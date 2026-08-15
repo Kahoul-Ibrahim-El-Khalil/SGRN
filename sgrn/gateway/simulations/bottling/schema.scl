@@ -1,0 +1,481 @@
+TYPE "ValveActuator"
+  VAR
+    position       : Real #UNIT("%");   // 0 = closed, 100 = fully open
+    command        : Real #UNIT("%");
+    travel_time    : Real #UNIT("s");
+    fault          : Bool;
+    limit_open     : Bool;
+    limit_closed   : Bool;
+  END_VAR
+END_TYPE
+
+TYPE "PIDLoop"
+  VAR
+    setpoint       : LReal;   // units depend on what the loop is controlling
+    process_value  : LReal;   // (see the field this loop instance is stored in)
+    output         : Real #UNIT("%");
+    kp             : Real;
+    ki             : Real;
+    kd             : Real;
+    integral_acc   : LReal;
+    enabled        : Bool;
+    auto_mode      : Bool;
+    saturated      : Bool;
+  END_VAR
+END_TYPE
+
+TYPE "MotorDrive"
+  VAR
+    running        : Bool;
+    speed_sp       : Real #UNIT("%");     // VFD speed reference, 0..100
+    speed_fb       : Real #UNIT("%");
+    current        : Real #UNIT("A");
+    fault          : Bool;
+    trip_overload  : Bool;
+    runtime        : LReal #UNIT("hour");
+  END_VAR
+END_TYPE
+
+TYPE "AccumulationZone"
+  VAR
+    fill              : Real #UNIT("%");   // 0 = empty, 100 = full (photoeye-derived)
+    upstream_starve   : Bool;   // upstream machine has nothing to send
+    downstream_block  : Bool;   // downstream machine can't accept more
+    conveyor          : "MotorDrive";
+  END_VAR
+END_TYPE
+
+TYPE "AlarmRecord"
+  VAR
+    active          : Bool;
+    acknowledged    : Bool;
+    code            : Word;
+    priority        : USInt;   // 0=info 1=warn 2=alarm 3=critical
+    description_id  : UInt;
+    timestamp       : DInt #UNIT("ms");
+  END_VAR
+END_TYPE
+
+
+DATA_BLOCK "Supervisor" DB1
+VAR
+    plant_mode           : USInt;   // 0=Stopped 1=Starting 2=Running 3=Stopping 4=Fault 5=E-Stop
+    master_speed_sp      : Real #UNIT("%");   // operator overall demand, 0..100 (% of rated)
+
+  line1 : STRUCT
+    mode          : USInt;   // same enum as plant_mode
+    speed_sp      : Real #UNIT("bpm");   // resolved bottle-per-minute target
+    rated         : Real #UNIT("bpm");   // 750 mL glass line rated speed
+    actual        : Real #UNIT("bpm");
+    oee           : Real #UNIT("%");
+    good_count    : UDInt;   // shift totalizer, accepted bottles
+    reject_count  : UDInt;
+  END_STRUCT;
+
+  line2 : 
+  STRUCT 
+    mode          : USInt;
+    speed_sp      : Real #UNIT("bpm");   // 330 mL PET/can line rated speed
+    rated         : Real #UNIT("bpm");
+    actual        : Real #UNIT("bpm");
+    oee           : Real #UNIT("%");
+    good_count    : UDInt;
+    reject_count  : UDInt;
+  END_STRUCT;
+
+    plant_estop          : Bool;   // latched, requires reset
+    reset_request         : Bool;   // momentary, operator-forced
+
+    timestamp            : DTL;
+END_VAR
+END_DATA_BLOCK
+
+DATA_BLOCK "ProductSupply" DB2
+VAR
+  tank: STRUCT
+    level             : Real #UNIT("%");
+    volume            : Real #UNIT("L");
+    capacity          : Real #UNIT("L");   // 20000 L
+    temp              : Real #UNIT("°C");
+    brix              : Real #UNIT("Bx");   // product concentration, degrees Brix
+    low_level_alarm   : Bool;
+    agitator          : "MotorDrive";
+    fill_valve        : "ValveActuator";   // makeup from batching/upstream
+  END_STRUCT;
+
+  line1_supply: STRUCT 
+    valve             : "ValveActuator";
+    press             : Real #UNIT("bar");
+  END_STRUCT;
+
+  line2_supply : STRUCT
+    valve             : "ValveActuator";
+    press             : Real #UNIT("bar");
+  END_STRUCT;
+
+    supply_pump          : "MotorDrive";
+
+  cip : STRUCT
+    active              : Bool;
+    cycle_state         : USInt;  // 0=Idle 1=PreRinse 2=Caustic 3=IntRinse 4=Acid 5=FinalRinse 6=Drain
+    time_in_state       : Real #UNIT("s");
+    supply_temp         : Real #UNIT("°C");
+    supply_flow         : Real #UNIT("L/min");
+    caustic_conc        : Real #UNIT("%");
+    return_conductivity : Real #UNIT("mS/cm");
+    cycles_completed    : UDInt;
+  END_STRUCT;
+
+    timestamp             : DTL;
+END_VAR
+END_DATA_BLOCK
+
+DATA_BLOCK "Line1Infeed" DB3
+VAR
+    unscrambler                   : "MotorDrive";
+    bottles_staged                : UInt;    // bottle count on accumulation table
+    table_fill                    : Real #UNIT("%");
+    infeed_starved                : Bool;    // no bottles from depalletizer
+    jam_detected                  : Bool;
+    empty_bottle_inspector_reject : Bool;    // vision reject: chipped/foreign object
+
+    timestamp                     : DTL;
+END_VAR
+END_DATA_BLOCK
+
+DATA_BLOCK "Line1Rinser" DB4
+VAR
+    rinser_turret     : "MotorDrive";
+    water_valve       : "ValveActuator";
+    air_valve         : "ValveActuator";
+    rinse_water_press : Real #UNIT("bar");
+    rinse_air_press   : Real #UNIT("bar");
+    nozzles_total     : UInt;
+    nozzles_blocked   : UInt;
+
+    timestamp         : DTL;
+END_VAR
+END_DATA_BLOCK
+
+DATA_BLOCK "Line1Filler" DB5
+VAR
+    carousel          : "MotorDrive";
+    valve_count       : UInt;    // 40 filling heads
+    valves_open_now   : UInt;
+
+  fill_volume: STRUCT
+    sp                : Real #UNIT("mL");   // 750.0 mL nominal
+    avg               : Real #UNIT("mL");   // running average, statistical process control
+    stddev            : Real #UNIT("mL");
+  END_STRUCT;
+
+    bowl_level        : "PIDLoop";   // constant-level bowl PID, setpoint/pv in %
+    product_temp      : Real #UNIT("°C");
+    co2_volumes       : Real #UNIT("vol");   // carbonation, if applicable (0 for still)
+
+  rejects : STRUCT
+    underfill         : UDInt;
+    overfill          : UDInt;
+    foam_sensor_trips : UDInt;
+  END_STRUCT;
+
+    vacuum_snift_press : Real #UNIT("bar");   // pre-fill vacuum snift, avoids foaming
+
+    timestamp          : DTL;
+END_VAR
+END_DATA_BLOCK
+
+DATA_BLOCK "Line1Capper" DB6
+VAR
+    capper_turret          : "MotorDrive";
+    chuck_heads            : UInt;    // 12 heads
+    cap_feeder_bowl_level  : Real #UNIT("%");
+    cap_feeder_starved     : Bool;
+
+ torque : STRUCT
+    sp            : Real #UNIT("Nm");   // target application torque
+    avg           : Real #UNIT("Nm");
+    stddev        : Real #UNIT("Nm");
+  END_STRUCT;
+
+  rejects : STRUCT
+    missing_cap     : UDInt;
+    cross_thread    : UDInt;
+    torque_high     : UDInt;
+    torque_low      : UDInt;
+  END_STRUCT;
+
+    timestamp       : DTL;
+END_VAR
+END_DATA_BLOCK
+
+DATA_BLOCK "Line1Labeler" DB7
+VAR
+    labeler_turret        : "MotorDrive";
+
+  label_supply : STRUCT
+    front             : Real #UNIT("%");   // roll remaining
+    back              : Real #UNIT("%");
+  END_STRUCT;
+
+    applicator_pressure   : Real #UNIT("bar");
+
+  rejects : STRUCT
+    skew              : UDInt;
+    missing           : UDInt;
+  END_STRUCT;
+
+    splice_detected       : Bool;   // roll splice passing through, brief slowdown
+
+    timestamp             : DTL;
+END_VAR
+END_DATA_BLOCK
+
+DATA_BLOCK "Line1CasePacker" DB8
+VAR
+    erector               : "MotorDrive";
+    packer                : "MotorDrive";
+    bottles_per_case      : UInt;   // 12
+
+  glue : STRUCT
+    tank_temp         : "PIDLoop";   // degrees C
+    pressure          : Real #UNIT("bar");
+  END_STRUCT;
+
+  case_blank : STRUCT
+    hopper            : Real #UNIT("%");
+    starved           : Bool;
+  END_STRUCT;
+
+    cases_packed_count    : UDInt;
+    miscount_reject_count : UDInt;
+
+    timestamp             : DTL;
+END_VAR
+END_DATA_BLOCK
+
+DATA_BLOCK "Line2Infeed" DB9
+VAR
+    unscrambler                     : "MotorDrive";
+    bottles_staged                  : UInt;
+    table_fill                      : Real #UNIT("%");
+    infeed_starved                  : Bool;
+    jam_detected                    : Bool;
+    empty_bottle_inspector_reject   : Bool;
+
+    timestamp                       : DTL;
+END_VAR
+END_DATA_BLOCK
+
+DATA_BLOCK "Line2Filler" DB10
+VAR
+    carousel          : "MotorDrive";
+    valve_count       : UInt;   // 24 filling heads
+    valves_open_now   : UInt;
+
+  fill_volume: STRUCT
+    sp                : Real #UNIT("mL");   // 330.0 mL nominal
+    avg               : Real #UNIT("mL");
+    stddev            : Real #UNIT("mL");
+  END_STRUCT;
+
+    bowl_level        : "PIDLoop";
+    product_temp      : Real #UNIT("°C");
+    co2_volumes       : Real #UNIT("vol");   // carbonated line, target ~3.8 vol
+
+  rejects : STRUCT
+    underfill         : UDInt;
+    overfill          : UDInt;
+    foam_sensor_trips : UDInt;
+  END_STRUCT;
+
+    vacuum_snift_press : Real #UNIT("bar");
+
+    timestamp          : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB11 "Line2Capper" — Chuck-head capper, Line 2 ────────────────────────
+DATA_BLOCK "Line2_Capper" DB11
+VAR
+    capper_turret             : "MotorDrive";
+    chuck_heads               : UInt;   // 8 heads
+    cap_feeder_bowl_level     : Real #UNIT("%");
+    cap_feeder_starved        : Bool;
+
+  torque: STRUCT
+    sp                : Real #UNIT("Nm");
+    avg               : Real #UNIT("Nm");
+    stddev            : Real #UNIT("Nm");
+  END_STRUCT;
+
+  rejects : STRUCT
+    missing_cap       : UDInt;
+    cross_thread      : UDInt;
+    torque_high       : UDInt;
+    torque_low        : UDInt;
+  END_STRUCT;
+
+    timestamp                 : DTL;
+END_VAR
+END_DATA_BLOCK
+
+DATA_BLOCK "Line2Labeler" DB12
+VAR
+    labeler_turret        : "MotorDrive";
+
+  label_supply : STRUCT
+    front             : Real #UNIT("%");
+    back              : Real #UNIT("%");
+  END_STRUCT;
+
+    applicator_pressure   : Real #UNIT("bar");
+
+  rejects: STRUCT
+    skew              : UDInt;
+    missing           : UDInt;
+  END_STRUCT;
+
+    splice_detected       : Bool;
+
+    timestamp             : DTL;
+END_VAR
+END_DATA_BLOCK
+
+DATA_BLOCK "Line2CasePacker" DB13
+VAR
+    erector               : "MotorDrive";
+    packer                : "MotorDrive";
+    bottles_per_case      : UInt;   // 24 (smaller format)
+
+  glue : STRUCT
+    tank_temp         : "PIDLoop";
+    pressure          : Real #UNIT("bar");
+  END_STRUCT;
+
+  case_blank : STRUCT
+    hopper            : Real #UNIT("%");
+    starved           : Bool;
+  END_STRUCT;
+
+    cases_packed_count    : UDInt;
+    miscount_reject_count : UDInt;
+
+    timestamp             : DTL;
+END_VAR
+END_DATA_BLOCK
+
+DATA_BLOCK "ConveyorNetwork" DB14
+VAR
+  line1 : STRUCT
+    rinser_to_filler   : "AccumulationZone";
+    filler_to_capper   : "AccumulationZone";
+    capper_to_labeler  : "AccumulationZone";
+    labeler_to_packer  : "AccumulationZone";
+  END_STRUCT;
+
+  line2 : STRUCT
+    filler_to_capper   : "AccumulationZone";
+    capper_to_labeler  : "AccumulationZone";
+    labeler_to_packer  : "AccumulationZone";
+  END_STRUCT;
+
+  merge: STRUCT
+    // ── Case merge onto shared palletizer infeed ──
+    conveyor       : "MotorDrive";
+    zone           : "AccumulationZone";
+    line1_gate     : "ValveActuator";   // diverter, reused as gate
+    line2_gate     : "ValveActuator";
+  END_STRUCT;
+
+    timestamp      : DTL;
+END_VAR
+END_DATA_BLOCK
+
+DATA_BLOCK "Palletizer" DB15
+VAR
+  robot : STRUCT
+    running               : Bool;
+    cycle_state           : USInt;  // 0=Idle 1=Picking 2=Placing 3=LayerComplete 4=Fault
+  END_STRUCT;
+
+    cases_per_layer                  : UInt;   // 10
+    layers_per_pallet                : UInt;   // 6
+    current_layer                    : UInt;
+    current_pallet_case_count        : UInt;
+    pallet_height                    : Real #UNIT("mm");
+    empty_pallet_dispenser_starved   : Bool;
+    full_pallet_conveyor             : "MotorDrive";
+
+  wrapper : STRUCT
+    active             : Bool;
+    turntable_speed    : Real #UNIT("RPM");
+    film_tension       : Real #UNIT("%");
+    wraps_target       : UInt;
+    wraps_completed    : UInt;
+  END_STRUCT;
+
+    pallets_completed_count           : UDInt;
+
+    timestamp                         : DTL;
+END_VAR
+END_DATA_BLOCK
+
+DATA_BLOCK "Utilities" DB16
+VAR
+  air : STRUCT
+    // ── Plant compressed air header ──
+    header_press      : Real #UNIT("bar");    // target 6.5-7.0 bar
+    header_press_sp   : Real #UNIT("bar");
+    compressor_1      : "MotorDrive";
+    compressor_2      : "MotorDrive";
+    dryer_dewpoint    : Real #UNIT("°C");
+    low_press_alarm   : Bool;
+  END_STRUCT;
+
+  glycol : STRUCT
+    // ── Glycol chiller loop (filler bowl / product jacket cooling) ──
+    supply_temp        : "PIDLoop";   // degrees C
+    return_temp        : Real #UNIT("°C");
+    chiller_compressor : "MotorDrive";
+    pump               : "MotorDrive";
+  END_STRUCT;
+
+  vacuum: STRUCT
+    header : Real #UNIT("kPa");
+    pump   : "MotorDrive";
+  END_STRUCT;
+
+    timestamp : DTL;
+END_VAR
+END_DATA_BLOCK
+
+DATA_BLOCK "SafetySystems" DB17
+VAR
+    estop_zones            : ARRAY [0..7] OF Bool;  // 0=Infeed1 1=Process1 2=Pack1
+                                                     // 3=Infeed2 4=Process2 5=Pack2
+                                                     // 6=Conveyors 7=Palletizer
+    zone_names_code        : ARRAY [0..7] OF UInt;  // maps to description table upstream
+    guard_door_open        : ARRAY [0..7] OF Bool;
+    light_curtain_broken   : ARRAY [0..3] OF Bool;  // palletizer robot cell, 4 curtains
+    any_estop_active       : Bool;
+    reset_interlock_ok     : Bool;    // all zones clear before reset permitted
+
+    timestamp              : DTL;
+END_VAR
+END_DATA_BLOCK
+
+DATA_BLOCK "Alarms" DB18
+VAR
+    active_count            : UInt;
+    critical_count          : UInt;
+    any_active              : Bool;
+    any_critical             : Bool;
+    plant_estop_active      : Bool;
+    line1_fault_active      : Bool;
+    line2_fault_active      : Bool;
+    utilities_fault_active  : Bool;
+    alarms                  : ARRAY [0..15] OF "AlarmRecord";
+    timestamp                                 : DTL;
+END_VAR
+END_DATA_BLOCK

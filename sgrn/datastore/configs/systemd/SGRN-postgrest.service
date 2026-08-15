@@ -1,0 +1,22 @@
+[Unit]
+Description=PostgREST (Micromamba SGRN)
+After=network.target SGRN-postgres.service
+Requires=SGRN-postgres.service
+
+[Service]
+User=${SGRN_USER}
+Type=simple
+
+EnvironmentFile=${SGRN_DATA_DIR}/.env
+Environment="PATH=${SGRN_DEPLOYMENT_ENV}/bin:/usr/bin:/bin"
+Environment="LD_LIBRARY_PATH=${SGRN_DEPLOYMENT_ENV}/lib"
+
+ExecStart=/usr/bin/env postgrest \
+    ${SGRN_DATA_DIR}/postgrest.conf
+
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=default.target

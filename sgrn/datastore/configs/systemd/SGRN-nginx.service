@@ -1,0 +1,25 @@
+[Unit]
+Description=NGINX (Micromamba SGRN)
+After=network.target
+
+[Service]
+Type=simple
+
+EnvironmentFile=${SGRN_DATA_DIR}/.env
+Environment="PATH=${SGRN_DEPLOYMENT_ENV}/bin:/usr/bin:/bin"
+Environment="LD_LIBRARY_PATH=${SGRN_DEPLOYMENT_ENV}/lib"
+
+ExecStart=/usr/bin/env nginx \
+    -c ${SGRN_DEPLOYMENT_ENV}/etc/nginx/nginx.conf \
+    -g 'daemon off;'
+
+ExecReload=/usr/bin/env nginx -s reload
+ExecStop=/bin/kill -s QUIT $MAINPID
+
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+# Ports must be > 1024 for user services
+
+[Install]
+WantedBy=default.target

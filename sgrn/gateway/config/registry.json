@@ -1,0 +1,112 @@
+{
+  "dbs": [
+    {
+      "db_name": "Configuration",
+      "db_number": 1,
+      "fields": [
+        {
+          "bit_index": 0,
+          "count": 0,
+          "name": "DEAD_BAND",
+          "offset": 0,
+          "type": "Real"
+        },
+        {
+          "bit_index": 0,
+          "count": 0,
+          "name": "SCAN_CYCLE",
+          "offset": 4,
+          "type": "Real"
+        }
+      ],
+      "size_bytes": 8
+    },
+    {
+      "db_name": "SensorData",
+      "db_number": 2,
+      "fields": [
+        {
+          "bit_index": 0,
+          "count": 0,
+          "name": "temperature",
+          "offset": 0,
+          "type": "Real"
+        },
+        {
+          "bit_index": 0,
+          "count": 0,
+          "name": "pressure",
+          "offset": 4,
+          "type": "Real"
+        },
+        {
+          "bit_index": 0,
+          "count": 0,
+          "name": "flow_rate",
+          "offset": 8,
+          "type": "Real"
+        },
+        {
+          "bit_index": 0,
+          "count": 0,
+          "name": "level",
+          "offset": 12,
+          "type": "Real"
+        },
+        {
+          "bit_index": 0,
+          "count": 0,
+          "name": "timestamp",
+          "offset": 16,
+          "type": "DTL"
+        }
+      ],
+      "size_bytes": 28
+    },
+    {
+      "db_name": "MotorControl",
+      "db_number": 3,
+      "fields": [
+        {
+          "bit_index": 0,
+          "count": 0,
+          "name": "Motor_Enable",
+          "offset": 0,
+          "type": "Bool"
+        },
+        {
+          "bit_index": 1,
+          "count": 0,
+          "name": "Motor_Ready",
+          "offset": 0,
+          "type": "Bool"
+        },
+        {
+          "bit_index": 2,
+          "count": 0,
+          "name": "Motor_Fault",
+          "offset": 0,
+          "type": "Bool"
+        },
+        {
+          "bit_index": 0,
+          "count": 0,
+          "name": "Motor_Speed",
+          "offset": 2,
+          "type": "Real"
+        },
+        {
+          "bit_index": 0,
+          "count": 0,
+          "name": "Motor_Current",
+          "offset": 6,
+          "type": "Real"
+        }
+      ],
+      "size_bytes": 10
+    }
+  ],
+  "summary": { "total_dbs": 3, "total_tags": 0, "warnings": 0 },
+  "tags": [],
+  "udts": []
+}

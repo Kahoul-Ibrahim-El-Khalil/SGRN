@@ -1,0 +1,29 @@
+name: SGRN-WINDOWS
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - cmake
+  - ninja
+  - clang
+  - lld
+  - llvm-tools
+  - gcc_win-64
+  - libstdcxx-devel_win-64
+  - libwinpthread
+  - winpthreads-devel
+  - openssl
+  - zlib
+  - fmt
+  - jsoncpp
+  - zstd
+  - c-ares
+  - curl
+  - brotli
+  - cxxopts
+  - sqlite
+  - nodejs
+  - git
+  - pip
+  - pip:
+      - python-snap7

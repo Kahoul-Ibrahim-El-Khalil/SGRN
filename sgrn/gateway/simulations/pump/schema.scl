@@ -1,0 +1,109 @@
+// ============================================================================
+// schema.scl — "MiniPlant" — small tank/pump/valve/heater skid
+//
+// DB1 "Setpoints" — operator/HMI-forced commands   (written by shell #3)
+// DB2 "Tank"       — level/temp process values      (written by shell #2, the PLC)
+// DB3 "Pump"       — feed pump status                (written by shell #2)
+// DB4 "Valves"     — inlet/outlet valve actuators     (written by shell #2)
+// DB5 "Heater"      — tank heater PID loop            (written by shell #2)
+// DB6 "Alarms"      — aggregated alarm summary        (written by shell #2)
+// ============================================================================
+
+// ─── UDT Definitions ────────────────────────────────────────────────────────
+
+TYPE "ValveActuator"
+  VAR
+    position_pct   : Real;   // 0 = closed, 100 = fully open
+    command_pct    : Real;   // demanded position
+    travel_time_s  : Real;   // full-stroke travel time
+    fault          : Bool;
+    limit_open     : Bool;
+    limit_closed   : Bool;
+  END_VAR
+END_TYPE
+
+TYPE "PIDLoop"
+  VAR
+    setpoint       : LReal;
+    process_value  : LReal;
+    output_pct     : Real;
+    kp             : Real;
+    ki             : Real;
+    kd             : Real;
+    integral_acc   : LReal;
+    enabled        : Bool;
+    auto_mode      : Bool;
+    saturated      : Bool;
+  END_VAR
+END_TYPE
+
+// ─── DB1 "Setpoints" — Operator commands / forced values ────────────────────
+DATA_BLOCK "Setpoints" DB1
+VAR
+    pump_run             : Bool;
+    pump_speed_sp_pct    : Real;    // 0..100
+    inlet_valve_cmd_pct  : Real;    // 0..100
+    outlet_valve_cmd_pct : Real;    // 0..100
+    heater_enable        : Bool;
+    heater_setpoint_c    : Real;
+    e_stop               : Bool;    // emergency stop, operator-forced
+    ack_alarms           : Bool;    // momentary ack
+    timestamp            : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB2 "Tank" — Process values ────────────────────────────────────────────
+DATA_BLOCK "Tank" DB2
+VAR
+    level_pct         : Real;
+    volume_l          : Real;
+    temp_c            : Real;
+    inlet_flow_lpm    : Real;
+    outlet_flow_lpm   : Real;
+    high_level_alarm  : Bool;
+    low_level_alarm   : Bool;
+    overfill_trip     : Bool;
+    timestamp         : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB3 "Pump" — Feed pump status ───────────────────────────────────────────
+DATA_BLOCK "Pump" DB3
+VAR
+    running     : Bool;
+    speed_pct   : Real;
+    fault       : Bool;
+    runtime_s   : LReal;
+    timestamp   : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB4 "Valves" — Inlet / outlet valve actuators ──────────────────────────
+DATA_BLOCK "Valves" DB4
+VAR
+    inlet     : "ValveActuator";
+    outlet    : "ValveActuator";
+    timestamp : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB5 "Heater" — Tank temperature control loop ───────────────────────────
+DATA_BLOCK "Heater" DB5
+VAR
+    loop      : "PIDLoop";
+    timestamp : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB6 "Alarms" — Aggregated summary ──────────────────────────────────────
+DATA_BLOCK "Alarms" DB6
+VAR
+    any_active     : Bool;
+    active_count   : UInt;
+    e_stop_active  : Bool;
+    high_level     : Bool;
+    low_level      : Bool;
+    pump_fault     : Bool;
+    timestamp      : DTL;
+END_VAR
+END_DATA_BLOCK

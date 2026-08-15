@@ -1,0 +1,5 @@
+# s7shell.cmake — Extra deps for s7shell executable (readline + shell library)
+include(${CMAKE_SOURCE_DIR}/cmake/find_readline.cmake)
+sgrn_find_readline()
+target_link_libraries(s7shell PRIVATE sgrn_s7shell_lib pthread ${SGRN_READLINE_LIBS})
+set_target_properties(s7shell PROPERTIES CXX_STANDARD 23)

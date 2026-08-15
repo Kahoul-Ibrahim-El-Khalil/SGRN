@@ -1,0 +1,26 @@
+# ── Build artifacts ──────────────────────────────────────────────────────────
+build/
+cmake/std_pch.cpp
+cmake/third_party_pch.cpp
+compile_commands.json
+
+# ── Generated output files from apps ─────────────────────────────────────────
+*.ndjson
+*.db
+*.sqlite
+*.log
+
+# ── Node modules ─────────────────────────────────────────────────────────────
+node_modules/
+
+# ── Editor / IDE ─────────────────────────────────────────────────────────────
+.cache/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

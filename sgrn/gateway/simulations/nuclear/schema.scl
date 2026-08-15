@@ -1,0 +1,347 @@
+// ============================================================================
+// nuclear_plant.scl — Nuclear Power Plant S7 Schema
+//
+// Models a pressurized water reactor (PWR) with:
+//   DB1 — ReactorCore     : neutron flux, control rods, core temperatures
+//   DB2 — PrimaryCoolant  : hot/cold leg, pressurizer, reactor coolant pumps
+//   DB3 — SteamGenerator  : secondary side, feedwater, steam output
+//   DB4 — Turbine         : HP/LP turbines, generator, grid sync
+//   DB5 — SafetySystems   : SCRAM logic, containment, emergency core cooling
+//   DB6 — RadMonitoring   : radiation sensors across containment zones
+//   DB7 — WasteProcessing : spent fuel pool, liquid/gaseous waste
+// ============================================================================
+
+// ─── UDT Definitions ────────────────────────────────────────────────────────
+
+TYPE "ControlRod"
+  VAR
+    position_pct    : Real;     // 0.0 = fully inserted, 100.0 = fully withdrawn
+    target_pct      : Real;     // commanded position
+    speed_pct_s     : Real;     // insertion/withdrawal speed (%/sec)
+    rod_stuck       : Bool;     // mechanical fault
+    temperature_c   : Real;     // rod guide tube temperature
+    wear_cycles     : UDInt;    // lifetime insertion cycles
+  END_VAR
+END_TYPE
+
+TYPE "CoolantPump"
+  VAR
+    running         : Bool;
+    speed_rpm       : Int;      // 0 – 1800 RPM
+    flow_m3h        : Real;     // volumetric flow (m³/h)
+    delta_p_bar     : Real;     // differential pressure (bar)
+    bearing_temp_c  : Real;     // bearing temperature
+    seal_leak_lph   : Real;     // seal leakage rate (L/h)
+    vibration_mm_s  : Real;     // vibration velocity
+    trip_active     : Bool;     // pump trip relay
+    run_hours       : UDInt;    // lifetime operating hours
+  END_VAR
+END_TYPE
+
+TYPE "TemperatureSensor"
+  VAR
+    value_c         : Real;
+    high_alarm      : Bool;
+    low_alarm       : Bool;
+    sensor_fault    : Bool;
+  END_VAR
+END_TYPE
+
+TYPE "RadiationSensor"
+  VAR
+    dose_rate_usvh  : Real;     // µSv/h
+    integrated_msv  : LReal;    // cumulative dose (mSv)
+    alarm_high      : Bool;
+    alarm_very_high : Bool;
+    channel_ok      : Bool;
+  END_VAR
+END_TYPE
+
+TYPE "PIDLoop"
+  VAR
+    setpoint        : LReal;
+    process_value   : LReal;
+    output_pct      : Real;
+    kp              : Real;
+    ki              : Real;
+    kd              : Real;
+    integral_acc    : LReal;
+    enabled         : Bool;
+    auto_mode       : Bool;
+    saturated       : Bool;
+  END_VAR
+END_TYPE
+
+TYPE "ValveActuator"
+  VAR
+    position_pct    : Real;     // 0 = closed, 100 = open
+    command_pct     : Real;     // setpoint
+    travel_time_s   : Real;     // full-stroke time
+    fault           : Bool;
+    limit_open      : Bool;     // limit switch
+    limit_closed    : Bool;
+  END_VAR
+END_TYPE
+
+TYPE "AlarmRecord"
+  VAR
+    active          : Bool;
+    acknowledged    : Bool;
+    code            : Word;
+    priority        : USInt;    // 0=info 1=warn 2=alarm 3=critical
+    description_id  : UInt;
+    timestamp_ms    : DInt;
+  END_VAR
+END_TYPE
+
+// ─── DB1 "ReactorCore" — Neutronics & Thermal-hydraulics ────────────────────
+DATA_BLOCK "ReactorCore" DB 1
+
+#MODBUS_HOLDING
+VAR
+    // ── Neutron flux & power ──
+    thermal_power_mw    : LReal;    // current thermal output (0 – 3400 MW)
+    thermal_power_pct   : Real;     // percentage of rated power
+    neutron_flux        : LReal;    // neutron flux (n/cm²·s)
+    avg_linear_heat_kw  : Real;     // average linear heat rate (kW/m)
+    reactivity_pcm      : Real;     // excess reactivity (pcm)
+    period_s            : Real;     // reactor period (s), negative = subcritical
+
+    // ── Control rods — 4 banks ──
+    rods                : ARRAY [0..3] OF "ControlRod";
+    rod_bank_demand_pct : Real;     // overall bank demand position
+
+    // ── Core temperatures ──
+    core_inlet_temp_c   : Real;     // cold leg entry
+    core_outlet_temp_c  : Real;     // hot leg exit
+    peak_fuel_temp_c    : Real;     // hottest fuel centerline
+    peak_clad_temp_c    : Real;     // hottest cladding
+    core_delta_t_c      : Real;     // outlet - inlet
+
+    // ── Core thermocouple map (8 radial × 2 axial) ──
+    thermocouples       : ARRAY [0..15] OF "TemperatureSensor";
+
+    // ── Boron & chemistry ──
+    boron_ppm           : Real;     // boric acid concentration
+    ph_primary          : Real;     // primary coolant pH
+
+    // ── Operating state ──
+    reactor_critical    : Bool;
+    reactor_tripped     : Bool;
+    startup_mode        : Bool;
+    power_ascension     : Bool;
+    xenon_buildup_pct   : Real;     // Xe-135 reactivity penalty
+
+    timestamp           : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB11 "PrimaryCoolant" — Reactor Coolant System ──────────────────────────
+DATA_BLOCK "PrimaryCoolant" DB 2
+VAR
+    // ── Hot leg / Cold leg ──
+    hot_leg_temp_c      : Real;
+    cold_leg_temp_c     : Real;
+    hot_leg_pressure_bar: Real;
+    cold_leg_press_bar  : Real;
+
+    // ── Pressurizer ──
+    przr_pressure_bar   : Real;     // target: 155 bar
+    przr_level_pct      : Real;     // water level in pressurizer
+    przr_temp_c         : Real;
+    przr_heater_on      : Bool;
+    przr_spray_on       : Bool;
+    przr_relief_open    : Bool;     // PORV status
+    przr_pid            : "PIDLoop";
+
+    // ── Reactor Coolant Pumps (4 loops) ──
+    rcp                 : ARRAY [0..3] OF "CoolantPump";
+    total_flow_m3h      : Real;     // total primary flow
+
+    // ── Letdown & charging ──
+    letdown_flow_lpm    : Real;
+    charging_flow_lpm   : Real;
+    letdown_valve       : "ValveActuator";
+    charging_valve      : "ValveActuator";
+
+    timestamp           : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB12 "SteamGenerator" — Secondary Side ──────────────────────────────────
+DATA_BLOCK "SteamGenerator" DB 3
+VAR
+    // ── Steam generator (2 units) ──
+    sg_pressure_bar     : ARRAY [0..1] OF Real;     // ~70 bar
+    sg_level_pct        : ARRAY [0..1] OF Real;     // narrow range level
+    sg_steam_temp_c     : ARRAY [0..1] OF Real;
+    sg_feedwater_temp_c : ARRAY [0..1] OF Real;
+    sg_steam_flow_th    : ARRAY [0..1] OF Real;     // steam flow (t/h)
+    sg_blowdown_active  : ARRAY [0..1] OF Bool;
+
+    // ── Feedwater system ──
+    fw_pump_running     : ARRAY [0..1] OF Bool;
+    fw_pump_speed_rpm   : ARRAY [0..1] OF Int;
+    fw_flow_th          : ARRAY [0..1] OF Real;     // feedwater flow (t/h)
+    fw_control_valve    : ARRAY [0..1] OF Real;     // valve position %
+
+    // ── Condensate ──
+    condenser_vacuum_mbar: Real;
+    hotwell_level_pct   : Real;
+    condenser_temp_c    : Real;
+
+    // ── Level control PID (per SG) ──
+    sg_level_pid        : ARRAY [0..1] OF "PIDLoop";
+
+    timestamp           : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB13 "Turbine" — Turbine-Generator & Grid ──────────────────────────────
+DATA_BLOCK "Turbine" DB 4
+VAR
+    // ── HP turbine ──
+    hp_speed_rpm        : Real;     // 3000 RPM for 50Hz grid
+    hp_inlet_press_bar  : Real;
+    hp_inlet_temp_c     : Real;
+    hp_exhaust_temp_c   : Real;
+
+    // ── LP turbine ──
+    lp_speed_rpm        : Real;
+    lp_exhaust_temp_c   : Real;
+    lp_exhaust_press_mbar: Real;
+
+    // ── Generator ──
+    gen_power_mw        : LReal;    // electrical output
+    gen_power_pct       : Real;     // % of rated
+    gen_voltage_kv      : Real;     // terminal voltage
+    gen_current_ka      : Real;     // stator current
+    gen_frequency_hz    : Real;     // 50.000 Hz target
+    gen_power_factor    : Real;     // cos φ
+    gen_excitation_a    : Real;     // field current
+
+    // ── Grid sync ──
+    grid_connected      : Bool;
+    grid_breaker_closed : Bool;
+    sync_check_ok       : Bool;
+
+    // ── Bearing temps ──
+    bearing_temps       : ARRAY [0..5] OF Real;
+
+    // ── Throttle ──
+    throttle_valve_pct  : Real;
+    governor_pid        : "PIDLoop";
+
+    // ── Vibration ──
+    shaft_vibration_um  : ARRAY [0..3] OF Real;   // 4 probes, µm peak
+
+    timestamp           : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB14 "SafetySystems" — Reactor Protection & Emergency ───────────────────
+DATA_BLOCK "SafetySystems" DB 5
+VAR
+    // ── SCRAM (reactor trip) ──
+    scram_signal        : Bool;
+    scram_manual        : Bool;
+    scram_auto          : Bool;
+    scram_reason_code   : Word;
+    scram_time_ms       : DInt;     // time since last SCRAM
+
+    // ── Trip setpoints ──
+    trip_high_flux_pct  : Real;     // overpower trip (% rated)
+    trip_high_press_bar : Real;     // high pressurizer pressure
+    trip_low_press_bar  : Real;     // low pressurizer pressure
+    trip_high_temp_c    : Real;     // overtemperature
+    trip_low_flow_pct   : Real;     // low RCS flow
+
+    // ── Emergency Core Cooling System (ECCS) ──
+    eccs_actuated       : Bool;
+    si_pumps_running    : ARRAY [0..1] OF Bool;    // safety injection
+    si_flow_m3h         : ARRAY [0..1] OF Real;
+    accumulators_armed  : ARRAY [0..3] OF Bool;
+    accumulator_press   : ARRAY [0..3] OF Real;    // bar (nitrogen cover gas)
+
+    // ── Containment ──
+    containment_press_bar : Real;   // normally ~1.0 bar
+    containment_temp_c  : Real;
+    containment_isolated: Bool;
+    spray_actuated      : Bool;
+    h2_concentration_pct: Real;     // hydrogen monitoring
+    h2_recombiners_on   : Bool;
+
+    // ── Diesel generators ──
+    dg_running          : ARRAY [0..1] OF Bool;
+    dg_voltage_v        : ARRAY [0..1] OF Real;
+    dg_load_kw          : ARRAY [0..1] OF Real;
+    dg_fuel_level_pct   : ARRAY [0..1] OF Real;
+
+    // ── Alarm table ──
+    alarms              : ARRAY [0..7] OF "AlarmRecord";
+    active_alarm_count  : UInt;
+    any_critical        : Bool;
+
+    timestamp           : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB15 "RadMonitoring" — Radiation & Health Physics ───────────────────────
+DATA_BLOCK "RadMonitoring" DB 6
+VAR
+    // ── Zone monitors (8 zones) ──
+    zone_monitors       : ARRAY [0..7] OF "RadiationSensor";
+
+    // ── Stack monitors ──
+    stack_release_bq_s  : LReal;    // gaseous release rate (Bq/s)
+    stack_flow_m3_s     : Real;     // stack exhaust flow
+    stack_alarm         : Bool;
+
+    // ── Liquid effluent ──
+    liquid_release_bq_l : LReal;    // liquid activity (Bq/L)
+    liquid_alarm        : Bool;
+
+    // ── Main steam line monitors ──
+    msl_activity        : ARRAY [0..1] OF Real;    // N-16 activity indicator
+    sg_tube_leak        : Bool;     // steam generator tube rupture detection
+
+    // ── Containment atmosphere ──
+    contain_activity    : LReal;    // containment noble gas (Bq/m³)
+    iodine_131_bq_m3   : Real;     // I-131 specific
+
+    // ── Personnel dosimetry ──
+    area_dose_rate      : ARRAY [0..3] OF Real;    // 4 area monitors (µSv/h)
+    collective_dose_msv : LReal;    // shift collective dose
+
+    timestamp           : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB16 "WasteProcessing" — Spent Fuel & Waste ─────────────────────────────
+DATA_BLOCK "WasteProcessing" DB 7
+VAR
+    // ── Spent fuel pool ──
+    sfp_temp_c          : Real;     // pool temperature
+    sfp_level_m         : Real;     // water level above fuel
+    sfp_boron_ppm       : Real;     // boron concentration
+    sfp_cooling_on      : Bool;
+    sfp_pump_running    : Bool;
+    sfp_activity_bq_l   : LReal;
+
+    // ── Liquid waste ──
+    lw_tank_level_pct   : ARRAY [0..3] OF Real;    // 4 holdup tanks
+    lw_processing       : Bool;
+    lw_discharge_valve  : "ValveActuator";
+
+    // ── Gaseous waste ──
+    gw_decay_tank_press : ARRAY [0..1] OF Real;    // 2 decay tanks (bar)
+    gw_charcoal_bed_dp  : Real;     // differential pressure across beds
+    gw_release_valve    : "ValveActuator";
+
+    // ── Solid waste ──
+    sw_drum_count       : UInt;     // drums processed
+    sw_storage_pct      : Real;     // storage capacity used
+
+    timestamp           : DTL;
+END_VAR
+END_DATA_BLOCK

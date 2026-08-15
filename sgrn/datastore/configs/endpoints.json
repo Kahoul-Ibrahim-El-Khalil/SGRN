@@ -1,0 +1,87 @@
+[
+  {
+    "label": "Sign In",
+    "method": "POST",
+    "url": "/sgrn/api/auth/signin"
+  },
+  {
+    "label": "Automated Service Sign In",
+    "method": "POST",
+    "url": "/sgrn/api/auth/automated-service/signin"
+  },
+  {
+    "label": "Sign Out",
+    "method": "POST",
+    "url": "/sgrn/api/auth/signout"
+  },
+  {
+    "label": "Update Password",
+    "method": "POST",
+    "url": "/sgrn/api/auth/updatePassword"
+  },
+  {
+    "label": "Get Server Status",
+    "method": "GET",
+    "url": "/sgrn/api/admin/getServerStatus"
+  },
+  {
+    "label": "Get Users",
+    "method": "GET",
+    "url": "/sgrn/api/admin/getUsers"
+  },
+  {
+    "label": "Register User",
+    "method": "POST",
+    "url": "/sgrn/api/admin/registerUser"
+  },
+  {
+    "label": "Get Endpoints",
+    "method": "GET",
+    "url": "/sgrn/api/getEndpoints"
+  },
+  {
+    "label": "PostgREST Proxy",
+    "method": "ANY",
+    "url": "/sgrn/postgrest"
+  },
+  {
+    "label": "Get Files Metadata",
+    "method": "GET",
+    "url": "/sgrn/storage/files/metadata"
+  },
+  {
+    "label": "Get Constraints",
+    "method": "GET",
+    "url": "/sgrn/storage/constraints"
+  },
+  {
+    "label": "Drive List",
+    "method": "GET",
+    "url": "/sgrn/storage/drive/list"
+  },
+  {
+    "label": "File Operations",
+    "method": "ANY",
+    "url": "/sgrn/storage/files"
+  },
+  {
+    "label": "Get Organisations",
+    "method": "GET",
+    "url": "/sgrn/api/query/getOrganisations"
+  },
+  {
+    "label": "Get Departments",
+    "method": "GET",
+    "url": "/sgrn/api/query/organisation/getDepartments"
+  },
+  {
+    "label": "Get Statuses",
+    "method": "GET",
+    "url": "/sgrn/api/query/organisation/getStatuses"
+  },
+  {
+    "label": "Get User Info",
+    "method": "GET",
+    "url": "/sgrn/api/query/user/getInfo"
+  }
+]

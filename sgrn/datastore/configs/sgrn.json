@@ -1,0 +1,125 @@
+{
+  "listeners": [
+    {
+      "address": "0.0.0.0",
+      "port": 5000,
+      "threads": 4
+    }
+  ],
+  "db_clients": [
+    {
+      "name": "default",
+      "rdbms": "postgresql",
+      "host": "127.0.0.1",
+      "port": 5432,
+      "dbname": "${POSTGRES_DB}",
+      "user": "${POSTGRES_USER}",
+      "passwd": "${POSTGRES_PASSWORD}",
+      "connection_number": 8,
+      "is_fast": false
+    }
+  ],
+  "redis_clients": [
+    {
+      "host": "127.0.0.1",
+      "port": 6379,
+      "name": "default",
+      "passwd": "",
+      "db": 0,
+      "is_fast": false,
+      "number_of_connections": 4,
+      "timeout": -1.0
+    }
+  ],
+  "plugins": [
+    {
+      "name": "sgrn::datastore::plugins::aws::S3Client",
+      "config": {
+        "region": "us-east-1",
+        "endpoint": "http://127.0.0.1:9000",
+        "access_key": "${MINIO_ROOT_USER}",
+        "secret_key": "${MINIO_ROOT_PASSWORD}"
+      }
+    },
+    {
+      "name": "sgrn::datastore::plugins::PostgrestClient",
+      "config": {
+        "host": "127.0.0.1",
+        "port": 3000,
+        "jwt_secret": "${JWT_SECRET}"
+      }
+    },
+    {
+      "name": "sgrn::datastore::plugins::Threadpool",
+      "config": {
+        "worker_threads": 4,
+        "pool_name": "s3-worker-pool"
+      }
+    },
+    {
+      "name": "sgrn::datastore::plugins::RedisMiddleware",
+      "config": {}
+    }
+  ],
+  "app": {
+    "threads_num": 4,
+    "log_path": "./",
+    "logfile_base_name": "",
+    "log_level": "DEBUG",
+    "log_size_limit": 0,
+    "enable_access_log": true,
+    "access_log_path": "./",
+    "access_log_file": "",
+    "run_as_daemon": false,
+    "relaunch_on_error": false,
+    "enable_session": true,
+    "session": {
+      "timeout": 3600,
+      "cookie_name": "SGRN-COOKIE",
+      "same_site": "strict",
+      "cookie_key": "your-secret-key-here-minimum-32-chars-long!!",
+      "max_age": 3600
+    },
+    "client_max_body_size": 104857600,
+    "max_connections": 100,
+    "max_memory": 1073741824
+  },
+  "static_file_headers": [
+    {
+      "name": "Cache-Control",
+      "value": "max-age=3600"
+    }
+  ],
+  "custom_config": {
+    "jwt_secret": "${JWT_SECRET}",
+    "rate_limiting": {
+      "enabled": true,
+      "auth_endpoint_limit": 5,
+      "auth_endpoint_window_s": 60,
+      "general_endpoint_limit": 100,
+      "general_endpoint_window_s": 60,
+      "storage_endpoint_limit": 30,
+      "storage_endpoint_window_s": 60,
+      "burst_allowance": 10
+    },
+    "telemetry": {
+      "batching_enabled": false,
+      "acknowledge_on_queue": false,
+      "flush_interval_s": 2.0,
+      "max_batch_size": 256,
+      "max_pending_items": 10000
+    },
+    "s3": {
+      "default_bucket": "sgrn-uploads",
+      "worker_threads": 2,
+      "threshold_compress_ram_mb": 1,
+      "threshold_presigned_mb": 25,
+      "max_file_size_mb": 100,
+      "default_expiration_seconds": 900,
+      "compression_size_threshold_kb": 1,
+      "compression_level": 10,
+      "allowed_extensions": ["*"],
+      "prohibited_extensions": ["exe", "dll", "so", "sh", "bat"]
+    }
+  }
+}

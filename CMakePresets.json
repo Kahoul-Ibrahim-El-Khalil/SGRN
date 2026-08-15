@@ -1,0 +1,471 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base-common",
+      "displayName": "Common Base Settings",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/.build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_MAKE_PROGRAM": "$env{HOME}/micromamba/envs/SGRN/bin/ninja",
+        "BUILD_TESTING": "OFF",
+        "JSONCPP_WITH_TESTS": "OFF",
+        "JSONCPP_WITH_POST_BUILD_UNITTEST": "OFF",
+        "JSONCPP_WITH_EXAMPLE": "OFF",
+        "FMT_TEST": "OFF",
+        "FMT_DOC": "OFF",
+        "SGRN_NO_DROGON": "OFF",
+        "SGRN_USE_UCRT": "OFF",
+        "JSONCPP_WITH_PKGCONFIG_SUPPORT": "OFF",
+        "AS_BUILD_SHARED": "OFF",
+        "AS_BUILD_SAMPLES": "OFF",
+        "AS_BUILD_TESTS": "OFF",
+        "UA_ENABLE_AMALGAMATION": "OFF",
+        "UA_BUILD_UNIT_TESTS": "OFF",
+        "UA_BUILD_EXAMPLES": "OFF",
+        "UA_BUILD_TOOLS": "OFF",
+        "FMT_INSTALL": "ON",
+        "TRANTOR_USE_TLS": "openssl",
+        "FETCHCONTENT_BASE_DIR": "${sourceDir}/.build/_deps",
+        "CPM_SOURCE_CACHE": "$env{HOME}/.cache/CPM"
+      },
+      "installDir": "${sourceDir}/.dist/${presetName}"
+    },
+    {
+      "name": "clang-diagnostics",
+      "hidden": true,
+      "environment": {
+        "CFLAGS": "$penv{CFLAGS} -fdiagnostics-show-note-include-stack -fcaret-diagnostics",
+        "CXXFLAGS": "$penv{CXXFLAGS} -fdiagnostics-show-note-include-stack -fcaret-diagnostics"
+      }
+    },
+    {
+      "name": "base-deps",
+      "displayName": "Base Dependencies Settings",
+      "hidden": true,
+      "inherits": "base-common",
+      "cacheVariables": {
+        "SGRN_DEPS_ONLY": "ON",
+        "SGRN_USE_INSTALLED_DEPS": "OFF",
+        "SGRN_BUILD_BACKEND": "ON",
+        "SGRN_BUILD_EXTERN_BACKEND": "ON",
+        "CMAKE_BUILD_TYPE": "Release",
+        "DROGON_BUILD_STATIC": "ON",
+        "TRANTOR_BUILD_STATIC": "ON"
+      }
+    },
+    {
+      "name": "linux-deps",
+      "displayName": "Linux Deps (.prefix/linux)",
+      "description": "Build and install all dependencies into .prefix/linux",
+      "inherits": "base-deps",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "SGRN_PLATFORM": "linux",
+        "CMAKE_C_COMPILER": "$env{HOME}/micromamba/envs/SGRN/bin/clang",
+        "CMAKE_CXX_COMPILER": "$env{HOME}/micromamba/envs/SGRN/bin/clang++",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/.prefix/linux"
+      }
+    },
+    {
+      "name": "win64-deps",
+      "displayName": "Win64 Deps (.prefix/win64)",
+      "description": "Cross-build and install all dependencies into .prefix/win64",
+      "inherits": "base-deps",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "SGRN_PLATFORM": "win64",
+        "CMAKE_TOOLCHAIN_FILE": "cmake/toolchain_win64.cmake",
+        "SGRN_WIN64_PREFIX": "$env{HOME}/micromamba/envs/SGRN-WIN64",
+        "SGRN_BUILD_EXTERN_BACKEND": "OFF",
+        "SGRN_BUILD_BACKEND": "OFF",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/.prefix/win64"
+      }
+    },
+    {
+      "name": "linux-arm64-deps",
+      "displayName": "Linux ARM64 Deps (.prefix/linux-arm64)",
+      "description": "Cross-build and install all dependencies into .prefix/linux-arm64",
+      "inherits": "base-deps",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "SGRN_PLATFORM": "linux-arm64",
+        "CMAKE_TOOLCHAIN_FILE": "cmake/toolchain_arm64.cmake",
+        "SGRN_ARM64_PREFIX": "$env{HOME}/micromamba/envs/SGRN-ARM64",
+        "SGRN_BUILD_EXTERN_BACKEND": "OFF",
+        "SGRN_BUILD_BACKEND": "OFF",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/.prefix/linux-arm64"
+      }
+    },
+    {
+      "name": "linux",
+      "displayName": "Linux (x86_64 Host)",
+      "inherits": "base-common",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "SGRN_PLATFORM": "linux",
+        "CMAKE_C_COMPILER": "$env{HOME}/micromamba/envs/SGRN/bin/clang",
+        "CMAKE_CXX_COMPILER": "$env{HOME}/micromamba/envs/SGRN/bin/clang++",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SGRN_BUILD_BACKEND": "ON",
+        "SGRN_BUILD_UTILS": "ON",
+        "SGRN_BUILD_SDK": "ON",
+        "SGRN_BUILD_S7": "ON",
+        "SGRN_BUILD_S7NODE": "ON",
+        "SGRN_BUILD_OPC": "ON"
+      }
+    },
+    {
+      "name": "win64",
+      "displayName": "Win64 (MinGW Cross)",
+      "inherits": "base-common",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "SGRN_PLATFORM": "win64",
+        "CMAKE_TOOLCHAIN_FILE": "cmake/toolchain_win64.cmake",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SGRN_BUILD_BACKEND": "OFF",
+        "SGRN_BUILD_UTILS": "ON",
+        "SGRN_BUILD_SDK": "ON",
+        "SGRN_BUILD_S7": "ON",
+        "SGRN_BUILD_S7NODE": "ON",
+        "SGRN_BUILD_OPC": "ON",
+        "SGRN_WIN64_PREFIX": "$env{HOME}/micromamba/envs/SGRN-WIN64",
+        "SGRN_USE_UCRT": "ON",
+        "CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS": "ON"
+      },
+      "environment": {
+        "CFLAGS": "",
+        "CXXFLAGS": "",
+        "LDFLAGS": ""
+      }
+    },
+    {
+      "name": "linux-arm64",
+      "displayName": "Linux ARM64 (Cross)",
+      "inherits": "base-common",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "SGRN_PLATFORM": "linux-arm64",
+        "CMAKE_TOOLCHAIN_FILE": "cmake/toolchain_arm64.cmake",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SGRN_BUILD_BACKEND": "OFF",
+        "SGRN_BUILD_UTILS": "ON",
+        "SGRN_BUILD_SDK": "ON",
+        "SGRN_BUILD_S7": "ON",
+        "SGRN_BUILD_S7NODE": "ON",
+        "SGRN_ARM64_PREFIX": "$env{HOME}/micromamba/envs/SGRN-ARM64"
+      }
+    },
+    {
+      "name": "linux-static",
+      "displayName": "linux (Static)",
+      "inherits": "linux",
+      "cacheVariables": {
+        "SGRN_BUILD_STATIC": "ON",
+        "CMAKE_FIND_LIBRARY_SUFFIXES": ".a",
+        "DROGON_BUILD_STATIC": "ON",
+        "TRANTOR_BUILD_STATIC": "ON",
+        "FMT_INSTALL": "OFF",
+        "JSONCPP_WITH_PKGCONFIG_SUPPORT": "OFF",
+        "BUILD_SHARED_LIBS": "OFF",
+        "JSONCPP_WITH_CMAKE_PACKAGE": "OFF",
+        "AS_BUILD_SHARED": "OFF",
+        "SGRN_PLATFORM": "linux-static",
+        "SGRN_LOCAL_PREFIX": "${sourceDir}/.prefix/linux-static",
+        "SGRN_USE_INSTALLED_DEPS": "ON"
+      }
+    },
+    {
+      "name": "linux-static-release",
+      "displayName": "linux (Static Release)",
+      "inherits": [
+        "linux-static",
+        "clang-diagnostics"
+      ],
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "win64-static",
+      "displayName": "win64 (Static)",
+      "inherits": "win64",
+      "cacheVariables": {
+        "SGRN_BUILD_STATIC": "ON",
+        "CMAKE_FIND_LIBRARY_SUFFIXES": ".a;.lib",
+        "DROGON_BUILD_STATIC": "ON",
+        "TRANTOR_BUILD_STATIC": "ON",
+        "FMT_INSTALL": "OFF",
+        "JSONCPP_WITH_PKGCONFIG_SUPPORT": "OFF",
+        "BUILD_SHARED_LIBS": "OFF",
+        "JSONCPP_WITH_CMAKE_PACKAGE": "OFF",
+        "AS_BUILD_SHARED": "OFF",
+        "SGRN_PLATFORM": "win64-static",
+        "SGRN_LOCAL_PREFIX": "${sourceDir}/.prefix/win64-static",
+        "SGRN_USE_INSTALLED_DEPS": "ON"
+      }
+    },
+    {
+      "name": "win64-static-release",
+      "displayName": "win64 (Static Release)",
+      "inherits": "win64-static",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SGRN_BUILD_STATIC": "ON"
+      }
+    },
+    {
+      "name": "linux-arm64-static",
+      "displayName": "linux-arm64 (Static)",
+      "inherits": "linux-arm64",
+      "cacheVariables": {
+        "SGRN_BUILD_STATIC": "ON",
+        "CMAKE_FIND_LIBRARY_SUFFIXES": ".a",
+        "DROGON_BUILD_STATIC": "ON",
+        "TRANTOR_BUILD_STATIC": "ON",
+        "FMT_INSTALL": "OFF",
+        "JSONCPP_WITH_PKGCONFIG_SUPPORT": "OFF",
+        "BUILD_SHARED_LIBS": "OFF",
+        "JSONCPP_WITH_CMAKE_PACKAGE": "OFF",
+        "AS_BUILD_SHARED": "OFF",
+        "SGRN_PLATFORM": "linux-arm64-static",
+        "SGRN_LOCAL_PREFIX": "${sourceDir}/.prefix/linux-arm64-static",
+        "SGRN_USE_INSTALLED_DEPS": "ON"
+      }
+    },
+    {
+      "name": "linux-arm64-static-release",
+      "displayName": "linux-arm64 (Static Release)",
+      "inherits": "linux-arm64-static",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "linux-deps-static",
+      "displayName": "Linux Deps (.prefix/linux-static) (Static)",
+      "description": "Build and install all dependencies into .prefix/linux-static (Static)",
+      "inherits": "base-deps",
+      "generator": "Ninja",
+      "installDir": "${sourceDir}/.prefix/linux-static",
+      "cacheVariables": {
+        "SGRN_PLATFORM": "linux-static",
+        "CMAKE_C_COMPILER": "$env{HOME}/micromamba/envs/SGRN/bin/clang",
+        "CMAKE_CXX_COMPILER": "$env{HOME}/micromamba/envs/SGRN/bin/clang++",
+        "BUILD_SHARED_LIBS": "OFF",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/.prefix/linux-static"
+      }
+    },
+    {
+      "name": "win64-deps-static",
+      "displayName": "Win64 Deps (.prefix/win64-static) (Static)",
+      "description": "Cross-build and install all dependencies into .prefix/win64-static (Static)",
+      "inherits": "base-deps",
+      "generator": "Ninja",
+      "installDir": "${sourceDir}/.prefix/win64-static",
+      "cacheVariables": {
+        "SGRN_PLATFORM": "win64-static",
+        "CMAKE_TOOLCHAIN_FILE": "cmake/toolchain_win64.cmake",
+        "SGRN_WIN64_PREFIX": "$env{HOME}/micromamba/envs/SGRN-WIN64",
+        "BUILD_SHARED_LIBS": "OFF",
+        "SGRN_BUILD_EXTERN_BACKEND": "OFF",
+        "SGRN_BUILD_BACKEND": "OFF",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/.prefix/win64-static"
+      }
+    },
+    {
+      "name": "linux-arm64-deps-static",
+      "displayName": "Linux ARM64 Deps (.prefix/linux-arm64-static) (Static)",
+      "description": "Cross-build and install all dependencies into .prefix/linux-arm64-static (Static)",
+      "inherits": "base-deps",
+      "generator": "Ninja",
+      "installDir": "${sourceDir}/.prefix/linux-arm64-static",
+      "cacheVariables": {
+        "SGRN_PLATFORM": "linux-arm64-static",
+        "CMAKE_TOOLCHAIN_FILE": "cmake/toolchain_arm64.cmake",
+        "SGRN_ARM64_PREFIX": "$env{HOME}/micromamba/envs/SGRN-ARM64",
+        "BUILD_SHARED_LIBS": "OFF",
+        "SGRN_BUILD_EXTERN_BACKEND": "OFF",
+        "SGRN_BUILD_BACKEND": "OFF",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/.prefix/linux-arm64-static"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "linux-deps",
+      "configurePreset": "linux-deps",
+      "targets": [
+        "install"
+      ]
+    },
+    {
+      "name": "win64-deps",
+      "configurePreset": "win64-deps",
+      "targets": [
+        "install"
+      ]
+    },
+    {
+      "name": "linux-arm64-deps",
+      "configurePreset": "linux-arm64-deps",
+      "targets": [
+        "install"
+      ]
+    },
+    {
+      "name": "linux",
+      "configurePreset": "linux"
+    },
+    {
+      "name": "win64",
+      "configurePreset": "win64"
+    },
+    {
+      "name": "linux-arm64",
+      "configurePreset": "linux-arm64"
+    },
+    {
+      "name": "linux-static",
+      "configurePreset": "linux-static"
+    },
+    {
+      "name": "linux-static-release",
+      "configurePreset": "linux-static-release"
+    },
+    {
+      "name": "win64-static",
+      "configurePreset": "win64-static"
+    },
+    {
+      "name": "win64-static-release",
+      "configurePreset": "win64-static-release"
+    },
+    {
+      "name": "linux-arm64-static",
+      "configurePreset": "linux-arm64-static"
+    },
+    {
+      "name": "linux-arm64-static-release",
+      "configurePreset": "linux-arm64-static-release"
+    },
+    {
+      "name": "linux-deps-static",
+      "configurePreset": "linux-deps-static",
+      "targets": [
+        "install"
+      ]
+    },
+    {
+      "name": "win64-deps-static",
+      "configurePreset": "win64-deps-static",
+      "targets": [
+        "install"
+      ]
+    },
+    {
+      "name": "linux-arm64-deps-static",
+      "configurePreset": "linux-arm64-deps-static",
+      "targets": [
+        "install"
+      ]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "linux",
+      "configurePreset": "linux"
+    },
+    {
+      "name": "win64",
+      "configurePreset": "win64"
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "linux-deps",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "linux-deps"
+        },
+        {
+          "type": "build",
+          "name": "linux-deps"
+        }
+      ]
+    },
+    {
+      "name": "win64-deps",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "win64-deps"
+        },
+        {
+          "type": "build",
+          "name": "win64-deps"
+        }
+      ]
+    },
+    {
+      "name": "linux-arm64-deps",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "linux-arm64-deps"
+        },
+        {
+          "type": "build",
+          "name": "linux-arm64-deps"
+        }
+      ]
+    },
+    {
+      "name": "linux-deps-static",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "linux-deps-static"
+        },
+        {
+          "type": "build",
+          "name": "linux-deps-static"
+        }
+      ]
+    },
+    {
+      "name": "win64-deps-static",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "win64-deps-static"
+        },
+        {
+          "type": "build",
+          "name": "win64-deps-static"
+        }
+      ]
+    },
+    {
+      "name": "linux-arm64-deps-static",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "linux-arm64-deps-static"
+        },
+        {
+          "type": "build",
+          "name": "linux-arm64-deps-static"
+        }
+      ]
+    }
+  ]
+}

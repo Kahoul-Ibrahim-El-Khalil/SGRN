@@ -1,0 +1,51 @@
+{
+  "listen": {
+    "s7": {
+      "ip": "0.0.0.0",
+      "port": 102,
+      "max_clients": 12,
+      "pdu_size": 960
+    },
+
+    "http": {
+      "ip": "0.0.0.0",
+      "port": 8000
+    },
+    "websocket": {
+      "ip": "0.0.0.0",
+      "port": 8001
+    },
+   "modbus": {
+     "ip": "0.0.0.0",
+      "port": 502
+   }
+
+  },
+  "schema": "./sgrn/gateway/simulations/gas_processing/schema.scl",
+
+  "state_dir": "/tmp/sgrn-gateway-state",
+  "telemetry_buffer": {
+    "snapshot_mode": "Anchored",
+    "batch_size": 100,
+    "batch_interval_s": 1000,
+    "zstd_level": 10,
+    "aggressive_zstd_level": 15,
+    "enable_aggressive_compression": true
+  },
+  "reconnect_ms": 5000,
+    "security_policy": "strict",
+    "security_script": "./sgrn/gateway/simulations/gas_processing/security.as"
+,
+  "persistence": {
+    "enabled": true,
+    "mode": "changes_with_timestamp",
+    "namespaces": ["DB1", "DB2", "DB3", "DB4"],
+    "atomic_window_ms": 10,
+    "batch_size": 5,
+    "batch_interval_s": 3,
+    "anchor_interval_s": 86,
+    "anchor_change_count": 10,
+    "zstd_level": 5,
+    "anchor_zstd_level": 12
+  }
+}

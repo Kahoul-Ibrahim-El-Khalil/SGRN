@@ -1,0 +1,23 @@
+{
+    "opcua": {
+        "endpoint_url": "opc.tcp://10.55.243.105:4862",
+        "disable_certificate": false,
+        "sampling_interval_ms": 100,
+        "reconnect_base_ms": 2000,
+        "flush_threshold_mb": 1,
+        "export_format": "json-nested",
+        "flush_interval_ms": 1000
+    },
+    "sgrn": {
+        "sync_with_sgrn": true,
+        "server_url": "https://localhost:8443",
+        "credentials": {
+            "token": "12345678",
+            "secret": "12345678"
+        },
+        "upload_options": {
+            "max_retries": 3,
+            "export_dir": "./exports"
+        }
+    }
+}

@@ -1,0 +1,28 @@
+[Unit]
+Description=PostgreSQL (Micromamba)
+After=network.target
+
+[Service]
+User=${SGRN_USER}
+Type=simple
+
+EnvironmentFile=${SGRN_DATA_DIR}/.env
+Environment="PATH=${SGRN_DEPLOYMENT_ENV}/bin:/usr/bin:/bin"
+Environment="LD_LIBRARY_PATH=${SGRN_DEPLOYMENT_ENV}/lib"
+Environment="PGDATA=${SGRN_DATA_DIR}/Postgres/data"
+
+ExecStartPre=/bin/bash -c "if [ ! -s ${SGRN_DATA_DIR}/Postgres/data/PG_VERSION ]; then /usr/bin/env initdb -D ${SGRN_DATA_DIR}/Postgres/data; fi"
+ExecStart=/usr/bin/env postgres -D ${SGRN_DATA_DIR}/Postgres/data
+
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+KillSignal=SIGINT
+TimeoutSec=300
+
+Restart=on-failure
+RestartSec=5
+
+LimitNOFILE=65536
+
+[Install]
+WantedBy=default.target

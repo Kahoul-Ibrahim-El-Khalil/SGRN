@@ -1,0 +1,23 @@
+
+[Unit]
+Description=Redis Server (SGRN)
+After=network.target
+
+[Service]
+User=${SGRN_USER}
+Type=simple
+
+EnvironmentFile=${SGRN_DATA_DIR}/.env
+Environment="PATH=${SGRN_DEPLOYMENT_ENV}/bin:/usr/bin:/bin"
+
+ExecStart=/usr/bin/env redis-server
+ExecStop=/usr/bin/env redis-cli shutdown
+Restart=always
+RestartSec=3
+
+# Optional: set working directory
+WorkingDirectory=${SGRN_DATA_DIR}
+
+[Install]
+WantedBy=default.target
+

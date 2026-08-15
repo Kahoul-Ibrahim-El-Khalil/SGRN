@@ -1,0 +1,28 @@
+# Root .clangd — clangd walks up from any file to find this config.
+# CompilationDatabase: "." means "look for compile_commands.json in the same
+# directory as this .clangd file", i.e. the project root.
+# The symlink at root/compile_commands.json → .build/linux-static-release/compile_commands.json
+# must be kept up to date (see scripts/link_ccdb.sh).
+
+CompileFlags:
+  CompilationDatabase: .
+  # Suppress noisy cross-platform warnings that are warnings-only in our build.
+  Add:
+    - -Wno-pragma-pack
+    - -Wno-unknown-warning-option
+
+---
+Index:
+  Background: Build   # Build index in the background for all project files.
+
+---
+Diagnostics:
+  UnusedIncludes: None  # Avoid spurious "unused include" noise from PCH files.
+  ClangTidy:
+    FastCheckFilter: None
+
+---
+InlayHints:
+  Enabled: true
+  ParameterNames: true
+  DeducedTypes: true

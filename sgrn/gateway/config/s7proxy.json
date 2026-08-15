@@ -1,0 +1,20 @@
+{
+  "hub": {
+    "ip": "127.0.0.1",
+    "port": 102
+  },
+  "registry": "sgrn/s7/registries/simple.scl",
+  "verbose": true,
+  "plcs": [
+    {
+      "name": "PLC_Simulation",
+      "ip": "127.0.0.1",
+      "rack": 0,
+      "slot": 1,
+      "mappings": [
+        { "src_db": 1, "dst_db": 1, "interval_ms": 100 },
+        { "src_db": 2, "dst_db": 2, "interval_ms": 500 }
+      ]
+    }
+  ]
+}

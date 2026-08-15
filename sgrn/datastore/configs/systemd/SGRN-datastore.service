@@ -1,0 +1,24 @@
+[Unit]
+Description=SGRN Core Monolith (Micromamba)
+After=network.target SGRN-postgres.service SGRN-minio.service SGRN-redis.service SGRN-postgrest.service SGRN-nginx.service
+Requires=SGRN-postgres.service SGRN-minio.service SGRN-redis.service SGRN-postgrest.service SGRN-nginx.service
+
+[Service]
+User=${SGRN_USER}
+Type=simple
+WorkingDirectory=${SGRN_DATA_DIR}
+
+EnvironmentFile=${SGRN_DATA_DIR}/.env
+Environment="PATH=${SGRN_DEPLOYMENT_ENV}/bin:/usr/bin:/bin"
+Environment="SGRN_CONFIG_PATH=${SGRN_DATA_DIR}/sgrn.json"
+ExecStart=${SGRN_BIN_DIR}/sgrn_datastore
+
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+ProtectSystem=full
+ProtectHome=false
+
+[Install]
+WantedBy=default.target

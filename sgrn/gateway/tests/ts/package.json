@@ -1,0 +1,21 @@
+{
+  "name": "sgrn-gateway-tests",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "dependencies": {
+    "ethernet-ip": "^2.0.0",
+    "node-opcua": "^2.175.6",
+    "node-opcua-server": "^2.175.6"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "scripts": {
+    "test": "bun test",
+    "test:opcua": "bun test tests/southbound-protocols.test.ts --test-name='OPC-UA'",
+    "test:eip": "bun test tests/southbound-protocols.test.ts --test-name='EtherNet'"
+  }
+}

@@ -1,0 +1,27 @@
+name: SGRN-ARM64
+channels:
+  - conda-forge
+dependencies:
+  - asio
+  - c-ares
+  - ca-certificates
+  - fmt
+  - jsoncpp
+  - krb5
+  - libcurl
+  - brotli
+  - libbrotlicommon
+  - libbrotlidec
+  - libbrotlienc
+  - cxxopts
+  - libiconv
+  - liblzma
+  - libsqlite
+  - libssh2
+  - libuv
+  - libxml2
+  - libzlib
+  - openssl
+  - sqlite
+  - zlib
+  - zstd

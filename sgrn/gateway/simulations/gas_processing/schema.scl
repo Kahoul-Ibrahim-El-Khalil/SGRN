@@ -1,0 +1,288 @@
+// ============================================================================
+// molecular_sieve.scl — Natural Gas Dehydration Unit S7 Schema
+//
+// Models a 3-tower molecular sieve dehydration skid with:
+//   DB1 — InletSeparation   : inlet scrubber, coalescing filter, feed conditions
+//   DB2 — AdsorberTowers    : 3 sieve beds cycling adsorb / regen / cool
+//   DB3 — RegenSystem       : regen gas heater, cooler, blower
+//   DB4 — SwitchingValves   : tower inlet/outlet/regen valve set + sequencer
+//   DB5 — OutletQuality     : dew point analyzer, dust filters, sales gas
+//   DB6 — SafetySystems     : trips, relief, ESD logic
+//   DB7 — Utilities         : fuel gas, instrument air, regen compressor
+// ============================================================================
+
+// ─── UDT Definitions ────────────────────────────────────────────────────────
+
+TYPE "SieveBed"
+  VAR
+    cycle_state       : USInt;   // 0=Adsorbing 1=Depressurizing 2=Heating 3=Cooling 4=Repressurizing
+    time_in_state_s    : UDInt;
+    bed_dp          : Real #UNIT("bar");     // differential pressure across bed
+    bed_inlet_temp        : Real #UNIT("°C");
+    bed_outlet_temp  : Real #UNIT("°C");
+    moisture_loading: Real #UNIT("%");   // % of design saturation capacity
+    cycles_completed   : UDInt;   // lifetime adsorption cycles
+    breakthrough_alarm : Bool;    // moisture breakthrough detected
+    crush_damage_susp  : Bool;    // suspected desiccant attrition (rising dP trend)
+  END_VAR
+END_TYPE
+
+TYPE "ValveActuator"
+  VAR
+    position_pct    : Real;     // 0 = closed, 100 = open
+    command_pct     : Real;     // setpoint
+    travel_time_s   : Real;     // full-stroke time
+    fault           : Bool;
+    limit_open      : Bool;     // limit switch
+    limit_closed    : Bool;
+  END_VAR
+END_TYPE
+
+TYPE "TemperatureSensor"
+  VAR
+    value         : Real #UNIT("°C");
+    high_alarm      : Bool;
+    low_alarm       : Bool;
+    sensor_fault    : Bool;
+  END_VAR
+END_TYPE
+
+TYPE "PressureSensor"
+  VAR
+    value       : Real #UNIT("bar");
+    high_alarm      : Bool;
+    low_alarm       : Bool;
+    sensor_fault    : Bool;
+  END_VAR
+END_TYPE
+
+TYPE "FlowMeter"
+  VAR
+    rate      : Real #UNIT("dam³/h");
+    totalizer  : LReal #UNIT("dam³/h");;    // cumulative totalized flow
+    low_flow_alarm  : Bool;
+    sensor_fault    : Bool;
+  END_VAR
+END_TYPE
+
+TYPE "PIDLoop"
+  VAR
+    setpoint        : LReal;
+    process_value   : LReal;
+    output_pct      : Real;
+    kp              : Real;
+    ki              : Real;
+    kd              : Real;
+    integral_acc    : LReal;
+    enabled         : Bool;
+    auto_mode       : Bool;
+    saturated       : Bool;
+  END_VAR
+END_TYPE
+
+TYPE "AlarmRecord"
+  VAR
+    active          : Bool;
+    acknowledged    : Bool;
+    code            : Word;
+    priority        : USInt;    // 0=info 1=warn 2=alarm 3=critical
+    description_id  : UInt;
+    timestamp_ms    : DInt;
+  END_VAR
+END_TYPE
+
+// ─── DB1 "InletSeparation" — Feed Conditioning ──────────────────────────────
+DATA_BLOCK "InletSeparation" DB 1
+
+#MODBUS_HOLDING
+VAR
+    // ── Inlet feed conditions ──
+    feed_pressure   : Real #UNIT("bar");     // wellhead / pipeline inlet pressure
+    feed_temp         : Real #UNIT("°C");
+    feed_flow           : "FlowMeter";
+    feed_h2s_ppm        : Real;     // sour gas monitoring, if applicable
+    feed_co2_pct        : Real;
+
+    // ── Inlet scrubber (bulk liquid knockout) ──
+    scrubber_level_pct  : Real;
+    scrubber_press  : Real #UNIT("bar");
+    scrubber_hi_level_trip : Bool;
+    scrubber_liquid_dump: "ValveActuator";
+
+    // ── Coalescing filter separator ──
+    coalescer_dp    : Real #UNIT("bar");     // fouling indicator
+    coalescer_bypass    : Bool;
+    coalescer_change_due: Bool;
+
+    // ── Free water knockout ──
+    fwko_level_pct      : Real;
+    fwko_temp         : Real #UNIT("°C");
+    fwko_drain_valve    : "ValveActuator";
+
+    timestamp           : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB2 "AdsorberTowers" — Molecular Sieve Beds ────────────────────────────
+DATA_BLOCK "AdsorberTowers" DB 2
+VAR
+    // ── 3 sieve towers (2 adsorbing / 1 regenerating, typical) ──
+    towers              : ARRAY [0..2] OF "SieveBed";
+
+    // ── Cycle sequencer ──
+    active_adsorbing    : ARRAY [0..2] OF Bool;  // which towers are on-stream
+    cycle_time_target_s : UDInt;                 // full adsorption cycle length
+    lead_lag_index      : USInt;                 // which tower goes online next
+    sequence_step       : UInt;                  // overall step counter
+    sequence_hold       : Bool;                  // operator-forced hold
+    sequence_fault      : Bool;
+
+    // ── Common process values ──
+    system_inlet_press : Real #UNIT("bar");
+    system_outlet_press: Real #UNIT("bar");
+    total_gas_flow      : "FlowMeter";
+
+    timestamp           : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB3 "RegenSystem" — Regeneration Gas Loop ──────────────────────────────
+DATA_BLOCK "RegenSystem" DB 3
+VAR
+    // ── Regen gas heater ──
+    heater_outlet_temp   : Real #UNIT("°C");     // target ~280-300 °C
+    heater_duty_pct        : Real;
+    heater_fuel_valve      : "ValveActuator";
+    heater_flame_on        : Bool;
+    heater_pilot_on        : Bool;
+    heater_high_temp_trip  : Bool;
+    heater_temp_pid        : "PIDLoop";
+
+    // ── Regen gas cooler (post-heating bed cooldown) ──
+    cooler_inlet_temp    : Real #UNIT("°C");
+    cooler_outlet_temp   : Real #UNIT("°C");     // target < 50 °C before repressurizing
+    cooler_fan_running     : Bool;
+    cooler_fan_speed_pct   : Real;
+
+    // ── Regen gas blower / recycle compressor ──
+    blower_running         : Bool;
+    blower_speed           : Int #UNIT("rpm");
+    blower_flow            : "FlowMeter";
+    blower_surge_alarm     : Bool;
+    blower_motor_temp      : Real #UNIT("°C");
+
+    // ── Regen gas knockout (condensed water from heated desorption) ──
+    regen_ko_level_pct     : Real;
+    regen_ko_drain_valve   : "ValveActuator";
+    regen_water_removed_l  : LReal;   // cumulative water recovered
+
+    timestamp              : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB4 "SwitchingValves" — Tower Valve Manifold ───────────────────────────
+DATA_BLOCK "SwitchingValves" DB 4
+VAR
+    // ── Per-tower valve set (3 towers × 4 valves) ──
+    inlet_valves        : ARRAY [0..2] OF "ValveActuator";   // feed gas in
+    outlet_valves       : ARRAY [0..2] OF "ValveActuator";   // dry gas out
+    regen_in_valves     : ARRAY [0..2] OF "ValveActuator";   // hot regen gas in
+    regen_out_valves    : ARRAY [0..2] OF "ValveActuator";   // spent regen gas out
+
+    // ── Depressurization / repressurization ──
+    depress_valves      : ARRAY [0..2] OF "ValveActuator";
+    repress_valves      : ARRAY [0..2] OF "ValveActuator";
+
+    // ── Interlock status ──
+    valve_mismatch_alarm: Bool;     // two towers commanded on-stream simultaneously
+    any_valve_fault     : Bool;
+
+    timestamp           : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB5 "OutletQuality" — Dry Gas Sales Quality ────────────────────────────
+DATA_BLOCK "OutletQuality" DB 5
+VAR
+    // ── Dew point analyzer ──
+    dew_point               : Real #UNIT("°C");     // target ≤ -100 °C (pipeline spec dependent)
+    dew_point_spec : Real #UNIT("°C");     // contractual sales spec
+    dew_point_hi_alarm      : Bool;
+    analyzer_fault          : Bool;
+    analyzer_last_cal       : DTL;
+
+    // ── Outlet dust filters (sieve fines protection) ──
+    dust_filter_dp  : Real #UNIT("bar");
+    dust_filter_bypass  : Bool;
+    dust_filter_change_due: Bool;
+
+    // ── Sales gas metering ──
+    sales_gas_flow          : "FlowMeter";
+    sales_gas_press         : Real #UNIT("bar");
+    sales_gas_temp          : Real #UNIT("°C");
+    heating_value           : Real #UNIT("MJ/m³");     // gross calorific value
+
+    timestamp               : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB6 "SafetySystems" — Trips & Emergency Shutdown ───────────────────────
+DATA_BLOCK "SafetySystems" DB 6
+VAR
+    // ── ESD logic ──
+    esd_signal          : Bool;
+    esd_manual          : Bool;
+    esd_auto            : Bool;
+    esd_reason_code      : Word;
+    esd_time_ms         : DInt;
+
+    // ── Trip setpoints ──
+    trip_high_press : Real #UNIT("bar");     // tower over-pressure
+    trip_low_press  : Real #UNIT("bar");     // loss of system pressure
+    trip_high_temp    : Real #UNIT("°C");     // heater runaway
+    trip_high_dp    : Real #UNIT("bar");     // bed plugging / channeling
+
+    // ── Relief & venting ──
+    relief_valve_lifted : ARRAY [0..2] OF Bool;   // per-tower PSV
+    flare_header_press : Real #UNIT("bar");
+    vent_valve          : "ValveActuator";
+
+    // ── Fire & gas ──
+    gas_detectors       : ARRAY [0..7] OF Real;   // % LEL, 8 zones
+    fire_detectors      : ARRAY [0..3] OF Bool;
+    fg_alarm_active     : Bool;
+
+    // ── Alarm table ──
+    alarms              : ARRAY [0..7] OF "AlarmRecord";
+    active_alarm_count  : UInt;
+    any_critical        : Bool;
+
+    timestamp           : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB7 "Utilities" — Support Systems ──────────────────────────────────────
+DATA_BLOCK "Utilities" DB 7
+VAR
+    // ── Fuel gas (heater firing) ──
+    fuel_gas_press  : Real #UNIT("bar");
+    fuel_gas_low_press_trip: Bool;
+
+    // ── Instrument air ──
+    inst_air_press  : Real #UNIT("bar");
+    inst_air_low_alarm  : Bool;
+    inst_air_dryer_on   : Bool;
+
+    // ── Regen compressor (if closed-loop regen gas recycle) ──
+    regen_comp_running  : Bool;
+    regen_comp_speed: Int #UNIT("rpm");
+    regen_comp_disch_press: Real #UNIT("bar");
+    regen_comp_vibration : Real #UNIT("mm/s");
+
+    // ── Power & control ──
+    ups_on_battery      : Bool;
+    control_power_ok    : Bool;
+
+    timestamp           : DTL;
+END_VAR
+END_DATA_BLOCK

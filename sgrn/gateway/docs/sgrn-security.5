@@ -1,0 +1,93 @@
+.TH SGRN-SECURITY 5 "July 2026" "SGRN Gateway 1.0" "File Formats Manual"
+.SH NAME
+security.as \- SGRN Gateway Security Policy Configuration
+.SH SYNOPSIS
+.B /etc/sgrn/security.as
+.SH DESCRIPTION
+The
+.B security.as
+file defines the access control policies for the SGRN Gateway. It uses an embedded AngelScript DSL to configure rules per protocol (S7, HTTP, WebSocket, Modbus, OPC-UA, EtherNet/IP).
+.PP
+Rules are evaluated in a most-specific-first order. The policy engine is deny-by-default; any request that does not explicitly match an allow rule will be denied.
+
+.SH API REFERENCE
+The following factory functions create a \fBPolicyBuilder\fR for a specific protocol:
+.TP
+\fBs7()\fR
+Rules for the native S7 PLC Server.
+.TP
+\fBhttp()\fR
+Rules for the HTTP REST API.
+.TP
+\fBws()\fR
+Rules for the WebSocket Telemetry stream.
+.TP
+\fBmodbus()\fR
+Rules for the Modbus TCP Server.
+.TP
+\fBopcua()\fR
+Rules for the OPC-UA Server.
+.TP
+\fBeip()\fR
+Rules for the EtherNet/IP Adapter.
+
+.SS PolicyBuilder Methods
+These methods add conditions to a rule. All conditions must be met for the rule to match.
+
+.TP
+\fB.allowIp("x.x.x.x")\fR
+Match an exact IPv4 address.
+.TP
+\fB.allowCidr("x.x.x.x/n")\fR
+Match an IPv4 subnet.
+.TP
+\fB.allowDb(uint16 db_number)\fR
+Restrict access to a specific Data Block (S7/Modbus).
+.TP
+\fB.allowOrigin("http://example.com")\fR
+Require a specific Origin header (HTTP/WebSocket).
+.TP
+\fB.requireHeader("Header-Name")\fR
+Require the presence of an HTTP header.
+.TP
+\fB.allowSession("SessionName")\fR
+Require a specific session display name (OPC-UA).
+.TP
+\fB.allowFieldRead("path")\fR
+Restrict read access to a specific field path or subtree. Path can include '*' or '[*]' for array elements.
+.TP
+\fB.allowField("path")\fR
+Restrict both read and write access to a specific field path or subtree.
+.TP
+\fB.denyFieldWrite("path")\fR
+Explicitly deny write access to a specific field path or subtree.
+
+.SS Terminal Actions
+Every rule must end with one of the following actions:
+
+.TP
+\fB.allow()\fR
+Grant access if all conditions are met.
+.TP
+\fB.deny()\fR
+Explicitly deny access if all conditions are met.
+
+.SH EXAMPLES
+.PP
+Allow HTTP access from a specific subnet, but deny write access to a critical field:
+.PP
+.nf
+    http().allowCidr("192.168.1.0/24")
+          .denyFieldWrite("ReactorCore/speed")
+          .allow();
+.fi
+
+.PP
+Allow WebSocket telemetry for a specific origin:
+.PP
+.nf
+    ws().allowOrigin("https://dashboard.local").allow();
+.fi
+
+.SH SEE ALSO
+\fBsgrnd\fR(8)

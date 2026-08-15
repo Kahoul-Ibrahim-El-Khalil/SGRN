@@ -1,0 +1,26 @@
+[Unit]
+Description=MinIO Object Storage (SGRN)
+After=network.target
+
+[Service]
+User=${SGRN_USER}
+Type=simple
+
+EnvironmentFile=${SGRN_DATA_DIR}/.env
+Environment="PATH=${SGRN_DEPLOYMENT_ENV}/bin:/usr/bin:/bin"
+Environment="LD_LIBRARY_PATH=${SGRN_DEPLOYMENT_ENV}/lib"
+
+# MinIO reads MINIO_ROOT_USER / MINIO_ROOT_PASSWORD from the EnvironmentFile above
+ExecStartPre=/usr/bin/mkdir -p ${SGRN_DATA_DIR}/minio
+WorkingDirectory=${SGRN_DATA_DIR}/minio
+ExecStart=/usr/bin/env minio server ${SGRN_DATA_DIR}/minio \
+    --address :9000 \
+    --console-address :9001
+
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+
+[Install]
+WantedBy=default.target

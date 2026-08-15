@@ -1,0 +1,27 @@
+{
+  "plc": {
+    "ip": "192.168.1.100",
+    "rack": 0,
+    "slot": 1,
+    "port": 102
+  },
+  "registry": "./plant.json",
+  "blocks": [
+    { "db": 1 },
+    { "db": 2, "fields": ["temperature", "pressure", "flow_rate"] }
+  ],
+  "poll_interval_ms": 1000,
+  "reconnect_ms": 2000,
+  "backoff_max_ms": 30000,
+  "on_change_only": false,
+  "heartbeat_ms": 60000,
+  "state_dir": "./poller-state",
+  "backend": {
+    "url": "http://localhost:8000",
+    "public_token": "",
+    "private_token": "",
+    "object_name": "s7poller/plc1",
+    "sync_interval_s": 60,
+    "telemetry_enabled": true
+  }
+}

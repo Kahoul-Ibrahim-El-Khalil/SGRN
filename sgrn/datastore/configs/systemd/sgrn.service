@@ -1,0 +1,23 @@
+[Unit]
+Description=SGRN Platform (All Services)
+After=network.target
+Wants=SGRN-postgres.service SGRN-redis.service SGRN-minio.service SGRN-postgrest.service SGRN-datastore.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+ExecStart=/bin/systemctl start SGRN-postgres.service
+ExecStart=/bin/systemctl start SGRN-redis.service
+ExecStart=/bin/systemctl start SGRN-minio.service
+ExecStart=/bin/systemctl start SGRN-postgrest.service
+ExecStart=/bin/systemctl start SGRN-datastore.service
+
+ExecStop=/bin/systemctl stop SGRN-datastore.service
+ExecStop=/bin/systemctl stop SGRN-postgrest.service
+ExecStop=/bin/systemctl stop SGRN-minio.service
+ExecStop=/bin/systemctl stop SGRN-redis.service
+ExecStop=/bin/systemctl stop SGRN-postgres.service
+
+[Install]
+WantedBy=default.target
