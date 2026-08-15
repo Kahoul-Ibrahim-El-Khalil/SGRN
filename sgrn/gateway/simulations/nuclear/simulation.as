@@ -1,5 +1,43 @@
+const string SCHEMA_PATH = "schema.scl";
 
-import "env.as";
+const string IP = "127.0.0.1";
+
+S7Client@ plc = null;
+
+bool setupEnv(
+    const string&in ip = IP,
+    int rack = 0,
+    int slot = 1
+) {
+    print("================================================================\n");
+    print("  Connecting to PLC at " + ip + " (rack=" + rack + ", slot=" + slot + ")\n");
+
+    @plc = S7Client(ip, rack, slot);
+    plc.loadSclSchema(SCHEMA_PATH);
+
+    bool ok = plc.lastOpOk();
+    if (ok) {
+        print("  Environment ready — all DB handles initialised.\n");
+    } else {
+        print("  WARNING: PLC connection issue: " + plc.lastError() + "\n");
+    }
+    print("================================================================\n");
+    return ok;
+}
+
+// ─── Convenience: print every DB ─────────────────────────────────────────────
+
+void printAll() {
+    if (db1 !is null) { print("--- ReactorCore (DB1) ---\n"); db1.print(); }
+    if (db2 !is null) { print("--- PrimaryCoolant (DB2) ---\n"); db2.print(); }
+    if (db3 !is null) { print("--- SteamGenerator (db3) ---\n"); db3.print(); }
+    if (db4 !is null) { print("--- Turbine (db4) ---\n"); db4.print(); }
+    if (db5 !is null) { print("--- SafetySystems (db5) ---\n"); db5.print(); }
+    if (db6 !is null) { print("--- RadMonitoring (db6) ---\n"); db6.print(); }
+    if (db7 !is null) { print("--- WasteProcessing (db7) ---\n"); db7.print(); }
+}
+
+// ─── Entry point when run standalone ─────────────────────────────────────────
 
 // ─── Simulation State Variables ──────────────────────────────────────────────
 
@@ -21,10 +59,10 @@ double rod_bank_pos = 100.0; // 0..100%
 double rod_bank_demand = 100.0;
 
 // Temperatures & coolant
-double t_inlet = 292.0;  // Core inlet temperature (degC)
+double t_inlet = 292.0; // Core inlet temperature (degC)
 double t_outlet = 325.0; // Core outlet temperature (degC)
 double przr_press = 155.0; // Pressurizer pressure (bar)
-double przr_level = 50.0;  // Pressurizer level (%)
+double przr_level = 50.0; // Pressurizer level (%)
 
 // Secondary side
 double sg1_press = 70.0;
@@ -219,7 +257,7 @@ void writeReactorCore(ReactorCore@ db, DTL@ ts) {
     db.boron_ppm = float(boron_ppm);
     db.reactor_critical = reactor_power_mw > 10.0;
     db.reactor_tripped = scrammed;
-    db.write("timestamp",  ts);
+    db.write("timestamp", ts);
     db.put();
 }
 
@@ -326,7 +364,7 @@ void writeSafetySystems(SafetySystems@ db, DTL@ ts) {
         db.alarms[i].timestamp_ms = 0;
     }
 
-    db.write("timestamp",ts);
+    db.write("timestamp", ts);
     db.put();
 }
 
@@ -372,7 +410,7 @@ void writeWasteProcessing(WasteProcessing@ db, DTL@ ts) {
     db.sfp_temp_c = float(sfp_temp);
     db.sfp_level_m = float(sfp_level);
     db.sfp_boron_ppm = 2400.0f;
-    db.write("timestamp",  ts);
+    db.write("timestamp", ts);
     db.put();
 }
 

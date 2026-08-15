@@ -345,7 +345,82 @@ static void GenericUDTFieldSetter_dtl(asIScriptGeneric* tp_gen) {
     p_sub_proxy->assignDtl(p_dtl_obj);
     p_sub_proxy->release();
 }
+static void GenericFieldGetter_primitive_array(asIScriptGeneric* tp_gen) {
+    auto* p_db = static_cast<ScriptDataBlock*>(tp_gen->GetObject());
+    auto* p_meta = static_cast<FieldMeta*>(tp_gen->GetAuxiliary());
+    asIScriptEngine* p_engine = tp_gen->GetEngine();
 
+    const char* as_type = s7TypeToAS(p_meta->s7type);
+    if (!as_type) {
+        tp_gen->SetReturnAddress(nullptr);
+        return;
+    }
+
+    // AngelScript declaration, e.g.:
+    // array<bool>
+    // array<float>
+    // array<int>
+    std::string decl = fmt::format("array<{}>", as_type);
+
+    asITypeInfo* array_type = p_engine->GetTypeInfoByDecl(decl.c_str());
+
+    if (!array_type) {
+        tp_gen->SetReturnAddress(nullptr);
+        return;
+    }
+
+    CScriptArray* arr = CScriptArray::Create(array_type, p_meta->count);
+
+    for (int i = 0; i < p_meta->count; ++i) {
+
+        FieldMeta element = *p_meta;
+
+        if (p_meta->s7type == s7codec::Type::Bool) {
+
+            size_t bit = static_cast<size_t>(p_meta->bit_index) + static_cast<size_t>(i);
+
+            element.abs_offset = p_meta->abs_offset + bit / 8;
+
+            element.bit_index = static_cast<uint8_t>(bit % 8);
+
+        } else {
+
+            const size_t element_size = s7codec::typeSpanBytes(p_meta->s7type, 1);
+
+            element.abs_offset = p_meta->abs_offset + static_cast<size_t>(i) * element_size;
+        }
+
+        element.count = 1;
+
+        auto value = decodeFromLiveMemory(p_db, &element);
+
+        // Set the array element according to its AngelScript type.
+        if (std::strcmp(as_type, "bool") == 0 || std::strcmp(as_type, "BOOL") == 0) {
+
+            bool v = value.asInt64() != 0;
+            arr->SetValue(i, &v);
+
+        } else if (std::strcmp(as_type, "float") == 0 || std::strcmp(as_type, "REAL") == 0) {
+
+            float v = static_cast<float>(value.asDouble());
+
+            arr->SetValue(i, &v);
+
+        } else if (std::strcmp(as_type, "double") == 0 || std::strcmp(as_type, "LREAL") == 0) {
+
+            double v = value.asDouble();
+            arr->SetValue(i, &v);
+
+        } else {
+
+            int32_t v = static_cast<int32_t>(value.asInt64());
+
+            arr->SetValue(i, &v);
+        }
+    }
+
+    tp_gen->SetReturnAddress(arr);
+}
 static void GenericFieldGetter_udt_array(asIScriptGeneric* tp_gen) {
     auto* p_db = static_cast<ScriptDataBlock*>(tp_gen->GetObject());
     auto* p_meta = static_cast<UdtArrayMeta*>(tp_gen->GetAuxiliary());
@@ -569,15 +644,7 @@ static void registerFieldProperties(sgrn::scripting::ScriptHost& t_host, const s
                     t_as_type_name.c_str(), getter_sig.c_str(), asFUNCTION(GenericFieldGetter_udt_array), asCALL_GENERIC, raw);
             } else {
                 // ------------------------------------------------------------
-                // Primitive array
-                //
-                // Do NOT expose the array itself as FieldProxy.
-                //
-                // The element accessor must return the actual S7 type so that:
-                //
-                //     safety_systems.estop_zones[i]
-                //
-                // has type bool rather than FieldProxy@.
+                // Primitive array -> AngelScript array<T>
                 // ------------------------------------------------------------
 
                 const char* as_element_type = s7TypeToAS(f.type);
@@ -598,31 +665,16 @@ static void registerFieldProperties(sgrn::scripting::ScriptHost& t_host, const s
 
                 t_registry.field_meta.push_back(std::move(p_meta));
 
-                auto acc = accessorsForASType(as_element_type);
+                std::string getter_sig = fmt::format("array<{}>@ get_{}() const", as_element_type, safe_name);
 
-                std::string getter_sig = fmt::format("{} get_{}() const", as_element_type, safe_name);
-
-                int r =
-                    t_host.getEngine()->RegisterObjectMethod(t_as_type_name.c_str(), getter_sig.c_str(), acc.getter, asCALL_GENERIC, raw);
+                int r = t_host.getEngine()->RegisterObjectMethod(
+                    t_as_type_name.c_str(), getter_sig.c_str(), asFUNCTION(GenericFieldGetter_primitive_array), asCALL_GENERIC, raw);
 
                 if (r < 0) {
                     fmt::print(stderr,
                         "[SchemaVM] Failed to register array getter '{}' "
                         "on '{}': {}\n",
                         getter_sig, t_as_type_name, r);
-                }
-
-                // Setter
-                std::string setter_sig = fmt::format("void set_{}({} val)", safe_name, as_element_type);
-
-                int rs =
-                    t_host.getEngine()->RegisterObjectMethod(t_as_type_name.c_str(), setter_sig.c_str(), acc.setter, asCALL_GENERIC, raw);
-
-                if (rs < 0) {
-                    fmt::print(stderr,
-                        "[SchemaVM] Failed to register array setter '{}' "
-                        "on '{}': {}\n",
-                        setter_sig, t_as_type_name, rs);
                 }
             }
             continue;
