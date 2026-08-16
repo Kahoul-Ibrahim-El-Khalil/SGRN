@@ -12,6 +12,9 @@ export interface DbField {
   count: number;
   udt_name?: string;
   unit?: string;
+  min?: number;
+  max?: number;
+  enum?: Record<string, string>;
   children?: DbField[];
 }
 

@@ -54,10 +54,14 @@
     parent_row_id: string | null;
     count: number;
     unit?: string;
+    min?: number;
+    max?: number;
+    enum_map?: Record<string, string>;
   }
 
   let tree_nodes: TreeNode[] = [];
   let expanded_nodes: Set<string> = new Set<string>(); // node IDs that are expanded
+  let node_map: Map<string, TreeNode> = new Map<string, TreeNode>();
   let subscribed_paths: Set<string> = new Set<string>(); // paths that are active in WS
 
   // Collapsible sections for Schema Registry
@@ -104,8 +108,19 @@
     const vals = $liveTelemetryValues;
     for (const key in vals) {
       const { value, ts } = vals[key];
-      const formatted =
-        typeof value === "number" ? value.toFixed(4) : String(value ?? "");
+      const node = node_map.get(key);
+      let formatted = "";
+      if (
+        node?.enum_map &&
+        (typeof value === "number" || typeof value === "string")
+      ) {
+        const enum_str = node.enum_map[String(value)];
+        formatted = enum_str ? `${value} (${enum_str})` : String(value);
+      } else if (typeof value === "number") {
+        formatted = value.toFixed(4);
+      } else {
+        formatted = String(value ?? "");
+      }
       const date = new Date(ts);
       const timeStr =
         date.toLocaleTimeString([], { hour12: false }) +
@@ -164,6 +179,9 @@
         parent_row_id: t_parent_row_id,
         count: t_field.count,
         unit: t_field.unit,
+        min: t_field.min,
+        max: t_field.max,
+        enum_map: t_field.enum,
       });
 
       if (is_struct) {
@@ -223,6 +241,11 @@
           walkField(db, f, "", 1, db_row_id);
         }
       }
+    }
+
+    node_map.clear();
+    for (const n of nodes) {
+      if (n.key) node_map.set(n.key, n);
     }
 
     return nodes;
@@ -388,6 +411,9 @@
     depth: number;
     full_path: string;
     unit?: string;
+    min?: number;
+    max?: number;
+    enum_map?: Record<string, string>;
   }
 
   function getFlatRegFields(
@@ -412,6 +438,9 @@
         depth: t_depth,
         full_path: full_path,
         unit: f.unit,
+        min: f.min,
+        max: f.max,
+        enum_map: f.enum,
       });
 
       let children = f.children;
@@ -561,6 +590,7 @@
               </th>
               <th class="th-live">Live Value</th>
               <th class="th-unit">Unit</th>
+              <th class="th-range">Range</th>
               <th class="th-sync">Sync Time</th>
             </tr>
           </thead>
@@ -639,6 +669,17 @@
                   {/if}
                 </td>
 
+                <!-- RANGE -->
+                <td class="range-cell">
+                  {#if node.type === "db" || node.is_struct || node.is_array || node.field_type === "TRUNCATED"}
+                    —
+                  {:else if node.min !== undefined && node.max !== undefined}
+                    [{node.min}, {node.max}]
+                  {:else}
+                    —
+                  {/if}
+                </td>
+
                 <!-- SYNC TIME -->
                 <td class="sync-cell">
                   {#if node.type === "db" || node.is_struct || node.is_array || node.field_type === "TRUNCATED"}
@@ -679,6 +720,7 @@
               <th class="th-type">Type</th>
               <th>Name / Path</th>
               <th>Unit</th>
+              <th class="th-range">Range / Enum</th>
               <th class="th-count">Count</th>
               <th></th>
             </tr>
@@ -704,7 +746,7 @@
                       class="dash-check"
                     />
                   </td>
-                  <td colspan="6">
+                  <td colspan="7">
                     <div class="reg-group-title">
                       <span
                         class="reg-group-chevron"
@@ -738,6 +780,7 @@
                     <td class="th-upper">Type</td>
                     <td class="th-upper">Name / Path</td>
                     <td class="th-upper">Unit</td>
+                    <td class="th-upper">Range / Enum</td>
                     <td class="th-upper-right">Count</td>
                     <td></td>
                   </tr>
@@ -787,6 +830,21 @@
                             </div>
                           </td>
                           <td class="unit-cell">{f.unit ?? "—"}</td>
+                          <td class="range-cell">
+                            {#if f.min !== undefined && f.max !== undefined}
+                              [{f.min}, {f.max}]
+                            {/if}
+                            {#if f.enum_map}
+                              <span class="meta-muted"
+                                >{Object.entries(f.enum_map)
+                                  .map(([k, v]) => `${k}=${v}`)
+                                  .join(", ")}</span
+                              >
+                            {/if}
+                            {#if f.min === undefined && !f.enum_map}
+                              —
+                            {/if}
+                          </td>
                           <td class="cell-right-dim"
                             >{f.count > 1 ? f.count : ""}</td
                           >
@@ -800,7 +858,7 @@
                     {/each}
                   {:else}
                     <tr class="reg-row">
-                      <td colspan="7" class="empty-cell">No fields mapped</td>
+                      <td colspan="8" class="empty-cell">No fields mapped</td>
                     </tr>
                   {/if}
                 {/if}
@@ -815,7 +873,7 @@
                   class="reg-group-header"
                   on:click={() => toggleRegGroup(group_id)}
                 >
-                  <td colspan="7">
+                  <td colspan="8">
                     <div class="reg-group-title">
                       <span
                         class="reg-group-chevron"
@@ -836,6 +894,7 @@
                     <td class="th-upper">Type</td>
                     <td class="th-upper">Member</td>
                     <td class="th-upper">Unit</td>
+                    <td class="th-upper">Range / Enum</td>
                     <td class="th-upper-right">Count</td>
                     <td></td>
                   </tr>
@@ -870,6 +929,21 @@
                             </div>
                           </td>
                           <td class="unit-cell">{f.unit ?? "—"}</td>
+                          <td class="range-cell">
+                            {#if f.min !== undefined && f.max !== undefined}
+                              [{f.min}, {f.max}]
+                            {/if}
+                            {#if f.enum_map}
+                              <span class="meta-muted"
+                                >{Object.entries(f.enum_map)
+                                  .map(([k, v]) => `${k}=${v}`)
+                                  .join(", ")}</span
+                              >
+                            {/if}
+                            {#if f.min === undefined && !f.enum_map}
+                              —
+                            {/if}
+                          </td>
                           <td class="cell-right-dim"
                             >{f.count > 1 ? f.count : ""}</td
                           >
@@ -879,7 +953,7 @@
                     {/each}
                   {:else}
                     <tr class="reg-row">
-                      <td colspan="7" class="empty-cell">No members</td>
+                      <td colspan="8" class="empty-cell">No members</td>
                     </tr>
                   {/if}
                 {/if}
@@ -893,7 +967,7 @@
                 class="reg-group-header"
                 on:click={() => toggleRegGroup(group_id)}
               >
-                <td colspan="7">
+                <td colspan="8">
                   <div class="reg-group-title">
                     <span
                       class="reg-group-chevron"
@@ -919,6 +993,7 @@
                   <td class="th-upper">Type</td>
                   <td class="th-upper">Symbol Name</td>
                   <td class="th-upper">Unit</td>
+                  <td class="th-upper">Range</td>
                   <td colspan="2" class="th-upper">Remark</td>
                 </tr>
 
@@ -929,6 +1004,7 @@
                     <td><span class="type-badge">{t.type}</span></td>
                     <td class="text-semibold">{t.name}</td>
                     <td class="unit-cell">—</td>
+                    <td class="range-cell">—</td>
                     <td colspan="2" class="cell-dim-sm">{t.remark ?? "--"}</td>
                   </tr>
                 {/each}

@@ -603,7 +603,6 @@ Result<void, PlcMemoryError> PlcMemory::writeDbMemory(uint16_t t_db_number, size
         return PlcMemoryErrorStatus::RANGE_EXCEEDS_ALLOWED_SPACE;
 
     uint8_t* target = p_plc_state_->getArenaTree().data() + p_entry->offset + t_offset;
-    fmt::print(stderr, "[DEBUG writeDbMemory] DB: {}, Offset: {}, Size: {}, Bytes: ", t_db_number, t_offset, t_size);
     for (size_t idx = 0; idx < t_size; ++idx) {
         fmt::print(stderr, "{:02X} ", tp_buffer[idx]);
     }

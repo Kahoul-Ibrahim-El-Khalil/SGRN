@@ -1,0 +1,54 @@
+
+TYPE "MotorDrive"
+  VAR
+    running        : Bool;
+    ready          : Bool;    // true whenever no fault is latched
+    speed_sp_pct   : Real #UNIT("%");     // echo of the commanded speed
+    speed_fb_pct   : Real #UNIT("%");     // actual ramped speed, 0..100
+    speed_rpm      : Real #UNIT("rpm");
+    output_freq_hz : Real #UNIT("Hz");
+    current_a      : Real #UNIT("A");
+    torque_pct     : Real #UNIT("%");
+    winding_temp_c : Real #UNIT("°C");
+    fault          : Bool;
+    fault_code     : UInt #ENUM(NONE, OVERCURRENT, OVERTEMP, ESTOP, STALL, UKNOWN) ;
+    runtime_h      : LReal #UNIT("hour");
+  END_VAR
+END_TYPE
+
+// ─── DB1 "MotorCommand" — the OPC-UA control surface ────────────────────────
+DATA_BLOCK "MotorCommand" DB1
+VAR
+    start            : Bool;    // rising edge starts the ramp (ignored if faulted)
+    stop             : Bool;    // level; stop always wins over start
+    e_stop           : Bool;    // hardwired-style emergency stop, latches a fault
+    fault_reset      : Bool;    // rising edge; clears a latched fault once the cause has cleared
+    direction_rev    : Bool;    // false = forward, true = reverse (only honoured while stopped)
+    speed_sp_pct     : Real #UNIT("%") #RANGE(0.0, 100.0);
+    accel_time_s     : Real #UNIT("s") #RANGE(0.1, 300.0);   // 0->100% ramp time
+    decel_time_s     : Real #UNIT("s") #RANGE(0.1, 300.0);   // 100->0% ramp time
+    torque_limit_pct : Real #UNIT("%") #RANGE(0.0, 150.0);   // current-limit style torque cap
+    timestamp        : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB2 "MotorStatus" — drive feedback ──────────────────────────────────────
+DATA_BLOCK "MotorStatus" DB2
+VAR
+    drive                 : "MotorDrive";
+    direction_actual_rev  : Bool;
+    timestamp             : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB3 "Alarms" — aggregated summary ──────────────────────────────────────
+DATA_BLOCK "Alarms" DB3
+VAR
+    any_active         : Bool;
+    overcurrent_trip   : Bool;
+    overtemp_trip      : Bool;
+    estop_active       : Bool;
+    stall_trip         : Bool;
+    timestamp          : DTL;
+END_VAR
+END_DATA_BLOCK

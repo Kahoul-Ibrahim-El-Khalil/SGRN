@@ -14,6 +14,7 @@
 #include <cctype>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -529,6 +530,9 @@ struct DbField {
     int struct_size{0};
     s7codec::Endian endianness{s7codec::Endian::Big};
     std::optional<std::string> unit;
+    std::optional<double> min_val;
+    std::optional<double> max_val;
+    std::map<int, std::string> enum_map;
     bool trigger_events{false};
     bool is_dynamic{false};
 };

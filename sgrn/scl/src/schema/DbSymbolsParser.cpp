@@ -263,6 +263,8 @@ public:
                 std::string_view{"#BIG_ENDIAN"},
                 std::string_view{"#LITTLE_ENDIAN"},
                 std::string_view{"#UNIT"},
+                std::string_view{"#RANGE"},
+                std::string_view{"#ENUM"},
                 std::string_view{"#EVENT_TRIGGER"},
                 std::string_view{"XSTRING"},
                 std::string_view{"XWSTRING"},
@@ -303,7 +305,7 @@ public:
         }
 
         if (c == ':' || c == ';' || c == '[' || c == ']' || c == '{' || c == '}' || c == '.' || c == '=' || c == ',' || c == '(' ||
-            c == ')') {
+            c == ')' || c == '-') {
             t.value += advance();
             if (t.value == ":" && peek() == '=')
                 t.value += advance();
@@ -312,7 +314,6 @@ public:
             t.type = TokenType::Punctuation;
             return t;
         }
-
         t.type = TokenType::Error;
         t.value += advance();
         return t;
@@ -652,8 +653,8 @@ private:
                         advance();
                 }
 
-                while (checkKeyword("#UNIT") || checkKeyword("#EVENT_TRIGGER") || checkKeyword("#DYNAMIC") || checkKeyword("#BIG_ENDIAN") ||
-                       checkKeyword("#LITTLE_ENDIAN")) {
+                while (checkKeyword("#UNIT") || checkKeyword("#RANGE") || checkKeyword("#ENUM") || checkKeyword("#EVENT_TRIGGER") ||
+                       checkKeyword("#DYNAMIC") || checkKeyword("#BIG_ENDIAN") || checkKeyword("#LITTLE_ENDIAN")) {
                     if (matchKeyword("#UNIT")) {
                         bool has_paren = matchPunctuation("(");
                         if (match(TokenType::StringLiteral)) {
@@ -663,6 +664,54 @@ private:
                         } else {
                             setError(fmt::format("Line {}:{} - Expected string literal after #UNIT", current_.line, current_.col));
                         }
+                    } else if (matchKeyword("#RANGE")) {
+                        expectPunctuation("(", "Expected '(' after #RANGE");
+                        if (match(TokenType::Number)) {
+                            f.min_val = std::stod(previous_.value);
+                        } else if (matchPunctuation("-")) {
+                            if (match(TokenType::Number))
+                                f.min_val = -std::stod(previous_.value);
+                        }
+                        expectPunctuation(",", "Expected ',' in #RANGE");
+                        if (match(TokenType::Number)) {
+                            f.max_val = std::stod(previous_.value);
+                        } else if (matchPunctuation("-")) {
+                            if (match(TokenType::Number))
+                                f.max_val = -std::stod(previous_.value);
+                        }
+                        expectPunctuation(")", "Expected ')' after #RANGE");
+                    } else if (matchKeyword("#ENUM")) {
+                        expectPunctuation("(", "Expected '(' after #ENUM");
+                        int current_enum_idx = 0;
+                        while (!checkPunctuation(")") && !check(TokenType::EndOfFile) && !m_has_error_) {
+                            std::string enum_name;
+                            if (match(TokenType::Identifier) || match(TokenType::StringLiteral)) {
+                                enum_name = previous_.value;
+                            } else {
+                                setError(fmt::format("Line {}:{} - Expected identifier in #ENUM", current_.line, current_.col));
+                                break;
+                            }
+
+                            if (matchPunctuation("=")) {
+                                bool val_neg = matchPunctuation("-");
+                                if (match(TokenType::Number)) {
+                                    current_enum_idx = std::stoi(previous_.value) * (val_neg ? -1 : 1);
+                                } else {
+                                    setError(fmt::format("Line {}:{} - Expected number after '=' in #ENUM", current_.line, current_.col));
+                                    break;
+                                }
+                            }
+
+                            f.enum_map[current_enum_idx] = enum_name;
+                            current_enum_idx++;
+
+                            if (matchPunctuation(",")) {
+                                continue;
+                            } else {
+                                break;
+                            }
+                        }
+                        expectPunctuation(")", "Expected ')' after #ENUM");
                     } else if (matchKeyword("#EVENT_TRIGGER")) {
                         f.trigger_events = true;
                     } else if (matchKeyword("#DYNAMIC")) {
@@ -691,14 +740,23 @@ private:
         if (matchKeyword("ARRAY")) {
             expectPunctuation("[", "Expected '[' in array definition");
             int lo = 0, hi = 0;
+
+            bool lo_neg = matchPunctuation("-");
             if (match(TokenType::Number))
-                lo = std::stoi(previous_.value);
+                lo = std::stoi(previous_.value) * (lo_neg ? -1 : 1);
+            else if (lo_neg)
+                setError(fmt::format("Line {}:{} - Expected number after '-' in array bounds", current_.line, current_.col));
+
             expectPunctuation("..", "Expected '..' in array bounds");
+
+            bool hi_neg = matchPunctuation("-");
             if (match(TokenType::Number))
-                hi = std::stoi(previous_.value);
+                hi = std::stoi(previous_.value) * (hi_neg ? -1 : 1);
+            else if (hi_neg)
+                setError(fmt::format("Line {}:{} - Expected number after '-' in array bounds", current_.line, current_.col));
+
             expectPunctuation("]", "Expected ']' in array definition");
             expectKeyword("OF", "Expected OF in array definition");
-
             f = parsePrimitiveOrUdt();
             int array_count = hi - lo + 1;
             if (array_count <= 0) {

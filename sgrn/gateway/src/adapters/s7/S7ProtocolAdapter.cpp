@@ -106,8 +106,6 @@ int S7API S7ProtocolAdapter::s7RequestCallback(void* tp_usr_ptr, int t_sender, i
                 return ::evrErrException;
             }
 
-            fmt::print(stderr, "[AUDIT] ALLOW S7 PUT  DB{} offset={} size={}\n", db_num, start, bytes);
-
             if (auto r = p_adapter->plc_memory_.writeDbMemory(db_num, start, bytes, static_cast<const uint8_t*>(tp_data)); !r) {
                 fmt::print(stderr, "[ERROR] S7 PUT to DB{} offset={} size={} failed – writeDbMemory failed: {}\n", db_num, start, bytes,
                     r.error());

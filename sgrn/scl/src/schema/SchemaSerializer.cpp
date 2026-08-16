@@ -85,6 +85,23 @@ static void serializeDbField(Writer& t_writer, const DbField& t_field) {
         t_writer.Key("unit");
         t_writer.String(t_field.unit.value().c_str());
     }
+    if (t_field.min_val.has_value()) {
+        t_writer.Key("min");
+        t_writer.Double(t_field.min_val.value());
+    }
+    if (t_field.max_val.has_value()) {
+        t_writer.Key("max");
+        t_writer.Double(t_field.max_val.value());
+    }
+    if (!t_field.enum_map.empty()) {
+        t_writer.Key("enum");
+        t_writer.StartObject();
+        for (const auto& [k, v] : t_field.enum_map) {
+            t_writer.Key(std::to_string(k).c_str());
+            t_writer.String(v.c_str());
+        }
+        t_writer.EndObject();
+    }
     if (t_field.endianness != s7codec::Endian::Big) {
         t_writer.Key("endianness");
         t_writer.String(t_field.endianness == s7codec::Endian::Little ? "little" : "big");
@@ -310,6 +327,21 @@ static sgrn::Result<DbField, ::sgrn::scl::Error> fieldFromJson(const rapidjson::
         t_field.struct_size = t_node["struct_size"].GetInt();
     if (t_node.HasMember("unit") && t_node["unit"].IsString())
         t_field.unit = t_node["unit"].GetString();
+    if (t_node.HasMember("min") && t_node["min"].IsNumber())
+        t_field.min_val = t_node["min"].GetDouble();
+    if (t_node.HasMember("max") && t_node["max"].IsNumber())
+        t_field.max_val = t_node["max"].GetDouble();
+    if (t_node.HasMember("enum") && t_node["enum"].IsObject()) {
+        for (auto it = t_node["enum"].MemberBegin(); it != t_node["enum"].MemberEnd(); ++it) {
+            try {
+                int key = std::stoi(it->name.GetString());
+                if (it->value.IsString()) {
+                    t_field.enum_map[key] = it->value.GetString();
+                }
+            } catch (...) {
+            }
+        }
+    }
     if (t_node.HasMember("endianness") && t_node["endianness"].IsString()) {
         std::string e = t_node["endianness"].GetString();
         t_field.endianness = (e == "little" || e == "LITTLE") ? s7codec::Endian::Little : s7codec::Endian::Big;
