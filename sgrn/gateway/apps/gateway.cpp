@@ -399,8 +399,15 @@ public:
                 // (which includes the state recovered from disk at boot), so the
                 // WebSocket stream reclaims the twin's initial state instead of
                 // showing an empty image until the first PLC delta.
-                return ws_facade_->start(config_.websocket->ip, config_.websocket->port, security_manager_, nullptr,
-                    [this]() { return server_.getDigitalTwinJsonString(); });
+                return ws_facade_->start(
+                    config_.websocket->ip, config_.websocket->port, security_manager_, &symbolic_store_,
+                    [this]() { return server_.getDigitalTwinJsonString(); },
+                    [this](uint16_t db, size_t offset, size_t size, uint8_t* out) -> sgrn::Result<void, std::string> {
+                        if (auto r = server_.readDbMemory(db, offset, size, out); !r) {
+                            return std::string(r.error().message());
+                        }
+                        return {};
+                    });
             });
         }
 

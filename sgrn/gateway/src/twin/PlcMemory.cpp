@@ -307,12 +307,6 @@ std::string PlcMemory::getDbJsonString(uint16_t t_db_number) const {
     rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
     {
         std::shared_lock<std::shared_mutex> lk(p_entry->mutex_);
-        const auto* arena_data = p_plc_state_->getArenaTree().data() + p_entry->offset;
-        fmt::print(stderr, "[DEBUG getDbJsonString] DB: {}, Name: {}, Size: {}, Bytes: ", t_db_number, p_entry->name, p_entry->size);
-        for (size_t idx = 0; idx < std::min(p_entry->size, size_t(30)); ++idx) {
-            fmt::print(stderr, "{:02X} ", arena_data[idx]);
-        }
-        fmt::print(stderr, "\n");
         node->serialize(writer, p_plc_state_->getArenaTree());
         return sb.GetString();
     }
@@ -603,10 +597,6 @@ Result<void, PlcMemoryError> PlcMemory::writeDbMemory(uint16_t t_db_number, size
         return PlcMemoryErrorStatus::RANGE_EXCEEDS_ALLOWED_SPACE;
 
     uint8_t* target = p_plc_state_->getArenaTree().data() + p_entry->offset + t_offset;
-    for (size_t idx = 0; idx < t_size; ++idx) {
-        fmt::print(stderr, "{:02X} ", tp_buffer[idx]);
-    }
-    fmt::print(stderr, "\n");
     bool changed = false;
     {
         std::unique_lock<std::shared_mutex> lk(p_entry->mutex_);

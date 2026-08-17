@@ -17,8 +17,12 @@ import logging
 import os
 import sys
 
-# Ensure local sgrn package is loadable
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# Ensure local sgrn package is loadable. The Python bindings live under
+# sgrn/bindings/python; the repo-root sgrn/ directory is the C++ tree and must
+# NOT shadow the bindings package, so put the bindings dir first.
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, _REPO_ROOT)
+sys.path.insert(0, os.path.join(_REPO_ROOT, "sgrn", "bindings", "python"))
 
 import numpy as np
 
@@ -36,7 +40,7 @@ async def main() -> None:
 
     # 1. Setup the Gateway REST client to fetch the registry
     log.info(f"Connecting to Gateway REST API: {gateway_url}")
-    gw = Gateway(t_url=gateway_url)
+    gw = Gateway(gateway_url)
     try:
         reg = gw.registry()
     except Exception as e:
@@ -47,10 +51,10 @@ async def main() -> None:
     db_schema = None
     db_num = None
     db_name = None
-    for name, schema in reg.dbs.items():
+    for schema in reg.dbs:
         if schema.size_bytes > 0:
             db_schema = schema
-            db_name = name
+            db_name = schema.db_name
             db_num = schema.db_number
             break
 
@@ -61,7 +65,7 @@ async def main() -> None:
     log.info(f"Testing Dual Subscriptions on DB {db_num} ('{db_name}')")
 
     # Pre-compile the dtype using the registry UDT definitions
-    dt = db_schema.to_dtype(t_udts=reg.udts)
+    dt = db_schema.to_dtype(t_udts=reg.udts_by_name())
     
     # State tracking
     received_json = {}
@@ -83,7 +87,7 @@ async def main() -> None:
     def on_binary(db: int, ts: float, record: np.void) -> None:
         if db == db_num:
             # Decode the binary NumPy record into a JSON-equivalent dict
-            decoded = decode_record(record, db_schema.fields, t_udts=reg.udts)
+            decoded = decode_record(record, db_schema.fields, t_udts=reg.udts_by_name())
             received_binary.update(decoded)
             log.info(f"[BINARY] Decoded raw memory frame (ts={ts})")
 
@@ -117,7 +121,7 @@ async def main() -> None:
         await asyncio.sleep(0.5)
         elapsed += 0.5
         
-    telemetry.stop()
+    await telemetry.stop()
     
     # 6. Compare the final states
     if not received_json or not received_binary:

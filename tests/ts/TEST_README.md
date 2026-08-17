@@ -43,7 +43,7 @@ tests/ts/
 
 ### Run All Tests
 ```bash
-cd sgrn/gateway/tests/ts
+cd tests/ts
 bun test
 ```
 
@@ -182,7 +182,7 @@ Tests are designed to run in CI environments:
 
 - name: Run Tests
   run: |
-    cd sgrn/gateway/tests/ts
+    cd tests/ts
     bun test
 ```
 

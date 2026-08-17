@@ -7,11 +7,13 @@ a structured NumPy record instead of a hand-parsed dict. This is the fast
 path for feeding PLC memory into ML/data pipelines: see
 ``Gateway.read_db_array`` and ``DbSchema.to_dtype``.
 
-S7 is big-endian on the wire, so every fixed-width numeric field uses the
-">" byte-order prefix. Bit-packed BOOL fields, BCD/legacy time types, and
-variable-length strings have no native NumPy scalar; those map to raw byte
-blocks (``V<n>``) or to the unsigned byte/word that contains them, with
-helpers below to unpack the semantic value on demand.
+Fixed-width numeric fields use the byte order declared by the schema for
+that field. The gateway can mix big-endian and little-endian fields inside
+the same DB, so the resulting NumPy dtype must preserve per-field byte
+order. Bit-packed BOOL fields, BCD/legacy time types, and variable-length
+strings have no native NumPy scalar; those map to raw byte blocks
+(``V<n>``) or to the unsigned byte/word that contains them, with helpers
+below to unpack the semantic value on demand.
 """
 
 from __future__ import annotations
@@ -37,34 +39,34 @@ class S7TypeError(ValueError):
     """Raised when an S7 type cannot be represented as a NumPy dtype."""
 
 
-# Fixed-width S7 types with a direct NumPy equivalent (big-endian on the wire).
+# Fixed-width S7 types with a direct NumPy equivalent.
 # Mirrors sgrn::gateway::twin::kS7TypeDictionaryJson.
 _SCALAR_MAP: Dict[str, str] = {
-    "BOOL": ">u1",  # whole containing byte — use unpackBool() for the bit
-    "SINT": ">i1",
-    "USINT": ">u1",
-    "BYTE": ">u1",
+    "BOOL": "u1",  # whole containing byte — use unpackBool() for the bit
+    "SINT": "i1",
+    "USINT": "u1",
+    "BYTE": "u1",
     "CHAR": "S1",
-    "WORD": ">u2",
-    "INT": ">i2",
-    "UINT": ">u2",
-    "DWORD": ">u4",
-    "DINT": ">i4",
-    "UDINT": ">u4",
-    "LWORD": ">u8",
-    "LINT": ">i8",
-    "ULINT": ">u8",
-    "REAL": ">f4",
-    "LREAL": ">f8",
-    "TIME": ">i4",
-    "LTIME": ">i8",
-    "S5TIME": ">u2",  # raw BCD duration, not decoded
-    "DATE": ">u2",  # days since 1990-01-01, not decoded
-    "TOD": ">u4",
-    "LTOD": ">u8",
-    "LDT": ">i8",
-    "COUNTER": ">u2",  # raw BCD
-    "TIMER": ">u2",  # raw BCD
+    "WORD": "u2",
+    "INT": "i2",
+    "UINT": "u2",
+    "DWORD": "u4",
+    "DINT": "i4",
+    "UDINT": "u4",
+    "LWORD": "u8",
+    "LINT": "i8",
+    "ULINT": "u8",
+    "REAL": "f4",
+    "LREAL": "f8",
+    "TIME": "i4",
+    "LTIME": "i8",
+    "S5TIME": "u2",  # raw BCD duration, not decoded
+    "DATE": "u2",  # days since 1990-01-01, not decoded
+    "TOD": "u4",
+    "LTOD": "u8",
+    "LDT": "i8",
+    "COUNTER": "u2",  # raw BCD
+    "TIMER": "u2",  # raw BCD
 }
 
 # Fixed-size BCD/structured time types with no direct numeric scalar.
@@ -78,11 +80,25 @@ _HEADER_BYTES: Dict[str, int] = {"STRING": 2, "WSTRING": 4, "XSTRING": 8, "XWSTR
 _CHAR_WIDTH: Dict[str, int] = {"STRING": 1, "WSTRING": 2, "XSTRING": 1, "XWSTRING": 2}
 
 
-def s7_scalar_dtype(t_type_name: str, *, t_capacity: Optional[int] = None) -> np.dtype:
+def _resolve_byteorder(t_endianness: Optional[str]) -> str:
+    if isinstance(t_endianness, str) and t_endianness.lower().startswith("l"):
+        return "<"
+    return ">"
+
+
+def s7_scalar_dtype(
+    t_type_name: str,
+    *,
+    t_capacity: Optional[int] = None,
+    t_endianness: Optional[str] = None,
+) -> np.dtype:
     """Map a single S7 leaf type name to a NumPy dtype (no array/count applied)."""
     t = t_type_name.upper()
     if t in _SCALAR_MAP:
-        return np.dtype(_SCALAR_MAP[t])
+        code = _SCALAR_MAP[t]
+        if code.startswith("S"):
+            return np.dtype(code)
+        return np.dtype(f"{_resolve_byteorder(t_endianness)}{code}")
     if t in _OPAQUE_SIZE_BYTES:
         return np.dtype(f"V{_OPAQUE_SIZE_BYTES[t]}")
     if t in _HEADER_BYTES:
@@ -92,7 +108,12 @@ def s7_scalar_dtype(t_type_name: str, *, t_capacity: Optional[int] = None) -> np
     raise S7TypeError(f"no NumPy mapping for S7 type {t_type_name!r} (STRUCT/UDT fields need build_dtype)")
 
 
-def s7_field_dtype(t_field: "DbField", *, t_udts: Optional[Dict[str, "UdtSchema"]] = None) -> Tuple[np.dtype, tuple]:
+def s7_field_dtype(
+    t_field: "DbField",
+    *,
+    t_udts: Optional[Dict[str, "UdtSchema"]] = None,
+    t_inherited_endianness: Optional[str] = None,
+) -> Tuple[np.dtype, tuple]:
     """
     Resolve one ``DbField`` to ``(dtype, shape)`` for use in a structured dtype.
 
@@ -101,29 +122,45 @@ def s7_field_dtype(t_field: "DbField", *, t_udts: Optional[Dict[str, "UdtSchema"
     arrays (``t_field.count > 1``).
     """
     shape: tuple = () if t_field.count <= 1 else (t_field.count,)
+    resolved_endianness = t_field.endianness or t_inherited_endianness
 
     if t_field.children:
-        sub = buildDtype(t_field.children, t_field.struct_size or 0, t_udts=t_udts)
+        sub = _buildDtype(
+            t_field.children,
+            t_field.struct_size or 0,
+            t_udts=t_udts,
+            t_inherited_endianness=resolved_endianness,
+        )
         return sub, shape
 
     if t_field.udt_name:
         udt = (t_udts or {}).get(t_field.udt_name)
         if udt is not None:
-            sub = buildDtype(udt.fields, udt.size_bytes, t_udts=t_udts)
+            sub = _buildDtype(
+                udt.fields,
+                udt.size_bytes,
+                t_udts=t_udts,
+                t_inherited_endianness=resolved_endianness,
+            )
             return sub, shape
         # UDT referenced but not resolvable here — fall back to an opaque blob.
         size = t_field.struct_size or 1
         return np.dtype(f"V{size}"), shape
 
-    base = s7_scalar_dtype(t_field.type, t_capacity=t_field.capacity)
+    base = s7_scalar_dtype(
+        t_field.type,
+        t_capacity=t_field.capacity,
+        t_endianness=resolved_endianness,
+    )
     return base, shape
 
 
-def buildDtype(
+def _buildDtype(
     t_fields: Sequence["DbField"],
     t_itemsize: int,
     *,
     t_udts: Optional[Dict[str, "UdtSchema"]] = None,
+    t_inherited_endianness: Optional[str] = None,
 ) -> np.dtype:
     """
     Build a NumPy structured dtype mirroring a DB/UDT field tree.
@@ -140,7 +177,7 @@ def buildDtype(
     seen: Dict[str, int] = {}
 
     for f in t_fields:
-        dt, shape = s7_field_dtype(f, t_udts=t_udts)
+        dt, shape = s7_field_dtype(f, t_udts=t_udts, t_inherited_endianness=t_inherited_endianness)
         name = f.name
         if name in seen:
             seen[name] += 1
@@ -155,6 +192,15 @@ def buildDtype(
         {"names": names, "formats": formats, "offsets": offsets, "itemsize": max(t_itemsize, 1)},
         align=False,
     )
+
+
+def buildDtype(
+    t_fields: Sequence["DbField"],
+    t_itemsize: int,
+    *,
+    t_udts: Optional[Dict[str, "UdtSchema"]] = None,
+) -> np.dtype:
+    return _buildDtype(t_fields, t_itemsize, t_udts=t_udts)
 
 
 def unpackBool(t_byte_value: int, t_bit_index: int) -> bool:

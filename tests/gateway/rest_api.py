@@ -19,7 +19,11 @@ from urllib.parse import parse_qs, urlparse
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# The Python bindings live under sgrn/bindings/python; put that on the path
+# BEFORE the repo root so the C++ sgrn/ tree doesn't shadow the bindings pkg.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _REPO_ROOT)
+sys.path.insert(0, os.path.join(_REPO_ROOT, "sgrn", "bindings", "python"))
 
 from sgrn import Gateway, GatewayError
 from sgrn.models import (

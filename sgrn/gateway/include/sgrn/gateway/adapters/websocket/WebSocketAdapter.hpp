@@ -10,11 +10,13 @@
 #include <condition_variable>
 #include <functional>
 #include <ixwebsocket/IXWebSocketServer.h>
+#include <map>
 #include <mutex>
 #include <queue>
 #include <set>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -61,6 +63,8 @@ namespace sgrn::gateway::adapters::websocket
  */
 class WebSocketAdapter {
 public:
+    using BinaryReadFn = std::function<sgrn::Result<void, std::string>(uint16_t t_db, size_t t_offset, size_t t_size, uint8_t* tp_out)>;
+
     WebSocketAdapter();
     ~WebSocketAdapter();
 
@@ -78,7 +82,8 @@ public:
      *        PLC delta. May be empty to keep the previous "deltas only" mode.
      */
     sgrn::Result<void> start(const std::string& t_ip, uint16_t t_port, SecurityManagerSptr tsp_security_manager,
-        const ::sgrn::scl::PlcSchemaStore* tp_registry = nullptr, std::function<std::string()> t_full_snapshot_provider = {});
+        const ::sgrn::scl::PlcSchemaStore* tp_registry = nullptr, std::function<std::string()> t_full_snapshot_provider = {},
+        BinaryReadFn t_binary_read_fn = {});
     void stop();
 
     struct Envelope {
@@ -103,6 +108,9 @@ private:
     void setupConnectionHandler();
     void handleTelemetryEvent(const sgrn::gateway::core::TelemetryEvent& t_event);
     std::vector<TargetInfo> collectTargets(const sgrn::gateway::core::TelemetryEvent& t_event, bool& t_any_needs_filter);
+    std::map<std::tuple<uint16_t, size_t, size_t>, std::vector<std::shared_ptr<ix::WebSocket>>> collectBinaryTargets(uint16_t t_db);
+    bool sendBinaryFrame(
+        const std::shared_ptr<ix::WebSocket>& tsp_ws, uint16_t t_db, size_t t_offset, size_t t_size, double t_timestamp_seconds);
     void workerLoop();
     void handleClientMessage(std::shared_ptr<ix::WebSocket> tsp_ws, const std::string& t_message);
 
@@ -112,10 +120,17 @@ private:
     // Connected clients and their path-level subscriptions.
     // An empty set means the client receives all updates.
     struct ClientContext {
+        struct BinarySubscription {
+            uint16_t db;
+            size_t offset;
+            size_t size;
+        };
+
         std::string ip;
         std::string origin;
         std::vector<std::string> headers;
         std::set<std::string> subscriptions;
+        std::vector<BinarySubscription> binary_subscriptions;
     };
     std::mutex clients_mutex_;
     size_t broker_sub_id_ = 0;
@@ -136,6 +151,7 @@ private:
     // Returns the full plant JSON to seed newly-connected clients with the
     // current (possibly persistence-restored) twin state. See start().
     std::function<std::string()> full_snapshot_provider_;
+    BinaryReadFn binary_read_fn_;
 };
 
 } // namespace sgrn::gateway::adapters::websocket

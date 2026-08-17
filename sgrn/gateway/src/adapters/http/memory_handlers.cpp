@@ -178,20 +178,27 @@ namespace sgrn::gateway::adapters
  * @returns Tuple of (db, offset, size) or error tuple (-1, 0, 0) on failure
  */
 static std::tuple<int, size_t, size_t> parseMemoryPath(const std::string& t_path) {
-    // Format: /db/<db>/offset/<off>/size/<sz>
     std::vector<std::string> parts = sgrn::utils::strings::tokenize(t_path, '/');
-    // Expected: ["", "db", "<db>", "offset", "<off>", "size", "<sz>"]
-    if (parts.size() != 7 || parts[1] != "db" || parts[3] != "offset" || parts[5] != "size") {
+    // Accept both:
+    //   "1/offset/0/size/72"   (the current httplib capture from /memory/db/(.*))
+    //   "/db/1/offset/0/size/72" (legacy/internal callers)
+    const bool has_db_prefix = parts.size() == 7 && parts[1] == "db" && parts[3] == "offset" && parts[5] == "size";
+    const bool bare_path = parts.size() == 5 && parts[1] == "offset" && parts[3] == "size";
+    if (!has_db_prefix && !bare_path) {
         return std::make_tuple(-1, 0, 0);
     }
 
     try {
-        unsigned long db_raw = std::stoul(parts[2]);
+        const size_t db_idx = has_db_prefix ? 2 : 0;
+        const size_t off_idx = has_db_prefix ? 4 : 2;
+        const size_t size_idx = has_db_prefix ? 6 : 4;
+
+        unsigned long db_raw = std::stoul(parts[db_idx]);
         if (db_raw > 65535U)
             return std::make_tuple(-1, 0, 0);
         int db = static_cast<int>(db_raw);
-        size_t offset = std::stoull(parts[4]);
-        size_t size = std::stoull(parts[6]);
+        size_t offset = std::stoull(parts[off_idx]);
+        size_t size = std::stoull(parts[size_idx]);
         return std::make_tuple(db, offset, size);
     } catch (const std::invalid_argument& e) {
         return std::make_tuple(-1, 0, 0);

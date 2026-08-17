@@ -110,7 +110,12 @@ void updateZone(AccumulationZone@ zone, double produce_bpm, double consume_bpm, 
     zone.upstream_starve = fill <= 2.0;
     zone.downstream_block = fill >= 98.0;
 }
-
+double fmax(double t_x, double t_y) {
+    if(t_x >= t_y) {
+        return t_x;
+    }
+    return t_y;
+}
 // ─── Main scan cycle ─────────────────────────────────────────────────────────
 
 void main() {
@@ -215,7 +220,10 @@ void main() {
             if (st == 0) { product_supply.cip.cycle_state = 1; product_supply.cip.time_in_state = 0.0f; } else if (dwell > STAGE_S && st < 6) {
                 product_supply.cip.cycle_state = st + 1;
                 product_supply.cip.time_in_state = 0.0f;
-                if (st + 1 == 6) { product_supply.cip.cycles_completed++; product_supply.cip.active = false; }
+                if (st + 1 == 6) {
+                    product_supply.cip.cycles_completed = product_supply.cip.cycles_completed + 1;
+                    product_supply.cip.active = false;
+                }
             }
             product_supply.cip.supply_temp = (st == 2) ? 75.0f : (st == 4) ? 60.0f : 20.0f;
             product_supply.cip.caustic_conc = (st == 2) ? 2.0f : 0.0f;
@@ -418,7 +426,7 @@ void main() {
 
         bool pallet_complete = total_case_slot >= 60;
         if (pallet_complete) {
-            palletizer.pallets_completed_count++;
+            palletizer.pallets_completed_count = palletizer.pallets_completed_count + 1;
             palletizer.wrapper.active = true;
             palletizer.wrapper.turntable_speed = 8.0f;
             palletizer.wrapper.film_tension = 35.0f;
@@ -510,17 +518,6 @@ void main() {
         palletizer.put();
         utilities.timestamp = ts;
         utilities.put();
-
-        // ── 11. Periodic console report ───────────────────────────────────────
-        if (iteration % int(SCAN_HZ * 2.0) == 0) {
-            print("[" + ts.toString() + "] mode=" + supervisor.plant_mode +
-                "  L1=" + l1_packer_bpm + "bpm(sp " + line1_sp_bpm + ")" +
-                    "  L2=" + l2_packer_bpm + "bpm(sp " + line2_sp_bpm + ")" +
-                        "  tank=" + product_supply.tank.level + "%" +
-                            "  air=" + air_press + "bar" +
-                                "  pallets=" + palletizer.pallets_completed_count +
-                                    (plant_estop ? "  [E-STOP]" : "") + "\n");
-        }
 
         iteration++;
         sleep(int(1000.0 / SCAN_HZ));

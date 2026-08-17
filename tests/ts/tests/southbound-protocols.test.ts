@@ -26,7 +26,7 @@ describe("Southbound Protocol Tests (S7, Modbus, OPC-UA)", () => {
 
       const s7proxyPath = path.join(
         import.meta.dir,
-        "../../../../.build/linux-static-release/sgrn/gateway/s7proxy",
+        "../../../.build/linux-static-release/sgrn/gateway/s7proxy",
       );
 
       // Check if s7proxy exists (may not be present in all builds)
@@ -160,11 +160,13 @@ describe("Southbound Protocol Tests (S7, Modbus, OPC-UA)", () => {
 
       const configPath = path.join(
         import.meta.dir,
-        "../../../../sgrn/gateway/configs/s7gateway.json",
+        "../../../sgrn/gateway/config/s7gateway.json",
       );
 
       if (fs.existsSync(configPath)) {
-        const configStr = fs.readFileSync(configPath, "utf8");
+        const configStr = fs
+          .readFileSync(configPath, "utf8")
+          .replace(/^\s*\/\/.*$/gm, "");
         const config = JSON.parse(configStr);
 
         // Check if OPC-UA is configured
@@ -225,11 +227,11 @@ describe("Southbound Protocol Tests (S7, Modbus, OPC-UA)", () => {
       const eipPaths = [
         path.join(
           import.meta.dir,
-          "../../../../.build/linux-static-release/sgrn/gateway/eipserver",
+          "../../../.build/linux-static-release/sgrn/gateway/eipserver",
         ),
         path.join(
           import.meta.dir,
-          "../../../../.build/linux-static-release/sgrn/gateway/eipserver.exe",
+          "../../../.build/linux-static-release/sgrn/gateway/eipserver.exe",
         ),
       ];
 
@@ -251,11 +253,13 @@ describe("Southbound Protocol Tests (S7, Modbus, OPC-UA)", () => {
 
       const configPath = path.join(
         import.meta.dir,
-        "../../../../sgrn/gateway/configs/s7gateway.json",
+        "../../../sgrn/gateway/config/s7gateway.json",
       );
 
       if (fs.existsSync(configPath)) {
-        const configStr = fs.readFileSync(configPath, "utf8");
+        const configStr = fs
+          .readFileSync(configPath, "utf8")
+          .replace(/^\s*\/\/.*$/gm, "");
         const config = JSON.parse(configStr);
 
         // Check if EtherNet/IP is configured
@@ -436,13 +440,12 @@ describe("Southbound Protocol Tests (S7, Modbus, OPC-UA)", () => {
       const possiblePaths = [
         path.join(
           import.meta.dir,
-          "../../../../sgrn/gateway/configs/s7gateway.json",
+          "../../../sgrn/gateway/configs/s7gateway.json",
         ),
         path.join(
           import.meta.dir,
-          "../../../../sgrn/gateway/config/s7gateway.json",
+          "../../../sgrn/gateway/config/s7gateway.json",
         ),
-        path.join(import.meta.dir, "../../../configs/s7gateway.json"),
       ];
 
       let configPath = null;
@@ -455,7 +458,9 @@ describe("Southbound Protocol Tests (S7, Modbus, OPC-UA)", () => {
 
       // Config file may not exist in test environment
       if (configPath) {
-        const configStr = fs.readFileSync(configPath, "utf8");
+        const configStr = fs
+          .readFileSync(configPath, "utf8")
+          .replace(/^\s*\/\/.*$/gm, "");
         const config = JSON.parse(configStr);
 
         // Validate basic configuration structure
@@ -477,15 +482,8 @@ describe("Southbound Protocol Tests (S7, Modbus, OPC-UA)", () => {
 
       // Try multiple possible security script locations
       const possiblePaths = [
-        path.join(
-          import.meta.dir,
-          "../../../../sgrn/gateway/configs/security.as",
-        ),
-        path.join(
-          import.meta.dir,
-          "../../../../sgrn/gateway/config/security.as",
-        ),
-        path.join(import.meta.dir, "../../../configs/security.as"),
+        path.join(import.meta.dir, "../../../sgrn/gateway/config/security.as"),
+        path.join(import.meta.dir, "../../../sgrn/gateway/configs/security.as"),
       ];
 
       let securityPath = null;
