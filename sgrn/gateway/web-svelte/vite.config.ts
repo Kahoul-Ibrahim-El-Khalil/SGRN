@@ -12,6 +12,10 @@ export default defineConfig({
   base: "./",
      resolve: {
         alias: {
+            "@sgrn/gateway": path.resolve(
+                __dirname,
+                "../../bindings/typescript/gateway/src/index.ts"
+            ),
             "@docs": path.resolve(
                 __dirname,
                 "../../../documentation/gateway"

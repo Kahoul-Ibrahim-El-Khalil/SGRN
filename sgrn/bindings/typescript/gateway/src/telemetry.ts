@@ -1,21 +1,5 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// telemetry.ts — GatewayClient WebSocket wrapper (ES module)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * NOTE: This enum must be kept in manually sync with @sgrn/types ErrorScope 
- * as this project doesn't have a shared dependency on it.
- */
-enum ErrorScope {
-  Network = "Network",
-  Runtime = "Runtime",
-}
-
-interface SgrnResult<T> {
-  data?: T;
-  error?: string;
-  scope?: ErrorScope;
-}
+import type { SgrnResult } from "./types";
+import { ErrorScope } from "./types";
 
 type RawMessageCallback = (data: unknown) => void;
 type UpdateCallback = (data: unknown) => void;
@@ -23,12 +7,12 @@ type StatusCallback = (status: string) => void;
 
 export class GatewayClient {
   private socket: WebSocket | null = null;
-  private connected: boolean = false;
+  private connected = false;
   private subscriptions: Set<string> = new Set();
   private listeners: Set<UpdateCallback> = new Set();
   private rawListeners: Set<RawMessageCallback> = new Set();
   private statusListeners: Set<StatusCallback> = new Set();
-  private reconnectInterval: number = 5000;
+  private reconnectInterval = 5000;
   private url: string;
 
   constructor(url: string) {
@@ -60,21 +44,17 @@ export class GatewayClient {
         try {
           const data: unknown = JSON.parse(event.data);
           this.rawListeners.forEach((cb) => cb(data));
-          // Legacy envelope support
           if (data && typeof data === "object") {
             const d = data as Record<string, unknown>;
             if (d["updates"] && Array.isArray(d["updates"])) {
               (d["updates"] as unknown[]).forEach((u) => this.notifyUpdate(u));
               return;
             }
-            if (
-              d["event"] === "update" ||
-              (d["db"] !== undefined && d["value"] !== undefined)
-            ) {
+            if (d["event"] === "update" || (d["db"] !== undefined && d["value"] !== undefined)) {
               this.notifyUpdate(data);
             }
           }
-        } catch (e) {
+        } catch {
           console.warn("Non-JSON message received:", event.data);
         }
       };
@@ -88,11 +68,11 @@ export class GatewayClient {
     }
   }
 
-  subscribe(path: string, force: boolean = false): SgrnResult<void> {
+  subscribe(path: string, force = false): SgrnResult<void> {
     if (!force && this.subscriptions.has(path)) return { data: undefined };
     this.subscriptions.add(path);
     if (!this.socket || !this.connected) {
-      return { data: undefined }; // Will be sent automatically on onopen
+      return { data: undefined };
     }
     try {
       this.socket.send(JSON.stringify({ command: "subscribe", path }));

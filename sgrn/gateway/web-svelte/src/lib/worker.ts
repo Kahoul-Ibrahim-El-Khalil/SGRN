@@ -2,8 +2,7 @@
 // worker.ts — SGRN Industrial Telemetry Worker
 // Handles high-frequency WebSocket data in a background thread.
 // ─────────────────────────────────────────────────────────────────────────────
-import { GatewayClient } from "./telemetry";
-import type { WorkerCommand, WorkerMessage } from "./types";
+import { GatewayClient, type WorkerCommand, type WorkerMessage } from "@sgrn/gateway";
 
 let validKeys: Set<string> | null = null;
 let client: GatewayClient | null = null;

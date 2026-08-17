@@ -8,9 +8,8 @@
   import Header from "./components/Header.svelte";
   import { theme } from "./lib/theme";
   import { packets, rate, statusText, statusDotClass, debugLog, liveTelemetryValues, setWorkerRef } from "./lib/telemetryStore";
-  import { fetchRegistryHeaders } from "./lib/api";
+  import { fetchRegistryHeaders, ws } from "@sgrn/gateway";
   import TelemetryWorker from "./lib/worker?worker";
-import { ws } from "./lib/config";
 
   theme.subscribe(() => {});
 

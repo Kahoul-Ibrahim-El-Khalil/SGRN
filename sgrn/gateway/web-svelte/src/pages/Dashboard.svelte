@@ -4,16 +4,16 @@
     liveTelemetryValues,
     sendWorkerCommand,
   } from "../lib/telemetryStore";
-  import { fetchFullRegistry } from "../lib/api";
-  import type {
-    DbSchema,
-    RegistryResponse,
-    DbField,
-    SymbolTag,
-    UdtSchema,
-  } from "../lib/types";
-
-  const RENDER_LIMIT_ROWS: number = 64;
+  import {
+    buildRegistryTree,
+    fetchFullRegistry,
+    filterDbs,
+    filterTags,
+    filterUdts,
+    flattenRegistryFields,
+    type RegistryResponse,
+    type RegistryTreeNode,
+  } from "@sgrn/gateway";
 
   let active_tab: "process" | "registry" = "process";
   let search_query: string = "";
@@ -39,29 +39,9 @@
   const overscan: number = 20;
 
   // Tree nodes for Process Image
-  interface TreeNode {
-    id: string;
-    type: "db" | "field";
-    db_num: number;
-    db_name: string;
-    name: string;
-    path: string;
-    key: string;
-    depth: number;
-    is_struct: boolean;
-    is_array: boolean;
-    field_type: string;
-    parent_row_id: string | null;
-    count: number;
-    unit?: string;
-    min?: number;
-    max?: number;
-    enum_map?: Record<string, string>;
-  }
-
-  let tree_nodes: TreeNode[] = [];
+  let tree_nodes: RegistryTreeNode[] = [];
   let expanded_nodes: Set<string> = new Set<string>(); // node IDs that are expanded
-  let node_map: Map<string, TreeNode> = new Map<string, TreeNode>();
+  let node_map: Map<string, RegistryTreeNode> = new Map<string, RegistryTreeNode>();
   let subscribed_paths: Set<string> = new Set<string>(); // paths that are active in WS
 
   // Collapsible sections for Schema Registry
@@ -70,7 +50,10 @@
   onMount(async () => {
     try {
       registry = await fetchFullRegistry();
-      tree_nodes = buildTree(registry);
+      const built = buildRegistryTree(registry);
+      tree_nodes = built.nodes;
+      node_map = built.node_map;
+      subscribed_paths = new Set(built.db_names);
 
       // Auto-expand DB nodes by default
       for (const node of tree_nodes) {
@@ -130,125 +113,6 @@
       update_count++;
     }
     cell_map = new Map(cell_map);
-  }
-
-  // Hierarchical tree builder for Process Image
-  function buildTree(t_registry: RegistryResponse): TreeNode[] {
-    const nodes: TreeNode[] = [];
-
-    function walkField(
-      t_db: DbSchema,
-      t_field: DbField,
-      t_parent_path: string,
-      t_depth: number,
-      t_parent_row_id: string,
-    ) {
-      const full_path: string = t_parent_path
-        ? `${t_parent_path}/${t_field.name}`
-        : t_field.name;
-      const key: string = `${t_db.db_name}-${full_path}`;
-
-      let children = t_field.children;
-      if (!children && (t_field.type.startsWith("UDT") || t_field.udt_name)) {
-        const udtName = t_field.udt_name || t_field.type;
-        const udt = t_registry.udts?.find((u) => u.name === udtName);
-        if (udt) children = udt.fields;
-      }
-
-      const is_struct: boolean = !!(children && children.length > 0);
-      const is_array: boolean =
-        t_field.count > 1 &&
-        t_field.type !== "STRING" &&
-        t_field.type !== "WSTRING";
-
-      const safe_key = key.replace(/[\[\]./]/g, "_");
-      const row_id = `row-${safe_key}`;
-
-      nodes.push({
-        id: row_id,
-        type: "field",
-        db_num: t_db.db_number,
-        db_name: t_db.db_name,
-        name: t_field.name,
-        path: full_path,
-        key,
-        depth: t_depth,
-        is_struct,
-        is_array,
-        field_type: t_field.type,
-        parent_row_id: t_parent_row_id,
-        count: t_field.count,
-        unit: t_field.unit,
-        min: t_field.min,
-        max: t_field.max,
-        enum_map: t_field.enum,
-      });
-
-      if (is_struct) {
-        if (children) {
-          for (const child of children) {
-            walkField(t_db, child, full_path, t_depth + 1, row_id);
-          }
-        }
-      } else if (is_array) {
-        const render_limit = Math.min(t_field.count, 64);
-        for (let i = 0; i < render_limit; i++) {
-          const sub_field: DbField = { ...t_field, name: `[${i}]`, count: 1 };
-          walkField(t_db, sub_field, full_path, t_depth + 1, row_id);
-        }
-        if (t_field.count > render_limit) {
-          nodes.push({
-            id: `${row_id}-truncated`,
-            type: "field",
-            db_num: t_db.db_number,
-            db_name: t_db.db_name,
-            name: `Truncated: ${t_field.count - render_limit} more elements...`,
-            path: "",
-            key: "",
-            depth: t_depth + 1,
-            is_struct: false,
-            is_array: false,
-            field_type: "TRUNCATED",
-            parent_row_id: row_id,
-            count: 0,
-          });
-        }
-      }
-    }
-
-    for (const db of t_registry.dbs || []) {
-      const db_row_id: string = `db-${db.db_number}`;
-      nodes.push({
-        id: db_row_id,
-        type: "db",
-        db_num: db.db_number,
-        db_name: db.db_name,
-        name: db.db_name,
-        path: "",
-        key: "",
-        depth: 0,
-        is_struct: true,
-        is_array: false,
-        field_type: "DB",
-        parent_row_id: null,
-        count: 0,
-      });
-
-      subscribed_paths.add(db.db_name);
-
-      if (db.fields) {
-        for (const f of db.fields) {
-          walkField(db, f, "", 1, db_row_id);
-        }
-      }
-    }
-
-    node_map.clear();
-    for (const n of nodes) {
-      if (n.key) node_map.set(n.key, n);
-    }
-
-    return nodes;
   }
 
   // Pre-calculate visible node IDs reactively
@@ -401,92 +265,9 @@
     expanded_reg_groups = new Set(expanded_reg_groups);
   }
 
-  // Flattened fields list for Registry rendering
-  interface FlatRegField {
-    name: string;
-    type: string;
-    udt_name: string;
-    offset: string;
-    count: number;
-    depth: number;
-    full_path: string;
-    unit?: string;
-    min?: number;
-    max?: number;
-    enum_map?: Record<string, string>;
-  }
-
-  function getFlatRegFields(
-    t_fields: DbField[] | undefined,
-    t_reg: RegistryResponse,
-    t_depth = 0,
-    t_parent_path = "",
-  ): FlatRegField[] {
-    if (!t_fields) return [];
-    const results: FlatRegField[] = [];
-    for (const f of t_fields) {
-      const offset_str =
-        f.bit_index > 0 ? `${f.offset}.${f.bit_index}` : `${f.offset}.0`;
-      const full_path = t_parent_path ? `${t_parent_path}/${f.name}` : f.name;
-
-      results.push({
-        name: f.name,
-        type: f.type,
-        udt_name: f.udt_name || "",
-        offset: offset_str,
-        count: f.count,
-        depth: t_depth,
-        full_path: full_path,
-        unit: f.unit,
-        min: f.min,
-        max: f.max,
-        enum_map: f.enum,
-      });
-
-      let children = f.children;
-      if (!children && (f.type.startsWith("UDT") || f.udt_name)) {
-        const udt = t_reg.udts?.find((u) => u.name === (f.udt_name || f.type));
-        if (udt) children = udt.fields;
-      }
-      if (children) {
-        results.push(
-          ...getFlatRegFields(children, t_reg, t_depth + 1, full_path),
-        );
-      }
-    }
-    return results;
-  }
-
   // Filter Data Blocks for Schema Registry search
-  function getFilteredDbs(t_dbs: DbSchema[], t_term: string) {
-    if (!t_term) return t_dbs;
-    return t_dbs.filter((t_db) => {
-      const db_match =
-        t_db.db_name.toLowerCase().includes(t_term) ||
-        `db${t_db.db_number}`.includes(t_term);
-      const field_match =
-        t_db.fields &&
-        t_db.fields.some((t_f) => t_f.name.toLowerCase().includes(t_term));
-      return db_match || field_match;
-    });
-  }
-
   // Filter UDTs for Schema Registry search
-  function getFilteredUdts(t_udts: UdtSchema[], t_term: string) {
-    if (!t_term) return t_udts;
-    return t_udts.filter((t_udt) => t_udt.name.toLowerCase().includes(t_term));
-  }
-
   // Filter Tags for Schema Registry search
-  function getFilteredTags(t_tags: SymbolTag[], t_term: string) {
-    if (!t_term) return t_tags;
-    return t_tags.filter(
-      (t) =>
-        t.name.toLowerCase().includes(t_term) ||
-        t.address.toLowerCase().includes(t_term) ||
-        t.type.toLowerCase().includes(t_term),
-    );
-  }
 </script>
 
 <div class="dashboard-wrap">
@@ -728,7 +509,7 @@
           <tbody>
             <!-- 1. DATA BLOCKS -->
             {#if registry?.dbs}
-              {#each getFilteredDbs(registry.dbs, registry_search_query.toLowerCase()) as db, idx}
+              {#each filterDbs(registry.dbs, registry_search_query.toLowerCase()) as db, idx}
                 {@const group_id = `reg-group-db-${idx}`}
                 <tr
                   class="reg-group-header"
@@ -786,7 +567,7 @@
                   </tr>
 
                   {#if db.fields && db.fields.length > 0}
-                    {#each getFlatRegFields(db.fields, registry) as f}
+                    {#each flattenRegistryFields(db.fields, registry) as f}
                       {#if !registry_search_query || f.name
                           .toLowerCase()
                           .includes(registry_search_query.toLowerCase())}
@@ -867,7 +648,7 @@
 
             <!-- 2. UDTS -->
             {#if registry?.udts}
-              {#each getFilteredUdts(registry.udts, registry_search_query.toLowerCase()) as udt, idx}
+              {#each filterUdts(registry.udts, registry_search_query.toLowerCase()) as udt, idx}
                 {@const group_id = `reg-group-udt-${idx}`}
                 <tr
                   class="reg-group-header"
@@ -900,7 +681,7 @@
                   </tr>
 
                   {#if udt.fields && udt.fields.length > 0}
-                    {#each getFlatRegFields(udt.fields, registry) as f}
+                    {#each flattenRegistryFields(udt.fields, registry) as f}
                       {#if !registry_search_query || f.name
                           .toLowerCase()
                           .includes(registry_search_query.toLowerCase())}
@@ -961,7 +742,7 @@
             {/if}
 
             <!-- 3. TAGS -->
-            {#if registry?.tags && getFilteredTags(registry.tags, registry_search_query.toLowerCase()).length > 0}
+            {#if registry?.tags && filterTags(registry.tags, registry_search_query.toLowerCase()).length > 0}
               {@const group_id = "reg-group-tags"}
               <tr
                 class="reg-group-header"
@@ -977,7 +758,7 @@
                     <span class="mr-6 text-dim">◈</span>
                     <strong>PLC Global Symbol Tags</strong>
                     <span class="meta-muted">
-                      {getFilteredTags(
+                      {filterTags(
                         registry.tags,
                         registry_search_query.toLowerCase(),
                       ).length} entries
@@ -997,7 +778,7 @@
                   <td colspan="2" class="th-upper">Remark</td>
                 </tr>
 
-                {#each getFilteredTags(registry.tags, registry_search_query.toLowerCase()) as t, idx}
+                {#each filterTags(registry.tags, registry_search_query.toLowerCase()) as t, idx}
                   <tr class="reg-row">
                     <td class="col-gap"></td>
                     <td class="accent-mono">{t.address}</td>

@@ -1,13 +1,21 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { fetchFullRegistry, fetchModbusMap } from "../lib/api";
-  import type { RegistryResponse, DbField } from "../lib/types";
+  import {
+    buildEipProjection,
+    buildOpcuaProjection,
+    fetchFullRegistry,
+    fetchModbusMap,
+    type EipProjectionRow,
+    type ModbusMap,
+    type RegistryResponse,
+    type OpcuaProjectionRow,
+  } from "@sgrn/gateway";
 
   let activeTab: "modbus" | "eip" | "opcua" = "modbus";
   let modbusSubTab: "holding" | "input" | "coils" | "discrete" = "holding";
   
   let registry: RegistryResponse | null = null;
-  let modbusMap: any = null;
+  let modbusMap: ModbusMap | null = null;
   let loading = true;
   let error = "";
 
@@ -27,87 +35,11 @@
     }
   });
 
-  // EtherNet/IP projection logic
-  function getCipType(s7Type: string): string {
-    const t = s7Type.toUpperCase();
-    if (t === "BOOL") return "BOOL (0xC1)";
-    if (t === "BYTE" || t === "USINT" || t === "CHAR") return "USINT (0xC6)";
-    if (t === "SINT") return "SINT (0xC2)";
-    if (t === "WORD" || t === "UINT") return "UINT (0xC7)";
-    if (t === "INT") return "INT (0xC3)";
-    if (t === "DWORD" || t === "UDINT" || t === "TIME" || t === "TOD") return "UDINT (0xC8)";
-    if (t === "DINT") return "DINT (0xC4)";
-    if (t === "REAL") return "REAL (0xCA)";
-    if (t === "LWORD" || t === "ULINT" || t === "LTIME" || t === "LTOD") return "ULINT (0xC9)";
-    if (t === "LINT") return "LINT (0xC5)";
-    if (t === "LREAL") return "LREAL (0xCB)";
-    return "BYTE_ARRAY (0xD3)";
-  }
-
-  interface EipRow {
-    db: string;
-    instance: number;
-    attr: number;
-    field: string;
-    cipType: string;
-  }
-
-  let eipRows: EipRow[] = [];
+  let eipRows: EipProjectionRow[] = [];
+  let opcuaRows: OpcuaProjectionRow[] = [];
   $: if (registry?.dbs) {
-    eipRows = [];
-    registry.dbs.forEach(db => {
-      let attrNum = 1;
-      db.fields?.forEach(field => {
-        const isComposite = field.count > 1 || (field.children && field.children.length > 0) || field.type.includes("String");
-        const cipType = isComposite ? "BYTE_ARRAY (0xD3)" : getCipType(field.type);
-        eipRows.push({
-          db: db.db_name,
-          instance: db.db_number,
-          attr: attrNum++,
-          field: field.name,
-          cipType
-        });
-      });
-    });
-  }
-
-  // OPC-UA projection logic
-  interface OpcuaRow {
-    db: string;
-    nodeId: string;
-    dataType: string;
-    valueRank: string;
-  }
-
-  let opcuaRows: OpcuaRow[] = [];
-  $: if (registry?.dbs) {
-    opcuaRows = [];
-    registry.dbs.forEach(db => {
-      opcuaRows.push({
-        db: db.db_name,
-        nodeId: `ns=1;s=${db.db_name}`,
-        dataType: "FolderType",
-        valueRank: "Scalar"
-      });
-
-      function walkFields(fields: DbField[], parentPath: string) {
-        fields.forEach(field => {
-          const fullPath = parentPath ? `${parentPath}.${field.name}` : field.name;
-          const isArray = field.count > 1 || field.type.includes("Array");
-          opcuaRows.push({
-            db: db.db_name,
-            nodeId: `ns=1;s=${db.db_name}.${fullPath}.Value`,
-            dataType: field.udt_name ? field.udt_name : field.type,
-            valueRank: isArray ? "OneDimension" : "Scalar"
-          });
-          if (field.children && field.children.length > 0) {
-            walkFields(field.children, fullPath);
-          }
-        });
-      }
-      
-      if (db.fields) walkFields(db.fields, "");
-    });
+    eipRows = buildEipProjection(registry);
+    opcuaRows = buildOpcuaProjection(registry);
   }
 </script>
 

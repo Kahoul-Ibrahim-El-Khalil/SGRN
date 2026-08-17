@@ -385,7 +385,7 @@ set(WEB_DIST_DIR "${WEB_SRC_DIR}/dist")
 set(WEB_GEN_DIR  "${CMAKE_CURRENT_BINARY_DIR}/web_generated")
 
 # ── Svelte source files tracked for rebuild ───────────────────────────────────
-file(GLOB_RECURSE WEB_SVELTE_SOURCES
+file(GLOB_RECURSE WEB_SVELTE_SOURCES CONFIGURE_DEPENDS
     "${WEB_SRC_DIR}/src/*.svelte"
     "${WEB_SRC_DIR}/src/*.ts"
     "${WEB_SRC_DIR}/src/*.md"
@@ -393,6 +393,16 @@ file(GLOB_RECURSE WEB_SVELTE_SOURCES
     "${WEB_SRC_DIR}/vite.config.ts"
     "${WEB_SRC_DIR}/svelte.config.js"
     "${WEB_SRC_DIR}/package.json"
+)
+
+# Shared TypeScript bindings used by the web app. Any change here must
+# invalidate the web asset build so the embedded bundle stays in sync.
+set(GATEWAY_BINDINGS_DIR "${CMAKE_SOURCE_DIR}/sgrn/bindings/typescript/gateway")
+file(GLOB_RECURSE WEB_GATEWAY_BINDINGS_SOURCES CONFIGURE_DEPENDS
+    "${GATEWAY_BINDINGS_DIR}/src/*.ts"
+    "${GATEWAY_BINDINGS_DIR}/README.md"
+    "${GATEWAY_BINDINGS_DIR}/package.json"
+    "${GATEWAY_BINDINGS_DIR}/tsconfig.json"
 )
 
 # Sentinel file — touches after a successful Vite build
@@ -403,7 +413,9 @@ add_custom_command(
     COMMAND bun run build
     COMMAND ${CMAKE_COMMAND} -E touch "${WEB_BUILD_SENTINEL}"
     WORKING_DIRECTORY "${WEB_SRC_DIR}"
-    DEPENDS ${WEB_SVELTE_SOURCES}
+    DEPENDS
+        ${WEB_SVELTE_SOURCES}
+        ${WEB_GATEWAY_BINDINGS_SOURCES}
     COMMENT "[Web] Building Svelte SPA → dist/ via bun + Vite..."
     VERBATIM
 )

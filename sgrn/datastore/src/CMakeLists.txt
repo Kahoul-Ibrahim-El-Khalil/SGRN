@@ -147,6 +147,8 @@ add_library(sgrn_datastore_filters ALIAS sgrn_datastore_lib)
 set(DASHBOARD_SRC_DIR "${PROJECT_SOURCE_DIR}/web/dashboard")
 set(DASHBOARD_BUILD_DIR "${DASHBOARD_SRC_DIR}/build")
 set(DASHBOARD_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/dashboard_generated")
+set(DASHBOARD_BINDINGS_DIR "${CMAKE_SOURCE_DIR}/sgrn/bindings/typescript/datastore")
+set(DASHBOARD_TYPES_DIR "${PROJECT_SOURCE_DIR}/web/types")
 
 # Stamp file to track when bun install was last run
 set(DASHBOARD_INSTALL_STAMP "${CMAKE_CURRENT_BINARY_DIR}/bun_install.stamp")
@@ -160,11 +162,26 @@ add_custom_command(
     DEPENDS
         "${PROJECT_SOURCE_DIR}/web/package.json"
         "${PROJECT_SOURCE_DIR}/web/bun.lock"
+        "${DASHBOARD_BINDINGS_DIR}/package.json"
+        "${DASHBOARD_TYPES_DIR}/package.json"
     COMMENT "[Dashboard] Installing JS dependencies via bun..."
     VERBATIM
 )
 
 # Step 1b: bun vite build → produces dashboard/build/
+file(GLOB_RECURSE DASHBOARD_BINDINGS_SOURCES CONFIGURE_DEPENDS
+    "${DASHBOARD_BINDINGS_DIR}/src/*.ts"
+    "${DASHBOARD_BINDINGS_DIR}/README.md"
+    "${DASHBOARD_BINDINGS_DIR}/package.json"
+    "${DASHBOARD_BINDINGS_DIR}/tsconfig.json"
+)
+
+file(GLOB_RECURSE DASHBOARD_TYPES_SOURCES CONFIGURE_DEPENDS
+    "${DASHBOARD_TYPES_DIR}/src/*.ts"
+    "${DASHBOARD_TYPES_DIR}/package.json"
+    "${DASHBOARD_TYPES_DIR}/tsconfig.json"
+)
+
 add_custom_command(
     OUTPUT "${DASHBOARD_BUILD_DIR}/index.html"
     COMMAND bun run build
@@ -173,6 +190,8 @@ add_custom_command(
         "${DASHBOARD_INSTALL_STAMP}"
         "${DASHBOARD_SRC_DIR}/vite.config.ts"
         "${DASHBOARD_SRC_DIR}/package.json"
+        ${DASHBOARD_BINDINGS_SOURCES}
+        ${DASHBOARD_TYPES_SOURCES}
     COMMENT "[Dashboard] Building React app via bun vite build..."
     VERBATIM
 )

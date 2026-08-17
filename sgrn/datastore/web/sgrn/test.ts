@@ -1,9 +1,12 @@
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-import { AutomatedServiceClient } from "./AutomatedServiceClient.ts";
-import { DirectoryTree } from "./utils/DirTree.ts";
-import type { Credentials } from "@sgrn/types";
-import { isError, isSuccess } from "@sgrn/types";
+import {
+    AutomatedServiceClient,
+    DirectoryTree,
+    type Credentials,
+    isError,
+    isSuccess,
+} from "@sgrn/datastore";
 
 const SERVER_URL: string = "https://localhost:8443";
 

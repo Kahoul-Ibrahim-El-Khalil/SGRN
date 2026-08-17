@@ -1,0 +1,13 @@
+{
+  "name": "@sgrn/typescript-bindings",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./gateway": "./gateway/src/index.ts",
+    "./datastore": "./datastore/src/index.ts"
+  },
+  "workspaces": [
+    "gateway",
+    "datastore"
+  ]
+}

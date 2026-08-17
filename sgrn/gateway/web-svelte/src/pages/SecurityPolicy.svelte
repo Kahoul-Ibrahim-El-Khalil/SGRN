@@ -1,7 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { fetchSecurityPolicy } from "../lib/api";
-  import type { SecurityRule } from "../lib/types";
+  import {
+    matchSecurityRule,
+    fetchSecurityPolicy,
+    type SecurityRule,
+  } from "@sgrn/gateway";
   import ProtoPill from "../components/ProtoPill.svelte";
   import ActionBadge from "../components/ActionBadge.svelte";
   import Tag from "../components/Tag.svelte";
@@ -71,42 +74,6 @@
   $: opcuaCount = allRules.filter(r => r.protocol === 'OPC-UA').length;
   $: eipCount = allRules.filter(r => r.protocol === 'EtherNet/IP').length;
 
-  // Simulator helper (IPv4 logic)
-  function ipToInt(ip: string): number | null {
-    const parts = ip.split('.').map(Number);
-    if (parts.length !== 4 || parts.some(p => isNaN(p) || p < 0 || p > 255)) return null;
-    return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
-  }
-
-  function cidrMatch(cidr: string, ip: string): boolean {
-    const parsed = ipToInt(ip);
-    if (parsed === null) return false;
-    const slash = cidr.indexOf('/');
-    if (slash === -1) {
-      const target = ipToInt(cidr);
-      return target !== null && parsed === target;
-    }
-    const base = ipToInt(cidr.slice(0, slash));
-    const bits = parseInt(cidr.slice(slash + 1));
-    if (base === null || isNaN(bits)) return false;
-    const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
-    return (parsed & mask) >>> 0 === (base & mask) >>> 0;
-  }
-
-  function ruleMatchesIp(rule: SecurityRule, ip: string): boolean {
-    if (!rule.cidrs || rule.cidrs.length === 0) return true;
-    return rule.cidrs.some(c => cidrMatch(c, ip));
-  }
-
-  function testRule(rule: SecurityRule, testIp: string, testProto: string, testDb: number | null): "ALLOW" | "DENY" | null {
-    if (rule.protocol !== testProto) return null;
-    if (!ruleMatchesIp(rule, testIp)) return null;
-    if (!rule.any_db && testDb !== null) {
-      if (!rule.dbs.includes(testDb)) return null;
-    }
-    return rule.action;
-  }
-
   function simulateAccess() {
     if (!testIp) {
       testResult = "";
@@ -115,7 +82,7 @@
     }
     const db = testDb !== "" ? parseInt(testDb) : null;
     for (const r of allRules) {
-      const verdict = testRule(r, testIp, testProto, db);
+      const verdict = matchSecurityRule(r, testIp, testProto, db);
       if (verdict !== null) {
         testResult = verdict === 'ALLOW' ? '✓ ALLOW' : '✕ DENY';
         testResultClass = verdict === 'ALLOW' ? 'allow' : 'deny';
