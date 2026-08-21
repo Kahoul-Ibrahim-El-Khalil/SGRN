@@ -5,7 +5,9 @@
 #include <sgrn/utils/time.hpp>
 #include <algorithm>
 #include <asio.hpp>
+#include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 #include <shared_mutex>
@@ -13,6 +15,7 @@
 #include <sgrn/gateway/twin/PlcCommandProcessor.hpp>
 #include <sgrn/gateway/twin/SnapshotRegistry.hpp>
 #include <sgrn/gateway/twin/field_update.hpp>
+#include <s7codec/codec.hpp>
 
 namespace sgrn::gateway::twin
 {
@@ -23,6 +26,137 @@ using ::sgrn::scl::ErrorCode;
 using ::sgrn::scl::SchemaCode;
 class PlcState;
 struct DbMemorySpan;
+
+namespace
+{
+/// Case-insensitive string comparison for BOOL/enum initializer literals.
+bool initEqualsIgnoreCase(const std::string& t_a, const std::string& t_b) {
+    if (t_a.size() != t_b.size())
+        return false;
+    for (size_t i = 0; i < t_a.size(); ++i) {
+        const char ca = (t_a[i] >= 'A' && t_a[i] <= 'Z') ? static_cast<char>(t_a[i] + ('a' - 'A')) : t_a[i];
+        const char cb = (t_b[i] >= 'A' && t_b[i] <= 'Z') ? static_cast<char>(t_b[i] + ('a' - 'A')) : t_b[i];
+        if (ca != cb)
+            return false;
+    }
+    return true;
+}
+
+std::string trimInitValue(const std::string& t_s) {
+    const size_t b = t_s.find_first_not_of(" \t\r\n");
+    if (b == std::string::npos)
+        return {};
+    const size_t e = t_s.find_last_not_of(" \t\r\n");
+    return t_s.substr(b, e - b + 1);
+}
+
+/// Seeds a single DB field's initializer (`:= <value>`) into freshly allocated
+/// DB memory. Recurses into STRUCT children so nested initializers are applied.
+/// Arrays are intentionally skipped (single-scalar initializers only today).
+void applyFieldInit(twin::PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field) {
+    if (t_field.init_value.empty())
+        return;
+
+    if (t_field.type == scl::DataType::Struct) {
+        for (const auto& child : t_field.children)
+            applyFieldInit(t_mem, t_db, child);
+        return;
+    }
+
+    const bool is_string = (t_field.type == scl::DataType::String || t_field.type == scl::DataType::WString ||
+                            t_field.type == scl::DataType::XString || t_field.type == scl::DataType::XWString);
+    const bool is_array = !is_string && t_field.count > 1;
+    if (is_array)
+        return; // array initializers (TIA `[a, b, c]`) are not supported yet
+
+    std::string raw = trimInitValue(t_field.init_value);
+    if (raw.empty())
+        return;
+
+    const int max_len = is_string ? (t_field.struct_size > 0 ? t_field.struct_size : t_field.count) : 1;
+    const size_t span = static_cast<size_t>(s7codec::typeSpanBytes(t_field.type, is_string ? max_len : 1));
+    if (span == 0)
+        return;
+    std::vector<uint8_t> buf(span, 0);
+    if (buf.empty())
+        return;
+
+    // Quoted string literal ("Siemens" or 'Siemens') → native string encode.
+    if (is_string) {
+        if (raw.size() >= 2 && ((raw.front() == '"' && raw.back() == '"') || (raw.front() == '\'' && raw.back() == '\'')))
+            raw = raw.substr(1, raw.size() - 2);
+        auto dv = s7codec::DecodedValue::makeString(std::move(raw));
+        auto st = s7codec::encodeScalar(dv, t_field.type, buf.data(), buf.size(), 0, max_len, t_field.endianness);
+        if (st.ok())
+            (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
+        return;
+    }
+
+    // Enum literal: resolve a matching name to its numeric value first.
+    if (!t_field.enum_map.empty()) {
+        for (const auto& [k, v] : t_field.enum_map) {
+            if (initEqualsIgnoreCase(v, raw)) {
+                auto dv = s7codec::DecodedValue::makeSigned(k);
+                auto st = s7codec::encodeScalar(dv, t_field.type, buf.data(), buf.size(), t_field.bit_index, 1, t_field.endianness);
+                if (st.ok())
+                    (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
+                return;
+            }
+        }
+    }
+
+    // BOOL literal.
+    if (t_field.type == scl::DataType::Bool) {
+        bool b = false;
+        if (initEqualsIgnoreCase(raw, "true") || raw == "1")
+            b = true;
+        else if (!initEqualsIgnoreCase(raw, "false") && raw != "0")
+            return;
+        auto dv = s7codec::DecodedValue::makeSigned(b ? 1 : 0);
+        auto st = s7codec::encodeScalar(dv, scl::DataType::Bool, buf.data(), buf.size(), t_field.bit_index, 1, t_field.endianness);
+        if (st.ok())
+            (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
+        return;
+    }
+
+    // Numeric literal. Rejoin sign/number tokens ("- 3" → "-3") for ease of use.
+    std::string num;
+    num.reserve(raw.size());
+    for (char c : raw) {
+        if (c != ' ')
+            num += c;
+    }
+    if (num.empty())
+        return;
+
+    if (t_field.type == scl::DataType::Real || t_field.type == scl::DataType::LReal) {
+        char* end = nullptr;
+        const double d = std::strtod(num.c_str(), &end);
+        if (!end || *end != '\0')
+            return;
+        auto dv = s7codec::DecodedValue::makeDouble(d);
+        auto st = s7codec::encodeScalar(dv, t_field.type, buf.data(), buf.size(), 0, 1, t_field.endianness);
+        if (st.ok())
+            (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
+        return;
+    }
+
+    char* end = nullptr;
+    const long long v = std::strtoll(num.c_str(), &end, 0);
+    if (!end || *end != '\0')
+        return;
+    auto dv = s7codec::DecodedValue::makeSigned(v);
+    auto st = s7codec::encodeScalar(dv, t_field.type, buf.data(), buf.size(), t_field.bit_index, 1, t_field.endianness);
+    if (st.ok())
+        (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
+}
+
+/// Applies `:=` initializers for a whole DB's field tree.
+void applyDbFieldInits(twin::PlcMemory& t_mem, uint16_t t_db, const std::vector<scl::DbField>& t_fields) {
+    for (const auto& f : t_fields)
+        applyFieldInit(t_mem, t_db, f);
+}
+} // namespace
 PlcMemory::PlcMemory()
     : cmd_processor_(std::make_unique<PlcCommandProcessor>(*this))
     , snapshot_registry_(std::make_unique<SnapshotRegistry>()) {
@@ -113,6 +247,7 @@ Result<void, ::sgrn::scl::Error> PlcMemory::loadRegistry(const PlcSchemaStore& t
         n.bit_index_ = static_cast<uint8_t>(t_field.bit_index);
         n.type_ = t_field.type;
         n.count_ = static_cast<uint32_t>(t_field.count);
+        n.string_capacity_ = static_cast<uint32_t>(t_field.string_capacity);
         for (const auto& child : t_field.children) {
             n.children_.push_back(t_self_ref(child, t_self_ref, tentry, t_db_endian));
         }
@@ -153,6 +288,10 @@ Result<void, ::sgrn::scl::Error> PlcMemory::loadRegistry(const PlcSchemaStore& t
             n.children_.push_back(convert_to_node(t_field, convert_to_node, p_entry, schema->endianness));
         }
         p_plc_state_->add(std::move(n), "");
+
+        // Seed `:=` initializers into the freshly zeroed segment (must happen
+        // after add(), once the segment arena for this DB is registered).
+        applyDbFieldInits(*this, num, schema->fields);
     }
 
     return {};

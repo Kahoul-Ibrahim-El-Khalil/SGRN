@@ -40,6 +40,8 @@ target_include_directories(sgrn_gateway_s7_wrappers
 target_link_libraries(sgrn_gateway_s7_wrappers
     PUBLIC  sgrn_utils
     PUBLIC  ${_SNAP7_TARGET}
+    PUBLIC  sgrn::scl
+    PUBLIC  sgrn::open62541
     PRIVATE fmt::fmt
 )
 
@@ -70,6 +72,7 @@ target_link_libraries(sgrn_gateway_security
     PUBLIC sgrn_scl
     PUBLIC sgrn_utils
     PUBLIC sgrn_scripting
+    PUBLIC sgrn::open62541
 )
 
 set_target_properties(sgrn_gateway_security PROPERTIES
@@ -526,6 +529,27 @@ target_link_libraries(sgrn_gateway PRIVATE
 )
 
 sgrn_target(sgrn_gateway)
+
+# ========================
+# 3. Tests
+# ========================
+
+if(SGRN_BUILD_TESTS)
+    sgrn_add_component_executable(
+        TARGET opcua_simulation_enum_projection_test
+        SOURCES tests/opcua_simulation_enum_projection_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn_gateway_opcua
+            sgrn_scl
+    )
+    target_include_directories(opcua_simulation_enum_projection_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/sgrn/scl/include
+    )
+    add_test(NAME opcua_simulation_enum_projection_test COMMAND opcua_simulation_enum_projection_test)
+    sgrn_target(opcua_simulation_enum_projection_test)
+endif()
 
 # ========================
 # 4. Executables

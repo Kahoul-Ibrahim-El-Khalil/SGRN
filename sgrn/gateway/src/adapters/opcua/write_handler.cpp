@@ -18,6 +18,7 @@
 #include <sgrn/gateway/twin/PlcCommandProcessor.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
 #include <sgrn/gateway/twin/PlcState.hpp>
+#include <sgrn/gateway/wrappers/opcua/TypeRegistry.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <sgrn/utils/time.hpp>
 

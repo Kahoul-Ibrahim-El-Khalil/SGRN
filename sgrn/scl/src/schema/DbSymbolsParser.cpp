@@ -1,6 +1,7 @@
 #include <fmt/core.h>
 #include <sgrn/scl/schema/DbSymbolsParser.hpp>
 #include <sgrn/scl/schema/SchemaSerializer.hpp>
+#include <sgrn/scl/utils.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <algorithm>
 #include <cctype>
@@ -235,6 +236,7 @@ public:
                 ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
 
             static constexpr std::array kEywords = {
+                // Structure / declarations
                 std::string_view{"TYPE"},
                 std::string_view{"END_TYPE"},
                 std::string_view{"DATA_BLOCK"},
@@ -247,8 +249,49 @@ public:
                 std::string_view{"VAR_OUTPUT"},
                 std::string_view{"VAR_IN_OUT"},
                 std::string_view{"VAR_TEMP"},
+
+                // Composite types
                 std::string_view{"ARRAY"},
                 std::string_view{"OF"},
+
+                // Primitive S7 types
+                std::string_view{"BOOL"},
+                std::string_view{"BYTE"},
+                std::string_view{"WORD"},
+                std::string_view{"DWORD"},
+                std::string_view{"LWORD"},
+
+                std::string_view{"SINT"},
+                std::string_view{"USINT"},
+                std::string_view{"INT"},
+                std::string_view{"UINT"},
+                std::string_view{"DINT"},
+                std::string_view{"UDINT"},
+                std::string_view{"LINT"},
+                std::string_view{"ULINT"},
+
+                std::string_view{"REAL"},
+                std::string_view{"LREAL"},
+
+                std::string_view{"CHAR"},
+                std::string_view{"WCHAR"},
+
+                std::string_view{"STRING"},
+                std::string_view{"WSTRING"},
+                std::string_view{"XSTRING"},
+                std::string_view{"XWSTRING"},
+
+                // IEC / Siemens temporal types
+                std::string_view{"DATE"},
+                std::string_view{"TIME"},
+                std::string_view{"TOD"},
+                std::string_view{"LTOD"},
+                std::string_view{"DT"},
+                std::string_view{"LDT"},
+                std::string_view{"DTL"},
+                std::string_view{"LDTL"},
+
+                // Attributes / declarations
                 std::string_view{"BEGIN"},
                 std::string_view{"VERSION"},
                 std::string_view{"NON_RETAIN"},
@@ -260,21 +303,24 @@ public:
                 std::string_view{"EXTERNAL"},
                 std::string_view{"READ_ONLY"},
                 std::string_view{"DB"},
-                std::string_view{"#BIG_ENDIAN"},
-                std::string_view{"#LITTLE_ENDIAN"},
+
+                // Semantic attributes
                 std::string_view{"#UNIT"},
                 std::string_view{"#RANGE"},
                 std::string_view{"#ENUM"},
                 std::string_view{"#EVENT_TRIGGER"},
-                std::string_view{"XSTRING"},
-                std::string_view{"XWSTRING"},
+
+                // Memory Layout Directives
                 std::string_view{"#DYNAMIC"},
+                std::string_view{"#BIG_ENDIAN"},
+                std::string_view{"#LITTLE_ENDIAN"},
+
+                // Modbus attributes
                 std::string_view{"#MODBUS_HOLDING"},
                 std::string_view{"#MODBUS_INPUT"},
                 std::string_view{"#MODBUS_COIL"},
                 std::string_view{"#MODBUS_DISCRETE"},
             };
-
             if (std::find(kEywords.begin(), kEywords.end(), std::string_view{upper_val}) != kEywords.end()) {
                 t.type = TokenType::Keyword;
                 t.value = std::move(upper_val);
@@ -431,6 +477,44 @@ class AstParser {
         }
     }
 
+    bool parseEnumMemberList(std::map<int, std::string>& t_enum_map, const std::string& t_value_sep, const std::string& t_context) {
+        int current_enum_idx = 0;
+        bool saw_member = false;
+
+        while (!checkPunctuation(")") && !check(TokenType::EndOfFile) && !m_has_error_) {
+            std::string enum_name;
+
+            if (match(TokenType::Identifier) || match(TokenType::StringLiteral)) {
+                enum_name = previous_.value;
+            } else {
+                setError(fmt::format(
+                    "Line {}:{} - Expected enum name in {} (got: '{}')", current_.line, current_.col, t_context, current_.value));
+                break;
+            }
+
+            saw_member = true;
+
+            if (matchPunctuation(t_value_sep)) {
+                bool val_neg = matchPunctuation("-");
+                if (match(TokenType::Number)) {
+                    current_enum_idx = std::stoi(previous_.value) * (val_neg ? -1 : 1);
+                } else {
+                    setError(
+                        fmt::format("Line {}:{} - Expected number after '{}' in {}", current_.line, current_.col, t_value_sep, t_context));
+                    break;
+                }
+            }
+
+            t_enum_map[current_enum_idx] = enum_name;
+            current_enum_idx++;
+
+            if (!matchPunctuation(","))
+                break;
+        }
+
+        return saw_member && !m_has_error_;
+    }
+
 public:
     AstParser(std::string t_src, const std::map<std::string, UdtDefinition>& tp_global_udts)
         : lexer_(std::move(t_src)) {
@@ -473,10 +557,29 @@ private:
         bool changed = false;
         for (auto& f : t_fields) {
             if (f.type == s7codec::Type::Struct && f.children.empty() && !f.udt_name.empty()) {
-                if (udt_map_.count(f.udt_name)) {
-                    f.children = udt_map_[f.udt_name].fields;
-                    f.struct_size = udt_map_[f.udt_name].size_bytes;
-                    changed = true;
+                auto it = udt_map_.find(f.udt_name);
+                if (it != udt_map_.end()) {
+                    const UdtDefinition& udt = it->second;
+                    if (udt.is_scalar_alias) {
+                        // Scalar alias reference → substitute the underlying scalar type and
+                        // inherit the semantic metadata unless the field overrides it.
+                        f.type = udt.scalar_type;
+                        f.struct_size = udt.size_bytes;
+                        f.udt_name.clear();
+                        if (f.enum_map.empty() && !udt.enum_map.empty())
+                            f.enum_map = udt.enum_map;
+                        if (!f.unit.has_value() && udt.unit.has_value())
+                            f.unit = udt.unit;
+                        if (!f.min_val.has_value() && udt.min_val.has_value())
+                            f.min_val = udt.min_val;
+                        if (!f.max_val.has_value() && udt.max_val.has_value())
+                            f.max_val = udt.max_val;
+                        changed = true;
+                    } else {
+                        f.children = udt.fields;
+                        f.struct_size = udt.size_bytes;
+                        changed = true;
+                    }
                 }
             }
             if (!f.children.empty()) {
@@ -488,61 +591,107 @@ private:
     }
 
     void parseUdt() {
-        std::string t_name;
+        std::string name;
         if (match(TokenType::StringLiteral) || match(TokenType::Identifier)) {
-            t_name = previous_.value;
+            name = previous_.value;
         } else {
             setError(fmt::format("Line {}:{} - Expected UDT name", current_.line, current_.col));
             return;
         }
 
         UdtDefinition udt;
-        udt.name = t_name;
-        udt.udt_number = extractNumber(t_name, "UDT");
+        udt.name = name;
+        udt.udt_number = extractNumber(name, "UDT");
 
         sgrn::scl::ModbusArea unused_modbus{sgrn::scl::ModbusArea::None};
         parseAttributes(udt.endianness, udt.trigger_events, unused_modbus);
         if (m_has_error_)
             return;
 
-        OffsetTracker t_tracker;
+        // ── Scalar-derived alias: TYPE "Name" : <BaseType> #ENUM(...) #UNIT(...) #RANGE(...) END_TYPE ──
+        if (matchPunctuation(":")) {
+            parseScalarAliasBody(udt, name);
+            return;
+        }
+
+        // ── Native TIA enum syntax: TYPE "Name" (...) END_TYPE ─────────────
+        if (matchPunctuation("(")) {
+            udt.is_scalar_alias = true;
+            // Native TIA enum exports are backed by INT unless the schema
+            // already has a scalar alias/base-type override elsewhere.
+            udt.scalar_type = DataType::Int;
+
+            const bool parsed_members = parseEnumMemberList(udt.enum_map, ":=", "native enum list");
+            if (m_has_error_)
+                return;
+            if (!parsed_members) {
+                setError(fmt::format(
+                    "Line {}:{} - Expected at least one enum member in native enum list for UDT '{}'", current_.line, current_.col, name));
+                return;
+            }
+
+            expectPunctuation(")", "Expected ')' after native enum list");
+            if (m_has_error_)
+                return;
+
+            matchPunctuation(";");
+
+            udt.size_bytes = s7codec::typeSpanBytes(udt.scalar_type, 0);
+            udt.max_depth = 1;
+
+            if (!matchKeyword("END_TYPE")) {
+                setError(fmt::format("Line {}:{} - Missing END_TYPE for native enum '{}'", current_.line, current_.col, name));
+                return;
+            }
+
+            result_.udts.push_back(udt);
+            udt_map_[name] = udt;
+            return;
+        }
+
+        OffsetTracker tracker;
         if (matchKeyword("STRUCT")) {
-            udt.fields = parseStructFields(t_tracker, "END_STRUCT", udt.endianness);
-            udt.size_bytes = t_tracker.getTotalSize();
+            udt.fields = parseStructFields(tracker, "END_STRUCT", udt.endianness);
+            udt.size_bytes = tracker.getTotalSize();
         } else {
             while (!checkKeyword("END_TYPE") && !check(TokenType::EndOfFile) && !m_has_error_) {
                 if (checkKeyword("DATA_BLOCK") || checkKeyword("TYPE")) {
-                    setError(fmt::format("Line {}:{} - Missing END_TYPE for UDT '{}'", current_.line, current_.col, t_name));
+                    setError(fmt::format("Line {}:{} - Missing END_TYPE for UDT '{}'", current_.line, current_.col, name));
                     return;
                 }
                 if (checkKeyword("VAR") || checkKeyword("VAR_INPUT") || checkKeyword("VAR_OUTPUT") || checkKeyword("VAR_IN_OUT") ||
                     checkKeyword("VAR_TEMP")) {
                     advance();
-                    auto t_fields = parseStructFields(t_tracker, "END_VAR", udt.endianness);
+                    auto t_fields = parseStructFields(tracker, "END_VAR", udt.endianness);
                     udt.fields.insert(udt.fields.end(), t_fields.begin(), t_fields.end());
                 } else {
                     advance();
                 }
             }
-            udt.size_bytes = t_tracker.getTotalSize();
+            udt.size_bytes = tracker.getTotalSize();
+        }
+
+        if (udt.fields.empty()) {
+            result_.warnings.push_back(
+                fmt::format("Line {}:{} - Unrecognized or empty TYPE body for UDT '{}'", current_.line, current_.col, name));
         }
 
         while (!checkKeyword("END_TYPE") && !check(TokenType::EndOfFile) && !m_has_error_) {
             if (checkKeyword("DATA_BLOCK") || checkKeyword("TYPE")) {
-                setError(fmt::format("Line {}:{} - Missing END_TYPE for UDT '{}'", current_.line, current_.col, t_name));
+                setError(fmt::format("Line {}:{} - Missing END_TYPE for UDT '{}'", current_.line, current_.col, name));
                 return;
             }
             advance();
         }
 
         if (!matchKeyword("END_TYPE")) {
-            setError(fmt::format("Line {}:{} - Missing END_TYPE for UDT '{}'", current_.line, current_.col, t_name));
+            setError(fmt::format("Line {}:{} - Missing END_TYPE for UDT '{}'", current_.line, current_.col, name));
             return;
         }
 
         udt.max_depth = calculateMaxDepth(udt.fields);
         result_.udts.push_back(udt);
-        udt_map_[t_name] = udt;
+        udt_map_[name] = udt;
     }
 
     void parseDb() {
@@ -576,7 +725,7 @@ private:
             m_last_db_number_ = number;
         }
 
-        DataBlockRegistry db;
+        DbSchema db;
         db.db_name = t_name;
         db.db_number = number;
 
@@ -628,7 +777,8 @@ private:
             setError(fmt::format("Line {}:{} - Maximum recursion depth exceeded", current_.line, current_.col));
             return {};
         }
-        std::vector<DbField> t_fields;
+        std::vector<DbField> fields;
+
         while (!checkKeyword(t_end_keyword) && !check(TokenType::EndOfFile) && !m_has_error_) {
             if (checkKeyword("DATA_BLOCK") || checkKeyword("TYPE")) {
                 setError(fmt::format("Line {}:{} - Missing '{}', found new block", current_.line, current_.col, t_end_keyword));
@@ -638,137 +788,202 @@ private:
                 std::string field_name = previous_.value;
 
                 if (matchPunctuation("{")) {
-                    while (!checkPunctuation("}") && !check(TokenType::EndOfFile))
+                    while (!checkPunctuation("}") && !check(TokenType::EndOfFile) && !m_has_error_) {
                         advance();
-                    matchPunctuation("}");
+                    }
+
+                    expectPunctuation("}", "Expected '}' after field declaration attributes");
+                    if (m_has_error_)
+                        return fields;
                 }
 
                 expectPunctuation(":", "Expected ':' after field name");
+
+                if (m_has_error_)
+                    return fields;
+
                 DbField f = parseType(t_block_endian, t_depth);
+
+                if (m_has_error_)
+                    return fields;
+
                 f.name = field_name;
                 f.endianness = t_block_endian;
 
                 if (matchPunctuation(":=")) {
-                    while (!checkPunctuation(";") && !check(TokenType::EndOfFile))
+                    std::string init;
+
+                    while (!checkPunctuation(";") && !check(TokenType::EndOfFile) && !m_has_error_) {
+                        if (!init.empty())
+                            init += ' ';
+
+                        init += current_.value;
                         advance();
-                }
-
-                while (checkKeyword("#UNIT") || checkKeyword("#RANGE") || checkKeyword("#ENUM") || checkKeyword("#EVENT_TRIGGER") ||
-                       checkKeyword("#DYNAMIC") || checkKeyword("#BIG_ENDIAN") || checkKeyword("#LITTLE_ENDIAN")) {
-                    if (matchKeyword("#UNIT")) {
-                        bool has_paren = matchPunctuation("(");
-                        if (match(TokenType::StringLiteral)) {
-                            f.unit = previous_.value;
-                            if (has_paren)
-                                expectPunctuation(")", "Expected ')' after #UNIT string");
-                        } else {
-                            setError(fmt::format("Line {}:{} - Expected string literal after #UNIT", current_.line, current_.col));
-                        }
-                    } else if (matchKeyword("#RANGE")) {
-                        expectPunctuation("(", "Expected '(' after #RANGE");
-                        if (match(TokenType::Number)) {
-                            f.min_val = std::stod(previous_.value);
-                        } else if (matchPunctuation("-")) {
-                            if (match(TokenType::Number))
-                                f.min_val = -std::stod(previous_.value);
-                        }
-                        expectPunctuation(",", "Expected ',' in #RANGE");
-                        if (match(TokenType::Number)) {
-                            f.max_val = std::stod(previous_.value);
-                        } else if (matchPunctuation("-")) {
-                            if (match(TokenType::Number))
-                                f.max_val = -std::stod(previous_.value);
-                        }
-                        expectPunctuation(")", "Expected ')' after #RANGE");
-                    } else if (matchKeyword("#ENUM")) {
-                        expectPunctuation("(", "Expected '(' after #ENUM");
-                        int current_enum_idx = 0;
-                        while (!checkPunctuation(")") && !check(TokenType::EndOfFile) && !m_has_error_) {
-                            std::string enum_name;
-                            if (match(TokenType::Identifier) || match(TokenType::StringLiteral)) {
-                                enum_name = previous_.value;
-                            } else {
-                                setError(fmt::format("Line {}:{} - Expected identifier in #ENUM", current_.line, current_.col));
-                                break;
-                            }
-
-                            if (matchPunctuation("=")) {
-                                bool val_neg = matchPunctuation("-");
-                                if (match(TokenType::Number)) {
-                                    current_enum_idx = std::stoi(previous_.value) * (val_neg ? -1 : 1);
-                                } else {
-                                    setError(fmt::format("Line {}:{} - Expected number after '=' in #ENUM", current_.line, current_.col));
-                                    break;
-                                }
-                            }
-
-                            f.enum_map[current_enum_idx] = enum_name;
-                            current_enum_idx++;
-
-                            if (matchPunctuation(",")) {
-                                continue;
-                            } else {
-                                break;
-                            }
-                        }
-                        expectPunctuation(")", "Expected ')' after #ENUM");
-                    } else if (matchKeyword("#EVENT_TRIGGER")) {
-                        f.trigger_events = true;
-                    } else if (matchKeyword("#DYNAMIC")) {
-                        f.is_dynamic = true;
-                    } else if (matchKeyword("#BIG_ENDIAN")) {
-                        f.endianness = s7codec::Endian::Big;
-                    } else if (matchKeyword("#LITTLE_ENDIAN")) {
-                        f.endianness = s7codec::Endian::Little;
                     }
+
+                    f.init_value = sgrn::utils::strings::trim(std::move(init));
                 }
+
+                parseFieldAttributes(f);
 
                 expectPunctuation(";", "Expected ';' after field definition");
 
+                if (m_has_error_)
+                    return fields;
+
                 t_tracker.advance(f);
-                t_fields.push_back(f);
+                fields.push_back(f);
             } else {
                 advance();
             }
         }
         matchKeyword(t_end_keyword);
-        return t_fields;
+        return fields;
+    }
+
+    /// Parses the semantic field attributes (#UNIT / #RANGE / #ENUM / #EVENT_TRIGGER /
+    /// #DYNAMIC / #BIG_ENDIAN / #LITTLE_ENDIAN) attached to a field or to a
+    /// scalar-derived TYPE alias. Shared by parseStructFields() and parseUdt().
+    void parseFieldAttributes(DbField& f) {
+        while (checkKeyword("#UNIT") || checkKeyword("#RANGE") || checkKeyword("#ENUM") || checkKeyword("#EVENT_TRIGGER") ||
+               checkKeyword("#DYNAMIC") || checkKeyword("#BIG_ENDIAN") || checkKeyword("#LITTLE_ENDIAN")) {
+            if (matchKeyword("#UNIT")) {
+                bool has_paren = matchPunctuation("(");
+                if (match(TokenType::StringLiteral)) {
+                    f.unit = previous_.value;
+                    if (has_paren)
+                        expectPunctuation(")", "Expected ')' after #UNIT string");
+                } else {
+                    setError(fmt::format("Line {}:{} - Expected string literal after #UNIT", current_.line, current_.col));
+                }
+            } else if (matchKeyword("#RANGE")) {
+                expectPunctuation("(", "Expected '(' after #RANGE");
+                if (match(TokenType::Number)) {
+                    f.min_val = std::stod(previous_.value);
+                } else if (matchPunctuation("-")) {
+                    if (match(TokenType::Number))
+                        f.min_val = -std::stod(previous_.value);
+                }
+                expectPunctuation(",", "Expected ',' in #RANGE");
+                if (match(TokenType::Number)) {
+                    f.max_val = std::stod(previous_.value);
+                } else if (matchPunctuation("-")) {
+                    if (match(TokenType::Number))
+                        f.max_val = -std::stod(previous_.value);
+                }
+                expectPunctuation(")", "Expected ')' after #RANGE");
+            } else if (matchKeyword("#ENUM")) {
+                expectPunctuation("(", "Expected '(' after #ENUM");
+                parseEnumMemberList(f.enum_map, "=", "#ENUM");
+                expectPunctuation(")", "Expected ')' after #ENUM");
+            } else if (matchKeyword("#EVENT_TRIGGER")) {
+                f.trigger_events = true;
+            } else if (matchKeyword("#DYNAMIC")) {
+                f.is_dynamic = true;
+            } else if (matchKeyword("#BIG_ENDIAN")) {
+                f.endianness = s7codec::Endian::Big;
+            } else if (matchKeyword("#LITTLE_ENDIAN")) {
+                f.endianness = s7codec::Endian::Little;
+            }
+        }
+    }
+
+    /// Parses the body of a scalar-derived TYPE alias:
+    ///
+    ///     TYPE "MotorState" : Int #ENUM(Off=0, On=1) #UNIT("state") #RANGE(0, 2) END_TYPE
+    ///
+    /// The base type is parsed with parseType() (reusing the #ENUM/#UNIT/#RANGE
+    /// attribute machinery), then folded into the UdtDefinition as an alias of the
+    /// underlying scalar DataType with the inherited semantic metadata.
+    void parseScalarAliasBody(UdtDefinition& t_udt, const std::string& t_name) {
+        DbField base = parseType(t_udt.endianness);
+        if (m_has_error_)
+            return;
+
+        parseFieldAttributes(base);
+        if (m_has_error_)
+            return;
+
+        if (base.type == s7codec::Type::Struct) {
+            setError(
+                fmt::format("Line {}:{} - Scalar alias '{}' must derive from a scalar base type (STRUCT/UDT base types are not supported)",
+                    current_.line, current_.col, t_name));
+            return;
+        }
+        if (base.count > 1) {
+            setError(fmt::format(
+                "Line {}:{} - Scalar alias '{}' must derive from a single scalar base type (ARRAY base types are not supported)",
+                current_.line, current_.col, t_name));
+            return;
+        }
+
+        t_udt.is_scalar_alias = true;
+        t_udt.scalar_type = base.type;
+        t_udt.enum_map = std::move(base.enum_map);
+        t_udt.unit = std::move(base.unit);
+        t_udt.min_val = std::move(base.min_val);
+        t_udt.max_val = std::move(base.max_val);
+        t_udt.endianness = base.endianness;
+        t_udt.size_bytes = (kind_of(base) == FieldKind::String) ? fieldElementSpanBytes(base) : info_of(base.type).storage_bytes;
+        t_udt.max_depth = 1;
+
+        if (!matchKeyword("END_TYPE")) {
+            setError(fmt::format("Line {}:{} - Missing END_TYPE for scalar alias '{}'", current_.line, current_.col, t_name));
+            return;
+        }
+
+        result_.udts.push_back(t_udt);
+        udt_map_[t_name] = t_udt;
     }
 
     DbField parseType(s7codec::Endian t_block_endian, int t_depth = 0) {
         DbField f;
         if (matchKeyword("ARRAY")) {
             expectPunctuation("[", "Expected '[' in array definition");
-            int lo = 0, hi = 0;
 
             bool lo_neg = matchPunctuation("-");
+            int lo = 0;
             if (match(TokenType::Number))
                 lo = std::stoi(previous_.value) * (lo_neg ? -1 : 1);
             else if (lo_neg)
                 setError(fmt::format("Line {}:{} - Expected number after '-' in array bounds", current_.line, current_.col));
+            else {
+                setError(fmt::format("Line {}:{} - Expected array lower bound", current_.line, current_.col));
+            }
 
             expectPunctuation("..", "Expected '..' in array bounds");
 
             bool hi_neg = matchPunctuation("-");
+            int hi = 0;
             if (match(TokenType::Number))
                 hi = std::stoi(previous_.value) * (hi_neg ? -1 : 1);
             else if (hi_neg)
                 setError(fmt::format("Line {}:{} - Expected number after '-' in array bounds", current_.line, current_.col));
+            else {
+                setError(fmt::format("Line {}:{} - Expected array upper bound", current_.line, current_.col));
+            }
 
             expectPunctuation("]", "Expected ']' in array definition");
             expectKeyword("OF", "Expected OF in array definition");
-            f = parsePrimitiveOrUdt();
+            if (m_has_error_)
+                return f;
+
+            f = parseType(t_block_endian, t_depth); // recursively parse the element type
             int array_count = hi - lo + 1;
             if (array_count <= 0) {
-                setError(fmt::format("Line {}:{} - Invalid Array Bounds: lower bound ({}) is greater than upper bound ({}).", current_.line,
-                    current_.col, lo, hi));
+                setError(fmt::format("Line {}:{} - Invalid array bounds: lower ({}) > upper ({}).", current_.line, current_.col, lo, hi));
                 return f;
             }
 
-            if (f.type == DataType::String || f.type == DataType::WString || f.type == DataType::XString || f.type == DataType::XWString) {
-                f.struct_size = f.count;
-            }
+            f.array_lower_bound = lo;
+            f.array_upper_bound = hi;
             f.count = array_count;
+
+            if (kind_of(f) == FieldKind::String && f.string_capacity <= 0) {
+                setError(fmt::format("Line {}:{} - String array element has invalid capacity", current_.line, current_.col));
+                return f;
+            }
+
             f.endianness = t_block_endian;
 
         } else if (matchKeyword("STRUCT")) {
@@ -789,45 +1004,71 @@ private:
 
     DbField parsePrimitiveOrUdt() {
         DbField f;
-        if (match(TokenType::Identifier) || match(TokenType::StringLiteral) || match(TokenType::Keyword)) {
-            std::string type_name = previous_.value;
-            sgrn::utils::strings::trim(type_name);
-            std::string upper = sgrn::utils::strings::toUpper(type_name);
 
-            s7codec::Type t;
-            if (s7codec::stringToType(upper.c_str(), t)) {
-                f.type = t;
+        if (!(match(TokenType::Identifier) || match(TokenType::StringLiteral) || match(TokenType::Keyword))) {
+            setError(fmt::format("Line {}:{} - Expected type identifier (got: '{}')", current_.line, current_.col, current_.value));
+            return f;
+        }
 
-                if (t == s7codec::Type::String || t == s7codec::Type::WString || t == s7codec::Type::XString ||
-                    t == s7codec::Type::XWString) {
-                    // Default capacity
-                    int capacity = (t == s7codec::Type::XString || t == s7codec::Type::XWString) ? 1000 : 254;
+        std::string type_name = previous_.value;
+        std::string upper = sgrn::utils::strings::toUpper(type_name);
 
-                    // Parse optional [length] or (length)
-                    if (matchPunctuation("[") || matchPunctuation("(")) {
-                        std::string closing = previous_.value == "[" ? "]" : ")";
-                        if (match(TokenType::Number))
-                            capacity = std::stoi(previous_.value);
-                        matchPunctuation(closing); // consume ']' or ')'
-                    }
+        s7codec::Type t;
+        if (!s7codec::stringToType(upper.c_str(), t)) {
+            // UDT reference
+            f.type = s7codec::Type::Struct;
+            f.udt_name = type_name;
 
-                    // Store capacity in struct_size, mark as scalar (count = 1)
-                    // (If later wrapped in an ARRAY, parseType() will set count to array size)
-                    f.struct_size = capacity;
-                    f.count = 1;
-                }
-            } else {
-                // UDT reference
-                f.type = s7codec::Type::Struct;
-                f.udt_name = type_name;
-                if (udt_map_.count(type_name)) {
-                    f.children = udt_map_[type_name].fields;
+            if (udt_map_.count(type_name)) {
+                f.children = udt_map_[type_name].fields;
+                f.struct_size = udt_map_[type_name].size_bytes;
+
+                if (udt_map_[type_name].is_scalar_alias) {
+                    f.type = udt_map_[type_name].scalar_type;
                     f.struct_size = udt_map_[type_name].size_bytes;
+                    f.enum_map = udt_map_[type_name].enum_map;
                 }
             }
-        } else {
-            setError(fmt::format("Line {}:{} - Expected type identifier (got: '{}')", current_.line, current_.col, current_.value));
+
+            return f;
         }
+
+        f.type = t;
+
+        const bool is_string =
+            t == s7codec::Type::String || t == s7codec::Type::WString || t == s7codec::Type::XString || t == s7codec::Type::XWString;
+
+        if (!is_string)
+            return f;
+
+        int capacity = (t == s7codec::Type::XString || t == s7codec::Type::XWString) ? 1000 : 254;
+
+        // STRING[n] / WSTRING[n] / XSTRING[n] / XWSTRING[n]
+        if (matchPunctuation("[") || matchPunctuation("(")) {
+            const std::string opening = previous_.value;
+            const std::string closing = opening == "[" ? "]" : ")";
+
+            if (!match(TokenType::Number)) {
+                setError(fmt::format("Line {}:{} - Expected string length after '{}'", current_.line, current_.col, opening));
+                return f;
+            }
+
+            capacity = std::stoi(previous_.value);
+
+            expectPunctuation(closing, fmt::format("Expected '{}' after string length", closing));
+
+            if (m_has_error_)
+                return f;
+
+            if (capacity <= 0) {
+                setError(fmt::format("Line {}:{} - String length must be positive", current_.line, current_.col));
+                return f;
+            }
+        }
+
+        f.string_capacity = capacity;
+        f.count = 1;
+
         return f;
     }
     int extractNumber(const std::string& t_name, const std::string& t_prefix) {

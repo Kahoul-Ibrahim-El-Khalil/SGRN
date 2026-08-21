@@ -11,6 +11,21 @@ namespace sgrn::gateway::adapters
 {
 
 bool setScalarFromDecoded(const s7codec::DecodedValue& t_dv, const NodeContext* tp_ctx, UA_DataValue& t_data_value) {
+    // Enumerations are projected as 32-bit integers carrying the custom
+    // Enum DataType so clients can resolve symbolic names. The underlying S7
+    // storage may be a 16-bit (or other width) integer; promote/demote as needed.
+    if (tp_ctx->enum_type != nullptr) {
+        UA_Int32 value = 0;
+        if (t_dv.kind() == s7codec::ValueKind::SignedInt)
+            value = static_cast<UA_Int32>(t_dv.i());
+        else if (t_dv.kind() == s7codec::ValueKind::UnsignedInt)
+            value = static_cast<UA_Int32>(t_dv.u());
+        else
+            return false;
+        UA_Variant_setScalarCopy(&t_data_value.value, &value, tp_ctx->enum_type);
+        return true;
+    }
+
     if (t_dv.kind() == s7codec::ValueKind::Bool) {
         UA_Boolean b = t_dv.b();
         UA_Variant_setScalarCopy(&t_data_value.value, &b, &UA_TYPES[UA_TYPES_BOOLEAN]);

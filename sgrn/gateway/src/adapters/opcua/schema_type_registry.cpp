@@ -3,7 +3,9 @@
 #include <sgrn/gateway/wrappers/opcua/TypeRegistry.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/scl/types.hpp>
+#include <sgrn/scl/utils.hpp>
 
+#include <fmt/core.h>
 #include <functional>
 #include <open62541/types_generated.h>
 #include <unordered_map>
@@ -14,18 +16,55 @@ using ::sgrn::scl::DbField;
 namespace sgrn::gateway::adapters
 {
 
-sgrn::Result<void> populateTypeRegistryFromSchema(
-    const ::sgrn::scl::PlcSchemaStore& t_registry, wrappers::opcua::TypeRegistry& t_type_registry) {
-    // Legacy registerUdtTypes() from main — schema translation lives in the adapter.
-    const auto& udts = t_registry.udts();
+// ─── Helper: collect enum definitions from schema ───────────────────────────
+static std::unordered_map<std::string, wrappers::opcua::EnumTypeDef> collectEnums(const ::sgrn::scl::PlcSchemaStore& t_registry) {
+    std::unordered_map<std::string, wrappers::opcua::EnumTypeDef> enum_by_sig;
 
-    std::unordered_map<std::string, const ::sgrn::scl::UdtDefinition*> udt_index;
-    udt_index.reserve(udts.size());
-    for (const auto& p_udt : udts)
-        udt_index[p_udt.name] = &p_udt;
+    auto collectEnum = [&](const DbField& f, const std::string& t_name) {
+        if (f.enum_map.empty())
+            return;
+        const int ua_base = s7TypeToUaTypeIndex(f.type);
+        const std::string sig = enumTypeSignature(ua_base, f.enum_map);
+        auto [it, inserted] = enum_by_sig.emplace(sig, wrappers::opcua::EnumTypeDef{});
+        if (inserted) {
+            it->second.name = t_name;
+            it->second.signature = sig;
+            it->second.values = f.enum_map;
+        } else if (it->second.name.empty()) {
+            it->second.name = t_name;
+        }
+    };
 
+    // Scalar‑alias UDTs with #ENUM
+    for (const auto& p_udt : t_registry.udts()) {
+        if (p_udt.is_scalar_alias && !p_udt.enum_map.empty()) {
+            DbField field{};
+            field.name = p_udt.name;
+            field.type = p_udt.scalar_type;
+            field.enum_map = p_udt.enum_map;
+            collectEnum(field, p_udt.name);
+        }
+    }
+
+    // Inline #ENUM attributes in UDTs and DataBlocks
+    for (const auto& p_udt : t_registry.udts()) {
+        for (const auto& f : p_udt.fields)
+            collectEnum(f, p_udt.name);
+    }
+    for (const auto& p_db : t_registry.dbs()) {
+        ::sgrn::scl::forEachField(
+            p_db.second.fields, "", 0, [&](const DbField& f, const std::string&, int) { collectEnum(f, p_db.second.db_name); });
+    }
+
+    return enum_by_sig;
+}
+
+// ─── Helper: build sorted list of structure UDTs (topological order) ────────
+static std::vector<const ::sgrn::scl::UdtDefinition*> sortUdtDependencies(
+    const std::unordered_map<std::string, const ::sgrn::scl::UdtDefinition*>& udt_index) {
     std::vector<const ::sgrn::scl::UdtDefinition*> sorted;
     std::unordered_map<std::string, bool> visited;
+
     std::function<void(const ::sgrn::scl::UdtDefinition&)> dfs = [&](const ::sgrn::scl::UdtDefinition& p_udt) {
         if (visited.count(p_udt.name))
             return;
@@ -40,18 +79,71 @@ sgrn::Result<void> populateTypeRegistryFromSchema(
         visited[p_udt.name] = true;
         sorted.push_back(&p_udt);
     };
-    for (const auto& p_udt : udts)
-        dfs(p_udt);
+
+    for (const auto& p_udt : udt_index) {
+        if (!p_udt.second->is_scalar_alias)
+            dfs(*p_udt.second);
+    }
+    return sorted;
+}
+
+// ─── Main function ───────────────────────────────────────────────────────────
+sgrn::Result<void> populateTypeRegistryFromSchema(
+    const ::sgrn::scl::PlcSchemaStore& t_registry, wrappers::opcua::TypeRegistry& t_type_registry) {
+
+    // Build index of non‑scalar UDTs
+    const auto& udts = t_registry.udts();
+    std::unordered_map<std::string, const ::sgrn::scl::UdtDefinition*> udt_index;
+    udt_index.reserve(udts.size());
+    for (const auto& p_udt : udts) {
+        if (!p_udt.is_scalar_alias)
+            udt_index[p_udt.name] = &p_udt;
+    }
+
+    // Sorted structure UDTs (dependencies first)
+    auto sorted = sortUdtDependencies(udt_index);
+
+    // Collect enum definitions
+    auto enum_by_sig = collectEnums(t_registry);
+    const size_t enum_count = enum_by_sig.size();
+    const size_t udt_count = sorted.size();
 
     wrappers::opcua::UdtRegistrationBatch batch;
-    const size_t udt_count = sorted.size();
-    batch.names.reserve(udt_count);
-    batch.members.reserve(udt_count);
-    batch.types.reserve(udt_count);
-    batch.index_.reserve(udt_count);
+    batch.names.reserve(udt_count + enum_count);
+    batch.members.reserve(udt_count + enum_count);
+    batch.types.reserve(udt_count + enum_count);
+    batch.index_.reserve(udt_count + enum_count);
+    batch.enums.reserve(enum_count);
 
     std::unordered_map<std::string, const UA_DataType*> building_index;
+    std::unordered_map<std::string, const UA_DataType*> enum_index_by_sig;
 
+    // ── 1. Build enumeration types ──────────────────────────────────────────
+    uint32_t enum_idx = 0;
+    for (auto& [sig, def] : enum_by_sig) {
+        if (def.name.empty())
+            def.name = fmt::format("S7Enum_{}", enum_idx);
+        UA_DataType et{};
+        et.typeId = UA_NODEID_NUMERIC(1, 30000 + enum_idx);
+        et.binaryEncodingId = UA_NODEID_NUMERIC(1, 0);
+        ++enum_idx;
+        et.typeKind = UA_DATATYPEKIND_ENUM;
+        et.pointerFree = true;
+        et.overlayable = UA_BINARY_OVERLAYABLE_INTEGER;
+        et.memSize = static_cast<UA_UInt32>(sizeof(UA_Int32));
+        et.members = nullptr;
+        et.membersSize = 0;
+        batch.names.push_back(def.name);
+        et.typeName = batch.names.back().c_str();
+        batch.members.push_back({});
+        batch.types.push_back(et);
+        building_index[def.name] = &batch.types.back();
+        enum_index_by_sig[sig] = &batch.types.back();
+        batch.index_[def.name] = &batch.types.back();
+        batch.enums.push_back(std::move(def));
+    }
+
+    // ── 2. Build structure types ────────────────────────────────────────────
     uint32_t udt_idx = 0;
     for (const ::sgrn::scl::UdtDefinition* p_udt : sorted) {
         UA_DataType ut{};
@@ -66,16 +158,25 @@ sgrn::Result<void> populateTypeRegistryFromSchema(
         ut.typeKind = UA_DATATYPEKIND_STRUCTURE;
         ut.pointerFree = true;
         size_t current_offset = 0;
+
         for (const DbField& f : p_udt->fields) {
             UA_DataTypeMember m{};
 #ifdef UA_ENABLE_TYPEDESCRIPTION
             m.memberName = f.name.c_str();
 #endif
             const UA_DataType* mt = nullptr;
-            if (f.type == DataType::Struct && !f.udt_name.empty()) {
+            if (!f.enum_map.empty()) {
+                const int ua_base = s7TypeToUaTypeIndex(f.type);
+                const std::string sig = enumTypeSignature(ua_base, f.enum_map);
+                auto enum_it = enum_index_by_sig.find(sig);
+                if (enum_it != enum_index_by_sig.end())
+                    mt = enum_it->second;
+            }
+            if (!mt && f.type == DataType::Struct && !f.udt_name.empty()) {
                 auto it = building_index.find(f.udt_name);
                 mt = (it != building_index.end()) ? it->second : &UA_TYPES[UA_TYPES_BYTE];
-            } else {
+            }
+            if (!mt) {
                 int idx = s7TypeToUaTypeIndex(f.type);
                 mt = (idx >= 0) ? &UA_TYPES[idx] : &UA_TYPES[UA_TYPES_BYTE];
             }
@@ -105,15 +206,19 @@ sgrn::Result<void> populateTypeRegistryFromSchema(
         building_index[p_udt->name] = &batch.types.back();
     }
 
+    // Ensure all members pointers are set
     for (size_t i = 0; i < batch.types.size(); ++i)
         batch.types[i].members = batch.members[i].data();
 
-    batch.index_.clear();
-    for (size_t i = 0; i < sorted.size(); ++i)
-        batch.index_[sorted[i]->name] = &batch.types[i];
+    // ── 3. Re‑build index for structures only (enums already in index) ──────
+    for (size_t i = 0; i < sorted.size(); ++i) {
+        // Structures start at offset `enum_count` in batch.types
+        batch.index_[sorted[i]->name] = &batch.types[enum_count + i];
+    }
 
-    for (size_t i = 0; i < batch.types.size(); ++i) {
-        UA_DataType& ut = batch.types[i];
+    // ── 4. Fix‑up member type pointers for nested UDTs ──────────────────────
+    for (size_t i = 0; i < sorted.size(); ++i) {
+        UA_DataType& ut = batch.types[enum_count + i]; // structure type
         const ::sgrn::scl::UdtDefinition* p_udt = sorted[i];
         for (size_t j = 0; j < ut.membersSize; ++j) {
             UA_DataTypeMember& m = const_cast<UA_DataTypeMember*>(ut.members)[j];

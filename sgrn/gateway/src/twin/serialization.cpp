@@ -7,8 +7,8 @@ using ::sgrn::scl::DataType;
 
 namespace sgrn::gateway::twin
 {
-using ::sgrn::scl::DataBlockRegistry;
 using ::sgrn::scl::DbField;
+using ::sgrn::scl::DbSchema;
 
 void serializeFieldToWriter(rapidjson::Writer<rapidjson::StringBuffer>& t_writer, const DbField& t_field, const uint8_t* tp_ptr,
     size_t t_buffer_size, int t_depth) {
@@ -29,7 +29,7 @@ sgrn::Result<std::string, ::sgrn::scl::Error> decodeFieldAt(
     return std::string(sb.GetString());
 }
 
-std::string decodeDbBuffer(const DataBlockRegistry& t_reg, const uint8_t* tp_buf, size_t t_buffer_size) {
+std::string decodeDbBuffer(const DbSchema& t_reg, const uint8_t* tp_buf, size_t t_buffer_size) {
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
     t_writer.StartObject();

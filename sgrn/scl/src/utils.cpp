@@ -23,11 +23,34 @@ namespace sgrn::scl
 {
 using sgrn::utils::strings::trim;
 
-int fieldSpanSize(const DbField& t_field) {
-    if (t_field.type == DataType::Struct)
-        return std::max(1, t_field.struct_size) * std::max(1, t_field.count);
-    int base = s7codec::typeSpanBytes(t_field.type, t_field.count);
-    return t_field.is_dynamic ? base + 4 : base;
+int fieldElementSpanBytes(const DbField& f) {
+    switch (kind_of(f)) {
+        case FieldKind::String:
+            switch (f.type) {
+                case DataType::String:
+                    return 2 + f.string_capacity;
+                case DataType::WString:
+                    return 4 + f.string_capacity * 2;
+                case DataType::XString:
+                    return 8 + f.string_capacity;
+                case DataType::XWString:
+                    return 8 + f.string_capacity * 2;
+                default:
+                    return f.string_capacity;
+            }
+        case FieldKind::Struct:
+            return std::max(1, f.struct_size);
+        case FieldKind::Scalar:
+        case FieldKind::Enum:
+            return std::max(1, info_of(f.type).storage_bytes);
+    }
+    return 1;
+}
+
+int fieldSpanSize(const DbField& f) {
+    const int elem = fieldElementSpanBytes(f);
+    int base = f.count <= 1 ? elem : elem * f.count;
+    return f.is_dynamic ? base + 4 : base;
 }
 
 // -----------------------------------------------------------------------------
@@ -35,38 +58,9 @@ int fieldSpanSize(const DbField& t_field) {
 // -----------------------------------------------------------------------------
 
 /**
- * @brief Computes the byte span of a field, including arrays and structs.
- */
-int symbolFieldSpanBytes(const DbField& t_field) {
-    auto prim = [&](DataType t_t) -> int {
-        if (t_t == DataType::String)
-            return 2 + std::max(0, t_field.count);
-        if (t_t == DataType::WString)
-            return 4 + (std::max(0, t_field.count) * 2);
-        if (t_t == DataType::XString)
-            return 8 + std::max(0, t_field.count);
-        if (t_t == DataType::XWString)
-            return 8 + (std::max(0, t_field.count) * 2);
-        if (t_t == DataType::Struct)
-            return 0;
-        return s7codec::primitiveSize(t_t);
-    };
-    int base = 0;
-    if (t_field.type == DataType::Struct)
-        base = std::max(1, t_field.struct_size) * std::max(1, t_field.count);
-    else if (t_field.count > 1 && t_field.type != DataType::String && t_field.type != DataType::WString &&
-             t_field.type != DataType::XString && t_field.type != DataType::XWString)
-        base = prim(t_field.type) * t_field.count;
-    else
-        base = prim(t_field.type);
-
-    return t_field.is_dynamic ? base + 4 : base;
-}
-
-/**
  * @brief Finds a field by its name in a Data Block registry.
  */
-const DbField* findFieldByName(const DataBlockRegistry& t_reg, const std::string& t_name) {
+const DbField* findFieldByName(const DbSchema& t_reg, const std::string& t_name) {
     std::vector<DbField>::const_iterator it =
         std::find_if(t_reg.fields.begin(), t_reg.fields.end(), [&](const DbField& t_f) { return t_f.name == t_name; });
     return it == t_reg.fields.end() ? nullptr : &*it;
@@ -128,19 +122,11 @@ std::optional<LocatedField> findFieldByPath(const std::vector<DbField>& t_fields
             size_t bracket_close = current_name.find(']', bracket_open);
             if (bracket_close != std::string_view::npos) {
                 field_name = current_name.substr(0, bracket_open);
-                int parsed_idx = 0;
-                bool ok = true;
-                for (char c : current_name.substr(bracket_open + 1, bracket_close - bracket_open - 1)) {
-                    if (c >= '0' && c <= '9') {
-                        parsed_idx = parsed_idx * 10 + (c - '0');
-                    } else {
-                        ok = false;
-                        break;
-                    }
-                }
-                if (ok) {
-                    array_index = parsed_idx;
+                std::string idx_str(current_name.substr(bracket_open + 1, bracket_close - bracket_open - 1));
+                try {
+                    array_index = std::stoi(idx_str);
                     is_array_access = true;
+                } catch (...) {
                 }
             }
         }
@@ -154,19 +140,18 @@ std::optional<LocatedField> findFieldByPath(const std::vector<DbField>& t_fields
         bool is_bool_array = is_array_access && it->type == DataType::Bool;
 
         if (is_array_access && !is_bool_array) {
-            if (it->type == DataType::Struct) {
-                elem_size = std::max(1, it->struct_size);
-            } else {
-                elem_size = s7codec::primitiveSize(it->type);
-            }
+            elem_size = fieldElementSpanBytes(*it);
         }
 
         int abs_offset = t_off + it->offset;
-        if (is_bool_array) {
-            abs_offset += array_index / 8;
-            result_bit_index = array_index % 8;
-        } else if (is_array_access) {
-            abs_offset += array_index * elem_size;
+        if (is_array_access) {
+            int norm_idx = array_index - it->array_lower_bound;
+            if (is_bool_array) {
+                abs_offset += norm_idx / 8;
+                result_bit_index = norm_idx % 8;
+            } else {
+                abs_offset += norm_idx * elem_size;
+            }
         }
 
         if (remaining.empty()) {
@@ -677,7 +662,7 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeArrayValue(
         return {};
     }
 
-    const int element_size = std::max(1, t_field.type == DataType::Struct ? t_field.struct_size : s7codec::primitiveSize(t_field.type));
+    const int element_size = fieldElementSpanBytes(t_field);
 
     for (rapidjson::SizeType index = 0; index < t_value.Size(); ++index) {
         size_t offset_at = data_offset + static_cast<size_t>(index * element_size);
@@ -720,8 +705,7 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeFieldRapidJson(
         }
         return {};
     }
-    if (t_field.count > 1 && t_field.type != DataType::String && t_field.type != DataType::WString && t_field.type != DataType::XString &&
-        t_field.type != DataType::XWString) {
+    if (t_field.count > 1) {
         return encodeArrayValue(t_field, t_value, tp_ptr, t_buffer_size, t_depth, t_e);
     }
     return encodeScalarValue(t_field, t_value, tp_ptr, t_buffer_size, t_e);
@@ -735,7 +719,7 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeFieldAt(
     return encodeFieldRapidJson(t_field, doc, tp_ptr, t_buffer_size, t_depth, t_e);
 }
 
-std::string decodeDbBuffer(const sgrn::scl::DataBlockRegistry& t_reg, const uint8_t* tp_buf, size_t t_buffer_size) {
+std::string decodeDbBuffer(const sgrn::scl::DbSchema& t_reg, const uint8_t* tp_buf, size_t t_buffer_size) {
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
     t_writer.StartObject();
@@ -788,55 +772,82 @@ static void writeDecodedValue(rapidjson::Writer<rapidjson::StringBuffer>& t_writ
     }
 }
 
+static void serializeStructToWriter(
+    rapidjson::Writer<rapidjson::StringBuffer>& w, const DbField& f, const uint8_t* ptr, size_t buf_size, int depth) {
+    if (f.count > 1) {
+        w.StartArray();
+        int struct_size = fieldElementSpanBytes(f);
+        for (int i = 0; i < f.count; ++i) {
+            w.StartObject();
+            for (const auto& child : f.children) {
+                w.Key(child.name.c_str());
+                serializeFieldToWriter(
+                    w, child, ptr + (i * struct_size) + child.offset, buf_size - (i * struct_size) - child.offset, depth + 1);
+            }
+            w.EndObject();
+        }
+        w.EndArray();
+    } else {
+        w.StartObject();
+        for (const auto& child : f.children) {
+            w.Key(child.name.c_str());
+            serializeFieldToWriter(w, child, ptr + child.offset, buf_size - child.offset, depth + 1);
+        }
+        w.EndObject();
+    }
+}
+
+static void serializeStringToWriter(rapidjson::Writer<rapidjson::StringBuffer>& w, const DbField& f, const uint8_t* ptr, size_t buf_size) {
+    if (f.count > 1) {
+        w.StartArray();
+        int elem_size = fieldElementSpanBytes(f);
+        for (int i = 0; i < f.count; ++i) {
+            auto dv = s7codec::decodeScalar(f.type, ptr + (i * elem_size), buf_size - (i * elem_size), 0, f.string_capacity);
+            writeDecodedValue(w, dv, f.type);
+        }
+        w.EndArray();
+    } else {
+        auto dv = s7codec::decodeScalar(f.type, ptr, buf_size, 0, f.string_capacity);
+        writeDecodedValue(w, dv, f.type);
+    }
+}
+
+static void serializeScalarOrArrayToWriter(
+    rapidjson::Writer<rapidjson::StringBuffer>& w, const DbField& f, const uint8_t* ptr, size_t buf_size) {
+    if (f.count > 1) {
+        w.StartArray();
+        int elem_size = fieldElementSpanBytes(f);
+        for (int i = 0; i < f.count; ++i) {
+            const uint8_t* p_elem_ptr = ptr + (i * elem_size);
+            int b_idx = f.bit_index;
+            if (f.type == DataType::Bool) {
+                p_elem_ptr = ptr + (i / 8);
+                b_idx = i % 8;
+            }
+            auto dv = s7codec::decodeScalar(f.type, p_elem_ptr, buf_size - static_cast<size_t>(p_elem_ptr - ptr), b_idx);
+            writeDecodedValue(w, dv, f.type);
+        }
+        w.EndArray();
+    } else {
+        auto dv = s7codec::decodeScalar(f.type, ptr, buf_size, f.bit_index);
+        writeDecodedValue(w, dv, f.type);
+    }
+}
+
 void serializeFieldToWriter(rapidjson::Writer<rapidjson::StringBuffer>& t_writer, const DbField& t_field, const uint8_t* tp_ptr,
     size_t t_buffer_size, int t_depth) {
     if (t_depth > 16) {
         t_writer.String("!!! ERROR: MAX RECURSION DEPTH EXCEEDED !!!");
         return;
     }
-    if (t_field.type == DataType::Struct) {
-        if (t_field.count > 1) {
-            t_writer.StartArray();
-            int struct_size = std::max(1, t_field.struct_size);
-            for (int i = 0; i < t_field.count; ++i) {
-                t_writer.StartObject();
-                for (const auto& child : t_field.children) {
-                    t_writer.Key(child.name.c_str());
-                    serializeFieldToWriter(t_writer, child, tp_ptr + (i * struct_size) + child.offset,
-                        t_buffer_size - (i * struct_size) - child.offset, t_depth + 1);
-                }
-                t_writer.EndObject();
-            }
-            t_writer.EndArray();
-        } else {
-            t_writer.StartObject();
-            for (const auto& child : t_field.children) {
-                t_writer.Key(child.name.c_str());
-                serializeFieldToWriter(t_writer, child, tp_ptr + child.offset, t_buffer_size - child.offset, t_depth + 1);
-            }
-            t_writer.EndObject();
-        }
-        return;
-    }
-
-    if (t_field.count > 1 && t_field.type != DataType::String && t_field.type != DataType::WString && t_field.type != DataType::XString &&
-        t_field.type != DataType::XWString) {
-        t_writer.StartArray();
-        int elem_size = s7codec::primitiveSize(t_field.type);
-        for (int i = 0; i < t_field.count; ++i) {
-            const uint8_t* p_elem_ptr = tp_ptr + (i * elem_size);
-            int b_idx = t_field.bit_index;
-            if (t_field.type == DataType::Bool) {
-                p_elem_ptr = tp_ptr + (i / 8);
-                b_idx = i % 8;
-            }
-            auto dv = s7codec::decodeScalar(t_field.type, p_elem_ptr, t_buffer_size - static_cast<size_t>(p_elem_ptr - tp_ptr), b_idx);
-            writeDecodedValue(t_writer, dv, t_field.type);
-        }
-        t_writer.EndArray();
-    } else {
-        auto dv = s7codec::decodeScalar(t_field.type, tp_ptr, t_buffer_size, t_field.bit_index, t_field.count);
-        writeDecodedValue(t_writer, dv, t_field.type);
+    switch (kind_of(t_field)) {
+        case FieldKind::Struct:
+            return serializeStructToWriter(t_writer, t_field, tp_ptr, t_buffer_size, t_depth);
+        case FieldKind::String:
+            return serializeStringToWriter(t_writer, t_field, tp_ptr, t_buffer_size);
+        case FieldKind::Scalar:
+        case FieldKind::Enum:
+            return serializeScalarOrArrayToWriter(t_writer, t_field, tp_ptr, t_buffer_size);
     }
 }
 sgrn::Result<std::vector<uint8_t>, Error> parseHexBytes(const std::string& t_joined) {

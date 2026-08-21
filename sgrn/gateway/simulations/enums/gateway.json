@@ -1,0 +1,22 @@
+{
+  "listen": {
+    "opcua": {
+      "ip": "0.0.0.0",
+      "port": 4840
+    },
+
+    "http": {
+      "ip": "0.0.0.0",
+      "port": 8000
+    },
+    "websocket": {
+      "ip": "0.0.0.0",
+      "port": 8001
+    }
+  }  ,
+  "schema": "./sgrn/gateway/simulations/enums/schema.scl",
+  "state_dir": "/tmp/sgrn-motor--gateway-state",
+  "reconnect_ms": 5000,
+    "security_policy": "strict",
+    "security_script": "./sgrn/gateway/simulations/enums/security.as"
+}

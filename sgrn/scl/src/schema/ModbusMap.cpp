@@ -7,7 +7,7 @@
  * the /registry/modbus JSON response (Listing G.2 from the thesis).
  */
 
-#include <sgrn/scl/ModbusMap.hpp>
+#include <sgrn/scl/functions/modbus.hpp>
 
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
@@ -63,8 +63,8 @@ static int fieldByteCount(const DbField& t_f) {
 }
 
 /// Build entries for a register-based area (Holding or Input).
-static void buildRegisterEntries(const DataBlockRegistry& t_db, bool t_read_only, int& t_cursor, std::vector<ModbusVirtualEntry>& t_out,
-    std::vector<std::string>& t_warnings) {
+static void buildRegisterEntries(
+    const DbSchema& t_db, bool t_read_only, int& t_cursor, std::vector<ModbusVirtualEntry>& t_out, std::vector<std::string>& t_warnings) {
     std::vector<std::pair<std::string, const DbField*>> flat;
     flattenFields(t_db.fields, "", flat);
 
@@ -102,8 +102,8 @@ static void buildRegisterEntries(const DataBlockRegistry& t_db, bool t_read_only
 }
 
 /// Build entries for a bit-based area (Coil or Discrete).
-static void buildBitEntries(const DataBlockRegistry& t_db, bool t_read_only, int& t_cursor, std::vector<ModbusVirtualEntry>& t_out,
-    std::vector<std::string>& t_warnings) {
+static void buildBitEntries(
+    const DbSchema& t_db, bool t_read_only, int& t_cursor, std::vector<ModbusVirtualEntry>& t_out, std::vector<std::string>& t_warnings) {
     std::vector<std::pair<std::string, const DbField*>> flat;
     flattenFields(t_db.fields, "", flat);
 
@@ -145,7 +145,7 @@ ModbusVirtualMap buildModbusVirtualMap(const PlcSchemaStore& t_store) {
     ModbusVirtualMap vmap;
 
     // Collect annotated DBs sorted by db_number for deterministic address assignment
-    std::vector<const DataBlockRegistry*> annotated;
+    std::vector<const DbSchema*> annotated;
     for (const auto& [num, t_db] : t_store.dbs()) {
         if (t_db.modbus_area != ModbusArea::None)
             annotated.push_back(&t_db);

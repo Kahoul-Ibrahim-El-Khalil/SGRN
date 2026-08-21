@@ -27,7 +27,7 @@ public:
      * symbols are provided via an in-memory stream rather than a file.
      *
      * @param lines Vector of string lines representing the export content.
-     * @return S7Result containing ParseResult (DBs and UDTs) or an error.
+     * @return Result containing ParseResult (DBs and UDTs) or an error.
      */
     static sgrn::Result<ParseResult, ::sgrn::scl::Error> parseLines(
         const std::vector<std::string>& t_lines, std::map<std::string, UdtDefinition>* tp_global_udts = nullptr);
@@ -37,14 +37,14 @@ public:
      *
      * @param content Raw text containing DB/UDT definitions.
      * @param global_udts Optional map covering symbols shared across files.
-     * @return S7Result containing ParseResult (DBs and UDTs) or an error.
+     * @return Result containing ParseResult (DBs and UDTs) or an error.
      */
     static sgrn::Result<ParseResult, ::sgrn::scl::Error> parseString(
         const std::string& t_content, std::map<std::string, UdtDefinition>* tp_global_udts = nullptr);
 
     /**
      * @param global_udts Optional map covering symbols shared across files.
-     * @return S7Result containing ParseResult (DBs and UDTs) or an error.
+     * @return Result containing ParseResult (DBs and UDTs) or an error.
      */
     static sgrn::Result<ParseResult, ::sgrn::scl::Error> parseExportFile(
         const std::string& t_filepath, std::map<std::string, UdtDefinition>* tp_global_udts = nullptr);
@@ -56,7 +56,7 @@ public:
      * scan until all definitions are resolved.
      *
      * @param filepaths List of paths to `.scl` or `.awl` files.
-     * @return S7Result containing a consolidated ParseResult.
+     * @return Result containing a consolidated ParseResult.
      */
     static sgrn::Result<ParseResult, ::sgrn::scl::Error> parseCollection(const std::vector<std::string>& t_filepaths);
 };

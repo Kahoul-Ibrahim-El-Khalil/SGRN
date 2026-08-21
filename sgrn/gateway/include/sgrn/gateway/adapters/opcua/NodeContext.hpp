@@ -4,6 +4,8 @@
 #include <string>
 #include <unordered_map>
 
+#include <open62541/types.h>
+
 namespace sgrn::gateway::wrappers::opcua
 {
 class TypeRegistry;
@@ -35,6 +37,13 @@ struct NodeContext {
     uint32_t field_offset{0};
     uint32_t field_size{0};
     ::sgrn::scl::DataType type{::sgrn::scl::DataType::Byte};
+    ::sgrn::scl::FieldKind kind{::sgrn::scl::FieldKind::Scalar};
+
+    /// Non-null when the field is projected as an OPC UA Enumeration. The
+    /// pointed-to `UA_DataType` carries the node id used in the address space;
+    /// `enum_map` mirrors it for value<->name translation on read/write.
+    const UA_DataType* enum_type{nullptr};
+    std::map<int, std::string> enum_map;
 };
 
 } // namespace sgrn::gateway::adapters

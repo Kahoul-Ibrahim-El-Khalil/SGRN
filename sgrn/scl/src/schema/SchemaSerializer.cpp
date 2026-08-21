@@ -143,7 +143,7 @@ static void serializeUdtDefinition(Writer& t_writer, const UdtDefinition& t_udt)
 }
 
 template <typename Writer>
-static void serializeDataBlockRegistry(Writer& t_writer, const DataBlockRegistry& t_db, bool t_headers_only) {
+static void serializeDbSchema(Writer& t_writer, const DbSchema& t_db, bool t_headers_only) {
     t_writer.StartObject();
     t_writer.Key("db_number");
     t_writer.Int(t_db.db_number);
@@ -223,7 +223,7 @@ static void doSerialize(Writer& t_writer, const PlcSchemaStore& t_registry, std:
         if (t_db_number.has_value() && num != *t_db_number)
             continue;
 
-        serializeDataBlockRegistry(t_writer, t_db, t_headers_only);
+        serializeDbSchema(t_writer, t_db, t_headers_only);
 
         accessible_dbs++;
     }
@@ -277,10 +277,10 @@ std::string SchemaSerializer::udtToJson(const UdtDefinition& t_udt) {
     return sb.GetString();
 }
 
-std::string SchemaSerializer::dbToJson(const DataBlockRegistry& t_db) {
+std::string SchemaSerializer::dbToJson(const DbSchema& t_db) {
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
-    detail::serializeDataBlockRegistry(t_writer, t_db, false);
+    detail::serializeDbSchema(t_writer, t_db, false);
     return sb.GetString();
 }
 
@@ -422,11 +422,11 @@ sgrn::Result<UdtDefinition, ::sgrn::scl::Error> SchemaSerializer::udtFromJson(co
     return p_udt;
 }
 
-sgrn::Result<DataBlockRegistry, ::sgrn::scl::Error> SchemaSerializer::dbFromJson(const rapidjson::Value& t_node) {
+sgrn::Result<DbSchema, ::sgrn::scl::Error> SchemaSerializer::dbFromJson(const rapidjson::Value& t_node) {
     if (!t_node.IsObject())
         return Error{SchemaCode::Generic, "DB entry must be an object"};
 
-    DataBlockRegistry t_db;
+    DbSchema t_db;
     if (t_node.HasMember("db_number"))
         t_db.db_number = t_node["db_number"].GetInt();
     if (t_node.HasMember("db_name") && t_node["db_name"].IsString())
@@ -525,7 +525,7 @@ sgrn::Result<void, ::sgrn::scl::Error> SchemaSerializer::deserialize(PlcSchemaSt
         if (!tp_value->IsArray())
             return Error{SchemaCode::Generic, "'dbs' must be an array"};
         for (const auto& t_node : tp_value->GetArray()) {
-            sgrn::Result<DataBlockRegistry, ::sgrn::scl::Error> t_db = SchemaSerializer::dbFromJson(t_node);
+            sgrn::Result<DbSchema, ::sgrn::scl::Error> t_db = SchemaSerializer::dbFromJson(t_node);
             if (t_db.hasError()) {
                 return Error(t_db.error());
             }

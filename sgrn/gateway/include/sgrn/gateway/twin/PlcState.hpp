@@ -45,6 +45,7 @@ struct PlcNode {
     // Optimized Context (replaces Json::Value)
     uint32_t offset_{0};
     uint32_t count_{1};
+    uint32_t string_capacity_{0};
     uint16_t db_number_{0};
     uint8_t bit_index_{0};
     s7codec::Type type_{s7codec::Type::Byte};
@@ -68,6 +69,7 @@ struct PlcNode {
         , id_(t_other.id_)
         , offset_(t_other.offset_)
         , count_(t_other.count_)
+        , string_capacity_(t_other.string_capacity_)
         , db_number_(t_other.db_number_)
         , bit_index_(t_other.bit_index_)
         , type_(t_other.type_)
@@ -86,6 +88,7 @@ struct PlcNode {
         , id_(t_other.id_)
         , offset_(t_other.offset_)
         , count_(t_other.count_)
+        , string_capacity_(t_other.string_capacity_)
         , db_number_(t_other.db_number_)
         , bit_index_(t_other.bit_index_)
         , type_(t_other.type_)
@@ -100,11 +103,12 @@ struct PlcNode {
     PlcNode& operator=(PlcNode&& t_other) noexcept {
         if (this != &t_other) {
             name_ = std::move(t_other.name_);
-            type_ = t_other.type_;
+            universal_type_ = t_other.universal_type_;
             size_ = t_other.size_;
             id_ = t_other.id_;
             offset_ = t_other.offset_;
             count_ = t_other.count_;
+            string_capacity_ = t_other.string_capacity_;
             db_number_ = t_other.db_number_;
             bit_index_ = t_other.bit_index_;
             type_ = t_other.type_;
@@ -121,11 +125,12 @@ struct PlcNode {
     PlcNode& operator=(const PlcNode& t_other) {
         if (this != &t_other) {
             name_ = t_other.name_;
-            type_ = t_other.type_;
+            universal_type_ = t_other.universal_type_;
             size_ = t_other.size_;
             id_ = t_other.id_;
             offset_ = t_other.offset_;
             count_ = t_other.count_;
+            string_capacity_ = t_other.string_capacity_;
             db_number_ = t_other.db_number_;
             bit_index_ = t_other.bit_index_;
             type_ = t_other.type_;

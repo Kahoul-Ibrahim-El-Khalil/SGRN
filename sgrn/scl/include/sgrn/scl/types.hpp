@@ -20,37 +20,18 @@
 #include <string_view>
 #include <vector>
 
-// ── S7 protocol constants (self-contained, no snap7.h required) ─────────────
-// When building inside the SGRN monorepo with snap7 available, the build system
-// defines SGRN_HAS_SNAP7 and snap7.h provides these symbols.
-// When building standalone (without snap7), we define them ourselves.
-#ifdef SGRN_HAS_SNAP7
-#include <snap7.h>
-#else
-using byte = unsigned char;
-inline constexpr byte S7AreaPE = 0x81; // Process inputs  (I/E)
-inline constexpr byte S7AreaPA = 0x82; // Process outputs (Q/A)
-inline constexpr byte S7AreaMK = 0x83; // Merkers         (M)
-inline constexpr byte S7AreaDB = 0x84; // Data blocks     (DB)
-inline constexpr byte S7AreaCT = 0x1C; // Counters        (C/Z)
-inline constexpr byte S7AreaTM = 0x1D; // Timers          (T)
-
-inline constexpr int S7WLBit = 0x01;
-inline constexpr int S7WLByte = 0x02;
-inline constexpr int S7WLWord = 0x04;
-inline constexpr int S7WLDWord = 0x06;
-inline constexpr int S7WLReal = 0x08;
-inline constexpr int S7WLCounter = 0x1C;
-inline constexpr int S7WLTimer = 0x1D;
-#endif
-
+#include "S7K.hpp"
+#include <sgrn/scl/types/DataType.hpp>
+#include <sgrn/scl/types/DbField.hpp>
+#include <sgrn/scl/types/DbSchema.hpp>
+#include <sgrn/scl/types/Error.hpp>
+#include <sgrn/scl/types/ParseResult.hpp>
+#include <sgrn/scl/types/UdtDefinition.hpp>
+#include <sgrn/scl/types/modbus/ModbusArea.hpp>
+#include <sgrn/scl/types/modbus/ModbusVirtualEntry.hpp>
+#include <sgrn/scl/types/modbus/ModbusVirtualMap.hpp>
 namespace sgrn::scl
 {
-// ---------------------------------------------------------------------------
-// Re-export the canonical data type from the freestanding s7codec/ library.
-// All downstream code should use sgrn::scl::DataType (or the legacy S7Type alias).
-// ---------------------------------------------------------------------------
-using DataType = s7codec::Type;
 
 /**
  * @brief Checks if a value fits within the range of a target type T.
@@ -59,41 +40,6 @@ template <typename T, typename U>
 constexpr bool isInRange(U t_value) {
     return s7codec::isInRange<T>(t_value);
 }
-
-// ---------------------------------------------------------------------------
-// String constants — type names delegate to s7codec::detail::
-// ---------------------------------------------------------------------------
-
-// Area aliases
-constexpr const char str_area_m[] = "M";
-constexpr const char str_area_mk[] = "MK";
-constexpr const char str_area_i[] = "I";
-constexpr const char str_area_pe[] = "PE";
-constexpr const char str_area_e[] = "E";
-constexpr const char str_area_q[] = "Q";
-constexpr const char str_area_pa[] = "PA";
-constexpr const char str_area_a[] = "A";
-constexpr const char str_area_ct[] = "CT";
-constexpr const char str_area_c[] = "C";
-constexpr const char str_area_z[] = "Z";
-constexpr const char str_area_tm[] = "TM";
-constexpr const char str_area_t[] = "T";
-constexpr const char str_area_db[] = "DB";
-
-// Connection types
-constexpr const char str_conn_pg[] = "PG";
-constexpr const char str_conn_op[] = "OP";
-constexpr const char str_conn_basic[] = "BASIC";
-
-// Block types
-constexpr const char str_block_ob[] = "OB";
-constexpr const char str_block_db[] = "DB";
-constexpr const char str_block_sdb[] = "SDB";
-constexpr const char str_block_fc[] = "FC";
-constexpr const char str_block_sfc[] = "SFC";
-constexpr const char str_block_fb[] = "FB";
-constexpr const char str_block_sfb[] = "SFB";
-
 // ---------------------------------------------------------------------------
 // Error Handling — protocol-neutral structured error codes
 // ---------------------------------------------------------------------------
@@ -237,10 +183,6 @@ using S7ErrorCode = SchemaCode;
 /// @deprecated Use Error
 using S7Error = Error;
 /// @deprecated Use DataType
-using Type = DataType;
-/// @deprecated Use sgrn::Result<T, Error>
-template <typename T>
-using S7Result = ::sgrn::Result<T, Error>;
 
 // ---------------------------------------------------------------------------
 // Data Types
@@ -345,22 +287,22 @@ inline std::optional<S7AreaRef> parseAreaRef(const std::string& t_tok) {
         return std::nullopt;
     }
     const std::string u = sgrn::utils::strings::toUpper(t_tok);
-    if (u == str_area_m || u == str_area_mk) {
+    if (u == "M" || u == "MK") {
         return S7AreaRef{S7AreaMK, 0};
     }
-    if (u == str_area_i || u == str_area_pe || u == str_area_e) {
+    if (u == "I" || u == "PE" || u == "E") {
         return S7AreaRef{S7AreaPE, 0};
     }
-    if (u == str_area_q || u == str_area_pa || u == str_area_a) {
+    if (u == "Q" || u == "PA" || u == "A") {
         return S7AreaRef{S7AreaPA, 0};
     }
-    if (u == str_area_ct || u == str_area_c || u == str_area_z) {
+    if (u == "CT" || u == "C" || u == "Z") {
         return S7AreaRef{S7AreaCT, 0};
     }
-    if (u == str_area_tm || u == str_area_t) {
+    if (u == "TM" || u == "T") {
         return S7AreaRef{S7AreaTM, 0};
     }
-    if (u.substr(0, 2) == str_area_db) {
+    if (u.substr(0, 2) == "DB") {
         auto t_v = sgrn::utils::strings::parseInt(u.substr(2));
         if (t_v && isInRange<uint16_t>(*t_v)) {
             return S7AreaRef{S7AreaDB, static_cast<uint16_t>(*t_v)};
@@ -375,17 +317,17 @@ inline std::optional<S7AreaRef> parseAreaRef(const std::string& t_tok) {
 
 inline std::optional<int> parseArea(std::string t_val) {
     const std::string clean_val = sgrn::utils::strings::toUpper(sgrn::utils::strings::trim(std::move(t_val)));
-    if (clean_val == str_area_db)
+    if (clean_val == "DB")
         return S7AreaDB;
-    if (clean_val == str_area_mk || clean_val == str_area_m)
+    if (clean_val == "MK" || clean_val == "M")
         return S7AreaMK;
-    if (clean_val == str_area_pe || clean_val == str_area_i)
+    if (clean_val == "PE" || clean_val == "I")
         return S7AreaPE;
-    if (clean_val == str_area_pa || clean_val == str_area_q)
+    if (clean_val == "PA" || clean_val == "Q")
         return S7AreaPA;
-    if (clean_val == str_area_ct || clean_val == str_area_c)
+    if (clean_val == "CT" || clean_val == "C")
         return S7AreaCT;
-    if (clean_val == str_area_tm || clean_val == str_area_t)
+    if (clean_val == "TM" || clean_val == "T")
         return S7AreaTM;
     return std::nullopt;
 }
@@ -408,30 +350,30 @@ using S7DateTime = std::tm;
 
 inline std::optional<uint16_t> parseConnectionType(std::string t_val) {
     const std::string clean_val = sgrn::utils::strings::toUpper(sgrn::utils::strings::trim(std::move(t_val)));
-    if (clean_val.empty() || clean_val == str_conn_pg)
+    if (clean_val.empty() || clean_val == "PG")
         return 1; // CONNTYPE_PG
-    if (clean_val == str_conn_op)
+    if (clean_val == "OP")
         return 2; // CONNTYPE_OP
-    if (clean_val == str_conn_basic)
+    if (clean_val == "BASIC")
         return 3; // CONNTYPE_BASIC
     return std::nullopt;
 }
 
 inline std::optional<int> parseBlockType(std::string t_val) {
     const std::string clean_val = sgrn::utils::strings::toUpper(sgrn::utils::strings::trim(std::move(t_val)));
-    if (clean_val == str_block_ob)
+    if (clean_val == "OB")
         return 0x38; // Block_OB
-    if (clean_val == str_block_db)
+    if (clean_val == "DB")
         return 0x41; // Block_DB
-    if (clean_val == str_block_sdb)
+    if (clean_val == "SDB")
         return 0x42; // Block_SDB
-    if (clean_val == str_block_fc)
+    if (clean_val == "FC")
         return 0x43; // Block_FC
-    if (clean_val == str_block_sfc)
+    if (clean_val == "SFC")
         return 0x44; // Block_SFC
-    if (clean_val == str_block_fb)
+    if (clean_val == "FB")
         return 0x45; // Block_FB
-    if (clean_val == str_block_sfb)
+    if (clean_val == "SFB")
         return 0x46; // Block_SFB
     return sgrn::utils::strings::parseIntFlexible(std::move(clean_val));
 }
@@ -447,21 +389,21 @@ struct RawTypeSpec {
 
 inline std::optional<RawTypeSpec> parseRawTypeSpec(std::string t_tok) {
     t_tok = sgrn::utils::strings::trim(std::move(t_tok));
-    int t_count = 0;
+    int count = 0;
     const auto lb = t_tok.find('['), rb = t_tok.find(']');
     if (lb != std::string::npos && rb != std::string::npos && rb > lb + 1) {
         auto cnt = sgrn::utils::strings::parseInt(t_tok.substr(lb + 1, rb - lb - 1));
         if (!cnt)
             return std::nullopt;
-        t_count = *cnt;
+        count = *cnt;
         t_tok = sgrn::utils::strings::trim(t_tok.substr(0, lb));
     }
     auto t_type = parseS7Type(t_tok);
     if (!t_type)
         return std::nullopt;
-    if ((*t_type == DataType::String || *t_type == DataType::WString) && t_count <= 0)
+    if ((*t_type == DataType::String || *t_type == DataType::WString) && count <= 0)
         return std::nullopt;
-    return RawTypeSpec{*t_type, t_count};
+    return RawTypeSpec{*t_type, count};
 }
 
 inline int rawTypeSpanBytes(DataType t_type, int t_count) {
@@ -473,14 +415,18 @@ inline int rawTypeSpanBytes(const RawTypeSpec& t_spec) {
 }
 
 inline std::optional<DataType> inferRawType(const rapidjson::Value& t_v) {
-    if (t_v.IsBool())
+    if (t_v.IsBool()) {
         return DataType::Bool;
-    if (t_v.IsString())
+    }
+    if (t_v.IsString()) {
         return DataType::String;
-    if (t_v.IsArray() && t_v.Size() > 0)
+    }
+    if (t_v.IsArray() && t_v.Size() > 0) {
         return inferRawType(t_v[0]);
-    if (t_v.IsDouble() && !t_v.IsInt64() && !t_v.IsUint64())
+    }
+    if (t_v.IsDouble() && !t_v.IsInt64() && !t_v.IsUint64()) {
         return DataType::Real;
+    }
     if (t_v.IsInt64()) {
         const auto s = t_v.GetInt64();
         if (s < 0) {
@@ -513,86 +459,10 @@ inline std::optional<DataType> inferRawType(const rapidjson::Value& t_v) {
     }
     return std::nullopt;
 }
-
-// ---------------------------------------------------------------------------
-// Field and UDT definitions
-// ---------------------------------------------------------------------------
-
-struct DbField {
-    std::string name;
-    int offset{0};
-    int bit_index{0};
-    DataType type{DataType::Byte};
-    int count{0};
-
-    std::string udt_name;
-    std::vector<DbField> children;
-    int struct_size{0};
-    s7codec::Endian endianness{s7codec::Endian::Big};
-    std::optional<std::string> unit;
-    std::optional<double> min_val;
-    std::optional<double> max_val;
-    std::map<int, std::string> enum_map;
-    bool trigger_events{false};
-    bool is_dynamic{false};
-};
-
-struct UdtDefinition {
-    uint16_t udt_number{0};
-    std::string name;
-    int size_bytes{0};
-    int max_depth{0};
-    std::vector<DbField> fields;
-    s7codec::Endian endianness{s7codec::Endian::Big};
-    bool trigger_events{false};
-};
-
-// ---------------------------------------------------------------------------
-// Data Block registry
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Modbus exposure area — set by #MODBUS_* block-level directives.
-// None = DB is not exposed via Modbus (default).
-// ---------------------------------------------------------------------------
-enum class ModbusArea : uint8_t {
-    None = 0,
-    Holding = 1,  ///< 4x — holding registers (FC03 read / FC16 write), read-write
-    Input = 2,    ///< 3x — input registers   (FC04 read-only)
-    Coil = 3,     ///< 0x — coils             (FC01 read / FC15 write), read-write bits
-    Discrete = 4, ///< 1x — discrete inputs   (FC02 read-only bits)
-};
-
-struct DbSchema {
-    uint16_t db_number{0};
-    std::string db_name;
-    int size_bytes{0};
-    int max_depth{0};
-    std::vector<DbField> fields;
-
-    std::string source_file;
-    s7codec::Endian endianness{s7codec::Endian::Big};
-    bool trigger_events{false};
-    ModbusArea modbus_area{ModbusArea::None}; ///< Modbus exposure directive
-};
-
-using DataBlockRegistry = DbSchema;
-using DbRawBuffer = std::vector<uint8_t>;
-using DataBlockRawBuffer = DbRawBuffer;
-using DbData = std::string;
-using DataBlockData = DbData;
-
-struct ParseResult {
-    std::vector<DbSchema> dbs;
-    std::vector<UdtDefinition> udts;
-    std::vector<std::string> warnings;
-};
+class PlcSchemaStore;
+struct FieldTarget;
 
 } // namespace sgrn::scl
-
-// ---------------------------------------------------------------------------
-// fmt::formatter specializations
-// ---------------------------------------------------------------------------
 
 template <>
 struct fmt::formatter<sgrn::scl::Error> : formatter<std::string_view> {
@@ -607,55 +477,3 @@ struct fmt::formatter<sgrn::scl::IoError> : formatter<std::string_view> {
         return formatter<std::string_view>::format(fmt::format("IoError{{message=\"{}\"}}", t_error.string()), t_ctx);
     }
 };
-
-template <>
-struct fmt::formatter<sgrn::scl::DataType> : formatter<std::string_view> {
-    auto format(sgrn::scl::DataType t_type, format_context& t_ctx) const {
-        return formatter<std::string_view>::format(s7codec::s7TypeToString(t_type), t_ctx);
-    }
-};
-
-template <>
-struct fmt::formatter<sgrn::scl::DbField> : formatter<std::string_view> {
-    auto format(const sgrn::scl::DbField& t_field, format_context& t_ctx) const {
-        return formatter<std::string_view>::format(
-            fmt::format(
-                "DbField{{name=\"{}\", offset={}, bit_index={}, type={}, count={}, udt=\"{}\", struct_size={}, children={}, unit=\"{}\"}}",
-                t_field.name, t_field.offset, t_field.bit_index, t_field.type, t_field.count, t_field.udt_name, t_field.struct_size,
-                t_field.children.size(), t_field.unit.value_or("")),
-            t_ctx);
-    }
-};
-
-template <>
-struct fmt::formatter<sgrn::scl::UdtDefinition> : formatter<std::string_view> {
-    auto format(const sgrn::scl::UdtDefinition& t_udt, format_context& t_ctx) const {
-        return formatter<std::string_view>::format(fmt::format("UdtDefinition{{udt_number={}, name=\"{}\", size_bytes={}, fields={}}}",
-                                                       t_udt.udt_number, t_udt.name, t_udt.size_bytes, t_udt.fields.size()),
-            t_ctx);
-    }
-};
-
-template <>
-struct fmt::formatter<sgrn::scl::DbSchema> : formatter<std::string_view> {
-    auto format(const sgrn::scl::DbSchema& t_db, format_context& t_ctx) const {
-        return formatter<std::string_view>::format(
-            fmt::format("DbSchema{{db_number={}, db_name=\"{}\", size_bytes={}, fields={}, source_file=\"{}\"}}", t_db.db_number,
-                t_db.db_name, t_db.size_bytes, t_db.fields.size(), t_db.source_file),
-            t_ctx);
-    }
-};
-
-template <>
-struct fmt::formatter<sgrn::scl::ParseResult> : formatter<std::string_view> {
-    auto format(const sgrn::scl::ParseResult& t_result, format_context& t_ctx) const {
-        return formatter<std::string_view>::format(
-            fmt::format("ParseResult{{dbs={}, udts={}}}", t_result.dbs.size(), t_result.udts.size()), t_ctx);
-    }
-};
-
-namespace sgrn::scl
-{
-class PlcSchemaStore;
-struct FieldTarget;
-} // namespace sgrn::scl
