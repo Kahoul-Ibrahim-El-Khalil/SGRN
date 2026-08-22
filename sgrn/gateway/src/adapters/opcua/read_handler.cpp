@@ -42,16 +42,10 @@ UA_StatusCode readS7Value(UA_Server* /*server*/, const UA_NodeId* /*sessionId*/,
 
     // Direct raw memory read for scalar primitives
     if (p_ctx->array_length == 0 && p_ctx->udt_name.empty()) {
-        // Stack buffer for small fields (covers all S7 primitives up to LReal/LInt)
-        uint8_t stack_buf[16];
-        uint8_t* p_raw = stack_buf;
-        std::vector<uint8_t> heap_buf;
-        if (p_ctx->field_size > sizeof(stack_buf)) {
-            heap_buf.resize(p_ctx->field_size);
-            p_raw = heap_buf.data();
-        }
-        if (auto r = p_ctx->server->readDbMemory(p_ctx->db_number, p_ctx->field_offset, p_ctx->field_size, p_raw); r) {
-            auto dv = s7codec::decodeScalar(p_ctx->type, p_raw, p_ctx->field_size, 0, 1);
+        if (auto r = p_ctx->server->readDbMemory(p_ctx->db_number, p_ctx->field_offset, p_ctx->field_size, p_ctx->scratch_buf.data()); r) {
+            const uint32_t decode_count = s7codec::stringDecodeCapacity(p_ctx->type, 1, p_ctx->string_capacity);
+
+            auto dv = s7codec::decodeScalar(p_ctx->type, p_ctx->scratch_buf.data(), p_ctx->field_size, 0, decode_count);
             if (dv.valid()) {
                 UA_DataValue_init(tp_data_value);
                 tp_data_value->hasValue = true;
@@ -70,23 +64,15 @@ UA_StatusCode readS7Value(UA_Server* /*server*/, const UA_NodeId* /*sessionId*/,
 
     // Direct raw memory read for typed arrays
     if (p_ctx->array_length > 0 && p_ctx->udt_name.empty() && p_ctx->elem_ua_type_index >= 0) {
-        uint8_t stack_buf[512];
-        uint8_t* p_raw = stack_buf;
-        std::vector<uint8_t> heap_buf;
-        if (p_ctx->field_size > sizeof(stack_buf)) {
-            heap_buf.resize(p_ctx->field_size);
-            p_raw = heap_buf.data();
-        }
-        if (auto r = p_ctx->server->readDbMemory(p_ctx->db_number, p_ctx->field_offset, p_ctx->field_size, p_raw); r) {
+        if (auto r = p_ctx->server->readDbMemory(p_ctx->db_number, p_ctx->field_offset, p_ctx->field_size, p_ctx->scratch_buf.data()); r) {
             UA_DataValue decoded{};
+
             RawDecodingContext raw_decoding_ctx{
-                .p_node_ctx = p_ctx, .p_raw_data = p_raw, .size = p_ctx->field_size, .p_data_value = &decoded};
+                .p_node_ctx = p_ctx, .p_raw_data = p_ctx->scratch_buf.data(), .size = p_ctx->field_size, .p_data_value = &decoded};
 
             if (auto result = memoryBytesToDataValue(&raw_decoding_ctx); result.hasValue()) {
-                UA_DataValue_init(tp_data_value);
-                tp_data_value->hasValue = true;
-                UA_Variant_copy(&decoded.value, &tp_data_value->value);
-                UA_DataValue_clear(&decoded);
+
+                tp_data_value = &decoded;
                 if (t_source_time_stamp) {
                     tp_data_value->sourceTimestamp = UA_DateTime_now();
                     tp_data_value->hasSourceTimestamp = true;

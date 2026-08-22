@@ -71,8 +71,9 @@ bool readBoolArrayFromS7(const uint8_t* tp_s7_ptr, size_t t_count, UA_Boolean*& 
         return false;
     for (size_t j = 0; j < t_count; ++j) {
         const uint8_t* p_bit_ptr = tp_s7_ptr + (j / 8U);
-        auto t_dv = s7codec::decodeScalar(DataType::Bool, p_bit_ptr, 1, static_cast<int>(j % 8U));
-        t_out_arr[j] = t_dv.valid() && t_dv.b();
+
+        auto dv = s7codec::decodeScalar(DataType::Bool, p_bit_ptr, 1, static_cast<int>(j % 8U));
+        t_out_arr[j] = dv.valid() && dv.b();
     }
     return true;
 }
@@ -81,10 +82,12 @@ bool readBoolArrayFromS7(const uint8_t* tp_s7_ptr, size_t t_count, UA_Boolean*& 
 
 bool decodeScalarS7ToUa(const uint8_t* tp_s7_ptr, const twin::PlcNode& t_node, const UA_DataType* tp_ua_type, uint8_t* tp_ua_ptr) {
     const size_t span = leafS7Span(t_node);
-    auto t_dv = s7codec::decodeScalar(t_node.type_, tp_s7_ptr, span, t_node.bit_index_, t_node.count_, t_node.endian_);
-    if (!t_dv.valid())
+    const uint32_t decode_count = s7codec::stringDecodeCapacity(t_node.type_, t_node.count_, t_node.string_capacity_);
+    auto dv = s7codec::decodeScalar(t_node.type_, tp_s7_ptr, span, t_node.bit_index_, decode_count, t_node.endian_);
+    if (!dv.valid()) {
         return false;
-    return writeDecodedToUaMember(t_dv, static_cast<DataType>(t_node.type_), tp_ua_type, tp_ua_ptr);
+    }
+    return writeDecodedToUaMember(dv, static_cast<DataType>(t_node.type_), tp_ua_type, tp_ua_ptr);
 }
 
 bool translateS7ToOpcUa(const UA_DataType& t_type, const uint8_t* tp_s7_ptr, uint8_t* tp_ua_ptr, const twin::PlcNode& t_node) {

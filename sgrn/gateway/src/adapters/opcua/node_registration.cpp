@@ -69,10 +69,12 @@ static NodeContext* makeFieldContext(twin::PlcMemory* tp_plc_memory, uint16_t t_
         .type = t_field.type,
         .kind = ::sgrn::scl::kind_of(t_field),
         .string_capacity = static_cast<uint32_t>(t_field.string_capacity),
+        .scratch_buf = {},
         .enum_type = nullptr,
         .enum_map = {},
     };
 
+    p_ctx->scratch_buf.resize(p_ctx->field_size);
     p_ctx->enum_map = t_field.enum_map;
 
     if (p_ctx->kind == ::sgrn::scl::FieldKind::Enum) {

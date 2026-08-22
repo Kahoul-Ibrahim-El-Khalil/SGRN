@@ -90,19 +90,6 @@ Result<void, std::string> buildTypedArray(RawDecodingContext* tp_ctx) {
         t_is_string ? (n > 0 ? (tp_ctx->size / n) : 0) : static_cast<size_t>(s7codec::primitiveSize(tp_ctx->p_node_ctx->type));
 
     // For strings: char capacity = elem_stride minus the fixed header bytes.
-    int string_char_capacity = 0;
-    if (t_is_string) {
-        int hdr = 0;
-        if (tp_ctx->p_node_ctx->type == DataType::String)
-            hdr = 2;
-        else if (tp_ctx->p_node_ctx->type == DataType::WString)
-            hdr = 4;
-        else if (tp_ctx->p_node_ctx->type == DataType::XString)
-            hdr = 8;
-        else if (tp_ctx->p_node_ctx->type == DataType::XWString)
-            hdr = 8;
-        string_char_capacity = static_cast<int>(elem_stride > static_cast<size_t>(hdr) ? elem_stride - hdr : 0);
-    }
 
     for (size_t i = 0; i < n; ++i) {
         const uint8_t* p_elem_ptr = tp_ctx->p_raw_data;
@@ -118,7 +105,7 @@ Result<void, std::string> buildTypedArray(RawDecodingContext* tp_ctx) {
 
         const size_t buf_remaining = tp_ctx->size - static_cast<size_t>(p_elem_ptr - tp_ctx->p_raw_data);
         // For string elements pass char capacity as decode_count; for scalars pass 1.
-        const int decode_count = t_is_string ? string_char_capacity : 1;
+        const uint32_t decode_count = s7codec::stringDecodeCapacity(tp_ctx->p_node_ctx->type, 1, tp_ctx->p_node_ctx->string_capacity);
         auto decoded = s7codec::decodeScalar(tp_ctx->p_node_ctx->type, p_elem_ptr, buf_remaining, bit_idx, decode_count,
             tp_ctx->p_node_ctx->type == DataType::WString || tp_ctx->p_node_ctx->type == DataType::XWString ? s7codec::Endian::Big
                                                                                                             : s7codec::Endian::Big);
@@ -175,7 +162,9 @@ Result<void, std::string> memoryBytesToDataValue(RawDecodingContext* tp_ctx) {
     if (tp_ctx->p_node_ctx->array_length > 0)
         return buildTypedArray(tp_ctx);
 
-    auto decoded = s7codec::decodeScalar(tp_ctx->p_node_ctx->type, tp_ctx->p_raw_data, tp_ctx->size, 0, 1);
+    const uint32_t decode_count = s7codec::stringDecodeCapacity(tp_ctx->p_node_ctx->type, 1, tp_ctx->p_node_ctx->string_capacity);
+    auto decoded = s7codec::decodeScalar(tp_ctx->p_node_ctx->type, tp_ctx->p_raw_data, tp_ctx->size, 0, decode_count);
+
     if (!decoded.valid()) {
         return "Decoding Scalar Failed";
     }

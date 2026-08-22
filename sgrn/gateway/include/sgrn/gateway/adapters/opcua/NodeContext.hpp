@@ -40,6 +40,7 @@ struct NodeContext {
     ::sgrn::scl::FieldKind kind{::sgrn::scl::FieldKind::Scalar};
 
     uint32_t string_capacity;
+    mutable std::vector<uint8_t> scratch_buf; // sized once at registration, reused every read for decoded values;
     /// Non-null when the field is projected as an OPC UA Enumeration. The
     /// pointed-to `UA_DataType` carries the node id used in the address space;
     /// `enum_map` mirrors it for value<->name translation on read/write.
