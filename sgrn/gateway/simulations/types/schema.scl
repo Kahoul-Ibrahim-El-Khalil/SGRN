@@ -1,22 +1,3 @@
-// schema.scl — Full-Coverage Type Simulation
-// ─────────────────────────────────────────────────────────────────────────
-// Exercises every read/write path in the OPC UA ↔ S7 bridge:
-//
-//   Primitives:    Bool, Byte/USInt, SByte/SInt, Word/UInt, Int, DWord/UDInt,
-//                  DInt, LWord/ULInt, LInt, Real, LReal, Char, WChar
-//   Strings:       String[n], WString[n]
-//   Time types:    Time, Date, TOD, DTL
-//   Enums:         scalar-alias (various base widths), native TIA syntax,
-//                  inline field-level #ENUM, array-of-enum, nested enum
-//   Arrays:        Bool[], Byte[], Int[], DInt[], Real[], LReal[], String[]
-//   Structs:       flat, nested (2 levels), struct with arrays, array-of-struct
-//   DB layout:     single DB with all of the above + plain regression controls
-// ─────────────────────────────────────────────────────────────────────────
-
-// ══════════════════════════════════════════════════════════════════════════
-// §1  ENUM TYPE DEFINITIONS
-// ══════════════════════════════════════════════════════════════════════════
-
 // 1a. USInt-backed (1-byte unsigned)
 TYPE "Status" : USInt #ENUM(IDLE=0, RUNNING=1, FAULT=2, DONE=3)
 END_TYPE

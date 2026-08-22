@@ -318,9 +318,7 @@ void addLeafVariableNode(const OpcUaAdapterContext& t_adapter_ctx, const OpcUaNo
     UA_NodeId_clear(&t_var_id);
 }
 void addFolderNode(const OpcUaAdapterContext& t_adapter, const OpcUaNodeRegistryContext& t_nodes, const OpcUaNodePath& t_path,
-    const ::sgrn::scl::DbField& t_field,
-    const OpcUaDbContext& t_db) // ── Information model ───────────────────────────────────────────────────────
-{
+    const ::sgrn::scl::DbField& t_field, const OpcUaDbContext& t_db) {
     UA_Server* p_raw = t_adapter.p_opcua_server->raw();
     const UA_NodeId& parent = t_path.parent_id.get();
 
@@ -338,17 +336,20 @@ void addFolderNode(const OpcUaAdapterContext& t_adapter, const OpcUaNodeRegistry
     branch_exp_id.nodeId = branch_id;
     UA_Server_addReference(p_raw, parent, UA_NODEID_NUMERIC(0, 48 /* HasNotifier */), branch_exp_id, true);
 
-    wrappers::opcua::NodeId branch_node = wrappers::opcua::nodeIdFromRaw(branch_id);
     const uint32_t struct_size =
         t_field.type == DataType::Struct ? static_cast<uint32_t>(t_field.struct_size) : computeFieldSize(t_field, false);
-
     OpcUaAggregateFieldContext agg_ctx{t_field.udt_name, static_cast<uint32_t>(t_field.offset), struct_size};
 
-    OpcUaNodePath agg_path{std::move(branch_node), t_path.path, t_path.node_id};
-
+    OpcUaNodePath agg_path{wrappers::opcua::nodeIdFromRaw(branch_id), t_path.path, t_path.node_id};
     addAggregateValueNode(t_adapter, t_nodes, agg_path, t_db, agg_ctx);
+
+    // FIX: without this, unresolved/anonymous struct fields only ever exposed
+    // the single opaque ".Value" JSON aggregate — clients never saw the
+    // individual member fields as their own browsable/writable nodes.
+    if (!t_field.children.empty()) {
+        addFieldNodes(t_adapter, t_nodes, wrappers::opcua::nodeIdFromRaw(branch_id), t_field.children, t_path.path, t_path.node_id, t_db);
+    }
 
     UA_NodeId_clear(&branch_id);
 }
-
 } // namespace sgrn::gateway::adapters

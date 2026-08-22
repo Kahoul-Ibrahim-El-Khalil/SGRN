@@ -344,7 +344,6 @@ set(GATEWAY_OPCUA_SOURCES
     src/adapters/opcua/udt_codec.cpp
     src/adapters/opcua/json_to_ua.cpp
     src/adapters/opcua/decoders.cpp
-    src/adapters/opcua/s7_to_ua.cpp
     src/adapters/opcua/read_handler.cpp
     src/adapters/opcua/write_handler.cpp
     src/adapters/opcua/delta_push.cpp

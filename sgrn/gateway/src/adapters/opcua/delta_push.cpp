@@ -215,7 +215,9 @@ void DeltaPushHandler::pushSubtreeSnapshot(uint16_t t_db_number, const std::stri
         if (p_udt_type && p_node && p_ctx->server->state()) {
             UA_DataValue t_raw_dv{};
             UA_Variant_init(&t_raw_dv.value);
-            if (s7StructToExtensionObjectVariant(*p_node, *p_udt_type, p_ctx->server->state()->tree(), t_raw_dv.value)) {
+            if (auto result =
+                    decodeStructObjectToExtensionObjectVariant(*p_node, *p_udt_type, p_ctx->server->state()->tree(), t_raw_dv.value);
+                result.hasValue()) {
                 t_raw_dv.hasValue = true;
                 enqueueDataValue(node_it->second.node_id, std::move(t_raw_dv), t_timestamp_ms);
                 return;

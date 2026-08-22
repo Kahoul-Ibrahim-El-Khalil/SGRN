@@ -799,7 +799,7 @@ private:
                 setError(fmt::format("Line {}:{} - Missing '{}', found new block", current_.line, current_.col, t_end_keyword));
                 break;
             }
-            if (match(TokenType::Identifier) || match(TokenType::StringLiteral)) {
+            if (match(TokenType::Identifier) || match(TokenType::StringLiteral) || match(TokenType::Keyword)) {
                 std::string field_name = previous_.value;
 
                 if (matchPunctuation("{")) {
@@ -849,7 +849,8 @@ private:
                 t_tracker.advance(f);
                 fields.push_back(f);
             } else {
-                advance();
+                setError(fmt::format("Line {}:{} - Expected field name before ':', got '{}'", current_.line, current_.col, current_.value));
+                return fields;
             }
         }
         matchKeyword(t_end_keyword);

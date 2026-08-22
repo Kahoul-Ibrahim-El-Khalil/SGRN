@@ -1,6 +1,5 @@
 #include <sgrn/gateway/adapters/opcua/NodeContext.hpp>
 #include <sgrn/gateway/adapters/opcua/decoders.hpp>
-#include <sgrn/gateway/adapters/opcua/s7_to_ua.hpp>
 #include <sgrn/gateway/adapters/opcua/udt_codec.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
@@ -65,14 +64,10 @@ UA_StatusCode readS7Value(UA_Server* /*server*/, const UA_NodeId* /*sessionId*/,
     // Direct raw memory read for typed arrays
     if (p_ctx->array_length > 0 && p_ctx->udt_name.empty() && p_ctx->elem_ua_type_index >= 0) {
         if (auto r = p_ctx->server->readDbMemory(p_ctx->db_number, p_ctx->field_offset, p_ctx->field_size, p_ctx->scratch_buf.data()); r) {
-            UA_DataValue decoded{};
-
             RawDecodingContext raw_decoding_ctx{
-                .p_node_ctx = p_ctx, .p_raw_data = p_ctx->scratch_buf.data(), .size = p_ctx->field_size, .p_data_value = &decoded};
+                .p_node_ctx = p_ctx, .p_raw_data = p_ctx->scratch_buf.data(), .size = p_ctx->field_size, .p_data_value = tp_data_value};
 
             if (auto result = memoryBytesToDataValue(&raw_decoding_ctx); result.hasValue()) {
-
-                tp_data_value = &decoded;
                 if (t_source_time_stamp) {
                     tp_data_value->sourceTimestamp = UA_DateTime_now();
                     tp_data_value->hasSourceTimestamp = true;
@@ -149,9 +144,9 @@ UA_StatusCode readS7Value(UA_Server* /*server*/, const UA_NodeId* /*sessionId*/,
         const UA_DataType* p_ua_type = (p_ctx->enum_type != nullptr) ? p_ctx->enum_type : &UA_TYPES[ua_type_idx];
 
         auto* p_arr = UA_Array_new(n, p_ua_type);
-        if (!p_arr)
+        if (!p_arr) {
             return UA_STATUSCODE_BADINTERNALERROR;
-
+        }
         for (size_t i = 0; i < n; ++i) {
             const auto& elem = jv[static_cast<rapidjson::SizeType>(i)];
 
@@ -292,7 +287,9 @@ UA_StatusCode readAggregateValue(UA_Server* /*server*/, const UA_NodeId* /*sessi
         const PlcNode* p_node = p_ctx->server->findSymbol(p_ctx->db_number, p_ctx->field_path);
         if (p_udt_type && p_node && p_ctx->server->state()) {
             UA_Variant_init(&tp_data_value->value);
-            if (s7StructToExtensionObjectVariant(*p_node, *p_udt_type, p_ctx->server->state()->tree(), tp_data_value->value)) {
+            if (auto result =
+                    decodeStructObjectToExtensionObjectVariant(*p_node, *p_udt_type, p_ctx->server->state()->tree(), tp_data_value->value);
+                result.hasValue()) {
                 tp_data_value->hasValue = true;
                 if (t_source_time_stamp) {
                     tp_data_value->sourceTimestamp = UA_DateTime_now();
