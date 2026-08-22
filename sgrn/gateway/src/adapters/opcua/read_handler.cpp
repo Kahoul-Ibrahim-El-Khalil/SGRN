@@ -1,5 +1,6 @@
 #include <sgrn/gateway/adapters/opcua/NodeContext.hpp>
 #include <sgrn/gateway/adapters/opcua/decoders.hpp>
+#include <sgrn/gateway/adapters/opcua/errors.hpp>
 #include <sgrn/gateway/adapters/opcua/udt_codec.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
@@ -39,19 +40,15 @@ UA_StatusCode readS7Value(UA_Server* /*server*/, const UA_NodeId* /*sessionId*/,
         }
     }
 
-    // Direct raw memory read for scalar primitives
+    // Direct raw memory read for scalar primitives. decodeMemoryBytesToDataValue
+    // covers scalars, temporal types (DTL / DATE_AND_TIME) and typed arrays; on
+    // failure we fall through to the JSON serialization path below.
     if (p_ctx->array_length == 0 && p_ctx->udt_name.empty()) {
         if (auto r = p_ctx->server->readDbMemory(p_ctx->db_number, p_ctx->field_offset, p_ctx->field_size, p_ctx->scratch_buf.data()); r) {
-            const uint32_t decode_count = s7codec::stringDecodeCapacity(p_ctx->type, 1, p_ctx->string_capacity);
-
-            auto dv = s7codec::decodeScalar(p_ctx->type, p_ctx->scratch_buf.data(), p_ctx->field_size, 0, decode_count);
-            if (dv.valid()) {
+            RawDecodingContext raw_ctx{.p_node_ctx = p_ctx, .p_raw_data = p_ctx->scratch_buf.data(), .size = p_ctx->field_size};
+            if (auto result = decodeMemoryBytesToDataValue(raw_ctx); result.hasValue()) {
                 UA_DataValue_init(tp_data_value);
-                tp_data_value->hasValue = true;
-                // Shared scalar decode — same type dispatch as memory_to_ua.cpp
-                if (auto result = setScalarFromDecoded(dv, p_ctx, tp_data_value); result.hasError()) {
-                    return UA_STATUSCODE_BADTYPEMISMATCH;
-                }
+                *tp_data_value = result.value();
                 if (t_source_time_stamp) {
                     tp_data_value->sourceTimestamp = UA_DateTime_now();
                     tp_data_value->hasSourceTimestamp = true;
@@ -64,10 +61,10 @@ UA_StatusCode readS7Value(UA_Server* /*server*/, const UA_NodeId* /*sessionId*/,
     // Direct raw memory read for typed arrays
     if (p_ctx->array_length > 0 && p_ctx->udt_name.empty() && p_ctx->elem_ua_type_index >= 0) {
         if (auto r = p_ctx->server->readDbMemory(p_ctx->db_number, p_ctx->field_offset, p_ctx->field_size, p_ctx->scratch_buf.data()); r) {
-            RawDecodingContext raw_decoding_ctx{
-                .p_node_ctx = p_ctx, .p_raw_data = p_ctx->scratch_buf.data(), .size = p_ctx->field_size, .p_data_value = tp_data_value};
+            RawDecodingContext raw_ctx{.p_node_ctx = p_ctx, .p_raw_data = p_ctx->scratch_buf.data(), .size = p_ctx->field_size};
 
-            if (auto result = memoryBytesToDataValue(&raw_decoding_ctx); result.hasValue()) {
+            if (auto result = decodeMemoryBytesToDataValue(raw_ctx); result.hasValue()) {
+                *tp_data_value = result.value();
                 if (t_source_time_stamp) {
                     tp_data_value->sourceTimestamp = UA_DateTime_now();
                     tp_data_value->hasSourceTimestamp = true;
@@ -286,10 +283,10 @@ UA_StatusCode readAggregateValue(UA_Server* /*server*/, const UA_NodeId* /*sessi
         const UA_DataType* p_udt_type = p_ctx->type_registry->find(p_ctx->udt_name);
         const PlcNode* p_node = p_ctx->server->findSymbol(p_ctx->db_number, p_ctx->field_path);
         if (p_udt_type && p_node && p_ctx->server->state()) {
-            UA_Variant_init(&tp_data_value->value);
-            if (auto result =
-                    decodeStructObjectToExtensionObjectVariant(*p_node, *p_udt_type, p_ctx->server->state()->tree(), tp_data_value->value);
-                result.hasValue()) {
+            auto result = decodeStructObjectToExtensionObjectVariant(*p_node, *p_udt_type, p_ctx->server->state()->tree());
+            if (result.hasValue()) {
+                UA_Variant_init(&tp_data_value->value);
+                tp_data_value->value = result.value();
                 tp_data_value->hasValue = true;
                 if (t_source_time_stamp) {
                     tp_data_value->sourceTimestamp = UA_DateTime_now();

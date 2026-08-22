@@ -1,5 +1,6 @@
 #pragma once
 
+#include <sgrn/gateway/adapters/opcua/errors.hpp>
 #include <sgrn/scl/types.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -14,7 +15,7 @@ namespace sgrn::gateway::adapters
 
 sgrn::Result<int, std::string> dataTypeToUaTypeIndex(::sgrn::scl::DataType t_type);
 size_t boolArrayByteCount(size_t t_bit_count);
-sgrn::Result<void, std::string> writeBoolArrayToMemory(
+sgrn::Result<void, OpcUaAdapterError> writeBoolArrayToMemory(
     const UA_Boolean* tp_source, size_t t_count, uint8_t* tp_destination, size_t t_destination_size);
 
 /// Stable key that identifies a scalar-backed OPC UA Enumeration type by the

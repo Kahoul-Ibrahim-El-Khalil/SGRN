@@ -12,7 +12,7 @@ using s7codec::encodeXWString;
 using scl::DataType;
 using sgrn::gateway::twin::PlcNode;
 
-UA_StatusCode encodeStringOpcUaToMemory(const uint8_t* tp_ua_ptr, uint8_t* tp_memory, const PlcNode& t_node) {
+Result<void, OpcUaAdapterError> encodeStringOpcUaToMemory(const uint8_t* tp_ua_ptr, uint8_t* tp_memory, const PlcNode& t_node) {
 
     const auto* p_string = reinterpret_cast<const UA_String*>(tp_ua_ptr);
     auto p_string_data_char = reinterpret_cast<const char*>(p_string->data);
@@ -20,7 +20,7 @@ UA_StatusCode encodeStringOpcUaToMemory(const uint8_t* tp_ua_ptr, uint8_t* tp_me
     const uint32_t string_capacity = t_node.string_capacity_;
     if (t_node.type_ == DataType::String) {
         if (auto result = encodeString(p_string_data_char, string_length, string_capacity, tp_memory, t_node.size_); !result.has_value()) {
-            return UA_STATUSCODE_BADOUTOFRANGE;
+            return Error(OpcUaAdapterError::OUT_OF_RANGE);
         }
 
     }
@@ -28,7 +28,7 @@ UA_StatusCode encodeStringOpcUaToMemory(const uint8_t* tp_ua_ptr, uint8_t* tp_me
     else if (t_node.type_ == DataType::XString) {
         if (auto result = encodeXString(p_string_data_char, string_length, string_capacity, tp_memory, t_node.size_, t_node.endian_);
             !result.has_value()) {
-            return UA_STATUSCODE_BADOUTOFRANGE;
+            return Error(OpcUaAdapterError::OUT_OF_RANGE);
         }
 
     }
@@ -44,27 +44,28 @@ UA_StatusCode encodeStringOpcUaToMemory(const uint8_t* tp_ua_ptr, uint8_t* tp_me
                         encodeWString(p_string_wide_char, wide_string_length, string_capacity, tp_memory, t_node.size_, t_node.endian_);
                     !result.has_value()) {
 
-                    return UA_STATUSCODE_BADOUTOFRANGE;
+                    return Error(OpcUaAdapterError::OUT_OF_RANGE);
                 }
             } else {
                 if (auto result =
                         encodeXWString(p_string_wide_char, wide_string_length, string_capacity, tp_memory, t_node.size_, t_node.endian_);
                     !result.has_value()) {
-                    return UA_STATUSCODE_BADOUTOFRANGE;
+                    return Error(OpcUaAdapterError::OUT_OF_RANGE);
                 }
             }
         }
     }
-    return UA_STATUSCODE_GOOD;
+    return {};
 }
 
-UA_StatusCode encodeDateTimeOpcUaToMemory(const uint8_t* tp_ua_ptr, uint8_t* tp_memory, const PlcNode& t_node, size_t s7_size) {
+Result<void, OpcUaAdapterError> encodeDateTimeOpcUaToMemory(
+    const uint8_t* tp_ua_ptr, uint8_t* tp_memory, const PlcNode& t_node, size_t s7_size) {
     const UA_DateTime ua_date = *reinterpret_cast<const UA_DateTime*>(tp_ua_ptr);
     // UA_DateTime_toUnixTime() returns Unix time in SECONDS.
     const int64_t unix_time_sec = UA_DateTime_toUnixTime(ua_date);
     if (t_node.type_ == DataType::DTL) {
         if (unix_time_sec < 0 || unix_time_sec > 9223372036LL)
-            return UA_STATUSCODE_BADOUTOFRANGE;
+            return Error(OpcUaAdapterError::OUT_OF_RANGE);
         struct tm tm_info = resolveOpcUaLocalTime(ua_date);
         UA_DateTimeStruct dts = UA_DateTime_toStruct(ua_date);
         s7codec::DtlComponents dtl;
@@ -76,18 +77,21 @@ UA_StatusCode encodeDateTimeOpcUaToMemory(const uint8_t* tp_ua_ptr, uint8_t* tp_
         dtl.minute = tm_info.tm_min;
         dtl.second = tm_info.tm_sec;
         dtl.nanosecond = (dts.milliSec * 1000000) + (dts.microSec * 1000) + dts.nanoSec;
-        s7codec::encodeDtl(dtl, tp_memory, s7_size, t_node.endian_);
+        if (auto result = s7codec::encodeDtl(dtl, tp_memory, s7_size, t_node.endian_); !result.has_value())
+            return Error(OpcUaAdapterError::ENCODE_FAILED);
     } else if (t_node.type_ == DataType::DateTime) {
         if (unix_time_sec < 631152000LL)
-            return UA_STATUSCODE_BADOUTOFRANGE;
+            return Error(OpcUaAdapterError::OUT_OF_RANGE);
         struct tm tm_info = resolveOpcUaLocalTime(ua_date);
-        s7codec::encodeDateTime(tm_info.tm_year + 1900, tm_info.tm_mon + 1, tm_info.tm_mday, tm_info.tm_hour, tm_info.tm_min,
-            tm_info.tm_sec, 0, tp_memory, s7_size);
+        if (auto result = s7codec::encodeDateTime(tm_info.tm_year + 1900, tm_info.tm_mon + 1, tm_info.tm_mday, tm_info.tm_hour,
+                tm_info.tm_min, tm_info.tm_sec, 0, tp_memory, s7_size);
+            !result.has_value())
+            return Error(OpcUaAdapterError::ENCODE_FAILED);
     }
-    return UA_STATUSCODE_GOOD;
+    return {};
 }
 
-UA_StatusCode encodeScalarOpcUaToMemory(
+Result<void, OpcUaAdapterError> encodeScalarOpcUaToMemory(
     const UA_DataType* tp_ua_type, const uint8_t* tp_ua_ptr, uint8_t* tp_memory, const PlcNode& t_node) {
     const size_t s7_size = s7codec::primitiveSize(t_node.type_);
 
@@ -99,7 +103,9 @@ UA_StatusCode encodeScalarOpcUaToMemory(
         const UA_Int32 raw = *reinterpret_cast<const UA_Int32*>(tp_ua_ptr);
         s7codec::DecodedValue dv = s7codec::DecodedValue::makeSigned(static_cast<int64_t>(raw));
         auto sc = s7codec::encodeScalar(dv, t_node.type_, tp_memory, s7_size, t_node.bit_index_, 0, t_node.endian_);
-        return sc.has_value() ? UA_STATUSCODE_GOOD : UA_STATUSCODE_BADINTERNALERROR;
+        if (!sc.has_value())
+            return Error(OpcUaAdapterError::ENCODE_FAILED);
+        return {};
     }
 
     // ── String / DateTime: keep dedicated helpers (need node-context data) ──
@@ -113,14 +119,16 @@ UA_StatusCode encodeScalarOpcUaToMemory(
     // ── Table-driven dispatch for all other scalar types ────────────────────
     const sgrn::codecs::CodecEntry* entry = sgrn::codecs::codecEntryFor(t_node.type_);
     if (!entry)
-        return UA_STATUSCODE_BADTYPEMISMATCH;
+        return Error(OpcUaAdapterError::CODEC_ENTRY_NOT_FOUND);
 
     s7codec::DecodedValue dv;
     if (!entry->from_ua(tp_ua_type, tp_ua_ptr, dv))
-        return UA_STATUSCODE_BADTYPEMISMATCH;
+        return Error(OpcUaAdapterError::TYPE_MISMATCH);
 
     auto sc = s7codec::encodeScalar(dv, t_node.type_, tp_memory, s7_size, t_node.bit_index_, 0, t_node.endian_);
-    return sc.has_value() ? UA_STATUSCODE_GOOD : UA_STATUSCODE_BADINTERNALERROR;
+    if (!sc.has_value())
+        return Error(OpcUaAdapterError::ENCODE_FAILED);
+    return {};
 }
 
 /**
@@ -130,7 +138,8 @@ UA_StatusCode encodeScalarOpcUaToMemory(
  * nested PlcNode children defined by the SCL schema. Properly calculates
  * memory offsets and handles nested structures or primitive arrays.
  */
-UA_StatusCode translateOpcUaToMemory(const UA_DataType& t_type, const uint8_t* tp_ua_ptr, uint8_t* tp_memory, const PlcNode& t_node) {
+Result<void, OpcUaAdapterError> encodeStructOpcUaToMemory(
+    const UA_DataType& t_type, const uint8_t* tp_ua_ptr, uint8_t* tp_memory, const PlcNode& t_node) {
     size_t ua_offset = 0;
     for (size_t i = 0; i < t_type.membersSize; ++i) {
         const UA_DataTypeMember& m = t_type.members[i];
@@ -150,24 +159,25 @@ UA_StatusCode translateOpcUaToMemory(const UA_DataType& t_type, const uint8_t* t
                         auto* p_bool_dest = tp_memory + child.offset_;
                         const auto* p_bool_array = reinterpret_cast<const UA_Boolean*>(p_array_data);
                         const size_t required_bytes = boolArrayByteCount(std::min(count_, (size_t)child.count_));
-                        if (!writeBoolArrayToMemory(p_bool_array, std::min(count_, (size_t)child.count_), p_bool_dest, required_bytes))
-                            return UA_STATUSCODE_BADINTERNALERROR;
+                        if (auto result =
+                                writeBoolArrayToMemory(p_bool_array, std::min(count_, (size_t)child.count_), p_bool_dest, required_bytes);
+                            result.hasError())
+                            return result.error();
                         break;
                     }
 
                     uint8_t* p_s7_elem_ptr = tp_memory + child.offset_ + (j * elem_stride);
                     if (m.memberType->typeKind == UA_DATATYPEKIND_STRUCTURE) {
-                        UA_StatusCode sc = translateOpcUaToMemory(*m.memberType, p_ua_elem_ptr, p_s7_elem_ptr, child);
-                        if (sc != UA_STATUSCODE_GOOD)
-                            return sc;
+                        if (auto result = encodeStructOpcUaToMemory(*m.memberType, p_ua_elem_ptr, p_s7_elem_ptr, child); result.hasError())
+                            return result.error();
                     } else {
                         PlcNode elem_node = child;
                         elem_node.count_ = 1;
                         elem_node.size_ = static_cast<uint32_t>(elem_stride);
                         elem_node.offset_ = 0;
-                        UA_StatusCode sc = encodeScalarOpcUaToMemory(m.memberType, p_ua_elem_ptr, p_s7_elem_ptr, elem_node);
-                        if (sc != UA_STATUSCODE_GOOD)
-                            return sc;
+                        if (auto result = encodeScalarOpcUaToMemory(m.memberType, p_ua_elem_ptr, p_s7_elem_ptr, elem_node);
+                            result.hasError())
+                            return result.error();
                     }
                 }
             }
@@ -176,18 +186,16 @@ UA_StatusCode translateOpcUaToMemory(const UA_DataType& t_type, const uint8_t* t
             uint8_t* p_member = tp_memory + child.offset_;
             const uint8_t* p_ua_member_ptr = tp_ua_ptr + ua_offset;
             if (m.memberType->typeKind == UA_DATATYPEKIND_STRUCTURE) {
-                UA_StatusCode sc = translateOpcUaToMemory(*m.memberType, p_ua_member_ptr, p_member, child);
-                if (sc != UA_STATUSCODE_GOOD)
-                    return sc;
+                if (auto result = encodeStructOpcUaToMemory(*m.memberType, p_ua_member_ptr, p_member, child); result.hasError())
+                    return result.error();
             } else {
-                UA_StatusCode sc = encodeScalarOpcUaToMemory(m.memberType, p_ua_member_ptr, p_member, child);
-                if (sc != UA_STATUSCODE_GOOD)
-                    return sc;
+                if (auto result = encodeScalarOpcUaToMemory(m.memberType, p_ua_member_ptr, p_member, child); result.hasError())
+                    return result.error();
             }
             ua_offset += m.memberType->memSize;
         }
     }
-    return UA_STATUSCODE_GOOD;
+    return {};
 }
 
 } // namespace sgrn::gateway::adapters

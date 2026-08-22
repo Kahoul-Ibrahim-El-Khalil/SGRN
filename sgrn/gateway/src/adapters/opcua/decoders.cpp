@@ -1,5 +1,6 @@
 #include <sgrn/gateway/adapters/opcua/NodeContext.hpp>
 #include <sgrn/gateway/adapters/opcua/decoders.hpp>
+#include <sgrn/gateway/adapters/opcua/errors.hpp>
 
 #include <sgrn/gateway/adapters/opcua/TypeTranslation.hpp>
 #include <sgrn/gateway/adapters/opcua/s7_to_ua.hpp>
@@ -10,117 +11,101 @@
 #include <open62541/types_generated_handling.h>
 #include <s7codec/codec.hpp>
 
-#include <opcua_codec_table.hpp>
-#include <open62541/types_generated.h>
-#include <open62541/types_generated_handling.h>
-#include <s7codec/codec.hpp>
-
 using ::sgrn::scl::DataType;
 
 namespace sgrn::gateway::adapters
 {
 
-Result<void, std::string> setScalarFromDecoded(const s7codec::DecodedValue& t_dv, const NodeContext* tp_ctx, UA_DataValue* tp_data_value) {
+Result<UA_DataValue, OpcUaAdapterError> decodeScalarToDataValue(const s7codec::DecodedValue& t_dv, const NodeContext& t_ctx) {
+    UA_DataValue out;
+    UA_DataValue_init(&out);
+    out.hasValue = true;
+
     // Enumerations are projected as 32-bit integers carrying the custom
     // Enum DataType so clients can resolve symbolic names. The underlying S7
     // storage may be a 16-bit (or other width) integer; promote/demote as needed.
-    if (tp_ctx->enum_type != nullptr) {
+    if (t_ctx.enum_type != nullptr) {
         UA_Int32 value = 0;
         if (t_dv.kind() == s7codec::ValueKind::SignedInt)
             value = static_cast<UA_Int32>(t_dv.i());
         else if (t_dv.kind() == s7codec::ValueKind::UnsignedInt)
             value = static_cast<UA_Int32>(t_dv.u());
         else
-            return Error("Faield to handle Enums");
-        UA_Variant_setScalarCopy(&tp_data_value->value, &value, tp_ctx->enum_type);
-        return {};
+            return Error(OpcUaAdapterError::ENUM_UNSUPPORTED_KIND);
+        UA_Variant_setScalarCopy(&out.value, &value, t_ctx.enum_type);
+        return out;
     }
 
-    const sgrn::codecs::CodecEntry* p_entry = sgrn::codecs::codecEntryFor(tp_ctx->type);
+    // Temporal scalar types (DTL / DateTime) are decoded directly from raw bytes
+    // by decodeTemporalBytesToUaDateTime() before this point; the codec-table
+    // adapter is a "return false" sentinel so it must never be reached here.
+    if (t_ctx.type == DataType::DTL || t_ctx.type == DataType::DateTime) {
+        return Error(OpcUaAdapterError::TYPE_MISMATCH);
+    }
+
+    const sgrn::codecs::CodecEntry* p_entry = sgrn::codecs::codecEntryFor(t_ctx.type);
     if (!p_entry) {
-        return Error("Failed to indentify the appropriate Corresponding type");
+        return Error(OpcUaAdapterError::CODEC_ENTRY_NOT_FOUND);
     }
-    if (!p_entry->to_ua(t_dv, tp_ctx->type, tp_data_value->value)) {
-        if (tp_ctx->type == DataType::DTL || tp_ctx->type == DataType::DateTime) {
-            if (t_dv.kind() != s7codec::ValueKind::String)
-                return Error("Codec failed to render DTL as string");
-            // s7codec renders DTL as "YYYY-MM-DD HH:MM:SS.nnnnnnnnn" (see
-            // s7shell's dtlToString) — parse it back into a real UA_DateTime
-            // instead of shipping the formatted string.
-            unsigned y = 0, mo = 0, d = 0, h = 0, mi = 0, s = 0, ns = 0;
-            if (std::sscanf(t_dv.s().c_str(), "%4u-%2u-%2u %2u:%2u:%2u.%9u", &y, &mo, &d, &h, &mi, &s, &ns) >= 6) {
-                UA_DateTimeStruct dts{};
-                dts.year = static_cast<UA_Int16>(y);
-                dts.month = static_cast<UA_UInt16>(mo);
-                dts.day = static_cast<UA_UInt16>(d);
-                dts.hour = static_cast<UA_UInt16>(h);
-                dts.min = static_cast<UA_UInt16>(mi);
-                dts.sec = static_cast<UA_UInt16>(s);
-                dts.milliSec = static_cast<UA_UInt16>(ns / 1000000U);
-                dts.microSec = static_cast<UA_UInt16>((ns / 1000U) % 1000U);
-                dts.nanoSec = static_cast<UA_UInt16>(ns % 1000U);
-                UA_DateTime dt = UA_DateTime_fromStruct(dts);
-                UA_Variant_setScalarCopy(&tp_data_value->value, &dt, &UA_TYPES[UA_TYPES_DATETIME]);
-                return {};
-            }
-            // Malformed DTL string — fall through to string encoding rather than
-            // fail the whole read; still better than a mismatched DataType attribute.
-            UA_String uas = UA_STRING_ALLOC(t_dv.s().c_str());
-            UA_Variant_setScalarCopy(&tp_data_value->value, &uas, &UA_TYPES[UA_TYPES_STRING]);
-            UA_String_clear(&uas);
-            return {};
-        }
-        return {};
+    if (!p_entry->to_ua(t_dv, t_ctx.type, out.value)) {
+        return Error(OpcUaAdapterError::NO_EQUIVALENT_TYPE);
     }
-    return {};
+    return out;
 }
 
-Result<void, std::string> buildTypedArray(RawDecodingContext* tp_ctx) {
-    const size_t n = tp_ctx->p_node_ctx->array_length;
-    const int t_ua_type_idx = tp_ctx->p_node_ctx->elem_ua_type_index;
+Result<UA_DataValue, OpcUaAdapterError> decodeTypedArrayToDataValue(const RawDecodingContext& t_ctx) {
+    const size_t n = t_ctx.p_node_ctx->array_length;
+    const int t_ua_type_idx = t_ctx.p_node_ctx->elem_ua_type_index;
     if (n == 0 || t_ua_type_idx < 0) {
-        return Error("This is an array of unknown type or of size 0");
+        return Error(OpcUaAdapterError::INVALID_ARRAY);
     }
 
-    const UA_DataType* p_ua_type = (tp_ctx->p_node_ctx->enum_type != nullptr) ? tp_ctx->p_node_ctx->enum_type : &UA_TYPES[t_ua_type_idx];
+    const UA_DataType* p_ua_type = (t_ctx.p_node_ctx->enum_type != nullptr) ? t_ctx.p_node_ctx->enum_type : &UA_TYPES[t_ua_type_idx];
 
     auto* p_arr = UA_Array_new(n, p_ua_type);
     if (!p_arr) {
-        return Error("Failed to init Array");
+        return Error(OpcUaAdapterError::ARRAY_ALLOC_FAILED);
     }
 
     // Compute per-element stride. For strings field_size is the TOTAL array size,
     // so stride = field_size / n. For non-strings use primitiveSize (handles bool packing
     // separately below).
-    const bool t_is_string = (tp_ctx->p_node_ctx->type == DataType::String || tp_ctx->p_node_ctx->type == DataType::WString ||
-                              tp_ctx->p_node_ctx->type == DataType::XString || tp_ctx->p_node_ctx->type == DataType::XWString);
+    const bool t_is_string = (t_ctx.p_node_ctx->type == DataType::String || t_ctx.p_node_ctx->type == DataType::WString ||
+                              t_ctx.p_node_ctx->type == DataType::XString || t_ctx.p_node_ctx->type == DataType::XWString);
     // Stride: for strings derived from total/count; for bools, 0 (handled via bit indexing); for others use primitiveSize.
     const size_t elem_stride =
-        t_is_string ? (n > 0 ? (tp_ctx->size / n) : 0) : static_cast<size_t>(s7codec::primitiveSize(tp_ctx->p_node_ctx->type));
+        t_is_string ? (n > 0 ? (t_ctx.size / n) : 0) : static_cast<size_t>(s7codec::primitiveSize(t_ctx.p_node_ctx->type));
 
     // For strings: char capacity = elem_stride minus the fixed header bytes.
 
     for (size_t i = 0; i < n; ++i) {
-        const uint8_t* p_elem_ptr = tp_ctx->p_raw_data;
+        const uint8_t* p_elem_ptr = t_ctx.p_raw_data;
         int bit_idx = 0;
-        if (tp_ctx->p_node_ctx->type == DataType::Bool) {
-            p_elem_ptr = tp_ctx->p_raw_data + (i / 8);
+        if (t_ctx.p_node_ctx->type == DataType::Bool) {
+            p_elem_ptr = t_ctx.p_raw_data + (i / 8);
             bit_idx = static_cast<int>(i % 8);
         } else {
-            p_elem_ptr = tp_ctx->p_raw_data + (i * elem_stride);
+            p_elem_ptr = t_ctx.p_raw_data + (i * elem_stride);
         }
-        if (p_elem_ptr >= tp_ctx->p_raw_data + tp_ctx->size)
+        if (p_elem_ptr >= t_ctx.p_raw_data + t_ctx.size)
             break;
 
-        const size_t buf_remaining = tp_ctx->size - static_cast<size_t>(p_elem_ptr - tp_ctx->p_raw_data);
-        // For string elements pass char capacity as decode_count; for scalars pass 1.
-        const uint32_t decode_count = s7codec::stringDecodeCapacity(tp_ctx->p_node_ctx->type, 1, tp_ctx->p_node_ctx->string_capacity);
-        auto decoded = s7codec::decodeScalar(tp_ctx->p_node_ctx->type, p_elem_ptr, buf_remaining, bit_idx, decode_count,
-            tp_ctx->p_node_ctx->type == DataType::WString || tp_ctx->p_node_ctx->type == DataType::XWString ? s7codec::Endian::Big
-                                                                                                            : s7codec::Endian::Big);
+        const size_t buf_remaining = t_ctx.size - static_cast<size_t>(p_elem_ptr - t_ctx.p_raw_data);
+        const uint32_t decode_count = s7codec::stringDecodeCapacity(t_ctx.p_node_ctx->type, 1, t_ctx.p_node_ctx->string_capacity);
+        auto decoded =
+            s7codec::decodeScalar(t_ctx.p_node_ctx->type, p_elem_ptr, buf_remaining, bit_idx, decode_count, s7codec::Endian::Big);
 
         bool appended = false;
-        if (decoded.valid()) {
+
+        // Temporal arrays: decode each raw element directly into a UA_DateTime,
+        // bypassing the codec's string round-trip (the table adapter is a sentinel).
+        if (t_ctx.p_node_ctx->type == DataType::DTL || t_ctx.p_node_ctx->type == DataType::DateTime) {
+            auto dt = decodeTemporalBytesToUaDateTime(t_ctx.p_node_ctx->type, p_elem_ptr, buf_remaining, s7codec::Endian::Big);
+            if (dt.hasValue()) {
+                static_cast<UA_DateTime*>(p_arr)[i] = dt.value();
+                appended = true;
+            }
+        } else if (decoded.valid()) {
             if (p_ua_type->typeKind == UA_DATATYPEKIND_ENUM) {
                 static_cast<UA_Int32*>(p_arr)[i] =
                     static_cast<UA_Int32>(decoded.kind() == s7codec::ValueKind::SignedInt ? decoded.i() : decoded.u());
@@ -132,11 +117,11 @@ Result<void, std::string> buildTypedArray(RawDecodingContext* tp_ctx) {
                 p_str_arr[i] = UA_String_fromChars(s.c_str());
                 appended = true;
             } else {
-                const sgrn::codecs::CodecEntry* entry = sgrn::codecs::codecEntryFor(tp_ctx->p_node_ctx->type);
+                const sgrn::codecs::CodecEntry* entry = sgrn::codecs::codecEntryFor(t_ctx.p_node_ctx->type);
                 if (entry) {
                     UA_Variant tmp;
                     UA_Variant_init(&tmp);
-                    if (entry->to_ua(decoded, tp_ctx->p_node_ctx->type, tmp) && tmp.type == p_ua_type) {
+                    if (entry->to_ua(decoded, t_ctx.p_node_ctx->type, tmp) && tmp.type == p_ua_type) {
                         void* p_target = static_cast<uint8_t*>(p_arr) + (i * p_ua_type->memSize);
                         appended = (UA_copy(tmp.data, p_target, p_ua_type) == UA_STATUSCODE_GOOD);
                     }
@@ -147,40 +132,53 @@ Result<void, std::string> buildTypedArray(RawDecodingContext* tp_ctx) {
 
         if (!appended) {
             UA_Array_delete(p_arr, n, p_ua_type);
-            return Error("Failed to decode Elements");
+            return Error(OpcUaAdapterError::DECODE_FAILED);
         }
     }
 
-    UA_DataValue_init(tp_ctx->p_data_value);
-    tp_ctx->p_data_value->hasValue = true;
-    UA_Variant_setArray(&(tp_ctx->p_data_value->value), p_arr, n, p_ua_type);
-    tp_ctx->p_data_value->value.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
-    tp_ctx->p_data_value->value.arrayDimensions[0] = static_cast<UA_UInt32>(n);
-    tp_ctx->p_data_value->value.arrayDimensionsSize = 1;
-    return {};
+    UA_DataValue out;
+    UA_DataValue_init(&out);
+    out.hasValue = true;
+    UA_Variant_setArray(&out.value, p_arr, n, p_ua_type);
+    out.value.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
+    out.value.arrayDimensions[0] = static_cast<UA_UInt32>(n);
+    out.value.arrayDimensionsSize = 1;
+    return out;
 }
 
-Result<void, std::string> memoryBytesToDataValue(RawDecodingContext* tp_ctx) {
-    if (!tp_ctx || !tp_ctx->p_node_ctx || !tp_ctx->p_raw_data || tp_ctx->size == 0) {
-        return Error("Null pointer");
+Result<UA_DataValue, OpcUaAdapterError> decodeMemoryBytesToDataValue(const RawDecodingContext& t_ctx) {
+    if (!t_ctx.p_node_ctx || !t_ctx.p_raw_data || t_ctx.size == 0) {
+        return Error(OpcUaAdapterError::NULL_POINTER);
     }
 
-    if (!tp_ctx->p_node_ctx->udt_name.empty())
-        return Error("Empty udt_name");
+    if (!t_ctx.p_node_ctx->udt_name.empty())
+        return Error(OpcUaAdapterError::INVALID_DB_ENTRY);
 
-    if (tp_ctx->p_node_ctx->array_length > 0)
-        return buildTypedArray(tp_ctx);
+    if (t_ctx.p_node_ctx->array_length > 0)
+        return decodeTypedArrayToDataValue(t_ctx);
 
-    const uint32_t decode_count = s7codec::stringDecodeCapacity(tp_ctx->p_node_ctx->type, 1, tp_ctx->p_node_ctx->string_capacity);
-    auto decoded = s7codec::decodeScalar(tp_ctx->p_node_ctx->type, tp_ctx->p_raw_data, tp_ctx->size, 0, decode_count);
+    // Temporal scalar types: decode the raw bytes directly into a UA_DateTime,
+    // bypassing the codec's string round-trip.
+    if (t_ctx.p_node_ctx->type == DataType::DTL || t_ctx.p_node_ctx->type == DataType::DateTime) {
+        auto dt = decodeTemporalBytesToUaDateTime(t_ctx.p_node_ctx->type, t_ctx.p_raw_data, t_ctx.size, s7codec::Endian::Big);
+        if (dt.hasError())
+            return dt.error();
+        UA_DataValue out;
+        UA_DataValue_init(&out);
+        out.hasValue = true;
+        UA_DateTime ua_dt = dt.value();
+        UA_Variant_setScalarCopy(&out.value, &ua_dt, &UA_TYPES[UA_TYPES_DATETIME]);
+        return out;
+    }
+
+    const uint32_t decode_count = s7codec::stringDecodeCapacity(t_ctx.p_node_ctx->type, 1, t_ctx.p_node_ctx->string_capacity);
+    auto decoded = s7codec::decodeScalar(t_ctx.p_node_ctx->type, t_ctx.p_raw_data, t_ctx.size, 0, decode_count);
 
     if (!decoded.valid()) {
-        return "Decoding Scalar Failed";
+        return Error(OpcUaAdapterError::DECODE_FAILED);
     }
 
-    UA_DataValue_init(tp_ctx->p_data_value);
-    tp_ctx->p_data_value->hasValue = true;
-    return setScalarFromDecoded(decoded, tp_ctx->p_node_ctx, tp_ctx->p_data_value);
+    return decodeScalarToDataValue(decoded, *t_ctx.p_node_ctx);
 }
 
 namespace
@@ -195,10 +193,10 @@ size_t leafS7Span(const twin::PlcNode& t_node) {
     return static_cast<size_t>(s7codec::primitiveSize(t_node.type_));
 }
 
-Result<void, std::string> writeDecodedToUaMember(
+Result<void, OpcUaAdapterError> writeDecodedToUaMember(
     const s7codec::DecodedValue& t_dv, DataType t_type, const UA_DataType* tp_ua_type, uint8_t* tp_ua_ptr) {
     if (!tp_ua_type || !tp_ua_ptr) {
-        return Error("Null Ptr");
+        return Error(OpcUaAdapterError::NULL_POINTER);
     }
 
     // ── Enum guard ──────────────────────────────────────────────────────────
@@ -209,7 +207,7 @@ Result<void, std::string> writeDecodedToUaMember(
         else if (t_dv.kind() == s7codec::ValueKind::UnsignedInt)
             val = static_cast<UA_Int32>(t_dv.u());
         else {
-            return Error("Failed at handling enums ");
+            return Error(OpcUaAdapterError::ENUM_UNSUPPORTED_KIND);
         }
         *reinterpret_cast<UA_Int32*>(tp_ua_ptr) = val;
         return {};
@@ -218,35 +216,35 @@ Result<void, std::string> writeDecodedToUaMember(
     // ── Table-driven dispatch ───────────────────────────────────────────────
     const sgrn::codecs::CodecEntry* p_entry = sgrn::codecs::codecEntryFor(t_type);
     if (!p_entry) {
-        return Error("Codec Entry not found");
+        return Error(OpcUaAdapterError::CODEC_ENTRY_NOT_FOUND);
     }
 
     UA_Variant tmp;
     UA_Variant_init(&tmp);
     if (!p_entry->to_ua(t_dv, t_type, tmp))
 
-        return Error("Equivalent DataType Not found");
+        return Error(OpcUaAdapterError::NO_EQUIVALENT_TYPE);
 
     // If types mismatch (e.g., table produced Double but member expects Int32),
     // fallback to a generic cast if possible, or fail. In practice, the UDT
     // builder ensures the member type matches entry->ua_type_idx.
     if (tmp.type != tp_ua_type) {
         UA_Variant_clear(&tmp);
-        return Error("Memmber type does not match the looked up type");
+        return Error(OpcUaAdapterError::MEMBER_TYPE_MISMATCH);
     }
 
     bool ok = (UA_copy(tmp.data, tp_ua_ptr, tp_ua_type) == UA_STATUSCODE_GOOD);
     UA_Variant_clear(&tmp);
     if (!ok) {
-        return Error("Failed at copying the enum value");
+        return Error(OpcUaAdapterError::VALUE_COPY_FAILED);
     }
     return {};
 }
 
-Result<void, std::string> decodeArrayOfBooleansFromMemory(const uint8_t* tp_memory_buf, size_t t_count, UA_Boolean*& t_out_arr) {
+Result<void, OpcUaAdapterError> decodeArrayOfBooleansFromMemory(const uint8_t* tp_memory_buf, size_t t_count, UA_Boolean*& t_out_arr) {
     t_out_arr = static_cast<UA_Boolean*>(UA_Array_new(t_count, &UA_TYPES[UA_TYPES_BOOLEAN]));
     if (!t_out_arr)
-        return Error("Failed to init array of Booleans");
+        return Error(OpcUaAdapterError::BOOL_ARRAY_ALLOC_FAILED);
     for (size_t j = 0; j < t_count; ++j) {
         const uint8_t* p_bit_ptr = tp_memory_buf + (j / 8U);
 
@@ -258,18 +256,28 @@ Result<void, std::string> decodeArrayOfBooleansFromMemory(const uint8_t* tp_memo
 
 } // namespace
 
-Result<void, std::string> decodeScalarToUa(
+Result<void, OpcUaAdapterError> decodeScalarToUa(
     const uint8_t* tp_memory_buf, const twin::PlcNode& t_node, const UA_DataType* tp_ua_type, uint8_t* tp_ua_ptr) {
+    // Temporal scalar types: decode the raw bytes directly into a UA_DateTime
+    // and write it straight into the UA struct member slot.
+    if (t_node.type_ == DataType::DTL || t_node.type_ == DataType::DateTime) {
+        auto dt = decodeTemporalBytesToUaDateTime(t_node.type_, tp_memory_buf, leafS7Span(t_node), t_node.endian_);
+        if (dt.hasError())
+            return dt.error();
+        *reinterpret_cast<UA_DateTime*>(tp_ua_ptr) = dt.value();
+        return {};
+    }
+
     const size_t span = leafS7Span(t_node);
     const uint32_t decode_count = s7codec::stringDecodeCapacity(t_node.type_, t_node.count_, t_node.string_capacity_);
     auto dv = s7codec::decodeScalar(t_node.type_, tp_memory_buf, span, t_node.bit_index_, decode_count, t_node.endian_);
     if (!dv.valid()) {
-        return Error("Failed at decoding");
+        return Error(OpcUaAdapterError::DECODE_FAILED);
     }
     return writeDecodedToUaMember(dv, static_cast<DataType>(t_node.type_), tp_ua_type, tp_ua_ptr);
 }
 
-Result<void, std::string> decodeToOpcUa(
+Result<void, OpcUaAdapterError> decodeToOpcUa(
     const UA_DataType& t_type, const uint8_t* tp_memory_buf, uint8_t* tp_ua_ptr, const twin::PlcNode& t_node) {
     size_t ua_offset = 0;
     for (size_t i = 0; i < t_type.membersSize; ++i) {
@@ -282,7 +290,7 @@ Result<void, std::string> decodeToOpcUa(
         if (m.isArray) {
             const size_t t_count = static_cast<size_t>(child.count_);
             if (t_count == 0)
-                return Error("Array of count 0");
+                return Error(OpcUaAdapterError::INVALID_ARRAY);
 
             if (child.type_ == DataType::Bool) {
                 UA_Boolean* p_bool_arr = nullptr;
@@ -294,7 +302,7 @@ Result<void, std::string> decodeToOpcUa(
             } else {
                 void* p_arr = UA_Array_new(t_count, m.memberType);
                 if (!p_arr)
-                    return Error("Failed to create a new array");
+                    return Error(OpcUaAdapterError::ARRAY_ALLOC_FAILED);
                 const size_t elem_stride = std::max<size_t>(1, child.size_);
                 for (size_t j = 0; j < t_count; ++j) {
                     uint8_t* p_ua_elem = static_cast<uint8_t*>(p_arr) + (j * m.memberType->memSize);
@@ -330,14 +338,14 @@ Result<void, std::string> decodeToOpcUa(
     return {};
 }
 
-Result<void, std::string> decodeStructObjectToExtensionObjectVariant(
-    const twin::PlcNode& t_node, const UA_DataType& t_type, const ::sgrn::ArenaTree& t_arena, UA_Variant& t_out) {
+Result<UA_Variant, OpcUaAdapterError> decodeStructObjectToExtensionObjectVariant(
+    const twin::PlcNode& t_node, const UA_DataType& t_type, const ::sgrn::ArenaTree& t_arena) {
     if (!t_node.cached_slot_)
-        return Error("Invalid Db Entry");
+        return Error(OpcUaAdapterError::INVALID_DB_ENTRY);
 
     void* p_buf = UA_calloc(1, t_type.memSize);
     if (!p_buf)
-        return Error("Allocation of buffer failed");
+        return Error(OpcUaAdapterError::ALLOC_FAILED);
 
     const uint8_t* p_s7_base = t_arena.data() + t_node.cached_slot_->offset + t_node.offset_;
     if (auto result = decodeToOpcUa(t_type, p_s7_base, static_cast<uint8_t*>(p_buf), t_node); result.hasError()) {
@@ -350,8 +358,11 @@ Result<void, std::string> decodeStructObjectToExtensionObjectVariant(
     eo.encoding = UA_EXTENSIONOBJECT_DECODED;
     eo.content.decoded.type = &t_type;
     eo.content.decoded.data = p_buf;
-    UA_Variant_setScalarCopy(&t_out, &eo, &UA_TYPES[UA_TYPES_EXTENSIONOBJECT]);
+
+    UA_Variant out;
+    UA_Variant_init(&out);
+    UA_Variant_setScalarCopy(&out, &eo, &UA_TYPES[UA_TYPES_EXTENSIONOBJECT]);
     UA_ExtensionObject_clear(&eo);
-    return {};
+    return out;
 }
 } // namespace sgrn::gateway::adapters

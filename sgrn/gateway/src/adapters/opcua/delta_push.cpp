@@ -56,12 +56,11 @@ bool DeltaPushHandler::buildDataValueFromEvent(const core::TelemetryEvent& t_eve
         typed_ctx.field_size = t_event.typed_leaf.meta.field_size;
         typed_ctx.array_length = t_event.typed_leaf.meta.array_length;
         typed_ctx.elem_ua_type_index = t_event.typed_leaf.meta.elem_ua_type_index;
-        RawDecodingContext raw_decoding_context{.p_node_ctx = &typed_ctx,
-            .p_raw_data = t_event.typed_leaf.bytes->data(),
-            .size = t_event.typed_leaf.bytes->size(),
-            .p_data_value = &t_raw_dv};
+        RawDecodingContext raw_context{
+            .p_node_ctx = &typed_ctx, .p_raw_data = t_event.typed_leaf.bytes->data(), .size = t_event.typed_leaf.bytes->size()};
 
-        if (auto result = memoryBytesToDataValue(&raw_decoding_context); result.hasValue()) {
+        if (auto result = decodeMemoryBytesToDataValue(raw_context); result.hasValue()) {
+            t_raw_dv = result.value();
             return true;
         }
     }
@@ -213,16 +212,15 @@ void DeltaPushHandler::pushSubtreeSnapshot(uint16_t t_db_number, const std::stri
         const UA_DataType* p_udt_type = p_ctx->type_registry->find(p_ctx->udt_name);
         const PlcNode* p_node = p_ctx->server->findSymbol(p_ctx->db_number, p_ctx->field_path);
         if (p_udt_type && p_node && p_ctx->server->state()) {
-            UA_DataValue t_raw_dv{};
-            UA_Variant_init(&t_raw_dv.value);
-            if (auto result =
-                    decodeStructObjectToExtensionObjectVariant(*p_node, *p_udt_type, p_ctx->server->state()->tree(), t_raw_dv.value);
-                result.hasValue()) {
+            auto result = decodeStructObjectToExtensionObjectVariant(*p_node, *p_udt_type, p_ctx->server->state()->tree());
+            if (result.hasValue()) {
+                UA_DataValue t_raw_dv{};
+                UA_DataValue_init(&t_raw_dv);
+                t_raw_dv.value = result.value();
                 t_raw_dv.hasValue = true;
                 enqueueDataValue(node_it->second.node_id, std::move(t_raw_dv), t_timestamp_ms);
                 return;
             }
-            UA_Variant_clear(&t_raw_dv.value);
         }
     }
 

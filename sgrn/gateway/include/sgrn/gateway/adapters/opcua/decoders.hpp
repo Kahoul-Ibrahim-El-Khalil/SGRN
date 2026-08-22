@@ -1,6 +1,7 @@
 #pragma once
 
 #include <sgrn/Result.hpp>
+#include <sgrn/gateway/adapters/opcua/errors.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <open62541/server.h>
@@ -22,25 +23,31 @@ namespace sgrn::gateway::adapters
 
 struct NodeContext;
 
+/// Inputs shared by the decode functions: a schema NodeContext plus the raw S7
+/// bytes to decode. The decoded UA_DataValue is *returned* rather than written
+/// through an out-parameter, so there is no pre-allocated sink to manage.
 struct RawDecodingContext {
     const NodeContext* p_node_ctx;
     const uint8_t* p_raw_data;
     size_t size;
-    UA_DataValue* p_data_value;
 };
 
-/// Build a UA_DataValue from raw S7 field bytes using NodeContext type metadata.
-Result<void, std::string> memoryBytesToDataValue(RawDecodingContext* tp_ctx);
+/// Build a UA_DataValue (scalar, temporal or typed array) from raw S7 field
+/// bytes using NodeContext type metadata. This is the entry point shared by the
+/// read handler and the delta-push path.
+Result<UA_DataValue, OpcUaAdapterError> decodeMemoryBytesToDataValue(const RawDecodingContext& t_ctx);
 
-Result<void, std::string> buildTypedArray(RawDecodingContext* tp_ctx);
-/// Convert a decoded S7 scalar into a UA_DataValue using NodeContext type metadata.
-/// Shared by read_handler.cpp and memory_to_ua.cpp to avoid duplicate type dispatch.
+/// Decode a raw typed S7 array (incl. bool packing) into a UA_DataValue array.
+Result<UA_DataValue, OpcUaAdapterError> decodeTypedArrayToDataValue(const RawDecodingContext& t_ctx);
 
-Result<void, std::string> setScalarFromDecoded(const s7codec::DecodedValue& t_dv, const NodeContext* tp_ctx, UA_DataValue* tp_data_value);
+/// Convert a decoded S7 scalar into a UA_DataValue using NodeContext type
+/// metadata. Shared by read_handler.cpp and the delta-push path to avoid
+/// duplicate type dispatch.
+Result<UA_DataValue, OpcUaAdapterError> decodeScalarToDataValue(const s7codec::DecodedValue& t_dv, const NodeContext& t_ctx);
 
-inline Result<UA_DateTime, std::string> decodeDtlBytesToUaDateTime(const uint8_t* tp_ptr, size_t t_size, s7codec::Endian t_endian) {
+inline Result<UA_DateTime, OpcUaAdapterError> decodeDtlBytesToUaDateTime(const uint8_t* tp_ptr, size_t t_size, s7codec::Endian t_endian) {
     if (!tp_ptr || t_size < 12)
-        return Error("DTL must be 12");
+        return Error(OpcUaAdapterError::INVALID_DTL);
 
     const uint32_t ns = s7codec::fromEndian<uint32_t>(tp_ptr + 8, t_endian);
 
@@ -58,16 +65,47 @@ inline Result<UA_DateTime, std::string> decodeDtlBytesToUaDateTime(const uint8_t
     return UA_DateTime_fromStruct(dts);
 }
 
+/// Decode an S7 DATE_AND_TIME (8-byte BCD) payload directly into a UA_DateTime.
+inline Result<UA_DateTime, OpcUaAdapterError> decodeDateAndTimeBytesToUaDateTime(const uint8_t* tp_ptr, size_t t_size) {
+    if (!tp_ptr || t_size < 8)
+        return Error(OpcUaAdapterError::INVALID_DTL);
+
+    auto bcd = [](uint8_t b) -> uint8_t { return static_cast<uint8_t>(((b >> 4) * 10) + (b & 0x0F)); };
+
+    const uint8_t year_bcd = bcd(tp_ptr[0]);
+    UA_DateTimeStruct dts{};
+    dts.year = static_cast<UA_Int16>(year_bcd + (year_bcd < 90 ? 2000 : 1900));
+    dts.month = bcd(tp_ptr[1]);
+    dts.day = bcd(tp_ptr[2]);
+    dts.hour = bcd(tp_ptr[3]);
+    dts.min = bcd(tp_ptr[4]);
+    dts.sec = bcd(tp_ptr[5]);
+    // Byte 6 = milliseconds BCD, byte 7 hi-nibble = tens-of-ms remainder (kept in ms).
+    dts.milliSec = static_cast<UA_UInt16>((bcd(tp_ptr[6]) * 10) + (tp_ptr[7] >> 4));
+    return UA_DateTime_fromStruct(dts);
+}
+
+/// @brief Decode any S7 temporal scalar type (DTL or DATE_AND_TIME) directly into
+///        a UA_DateTime from its raw memory bytes — no string round-trip.
+inline Result<UA_DateTime, OpcUaAdapterError> decodeTemporalBytesToUaDateTime(
+    s7codec::Type t_type, const uint8_t* tp_ptr, size_t t_size, s7codec::Endian t_endian) {
+    if (t_type == s7codec::Type::DTL)
+        return decodeDtlBytesToUaDateTime(tp_ptr, t_size, t_endian);
+    if (t_type == s7codec::Type::DateTime)
+        return decodeDateAndTimeBytesToUaDateTime(tp_ptr, t_size);
+    return Error(OpcUaAdapterError::TYPE_MISMATCH);
+}
+
 /// Decode one S7 scalar field into an open62541 value buffer (member layout).
-Result<void, std::string> decodeScalarToUa(
+Result<void, OpcUaAdapterError> decodeScalarToUa(
     const uint8_t* tp_memory_buf, const twin::PlcNode& t_node, const UA_DataType* tp_ua_type, uint8_t* tp_ua_ptr);
 
 /// Recursively project an S7 struct/array tree into a decoded UA struct buffer.
-Result<void, std::string> decodeToOpcUa(
+Result<void, OpcUaAdapterError> decodeToOpcUa(
     const UA_DataType& t_type, const uint8_t* tp_memory_buf, uint8_t* tp_ua_ptr, const twin::PlcNode& t_node);
 
 /// Build a UA ExtensionObject variant from live arena memory for a struct node.
-Result<void, std::string> decodeStructObjectToExtensionObjectVariant(
-    const twin::PlcNode& t_node, const UA_DataType& t_type, const ::sgrn::ArenaTree& t_arena, UA_Variant& t_out);
+Result<UA_Variant, OpcUaAdapterError> decodeStructObjectToExtensionObjectVariant(
+    const twin::PlcNode& t_node, const UA_DataType& t_type, const ::sgrn::ArenaTree& t_arena);
 
 } // namespace sgrn::gateway::adapters

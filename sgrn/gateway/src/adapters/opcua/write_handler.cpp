@@ -13,6 +13,8 @@
  */
 #include <sgrn/gateway/adapters/opcua/NodeContext.hpp>
 #include <sgrn/gateway/adapters/opcua/TypeTranslation.hpp>
+#include <sgrn/gateway/adapters/opcua/encoders.hpp>
+#include <sgrn/gateway/adapters/opcua/errors.hpp>
 #include <sgrn/gateway/adapters/opcua/udt_codec.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
 #include <sgrn/gateway/twin/PlcCommandProcessor.hpp>
@@ -262,8 +264,10 @@ std::optional<UA_StatusCode> tryBinaryWrite(NodeContext* p_ctx, const UA_Variant
     if (is_array_input) {
         if (is_bool_array) {
             const auto* p_bools = reinterpret_cast<const UA_Boolean*>(p_udt_data);
-            if (!writeBoolArrayToMemory(p_bools, input_count, s7_binary.data() + header_offset, s7_binary.size() - header_offset))
-                return UA_STATUSCODE_BADINTERNALERROR;
+            if (auto result =
+                    writeBoolArrayToMemory(p_bools, input_count, s7_binary.data() + header_offset, s7_binary.size() - header_offset);
+                result.hasError())
+                return toUAStatusCode(result.error());
         } else {
             const bool is_eo_arr = UA_Variant_hasArrayType(&t_v, &UA_TYPES[UA_TYPES_EXTENSIONOBJECT]);
             for (size_t j = 0; j < input_count; ++j) {
@@ -285,9 +289,9 @@ std::optional<UA_StatusCode> tryBinaryWrite(NodeContext* p_ctx, const UA_Variant
                     continue;
 
                 if (p_current_udt_type->typeKind == UA_DATATYPEKIND_STRUCTURE) {
-                    UA_StatusCode sc = translateOpcUaToMemory(*p_current_udt_type, p_current_ua_data, p_s7_elem_ptr, *p_node);
-                    if (sc != UA_STATUSCODE_GOOD)
-                        return sc;
+                    if (auto result = encodeStructOpcUaToMemory(*p_current_udt_type, p_current_ua_data, p_s7_elem_ptr, *p_node);
+                        result.hasError())
+                        return toUAStatusCode(result.error());
                 } else {
                     PlcNode elem_node = *p_node;
                     if (p_node->type_ == DataType::String || p_node->type_ == DataType::WString || p_node->type_ == DataType::XString ||
@@ -302,24 +306,24 @@ std::optional<UA_StatusCode> tryBinaryWrite(NodeContext* p_ctx, const UA_Variant
                     }
                     elem_node.size_ = static_cast<uint32_t>(element_span);
                     elem_node.offset_ = 0;
-                    UA_StatusCode sc = encodeScalarOpcUaToMemory(p_current_udt_type, p_current_ua_data, p_s7_elem_ptr, elem_node);
-                    if (sc != UA_STATUSCODE_GOOD)
-                        return sc;
+                    if (auto result = encodeScalarOpcUaToMemory(p_current_udt_type, p_current_ua_data, p_s7_elem_ptr, elem_node);
+                        result.hasError())
+                        return toUAStatusCode(result.error());
                 }
             }
         }
     } else if (p_udt_type->typeKind == UA_DATATYPEKIND_STRUCTURE) {
-        UA_StatusCode sc = translateOpcUaToMemory(*p_udt_type, p_udt_data, s7_binary.data() + header_offset, *p_node);
-        if (sc != UA_STATUSCODE_GOOD)
-            return sc;
+        if (auto result = encodeStructOpcUaToMemory(*p_udt_type, p_udt_data, s7_binary.data() + header_offset, *p_node); result.hasError())
+            return toUAStatusCode(result.error());
     } else if (is_bool_array) {
         const auto* p_bools = static_cast<const UA_Boolean*>(t_v.data);
-        if (!writeBoolArrayToMemory(p_bools, t_v.arrayLength, s7_binary.data() + header_offset, s7_binary.size() - header_offset))
-            return UA_STATUSCODE_BADINTERNALERROR;
+        if (auto result =
+                writeBoolArrayToMemory(p_bools, t_v.arrayLength, s7_binary.data() + header_offset, s7_binary.size() - header_offset);
+            result.hasError())
+            return toUAStatusCode(result.error());
     } else {
-        UA_StatusCode sc = encodeScalarOpcUaToMemory(p_udt_type, p_udt_data, s7_binary.data() + header_offset, *p_node);
-        if (sc != UA_STATUSCODE_GOOD)
-            return sc;
+        if (auto result = encodeScalarOpcUaToMemory(p_udt_type, p_udt_data, s7_binary.data() + header_offset, *p_node); result.hasError())
+            return toUAStatusCode(result.error());
     }
 
     PlcCommand cmd;

@@ -2,6 +2,7 @@
 
 #include <sgrn/gateway/adapters/opcua/NodeContext.hpp>
 #include <sgrn/gateway/adapters/opcua/TypeTranslation.hpp>
+#include <sgrn/gateway/adapters/opcua/errors.hpp>
 #include <sgrn/gateway/adapters/opcua/udt_codec.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
 #include <sgrn/gateway/twin/PlcCommandProcessor.hpp>
@@ -49,7 +50,7 @@ inline struct tm resolveOpcUaLocalTime(UA_DateTime ua_date) {
     return tm_info;
 }
 
-UA_StatusCode encodeStringOpcUaToMemory(const uint8_t* tp_ua_ptr, uint8_t* tp_memory, const twin::PlcNode& t_node);
+Result<void, OpcUaAdapterError> encodeStringOpcUaToMemory(const uint8_t* tp_ua_ptr, uint8_t* tp_memory, const twin::PlcNode& t_node);
 /**
  * @brief Encodes a single scalar OPC UA primitive into a raw S7 binary buffer.
  *
@@ -58,8 +59,9 @@ UA_StatusCode encodeStringOpcUaToMemory(const uint8_t* tp_ua_ptr, uint8_t* tp_me
  * DTL and DateTime, preventing out-of-range epoch underflows.
  */
 
-UA_StatusCode encodeScalarOpcUaToMemory(
+Result<void, OpcUaAdapterError> encodeScalarOpcUaToMemory(
     const UA_DataType* tp_ua_type, const uint8_t* tp_ua_ptr, uint8_t* tp_memory, const twin::PlcNode& t_node);
-UA_StatusCode translateOpcUaToMemory(const UA_DataType& t_type, const uint8_t* tp_ua_ptr, uint8_t* tp_memory, const twin::PlcNode& t_node);
+Result<void, OpcUaAdapterError> encodeStructOpcUaToMemory(
+    const UA_DataType& t_type, const uint8_t* tp_ua_ptr, uint8_t* tp_memory, const twin::PlcNode& t_node);
 
 } // namespace sgrn::gateway::adapters

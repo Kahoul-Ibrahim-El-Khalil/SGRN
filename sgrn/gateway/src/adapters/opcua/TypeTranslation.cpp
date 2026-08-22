@@ -19,17 +19,17 @@ size_t boolArrayByteCount(size_t t_bit_count) {
     return (t_bit_count + 7U) / 8U;
 }
 
-sgrn::Result<void, std::string> writeBoolArrayToMemory(
+sgrn::Result<void, OpcUaAdapterError> writeBoolArrayToMemory(
     const UA_Boolean* tp_source, size_t t_count, uint8_t* tp_destination, size_t t_destination_size) {
     for (size_t index = 0; index < t_count; ++index) {
         const size_t byte_index = index / 8U;
         if (byte_index >= t_destination_size) {
-            return sgrn::Error("Buffer overflow Risk");
+            return sgrn::Error(OpcUaAdapterError::OUT_OF_RANGE);
         }
         auto status = s7codec::encodeBool(
             tp_source[index] != 0, static_cast<int>(index % 8U), tp_destination + byte_index, t_destination_size - byte_index);
         if (!status.has_value())
-            return sgrn::Error("Failed to encode Bool");
+            return sgrn::Error(OpcUaAdapterError::ENCODE_FAILED);
     }
     return {};
 }
