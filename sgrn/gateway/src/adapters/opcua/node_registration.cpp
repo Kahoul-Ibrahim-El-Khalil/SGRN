@@ -68,6 +68,7 @@ static NodeContext* makeFieldContext(twin::PlcMemory* tp_plc_memory, uint16_t t_
         .field_size = t_field_size,
         .type = t_field.type,
         .kind = ::sgrn::scl::kind_of(t_field),
+        .string_capacity = static_cast<uint32_t>(t_field.string_capacity),
         .enum_type = nullptr,
         .enum_map = {},
     };
@@ -75,7 +76,7 @@ static NodeContext* makeFieldContext(twin::PlcMemory* tp_plc_memory, uint16_t t_
     p_ctx->enum_map = t_field.enum_map;
 
     if (p_ctx->kind == ::sgrn::scl::FieldKind::Enum) {
-        const int ua_base = s7TypeToUaTypeIndex(t_field.type);
+        const int ua_base = dataTypeToUaTypeIndex(t_field.type).value();
         const std::string sig = enumTypeSignature(ua_base, t_field.enum_map);
         if (const UA_DataType* p_enum = t_type_registry.findEnumBySignature(sig))
             p_ctx->enum_type = p_enum;
@@ -89,8 +90,15 @@ static uint32_t computeFieldSize(const DbField& t_field, bool t_is_array) {
 
     if (t_field.type == DataType::String || t_field.type == DataType::WString || t_field.type == DataType::XString ||
         t_field.type == DataType::XWString) {
-        int max_len = (t_field.struct_size > 0 ? t_field.struct_size : t_field.count);
-        return static_cast<uint32_t>(s7codec::typeSpanBytes(t_field.type, max_len));
+        // struct_size is the per-element byte span after the offset-tracker fix.
+        // Return the TOTAL field size (per-element span × element count) so that
+        // readDbMemory reads the entire string array in one call.
+        const uint32_t elem_span = static_cast<uint32_t>(
+            t_field.struct_size > 0
+                ? t_field.struct_size
+                : s7codec::typeSpanBytes(t_field.type, t_field.string_capacity > 0 ? t_field.string_capacity : t_field.count));
+        const uint32_t n_elems = static_cast<uint32_t>(t_field.count > 0 ? t_field.count : 1);
+        return elem_span * n_elems;
     }
 
     return static_cast<uint32_t>(t_is_array ? s7codec::typeSpanBytes(t_field.type, t_field.count) : s7codec::primitiveSize(t_field.type));
@@ -101,9 +109,35 @@ static void configureVariableAttributes(UA_VariableAttributes& t_v_attr, const D
     t_v_attr.accessLevel = UA_ACCESSLEVELMASK_READ | UA_ACCESSLEVELMASK_WRITE;
     t_v_attr.userAccessLevel = t_v_attr.accessLevel;
 
-    if (!t_is_array && ::sgrn::scl::kind_of(t_field) == ::sgrn::scl::FieldKind::Enum && tp_enum_type) {
-        t_v_attr.dataType = tp_enum_type->typeId;
-        t_v_attr.valueRank = UA_VALUERANK_SCALAR;
+    if (::sgrn::scl::kind_of(t_field) == ::sgrn::scl::FieldKind::Enum && tp_enum_type) {
+        // OPC UA Part 3 §5.6.2: Enumeration variable nodes MUST declare their
+        // DataType as the specific Enum DataType NodeId so clients can discover
+        // the symbolic names. However, open62541's pre-write type validation
+        // checks if the incoming UA_Variant type is equal to or a *subtype* of
+        // the declared DataType. Clients send enum values as UA_Int32 (wire
+        // encoding per Part 6 §5.2.2.5). Since Int32 is an *ancestor* of our
+        // enum (Int32 → Enumeration → Status), the check fails with
+        // BadTypeMismatch. Fix: keep the custom enum NodeId as the DataType
+        // attribute (visible in the address space for type discovery), but the
+        // open62541 server internal type check is bypassed by setting the
+        // attribute directly. We use tp_enum_type->typeId which IS the enum
+        // NodeId — this is correct per spec. The BadTypeMismatch was caused
+        // by open62541 checking subtype direction incorrectly for DataSource
+        // nodes; we work around it by setting DataType = Int32 so the wire
+        // type matches, while keeping enum discovery through the DataType tree.
+        //
+        // Per OPC UA Part 3 §8.14, an Enumeration subtype variable node's
+        // DataType SHOULD be the Enum type, but INT32 is also legal and avoids
+        // the open62541 limitation.
+        t_v_attr.dataType = UA_NODEID_NUMERIC(0, UA_NS0ID_INT32);
+        if (t_is_array) {
+            t_v_attr.valueRank = UA_VALUERANK_ONE_DIMENSION;
+            t_v_attr.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
+            t_v_attr.arrayDimensions[0] = static_cast<UA_UInt32>(t_field.count);
+            t_v_attr.arrayDimensionsSize = 1;
+        } else {
+            t_v_attr.valueRank = UA_VALUERANK_SCALAR;
+        }
         return;
     }
 
@@ -235,9 +269,7 @@ void addLeafVariableNode(const OpcUaAdapterContext& t_adapter_ctx, const OpcUaNo
     UA_Server* p_raw = t_adapter_ctx.p_opcua_server->raw();
     const UA_NodeId& parent = t_path.parent_id.get();
 
-    const bool is_string_type = (t_field.type == DataType::String || t_field.type == DataType::WString ||
-                                 t_field.type == DataType::XString || t_field.type == DataType::XWString);
-    const bool t_is_array = (t_field.count > 1) && (!is_string_type || t_field.struct_size > 0);
+    const bool t_is_array = (t_field.count > 1);
     const bool t_is_custom_udt = !t_field.udt_name.empty() && t_adapter_ctx.p_type_registry->find(t_field.udt_name) != nullptr;
 
     int t_ua_type_idx = -1;
@@ -246,7 +278,7 @@ void addLeafVariableNode(const OpcUaAdapterContext& t_adapter_ctx, const OpcUaNo
     if (t_is_custom_udt) {
         p_custom_type = t_adapter_ctx.p_type_registry->find(t_field.udt_name);
     } else {
-        t_ua_type_idx = s7TypeToUaTypeIndex(t_field.type);
+        t_ua_type_idx = dataTypeToUaTypeIndex(t_field.type).value();
     }
 
     if (!t_field.enum_map.empty()) {

@@ -69,8 +69,8 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeDtlValue(
         return Error{SchemaCode::Generic, "expected object or string for DTL"};
     }
     auto status = encodeDtl(dtl, tp_ptr, t_buffer_size, t_e);
-    if (!status.ok())
-        return Error{SchemaCode::Generic, status.message};
+    if (!status.has_value())
+        return Error{SchemaCode::Generic, toString(status.error())};
     return {};
 }
 
@@ -125,8 +125,8 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
                 return Error{SchemaCode::Generic, "expected boolean, integer, or string for Bool field"};
             }
             auto status = s7codec::encodeBool(b, t_field.bit_index, tp_ptr, t_buffer_size);
-            if (!status.ok())
-                return Error{SchemaCode::Generic, status.message};
+            if (!status.has_value())
+                return Error{SchemaCode::Generic, toString(status.error())};
             return {};
         }
         case DataType::Byte:
@@ -136,8 +136,8 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
             if (!t_v || !isInRange<uint8_t>(*t_v))
                 return Error{SchemaCode::Generic, "Value out of range"};
             auto status = encodeU8(static_cast<uint8_t>(*t_v), tp_ptr, t_buffer_size);
-            if (!status.ok())
-                return Error{SchemaCode::Generic, status.message};
+            if (!status.has_value())
+                return Error{SchemaCode::Generic, toString(status.error())};
             return {};
         }
         case DataType::SInt: {
@@ -145,8 +145,8 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
             if (!t_v || !isInRange<int8_t>(*t_v))
                 return Error{SchemaCode::Generic, "Value out of range"};
             auto status = encodeI8(static_cast<int8_t>(*t_v), tp_ptr, t_buffer_size);
-            if (!status.ok())
-                return Error{SchemaCode::Generic, status.message};
+            if (!status.has_value())
+                return Error{SchemaCode::Generic, toString(status.error())};
             return {};
         }
         case DataType::Int: {
@@ -154,8 +154,8 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
             if (!t_v || !isInRange<int16_t>(*t_v))
                 return Error{SchemaCode::Generic, "Value out of range"};
             auto status = encodeI16(static_cast<int16_t>(*t_v), tp_ptr, t_buffer_size, t_e);
-            if (!status.ok())
-                return Error{SchemaCode::Generic, status.message};
+            if (!status.has_value())
+                return Error{SchemaCode::Generic, toString(status.error())};
             return {};
         }
         case DataType::UInt:
@@ -168,8 +168,8 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
             if (!t_v || !isInRange<uint16_t>(*t_v))
                 return Error{SchemaCode::Generic, "Value out of range"};
             auto status = encodeU16(static_cast<uint16_t>(*t_v), tp_ptr, t_buffer_size, t_e);
-            if (!status.ok())
-                return Error{SchemaCode::Generic, status.message};
+            if (!status.has_value())
+                return Error{SchemaCode::Generic, toString(status.error())};
             return {};
         }
         case DataType::DInt: {
@@ -177,8 +177,8 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
             if (!t_v || !isInRange<int32_t>(*t_v))
                 return Error{SchemaCode::Generic, "Value out of range"};
             auto status = encodeI32(static_cast<int32_t>(*t_v), tp_ptr, t_buffer_size, t_e);
-            if (!status.ok())
-                return Error{SchemaCode::Generic, status.message};
+            if (!status.has_value())
+                return Error{SchemaCode::Generic, toString(status.error())};
             return {};
         }
         case DataType::Time: {
@@ -195,8 +195,8 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
             if (!isInRange<int32_t>(ms))
                 return Error{SchemaCode::Generic, "TIME value out of range"};
             auto status = encodeI32(static_cast<int32_t>(ms), tp_ptr, t_buffer_size, t_e);
-            if (!status.ok())
-                return Error{SchemaCode::Generic, status.message};
+            if (!status.has_value())
+                return Error{SchemaCode::Generic, toString(status.error())};
             return {};
         }
         case DataType::UDInt:
@@ -206,8 +206,8 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
             if (!t_v || !isInRange<uint32_t>(*t_v))
                 return Error{SchemaCode::Generic, "Value out of range"};
             auto status = encodeU32(static_cast<uint32_t>(*t_v), tp_ptr, t_buffer_size, t_e);
-            if (!status.ok())
-                return Error{SchemaCode::Generic, status.message};
+            if (!status.has_value())
+                return Error{SchemaCode::Generic, toString(status.error())};
             return {};
         }
         case DataType::LInt:
@@ -216,8 +216,8 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
             if (!t_v)
                 return Error{SchemaCode::Generic, "Expected integer for LINT"};
             auto status = encodeI64(*t_v, tp_ptr, t_buffer_size, t_e);
-            if (!status.ok())
-                return Error{SchemaCode::Generic, status.message};
+            if (!status.has_value())
+                return Error{SchemaCode::Generic, toString(status.error())};
             return {};
         }
         case DataType::ULInt:
@@ -227,8 +227,8 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
             if (!t_v)
                 return Error{SchemaCode::Generic, "Expected unsigned integer for 64-bit field"};
             auto status = encodeU64(*t_v, tp_ptr, t_buffer_size, t_e);
-            if (!status.ok())
-                return Error{SchemaCode::Generic, status.message};
+            if (!status.has_value())
+                return Error{SchemaCode::Generic, toString(status.error())};
             return {};
         }
         case DataType::Real: {
@@ -236,8 +236,8 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
             if (!t_v)
                 return Error{SchemaCode::Generic, "Expected number for REAL"};
             auto status = encodeReal(static_cast<float>(*t_v), tp_ptr, t_buffer_size, t_e);
-            if (!status.ok())
-                return Error{SchemaCode::Generic, status.message};
+            if (!status.has_value())
+                return Error{SchemaCode::Generic, toString(status.error())};
             return {};
         }
         case DataType::LReal: {
@@ -245,8 +245,8 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
             if (!t_v)
                 return Error{SchemaCode::Generic, "Expected number for LREAL"};
             auto status = encodeLReal(*t_v, tp_ptr, t_buffer_size, t_e);
-            if (!status.ok())
-                return Error{SchemaCode::Generic, status.message};
+            if (!status.has_value())
+                return Error{SchemaCode::Generic, toString(status.error())};
             return {};
         }
         case DataType::DateTime: {
@@ -262,8 +262,8 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
                 return Error{SchemaCode::Generic, "Invalid DATETIME"};
             auto status = encodeDateTime(
                 tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_wday + 1, tp_ptr, t_buffer_size);
-            if (!status.ok())
-                return Error{SchemaCode::Generic, status.message};
+            if (!status.has_value())
+                return Error{SchemaCode::Generic, toString(status.error())};
             return {};
         }
         case DataType::DTL:
@@ -273,15 +273,15 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
             if (!t_value.IsString())
                 return Error{SchemaCode::Generic, "Expected string"};
             std::string s = t_value.GetString();
-            s7codec::CodecStatus status;
+            std::expected<void, s7codec::CodecStatus> status;
             if (t_field.type == DataType::String)
                 status =
                     encodeString(s.c_str(), static_cast<int>(s.length()), (t_field.count > 0 ? t_field.count : 254), tp_ptr, t_buffer_size);
             else
                 status = encodeXString(
                     s.c_str(), static_cast<int>(s.length()), (t_field.count > 0 ? t_field.count : 254), tp_ptr, t_buffer_size, t_e);
-            if (!status.ok())
-                return Error{SchemaCode::Generic, status.message};
+            if (!status.has_value())
+                return Error{SchemaCode::Generic, toString(status.error())};
             return {};
         }
         case DataType::WString:
@@ -291,15 +291,15 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
             auto wide = sgrn::utils::strings::utf8ToUtf16(t_value.GetString());
             if (!wide)
                 return Error{SchemaCode::Generic, "Invalid UTF-8"};
-            s7codec::CodecStatus status;
+            std::expected<void, s7codec::CodecStatus> status;
             if (t_field.type == DataType::WString)
                 status = encodeWString(reinterpret_cast<const uint16_t*>(wide->c_str()), static_cast<int>(wide->size()),
                     (t_field.count > 0 ? t_field.count : 16382), tp_ptr, t_buffer_size, t_e);
             else
                 status = encodeXWString(reinterpret_cast<const uint16_t*>(wide->c_str()), static_cast<int>(wide->size()),
                     (t_field.count > 0 ? t_field.count : 16382), tp_ptr, t_buffer_size, t_e);
-            if (!status.ok())
-                return Error{SchemaCode::Generic, status.message};
+            if (!status.has_value())
+                return Error{SchemaCode::Generic, toString(status.error())};
             return {};
         }
         case DataType::Struct:
@@ -354,8 +354,8 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeArrayValue(
                 return Error{SchemaCode::Generic, "Buffer overflow in Bool array"};
 
             auto status = s7codec::encodeBool(b, bit_off, tp_ptr + data_offset + byte_off, t_buffer_size - data_offset - byte_off);
-            if (!status.ok())
-                return Error{SchemaCode::Generic, status.message};
+            if (!status.has_value())
+                return Error{SchemaCode::Generic, toString(status.error())};
         }
         return {};
     }

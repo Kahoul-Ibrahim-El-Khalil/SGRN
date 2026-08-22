@@ -76,19 +76,34 @@ struct OffsetTracker {
         // ── String / WString / XString / XWString ──────────────────────────────
         if (t_field.type == DataType::String || t_field.type == DataType::WString || t_field.type == DataType::XString ||
             t_field.type == DataType::XWString) {
-            // For strings: struct_size holds the per‑element capacity (if > 0),
-            // otherwise count holds the scalar capacity (legacy).
-            // We normalise by setting struct_size to the capacity and count to 1
-            // for scalar strings.
-            int capacity = t_field.struct_size > 0 ? t_field.struct_size : t_field.count;
-            if (t_field.struct_size == 0) {
-                // This is a scalar string – treat it as one element of capacity 'capacity'
-                t_field.struct_size = capacity;
+            // Determine the per-element char capacity:
+            //   - string_capacity > 0: set by parseStringType (most reliable).
+            //   - struct_size > 0:     legacy path where struct_size stores the capacity.
+            //   - fallback to count for truly legacy scalar paths.
+            int char_capacity;
+            if (t_field.string_capacity > 0) {
+                char_capacity = t_field.string_capacity;
+            } else if (t_field.struct_size > 0) {
+                char_capacity = t_field.struct_size;
+            } else {
+                // legacy scalar: count holds the char capacity
+                char_capacity = t_field.count;
+            }
+
+            // For a scalar string (num_elements == 1), normalise so that
+            // struct_size = byte span of one element, count = 1.
+            // For a string array (num_elements > 1), keep count intact and
+            // set struct_size to the per-element byte span.
+            int elem_span = s7codec::typeSpanBytes(t_field.type, char_capacity);
+            if (num_elements <= 1) {
+                t_field.struct_size = elem_span;
                 t_field.count = 1;
                 num_elements = 1;
+            } else {
+                // array of strings — struct_size is the per-element byte span
+                t_field.struct_size = elem_span;
+                // count stays as the array element count
             }
-            // Now compute total size: capacity bytes per string * number of strings
-            int elem_span = s7codec::typeSpanBytes(t_field.type, capacity);
             total_size = elem_span * num_elements;
 
             // Alignment: strings are aligned to 2-byte boundary (like S7)

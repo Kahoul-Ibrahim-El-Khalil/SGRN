@@ -1,0 +1,195 @@
+// schema.scl — Full-Coverage Type Simulation
+// ─────────────────────────────────────────────────────────────────────────
+// Exercises every read/write path in the OPC UA ↔ S7 bridge:
+//
+//   Primitives:    Bool, Byte/USInt, SByte/SInt, Word/UInt, Int, DWord/UDInt,
+//                  DInt, LWord/ULInt, LInt, Real, LReal, Char, WChar
+//   Strings:       String[n], WString[n]
+//   Time types:    Time, Date, TOD, DTL
+//   Enums:         scalar-alias (various base widths), native TIA syntax,
+//                  inline field-level #ENUM, array-of-enum, nested enum
+//   Arrays:        Bool[], Byte[], Int[], DInt[], Real[], LReal[], String[]
+//   Structs:       flat, nested (2 levels), struct with arrays, array-of-struct
+//   DB layout:     single DB with all of the above + plain regression controls
+// ─────────────────────────────────────────────────────────────────────────
+
+// ══════════════════════════════════════════════════════════════════════════
+// §1  ENUM TYPE DEFINITIONS
+// ══════════════════════════════════════════════════════════════════════════
+
+// 1a. USInt-backed (1-byte unsigned)
+TYPE "Status" : USInt #ENUM(IDLE=0, RUNNING=1, FAULT=2, DONE=3)
+END_TYPE
+
+// 1b. Native TIA syntax with auto-increment trailing member
+TYPE "PlantMode"
+VERSION : 0.1
+   (STOPPED  := 0,
+    STARTING := 1,
+    RUNNING  := 2,
+    STOPPING := 3,
+    FAULT    := 4,
+    UNKNOWN);
+END_TYPE
+
+// 1c. SInt-backed — negative values, signed encode path
+TYPE "Direction" : SInt #ENUM(BACKWARD=-1, STOPPED=0, FORWARD=1)
+END_TYPE
+
+// 1d. DInt-backed — full 32-bit range
+TYPE "ErrorCode" : DInt #ENUM(OK=0, WARN=1000, ERR_COMM=-100, ERR_HW=-200)
+END_TYPE
+
+// 1e. Byte-backed — boundary value 255
+TYPE "Level" : Byte #ENUM(LOW=0, MED=127, HIGH=255)
+END_TYPE
+
+// 1f. UInt-backed — sparse / non-contiguous
+TYPE "AlarmClass" : UInt #ENUM(NONE=0, INFO=10, WARN=20, ALARM=100)
+END_TYPE
+
+// 1g. Duplicate signature of Status (same base + values) — dedup path
+TYPE "StatusAlias" : USInt #ENUM(IDLE=0, RUNNING=1, FAULT=2, DONE=3)
+END_TYPE
+
+// ══════════════════════════════════════════════════════════════════════════
+// §2  STRUCT TYPE DEFINITIONS
+// ══════════════════════════════════════════════════════════════════════════
+
+// 2a. Flat struct — all scalar primitives
+TYPE "PrimitivePack"
+STRUCT
+    bool      : Bool;
+    byte      : Byte;
+    usint     : USInt;
+    sint      : SInt;
+    word      : Word;
+    uint      : UInt;
+    int       : Int;
+    dword     : DWord;
+    udint     : UDInt;
+    dint      : DInt;
+    real      : Real;
+    lreal     : LReal;
+END_STRUCT
+END_TYPE
+
+// 2b. Struct with string + time fields
+TYPE "InfoBlock"
+STRUCT
+    label       : String[32];
+    tag         : WString[16];
+    created     : DTL;
+    age_ms      : Time;
+    date_only   : Date;
+    time_only   : TOD;
+    mode        : "PlantMode";
+    severity    : USInt #ENUM(LOW=0, MED=1, HIGH=2, CRITICAL=3);
+END_STRUCT
+END_TYPE
+
+// 2c. Nested struct (two levels deep)
+TYPE "Bearing"
+STRUCT
+    temp_real   : Real;
+    rpm         : UDInt;
+    fault_code  : "ErrorCode";
+END_STRUCT
+END_TYPE
+
+TYPE "Motor"
+STRUCT
+    name        : String[16];
+    running     : Bool;
+    setpoint    : Real;
+    bearing_a   : "Bearing";
+    bearing_b   : "Bearing";
+    status      : "Status";
+END_STRUCT
+END_TYPE
+
+
+DATA_BLOCK "TypeCoverage" DB1
+VAR
+    bool      : Bool;
+    byte      : Byte;
+    usint     : USInt;
+    sint      : SInt;
+    word      : Word;
+    uint      : UInt;
+    int       : Int;
+    dword     : DWord;
+    udint     : UDInt;
+    dint      : DInt;
+    lword     : LWord;
+    ulint     : ULInt;
+    lint      : LInt;
+    real      : Real;
+    lreal     : LReal;
+    char      : Char;
+    wchar     : WChar;
+
+    string    : String[64];
+    wstring   : WString[32];
+    short_str : String[8];
+    extended_string : XString[1024];
+    time      : Time;
+    date      : Date;
+    tod       : TOD;
+    dtl       : DTL;
+
+END_VAR
+END_DATA_BLOCK
+DATA_BLOCK "Enums" DB2
+VAR
+    status        : "Status";
+    plant_mode    : "PlantMode";
+    direction     : "Direction";
+    error_code    : "ErrorCode";
+    level         : "Level";
+    alarm_class   : "AlarmClass";
+    status_alias  : "StatusAlias";
+    inline_prio   : USInt #ENUM(LOW=0, MED=1, HIGH=2);
+END_VAR
+END_DATA_BLOCK
+
+DATA_BLOCK "Arrays" DB3
+VAR
+    bools      : ARRAY[0..7]  OF Bool;
+    bytes      : ARRAY[0..7]  OF Byte;
+    usints     : ARRAY[0..3]  OF USInt;
+    sints      : ARRAY[0..3]  OF SInt;
+    words      : ARRAY[0..3]  OF Word;
+    uints      : ARRAY[0..3]  OF UInt;
+    ints       : ARRAY[0..3]  OF Int;
+    dwords     : ARRAY[0..3]  OF DWord;
+    udints     : ARRAY[0..3]  OF UDInt;
+    dints      : ARRAY[0..3]  OF DInt;
+    reals      : ARRAY[0..3]  OF Real;
+    lreals     : ARRAY[0..1]  OF LReal;
+
+    strings   : ARRAY[0..3]  OF String[16];
+    wstrings  : ARRAY[0..1]  OF WString[8];
+
+    statuss    : ARRAY[0..3]  OF "Status";
+    mode_logs  : ARRAY[0..9]  OF "PlantMode";
+    levels     : ARRAY[0..3]  OF "Level";
+
+END_VAR
+END_DATA_BLOCK
+
+DATA_BLOCK "Structs" DB4
+VAR
+    prims    : "PrimitivePack";
+    info     : "InfoBlock";
+    motor    : "Motor";
+
+    motors    : ARRAY[0..1]  OF "Motor";
+    bearings  : ARRAY[0..3]  OF "Bearing";
+
+    ctrl_counter    : DInt;
+    ctrl_flag       : Bool;
+    ctrl_label      : String[32];
+    ctrl_timestamp  : DTL;
+END_VAR
+END_DATA_BLOCK

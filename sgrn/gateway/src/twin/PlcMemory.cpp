@@ -87,7 +87,7 @@ void applyFieldInit(twin::PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t
             raw = raw.substr(1, raw.size() - 2);
         auto dv = s7codec::DecodedValue::makeString(std::move(raw));
         auto st = s7codec::encodeScalar(dv, t_field.type, buf.data(), buf.size(), 0, max_len, t_field.endianness);
-        if (st.ok())
+        if (st.has_value())
             (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
         return;
     }
@@ -98,7 +98,7 @@ void applyFieldInit(twin::PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t
             if (initEqualsIgnoreCase(v, raw)) {
                 auto dv = s7codec::DecodedValue::makeSigned(k);
                 auto st = s7codec::encodeScalar(dv, t_field.type, buf.data(), buf.size(), t_field.bit_index, 1, t_field.endianness);
-                if (st.ok())
+                if (st.has_value())
                     (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
                 return;
             }
@@ -114,7 +114,7 @@ void applyFieldInit(twin::PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t
             return;
         auto dv = s7codec::DecodedValue::makeSigned(b ? 1 : 0);
         auto st = s7codec::encodeScalar(dv, scl::DataType::Bool, buf.data(), buf.size(), t_field.bit_index, 1, t_field.endianness);
-        if (st.ok())
+        if (st.has_value())
             (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
         return;
     }
@@ -136,7 +136,7 @@ void applyFieldInit(twin::PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t
             return;
         auto dv = s7codec::DecodedValue::makeDouble(d);
         auto st = s7codec::encodeScalar(dv, t_field.type, buf.data(), buf.size(), 0, 1, t_field.endianness);
-        if (st.ok())
+        if (st.has_value())
             (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
         return;
     }
@@ -147,7 +147,7 @@ void applyFieldInit(twin::PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t
         return;
     auto dv = s7codec::DecodedValue::makeSigned(v);
     auto st = s7codec::encodeScalar(dv, t_field.type, buf.data(), buf.size(), t_field.bit_index, 1, t_field.endianness);
-    if (st.ok())
+    if (st.has_value())
         (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
 }
 
@@ -184,11 +184,13 @@ Result<void, ::sgrn::scl::Error> PlcMemory::loadRegistry(const PlcSchemaStore& t
     }
 
     uint16_t next_id = 1000;
-    auto convert_to_node = [&](const DbField& t_field, auto& t_self_ref, DbEntry* tentry, s7codec::Endian t_db_endian) -> PlcNode {
+    auto convert_to_node = [&](const DbField& t_field, auto& t_self_ref, DbEntry* tentry, s7codec::Endian t_db_endian,
+                               uint16_t t_db_num) -> PlcNode {
         PlcNode n;
         n.name_ = t_field.name;
         n.id_ = next_id++;
         n.cached_slot_ = tentry;
+        n.db_number_ = t_db_num;
         n.endian_ = t_field.endianness;
         n.is_dynamic_ = t_field.is_dynamic;
 
@@ -196,8 +198,14 @@ Result<void, ::sgrn::scl::Error> PlcMemory::loadRegistry(const PlcSchemaStore& t
             n.size_ = t_field.struct_size;
         } else if (t_field.type == DataType::String || t_field.type == DataType::WString || t_field.type == DataType::XString ||
                    t_field.type == DataType::XWString) {
-            int max_len = (t_field.struct_size > 0 ? t_field.struct_size : t_field.count);
-            n.size_ = static_cast<size_t>(s7codec::typeSpanBytes(t_field.type, max_len));
+            // After the offset-tracker fix, struct_size is always the per-element
+            // byte span (== typeSpanBytes(type, char_capacity)).  Use it directly.
+            // Fall back to fieldElementSpanBytes only for truly legacy fields that
+            // arrive without struct_size set (e.g. hand-crafted test data).
+            n.size_ = static_cast<size_t>(
+                t_field.struct_size > 0
+                    ? t_field.struct_size
+                    : s7codec::typeSpanBytes(t_field.type, t_field.string_capacity > 0 ? t_field.string_capacity : t_field.count));
         } else {
             n.size_ = static_cast<size_t>(s7codec::primitiveSize(t_field.type));
         }
@@ -249,7 +257,7 @@ Result<void, ::sgrn::scl::Error> PlcMemory::loadRegistry(const PlcSchemaStore& t
         n.count_ = static_cast<uint32_t>(t_field.count);
         n.string_capacity_ = static_cast<uint32_t>(t_field.string_capacity);
         for (const auto& child : t_field.children) {
-            n.children_.push_back(t_self_ref(child, t_self_ref, tentry, t_db_endian));
+            n.children_.push_back(t_self_ref(child, t_self_ref, tentry, t_db_endian, t_db_num));
         }
         return n;
     };
@@ -285,7 +293,7 @@ Result<void, ::sgrn::scl::Error> PlcMemory::loadRegistry(const PlcSchemaStore& t
         n.db_number_ = num;
         n.endian_ = schema->endianness;
         for (const auto& t_field : schema->fields) {
-            n.children_.push_back(convert_to_node(t_field, convert_to_node, p_entry, schema->endianness));
+            n.children_.push_back(convert_to_node(t_field, convert_to_node, p_entry, schema->endianness, num));
         }
         p_plc_state_->add(std::move(n), "");
 

@@ -343,13 +343,14 @@ set(GATEWAY_OPCUA_SOURCES
     src/adapters/opcua/TypeTranslation.cpp
     src/adapters/opcua/udt_codec.cpp
     src/adapters/opcua/json_to_ua.cpp
-    src/adapters/opcua/memory_to_ua.cpp
+    src/adapters/opcua/decoders.cpp
     src/adapters/opcua/s7_to_ua.cpp
     src/adapters/opcua/read_handler.cpp
     src/adapters/opcua/write_handler.cpp
     src/adapters/opcua/delta_push.cpp
     src/adapters/opcua/node_registration.cpp
     src/adapters/opcua/information_model.cpp
+    src/adapters/opcua/encoders.cpp
     # session_security.* superseded by wrappers/opcua/SessionRegistry
 )
 
@@ -369,6 +370,7 @@ target_link_libraries(sgrn_gateway_opcua
     PUBLIC  sgrn_gateway_twin            # PlcMemory, TelemetryBroker
     PUBLIC  sgrn_gateway_security        # SecurityManager
     PUBLIC  sgrn_scl                     # PlcSchemaStore, S7Type
+    PRIVATE sgrn::opcua_codec_table      # OPC UA <-> S7 declarative codec bridge
     PRIVATE fmt::fmt
 )
 

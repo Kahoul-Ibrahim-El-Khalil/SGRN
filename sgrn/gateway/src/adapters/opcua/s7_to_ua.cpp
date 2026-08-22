@@ -3,6 +3,7 @@
 #include <sgrn/gateway/twin/PlcState.hpp>
 #include <sgrn/utils/strings.hpp>
 
+#include <opcua_codec_table.hpp>
 #include <open62541/types_generated.h>
 #include <open62541/types_generated_handling.h>
 #include <s7codec/codec.hpp>
@@ -28,68 +29,40 @@ bool writeDecodedToUaMember(const s7codec::DecodedValue& t_dv, DataType t_type, 
     if (!tp_ua_type || !tp_ua_ptr)
         return false;
 
-    if (tp_ua_type == &UA_TYPES[UA_TYPES_BOOLEAN]) {
-        *reinterpret_cast<UA_Boolean*>(tp_ua_ptr) = t_dv.b();
-        return true;
-    }
-    if (tp_ua_type == &UA_TYPES[UA_TYPES_SBYTE]) {
-        *reinterpret_cast<UA_SByte*>(tp_ua_ptr) = static_cast<UA_SByte>(t_dv.i());
-        return true;
-    }
-    if (tp_ua_type == &UA_TYPES[UA_TYPES_BYTE]) {
-        *reinterpret_cast<UA_Byte*>(tp_ua_ptr) = static_cast<UA_Byte>(t_dv.u());
-        return true;
-    }
-    if (tp_ua_type == &UA_TYPES[UA_TYPES_INT16]) {
-        *reinterpret_cast<UA_Int16*>(tp_ua_ptr) = static_cast<UA_Int16>(t_dv.i());
-        return true;
-    }
-    if (tp_ua_type == &UA_TYPES[UA_TYPES_UINT16]) {
-        *reinterpret_cast<UA_UInt16*>(tp_ua_ptr) = static_cast<UA_UInt16>(t_dv.u());
-        return true;
-    }
-    if (tp_ua_type == &UA_TYPES[UA_TYPES_INT32]) {
-        if (t_type == DataType::Time)
-            *reinterpret_cast<UA_Int32*>(tp_ua_ptr) = static_cast<UA_Int32>(t_dv.i());
+    // ── Enum guard ──────────────────────────────────────────────────────────
+    if (tp_ua_type->typeKind == UA_DATATYPEKIND_ENUM) {
+        UA_Int32 val = 0;
+        if (t_dv.kind() == s7codec::ValueKind::SignedInt)
+            val = static_cast<UA_Int32>(t_dv.i());
+        else if (t_dv.kind() == s7codec::ValueKind::UnsignedInt)
+            val = static_cast<UA_Int32>(t_dv.u());
         else
-            *reinterpret_cast<UA_Int32*>(tp_ua_ptr) = static_cast<UA_Int32>(t_dv.i());
-        return true;
-    }
-    if (tp_ua_type == &UA_TYPES[UA_TYPES_UINT32]) {
-        *reinterpret_cast<UA_UInt32*>(tp_ua_ptr) = static_cast<UA_UInt32>(t_dv.u());
-        return true;
-    }
-    if (tp_ua_type == &UA_TYPES[UA_TYPES_INT64]) {
-        *reinterpret_cast<UA_Int64*>(tp_ua_ptr) = t_dv.i();
-        return true;
-    }
-    if (tp_ua_type == &UA_TYPES[UA_TYPES_UINT64]) {
-        *reinterpret_cast<UA_UInt64*>(tp_ua_ptr) = t_dv.u();
-        return true;
-    }
-    if (tp_ua_type == &UA_TYPES[UA_TYPES_FLOAT]) {
-        *reinterpret_cast<UA_Float*>(tp_ua_ptr) = t_dv.f();
-        return true;
-    }
-    if (tp_ua_type == &UA_TYPES[UA_TYPES_DOUBLE]) {
-        if (t_type == DataType::Time)
-            *reinterpret_cast<UA_Double*>(tp_ua_ptr) = static_cast<UA_Double>(static_cast<int32_t>(t_dv.i()));
-        else {
-            *reinterpret_cast<UA_Double*>(tp_ua_ptr) = t_dv.d();
-        }
-        return true;
-    }
-    if (tp_ua_type == &UA_TYPES[UA_TYPES_STRING]) {
-        if (t_dv.kind() != s7codec::ValueKind::String) {
             return false;
-        }
-        auto* p_s = reinterpret_cast<UA_String*>(tp_ua_ptr);
-        UA_String_init(p_s);
-        *p_s = UA_STRING_ALLOC(t_dv.s().c_str());
+        *reinterpret_cast<UA_Int32*>(tp_ua_ptr) = val;
         return true;
     }
 
-    return false;
+    // ── Table-driven dispatch ───────────────────────────────────────────────
+    const sgrn::codecs::CodecEntry* entry = sgrn::codecs::codecEntryFor(t_type);
+    if (!entry)
+        return false;
+
+    UA_Variant tmp;
+    UA_Variant_init(&tmp);
+    if (!entry->to_ua(t_dv, t_type, tmp))
+        return false;
+
+    // If types mismatch (e.g., table produced Double but member expects Int32),
+    // fallback to a generic cast if possible, or fail. In practice, the UDT
+    // builder ensures the member type matches entry->ua_type_idx.
+    if (tmp.type != tp_ua_type) {
+        UA_Variant_clear(&tmp);
+        return false;
+    }
+
+    bool ok = (UA_copy(tmp.data, tp_ua_ptr, tp_ua_type) == UA_STATUSCODE_GOOD);
+    UA_Variant_clear(&tmp);
+    return ok;
 }
 
 bool readBoolArrayFromS7(const uint8_t* tp_s7_ptr, size_t t_count, UA_Boolean*& t_out_arr) {

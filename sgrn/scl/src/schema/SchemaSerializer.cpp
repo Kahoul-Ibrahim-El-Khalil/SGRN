@@ -18,6 +18,14 @@ namespace detail
 static int fieldSpanBytes(const DbField& t_field) {
     if (t_field.type == DataType::Struct)
         return std::max(1, t_field.struct_size) * std::max(1, t_field.count);
+    // For strings, struct_size holds the per-element byte span (after offset-tracker fix).
+    if (t_field.type == DataType::String || t_field.type == DataType::WString || t_field.type == DataType::XString ||
+        t_field.type == DataType::XWString) {
+        const int elem_span = t_field.struct_size > 0 ? t_field.struct_size
+                                                      : s7codec::typeSpanBytes(t_field.type,
+                                                            t_field.string_capacity > 0 ? t_field.string_capacity : t_field.count);
+        return elem_span * std::max(1, t_field.count);
+    }
     return s7codec::typeSpanBytes(t_field.type, t_field.count);
 }
 
@@ -51,17 +59,26 @@ static void serializeDbField(Writer& t_writer, const DbField& t_field) {
 
     if (t_field.type == DataType::String || t_field.type == DataType::WString || t_field.type == DataType::XString ||
         t_field.type == DataType::XWString) {
-        if (t_field.struct_size > 0) { // Array of strings
-            t_writer.Key("count");
-            t_writer.Int(t_field.count);
-            t_writer.Key("capacity");
-            t_writer.Int(t_field.struct_size);
-        } else { // Scalar string
-            t_writer.Key("count");
-            t_writer.Int(1);
-            t_writer.Key("capacity");
-            t_writer.Int(t_field.count);
+        // After the offset-tracker fix:
+        //   scalar string:  count=1,  string_capacity=chars, struct_size=byte_span
+        //   string array:   count=N,  string_capacity=chars, struct_size=per-elem-byte_span
+        // Use count>1 as the array discriminator; always emit string_capacity as 'capacity'.
+        const bool t_is_str_array = (t_field.count > 1);
+        t_writer.Key("count");
+        t_writer.Int(t_field.count);
+        t_writer.Key("capacity");
+        // Prefer string_capacity; fall back to deriving from struct_size if absent.
+        if (t_field.string_capacity > 0) {
+            t_writer.Int(t_field.string_capacity);
+        } else if (t_field.struct_size > 0) {
+            // Reverse-engineer char capacity from byte span.
+            int hdr = (t_field.type == DataType::String) ? 2 : (t_field.type == DataType::WString) ? 4 : 8; // XString / XWString
+            int wscale = (t_field.type == DataType::WString || t_field.type == DataType::XWString) ? 2 : 1;
+            t_writer.Int((t_field.struct_size - hdr) / wscale);
+        } else {
+            t_writer.Int(t_field.count); // legacy fallback
         }
+        (void)t_is_str_array; // used for documentation only
     } else {
         t_writer.Key("count");
         t_writer.Int(t_field.count);
@@ -362,6 +379,21 @@ static sgrn::Result<DbField, ::sgrn::scl::Error> fieldFromJson(const rapidjson::
         t_field.udt_name = t_node["type"].GetString();
     } else {
         t_field.type = type.value();
+    }
+
+    // For string types: 'capacity' in JSON is the char capacity (as emitted by serializeDbField).
+    // Restore string_capacity and recompute struct_size (per-element byte span) so that
+    // the deserialized DbField matches what the SCL parser would produce.
+    const bool t_is_json_string = (t_field.type == DataType::String || t_field.type == DataType::WString ||
+                                   t_field.type == DataType::XString || t_field.type == DataType::XWString);
+    if (t_is_json_string && t_node.HasMember("capacity") && t_node["capacity"].IsInt()) {
+        const int char_cap = t_node["capacity"].GetInt();
+        t_field.string_capacity = char_cap;
+        // Ensure count >= 1 (scalar strings serialized with count=1)
+        if (t_field.count < 1)
+            t_field.count = 1;
+        // Recompute the per-element byte span
+        t_field.struct_size = s7codec::typeSpanBytes(t_field.type, char_cap);
     }
 
     if (t_node.HasMember("children")) {

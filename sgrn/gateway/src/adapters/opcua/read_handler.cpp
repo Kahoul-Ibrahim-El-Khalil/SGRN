@@ -1,5 +1,5 @@
 #include <sgrn/gateway/adapters/opcua/NodeContext.hpp>
-#include <sgrn/gateway/adapters/opcua/memory_to_ua.hpp>
+#include <sgrn/gateway/adapters/opcua/decoders.hpp>
 #include <sgrn/gateway/adapters/opcua/s7_to_ua.hpp>
 #include <sgrn/gateway/adapters/opcua/udt_codec.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
@@ -56,7 +56,7 @@ UA_StatusCode readS7Value(UA_Server* /*server*/, const UA_NodeId* /*sessionId*/,
                 UA_DataValue_init(tp_data_value);
                 tp_data_value->hasValue = true;
                 // Shared scalar decode — same type dispatch as memory_to_ua.cpp
-                if (!setScalarFromDecoded(dv, p_ctx, *tp_data_value)) {
+                if (auto result = setScalarFromDecoded(dv, p_ctx, tp_data_value); result.hasError()) {
                     return UA_STATUSCODE_BADTYPEMISMATCH;
                 }
                 if (t_source_time_stamp) {
@@ -79,7 +79,10 @@ UA_StatusCode readS7Value(UA_Server* /*server*/, const UA_NodeId* /*sessionId*/,
         }
         if (auto r = p_ctx->server->readDbMemory(p_ctx->db_number, p_ctx->field_offset, p_ctx->field_size, p_raw); r) {
             UA_DataValue decoded{};
-            if (s7BytesToDataValue(p_ctx, p_raw, p_ctx->field_size, decoded)) {
+            RawDecodingContext raw_decoding_ctx{
+                .p_node_ctx = p_ctx, .p_raw_data = p_raw, .size = p_ctx->field_size, .p_data_value = &decoded};
+
+            if (auto result = memoryBytesToDataValue(&raw_decoding_ctx); result.hasValue()) {
                 UA_DataValue_init(tp_data_value);
                 tp_data_value->hasValue = true;
                 UA_Variant_copy(&decoded.value, &tp_data_value->value);
@@ -157,160 +160,65 @@ UA_StatusCode readS7Value(UA_Server* /*server*/, const UA_NodeId* /*sessionId*/,
         }
 
         // Typed array
-        if (ua_type_idx == UA_TYPES_DOUBLE) {
-            auto* p_arr = static_cast<UA_Double*>(UA_Array_new(n, &UA_TYPES[UA_TYPES_DOUBLE]));
-            for (size_t i = 0; i < n; ++i)
-                p_arr[i] = jv[static_cast<rapidjson::SizeType>(i)].IsNumber() ? jv[static_cast<rapidjson::SizeType>(i)].GetDouble() : 0.0;
-            UA_Variant_setArray(&tp_data_value->value, p_arr, n, &UA_TYPES[UA_TYPES_DOUBLE]);
-            tp_data_value->value.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
-            tp_data_value->value.arrayDimensions[0] = static_cast<UA_UInt32>(n);
-            tp_data_value->value.arrayDimensionsSize = 1;
-        } else if (ua_type_idx == UA_TYPES_FLOAT) {
-            auto* p_arr = static_cast<UA_Float*>(UA_Array_new(n, &UA_TYPES[UA_TYPES_FLOAT]));
-            for (size_t i = 0; i < n; ++i)
-                p_arr[i] = jv[static_cast<rapidjson::SizeType>(i)].IsNumber()
-                               ? static_cast<UA_Float>(jv[static_cast<rapidjson::SizeType>(i)].GetDouble())
-                               : 0.0f;
-            UA_Variant_setArray(&tp_data_value->value, p_arr, n, &UA_TYPES[UA_TYPES_FLOAT]);
-            tp_data_value->value.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
-            tp_data_value->value.arrayDimensions[0] = static_cast<UA_UInt32>(n);
-            tp_data_value->value.arrayDimensionsSize = 1;
-        } else if (ua_type_idx == UA_TYPES_INT32) {
-            auto* p_arr = static_cast<UA_Int32*>(UA_Array_new(n, &UA_TYPES[UA_TYPES_INT32]));
-            for (size_t i = 0; i < n; ++i)
-                p_arr[i] = jv[static_cast<rapidjson::SizeType>(i)].IsNumber() ? jv[static_cast<rapidjson::SizeType>(i)].GetInt() : 0;
-            UA_Variant_setArray(&tp_data_value->value, p_arr, n, &UA_TYPES[UA_TYPES_INT32]);
-            tp_data_value->value.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
-            tp_data_value->value.arrayDimensions[0] = static_cast<UA_UInt32>(n);
-            tp_data_value->value.arrayDimensionsSize = 1;
-        } else if (ua_type_idx == UA_TYPES_UINT32) {
-            auto* p_arr = static_cast<UA_UInt32*>(UA_Array_new(n, &UA_TYPES[UA_TYPES_UINT32]));
-            for (size_t i = 0; i < n; ++i)
-                p_arr[i] = jv[static_cast<rapidjson::SizeType>(i)].IsNumber() ? jv[static_cast<rapidjson::SizeType>(i)].GetUint() : 0u;
-            UA_Variant_setArray(&tp_data_value->value, p_arr, n, &UA_TYPES[UA_TYPES_UINT32]);
-            tp_data_value->value.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
-            tp_data_value->value.arrayDimensions[0] = static_cast<UA_UInt32>(n);
-            tp_data_value->value.arrayDimensionsSize = 1;
-        } else if (ua_type_idx == UA_TYPES_INT64) {
-            auto* p_arr = static_cast<UA_Int64*>(UA_Array_new(n, &UA_TYPES[UA_TYPES_INT64]));
-            for (size_t i = 0; i < n; ++i)
-                p_arr[i] = jv[static_cast<rapidjson::SizeType>(i)].IsNumber() ? jv[static_cast<rapidjson::SizeType>(i)].GetInt64() : 0;
-            UA_Variant_setArray(&tp_data_value->value, p_arr, n, &UA_TYPES[UA_TYPES_INT64]);
-            tp_data_value->value.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
-            tp_data_value->value.arrayDimensions[0] = static_cast<UA_UInt32>(n);
-            tp_data_value->value.arrayDimensionsSize = 1;
-        } else if (ua_type_idx == UA_TYPES_UINT64) {
-            auto* p_arr = static_cast<UA_UInt64*>(UA_Array_new(n, &UA_TYPES[UA_TYPES_UINT64]));
-            for (size_t i = 0; i < n; ++i)
-                p_arr[i] = jv[static_cast<rapidjson::SizeType>(i)].IsNumber() ? jv[static_cast<rapidjson::SizeType>(i)].GetUint64() : 0u;
-            UA_Variant_setArray(&tp_data_value->value, p_arr, n, &UA_TYPES[UA_TYPES_UINT64]);
-            tp_data_value->value.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
-            tp_data_value->value.arrayDimensions[0] = static_cast<UA_UInt32>(n);
-            tp_data_value->value.arrayDimensionsSize = 1;
-        } else if (ua_type_idx == UA_TYPES_INT16) {
-            auto* p_arr = static_cast<UA_Int16*>(UA_Array_new(n, &UA_TYPES[UA_TYPES_INT16]));
-            for (size_t i = 0; i < n; ++i)
-                p_arr[i] = jv[static_cast<rapidjson::SizeType>(i)].IsNumber()
-                               ? static_cast<UA_Int16>(jv[static_cast<rapidjson::SizeType>(i)].GetInt())
-                               : 0;
-            UA_Variant_setArray(&tp_data_value->value, p_arr, n, &UA_TYPES[UA_TYPES_INT16]);
-            tp_data_value->value.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
-            tp_data_value->value.arrayDimensions[0] = static_cast<UA_UInt32>(n);
-            tp_data_value->value.arrayDimensionsSize = 1;
-        } else if (ua_type_idx == UA_TYPES_UINT16) {
-            auto* p_arr = static_cast<UA_UInt16*>(UA_Array_new(n, &UA_TYPES[UA_TYPES_UINT16]));
-            for (size_t i = 0; i < n; ++i)
-                p_arr[i] = jv[static_cast<rapidjson::SizeType>(i)].IsNumber()
-                               ? static_cast<UA_UInt16>(jv[static_cast<rapidjson::SizeType>(i)].GetUint())
-                               : 0u;
-            UA_Variant_setArray(&tp_data_value->value, p_arr, n, &UA_TYPES[UA_TYPES_UINT16]);
-            tp_data_value->value.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
-            tp_data_value->value.arrayDimensions[0] = static_cast<UA_UInt32>(n);
-            tp_data_value->value.arrayDimensionsSize = 1;
-        } else if (ua_type_idx == UA_TYPES_BYTE) {
-            auto* p_arr = static_cast<UA_Byte*>(UA_Array_new(n, &UA_TYPES[UA_TYPES_BYTE]));
-            for (size_t i = 0; i < n; ++i)
-                p_arr[i] = jv[static_cast<rapidjson::SizeType>(i)].IsNumber()
-                               ? static_cast<UA_Byte>(jv[static_cast<rapidjson::SizeType>(i)].GetUint())
-                               : 0u;
-            UA_Variant_setArray(&tp_data_value->value, p_arr, n, &UA_TYPES[UA_TYPES_BYTE]);
-            tp_data_value->value.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
-            tp_data_value->value.arrayDimensions[0] = static_cast<UA_UInt32>(n);
-            tp_data_value->value.arrayDimensionsSize = 1;
-        } else if (ua_type_idx == UA_TYPES_SBYTE) {
-            auto* p_arr = static_cast<UA_SByte*>(UA_Array_new(n, &UA_TYPES[UA_TYPES_SBYTE]));
-            for (size_t i = 0; i < n; ++i)
-                p_arr[i] = jv[static_cast<rapidjson::SizeType>(i)].IsNumber()
-                               ? static_cast<UA_SByte>(jv[static_cast<rapidjson::SizeType>(i)].GetInt())
-                               : 0;
-            UA_Variant_setArray(&tp_data_value->value, p_arr, n, &UA_TYPES[UA_TYPES_SBYTE]);
-            tp_data_value->value.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
-            tp_data_value->value.arrayDimensions[0] = static_cast<UA_UInt32>(n);
-            tp_data_value->value.arrayDimensionsSize = 1;
-        } else if (ua_type_idx == UA_TYPES_BOOLEAN) {
-            auto* p_arr = static_cast<UA_Boolean*>(UA_Array_new(n, &UA_TYPES[UA_TYPES_BOOLEAN]));
-            for (size_t i = 0; i < n; ++i)
-                p_arr[i] = jv[static_cast<rapidjson::SizeType>(i)].IsBool() ? jv[static_cast<rapidjson::SizeType>(i)].GetBool() : false;
-            UA_Variant_setArray(&tp_data_value->value, p_arr, n, &UA_TYPES[UA_TYPES_BOOLEAN]);
-            tp_data_value->value.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
-            tp_data_value->value.arrayDimensions[0] = static_cast<UA_UInt32>(n);
-            tp_data_value->value.arrayDimensionsSize = 1;
-        } else if (ua_type_idx == UA_TYPES_STRING) {
-            auto* p_arr = static_cast<UA_String*>(UA_Array_new(n, &UA_TYPES[UA_TYPES_STRING]));
-            for (size_t i = 0; i < n; ++i) {
-                if (jv[static_cast<rapidjson::SizeType>(i)].IsString()) {
-                    p_arr[i] = UA_STRING_ALLOC(jv[static_cast<rapidjson::SizeType>(i)].GetString());
-                } else {
-                    UA_String_init(&p_arr[i]);
-                }
-            }
-            UA_Variant_setArray(&tp_data_value->value, p_arr, n, &UA_TYPES[UA_TYPES_STRING]);
-            tp_data_value->value.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
-            tp_data_value->value.arrayDimensions[0] = static_cast<UA_UInt32>(n);
-            tp_data_value->value.arrayDimensionsSize = 1;
-        } else if (ua_type_idx == UA_TYPES_BYTESTRING) {
-            auto* p_arr = static_cast<UA_ByteString*>(UA_Array_new(n, &UA_TYPES[UA_TYPES_BYTESTRING]));
-            for (size_t i = 0; i < n; ++i) {
-                if (jv[static_cast<rapidjson::SizeType>(i)].IsString()) {
-                    p_arr[i] = UA_BYTESTRING_ALLOC(jv[static_cast<rapidjson::SizeType>(i)].GetString());
-                } else {
-                    UA_ByteString_init(&p_arr[i]);
-                }
-            }
-            UA_Variant_setArray(&tp_data_value->value, p_arr, n, &UA_TYPES[UA_TYPES_BYTESTRING]);
-            tp_data_value->value.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
-            tp_data_value->value.arrayDimensions[0] = static_cast<UA_UInt32>(n);
-            tp_data_value->value.arrayDimensionsSize = 1;
-        } else if (ua_type_idx == UA_TYPES_DATETIME) {
-            // Fix 8: Parse actual Unix epoch milliseconds from JSON instead of using server time
-            auto* p_arr = static_cast<UA_DateTime*>(UA_Array_new(n, &UA_TYPES[UA_TYPES_DATETIME]));
-            for (size_t i = 0; i < n; ++i) {
-                const auto& elem = jv[static_cast<rapidjson::SizeType>(i)];
+        const UA_DataType* p_ua_type = (p_ctx->enum_type != nullptr) ? p_ctx->enum_type : &UA_TYPES[ua_type_idx];
+
+        auto* p_arr = UA_Array_new(n, p_ua_type);
+        if (!p_arr)
+            return UA_STATUSCODE_BADINTERNALERROR;
+
+        for (size_t i = 0; i < n; ++i) {
+            const auto& elem = jv[static_cast<rapidjson::SizeType>(i)];
+
+            if (p_ua_type->typeKind == UA_DATATYPEKIND_ENUM) {
+                static_cast<UA_Int32*>(p_arr)[i] = elem.IsNumber() ? elem.GetInt() : 0;
+            } else if (ua_type_idx == UA_TYPES_DOUBLE) {
+                static_cast<UA_Double*>(p_arr)[i] = elem.IsNumber() ? elem.GetDouble() : 0.0;
+            } else if (ua_type_idx == UA_TYPES_FLOAT) {
+                static_cast<UA_Float*>(p_arr)[i] = elem.IsNumber() ? static_cast<UA_Float>(elem.GetDouble()) : 0.0f;
+            } else if (ua_type_idx == UA_TYPES_INT32) {
+                static_cast<UA_Int32*>(p_arr)[i] = elem.IsNumber() ? elem.GetInt() : 0;
+            } else if (ua_type_idx == UA_TYPES_UINT32) {
+                static_cast<UA_UInt32*>(p_arr)[i] = elem.IsNumber() ? elem.GetUint() : 0u;
+            } else if (ua_type_idx == UA_TYPES_INT64) {
+                static_cast<UA_Int64*>(p_arr)[i] = elem.IsNumber() ? elem.GetInt64() : 0;
+            } else if (ua_type_idx == UA_TYPES_UINT64) {
+                static_cast<UA_UInt64*>(p_arr)[i] = elem.IsNumber() ? elem.GetUint64() : 0u;
+            } else if (ua_type_idx == UA_TYPES_INT16) {
+                static_cast<UA_Int16*>(p_arr)[i] = elem.IsNumber() ? static_cast<UA_Int16>(elem.GetInt()) : 0;
+            } else if (ua_type_idx == UA_TYPES_UINT16) {
+                static_cast<UA_UInt16*>(p_arr)[i] = elem.IsNumber() ? static_cast<UA_UInt16>(elem.GetUint()) : 0u;
+            } else if (ua_type_idx == UA_TYPES_BYTE) {
+                static_cast<UA_Byte*>(p_arr)[i] = elem.IsNumber() ? static_cast<UA_Byte>(elem.GetUint()) : 0u;
+            } else if (ua_type_idx == UA_TYPES_SBYTE) {
+                static_cast<UA_SByte*>(p_arr)[i] = elem.IsNumber() ? static_cast<UA_SByte>(elem.GetInt()) : 0;
+            } else if (ua_type_idx == UA_TYPES_BOOLEAN) {
+                static_cast<UA_Boolean*>(p_arr)[i] = elem.IsBool() ? elem.GetBool() : false;
+            } else if (ua_type_idx == UA_TYPES_STRING) {
+                static_cast<UA_String*>(p_arr)[i] = elem.IsString() ? UA_STRING_ALLOC(elem.GetString()) : UA_STRING_NULL;
+            } else if (ua_type_idx == UA_TYPES_BYTESTRING) {
+                static_cast<UA_ByteString*>(p_arr)[i] = elem.IsString() ? UA_BYTESTRING_ALLOC(elem.GetString()) : UA_BYTESTRING_NULL;
+            } else if (ua_type_idx == UA_TYPES_DATETIME) {
                 if (elem.IsUint64()) {
                     uint64_t epoch_ms = elem.GetUint64();
-                    p_arr[i] = UA_DateTime_fromUnixTime(static_cast<UA_Int64>(epoch_ms / 1000)) +
-                               static_cast<UA_DateTime>((epoch_ms % 1000) * UA_DATETIME_MSEC);
-                } else if (elem.IsInt64()) {
+                    static_cast<UA_DateTime*>(p_arr)[i] = UA_DateTime_fromUnixTime(static_cast<UA_Int64>(epoch_ms / 1000)) +
+                                                          static_cast<UA_DateTime>((epoch_ms % 1000) * UA_DATETIME_MSEC);
+                } else if (elem.IsInt64() && elem.GetInt64() >= 0) {
                     int64_t epoch_ms = elem.GetInt64();
-                    if (epoch_ms >= 0) {
-                        p_arr[i] = UA_DateTime_fromUnixTime(static_cast<UA_Int64>(epoch_ms / 1000)) +
-                                   static_cast<UA_DateTime>((static_cast<uint64_t>(epoch_ms) % 1000) * UA_DATETIME_MSEC);
-                    } else {
-                        p_arr[i] = UA_DateTime_fromUnixTime(0);
-                    }
+                    static_cast<UA_DateTime*>(p_arr)[i] =
+                        UA_DateTime_fromUnixTime(static_cast<UA_Int64>(epoch_ms / 1000)) +
+                        static_cast<UA_DateTime>((static_cast<uint64_t>(epoch_ms) % 1000) * UA_DATETIME_MSEC);
                 } else {
-                    p_arr[i] = UA_DateTime_fromUnixTime(0);
+                    static_cast<UA_DateTime*>(p_arr)[i] = UA_DateTime_fromUnixTime(0);
                 }
+            } else {
+                // Ignore unknown types, handled by null array element
             }
-            UA_Variant_setArray(&tp_data_value->value, p_arr, n, &UA_TYPES[UA_TYPES_DATETIME]);
-            tp_data_value->value.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
-            tp_data_value->value.arrayDimensions[0] = static_cast<UA_UInt32>(n);
-            tp_data_value->value.arrayDimensionsSize = 1;
-        } else {
-            UA_String s = UA_STRING_ALLOC(val_res.value().c_str());
-            UA_Variant_setScalarCopy(&tp_data_value->value, &s, &UA_TYPES[UA_TYPES_STRING]);
-            UA_String_clear(&s);
         }
+
+        UA_Variant_setArray(&tp_data_value->value, p_arr, n, p_ua_type);
+        tp_data_value->value.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
+        tp_data_value->value.arrayDimensions[0] = static_cast<UA_UInt32>(n);
+        tp_data_value->value.arrayDimensionsSize = 1;
         tp_data_value->hasValue = true;
         if (t_source_time_stamp) {
             tp_data_value->sourceTimestamp = UA_DateTime_now();

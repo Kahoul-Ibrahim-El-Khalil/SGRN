@@ -1,6 +1,6 @@
+#include <sgrn/gateway/adapters/opcua/decoders.hpp>
 #include <sgrn/gateway/adapters/opcua/delta_push.hpp>
 #include <sgrn/gateway/adapters/opcua/json_to_ua.hpp>
-#include <sgrn/gateway/adapters/opcua/memory_to_ua.hpp>
 #include <sgrn/gateway/adapters/opcua/s7_to_ua.hpp>
 #include <sgrn/gateway/adapters/opcua/udt_codec.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
@@ -56,8 +56,14 @@ bool DeltaPushHandler::buildDataValueFromEvent(const core::TelemetryEvent& t_eve
         typed_ctx.field_size = t_event.typed_leaf.meta.field_size;
         typed_ctx.array_length = t_event.typed_leaf.meta.array_length;
         typed_ctx.elem_ua_type_index = t_event.typed_leaf.meta.elem_ua_type_index;
-        if (s7BytesToDataValue(&typed_ctx, t_event.typed_leaf.bytes->data(), t_event.typed_leaf.bytes->size(), t_raw_dv))
+        RawDecodingContext raw_decoding_context{.p_node_ctx = &typed_ctx,
+            .p_raw_data = t_event.typed_leaf.bytes->data(),
+            .size = t_event.typed_leaf.bytes->size(),
+            .p_data_value = &t_raw_dv};
+
+        if (auto result = memoryBytesToDataValue(&raw_decoding_context); result.hasValue()) {
             return true;
+        }
     }
 
     if (!t_event.json_value)

@@ -39,6 +39,7 @@ struct NodeContext {
     ::sgrn::scl::DataType type{::sgrn::scl::DataType::Byte};
     ::sgrn::scl::FieldKind kind{::sgrn::scl::FieldKind::Scalar};
 
+    uint32_t string_capacity;
     /// Non-null when the field is projected as an OPC UA Enumeration. The
     /// pointed-to `UA_DataType` carries the node id used in the address space;
     /// `enum_map` mirrors it for value<->name translation on read/write.

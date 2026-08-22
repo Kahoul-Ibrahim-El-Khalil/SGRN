@@ -41,18 +41,27 @@ void PlcState::add(PlcNode t_node, const std::string& t_parent_path, std::option
         p_entry = it != tree().segments().end() ? it->second.get() : nullptr;
     }
 
-    auto recursive_add = [&](auto& t_self, PlcNode& t_n, const std::string& t_path) -> void {
+    // recursive_add stores every node in the flat nodes_ map.
+    // The second parameter (t_parent_abs_offset) is the DB-absolute byte offset
+    // of the parent, so that child nodes stored in the map carry an absolute
+    // offset_ rather than a struct-relative one.  The children_ vectors inside
+    // each node keep their intra-struct relative offsets because serialization
+    // accumulates the offset via the t_extra_offset argument.
+    auto recursive_add = [&](auto& t_self, PlcNode& t_n, const std::string& t_path, uint32_t t_parent_abs_offset) -> void {
         std::string f_path = t_path.empty() ? t_n.name_ : t_path + "." + t_n.name_;
         t_n.cached_slot_ = p_entry;
         t_n.full_path_ = f_path; // store for collision verification in find()
+        const uint32_t my_abs_offset = t_parent_abs_offset + t_n.offset_;
         for (auto& child : t_n.children_) {
-            t_self(t_self, child, f_path);
+            t_self(t_self, child, f_path, my_abs_offset);
         }
-        // Store with original case — CaseInsensitiveHash handles lookups
-        nodes_[f_path] = t_n;
+        // Store with absolute offset so processCommands can use it directly.
+        PlcNode to_store = t_n;
+        to_store.offset_ = my_abs_offset;
+        nodes_[f_path] = std::move(to_store);
     };
 
-    recursive_add(recursive_add, t_node, t_parent_path);
+    recursive_add(recursive_add, t_node, t_parent_path, 0);
 }
 
 // getPoint removed

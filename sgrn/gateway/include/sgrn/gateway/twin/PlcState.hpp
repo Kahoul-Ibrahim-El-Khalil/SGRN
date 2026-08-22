@@ -185,17 +185,17 @@ struct PlcNode {
         bool is_s7_string = (type_ == s7codec::Type::String || type_ == s7codec::Type::WString || type_ == s7codec::Type::XString ||
                              type_ == s7codec::Type::XWString);
 
-        // Strings are NOT arrays in S7 terminology (they are scalars with capacity)
-        // UNLESS it's an ARRAY OF STRING (which we don't support well yet in this logic,
-        // but here count usually refers to capacity for scalars).
-        // For ARRAY OF STRING, the parser should probably have nested them or
-        // we'd need a separate 'capacity' field.
-        bool is_array = (local_count > 1 && !is_s7_string);
+        // After the offset-tracker fix:
+        //   - scalar string:  count_=1,  size_=per-element byte span, string_capacity_=chars
+        //   - string array:   count_=N,  size_=per-element byte span, string_capacity_=chars
+        //   - other arrays:   count_=N,  size_=per-element byte span
+        const bool is_string_array = (is_s7_string && local_count > 1);
+        bool is_array = (local_count > 1 && (!is_s7_string || is_string_array));
 
         size_t elem_size = this->size_;
         // For non-array strings, the entire 'size' is the element size.
         // For arrays, 'size' should be the element size.
-        // In loadRegistry, n.size for strings is typeSpanBytes(max_len), which is the full buffer.
+        // In loadRegistry, n.size for strings is typeSpanBytes(char_capacity), which is the per-element span.
         if (is_array)
             t_writer.StartArray();
 
@@ -230,13 +230,18 @@ struct PlcNode {
                 const uint8_t* p_ptr = t_arena.data() + cached_slot_->offset + current_abs_offset;
                 size_t buffer_remaining = (cached_slot_->offset + cached_slot_->size) - (cached_slot_->offset + current_abs_offset);
 
-                // Use count=1 for individual array elements, or count=capacity for a scalar string
-                // For Bool arrays, we now decode the WHOLE array in one go if it's the first element,
-                // or we skip if we are in the middle of a Bool array (since S7 packs them).
-                // HOWEVER, the current gateway loop is element-by-element.
-                // To support bit-packing properly while keeping the loop, we'll let s7codec handle the bit_index.
-
-                int decode_count = (is_array && !is_s7_string) ? 1 : static_cast<int>(count_);
+                // For string array elements: decode_count = char capacity.
+                // For scalar strings: decode_count = string_capacity_ (or count_ for legacy).
+                // For non-string arrays: decode_count = 1 (one element at a time).
+                // For Bool arrays: adjusted below.
+                int decode_count;
+                if (is_string_array) {
+                    decode_count = static_cast<int>(string_capacity_ > 0 ? string_capacity_ : (size_ > 2 ? size_ - 2 : 0));
+                } else if (is_s7_string) {
+                    decode_count = static_cast<int>(string_capacity_ > 0 ? string_capacity_ : count_);
+                } else {
+                    decode_count = is_array ? 1 : static_cast<int>(count_);
+                }
 
                 // If it's a bool array, we adjust the pointer and bit index manually to match S7 packing
                 if (is_array && type_ == s7codec::Type::Bool) {

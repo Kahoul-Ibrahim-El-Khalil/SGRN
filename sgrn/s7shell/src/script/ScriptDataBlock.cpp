@@ -323,9 +323,9 @@ void ScriptDataBlock::writeScalar(const std::string& t_path, const s7codec::Deco
 
     auto status =
         s7codec::encodeScalar(t_val, loc->field->type, buf.data(), sz, loc->field->bit_index, loc->field->count, loc->field->endianness);
-    if (!status.ok()) {
+    if (!status.has_value()) {
         shell::logError(
-            ::sgrn::scl::Error(SchemaCode::InvalidType, status.message), fmt::format("DB{}.writeScalar('{}')", db_num_, t_path));
+            ::sgrn::scl::Error(SchemaCode::InvalidType, toString(status.error())), fmt::format("DB{}.writeScalar('{}')", db_num_, t_path));
         return;
     }
 

@@ -23,6 +23,8 @@
 #include <sgrn/utils/time.hpp>
 
 #include <fmt/core.h>
+#include <sgrn/gateway/adapters/opcua/encoders.hpp>
+#include <opcua_codec_table.hpp>
 #include <open62541/nodeids.h>
 #include <open62541/server.h>
 #include <open62541/types_generated.h>
@@ -33,7 +35,6 @@
 #include <rapidjson/writer.h>
 #include <s7codec/codec.hpp>
 #include <vector>
-
 using namespace sgrn::gateway::twin;
 using ::sgrn::gateway::S7Area;
 using ::sgrn::scl::DataType;
@@ -50,188 +51,6 @@ static std::string resolveSessionIp(UA_Server* /*server*/, const UA_NodeId* /*se
 // Placeholder: extract client certificate subject from UA session.
 static std::string resolveCertSubject(UA_Server* /*server*/, const UA_NodeId* /*sessionId*/) {
     return "";
-}
-
-/**
- * @brief Converts an OPC UA DateTime (UTC) to a local time structure.
- *
- * OPC UA transmits timestamps strictly in UTC. If written directly to PLC blocks (like DTL),
- * the SCADA/HMI will display the raw UTC time, causing timezone offset mismatches (e.g., 1-hour drift).
- * This helper resolves the UA_DateTime into the OS's local timezone (respecting DST rules)
- * before it is serialized to JSON or packed into S7 binary memory.
- */
-static struct tm resolveOpcUaLocalTime(UA_DateTime ua_date) {
-    time_t t_sec = static_cast<time_t>(UA_DateTime_toUnixTime(ua_date) / 1000);
-    struct tm tm_info;
-    localtime_r(&t_sec, &tm_info);
-    return tm_info;
-}
-
-template <size_t UaTypeIdx, typename UaType, typename EncodeFunc>
-bool tryEncodePrimitive(const UA_DataType* tp_ua_type, const uint8_t* tp_ua_ptr, EncodeFunc func) {
-    if (tp_ua_type == &UA_TYPES[UaTypeIdx]) {
-        func(*reinterpret_cast<const UaType*>(tp_ua_ptr));
-        return true;
-    }
-    return false;
-}
-
-static void encodeStringOpcUaToS7(const uint8_t* tp_ua_ptr, uint8_t* tp_s7_ptr, const PlcNode& t_node) {
-    const auto* p_s = reinterpret_cast<const UA_String*>(tp_ua_ptr);
-    if (t_node.type_ == DataType::String) {
-        s7codec::encodeString(reinterpret_cast<const char*>(p_s->data), static_cast<int>(p_s->length), static_cast<int>(t_node.count_),
-            tp_s7_ptr, t_node.size_);
-    } else if (t_node.type_ == DataType::XString) {
-        s7codec::encodeXString(reinterpret_cast<const char*>(p_s->data), static_cast<int>(p_s->length), static_cast<int>(t_node.count_),
-            tp_s7_ptr, t_node.size_, t_node.endian_);
-    } else if (t_node.type_ == DataType::WString || t_node.type_ == DataType::XWString) {
-        std::string utf8(reinterpret_cast<const char*>(p_s->data), p_s->length);
-        auto wide = sgrn::utils::strings::utf8ToUtf16(utf8);
-        if (wide) {
-            if (t_node.type_ == DataType::WString) {
-                s7codec::encodeWString(reinterpret_cast<const uint16_t*>(wide->c_str()), static_cast<int>(wide->size()),
-                    static_cast<int>(t_node.count_), tp_s7_ptr, t_node.size_, t_node.endian_);
-            } else {
-                s7codec::encodeXWString(reinterpret_cast<const uint16_t*>(wide->c_str()), static_cast<int>(wide->size()),
-                    static_cast<int>(t_node.count_), tp_s7_ptr, t_node.size_, t_node.endian_);
-            }
-        }
-    }
-}
-
-static UA_StatusCode encodeDateTimeOpcUaToS7(const uint8_t* tp_ua_ptr, uint8_t* tp_s7_ptr, const PlcNode& t_node, size_t s7_size) {
-    const UA_DateTime ua_date = *reinterpret_cast<const UA_DateTime*>(tp_ua_ptr);
-    const int64_t unix_time_sec = UA_DateTime_toUnixTime(ua_date) / 1000;
-    if (t_node.type_ == DataType::DTL) {
-        if (unix_time_sec < 0 || unix_time_sec > 9223372036LL)
-            return UA_STATUSCODE_BADOUTOFRANGE;
-        struct tm tm_info = resolveOpcUaLocalTime(ua_date);
-        UA_DateTimeStruct dts = UA_DateTime_toStruct(ua_date);
-        s7codec::DtlComponents dtl;
-        dtl.year = tm_info.tm_year + 1900;
-        dtl.month = tm_info.tm_mon + 1;
-        dtl.day = tm_info.tm_mday;
-        dtl.day_of_week = tm_info.tm_wday + 1;
-        dtl.hour = tm_info.tm_hour;
-        dtl.minute = tm_info.tm_min;
-        dtl.second = tm_info.tm_sec;
-        dtl.nanosecond = (dts.milliSec * 1000000) + (dts.microSec * 1000) + dts.nanoSec;
-        s7codec::encodeDtl(dtl, tp_s7_ptr, s7_size, t_node.endian_);
-    } else if (t_node.type_ == DataType::DateTime) {
-        if (unix_time_sec < 631152000LL)
-            return UA_STATUSCODE_BADOUTOFRANGE;
-        struct tm tm_info = resolveOpcUaLocalTime(ua_date);
-        s7codec::encodeDateTime(tm_info.tm_year + 1900, tm_info.tm_mon + 1, tm_info.tm_mday, tm_info.tm_hour, tm_info.tm_min,
-            tm_info.tm_sec, 0, tp_s7_ptr, s7_size);
-    }
-    return UA_STATUSCODE_GOOD;
-}
-
-/**
- * @brief Encodes a single scalar OPC UA primitive into a raw S7 binary buffer.
- *
- * Maps open62541 UA_TYPES to s7codec primitives. Handles endianness conversions,
- * bit alignments for booleans, and boundary validation for critical types like
- * DTL and DateTime, preventing out-of-range epoch underflows.
- */
-UA_StatusCode encodeScalarOpcUaToS7(const UA_DataType* tp_ua_type, const uint8_t* tp_ua_ptr, uint8_t* tp_s7_ptr, const PlcNode& t_node) {
-    size_t s7_size = s7codec::primitiveSize(t_node.type_);
-
-    if (tryEncodePrimitive<UA_TYPES_BOOLEAN, UA_Boolean>(
-            tp_ua_type, tp_ua_ptr, [&](auto v) { s7codec::encodeBool(v, t_node.bit_index_, tp_s7_ptr, s7_size); })) {
-    } else if (tryEncodePrimitive<UA_TYPES_SBYTE, UA_SByte>(
-                   tp_ua_type, tp_ua_ptr, [&](auto v) { s7codec::encodeI8(v, tp_s7_ptr, s7_size); })) {
-    } else if (tryEncodePrimitive<UA_TYPES_BYTE, UA_Byte>(
-                   tp_ua_type, tp_ua_ptr, [&](auto v) { s7codec::encodeU8(v, tp_s7_ptr, s7_size); })) {
-    } else if (tryEncodePrimitive<UA_TYPES_INT16, UA_Int16>(
-                   tp_ua_type, tp_ua_ptr, [&](auto v) { s7codec::encodeI16(v, tp_s7_ptr, s7_size, t_node.endian_); })) {
-    } else if (tryEncodePrimitive<UA_TYPES_UINT16, UA_UInt16>(
-                   tp_ua_type, tp_ua_ptr, [&](auto v) { s7codec::encodeU16(v, tp_s7_ptr, s7_size, t_node.endian_); })) {
-    } else if (tryEncodePrimitive<UA_TYPES_INT32, UA_Int32>(
-                   tp_ua_type, tp_ua_ptr, [&](auto v) { s7codec::encodeI32(v, tp_s7_ptr, s7_size, t_node.endian_); })) {
-    } else if (tryEncodePrimitive<UA_TYPES_UINT32, UA_UInt32>(
-                   tp_ua_type, tp_ua_ptr, [&](auto v) { s7codec::encodeU32(v, tp_s7_ptr, s7_size, t_node.endian_); })) {
-    } else if (tryEncodePrimitive<UA_TYPES_INT64, UA_Int64>(
-                   tp_ua_type, tp_ua_ptr, [&](auto v) { s7codec::encodeI64(v, tp_s7_ptr, s7_size, t_node.endian_); })) {
-    } else if (tryEncodePrimitive<UA_TYPES_UINT64, UA_UInt64>(
-                   tp_ua_type, tp_ua_ptr, [&](auto v) { s7codec::encodeU64(v, tp_s7_ptr, s7_size, t_node.endian_); })) {
-    } else if (tryEncodePrimitive<UA_TYPES_FLOAT, UA_Float>(
-                   tp_ua_type, tp_ua_ptr, [&](auto v) { s7codec::encodeReal(v, tp_s7_ptr, s7_size, t_node.endian_); })) {
-    } else if (tryEncodePrimitive<UA_TYPES_DOUBLE, UA_Double>(
-                   tp_ua_type, tp_ua_ptr, [&](auto v) { s7codec::encodeLReal(v, tp_s7_ptr, s7_size, t_node.endian_); })) {
-    } else if (tp_ua_type == &UA_TYPES[UA_TYPES_STRING]) {
-        encodeStringOpcUaToS7(tp_ua_ptr, tp_s7_ptr, t_node);
-    } else if (tp_ua_type == &UA_TYPES[UA_TYPES_DATETIME]) {
-        return encodeDateTimeOpcUaToS7(tp_ua_ptr, tp_s7_ptr, t_node, s7_size);
-    }
-    return UA_STATUSCODE_GOOD;
-}
-
-/**
- * @brief Recursively traverses a complex OPC UA ExtensionObject/Structure and packs it into S7 memory.
- *
- * Iterates through the UA_DataType members and matches them against the
- * nested PlcNode children defined by the SCL schema. Properly calculates
- * memory offsets and handles nested structures or primitive arrays.
- */
-UA_StatusCode translateOpcUaToS7(const UA_DataType& t_type, const uint8_t* tp_ua_ptr, uint8_t* tp_s7_ptr, const PlcNode& t_node) {
-    size_t ua_offset = 0;
-    for (size_t i = 0; i < t_type.membersSize; ++i) {
-        const UA_DataTypeMember& m = t_type.members[i];
-        if (i >= t_node.children_.size())
-            break;
-        const PlcNode& child = t_node.children_[i];
-        ua_offset += m.padding;
-
-        if (m.isArray) {
-            const size_t count_ = *reinterpret_cast<const size_t*>(tp_ua_ptr + ua_offset);
-            const uint8_t* p_array_data = *reinterpret_cast<const uint8_t* const*>(tp_ua_ptr + ua_offset + sizeof(size_t));
-            if (p_array_data) {
-                const size_t elem_stride = std::max<size_t>(1, child.size_);
-                for (size_t j = 0; j < std::min(count_, (size_t)child.count_); ++j) {
-                    const uint8_t* p_ua_elem_ptr = p_array_data + (j * m.memberType->memSize);
-                    if (child.type_ == DataType::Bool) {
-                        auto* p_bool_dest = tp_s7_ptr + child.offset_;
-                        const auto* p_bool_array = reinterpret_cast<const UA_Boolean*>(p_array_data);
-                        const size_t required_bytes = boolArrayByteCount(std::min(count_, (size_t)child.count_));
-                        if (!writeBoolArrayToS7(p_bool_array, std::min(count_, (size_t)child.count_), p_bool_dest, required_bytes))
-                            return UA_STATUSCODE_BADINTERNALERROR;
-                        break;
-                    }
-
-                    uint8_t* p_s7_elem_ptr = tp_s7_ptr + child.offset_ + (j * elem_stride);
-                    if (m.memberType->typeKind == UA_DATATYPEKIND_STRUCTURE) {
-                        UA_StatusCode sc = translateOpcUaToS7(*m.memberType, p_ua_elem_ptr, p_s7_elem_ptr, child);
-                        if (sc != UA_STATUSCODE_GOOD)
-                            return sc;
-                    } else {
-                        PlcNode elem_node = child;
-                        elem_node.count_ = 1;
-                        elem_node.size_ = static_cast<uint32_t>(elem_stride);
-                        elem_node.offset_ = 0;
-                        UA_StatusCode sc = encodeScalarOpcUaToS7(m.memberType, p_ua_elem_ptr, p_s7_elem_ptr, elem_node);
-                        if (sc != UA_STATUSCODE_GOOD)
-                            return sc;
-                    }
-                }
-            }
-            ua_offset += sizeof(size_t) + sizeof(void*);
-        } else {
-            uint8_t* p_s7_member_ptr = tp_s7_ptr + child.offset_;
-            const uint8_t* p_ua_member_ptr = tp_ua_ptr + ua_offset;
-            if (m.memberType->typeKind == UA_DATATYPEKIND_STRUCTURE) {
-                UA_StatusCode sc = translateOpcUaToS7(*m.memberType, p_ua_member_ptr, p_s7_member_ptr, child);
-                if (sc != UA_STATUSCODE_GOOD)
-                    return sc;
-            } else {
-                UA_StatusCode sc = encodeScalarOpcUaToS7(m.memberType, p_ua_member_ptr, p_s7_member_ptr, child);
-                if (sc != UA_STATUSCODE_GOOD)
-                    return sc;
-            }
-            ua_offset += m.memberType->memSize;
-        }
-    }
-    return UA_STATUSCODE_GOOD;
 }
 
 // ====================================================================================
@@ -396,7 +215,7 @@ std::string serializeScalarToJson(const UA_Variant& t_value, const NodeContext* 
  *
  * This is the "fast path". It resolves the raw pointers from the OPC UA variant,
  * allocates a correctly sized binary buffer based on the schema (PlcNode), and packs
- * the data using `encodeScalarOpcUaToS7` or `translateOpcUaToS7`. The resulting binary
+ * the data using `encodeScalarOpcUaToMemory` or `translateOpcUaToS7`. The resulting binary
  * payload is then wrapped in a PlcCommand and queued for execution by the PlcCommandProcessor.
  *
  * @return UA_STATUSCODE_GOOD on success, an error code on failure, or std::nullopt
@@ -443,7 +262,7 @@ std::optional<UA_StatusCode> tryBinaryWrite(NodeContext* p_ctx, const UA_Variant
     if (is_array_input) {
         if (is_bool_array) {
             const auto* p_bools = reinterpret_cast<const UA_Boolean*>(p_udt_data);
-            if (!writeBoolArrayToS7(p_bools, input_count, s7_binary.data() + header_offset, s7_binary.size() - header_offset))
+            if (!writeBoolArrayToMemory(p_bools, input_count, s7_binary.data() + header_offset, s7_binary.size() - header_offset))
                 return UA_STATUSCODE_BADINTERNALERROR;
         } else {
             const bool is_eo_arr = UA_Variant_hasArrayType(&t_v, &UA_TYPES[UA_TYPES_EXTENSIONOBJECT]);
@@ -466,7 +285,7 @@ std::optional<UA_StatusCode> tryBinaryWrite(NodeContext* p_ctx, const UA_Variant
                     continue;
 
                 if (p_current_udt_type->typeKind == UA_DATATYPEKIND_STRUCTURE) {
-                    UA_StatusCode sc = translateOpcUaToS7(*p_current_udt_type, p_current_ua_data, p_s7_elem_ptr, *p_node);
+                    UA_StatusCode sc = translateOpcUaToMemory(*p_current_udt_type, p_current_ua_data, p_s7_elem_ptr, *p_node);
                     if (sc != UA_STATUSCODE_GOOD)
                         return sc;
                 } else {
@@ -483,22 +302,22 @@ std::optional<UA_StatusCode> tryBinaryWrite(NodeContext* p_ctx, const UA_Variant
                     }
                     elem_node.size_ = static_cast<uint32_t>(element_span);
                     elem_node.offset_ = 0;
-                    UA_StatusCode sc = encodeScalarOpcUaToS7(p_current_udt_type, p_current_ua_data, p_s7_elem_ptr, elem_node);
+                    UA_StatusCode sc = encodeScalarOpcUaToMemory(p_current_udt_type, p_current_ua_data, p_s7_elem_ptr, elem_node);
                     if (sc != UA_STATUSCODE_GOOD)
                         return sc;
                 }
             }
         }
     } else if (p_udt_type->typeKind == UA_DATATYPEKIND_STRUCTURE) {
-        UA_StatusCode sc = translateOpcUaToS7(*p_udt_type, p_udt_data, s7_binary.data() + header_offset, *p_node);
+        UA_StatusCode sc = translateOpcUaToMemory(*p_udt_type, p_udt_data, s7_binary.data() + header_offset, *p_node);
         if (sc != UA_STATUSCODE_GOOD)
             return sc;
     } else if (is_bool_array) {
         const auto* p_bools = static_cast<const UA_Boolean*>(t_v.data);
-        if (!writeBoolArrayToS7(p_bools, t_v.arrayLength, s7_binary.data() + header_offset, s7_binary.size() - header_offset))
+        if (!writeBoolArrayToMemory(p_bools, t_v.arrayLength, s7_binary.data() + header_offset, s7_binary.size() - header_offset))
             return UA_STATUSCODE_BADINTERNALERROR;
     } else {
-        UA_StatusCode sc = encodeScalarOpcUaToS7(p_udt_type, p_udt_data, s7_binary.data() + header_offset, *p_node);
+        UA_StatusCode sc = encodeScalarOpcUaToMemory(p_udt_type, p_udt_data, s7_binary.data() + header_offset, *p_node);
         if (sc != UA_STATUSCODE_GOOD)
             return sc;
     }

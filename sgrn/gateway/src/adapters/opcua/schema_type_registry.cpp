@@ -23,7 +23,7 @@ static std::unordered_map<std::string, wrappers::opcua::EnumTypeDef> collectEnum
     auto collectEnum = [&](const DbField& f, const std::string& t_name) {
         if (f.enum_map.empty())
             return;
-        const int ua_base = s7TypeToUaTypeIndex(f.type);
+        const int ua_base = dataTypeToUaTypeIndex(f.type).value();
         const std::string sig = enumTypeSignature(ua_base, f.enum_map);
         auto [it, inserted] = enum_by_sig.emplace(sig, wrappers::opcua::EnumTypeDef{});
         if (inserted) {
@@ -166,7 +166,7 @@ sgrn::Result<void> populateTypeRegistryFromSchema(
 #endif
             const UA_DataType* mt = nullptr;
             if (!f.enum_map.empty()) {
-                const int ua_base = s7TypeToUaTypeIndex(f.type);
+                const int ua_base = dataTypeToUaTypeIndex(f.type).value();
                 const std::string sig = enumTypeSignature(ua_base, f.enum_map);
                 auto enum_it = enum_index_by_sig.find(sig);
                 if (enum_it != enum_index_by_sig.end())
@@ -177,7 +177,7 @@ sgrn::Result<void> populateTypeRegistryFromSchema(
                 mt = (it != building_index.end()) ? it->second : &UA_TYPES[UA_TYPES_BYTE];
             }
             if (!mt) {
-                int idx = s7TypeToUaTypeIndex(f.type);
+                int idx = dataTypeToUaTypeIndex(f.type).value();
                 mt = (idx >= 0) ? &UA_TYPES[idx] : &UA_TYPES[UA_TYPES_BYTE];
             }
             if (mt->typeKind == UA_DATATYPEKIND_STRING || f.count > 1 || !mt->pointerFree)

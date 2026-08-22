@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <expected>
 #include <string>
 #include <type_traits>
 #include <variant>
@@ -136,20 +137,6 @@ struct overloaded : Fs... {
 template <typename... Fs>
 overloaded(Fs...) -> overloaded<Fs...>;
 
-struct CodecStatus {
-    bool success{true};
-    const char* message{""};
-    bool ok() const {
-        return success;
-    }
-    static CodecStatus Ok() {
-        return {true, ""};
-    }
-    static CodecStatus Error(const char* msg) {
-        return {false, msg};
-    }
-};
-
 struct DtlComponents {
     uint16_t year{0};
     uint8_t month{0};
@@ -161,109 +148,150 @@ struct DtlComponents {
     uint32_t nanosecond{0};
 };
 
+// All error outcomes that can flow out of the encode/decode primitives
+// below. Every std::expected<void, ...> in this file now returns this
+// enum instead of a std::string, and toString() below is the single
+// place that maps a status back to a human-readable message.
+enum class CodecStatus {
+    INVALID_BIT_INDEX,
+    BUFFER_TOO_SMALL,
+    STRING_TOO_LONG,
+    INVALID_UTF8,
+    INVALID_VALUE,
+    INVALID_DATE_STRING,
+    INVALID_DATETIME_STRING,
+    INVALID_DTL_STRING,
+    UNSUPPORTED_TYPE,
+};
+
+// Static translator: CodecStatus -> human-readable message.
+inline const char* toString(CodecStatus status) {
+    switch (status) {
+        case CodecStatus::INVALID_BIT_INDEX:
+            return "bit_index must be 0-7";
+        case CodecStatus::BUFFER_TOO_SMALL:
+            return "buffer too small";
+        case CodecStatus::STRING_TOO_LONG:
+            return "string length exceeds max";
+        case CodecStatus::INVALID_UTF8:
+            return "invalid UTF-8 string";
+        case CodecStatus::INVALID_VALUE:
+            return "invalid value";
+        case CodecStatus::INVALID_DATE_STRING:
+            return "invalid Date string";
+        case CodecStatus::INVALID_DATETIME_STRING:
+            return "invalid DateTime string";
+        case CodecStatus::INVALID_DTL_STRING:
+            return "invalid DTL string";
+        case CodecStatus::UNSUPPORTED_TYPE:
+            return "unsupported type for scalar encode";
+    }
+    return "unknown codec error";
+}
+
 // --- Low-level Primitives ---
 
-inline CodecStatus encodeBool(bool value, int bit_index, uint8_t* ptr, size_t buffer_size) {
+inline std::expected<void, CodecStatus> encodeBool(bool value, int bit_index, uint8_t* ptr, size_t buffer_size) {
     if (buffer_size < 1)
-        return CodecStatus::Error("buffer too small for Bool");
+        return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     if (bit_index < 0 || bit_index > 7)
-        return CodecStatus::Error("bit_index must be 0-7");
+        return std::unexpected(CodecStatus::INVALID_BIT_INDEX);
     if (value)
         ptr[0] |= static_cast<uint8_t>(1 << bit_index);
     else
         ptr[0] &= static_cast<uint8_t>(~(1 << bit_index));
-    return CodecStatus::Ok();
+    return {};
 }
 
-inline CodecStatus encodeU8(uint8_t value, uint8_t* ptr, size_t buffer_size) {
+inline std::expected<void, CodecStatus> encodeU8(uint8_t value, uint8_t* ptr, size_t buffer_size) {
     if (buffer_size < 1)
-        return CodecStatus::Error("buffer too small for U8");
+        return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     ptr[0] = value;
-    return CodecStatus::Ok();
+    return {};
 }
 
-inline CodecStatus encodeI8(int8_t value, uint8_t* ptr, size_t buffer_size) {
+inline std::expected<void, CodecStatus> encodeI8(int8_t value, uint8_t* ptr, size_t buffer_size) {
     if (buffer_size < 1)
-        return CodecStatus::Error("buffer too small for I8");
+        return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     ptr[0] = static_cast<uint8_t>(value);
-    return CodecStatus::Ok();
+    return {};
 }
 
-inline CodecStatus encodeI16(int16_t value, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeI16(int16_t value, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
     if (buffer_size < 2)
-        return CodecStatus::Error("buffer too small for I16");
+        return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     toEndian<int16_t>(value, ptr, e);
-    return CodecStatus::Ok();
+    return {};
 }
 
-inline CodecStatus encodeU16(uint16_t value, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeU16(uint16_t value, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
     if (buffer_size < 2)
-        return CodecStatus::Error("buffer too small for U16");
+        return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     toEndian<uint16_t>(value, ptr, e);
-    return CodecStatus::Ok();
+    return {};
 }
 
-inline CodecStatus encodeI32(int32_t value, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeI32(int32_t value, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
     if (buffer_size < 4)
-        return CodecStatus::Error("buffer too small for I32");
+        return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     toEndian<int32_t>(value, ptr, e);
-    return CodecStatus::Ok();
+    return {};
 }
 
-inline CodecStatus encodeU32(uint32_t value, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeU32(uint32_t value, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
     if (buffer_size < 4)
-        return CodecStatus::Error("buffer too small for U32");
+        return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     toEndian<uint32_t>(value, ptr, e);
-    return CodecStatus::Ok();
+    return {};
 }
 
-inline CodecStatus encodeI64(int64_t value, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeI64(int64_t value, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
     if (buffer_size < 8)
-        return CodecStatus::Error("buffer too small for I64");
+        return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     toEndian<int64_t>(value, ptr, e);
-    return CodecStatus::Ok();
+    return {};
 }
 
-inline CodecStatus encodeU64(uint64_t value, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeU64(uint64_t value, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
     if (buffer_size < 8)
-        return CodecStatus::Error("buffer too small for U64");
+        return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     toEndian<uint64_t>(value, ptr, e);
-    return CodecStatus::Ok();
+    return {};
 }
 
-inline CodecStatus encodeReal(float value, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeReal(float value, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
     if (buffer_size < 4)
-        return CodecStatus::Error("buffer too small for Float");
+        return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     toEndian<float>(value, ptr, e);
-    return CodecStatus::Ok();
+    return {};
 }
 
-inline CodecStatus encodeLReal(double value, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeLReal(double value, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
     if (buffer_size < 8)
-        return CodecStatus::Error("buffer too small for Double");
+        return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     toEndian<double>(value, ptr, e);
-    return CodecStatus::Ok();
+    return {};
 }
 
-inline CodecStatus encodeString(const char* value, int value_len, int max_len, uint8_t* ptr, size_t buffer_size) {
+inline std::expected<void, CodecStatus> encodeString(const char* value, int value_len, int max_len, uint8_t* ptr, size_t buffer_size) {
     if (buffer_size < static_cast<size_t>(2 + max_len))
-        return CodecStatus::Error("buffer too small for String");
+        return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     if (value_len > max_len)
-        return CodecStatus::Error("string length exceeds max");
+        return std::unexpected(CodecStatus::STRING_TOO_LONG);
     ptr[0] = static_cast<uint8_t>(max_len);
     ptr[1] = static_cast<uint8_t>(value_len);
     std::memcpy(ptr + 2, value, static_cast<std::size_t>(value_len));
     // Zero the tail bytes to avoid stale data being sent to the PLC
     std::memset(ptr + 2 + value_len, 0, static_cast<size_t>(max_len - value_len));
-    return CodecStatus::Ok();
+    return {};
 }
 
-inline CodecStatus encodeWString(
+inline std::expected<void, CodecStatus> encodeWString(
     const uint16_t* code_units, int num_units, int max_len, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
     if (buffer_size < static_cast<size_t>(4 + max_len * 2))
-        return CodecStatus::Error("buffer too small for WString");
+        return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     if (num_units > max_len)
-        return CodecStatus::Error("wstring length exceeds max");
+        return std::unexpected(CodecStatus::STRING_TOO_LONG);
     toEndian<uint16_t>(static_cast<uint16_t>(max_len), ptr, e);
     toEndian<uint16_t>(static_cast<uint16_t>(num_units), ptr + 2, e);
     for (int i = 0; i < num_units; ++i) {
@@ -272,27 +300,28 @@ inline CodecStatus encodeWString(
     int tail_bytes = (max_len - num_units) * 2;
     if (tail_bytes > 0)
         std::memset(ptr + 4 + (num_units * 2), 0, static_cast<size_t>(tail_bytes));
-    return CodecStatus::Ok();
+    return {};
 }
 
-inline CodecStatus encodeXString(const char* value, int value_len, int max_len, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeXString(
+    const char* value, int value_len, int max_len, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
     if (buffer_size < static_cast<size_t>(8 + max_len))
-        return CodecStatus::Error("buffer too small for XString");
+        return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     if (value_len > max_len)
-        return CodecStatus::Error("string length exceeds max");
+        return std::unexpected(CodecStatus::STRING_TOO_LONG);
     toEndian<uint32_t>(static_cast<uint32_t>(max_len), ptr, e);
     toEndian<uint32_t>(static_cast<uint32_t>(value_len), ptr + 4, e);
     std::memcpy(ptr + 8, value, static_cast<std::size_t>(value_len));
     std::memset(ptr + 8 + value_len, 0, static_cast<size_t>(max_len - value_len));
-    return CodecStatus::Ok();
+    return {};
 }
 
-inline CodecStatus encodeXWString(
+inline std::expected<void, CodecStatus> encodeXWString(
     const uint16_t* code_units, int num_units, int max_len, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
     if (buffer_size < static_cast<size_t>(8 + max_len * 2))
-        return CodecStatus::Error("buffer too small for XWString");
+        return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     if (num_units > max_len)
-        return CodecStatus::Error("wstring length exceeds max");
+        return std::unexpected(CodecStatus::STRING_TOO_LONG);
     toEndian<uint32_t>(static_cast<uint32_t>(max_len), ptr, e);
     toEndian<uint32_t>(static_cast<uint32_t>(num_units), ptr + 4, e);
     for (int i = 0; i < num_units; ++i) {
@@ -301,13 +330,13 @@ inline CodecStatus encodeXWString(
     int tail_bytes = (max_len - num_units) * 2;
     if (tail_bytes > 0)
         std::memset(ptr + 8 + (num_units * 2), 0, static_cast<size_t>(tail_bytes));
-    return CodecStatus::Ok();
+    return {};
 }
 
-inline CodecStatus encodeDateTime(
+inline std::expected<void, CodecStatus> encodeDateTime(
     int year, int month, int day, int hour, int minute, int second, int day_of_week, uint8_t* ptr, size_t buffer_size) {
     if (buffer_size < 8)
-        return CodecStatus::Error("buffer too small for DateTime");
+        return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     ptr[0] = decToBcd(year % 100);
     ptr[1] = decToBcd(month);
     ptr[2] = decToBcd(day);
@@ -316,12 +345,12 @@ inline CodecStatus encodeDateTime(
     ptr[5] = decToBcd(second);
     ptr[6] = 0;
     ptr[7] = static_cast<uint8_t>(day_of_week);
-    return CodecStatus::Ok();
+    return {};
 }
 
-inline CodecStatus encodeDtl(const DtlComponents& c, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeDtl(const DtlComponents& c, uint8_t* ptr, size_t buffer_size, Endian e = Endian::Big) {
     if (buffer_size < 12)
-        return CodecStatus::Error("buffer too small for DTL");
+        return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     toEndian<uint16_t>(c.year, ptr, e);
     ptr[2] = c.month;
     ptr[3] = c.day;
@@ -330,7 +359,7 @@ inline CodecStatus encodeDtl(const DtlComponents& c, uint8_t* ptr, size_t buffer
     ptr[6] = c.minute;
     ptr[7] = c.second;
     toEndian<uint32_t>(c.nanosecond, ptr + 8, e);
-    return CodecStatus::Ok();
+    return {};
 }
 
 inline bool parseTimeString(const char* raw, int64_t& out_ms) {
@@ -601,10 +630,10 @@ inline DecodedValue decodeScalar(
     }
 }
 
-inline CodecStatus encodeScalar(
+inline std::expected<void, CodecStatus> encodeScalar(
     const DecodedValue& dv, Type type, uint8_t* ptr, size_t buffer_size, int bit_index = 0, int count = 0, Endian e = Endian::Big) {
     if (!dv.valid())
-        return CodecStatus::Error("invalid value");
+        return std::unexpected(CodecStatus::INVALID_VALUE);
     switch (type) {
         case Type::Bool:
             return encodeBool(dv.asInt64() != 0, bit_index, ptr, buffer_size);
@@ -672,7 +701,7 @@ inline CodecStatus encodeScalar(
                 utf16.push_back(static_cast<char16_t>(cp));
             }
             if (!ok)
-                return CodecStatus::Error("invalid UTF-8 string for WSTRING");
+                return std::unexpected(CodecStatus::INVALID_UTF8);
             return encodeWString(
                 reinterpret_cast<const uint16_t*>(utf16.c_str()), static_cast<int>(utf16.size()), count, ptr, buffer_size, e);
         }
@@ -707,25 +736,25 @@ inline CodecStatus encodeScalar(
                 utf16.push_back(static_cast<char16_t>(cp));
             }
             if (!ok)
-                return CodecStatus::Error("invalid UTF-8 string for XWSTRING");
+                return std::unexpected(CodecStatus::INVALID_UTF8);
             return encodeXWString(
                 reinterpret_cast<const uint16_t*>(utf16.c_str()), static_cast<int>(utf16.size()), count, ptr, buffer_size, e);
         }
         case Type::DateTime: {
             if (dv.kind() != ValueKind::String)
-                return CodecStatus::Error("expected ISO string for DateTime");
+                return std::unexpected(CodecStatus::INVALID_DATETIME_STRING);
             int y, m, d, h, min, s, ms;
             if (std::sscanf(dv.s().c_str(), "%d-%d-%d %d:%d:%d.%d", &y, &m, &d, &h, &min, &s, &ms) < 6)
-                return CodecStatus::Error("invalid DateTime string");
+                return std::unexpected(CodecStatus::INVALID_DATETIME_STRING);
             return encodeDateTime(y, m, d, h, min, s, 0, ptr, buffer_size);
         }
         case Type::DTL: {
             if (dv.kind() != ValueKind::String)
-                return CodecStatus::Error("expected ISO string for DTL");
+                return std::unexpected(CodecStatus::INVALID_DTL_STRING);
             DtlComponents c;
             if (std::sscanf(dv.s().c_str(), "%hu-%hhu-%hhu %hhu:%hhu:%hhu.%u", &c.year, &c.month, &c.day, &c.hour, &c.minute, &c.second,
                     &c.nanosecond) < 6)
-                return CodecStatus::Error("invalid DTL string");
+                return std::unexpected(CodecStatus::INVALID_DTL_STRING);
             return encodeDtl(c, ptr, buffer_size, e);
         }
         case Type::Date: {
@@ -736,7 +765,7 @@ inline CodecStatus encodeScalar(
                     ti.tm_mon -= 1;
                     return encodeU16(Date(ti).get(), ptr, buffer_size, e);
                 }
-                return CodecStatus::Error("invalid Date string");
+                return std::unexpected(CodecStatus::INVALID_DATE_STRING);
             }
             return encodeU16(static_cast<uint16_t>(dv.asInt64()), ptr, buffer_size, e);
         }
@@ -747,7 +776,7 @@ inline CodecStatus encodeScalar(
         case Type::LTime:
             return encodeI64(dv.asInt64(), ptr, buffer_size, e);
         default:
-            return CodecStatus::Error("unsupported type for scalar encode");
+            return std::unexpected(CodecStatus::UNSUPPORTED_TYPE);
     }
 }
 
