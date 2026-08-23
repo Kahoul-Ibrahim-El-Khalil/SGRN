@@ -46,6 +46,9 @@ struct PlcNode {
     uint32_t offset_{0};
     uint32_t count_{1};
     uint32_t string_capacity_{0};
+    std::optional<double> min_val_{std::nullopt};
+    std::optional<double> max_val_{std::nullopt};
+
     uint16_t db_number_{0};
     uint8_t bit_index_{0};
     s7codec::Type type_{s7codec::Type::Byte};
@@ -53,7 +56,7 @@ struct PlcNode {
     bool is_dynamic_{false};
     std::vector<PlcNode> children_;
     std::string full_path_; // Store for collision verification in find()
-
+    // PlcNode struct — add after string_capacity_
     // Cache — points into PlcArena (stable for arena lifetime)
     mutable const DbEntry* cached_slot_{nullptr}; // REVAMP-3: DbEntry* replaces LeafDescriptor*
 

@@ -27,13 +27,17 @@ sgrn::Result<void> TypeRegistry::adopt(UdtRegistrationBatch&& t_batch) {
         custom_types_[i].members = custom_members_[i].data();
 
     enum_by_signature_.clear();
-    for (const auto& enum_def : enum_defs_) {
-        auto it = index_.find(enum_def.name);
-        if (it != index_.end()) {
-            enum_by_signature_[enum_def.signature] = it->second;
+    for (const UA_DataType& type : custom_types_) {
+        if (type.typeKind != UA_DATATYPEKIND_ENUM)
+            continue;
+
+        for (const auto& def : enum_defs_) {
+            if (def.name == type.typeName) {
+                enum_by_signature_[def.signature] = &type;
+                break;
+            }
         }
     }
-
     if (!custom_types_.empty()) {
         custom_data_types_array_ =
             std::make_unique<UA_DataTypeArray>(UA_DataTypeArray{nullptr, custom_types_.size(), custom_types_.data()});

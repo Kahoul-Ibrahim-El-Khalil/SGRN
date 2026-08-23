@@ -44,6 +44,8 @@ struct NodeContext {
     /// Non-null when the field is projected as an OPC UA Enumeration. The
     /// pointed-to `UA_DataType` carries the node id used in the address space;
     /// `enum_map` mirrors it for value<->name translation on read/write.
+    std::optional<double> min_val{std::nullopt};
+    std::optional<double> max_val{std::nullopt};
     const UA_DataType* enum_type{nullptr};
     std::map<int, std::string> enum_map;
 };

@@ -95,10 +95,6 @@ Result<void, OpcUaAdapterError> encodeScalarOpcUaToMemory(
     const UA_DataType* tp_ua_type, const uint8_t* tp_ua_ptr, uint8_t* tp_memory, const PlcNode& t_node) {
     const size_t s7_size = s7codec::primitiveSize(t_node.type_);
 
-    // ── Enum guard ──────────────────────────────────────────────────────────
-    // UA enums are always UA_Int32 on the wire regardless of S7 storage width.
-    // Intercept before the table so the custom UA_DataType pointer (which is
-    // never == &UA_TYPES[...]) doesn't fall through to a silent no-op.
     if (tp_ua_type && tp_ua_type->typeKind == UA_DATATYPEKIND_ENUM) {
         const UA_Int32 raw = *reinterpret_cast<const UA_Int32*>(tp_ua_ptr);
         s7codec::DecodedValue dv = s7codec::DecodedValue::makeSigned(static_cast<int64_t>(raw));
@@ -108,7 +104,6 @@ Result<void, OpcUaAdapterError> encodeScalarOpcUaToMemory(
         return {};
     }
 
-    // ── String / DateTime: keep dedicated helpers (need node-context data) ──
     if (tp_ua_type == &UA_TYPES[UA_TYPES_STRING]) {
         return encodeStringOpcUaToMemory(tp_ua_ptr, tp_memory, t_node);
     }
@@ -116,7 +111,39 @@ Result<void, OpcUaAdapterError> encodeScalarOpcUaToMemory(
         return encodeDateTimeOpcUaToMemory(tp_ua_ptr, tp_memory, t_node, s7_size);
     }
 
-    // ── Table-driven dispatch for all other scalar types ────────────────────
+    // ── Engineering-range guard ──────────────────────────────────────────────
+    // Covers scalar leaves, array elements, AND struct members alike, since
+    // this function is the single choke point all three funnel through
+    // (see encodeStructOpcUaToMemory's per-member and per-array-element calls).
+    if (t_node.min_val_.has_value() || t_node.max_val_.has_value()) {
+        std::optional<double> v;
+        if (tp_ua_type == &UA_TYPES[UA_TYPES_DOUBLE])
+            v = *reinterpret_cast<const UA_Double*>(tp_ua_ptr);
+        else if (tp_ua_type == &UA_TYPES[UA_TYPES_FLOAT])
+            v = static_cast<double>(*reinterpret_cast<const UA_Float*>(tp_ua_ptr));
+        else if (tp_ua_type == &UA_TYPES[UA_TYPES_INT64])
+            v = static_cast<double>(*reinterpret_cast<const UA_Int64*>(tp_ua_ptr));
+        else if (tp_ua_type == &UA_TYPES[UA_TYPES_UINT64])
+            v = static_cast<double>(*reinterpret_cast<const UA_UInt64*>(tp_ua_ptr));
+        else if (tp_ua_type == &UA_TYPES[UA_TYPES_INT32])
+            v = static_cast<double>(*reinterpret_cast<const UA_Int32*>(tp_ua_ptr));
+        else if (tp_ua_type == &UA_TYPES[UA_TYPES_UINT32])
+            v = static_cast<double>(*reinterpret_cast<const UA_UInt32*>(tp_ua_ptr));
+        else if (tp_ua_type == &UA_TYPES[UA_TYPES_INT16])
+            v = static_cast<double>(*reinterpret_cast<const UA_Int16*>(tp_ua_ptr));
+        else if (tp_ua_type == &UA_TYPES[UA_TYPES_UINT16])
+            v = static_cast<double>(*reinterpret_cast<const UA_UInt16*>(tp_ua_ptr));
+        else if (tp_ua_type == &UA_TYPES[UA_TYPES_BYTE])
+            v = static_cast<double>(*reinterpret_cast<const UA_Byte*>(tp_ua_ptr));
+        else if (tp_ua_type == &UA_TYPES[UA_TYPES_SBYTE])
+            v = static_cast<double>(*reinterpret_cast<const UA_SByte*>(tp_ua_ptr));
+
+        if (v.has_value() && ((t_node.min_val_.has_value() && *v < t_node.min_val_.value()) ||
+                                 (t_node.max_val_.has_value() && *v > t_node.max_val_.value()))) {
+            return Error(OpcUaAdapterError::OUT_OF_RANGE);
+        }
+    }
+
     const sgrn::codecs::CodecEntry* entry = sgrn::codecs::codecEntryFor(t_node.type_);
     if (!entry)
         return Error(OpcUaAdapterError::CODEC_ENTRY_NOT_FOUND);
@@ -129,15 +156,13 @@ Result<void, OpcUaAdapterError> encodeScalarOpcUaToMemory(
     if (!sc.has_value())
         return Error(OpcUaAdapterError::ENCODE_FAILED);
     return {};
-}
-
-/**
- * @brief Recursively traverses a complex OPC UA ExtensionObject/Structure and packs it into S7 memory.
- *
- * Iterates through the UA_DataType members and matches them against the
- * nested PlcNode children defined by the SCL schema. Properly calculates
- * memory offsets and handles nested structures or primitive arrays.
- */
+} /**
+   * @brief Recursively traverses a complex OPC UA ExtensionObject/Structure and packs it into S7 memory.
+   *
+   * Iterates through the UA_DataType members and matches them against the
+   * nested PlcNode children defined by the SCL schema. Properly calculates
+   * memory offsets and handles nested structures or primitive arrays.
+   */
 Result<void, OpcUaAdapterError> encodeStructOpcUaToMemory(
     const UA_DataType& t_type, const uint8_t* tp_ua_ptr, uint8_t* tp_memory, const PlcNode& t_node) {
     size_t ua_offset = 0;

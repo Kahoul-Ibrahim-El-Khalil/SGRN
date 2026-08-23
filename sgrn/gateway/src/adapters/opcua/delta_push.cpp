@@ -1,8 +1,5 @@
 #include <sgrn/gateway/adapters/opcua/decoders.hpp>
 #include <sgrn/gateway/adapters/opcua/delta_push.hpp>
-#include <sgrn/gateway/adapters/opcua/json_to_ua.hpp>
-#include <sgrn/gateway/adapters/opcua/s7_to_ua.hpp>
-#include <sgrn/gateway/adapters/opcua/udt_codec.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
 #include <sgrn/gateway/twin/PlcState.hpp>
 #include <sgrn/gateway/wrappers/opcua/DataValue.hpp>
@@ -64,19 +61,6 @@ bool DeltaPushHandler::buildDataValueFromEvent(const core::TelemetryEvent& t_eve
             return true;
         }
     }
-
-    if (!t_event.json_value)
-        return false;
-
-    rapidjson::Document jv;
-    if (jv.Parse(t_event.json_value->c_str()).HasParseError())
-        return false;
-
-    if (jv.IsArray()) {
-        const int ua_type_idx = tp_ctx ? (tp_ctx->elem_ua_type_index >= 0 ? tp_ctx->elem_ua_type_index : UA_TYPES_DOUBLE) : UA_TYPES_DOUBLE;
-        return jsonArrayToDataValue(jv, ua_type_idx, t_raw_dv);
-    }
-    return jsonValueToDataValue(jv, t_raw_dv);
 }
 
 void DeltaPushHandler::onTelemetryEvent(const core::TelemetryEvent& t_event) {
@@ -91,77 +75,12 @@ void DeltaPushHandler::onTelemetryEvent(const core::TelemetryEvent& t_event) {
 
         const NodeContext* p_node_ctx = node_it->second.ctx;
 
-        if (p_node_ctx && p_node_ctx->trigger_events && alarm_callback_ && t_event.json_value) {
-            rapidjson::Document jv;
-            if (!jv.Parse(t_event.json_value->c_str()).HasParseError()) {
-                if (jv.IsObject()) {
-                    alarm_callback_(t_event.db, t_event.path, jv, t_event.timestamp);
-                } else if (jv.IsArray()) {
-                    for (rapidjson::SizeType i = 0; i < jv.Size(); ++i)
-                        alarm_callback_(t_event.db, fmt::format("{}[{}]", t_event.path, i), jv[i], t_event.timestamp);
-                } else {
-                    alarm_callback_(t_event.db, t_event.path, jv, t_event.timestamp);
-                }
-            }
-        }
-
         UA_DataValue t_raw_dv{};
         if (!buildDataValueFromEvent(t_event, p_node_ctx, t_raw_dv))
             return;
 
         enqueueDataValue(node_it->second.node_id, std::move(t_raw_dv), t_event.timestamp);
         notifyAggregateAncestors(t_event.db, t_event.path, t_event.timestamp);
-    }
-}
-
-void DeltaPushHandler::flattenAndPush(
-    uint16_t t_db_number, const rapidjson::Value& t_obj, const std::string& t_path_prefix, uint64_t t_timestamp_ms) {
-    if (!t_obj.IsObject())
-        return;
-    for (auto it = t_obj.MemberBegin(); it != t_obj.MemberEnd(); ++it) {
-        std::string field_name = it->name.GetString();
-        std::string full_path = t_path_prefix.empty() ? field_name : t_path_prefix + "." + field_name;
-        if (it->value.IsObject()) {
-            flattenAndPush(t_db_number, it->value, full_path, t_timestamp_ms);
-            {
-                std::lock_guard lock(dirty_mutex_);
-                dirty_aggregates_.insert(fmt::format("{}:{}", t_db_number, full_path));
-            }
-            continue;
-        }
-
-        const std::string t_map_key = fmt::format("{}:{}", t_db_number, full_path);
-        auto node_it = nodes_.find(t_map_key);
-        if (node_it == nodes_.end())
-            continue;
-
-        const NodeContext* p_ctx = node_it->second.ctx;
-
-        if (p_ctx && p_ctx->trigger_events && alarm_callback_) {
-            if (it->value.IsObject()) {
-                alarm_callback_(t_db_number, full_path, it->value, t_timestamp_ms);
-            } else if (it->value.IsArray()) {
-                for (rapidjson::SizeType i = 0; i < it->value.Size(); ++i)
-                    alarm_callback_(t_db_number, fmt::format("{}[{}]", full_path, i), it->value[i], t_timestamp_ms);
-            } else {
-                alarm_callback_(t_db_number, full_path, it->value, t_timestamp_ms);
-            }
-        }
-
-        UA_DataValue t_raw_dv{};
-        bool ok = false;
-        if (it->value.IsArray()) {
-            const int ua_type_idx =
-                p_ctx ? (p_ctx->elem_ua_type_index >= 0 ? p_ctx->elem_ua_type_index : UA_TYPES_DOUBLE) : UA_TYPES_DOUBLE;
-            ok = jsonArrayToDataValue(it->value, ua_type_idx, t_raw_dv);
-        } else {
-            ok = jsonValueToDataValue(it->value, t_raw_dv);
-        }
-        if (!ok)
-            continue;
-
-        enqueueDataValue(node_it->second.node_id, std::move(t_raw_dv), t_timestamp_ms);
-        notifyAggregateAncestors(t_db_number, full_path, t_timestamp_ms);
     }
 }
 

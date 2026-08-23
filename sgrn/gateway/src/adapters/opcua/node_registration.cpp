@@ -6,25 +6,24 @@
 #include <sgrn/gateway/wrappers/opcua/TypeRegistry.hpp>
 
 #include <fmt/core.h>
+#include <sgrn/debug.hpp>
 #include <open62541/common.h>
 #include <open62541/nodeids.h>
 #include <open62541/server.h>
 #include <open62541/types_generated.h>
 #include <open62541/types_generated_handling.h>
 #include <s7codec/codec.hpp>
-
 using ::sgrn::scl::DataType;
 using ::sgrn::scl::DbField;
 
 namespace sgrn::gateway::adapters
 {
 
-extern UA_StatusCode readS7Value(
+extern UA_StatusCode readValue(
     UA_Server*, const UA_NodeId*, void*, const UA_NodeId*, void*, UA_Boolean, const UA_NumericRange*, UA_DataValue*);
 extern UA_StatusCode readAggregateValue(
     UA_Server*, const UA_NodeId*, void*, const UA_NodeId*, void*, UA_Boolean, const UA_NumericRange*, UA_DataValue*);
-extern UA_StatusCode writeS7Value(
-    UA_Server*, const UA_NodeId*, void*, const UA_NodeId*, void*, const UA_NumericRange*, const UA_DataValue*);
+extern UA_StatusCode writeValue(UA_Server*, const UA_NodeId*, void*, const UA_NodeId*, void*, const UA_NumericRange*, const UA_DataValue*);
 
 static void trackNode(uint16_t t_db_number, const std::string& t_full_path, const wrappers::opcua::NodeId& t_var_id,
     const NodeContext* tp_ctx, std::unordered_map<std::string, wrappers::opcua::NodeId>* tp_node_id_map, DeltaPushHandler* tp_delta_push) {
@@ -44,8 +43,8 @@ static void setReadOnlyDataSource(UA_Server* tp_server, const UA_NodeId& t_var_i
 
 static void setReadWriteDataSource(UA_Server* tp_server, const UA_NodeId& t_var_id) {
     UA_DataSource ds{};
-    ds.read = readS7Value;
-    ds.write = writeS7Value;
+    ds.read = readValue;
+    ds.write = writeValue;
     UA_Server_setVariableNode_dataSource(tp_server, t_var_id, ds);
 }
 
@@ -73,15 +72,19 @@ static NodeContext* makeFieldContext(twin::PlcMemory* tp_plc_memory, uint16_t t_
         .enum_type = nullptr,
         .enum_map = {},
     };
-
+    p_ctx->min_val = t_field.min_val;
+    p_ctx->max_val = t_field.max_val;
     p_ctx->scratch_buf.resize(p_ctx->field_size);
     p_ctx->enum_map = t_field.enum_map;
 
     if (p_ctx->kind == ::sgrn::scl::FieldKind::Enum) {
-        const int ua_base = dataTypeToUaTypeIndex(t_field.type).value();
-        const std::string sig = enumTypeSignature(ua_base, t_field.enum_map);
-        if (const UA_DataType* p_enum = t_type_registry.findEnumBySignature(sig))
-            p_ctx->enum_type = p_enum;
+        if (auto ua_base_res = dataTypeToUaTypeIndex(t_field.type); ua_base_res.hasValue()) {
+            const std::string sig = enumTypeSignature(ua_base_res.value(), t_field.enum_map);
+            if (const UA_DataType* p_enum = t_type_registry.findEnumBySignature(sig))
+                p_ctx->enum_type = p_enum;
+        } else {
+            SGRN_WARN_LOG("OPC UA: field '{}' has enum_map but unsupported base type — registering as plain scalar", t_full_path);
+        }
     }
     return p_ctx;
 }
@@ -111,27 +114,15 @@ static void configureVariableAttributes(UA_VariableAttributes& t_v_attr, const D
     t_v_attr.accessLevel = UA_ACCESSLEVELMASK_READ | UA_ACCESSLEVELMASK_WRITE;
     t_v_attr.userAccessLevel = t_v_attr.accessLevel;
 
+    // node_registration.cpp — configureVariableAttributes(), replace the enum block
     if (::sgrn::scl::kind_of(t_field) == ::sgrn::scl::FieldKind::Enum && tp_enum_type) {
-        // OPC UA Part 3 §5.6.2: Enumeration variable nodes MUST declare their
-        // DataType as the specific Enum DataType NodeId so clients can discover
-        // the symbolic names. However, open62541's pre-write type validation
-        // checks if the incoming UA_Variant type is equal to or a *subtype* of
-        // the declared DataType. Clients send enum values as UA_Int32 (wire
-        // encoding per Part 6 §5.2.2.5). Since Int32 is an *ancestor* of our
-        // enum (Int32 → Enumeration → Status), the check fails with
-        // BadTypeMismatch. Fix: keep the custom enum NodeId as the DataType
-        // attribute (visible in the address space for type discovery), but the
-        // open62541 server internal type check is bypassed by setting the
-        // attribute directly. We use tp_enum_type->typeId which IS the enum
-        // NodeId — this is correct per spec. The BadTypeMismatch was caused
-        // by open62541 checking subtype direction incorrectly for DataSource
-        // nodes; we work around it by setting DataType = Int32 so the wire
-        // type matches, while keeping enum discovery through the DataType tree.
-        //
-        // Per OPC UA Part 3 §8.14, an Enumeration subtype variable node's
-        // DataType SHOULD be the Enum type, but INT32 is also legal and avoids
-        // the open62541 limitation.
-        t_v_attr.dataType = UA_NODEID_NUMERIC(0, UA_NS0ID_INT32);
+        // OPC UA Part 3 §5.6.2 / Part 8 §5.1: an Enumeration-subtype variable's
+        // DataType attribute MUST be the specific Enum type NodeId so clients can
+        // discover EnumStrings/EnumValues. Enum values are still wire-encoded as
+        // Int32 (Part 6 §5.1.5) — open62541's write-path validation already
+        // special-cases Int32-typed Variants against Enum-kind DataTypes, so this
+        // does not need the Int32 substitution the previous version used.
+        t_v_attr.dataType = tp_enum_type->typeId;
         if (t_is_array) {
             t_v_attr.valueRank = UA_VALUERANK_ONE_DIMENSION;
             t_v_attr.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
@@ -266,18 +257,35 @@ void addFieldNodes(const OpcUaAdapterContext& t_adapter_ctx, const OpcUaNodeRegi
         }
     }
 }
+static void addRangeProperty(
+    UA_Server* tp_server, const UA_NodeId& t_parent_id, const std::string& t_full_node_id, double t_low, double t_high) {
+
+    UA_NodeId prop_id = UA_NODEID_STRING_ALLOC(1, (t_full_node_id + ".EURange").c_str());
+    UA_VariableAttributes r_attr = UA_VariableAttributes_default;
+    r_attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", "EURange");
+    r_attr.dataType = UA_NODEID_NUMERIC(0, UA_NS0ID_RANGE);
+
+    UA_Range range;
+    range.low = t_low;
+    range.high = t_high;
+    UA_Variant_setScalarCopy(&r_attr.value, &range, &UA_TYPES[UA_TYPES_RANGE]);
+
+    UA_Server_addVariableNode(tp_server, prop_id, t_parent_id, UA_NODEID_NUMERIC(0, UA_NS0ID_HASPROPERTY),
+        UA_QUALIFIEDNAME_ALLOC(0, "EURange"), UA_NODEID_NUMERIC(0, UA_NS0ID_PROPERTYTYPE), r_attr, nullptr, nullptr);
+    UA_NodeId_clear(&prop_id);
+}
 void addLeafVariableNode(const OpcUaAdapterContext& t_adapter_ctx, const OpcUaNodeRegistryContext& t_nodes_ctx, const OpcUaNodePath& t_path,
     const ::sgrn::scl::DbField& t_field, const OpcUaDbContext& t_db) {
     UA_Server* p_raw = t_adapter_ctx.p_opcua_server->raw();
     const UA_NodeId& parent = t_path.parent_id.get();
 
-    const bool t_is_array = (t_field.count > 1);
-    const bool t_is_custom_udt = !t_field.udt_name.empty() && t_adapter_ctx.p_type_registry->find(t_field.udt_name) != nullptr;
+    const bool is_array = (t_field.count > 1);
+    const bool is_custom_udt = !t_field.udt_name.empty() && t_adapter_ctx.p_type_registry->find(t_field.udt_name) != nullptr;
 
     int t_ua_type_idx = -1;
     const UA_DataType* p_custom_type = nullptr;
     const UA_DataType* p_enum_type = nullptr;
-    if (t_is_custom_udt) {
+    if (is_custom_udt) {
         p_custom_type = t_adapter_ctx.p_type_registry->find(t_field.udt_name);
     } else {
         t_ua_type_idx = dataTypeToUaTypeIndex(t_field.type).value();
@@ -288,16 +296,16 @@ void addLeafVariableNode(const OpcUaAdapterContext& t_adapter_ctx, const OpcUaNo
         p_enum_type = t_adapter_ctx.p_type_registry->findEnumBySignature(sig);
     }
 
-    const uint32_t t_field_size = computeFieldSize(t_field, t_is_array);
+    const uint32_t t_field_size = computeFieldSize(t_field, is_array);
     auto* p_ctx = makeFieldContext(t_adapter_ctx.p_plc_memory, t_db.number, t_path.path, t_adapter_ctx.p_security_manager, t_field,
-        t_is_array, t_is_custom_udt, t_ua_type_idx, t_field_size, *t_adapter_ctx.p_type_registry, t_db.trigger_events);
+        is_array, is_custom_udt, t_ua_type_idx, t_field_size, *t_adapter_ctx.p_type_registry, t_db.trigger_events);
     p_ctx->enum_type = p_enum_type;
     t_nodes_ctx.p_owned_contexts->push_back(std::unique_ptr<NodeContext>(p_ctx));
 
     UA_NodeId t_var_id = UA_NODEID_STRING_ALLOC(1, t_path.node_id.c_str());
     UA_VariableAttributes t_v_attr = UA_VariableAttributes_default;
     t_v_attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", t_field.name.c_str());
-    configureVariableAttributes(t_v_attr, t_field, t_is_array, t_is_custom_udt, t_ua_type_idx, p_custom_type, p_enum_type);
+    configureVariableAttributes(t_v_attr, t_field, is_array, is_custom_udt, t_ua_type_idx, p_custom_type, p_enum_type);
 
     UA_Server_addVariableNode(p_raw, t_var_id, parent, UA_NODEID_NUMERIC(0, UA_NS0ID_HASCOMPONENT),
         UA_QUALIFIEDNAME_ALLOC(1, t_field.name.c_str()), UA_NODEID_NUMERIC(0, UA_NS0ID_BASEDATAVARIABLETYPE), t_v_attr, p_ctx, nullptr);
@@ -306,7 +314,8 @@ void addLeafVariableNode(const OpcUaAdapterContext& t_adapter_ctx, const OpcUaNo
 
     if (t_field.unit.has_value())
         addEngineeringUnitsProperty(p_raw, t_var_id, t_path.node_id, t_field.unit.value());
-
+    if (t_field.min_val.has_value() && t_field.max_val.has_value())
+        addRangeProperty(p_raw, t_var_id, t_path.node_id, t_field.min_val.value(), t_field.max_val.value());
     wrappers::opcua::NodeId tracked = wrappers::opcua::nodeIdFromRaw(t_var_id);
     trackNode(t_db.number, t_path.path, tracked, p_ctx, t_nodes_ctx.p_node_id_map, t_adapter_ctx.p_delta_push_handler);
 

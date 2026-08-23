@@ -6,10 +6,10 @@
 #include <sgrn/scl/utils.hpp>
 
 #include <fmt/core.h>
+#include <sgrn/debug.hpp>
 #include <functional>
 #include <open62541/types_generated.h>
 #include <unordered_map>
-
 using ::sgrn::scl::DataType;
 using ::sgrn::scl::DbField;
 
@@ -20,11 +20,16 @@ namespace sgrn::gateway::adapters
 static std::unordered_map<std::string, wrappers::opcua::EnumTypeDef> collectEnums(const ::sgrn::scl::PlcSchemaStore& t_registry) {
     std::unordered_map<std::string, wrappers::opcua::EnumTypeDef> enum_by_sig;
 
+    // schema_type_registry.cpp — collectEnums(), replace the lambda body
     auto collectEnum = [&](const DbField& f, const std::string& t_name) {
         if (f.enum_map.empty())
             return;
-        const int ua_base = dataTypeToUaTypeIndex(f.type).value();
-        const std::string sig = enumTypeSignature(ua_base, f.enum_map);
+        auto ua_base_res = dataTypeToUaTypeIndex(f.type);
+        if (ua_base_res.hasError()) {
+            SGRN_WARN_LOG("OPC UA: skipping enum registration for '{}' — unsupported base type", t_name);
+            return;
+        }
+        const std::string sig = enumTypeSignature(ua_base_res.value(), f.enum_map);
         auto [it, inserted] = enum_by_sig.emplace(sig, wrappers::opcua::EnumTypeDef{});
         if (inserted) {
             it->second.name = t_name;
@@ -34,7 +39,6 @@ static std::unordered_map<std::string, wrappers::opcua::EnumTypeDef> collectEnum
             it->second.name = t_name;
         }
     };
-
     // Scalar‑alias UDTs with #ENUM
     for (const auto& p_udt : t_registry.udts()) {
         if (p_udt.is_scalar_alias && !p_udt.enum_map.empty()) {
@@ -49,11 +53,11 @@ static std::unordered_map<std::string, wrappers::opcua::EnumTypeDef> collectEnum
     // Inline #ENUM attributes in UDTs and DataBlocks
     for (const auto& p_udt : t_registry.udts()) {
         for (const auto& f : p_udt.fields)
-            collectEnum(f, p_udt.name);
+            collectEnum(f, p_udt.name + "." + f.name);
     }
     for (const auto& p_db : t_registry.dbs()) {
-        ::sgrn::scl::forEachField(
-            p_db.second.fields, "", 0, [&](const DbField& f, const std::string&, int) { collectEnum(f, p_db.second.db_name); });
+        ::sgrn::scl::forEachField(p_db.second.fields, "", 0,
+            [&](const DbField& f, const std::string&, int) { collectEnum(f, p_db.second.db_name + "." + f.name); });
     }
 
     return enum_by_sig;

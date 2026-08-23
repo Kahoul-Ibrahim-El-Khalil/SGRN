@@ -256,6 +256,8 @@ Result<void, ::sgrn::scl::Error> PlcMemory::loadRegistry(const PlcSchemaStore& t
         n.type_ = t_field.type;
         n.count_ = static_cast<uint32_t>(t_field.count);
         n.string_capacity_ = static_cast<uint32_t>(t_field.string_capacity);
+        n.min_val_ = t_field.min_val;
+        n.max_val_ = t_field.max_val;
         for (const auto& child : t_field.children) {
             n.children_.push_back(t_self_ref(child, t_self_ref, tentry, t_db_endian, t_db_num));
         }
