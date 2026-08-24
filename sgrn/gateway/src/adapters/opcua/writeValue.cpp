@@ -55,25 +55,47 @@ static std::string resolveCertSubject(UA_Server* /*server*/, const UA_NodeId* /*
     return "";
 }
 
+static const UA_DataType* normalizeIncomingType(const NodeContext& ctx, const UA_Variant& value) {
+    SGRN_RETURN_IF_NULL(value.type, nullptr);
+
+    SGRN_RETURN_IF(ctx.enum_type && value.type == &UA_TYPES[UA_TYPES_INT32], ctx.enum_type);
+
+    return value.type;
+}
+
 /**
- * @brief Attempts to execute a high-performance native binary write to the PLC.
+ * @brief Resolves the UA_DataType this field's schema actually expects for
+ *        a STRUCTURE write.
  *
- * This is the "fast path". It resolves the raw pointers from the OPC UA variant,
- * allocates a correctly sized binary buffer based on the schema (PlcNode), and packs
- * the data using `encodeScalarOpcUaToMemory` or `translateOpcUaToS7`. The resulting binary
- * payload is then wrapped in a PlcCommand and queued for execution by the PlcCommandProcessor.
- *
- * @return UA_STATUSCODE_GOOD on success, an error code on failure, or std::nullopt
- *         if the data type cannot be natively mapped (triggering a JSON fallback).
+ * NodeContext::udt_name is only populated when the field is a Struct
+ * (see node_registration.cpp: `.udt_name = kind_of(field) == FieldKind::Struct
+ * ? field.udt_name : ""`), so an empty name means "not a UDT field — nothing
+ * to validate." For UDT fields, look the name up in the same TypeRegistry
+ * that was used to register the type in the first place. TypeRegistry::find()
+ * is a read-only lookup into a table built once at startup (adopt()) and
+ * never swapped while serving, so this is safe to call from the write
+ * callback without extra locking — same lifetime assumption NodeContext
+ * already makes for its other caches.
  */
+static const UA_DataType* resolveExpectedUdtType(const NodeContext& ctx) {
+    SGRN_RETURN_IF(ctx.udt_name.empty(), nullptr);
+
+    return ctx.type_registry ? ctx.type_registry->find(ctx.udt_name) : nullptr;
+}
+
 Result<void, OpcUaAdapterError> tryBinaryWrite(NodeContext* p_ctx, const UA_Variant& t_v, const PlcNode* p_node) {
-    const UA_DataType* p_udt_type = nullptr;
+    const UA_DataType* p_udt_type = normalizeIncomingType(*p_ctx, t_v);
     const uint8_t* p_udt_data = nullptr;
     bool is_array_input = (t_v.arrayLength > 0);
 
+    // The type this field is actually registered as. If udt_name is
+    // non-empty (this is a struct field) but the lookup fails, that's a
+    // registry desync — we treat it the same as a mismatch below rather
+    // than silently trusting whatever the client sent.
+    const UA_DataType* p_expected_udt = resolveExpectedUdtType(*p_ctx);
+
     if (is_array_input) {
         if (t_v.arrayLength == p_ctx->array_length || (p_node->is_dynamic_ && t_v.arrayLength <= p_ctx->array_length)) {
-            p_udt_type = t_v.type;
             p_udt_data = static_cast<const uint8_t*>(t_v.data);
         }
     } else {
@@ -81,18 +103,26 @@ Result<void, OpcUaAdapterError> tryBinaryWrite(NodeContext* p_ctx, const UA_Vari
             const auto* p_eo = static_cast<const UA_ExtensionObject*>(t_v.data);
             if ((p_eo->encoding == UA_EXTENSIONOBJECT_DECODED || p_eo->encoding == UA_EXTENSIONOBJECT_DECODED_NODELETE) &&
                 p_eo->content.decoded.data && p_eo->content.decoded.type) {
+
                 p_udt_type = p_eo->content.decoded.type;
                 p_udt_data = static_cast<const uint8_t*>(p_eo->content.decoded.data);
             }
         } else if (t_v.type) {
-            p_udt_type = t_v.type;
             p_udt_data = static_cast<const uint8_t*>(t_v.data);
         }
     }
 
-    if (!p_udt_type || !p_udt_data) {
-        return OpcUaAdapterError::NULL_POINTER;
-    }
+    // Distrust the client: whether the struct arrived wrapped in an
+    // ExtensionObject or as a direct scalar of a registered UA_DataType,
+    // it can claim to be ANY struct type the server knows about. Reject
+    // any mismatch here, before members are ever zipped index-by-index
+    // against our PlcNode schema tree — this must run for BOTH paths
+    // above, not just the ExtensionObject one.
+    SGRN_RETURN_ERROR_IF(
+        !p_ctx->udt_name.empty() && p_udt_type && p_udt_type->typeKind == UA_DATATYPEKIND_STRUCTURE && p_udt_type != p_expected_udt,
+        OpcUaAdapterError::TYPE_MISMATCH);
+
+    SGRN_RETURN_ERROR_IF(!p_udt_type || !p_udt_data, OpcUaAdapterError::NULL_POINTER);
 
     const size_t element_span = std::max<size_t>(1, p_node->size_);
     const size_t input_count = is_array_input ? std::min(t_v.arrayLength, static_cast<size_t>(p_ctx->array_length)) : 1U;
@@ -107,11 +137,13 @@ Result<void, OpcUaAdapterError> tryBinaryWrite(NodeContext* p_ctx, const UA_Vari
 
     if (is_array_input) {
         if (is_bool_array) {
-            const auto* p_bools = reinterpret_cast<const UA_Boolean*>(p_udt_data);
-            if (auto result =
-                    writeBoolArrayToMemory(p_bools, input_count, s7_binary.data() + header_offset, s7_binary.size() - header_offset);
-                result.hasError())
-                return result.error();
+
+            ArrayOfBoolsEncodingContext ctx{.p_source = reinterpret_cast<const UA_Boolean*>(p_udt_data),
+                .count = input_count,
+                .p_destination = s7_binary.data() + header_offset,
+                .destination_size = (size_t)(s7_binary.size() - header_offset)};
+
+            SGRN_IF_ERROR_PROPAGATE(encodeArrayOfBoolsToMemory(ctx));
         } else {
             const bool is_eo_arr = UA_Variant_hasArrayType(&t_v, &UA_TYPES[UA_TYPES_EXTENSIONOBJECT]);
             for (size_t j = 0; j < input_count; ++j) {
@@ -124,6 +156,7 @@ Result<void, OpcUaAdapterError> tryBinaryWrite(NodeContext* p_ctx, const UA_Vari
                     const UA_ExtensionObject& p_eo = p_eo_arr[j];
                     if ((p_eo.encoding == UA_EXTENSIONOBJECT_DECODED || p_eo.encoding == UA_EXTENSIONOBJECT_DECODED_NODELETE) &&
                         p_eo.content.decoded.data && p_eo.content.decoded.type) {
+
                         p_current_udt_type = p_eo.content.decoded.type;
                         p_current_ua_data = static_cast<const uint8_t*>(p_eo.content.decoded.data);
                     }
@@ -132,54 +165,67 @@ Result<void, OpcUaAdapterError> tryBinaryWrite(NodeContext* p_ctx, const UA_Vari
                 if (!p_current_udt_type || !p_current_ua_data)
                     continue;
 
+                // Same distrust check, per array element — a client can send
+                // a mixed-type array where only some elements lie about
+                // their type, and (unlike the scalar case) can lie about
+                // the element type without any ExtensionObject wrapper too.
+                SGRN_RETURN_ERROR_IF(!p_ctx->udt_name.empty() && p_current_udt_type->typeKind == UA_DATATYPEKIND_STRUCTURE &&
+                                         p_current_udt_type != p_expected_udt,
+                    OpcUaAdapterError::TYPE_MISMATCH);
+
                 if (p_current_udt_type->typeKind == UA_DATATYPEKIND_STRUCTURE) {
-                    if (auto result = encodeStructOpcUaToMemory(*p_current_udt_type, p_current_ua_data, p_s7_elem_ptr, *p_node);
-                        result.hasError())
-                        return result.error();
+                    OpcUaEncodingContext elem_ctx{p_current_udt_type, p_current_ua_data, p_s7_elem_ptr, p_node};
+                    elem_ctx.depth = 0;
+                    SGRN_IF_ERROR_PROPAGATE(encodeStructOpcUaToMemory(elem_ctx));
                 } else {
-                    PlcNode elem_node = *p_node;
+                    // Scalar element: project the layout into a cheap POD view
+                    // instead of deep-copying the whole PlcNode (name_/full_path_
+                    // strings + recursive children_ + atomic) per array element.
+                    PlcScalarView elem_view = makeScalarView(*p_node);
+                    elem_view.size = static_cast<uint32_t>(element_span);
                     if (p_node->type_ == DataType::String || p_node->type_ == DataType::WString || p_node->type_ == DataType::XString ||
                         p_node->type_ == DataType::XWString) {
                         if (p_node->type_ == DataType::String || p_node->type_ == DataType::XString) {
-                            elem_node.count_ = (element_span >= 2) ? static_cast<uint32_t>(element_span - 2) : 0;
+                            elem_view.count = (element_span >= 2) ? static_cast<uint32_t>(element_span - 2) : 0;
                         } else {
-                            elem_node.count_ = (element_span >= 4) ? static_cast<uint32_t>((element_span - 4) / 2) : 0;
+                            elem_view.count = (element_span >= 4) ? static_cast<uint32_t>((element_span - 4) / 2) : 0;
                         }
                     } else {
-                        elem_node.count_ = 1;
+                        elem_view.count = 1;
                     }
-                    elem_node.size_ = static_cast<uint32_t>(element_span);
-                    elem_node.offset_ = 0;
-                    if (auto result = encodeScalarOpcUaToMemory(p_current_udt_type, p_current_ua_data, p_s7_elem_ptr, elem_node);
-                        result.hasError())
-                        return result.error();
+                    OpcUaEncodingContext elem_ctx{p_current_udt_type, p_current_ua_data, p_s7_elem_ptr, elem_view};
+                    SGRN_IF_ERROR_PROPAGATE(encodeScalarOpcUaToMemory(elem_ctx));
                 }
             }
         }
     } else if (p_udt_type->typeKind == UA_DATATYPEKIND_STRUCTURE) {
-        if (auto result = encodeStructOpcUaToMemory(*p_udt_type, p_udt_data, s7_binary.data() + header_offset, *p_node); result.hasError())
-            return result.error();
+        // p_udt_type is now validated against p_expected_udt above, for
+        // both the ExtensionObject and direct-scalar-type input paths.
+        OpcUaEncodingContext elem_ctx{p_udt_type, p_udt_data, s7_binary.data() + header_offset, p_node};
+        SGRN_IF_ERROR_PROPAGATE(encodeStructOpcUaToMemory(elem_ctx));
     } else if (is_bool_array) {
         const auto* p_bools = static_cast<const UA_Boolean*>(t_v.data);
-        if (auto result =
-                writeBoolArrayToMemory(p_bools, t_v.arrayLength, s7_binary.data() + header_offset, s7_binary.size() - header_offset);
-            result.hasError())
-            return result.error();
+
+        ArrayOfBoolsEncodingContext ctx{.p_source = p_bools,
+            .count = t_v.arrayLength,
+            .p_destination = s7_binary.data() + header_offset,
+            .destination_size = (size_t)(s7_binary.data() - header_offset)};
+
+        SGRN_IF_ERROR_PROPAGATE(encodeArrayOfBoolsToMemory(ctx));
+
     } else {
-        if (auto result = encodeScalarOpcUaToMemory(p_udt_type, p_udt_data, s7_binary.data() + header_offset, *p_node); result.hasError())
-            return result.error();
+
+        OpcUaEncodingContext elem_ctx{p_udt_type, p_udt_data, s7_binary.data() + header_offset, p_node};
+        SGRN_IF_ERROR_PROPAGATE(encodeScalarOpcUaToMemory(elem_ctx));
     }
 
     PlcCommand cmd;
     cmd.type = PlcCommand::WriteBinary;
     cmd.db_number = p_ctx->db_number;
     cmd.size = s7_binary.size();
-    cmd.offset = p_node->offset_ + (is_array_input ? 0 : 0);
+    cmd.offset = p_node->offset_;
 
-    auto* p_entry = p_ctx->server->state()->findSegmentById(p_ctx->db_number);
-
-    cmd.path = (p_entry ? p_entry->name : "") + "." + p_ctx->field_path;
-
+    cmd.path = p_ctx->resolveCmdPath();
     cmd.value_binary = std::move(s7_binary);
 
     cmd.timestamp = sgrn::utils::time::nowMilliseconds();
@@ -191,21 +237,12 @@ Result<void, OpcUaAdapterError> tryBinaryWrite(NodeContext* p_ctx, const UA_Vari
     return {};
 }
 
-/**
- * @brief The main OPC UA write interceptor callback registered with the open62541 server.
- *
- * Orchestrates the entire write pipeline:
- * 1. Validates session security and access rights.
- * 2. Attempts the high-performance native binary write (tryBinaryWrite).
- * 3. Falls back to JSON serialization (tryJsonWrite) if necessary.
- */
 UA_StatusCode writeValue(UA_Server* tp_ua_server, const UA_NodeId* tp_session_id, void* /*sessionContext*/, const UA_NodeId* /*nodeId*/,
     void* tp_node_context, const UA_NumericRange* /*range*/, const UA_DataValue* tp_data_value) {
 
     auto* p_ctx = static_cast<NodeContext*>(tp_node_context);
-    if (!p_ctx || !p_ctx->server || !p_ctx->security) {
-        return UA_STATUSCODE_BADINTERNALERROR;
-    }
+
+    SGRN_RETURN_IF(!p_ctx || !p_ctx->server || !p_ctx->security, UA_STATUSCODE_BADINTERNALERROR);
 
     const std::string client_ip = resolveSessionIp(tp_ua_server, tp_session_id);
     const std::string cert_subject = resolveCertSubject(tp_ua_server, tp_session_id);
@@ -214,18 +251,17 @@ UA_StatusCode writeValue(UA_Server* tp_ua_server, const UA_NodeId* tp_session_id
             security::Protocol::OpcUA, client_ip, p_ctx->db_number, p_ctx->field_path, true, "", {}, cert_subject))
         return UA_STATUSCODE_BADUSERACCESSDENIED;
 
-    if (!tp_data_value || !tp_data_value->hasValue)
-        return UA_STATUSCODE_BADNODATA;
+    SGRN_RETURN_IF(!tp_data_value || !tp_data_value->hasValue, UA_STATUSCODE_BADNODATA);
 
     const UA_Variant& t_v = tp_data_value->value;
     const PlcNode* p_node = p_ctx->server->findSymbol(p_ctx->db_number, p_ctx->field_path);
 
-    if (!p_node) {
-        return UA_STATUSCODE_BADNODATA;
-    }
-    if (auto result = tryBinaryWrite(p_ctx, t_v, p_node); result.hasError()) {
-        return toUAStatusCode(result.error());
-    }
+    SGRN_RETURN_IF_NULL(p_node, UA_STATUSCODE_BADNODATA);
+
+    auto r = tryBinaryWrite(p_ctx, t_v, p_node);
+
+    SGRN_RETURN_IF(r.hasError(), toUAStatusCode(r.error()));
+
     return UA_STATUSCODE_GOOD;
 }
 

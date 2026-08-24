@@ -1,5 +1,6 @@
 #include <sgrn/gateway/adapters/opcua/TypeTranslation.hpp>
 #include <sgrn/gateway/adapters/opcua/information_model.hpp>
+#include <sgrn/gateway/adapters/opcua/scalar_view.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
 #include <sgrn/gateway/wrappers/opcua/Server.hpp>
@@ -7,6 +8,7 @@
 
 #include <fmt/core.h>
 #include <sgrn/debug.hpp>
+#include <sgrn/gateway/twin/PlcState.hpp>
 #include <open62541/common.h>
 #include <open62541/nodeids.h>
 #include <open62541/server.h>
@@ -18,6 +20,47 @@ using ::sgrn::scl::DbField;
 
 namespace sgrn::gateway::adapters
 {
+
+// Defined here (the adapter lifecycle TU) rather than in NodeContext.hpp so
+// the header keeps its forward declarations. Resolves the cached twin symbol
+// on first use; makeFieldContext() below populates it eagerly when the twin
+// tree is already loaded, this covers any context created before that.
+const twin::PlcNode* NodeContext::resolveSymbol() const {
+    if (!plc_node && server)
+        plc_node = server->findSymbol(db_number, field_path);
+    return plc_node;
+}
+
+const std::string& NodeContext::resolveCmdPath() const {
+    if (!cmd_path_cached_) {
+        const auto* p_entry = server ? server->state()->findSegmentById(db_number) : nullptr;
+        // Only latch the cache on a successful segment lookup. If the segment
+        // isn't registered yet (e.g. the eager warm-up in makeFieldContext()
+        // races ahead of registerSegment() for some adapter path), leave
+        // cmd_path_cached_ false so the next call — most likely the real
+        // write, by which point startup has settled — retries instead of
+        // permanently caching a path with the segment name missing.
+        if (p_entry) {
+            cached_cmd_path_ = p_entry->name + "." + field_path;
+            cmd_path_cached_ = true;
+        } else {
+            return field_path; // uncached fallback: "." prefix omitted rather than wrong
+        }
+    }
+    return cached_cmd_path_;
+}
+PlcScalarView makeScalarView(const twin::PlcNode& t_node) {
+    return PlcScalarView{
+        .type = t_node.type_,
+        .endian = t_node.endian_,
+        .size = static_cast<uint32_t>(t_node.size_),
+        .count = t_node.count_,
+        .bit_index = t_node.bit_index_,
+        .string_capacity = t_node.string_capacity_,
+        .min_val = t_node.min_val_,
+        .max_val = t_node.max_val_,
+    };
+}
 
 extern UA_StatusCode readValue(
     UA_Server*, const UA_NodeId*, void*, const UA_NodeId*, void*, UA_Boolean, const UA_NumericRange*, UA_DataValue*);
@@ -77,6 +120,12 @@ static NodeContext* makeFieldContext(twin::PlcMemory* tp_plc_memory, uint16_t t_
     p_ctx->scratch_buf.resize(p_ctx->field_size);
     p_ctx->enum_map = t_field.enum_map;
 
+    // Eagerly cache the twin symbol (no-op → nullptr when the twin tree isn't
+    // loaded yet; resolveSymbol() re-resolves lazily on first use). This keeps
+    // findSymbol()'s string build + case-insensitive hash out of every write /
+    // aggregate read / delta-push callback.
+    p_ctx->plc_node = tp_plc_memory->findSymbol(t_db_number, t_full_path);
+    p_ctx->resolveCmdPath(); // warm the cache eagerly, same rationale as plc_node above
     if (p_ctx->kind == ::sgrn::scl::FieldKind::Enum) {
         if (auto ua_base_res = dataTypeToUaTypeIndex(t_field.type); ua_base_res.hasValue()) {
             const std::string sig = enumTypeSignature(ua_base_res.value(), t_field.enum_map);
@@ -155,6 +204,12 @@ static void configureVariableAttributes(UA_VariableAttributes& t_v_attr, const D
         if (t_ua_type_idx >= 0)
             t_v_attr.dataType = UA_TYPES[t_ua_type_idx].typeId;
     }
+
+    // Override semantic types where OPC UA has standard mappings.
+    // TIME is decoded as a Double (milliseconds), but semantically is a Duration (NodeId 290).
+    if (t_field.type == ::sgrn::scl::DataType::Time) {
+        t_v_attr.dataType = UA_NODEID_NUMERIC(0, 290);
+    }
 }
 
 static void addEngineeringUnitsProperty(
@@ -194,6 +249,7 @@ void addAggregateValueNode(const OpcUaAdapterContext& t_adapter_ctx, const OpcUa
         .type = ::sgrn::scl::DataType::Struct,
         .enum_type = nullptr,
         .enum_map = {},
+        .string_capacity = 0,
     };
     t_nodes_ctx.p_owned_contexts->push_back(std::unique_ptr<NodeContext>(p_ctx));
 

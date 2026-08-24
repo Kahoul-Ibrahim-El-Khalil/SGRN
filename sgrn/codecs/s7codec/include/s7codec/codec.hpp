@@ -505,6 +505,13 @@ inline DecodedValue decodeScalar(
             if (!check(8))
                 return {};
             return DecodedValue::makeString(LTOD(fromEndian<uint64_t>(t_ptr, t_endian)).toString());
+        case Type::LDT:
+        case Type::LDTL:
+            if (!check(8))
+                return {};
+            // For now, represent LDT/LDTL as int64_t nanoseconds since 1970 for raw access.
+            // SGRN OPC UA layer intercepts this to format as UA_DateTime.
+            return DecodedValue::makeSigned(static_cast<int64_t>(fromEndian<int64_t>(t_ptr, t_endian)));
         case Type::Real:
             if (!check(4))
                 return {};
@@ -790,6 +797,8 @@ inline std::expected<void, CodecStatus> encodeScalar(const DecodedValue& t_decod
         case Type::LTimeOfDay:
             return encodeU64(static_cast<uint64_t>(t_decoded_value.asInt64()), t_ptr, t_buffer_size, t_endian);
         case Type::LTime:
+        case Type::LDT:
+        case Type::LDTL:
             return encodeI64(t_decoded_value.asInt64(), t_ptr, t_buffer_size, t_endian);
         default:
             return std::unexpected(CodecStatus::UNSUPPORTED_TYPE);

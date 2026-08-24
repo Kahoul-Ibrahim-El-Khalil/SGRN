@@ -118,6 +118,8 @@ VAR
     date      : Date;
     tod       : TOD;
     dtl       : DTL;
+    ldt       : LDT;
+    ldtl      : LDTL;
 
 END_VAR
 END_DATA_BLOCK

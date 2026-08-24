@@ -1,7 +1,7 @@
+#include <sgrn/Result.hpp>
 #include <sgrn/gateway/twin/TreePath.hpp>
 #include <cctype>
 #include <sstream>
-
 namespace sgrn::gateway::twin
 {
 
@@ -95,8 +95,8 @@ std::string TreePath::toSlashed() const {
 }
 
 bool TreePath::operator==(const TreePath& t_other) const {
-    if (segments_.size() != t_other.segments_.size())
-        return false;
+    SGRN_RETURN_IF(segments_.size() != t_other.segments_.size(), false);
+
     for (size_t i = 0; i < segments_.size(); ++i) {
         const auto& a = segments_[i];
         const auto& b = t_other.segments_[i];

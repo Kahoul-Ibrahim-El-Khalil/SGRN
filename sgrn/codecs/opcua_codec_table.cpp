@@ -161,7 +161,7 @@ static bool toUaDateTime(const DecodedValue& dv, Type /*s7*/, UA_Variant& out) n
 // The table — must match the 30 types in sgrn::scl::kTypeTable
 // ---------------------------------------------------------------------------
 
-const CodecEntry kCodecTable[30] = {
+const CodecEntry kCodecTable[32] = {
     // type                  name        bytes  ua_idx            str    temporal  from_ua to_ua
     {Type::Bool, "BOOL", 1, UA_TYPES_BOOLEAN, false, false, fromUaBool, toUaBool},
 
@@ -221,8 +221,7 @@ const CodecEntry kCodecTable[30] = {
     {Type::Date, "DATE", 2, UA_TYPES_UINT16, false, true, FROM_UA_UNSIGNED(UA_TYPES_UINT16, UA_UInt16),
         TO_UA_UNSIGNED(UA_TYPES_UINT16, UA_UInt16)},
 
-    {Type::TimeOfDay, "TOD", 4, UA_TYPES_UINT32, false, true, FROM_UA_UNSIGNED(UA_TYPES_UINT32, UA_UInt32),
-        TO_UA_UNSIGNED(UA_TYPES_UINT32, UA_UInt32)},
+    {Type::TimeOfDay, "TOD", 4, UA_TYPES_STRING, true, true, fromUaString, toUaString},
 
     {Type::LTimeOfDay, "LTOD", 8, UA_TYPES_UINT64, false, true, FROM_UA_UNSIGNED(UA_TYPES_UINT64, UA_UInt64),
         TO_UA_UNSIGNED(UA_TYPES_UINT64, UA_UInt64)},
@@ -230,6 +229,10 @@ const CodecEntry kCodecTable[30] = {
     {Type::DateTime, "DT", 8, UA_TYPES_DATETIME, false, true, fromUaDateTime, toUaDateTime},
 
     {Type::DTL, "DTL", 12, UA_TYPES_DATETIME, false, true, fromUaDateTime, toUaDateTime},
+
+    {Type::LDT, "LDT", 8, UA_TYPES_DATETIME, false, true, fromUaDateTime, toUaDateTime},
+
+    {Type::LDTL, "LDTL", 8, UA_TYPES_DATETIME, false, true, fromUaDateTime, toUaDateTime},
 
     {Type::Timer, "TIMER", 2, UA_TYPES_UINT16, false, true, FROM_UA_UNSIGNED(UA_TYPES_UINT16, UA_UInt16),
         TO_UA_UNSIGNED(UA_TYPES_UINT16, UA_UInt16)},

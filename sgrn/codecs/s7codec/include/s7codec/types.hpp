@@ -78,6 +78,8 @@ enum class Type {
     TimeOfDay,  ///< 32-bit unsigned ms since midnight
     LTimeOfDay, ///< 64-bit unsigned ns since midnight
     DateTime,   ///< 8-byte BCD encoded date and time
+    LDT,        ///< 8-byte signed ns since 1970
+    LDTL,       ///< 8-byte signed ns since 1970 (local)
     DTL,        ///< 12-byte struct (TIA Portal Date and Time Long)
     Char,       ///< 8-bit ASCII character
     WChar,      ///< 16-bit Unicode character
@@ -164,6 +166,10 @@ inline const char* s7TypeToString(Type t) {
             return "LTIMEOFDAY";
         case Type::DateTime:
             return "DATETIME";
+        case Type::LDT:
+            return "LDT";
+        case Type::LDTL:
+            return "LDTL";
         case Type::DTL:
             return "DTL";
         case Type::Char:
@@ -232,6 +238,9 @@ inline const char* s7TypeToCType(Type t) {
             return "double";
         case Type::DateTime:
             return "S7DateTime"; // 8-byte BCD encoded timestamp
+        case Type::LDT:
+        case Type::LDTL:
+            return "int64_t"; // 8-byte nanoseconds since 1970
         case Type::DTL:
             return "struct DTL"; // 12-byte structural timestamp
         case Type::String:
@@ -459,6 +468,14 @@ inline bool stringToType(const char* name, Type& out) {
                 out = Type::LTimeOfDay;
                 return true;
             }
+            if (detail::strEqualCI(name, "LDT")) {
+                out = Type::LDT;
+                return true;
+            }
+            if (detail::strEqualCI(name, "LDTL")) {
+                out = Type::LDTL;
+                return true;
+            }
             break;
         case 'R':
             if (detail::strEqualCI(name, "REAL")) {
@@ -555,6 +572,8 @@ inline constexpr int primitiveSize(Type type) {
         case Type::LReal:
         case Type::LTime:
         case Type::LTimeOfDay:
+        case Type::LDT:
+        case Type::LDTL:
             return 8;
         case Type::DateTime:
             return 8;

@@ -108,7 +108,7 @@ void WebSocketAdapter::setupConnectionHandler() {
                 }
 
                 std::lock_guard<std::mutex> lk(clients_mutex_);
-                clients_[ws_locked] = ClientContext{connectionState->getRemoteIp(), origin, std::move(header_names), {}};
+                clients_[ws_locked] = ClientContext{connectionState->getRemoteIp(), origin, std::move(header_names), {}, {}};
             } else if (msg->type == ix::WebSocketMessageType::Close) {
                 std::lock_guard<std::mutex> lk(clients_mutex_);
                 clients_.erase(ws_locked);

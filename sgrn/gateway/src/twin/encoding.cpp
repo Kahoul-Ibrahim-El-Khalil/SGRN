@@ -211,7 +211,9 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
             return {};
         }
         case DataType::LInt:
-        case DataType::LTime: {
+        case DataType::LTime:
+        case DataType::LDT:
+        case DataType::LDTL: {
             auto t_v = to_signed(t_value);
             if (!t_v)
                 return Error{SchemaCode::Generic, "Expected integer for LINT"};

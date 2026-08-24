@@ -41,7 +41,7 @@ namespace
 // Writes the DataTypeDefinition attribute (UA_EnumDefinition) for an enum
 // DataType node — the machine-readable field/value list consumed by clients
 // that support DataTypeDefinition browsing (OPC UA Part 3 §8.51).
-void writeEnumDefinitionAttribute(UA_Server* tp_raw, const UA_DataType& t_type, const EnumTypeDef& t_def) {
+Result<void, std::string> writeEnumDefinitionAttribute(UA_Server* tp_raw, const UA_DataType& t_type, const EnumTypeDef& t_def) {
     UA_EnumDefinition enum_def;
     UA_EnumDefinition_init(&enum_def);
     enum_def.fieldsSize = t_def.values.size();
@@ -56,63 +56,63 @@ void writeEnumDefinitionAttribute(UA_Server* tp_raw, const UA_DataType& t_type, 
             enum_def.fields[idx].name = UA_STRING_ALLOC(v.c_str());
             ++idx;
         }
-        __UA_Server_write(tp_raw, &t_type.typeId, UA_ATTRIBUTEID_DATATYPEDEFINITION, &UA_TYPES[UA_TYPES_ENUMDEFINITION], &enum_def);
+        UA_StatusCode code =
+            __UA_Server_write(tp_raw, &t_type.typeId, UA_ATTRIBUTEID_DATATYPEDEFINITION, &UA_TYPES[UA_TYPES_ENUMDEFINITION], &enum_def);
+        if (code != UA_STATUSCODE_GOOD) {
+
+            UA_EnumDefinition_clear(&enum_def);
+            return fmt::format("Failed to register Enum {}, UA_StatusCode: {}", t_def.name, UA_StatusCode_name(code));
+        }
     }
     UA_EnumDefinition_clear(&enum_def);
+    return {};
 }
 
-// EnumStrings: indexed LocalizedText array. Per OPC UA Part 8 §5.1, the
-// ARRAY INDEX itself is the enum value here (unlike EnumValues below, which
-// carries its own .value field per entry) — so this only works directly for
-// contiguous, non-negative enum values. S7 schemas commonly use sparse
-// values (0, 10, 20, ...), which would silently mislabel every index past
-// the first gap if built positionally in map-iteration order. Guarded below
-// instead of emitting wrong data. Fully self-contained — its locals (`n`,
-// the LocalizedText array) never leak into registerEnumValuesProperty().
-void registerEnumStringsProperty(UA_Server* tp_raw, const UA_DataType& t_type, const EnumTypeDef& t_def) {
-    const int max_key =
-        std::max_element(t_def.values.begin(), t_def.values.end(), [](const auto& a, const auto& b) { return a.first < b.first; })->first;
-    const int min_key = t_def.values.begin()->first;
+static bool isContiguousZeroBasedEnum(const EnumTypeDef& t_def) {
+    if (t_def.values.empty())
+        return false;
 
-    if (min_key < 0 || static_cast<size_t>(max_key) > 4096) {
-        // Negative or too-sparse to represent positionally — EnumValues
-        // carries the correct value/label pairs and is what spec-compliant
-        // clients should fall back to for non-contiguous enums.
-        SGRN_WARN_LOG("OPC UA: enum '{}' has negative or excessively sparse values [{}..{}] — skipping EnumStrings, EnumValues only",
-            t_type.typeName, min_key, max_key);
-        return;
+    int expected = 0;
+    for (const auto& [value, name] : t_def.values) {
+        (void)name;
+        if (value != expected)
+            return false;
+        ++expected;
+    }
+    return true;
+}
+
+Result<void, std::string> registerEnumStringsProperty(UA_Server* tp_raw, const UA_DataType& t_type, const EnumTypeDef& t_def) {
+    SGRN_RETURN_IF(!isContiguousZeroBasedEnum(t_def), {});
+
+    const size_t n = t_def.values.size();
+
+    auto* lts = static_cast<UA_LocalizedText*>(UA_Array_new(n, &UA_TYPES[UA_TYPES_LOCALIZEDTEXT]));
+
+    SGRN_RETURN_IF_NULL(!lts, {});
+
+    size_t index = 0;
+    for (const auto& [value, name] : t_def.values) {
+        (void)value;
+        lts[index++] = UA_LOCALIZEDTEXT_ALLOC("en", name.c_str());
     }
 
-    const size_t n = static_cast<size_t>(max_key) + 1;
-    UA_LocalizedText* lts = static_cast<UA_LocalizedText*>(UA_Array_new(n, &UA_TYPES[UA_TYPES_LOCALIZEDTEXT]));
+    UA_VariableAttributes attr = UA_VariableAttributes_default;
+    attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", "EnumStrings");
+    attr.dataType = UA_TYPES[UA_TYPES_LOCALIZEDTEXT].typeId;
+    attr.valueRank = UA_VALUERANK_ONE_DIMENSION;
+    attr.value.arrayLength = n;
+    attr.value.arrayDimensions = nullptr;
+    attr.value.arrayDimensionsSize = 0;
 
-    // Pre-fill every slot so gaps in the enum (e.g. 0, 10, 20 skips 1..9)
-    // get an explicit empty label instead of leaking whatever the previous
-    // positional-index bug happened to put there.
-    for (size_t i = 0; i < n; ++i)
-        lts[i] = UA_LOCALIZEDTEXT_ALLOC("en", "");
-    for (const auto& [k, v] : t_def.values)
-        lts[static_cast<size_t>(k)] = UA_LOCALIZEDTEXT_ALLOC("en", v.c_str());
+    UA_Variant_setArray(&attr.value, lts, n, &UA_TYPES[UA_TYPES_LOCALIZEDTEXT]);
 
-    UA_Variant strings_var;
-    UA_Variant_init(&strings_var);
-    UA_Variant_setArray(&strings_var, lts, static_cast<UA_Int32>(n), &UA_TYPES[UA_TYPES_LOCALIZEDTEXT]);
+    const UA_NodeId property_id = UA_NODEID_STRING_ALLOC(1, (std::string(t_type.typeName) + ".EnumStrings").c_str());
 
-    UA_VariableAttributes s_attr = UA_VariableAttributes_default;
-    s_attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", "EnumStrings");
-    s_attr.dataType = UA_TYPES[UA_TYPES_LOCALIZEDTEXT].typeId;
-    s_attr.valueRank = UA_VALUERANK_ONE_DIMENSION;
-    s_attr.arrayDimensionsSize = 1;
-    UA_UInt32 dims[1] = {0};
-    s_attr.arrayDimensions = dims;
-    UA_Variant_copy(&strings_var, &s_attr.value);
+    UA_Server_addVariableNode(tp_raw, property_id, t_type.typeId, UA_NODEID_NUMERIC(0, UA_NS0ID_HASPROPERTY),
+        UA_QUALIFIEDNAME(0, const_cast<char*>("EnumStrings")), UA_NODEID_NUMERIC(0, UA_NS0ID_PROPERTYTYPE), attr, nullptr, nullptr);
 
-    UA_NodeId strings_id = UA_NODEID_STRING_ALLOC(1, (std::string(t_type.typeName) + "_EnumStrings").c_str());
-    UA_Server_addVariableNode(tp_raw, strings_id, t_type.typeId, UA_NODEID_NUMERIC(0, UA_NS0ID_HASPROPERTY),
-        UA_QUALIFIEDNAME_ALLOC(0, "EnumStrings"), UA_NODEID_NUMERIC(0, UA_NS0ID_PROPERTYTYPE), s_attr, nullptr, nullptr);
-
-    UA_NodeId_clear(&strings_id);
-    UA_Variant_clear(&strings_var);
+    UA_NodeId_clear(const_cast<UA_NodeId*>(&property_id));
 }
 
 #if defined(UA_TYPES_ENUMVALUETYPE)
@@ -140,9 +140,8 @@ void registerEnumValuesProperty(UA_Server* tp_raw, const UA_DataType& t_type, co
     v_attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", "EnumValues");
     v_attr.dataType = UA_TYPES[UA_TYPES_ENUMVALUETYPE].typeId;
     v_attr.valueRank = UA_VALUERANK_ONE_DIMENSION;
-    v_attr.arrayDimensionsSize = 1;
-    UA_UInt32 vdims[1] = {0};
-    v_attr.arrayDimensions = vdims;
+    v_attr.arrayDimensionsSize = 0;
+    v_attr.arrayDimensions = nullptr;
     UA_Variant_copy(&values_var, &v_attr.value);
 
     UA_NodeId values_id = UA_NODEID_STRING_ALLOC(1, (std::string(t_type.typeName) + "_EnumValues").c_str());
@@ -342,8 +341,11 @@ void registerDataTypeNodes(Server& t_server, const TypeRegistry& t_type_registry
                     break;
                 }
             }
-            if (p_def)
+
+            if (p_def) {
                 registerEnumDataType(p_raw, ut, *p_def);
+            }
+
             continue;
         }
 

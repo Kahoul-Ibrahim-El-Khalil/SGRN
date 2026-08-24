@@ -3,6 +3,7 @@
 #include <sgrn/gateway/adapters/opcua/NodeContext.hpp>
 #include <sgrn/gateway/adapters/opcua/TypeTranslation.hpp>
 #include <sgrn/gateway/adapters/opcua/errors.hpp>
+#include <sgrn/gateway/adapters/opcua/scalar_view.hpp>
 #include <sgrn/gateway/adapters/opcua/udt_codec.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
 #include <sgrn/gateway/twin/PlcCommandProcessor.hpp>
@@ -49,8 +50,49 @@ inline struct tm resolveOpcUaLocalTime(UA_DateTime ua_date) {
     localtime_r(&t_sec, &tm_info);
     return tm_info;
 }
+struct ArrayOfBoolsEncodingContext {
+    const UA_Boolean* p_source;
+    size_t count;
+    uint8_t* p_destination;
+    size_t destination_size;
+};
 
-Result<void, OpcUaAdapterError> encodeStringOpcUaToMemory(const uint8_t* tp_ua_ptr, uint8_t* tp_memory, const twin::PlcNode& t_node);
+struct OpcUaEncodingContext {
+    const UA_DataType* p_ua_type;
+    const uint8_t* p_ua_buf;
+    uint8_t* p_memory;
+    /// Scalar layout snapshot — cheap POD mirror of the PlcNode fields the
+    /// scalar codec paths touch. Always populated (from p_node when one is
+    /// provided), so scalar encoding never dereferences the full PlcNode.
+    PlcScalarView view{};
+    /// Non-null only for STRUCT payloads: children_ drives member recursion.
+    const twin::PlcNode* p_node{nullptr};
+    uint32_t override_size = 0;
+
+    /// Recursion guard for nested/self-referential UDTs — encodeStructOpcUaToMemory
+    /// increments this on every nested call and refuses to go past kMaxStructDepth.
+    uint16_t depth = 0;
+    /// Struct payload: keeps the full PlcNode (children_) AND snapshots its
+    /// scalar layout into `view`. Existing call sites passing a PlcNode*
+    /// resolve here.
+    OpcUaEncodingContext(const UA_DataType* tp_ua_type, const uint8_t* tp_ua_buf, uint8_t* tp_memory, const twin::PlcNode* tp_node);
+    /// Scalar-only payload from a prebuilt view (array-element hot loops —
+    /// no strings/children_/atomic copies).
+    OpcUaEncodingContext(const UA_DataType* tp_ua_type, const uint8_t* tp_ua_buf, uint8_t* tp_memory, const PlcScalarView& t_view)
+        : p_ua_type(tp_ua_type)
+        , p_ua_buf(tp_ua_buf)
+        , p_memory(tp_memory)
+        , view(t_view)
+        , p_node(nullptr) {
+    }
+
+    uint32_t effectiveSize() const {
+        return override_size > 0 ? override_size : view.size;
+    }
+};
+
+Result<void, OpcUaAdapterError> encodeArrayOfBoolsToMemory(const ArrayOfBoolsEncodingContext& t_ctx);
+Result<void, OpcUaAdapterError> encodeStringOpcUaToMemory(const OpcUaEncodingContext& t_ctx);
 /**
  * @brief Encodes a single scalar OPC UA primitive into a raw S7 binary buffer.
  *
@@ -58,10 +100,8 @@ Result<void, OpcUaAdapterError> encodeStringOpcUaToMemory(const uint8_t* tp_ua_p
  * bit alignments for booleans, and boundary validation for critical types like
  * DTL and DateTime, preventing out-of-range epoch underflows.
  */
-
-Result<void, OpcUaAdapterError> encodeScalarOpcUaToMemory(
-    const UA_DataType* tp_ua_type, const uint8_t* tp_ua_ptr, uint8_t* tp_memory, const twin::PlcNode& t_node);
-Result<void, OpcUaAdapterError> encodeStructOpcUaToMemory(
-    const UA_DataType& t_type, const uint8_t* tp_ua_ptr, uint8_t* tp_memory, const twin::PlcNode& t_node);
+Result<void, OpcUaAdapterError> encodeScalarOpcUaToMemory(const OpcUaEncodingContext& t_ctx);
+Result<void, OpcUaAdapterError> encodeStructOpcUaToMemory(const OpcUaEncodingContext& tp_ctx);
+Result<void, OpcUaAdapterError> encodeTimeOfDayOpcUaToMemory(const OpcUaEncodingContext& tp_ctx);
 
 } // namespace sgrn::gateway::adapters

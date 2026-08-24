@@ -73,7 +73,7 @@ struct CodecEntry {
  * Rows are ordered to match kTypeTable in sgrn::scl (same 30 types).
  * Do NOT rely on index-based access; use `codecEntryFor()`.
  */
-extern const CodecEntry kCodecTable[30];
+extern const CodecEntry kCodecTable[32];
 
 /**
  * @brief O(N) lookup by S7 type (N = 30, compile-time constant).

@@ -20,7 +20,7 @@ struct PlcTypeInfo {
     bool is_temporal;
 };
 
-constexpr std::array<PlcTypeInfo, 30> kTypeTable = {{
+constexpr std::array<PlcTypeInfo, 32> kTypeTable = {{
     {DataType::Bool, "BOOL", 1, UA_TYPES_BOOLEAN, -1, false, false},
     {DataType::SInt, "SINT", 1, UA_TYPES_SBYTE, -1, false, false},
     {DataType::USInt, "USINT", 1, UA_TYPES_BYTE, -1, false, false},
@@ -45,10 +45,12 @@ constexpr std::array<PlcTypeInfo, 30> kTypeTable = {{
     {DataType::Time, "TIME", 4, UA_TYPES_DOUBLE, -1, false, true},
     {DataType::LTime, "LTIME", 8, UA_TYPES_INT64, -1, false, true},
     {DataType::Date, "DATE", 2, UA_TYPES_UINT16, -1, false, true},
-    {DataType::TimeOfDay, "TOD", 4, UA_TYPES_UINT32, -1, false, true},
+    {DataType::TimeOfDay, "TOD", 4, UA_TYPES_STRING, -1, false, true},
     {DataType::LTimeOfDay, "LTOD", 8, UA_TYPES_UINT64, -1, false, true},
     {DataType::DateTime, "DT", 8, UA_TYPES_DATETIME, -1, false, true},
     {DataType::DTL, "DTL", 12, UA_TYPES_DATETIME, -1, false, true},
+    {DataType::LDT, "LDT", 8, UA_TYPES_DATETIME, -1, false, true},
+    {DataType::LDTL, "LDTL", 8, UA_TYPES_DATETIME, -1, false, true},
     {DataType::Timer, "TIMER", 2, UA_TYPES_UINT16, -1, false, true},
     {DataType::Counter, "COUNTER", 2, UA_TYPES_UINT16, -1, false, false},
 }};

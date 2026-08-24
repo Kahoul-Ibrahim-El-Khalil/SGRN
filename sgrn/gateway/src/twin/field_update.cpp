@@ -87,6 +87,8 @@ int inferUaTypeIndex(const PlcNode& t_node) {
         case s7codec::Type::LReal:
         case s7codec::Type::Time:
             return UA_TYPES_DOUBLE;
+        case s7codec::Type::TimeOfDay:
+            return UA_TYPES_STRING;
         case s7codec::Type::String:
         case s7codec::Type::WString:
         case s7codec::Type::XString:

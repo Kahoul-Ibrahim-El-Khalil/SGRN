@@ -29,51 +29,46 @@ void setCurrentTimeStamp(UA_DataValue* tp_data_value) {
 // covers scalars, temporal types (DTL / DATE_AND_TIME) and typed arrays; on
 static UA_StatusCode readScalarValue(const NodeContext* tp_ctx, UA_DataValue* tp_data_value, UA_Boolean t_source_time_stamp) {
     auto r = tp_ctx->server->readDbMemory(tp_ctx->db_number, tp_ctx->field_offset, tp_ctx->field_size, tp_ctx->scratch_buf.data());
-    if (r.hasError())
-        return toUAStatusCode(r.error());
+    SGRN_RETURN_IF(r.hasError(), toUAStatusCode(r.error()));
 
-    RawDecodingContext raw_ctx{.p_node_ctx = tp_ctx, .p_raw_data = tp_ctx->scratch_buf.data(), .size = tp_ctx->field_size};
-    if (auto result = decodeMemoryBytesToDataValue(raw_ctx); result.hasValue()) {
-        UA_DataValue_init(tp_data_value);
-        *tp_data_value = result.value();
-        if (t_source_time_stamp)
-            setCurrentTimeStamp(tp_data_value);
-        return UA_STATUSCODE_GOOD;
-    } else {
-        return toUAStatusCode(result.error()); // was hard-coded BADINTERNALERROR
-    }
+    OpcUaDecodingContext raw_ctx{.p_node_ctx = tp_ctx, .p_raw_data = tp_ctx->scratch_buf.data(), .size = tp_ctx->field_size};
+
+    auto decoded = decodeMemoryBytesToDataValue(raw_ctx);
+    SGRN_RETURN_IF(decoded.hasError(), toUAStatusCode(decoded.error())); // was hard-coded BADINTERNALERROR
+
+    UA_DataValue_init(tp_data_value);
+    *tp_data_value = std::move(decoded).value();
+    if (t_source_time_stamp)
+        setCurrentTimeStamp(tp_data_value);
+    return UA_STATUSCODE_GOOD;
 }
 static UA_StatusCode readArrayValue(const NodeContext* tp_ctx, UA_DataValue* tp_data_value, UA_Boolean t_source_time_stamp) {
     auto r = tp_ctx->server->readDbMemory(tp_ctx->db_number, tp_ctx->field_offset, tp_ctx->field_size, tp_ctx->scratch_buf.data());
-    if (r.hasError()) {
-        return toUAStatusCode(r.error());
-    }
-    RawDecodingContext raw_ctx{.p_node_ctx = tp_ctx, .p_raw_data = tp_ctx->scratch_buf.data(), .size = tp_ctx->field_size};
+    SGRN_RETURN_IF(r.hasError(), toUAStatusCode(r.error()));
 
-    if (auto result = decodeMemoryBytesToDataValue(raw_ctx); result.hasValue()) {
-        *tp_data_value = result.value();
-        if (t_source_time_stamp) {
-            setCurrentTimeStamp(tp_data_value);
-        }
-        return UA_STATUSCODE_GOOD;
-    } else {
-        return toUAStatusCode(result.error());
+    OpcUaDecodingContext raw_ctx{.p_node_ctx = tp_ctx, .p_raw_data = tp_ctx->scratch_buf.data(), .size = tp_ctx->field_size};
+
+    auto result = decodeMemoryBytesToDataValue(raw_ctx);
+    SGRN_RETURN_IF(result.hasError(), toUAStatusCode(result.error()));
+
+    *tp_data_value = std::move(result).value();
+    if (t_source_time_stamp) {
+        setCurrentTimeStamp(tp_data_value);
     }
+    return UA_STATUSCODE_GOOD;
 }
 
 UA_StatusCode readValue(UA_Server* /*server*/, const UA_NodeId* /*sessionId*/, void* /*sessionContext*/, const UA_NodeId* /*nodeId*/,
     void* tp_node_context, UA_Boolean t_source_time_stamp, const UA_NumericRange* /*range*/, UA_DataValue* tp_data_value) {
     auto* p_ctx = static_cast<NodeContext*>(tp_node_context);
-    if (!p_ctx || !p_ctx->server)
-        return UA_STATUSCODE_BADINTERNALERROR;
+    SGRN_RETURN_IF(!p_ctx || !p_ctx->server, UA_STATUSCODE_BADINTERNALERROR);
 
     if (p_ctx->security) {
         std::string client_ip = "";
         std::string session_name = "";
-        if (!p_ctx->security->authorizeField(
-                security::Protocol::OpcUA, client_ip, p_ctx->db_number, p_ctx->field_path, false, "", {}, session_name)) {
-            return UA_STATUSCODE_BADUSERACCESSDENIED;
-        }
+        SGRN_RETURN_IF(!p_ctx->security->authorizeField(
+                           security::Protocol::OpcUA, client_ip, p_ctx->db_number, p_ctx->field_path, false, "", {}, session_name),
+            UA_STATUSCODE_BADUSERACCESSDENIED);
     }
 
     if (p_ctx->array_length == 0 && p_ctx->udt_name.empty())
@@ -92,35 +87,30 @@ UA_StatusCode readAggregateValue(UA_Server* /*server*/, const UA_NodeId* /*sessi
     const UA_NodeId* /*nodeId*/, void* tp_node_context, UA_Boolean t_source_time_stamp, const UA_NumericRange* /*range*/,
     UA_DataValue* tp_data_value) {
     auto* p_ctx = static_cast<NodeContext*>(tp_node_context);
-    if (!p_ctx || !p_ctx->server)
-        return UA_STATUSCODE_BADINTERNALERROR;
+    SGRN_RETURN_IF(!p_ctx || !p_ctx->server, UA_STATUSCODE_BADINTERNALERROR);
 
     if (p_ctx->security) {
         std::string client_ip = "";
         std::string session_name = "";
-        if (!p_ctx->security->authorizeField(
-                security::Protocol::OpcUA, client_ip, p_ctx->db_number, p_ctx->field_path, false, "", {}, session_name)) {
-            return UA_STATUSCODE_BADUSERACCESSDENIED;
-        }
+        SGRN_RETURN_IF(!p_ctx->security->authorizeField(
+                           security::Protocol::OpcUA, client_ip, p_ctx->db_number, p_ctx->field_path, false, "", {}, session_name),
+            UA_STATUSCODE_BADUSERACCESSDENIED);
     }
 
     if (!p_ctx->udt_name.empty() && p_ctx->type_registry) {
         const UA_DataType* p_udt_type = p_ctx->type_registry->find(p_ctx->udt_name);
-        const PlcNode* p_node = p_ctx->server->findSymbol(p_ctx->db_number, p_ctx->field_path);
+        const PlcNode* p_node = p_ctx->resolveSymbol();
         if (p_udt_type && p_node && p_ctx->server->state()) {
             auto result = decodeStructObjectToExtensionObjectVariant(*p_node, *p_udt_type, p_ctx->server->state()->tree());
-            if (result.hasValue()) {
-                UA_Variant_init(&tp_data_value->value);
-                tp_data_value->value = result.value();
-                tp_data_value->hasValue = true;
-                if (t_source_time_stamp) {
-                    setCurrentTimeStamp(tp_data_value);
-                }
-                return UA_STATUSCODE_GOOD;
-            } else {
-                UA_Variant_clear(&tp_data_value->value);
-                return toUAStatusCode(result.error());
+            SGRN_RETURN_IF(result.hasError(), toUAStatusCode(result.error()));
+
+            UA_Variant_init(&tp_data_value->value);
+            tp_data_value->value = std::move(result).value();
+            tp_data_value->hasValue = true;
+            if (t_source_time_stamp) {
+                setCurrentTimeStamp(tp_data_value);
             }
+            return UA_STATUSCODE_GOOD;
         }
         return UA_STATUSCODE_BADINTERNALERROR;
     }

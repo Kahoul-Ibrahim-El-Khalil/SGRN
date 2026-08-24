@@ -817,23 +817,22 @@ Result<void, PlcMemoryError> PlcMemory::readDbMemory(std::span<const DbMemorySpa
 }
 
 Result<void, PlcMemoryError> PlcMemory::writeDbMemory(std::span<const DbMemorySpan> t_spans) {
-    if (!p_plc_state_)
-        return PlcMemoryErrorStatus::PLC_STATE_NOT_INITIALIZED;
-    if (t_spans.empty())
-        return {};
+    SGRN_RETURN_IF(!p_plc_state_, PlcMemoryErrorStatus::PLC_STATE_NOT_INITIALIZED);
+
+    SGRN_RETURN_IF(t_spans.empty(), {});
 
     std::vector<ResolvedDbSpan> resolved;
     resolved.reserve(t_spans.size());
     for (const auto& s : t_spans) {
         if (s.size == 0)
             continue;
-        if (!s.p_buffer)
-            return PlcMemoryErrorStatus::NULL_BUFFER;
+        SGRN_RETURN_IF_NULL(s.p_buffer, PlcMemoryErrorStatus::NULL_BUFFER);
         DbEntry* p_entry = p_plc_state_->findSegmentById(s.db);
-        if (!p_entry)
-            return PlcMemoryErrorStatus::DB_SEGMENT_NOT_FOUND;
-        if (s.offset > p_entry->size || s.size > p_entry->size - s.offset)
-            return PlcMemoryErrorStatus::RANGE_EXCEEDS_ALLOWED_SPACE;
+
+        SGRN_RETURN_IF_NULL(p_entry, PlcMemoryErrorStatus::DB_SEGMENT_NOT_FOUND);
+
+        SGRN_RETURN_IF(s.offset > p_entry->size || s.size > p_entry->size - s.offset, PlcMemoryErrorStatus::RANGE_EXCEEDS_ALLOWED_SPACE);
+
         resolved.push_back({p_entry, &s});
     }
 
@@ -880,15 +879,14 @@ Result<void, PlcMemoryError> PlcMemory::writeDbMemory(std::span<const DbMemorySp
 }
 
 Result<void, PlcMemoryError> PlcMemory::writeBit(uint16_t t_db_number, size_t t_byte_offset, int t_bit_index, bool t_value) {
-    if (!p_plc_state_)
-        return PlcMemoryErrorStatus::PLC_STATE_NOT_INITIALIZED;
-    if (t_bit_index < 0 || t_bit_index > 7)
-        return PlcMemoryErrorStatus::INVALID_BIT_INDEX;
+    SGRN_RETURN_IF_NULL(p_plc_state_, PlcMemoryErrorStatus::PLC_STATE_NOT_INITIALIZED);
+
+    SGRN_RETURN_IF(t_bit_index < 0 || t_bit_index > 7, PlcMemoryErrorStatus::INVALID_BIT_INDEX);
+
     DbEntry* p_entry = p_plc_state_->findSegmentById(t_db_number);
-    if (!p_entry)
-        return PlcMemoryErrorStatus::DB_SEGMENT_NOT_FOUND;
-    if (t_byte_offset >= p_entry->size)
-        return PlcMemoryErrorStatus::RANGE_EXCEEDS_ALLOWED_SPACE;
+    SGRN_RETURN_IF(!p_entry, PlcMemoryErrorStatus::DB_SEGMENT_NOT_FOUND);
+
+    SGRN_RETURN_IF(t_byte_offset >= p_entry->size, PlcMemoryErrorStatus::RANGE_EXCEEDS_ALLOWED_SPACE);
 
     uint8_t* target = p_plc_state_->getArenaTree().data() + p_entry->offset + t_byte_offset;
     uint8_t old_val, new_val;

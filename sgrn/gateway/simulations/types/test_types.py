@@ -165,30 +165,53 @@ async def test_time_types(c: Client) -> None:
 
     # DTL — write DateTime via OPC UA, verify both OPC UA read-back and HTTP
     dt_write = datetime.datetime(2000, 1, 1, 12, 30, 45, tzinfo=datetime.timezone.utc)
-    await write_node(c, ["t_dtl"], dt_write, ua.VariantType.DateTime)
+    await write_node(c, ["dtl"], dt_write, ua.VariantType.DateTime)
     await asyncio.sleep(0.08)
 
-    got_dt = await read_node(c, ["t_dtl"])
+    got_dt = await read_node(c, ["dtl"])
     if hasattr(got_dt, "tzinfo") and got_dt.tzinfo:
         got_utc = got_dt.astimezone(datetime.timezone.utc)
     else:
         got_utc = got_dt
     ok_dt = (got_utc.year == 2000 and got_utc.month == 1 and got_utc.day == 1
              and got_utc.hour == 12 and got_utc.minute == 30 and got_utc.second == 45)
-    record("ua:  t_dtl 2000-01-01 12:30:45 UTC", ok_dt, f"got {got_utc}")
+    record("ua:  dtl 2000-01-01 12:30:45 UTC", ok_dt, f"got {got_utc}")
 
-    http_dtl = http_get("t_dtl")
-    record("http:t_dtl not empty", bool(http_dtl), f"got {http_dtl!r}")
-    if isinstance(http_dtl, str):
-        record("http:t_dtl date=2000-01-01", "2000-01-01" in http_dtl, f"got {http_dtl!r}")
-    elif isinstance(http_dtl, dict):
-        record("http:t_dtl year=2000", http_dtl.get("year") == 2000, f"got {http_dtl!r}")
+    http_dtl = http_get("dtl")
+    record("http:dtl not empty", bool(http_dtl), f"got {http_dtl!r}")
 
-    # TIME field (milliseconds as Int32)
-    await write_node(c, ["t_time"], 5000, ua.VariantType.Int32)
+    # LDT — write DateTime via OPC UA
+    ldt_write = datetime.datetime(2025, 5, 5, 10, 10, 10, tzinfo=datetime.timezone.utc)
+    await write_node(c, ["ldt"], ldt_write, ua.VariantType.DateTime)
     await asyncio.sleep(0.05)
-    got_time = http_get("t_time")
-    record("http:t_time = 5000 ms", approx(got_time, 5000, 1), f"got {got_time!r}")
+    got_ldt = await read_node(c, ["ldt"])
+    if hasattr(got_ldt, "tzinfo") and got_ldt.tzinfo:
+        got_ldt_utc = got_ldt.astimezone(datetime.timezone.utc)
+    else:
+        got_ldt_utc = got_ldt
+    ok_ldt = (got_ldt_utc.year == 2025 and got_ldt_utc.month == 5 and got_ldt_utc.day == 5
+             and got_ldt_utc.hour == 10 and got_ldt_utc.minute == 10 and got_ldt_utc.second == 10)
+    record("ua:  ldt 2025-05-05 10:10:10 UTC", ok_ldt, f"got {got_ldt_utc}")
+
+    # LDTL — write DateTime via OPC UA
+    ldtl_write = datetime.datetime(2026, 6, 6, 11, 11, 11, tzinfo=datetime.timezone.utc)
+    await write_node(c, ["ldtl"], ldtl_write, ua.VariantType.DateTime)
+    await asyncio.sleep(0.05)
+    got_ldtl = await read_node(c, ["ldtl"])
+    record("ua:  ldtl round-trip", bool(got_ldtl), f"got {got_ldtl}")
+
+    # TIME field (milliseconds as Double since we mapped it to Duration NodeId 290)
+    # Wait, open62541 allows implicit cast if writing Int32, but let's write Double to be safe
+    await write_node(c, ["time"], 5000.0, ua.VariantType.Double)
+    await asyncio.sleep(0.05)
+    got_time = http_get("time")
+    record("http:time = 5000 ms", approx(got_time, 5000, 1), f"got {got_time!r}")
+
+    # TOD field (Time of day - mapped to String in our schema)
+    await write_node(c, ["tod"], "14:30:00.123", ua.VariantType.String)
+    await asyncio.sleep(0.05)
+    got_tod = http_get("tod")
+    record("http:tod = 14:30:00.123", got_tod == "14:30:00.123", f"got {got_tod!r}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

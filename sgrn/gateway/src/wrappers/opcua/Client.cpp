@@ -254,8 +254,7 @@ void Client::dataChangeCallback(
 // ── Event loop ────────────────────────────────────────────────────────────────
 
 sgrn::Result<void> Client::runIterate(uint32_t t_timeout_ms) {
-    if (!client_)
-        return "runIterate: client not initialised";
+    SGRN_RETURN_IF_NULL(client_, "runIterate: client not initialised");
 
     // Handle pending reconnect before iterating
     if (cfg_.auto_reconnect && needs_reconnect_) {
@@ -288,8 +287,7 @@ sgrn::Result<void> Client::runIterate(uint32_t t_timeout_ms) {
         return fmt::format("runIterate: disconnected ({}", UA_StatusCode_name(sc));
     }
 
-    if (sc != UA_STATUSCODE_GOOD)
-        return fmt::format("runIterate: {}", UA_StatusCode_name(sc));
+    SGRN_RETURN_IF(sc != UA_STATUSCODE_GOOD, fmt::format("runIterate: {}", UA_StatusCode_name(sc)));
 
     return {};
 }
