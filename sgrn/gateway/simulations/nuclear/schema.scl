@@ -1,18 +1,3 @@
-// ============================================================================
-// nuclear_plant.scl — Nuclear Power Plant S7 Schema
-//
-// Models a pressurized water reactor (PWR) with:
-//   DB1 — ReactorCore     : neutron flux, control rods, core temperatures
-//   DB2 — PrimaryCoolant  : hot/cold leg, pressurizer, reactor coolant pumps
-//   DB3 — SteamGenerator  : secondary side, feedwater, steam output
-//   DB4 — Turbine         : HP/LP turbines, generator, grid sync
-//   DB5 — SafetySystems   : SCRAM logic, containment, emergency core cooling
-//   DB6 — RadMonitoring   : radiation sensors across containment zones
-//   DB7 — WasteProcessing : spent fuel pool, liquid/gaseous waste
-// ============================================================================
-
-// ─── UDT Definitions ────────────────────────────────────────────────────────
-
 TYPE "ControlRod"
   VAR
     position_pct    : Real;     // 0.0 = fully inserted, 100.0 = fully withdrawn

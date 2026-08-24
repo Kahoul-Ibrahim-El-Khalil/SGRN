@@ -83,7 +83,13 @@ static const UA_DataType* resolveExpectedUdtType(const NodeContext& ctx) {
     return ctx.type_registry ? ctx.type_registry->find(ctx.udt_name) : nullptr;
 }
 
-Result<void, OpcUaAdapterError> tryBinaryWrite(NodeContext* p_ctx, const UA_Variant& t_v, const PlcNode* p_node) {
+/**
+ * @brief Encodes an incoming OPC UA value into the flat S7 byte layout for
+ *        `p_node`. Pure encode — does not touch PlcMemory or the command
+ *        queue. Returns the ready-to-commit buffer (including the 4-byte
+ *        dynamic-array header if `p_node->is_dynamic_`).
+ */
+Result<std::vector<uint8_t>, OpcUaAdapterError> encodeBinaryWrite(NodeContext* p_ctx, const UA_Variant& t_v, const PlcNode* p_node) {
     const UA_DataType* p_udt_type = normalizeIncomingType(*p_ctx, t_v);
     const uint8_t* p_udt_data = nullptr;
     bool is_array_input = (t_v.arrayLength > 0);
@@ -130,24 +136,24 @@ Result<void, OpcUaAdapterError> tryBinaryWrite(NodeContext* p_ctx, const UA_Vari
     const bool is_bool_array =
         is_array_input && p_node->type_ == DataType::Bool && UA_Variant_hasArrayType(&t_v, &UA_TYPES[UA_TYPES_BOOLEAN]);
     const size_t payload_size = is_bool_array ? boolArrayByteCount(input_count) : (element_span * input_count);
-    std::vector<uint8_t> s7_binary(header_offset + payload_size, 0);
+    std::vector<uint8_t> cannonical_memory_buf(header_offset + payload_size, 0);
 
     if (p_node->is_dynamic_)
-        s7codec::toEndian<uint32_t>(static_cast<uint32_t>(input_count), s7_binary.data(), p_node->endian_);
+        s7codec::toEndian<uint32_t>(static_cast<uint32_t>(input_count), cannonical_memory_buf.data(), p_node->endian_);
 
     if (is_array_input) {
         if (is_bool_array) {
 
             ArrayOfBoolsEncodingContext ctx{.p_source = reinterpret_cast<const UA_Boolean*>(p_udt_data),
                 .count = input_count,
-                .p_destination = s7_binary.data() + header_offset,
-                .destination_size = (size_t)(s7_binary.size() - header_offset)};
+                .p_destination = cannonical_memory_buf.data() + header_offset,
+                .destination_size = (size_t)(cannonical_memory_buf.size() - header_offset)};
 
             SGRN_IF_ERROR_PROPAGATE(encodeArrayOfBoolsToMemory(ctx));
         } else {
             const bool is_eo_arr = UA_Variant_hasArrayType(&t_v, &UA_TYPES[UA_TYPES_EXTENSIONOBJECT]);
             for (size_t j = 0; j < input_count; ++j) {
-                uint8_t* p_s7_elem_ptr = s7_binary.data() + header_offset + (j * element_span);
+                uint8_t* p_s7_elem_ptr = cannonical_memory_buf.data() + header_offset + (j * element_span);
                 const UA_DataType* p_current_udt_type = p_udt_type;
                 const uint8_t* p_current_ua_data = p_udt_data + (j * p_udt_type->memSize);
 
@@ -165,10 +171,6 @@ Result<void, OpcUaAdapterError> tryBinaryWrite(NodeContext* p_ctx, const UA_Vari
                 if (!p_current_udt_type || !p_current_ua_data)
                     continue;
 
-                // Same distrust check, per array element — a client can send
-                // a mixed-type array where only some elements lie about
-                // their type, and (unlike the scalar case) can lie about
-                // the element type without any ExtensionObject wrapper too.
                 SGRN_RETURN_ERROR_IF(!p_ctx->udt_name.empty() && p_current_udt_type->typeKind == UA_DATATYPEKIND_STRUCTURE &&
                                          p_current_udt_type != p_expected_udt,
                     OpcUaAdapterError::TYPE_MISMATCH);
@@ -178,9 +180,6 @@ Result<void, OpcUaAdapterError> tryBinaryWrite(NodeContext* p_ctx, const UA_Vari
                     elem_ctx.depth = 0;
                     SGRN_IF_ERROR_PROPAGATE(encodeStructOpcUaToMemory(elem_ctx));
                 } else {
-                    // Scalar element: project the layout into a cheap POD view
-                    // instead of deep-copying the whole PlcNode (name_/full_path_
-                    // strings + recursive children_ + atomic) per array element.
                     PlcScalarView elem_view = makeScalarView(*p_node);
                     elem_view.size = static_cast<uint32_t>(element_span);
                     if (p_node->type_ == DataType::String || p_node->type_ == DataType::WString || p_node->type_ == DataType::XString ||
@@ -199,42 +198,24 @@ Result<void, OpcUaAdapterError> tryBinaryWrite(NodeContext* p_ctx, const UA_Vari
             }
         }
     } else if (p_udt_type->typeKind == UA_DATATYPEKIND_STRUCTURE) {
-        // p_udt_type is now validated against p_expected_udt above, for
-        // both the ExtensionObject and direct-scalar-type input paths.
-        OpcUaEncodingContext elem_ctx{p_udt_type, p_udt_data, s7_binary.data() + header_offset, p_node};
+        OpcUaEncodingContext elem_ctx{p_udt_type, p_udt_data, cannonical_memory_buf.data() + header_offset, p_node};
         SGRN_IF_ERROR_PROPAGATE(encodeStructOpcUaToMemory(elem_ctx));
     } else if (is_bool_array) {
         const auto* p_bools = static_cast<const UA_Boolean*>(t_v.data);
 
         ArrayOfBoolsEncodingContext ctx{.p_source = p_bools,
             .count = t_v.arrayLength,
-            .p_destination = s7_binary.data() + header_offset,
-            .destination_size = (size_t)(s7_binary.data() - header_offset)};
+            .p_destination = cannonical_memory_buf.data() + header_offset,
+            .destination_size = (size_t)(cannonical_memory_buf.data() - header_offset)};
 
         SGRN_IF_ERROR_PROPAGATE(encodeArrayOfBoolsToMemory(ctx));
 
     } else {
-
-        OpcUaEncodingContext elem_ctx{p_udt_type, p_udt_data, s7_binary.data() + header_offset, p_node};
+        OpcUaEncodingContext elem_ctx{p_udt_type, p_udt_data, cannonical_memory_buf.data() + header_offset, p_node};
         SGRN_IF_ERROR_PROPAGATE(encodeScalarOpcUaToMemory(elem_ctx));
     }
 
-    PlcCommand cmd;
-    cmd.type = PlcCommand::WriteBinary;
-    cmd.db_number = p_ctx->db_number;
-    cmd.size = s7_binary.size();
-    cmd.offset = p_node->offset_;
-
-    cmd.path = p_ctx->resolveCmdPath();
-    cmd.value_binary = std::move(s7_binary);
-
-    cmd.timestamp = sgrn::utils::time::nowMilliseconds();
-
-    p_ctx->server->state()->pushCommand(std::move(cmd));
-
-    p_ctx->server->signalDirty();
-
-    return {};
+    return cannonical_memory_buf;
 }
 
 UA_StatusCode writeValue(UA_Server* tp_ua_server, const UA_NodeId* tp_session_id, void* /*sessionContext*/, const UA_NodeId* /*nodeId*/,
@@ -258,9 +239,19 @@ UA_StatusCode writeValue(UA_Server* tp_ua_server, const UA_NodeId* tp_session_id
 
     SGRN_RETURN_IF_NULL(p_node, UA_STATUSCODE_BADNODATA);
 
-    auto r = tryBinaryWrite(p_ctx, t_v, p_node);
+    auto encoded = encodeBinaryWrite(p_ctx, t_v, p_node);
+    SGRN_RETURN_IF(encoded.hasError(), toUAStatusCode(encoded.error()));
 
-    SGRN_RETURN_IF(r.hasError(), toUAStatusCode(r.error()));
+    // Commit directly — the same call S7/Modbus/EtherNet/IP/HTTP PUT already
+    // make. writeDbMemory() does the version bump (leaf + every ancestor,
+    // see the bumpFieldVersions fix below), the SnapshotRegistry patch, and
+    // markDirty()+signalDirty() atomically under one lock, so there's no
+    // separate queued/batched path left to fall out of sync with it. This
+    // also means a genuine commit failure (e.g. RANGE_EXCEEDS_ALLOWED_SPACE)
+    // now reaches the client as a real bad status instead of the previous
+    // always-GOOD-once-encoded behavior.
+    auto write_res = p_ctx->server->writeDbMemory(p_ctx->db_number, p_node->offset_, encoded.value().size(), encoded.value().data());
+    SGRN_RETURN_IF(write_res.hasError(), toUAStatusCode(write_res.error()));
 
     return UA_STATUSCODE_GOOD;
 }

@@ -31,24 +31,6 @@ const twin::PlcNode* NodeContext::resolveSymbol() const {
     return plc_node;
 }
 
-const std::string& NodeContext::resolveCmdPath() const {
-    if (!cmd_path_cached_) {
-        const auto* p_entry = server ? server->state()->findSegmentById(db_number) : nullptr;
-        // Only latch the cache on a successful segment lookup. If the segment
-        // isn't registered yet (e.g. the eager warm-up in makeFieldContext()
-        // races ahead of registerSegment() for some adapter path), leave
-        // cmd_path_cached_ false so the next call — most likely the real
-        // write, by which point startup has settled — retries instead of
-        // permanently caching a path with the segment name missing.
-        if (p_entry) {
-            cached_cmd_path_ = p_entry->name + "." + field_path;
-            cmd_path_cached_ = true;
-        } else {
-            return field_path; // uncached fallback: "." prefix omitted rather than wrong
-        }
-    }
-    return cached_cmd_path_;
-}
 PlcScalarView makeScalarView(const twin::PlcNode& t_node) {
     return PlcScalarView{
         .type = t_node.type_,
@@ -125,7 +107,6 @@ static NodeContext* makeFieldContext(twin::PlcMemory* tp_plc_memory, uint16_t t_
     // findSymbol()'s string build + case-insensitive hash out of every write /
     // aggregate read / delta-push callback.
     p_ctx->plc_node = tp_plc_memory->findSymbol(t_db_number, t_full_path);
-    p_ctx->resolveCmdPath(); // warm the cache eagerly, same rationale as plc_node above
     if (p_ctx->kind == ::sgrn::scl::FieldKind::Enum) {
         if (auto ua_base_res = dataTypeToUaTypeIndex(t_field.type); ua_base_res.hasValue()) {
             const std::string sig = enumTypeSignature(ua_base_res.value(), t_field.enum_map);

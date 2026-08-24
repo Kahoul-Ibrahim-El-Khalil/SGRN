@@ -59,22 +59,7 @@ struct NodeContext {
     std::optional<double> max_val{std::nullopt};
     const UA_DataType* enum_type{nullptr};
     std::map<int, std::string> enum_map;
-
-    /// Cached twin-symbol accessor: returns plc_node, resolving via
-    /// PlcMemory::findSymbol() exactly once on first use (defined in
-    /// node_registration.cpp). Never returns dangling as long as the
-    /// registry-lifetime note on plc_node holds.
     const twin::PlcNode* resolveSymbol() const;
-
-    /// Cached "<segment_name>.<field_path>" string used to tag PlcCommands
-    /// sent to the command processor on write. Built once (resolveCmdPath())
-    /// and reused after — avoids a findSegmentById() hashmap lookup plus a
-    /// string concatenation on every single OPC UA write. Same caching
-    /// pattern/lifetime assumption as plc_node above (registry loaded before
-    /// serving starts, not swapped at runtime).
-    mutable std::string cached_cmd_path_;
-    mutable bool cmd_path_cached_{false};
-    const std::string& resolveCmdPath() const;
 };
 
 } // namespace sgrn::gateway::adapters

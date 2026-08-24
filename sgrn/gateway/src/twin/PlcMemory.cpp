@@ -531,12 +531,15 @@ void PlcMemory::bumpFieldVersions(
             size_t intersect_end = std::min(static_cast<size_t>(node.offset_ + node_span), t_offset + t_size);
             size_t rel = intersect_start - t_offset;
             size_t len = intersect_end - intersect_start;
-            if (std::memcmp(told_base + rel, tp_new_base + rel, len) != 0)
-                p_plc_state_->incrementNodeVersion(TreePath::fromDotted(path));
+            if (std::memcmp(told_base + rel, tp_new_base + rel, len) != 0) {
+                auto tp = TreePath::fromDotted(path);
+                p_plc_state_->incrementNodeVersion(tp);
+                for (auto parent = tp.parent(); parent.has_value(); parent = parent->parent())
+                    p_plc_state_->incrementNodeVersion(*parent);
+            }
         }
     }
 }
-
 PlcMemory::SegmentLookup PlcMemory::findContainingSegment(size_t t_abs_offset, size_t t_size) const {
     for (const auto& [name_, seg] : p_plc_state_->segments()) {
         DbEntry* p_entry = seg.get();
