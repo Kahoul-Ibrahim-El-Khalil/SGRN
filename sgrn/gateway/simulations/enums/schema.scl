@@ -1,0 +1,116 @@
+// schema.scl — Advanced Enum Edge-Case Simulation
+// ─────────────────────────────────────────────────────────────────────────
+// Exercises every enum registration/read/write path this codebase has:
+//   - #ENUM scalar-alias shorthand vs. native TIA "(A := 0, ...)" syntax
+//   - auto-increment trailing members (no explicit value)
+//   - negative values (SInt/DInt-backed)
+//   - full-width boundary values (Byte 255, DInt +/-2e9)
+//   - sparse / non-contiguous value sets (gaps must be rejected, not just
+//     range-checked)
+//   - duplicate signature dedup (two differently-named enums with identical
+//     base type + value set)
+//   - inline field-level #ENUM (not via a named UDT alias)
+//   - enum nested inside a UDT referenced by a DB
+//   - enum as a struct-array element field
+//   - array of a bare enum-typed scalar alias
+//   - a plain non-enum field alongside enums (regression control)
+// ─────────────────────────────────────────────────────────────────────────
+
+// 1. Baseline regression case — the original enums-simulation type.
+TYPE "Status" : USInt #ENUM(ONE, TWO, THREE, FOUR)
+END_TYPE
+
+// 2. Native TIA syntax with a gap and an auto-incremented trailing member —
+//    mirrors the pattern already used in simulations/bottling/schema.scl's
+//    PlantMode (FAULT=4, STOP=5, UKNOWN with no explicit value -> 6).
+TYPE "PlantModeNative"
+VERSION : 0.1
+   (STOPPED := 0,
+    STARTING := 1,
+    RUNNING := 2,
+    STOPPING := 3,
+    FAULT := 4,
+    STOP := 5,
+    UKNOWN);
+END_TYPE
+
+// 3. Negative values — SInt-backed. Exercises isInRange<int8_t> and the
+//    signed encode path in encodeEnumValueToS7.
+TYPE "SignBit" : SInt #ENUM(NEG_ONE=-1, ZERO=0, POS_ONE=1)
+END_TYPE
+
+// 4. Full 32-bit range boundaries — DInt-backed. Exercises isInRange<int32_t>
+//    right at INT32_MIN/MAX-adjacent values.
+TYPE "WideEnum" : DInt #ENUM(LOW=-2000000000, MID=0, HIGH=2000000000)
+END_TYPE
+
+// 5. Unsigned byte boundary — value 255 must round-trip correctly through
+//    UA_Int32 -> uint8_t narrowing without being misread as negative.
+TYPE "ByteMax" : Byte #ENUM(ZEROB=0, MIDB=127, MAXB=255)
+END_TYPE
+
+// 6. Sparse / non-contiguous values. 500 is numerically in-range for UInt
+//    but is NOT a declared member — a write of 500 must be rejected by the
+//    enum_map membership check, not just pass the width/range check.
+TYPE "SparseGap" : UInt #ENUM(A=10, B=20, C=21, ZTOP=1000)
+END_TYPE
+
+// 7. Deliberate duplicate signature of "Status" (same base type, same
+//    value set 0-3) under a different name. Exercises enum_by_sig dedup in
+//    schema_type_registry.cpp — confirm this either collapses cleanly to a
+//    single UA_DataType or is handled without corrupting the registry;
+//    either way both fields must still read/write correctly independently.
+TYPE "StatusAlias" : USInt #ENUM(ONE, TWO, THREE, FOUR)
+END_TYPE
+
+// 8. UDT used both standalone and nested, containing an inline field-level
+//    #ENUM (not a named alias) to exercise the direct-field enum path.
+TYPE "AlarmRecord"
+STRUCT
+    active     : Bool;
+    priority   : USInt #ENUM(INFO=0, WARN=1, ALARM=2, CRITICAL=3);
+    code       : UInt;
+END_STRUCT
+END_TYPE
+
+// 9. UDT-of-UDT nesting: enum lives two levels down from the DB root, to
+//    exercise the recursive collectEnums() walk through nested Structs.
+TYPE "Station"
+STRUCT
+    name       : String[16];
+    mode       : "PlantModeNative";
+    last_alarm : "AlarmRecord";
+END_STRUCT
+END_TYPE
+
+DATA_BLOCK "EnumEdgeCases" DB1
+VAR
+    // Direct scalar-alias fields (Steps 1-7 above)
+    status          : "Status";
+    status_alias    : "StatusAlias";
+    plant_mode      : "PlantModeNative";
+    sign_bit        : "SignBit";
+    wide_enum       : "WideEnum";
+    byte_max        : "ByteMax";
+    sparse_gap      : "SparseGap";
+
+    // Inline field-level enum, not via a UDT alias at all
+    inline_priority : USInt #ENUM(LOW=0, MED=1, HIGH=2);
+
+    // Enum inside a struct-array element (array-of-struct-containing-enum)
+    alarms          : ARRAY[0..3] OF "AlarmRecord";
+
+    // Array of a bare enum-typed scalar alias (array-of-enum-scalar,
+    // exercises the array branch of encodeScalarOpcUaToS7 directly, not
+    // via a struct wrapper)
+    mode_log        : ARRAY[0..9] OF "PlantModeNative";
+
+    // Nested UDT-of-UDT enum, two levels deep
+    station         : "Station";
+
+    // Plain non-enum field as a regression control — must be completely
+    // unaffected by any of the enum-path changes
+    counter         : DInt;
+    timestamp       : DTL;
+END_VAR
+END_DATA_BLOCK

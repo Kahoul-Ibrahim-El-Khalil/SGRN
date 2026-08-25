@@ -9,8 +9,8 @@
 namespace sgrn::gateway::twin
 {
 
-using ::sgrn::scl::DataBlockRegistry;
 using ::sgrn::scl::DbField;
+using ::sgrn::scl::DbSchema;
 
 struct DbFieldVisitInfo {
     const DbField* field{nullptr};
@@ -32,7 +32,7 @@ void visitDbFields(const std::vector<DbField>& t_fields, Fn&& t_fn, std::string 
     }
 }
 
-inline std::vector<std::string> collectDbLeafPaths(const DataBlockRegistry& t_registry) {
+inline std::vector<std::string> collectDbLeafPaths(const DbSchema& t_registry) {
     std::vector<std::string> paths;
     visitDbFields(t_registry.fields, [&](const DbFieldVisitInfo& t_info) {
         if (t_info.is_leaf) {

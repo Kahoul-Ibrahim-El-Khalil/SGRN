@@ -40,6 +40,8 @@ target_include_directories(sgrn_gateway_s7_wrappers
 target_link_libraries(sgrn_gateway_s7_wrappers
     PUBLIC  sgrn_utils
     PUBLIC  ${_SNAP7_TARGET}
+    PUBLIC  sgrn::scl
+    PUBLIC  sgrn::open62541
     PRIVATE fmt::fmt
 )
 
@@ -70,6 +72,7 @@ target_link_libraries(sgrn_gateway_security
     PUBLIC sgrn_scl
     PUBLIC sgrn_utils
     PUBLIC sgrn_scripting
+    PUBLIC sgrn::open62541
 )
 
 set_target_properties(sgrn_gateway_security PROPERTIES
@@ -338,15 +341,13 @@ set(GATEWAY_OPCUA_SOURCES
     src/adapters/opcua/OpcUaAdapter.cpp
     src/adapters/opcua/schema_type_registry.cpp
     src/adapters/opcua/TypeTranslation.cpp
-    src/adapters/opcua/udt_codec.cpp
-    src/adapters/opcua/json_to_ua.cpp
-    src/adapters/opcua/memory_to_ua.cpp
-    src/adapters/opcua/s7_to_ua.cpp
-    src/adapters/opcua/read_handler.cpp
-    src/adapters/opcua/write_handler.cpp
+    src/adapters/opcua/decoders.cpp
+    src/adapters/opcua/readValue.cpp
+    src/adapters/opcua/writeValue.cpp
     src/adapters/opcua/delta_push.cpp
     src/adapters/opcua/node_registration.cpp
     src/adapters/opcua/information_model.cpp
+    src/adapters/opcua/encoders.cpp
     # session_security.* superseded by wrappers/opcua/SessionRegistry
 )
 
@@ -366,6 +367,7 @@ target_link_libraries(sgrn_gateway_opcua
     PUBLIC  sgrn_gateway_twin            # PlcMemory, TelemetryBroker
     PUBLIC  sgrn_gateway_security        # SecurityManager
     PUBLIC  sgrn_scl                     # PlcSchemaStore, S7Type
+    PRIVATE sgrn::opcua_codec_table      # OPC UA <-> S7 declarative codec bridge
     PRIVATE fmt::fmt
 )
 
@@ -526,6 +528,27 @@ target_link_libraries(sgrn_gateway PRIVATE
 )
 
 sgrn_target(sgrn_gateway)
+
+# ========================
+# 3. Tests
+# ========================
+
+if(SGRN_BUILD_TESTS)
+    sgrn_add_component_executable(
+        TARGET opcua_simulation_enum_projection_test
+        SOURCES tests/opcua_simulation_enum_projection_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn_gateway_opcua
+            sgrn_scl
+    )
+    target_include_directories(opcua_simulation_enum_projection_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/sgrn/scl/include
+    )
+    add_test(NAME opcua_simulation_enum_projection_test COMMAND opcua_simulation_enum_projection_test)
+    sgrn_target(opcua_simulation_enum_projection_test)
+endif()
 
 # ========================
 # 4. Executables

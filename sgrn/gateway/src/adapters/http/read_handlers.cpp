@@ -11,7 +11,7 @@
 #include <sgrn/utils/rapidjson.hpp>
 #include <sgrn/utils/strings.hpp>
 
-#include <sgrn/scl/ModbusMap.hpp>
+#include <sgrn/scl/functions/modbus.hpp>
 using sgrn::gateway::common::json_helper::buildArrayResponse;
 namespace sgrn::gateway::adapters
 {

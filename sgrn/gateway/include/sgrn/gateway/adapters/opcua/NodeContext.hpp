@@ -4,6 +4,8 @@
 #include <string>
 #include <unordered_map>
 
+#include <open62541/types.h>
+
 namespace sgrn::gateway::wrappers::opcua
 {
 class TypeRegistry;
@@ -12,6 +14,7 @@ class TypeRegistry;
 namespace sgrn::gateway::twin
 {
 class PlcMemory;
+struct PlcNode;
 } // namespace sgrn::gateway::twin
 
 namespace sgrn::gateway
@@ -35,6 +38,28 @@ struct NodeContext {
     uint32_t field_offset{0};
     uint32_t field_size{0};
     ::sgrn::scl::DataType type{::sgrn::scl::DataType::Byte};
+    ::sgrn::scl::FieldKind kind{::sgrn::scl::FieldKind::Scalar};
+
+    uint32_t string_capacity;
+    mutable std::vector<uint8_t> scratch_buf; // sized once at registration, reused every read for decoded values;
+    /// Resolved twin symbol for this field (twin::PlcState lookup), cached to
+    /// keep findSymbol()'s per-call string build + case-insensitive hash out
+    /// of every write / aggregate read / delta-push callback. Populated
+    /// eagerly at registration when the twin tree is already loaded;
+    /// resolveSymbol() lazily resolves (once) otherwise.
+    /// NOTE: assumes the registry is loaded before adapter start and not
+    /// swapped at runtime (current gateway.cpp wiring). If schema hot-reload
+    /// while serving is ever added, the cache must be invalidated (reset
+    /// plc_node to nullptr on loadRegistry/clear).
+    mutable const twin::PlcNode* plc_node{nullptr};
+    /// Non-null when the field is projected as an OPC UA Enumeration. The
+    /// pointed-to `UA_DataType` carries the node id used in the address space;
+    /// `enum_map` mirrors it for value<->name translation on read/write.
+    std::optional<double> min_val{std::nullopt};
+    std::optional<double> max_val{std::nullopt};
+    const UA_DataType* enum_type{nullptr};
+    std::map<int, std::string> enum_map;
+    const twin::PlcNode* resolveSymbol() const;
 };
 
 } // namespace sgrn::gateway::adapters

@@ -22,9 +22,7 @@ namespace sgrn::gateway::twin
 {
 using ::sgrn::gateway::wrappers::s7::S7Client;
 using ::sgrn::scl::DataType;
-using ::sgrn::scl::DbData;
 using ::sgrn::scl::DbField;
-using ::sgrn::scl::DbRawBuffer;
 using ::sgrn::scl::DbSchema;
 using ::sgrn::scl::Error;
 using ::sgrn::scl::ErrorCode;
@@ -177,7 +175,7 @@ namespace
 using namespace rapidjson;
 } // namespace
 
-sgrn::Result<DbData, ::sgrn::scl::Error> DbSnapshot::decode() const {
+sgrn::Result<std::string, ::sgrn::scl::Error> DbSnapshot::decode() const {
     // Wait-free check on buffer size.
     // registry_ is immutable after construction.
     if (raw_buffer_.size() < static_cast<size_t>(registry_.size_bytes)) {
@@ -281,7 +279,7 @@ sgrn::Result<void, ::sgrn::scl::Error> DbSnapshot::readField(S7Client& t_client,
     auto proto_res = t_client.readDB(registry_.db_number, located.value().abs_offset, size);
     if (proto_res.hasError())
         return Error{SchemaCode::Generic, proto_res.error().string()};
-    const DbRawBuffer& res_buf = proto_res.value();
+    const std::vector<uint8_t>& res_buf = proto_res.value();
 
     std::memcpy(raw_buffer_.front_data_rw() + located.value().abs_offset, res_buf.data(), size);
     std::memcpy(raw_buffer_.back_data() + located.value().abs_offset, res_buf.data(), size);

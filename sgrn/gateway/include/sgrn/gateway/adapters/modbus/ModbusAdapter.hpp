@@ -48,7 +48,7 @@
 #include <sgrn/gateway/twin/PlcMemory.hpp>
 #include <sgrn/gateway/wrappers/modbus/Mapping.hpp>
 #include <sgrn/gateway/wrappers/modbus/Server.hpp>
-#include <sgrn/scl/ModbusMap.hpp>
+#include <sgrn/scl/functions/modbus.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/scl/types.hpp>
 

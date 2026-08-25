@@ -66,6 +66,7 @@ void SessionRegistry::installAccessControl(UA_Server* tp_server) {
     // embedding application's auth.
     original_activate_session_ = ac.activateSession;
     original_close_session_ = ac.closeSession;
+    original_context_ = ac.context;
 
     ac.context = this;
     ac.activateSession = &SessionRegistry::onActivateSession;
@@ -76,8 +77,12 @@ UA_StatusCode SessionRegistry::onActivateSession(UA_Server* tp_server, UA_Access
     const UA_ByteString* t_cert, const UA_NodeId* t_session_id, const UA_ExtensionObject* t_token, void** t_session_context) {
     auto* self = tp_ac ? static_cast<SessionRegistry*>(tp_ac->context) : nullptr;
     UA_StatusCode sc = UA_STATUSCODE_GOOD;
-    if (self && self->original_activate_session_)
+    if (self && self->original_activate_session_) {
+        void* saved_ctx = tp_ac->context;
+        tp_ac->context = self->original_context_;
         sc = self->original_activate_session_(tp_server, tp_ac, t_endpoint, t_cert, t_session_id, t_token, t_session_context);
+        tp_ac->context = saved_ctx;
+    }
     if (sc == UA_STATUSCODE_GOOD && self && t_session_id)
         self->onActivate(sessionIdToString(t_session_id), ""); // remote IP not available pre-auth
     return sc;
@@ -86,10 +91,16 @@ UA_StatusCode SessionRegistry::onActivateSession(UA_Server* tp_server, UA_Access
 void SessionRegistry::onCloseSession(
     UA_Server* tp_server, UA_AccessControl* tp_ac, const UA_NodeId* t_session_id, void* t_session_context) {
     auto* self = tp_ac ? static_cast<SessionRegistry*>(tp_ac->context) : nullptr;
-    if (self && t_session_id)
-        self->onClose(sessionIdToString(t_session_id));
-    if (self && self->original_close_session_)
+    if (self && self->original_close_session_) {
+        void* saved_ctx = tp_ac->context;
+        tp_ac->context = self->original_context_;
+        if (t_session_id)
+            self->onClose(sessionIdToString(t_session_id));
         self->original_close_session_(tp_server, tp_ac, t_session_id, t_session_context);
+        tp_ac->context = saved_ctx;
+    } else if (self && t_session_id) {
+        self->onClose(sessionIdToString(t_session_id));
+    }
 }
 
 } // namespace sgrn::gateway::wrappers::opcua

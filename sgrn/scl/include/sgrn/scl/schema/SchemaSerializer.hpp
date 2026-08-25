@@ -17,11 +17,11 @@ namespace sgrn::scl
 class SchemaSerializer {
 public:
     static std::string udtToJson(const UdtDefinition& t_udt);
-    static std::string dbToJson(const DataBlockRegistry& t_db);
+    static std::string dbToJson(const DbSchema& t_db);
     static std::string tagToJson(const PlcTag& t_tag);
 
     static sgrn::Result<UdtDefinition, ::sgrn::scl::Error> udtFromJson(const rapidjson::Value& t_node);
-    static sgrn::Result<DataBlockRegistry, ::sgrn::scl::Error> dbFromJson(const rapidjson::Value& t_node);
+    static sgrn::Result<DbSchema, ::sgrn::scl::Error> dbFromJson(const rapidjson::Value& t_node);
     static sgrn::Result<PlcTag, ::sgrn::scl::Error> tagFromJson(const rapidjson::Value& t_node);
 
     /**

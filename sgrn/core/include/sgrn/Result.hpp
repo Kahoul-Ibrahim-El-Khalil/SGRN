@@ -6,7 +6,7 @@
 #include <optional>
 #include <string>
 #include <type_traits>
-
+#include <utility>
 namespace sgrn
 {
 // ---------------------------------------------------------------------------
@@ -66,4 +66,37 @@ template <typename E>
 [[nodiscard]] constexpr auto Error(E&& e) {
     return std::unexpected<std::decay_t<E>>(std::forward<E>(e));
 }
+
+#define SGRN_IF_ERROR_PROPAGATE(expr)                                                                                                      \
+    do {                                                                                                                                   \
+        auto _sgrn_result = (expr);                                                                                                        \
+        if (!_sgrn_result.has_value())                                                                                                     \
+            return _sgrn_result.error();                                                                                                   \
+    } while (false)
+
+#define SGRN_ASSIGN_OR_RETURN(lhs, expr)                                                                                                   \
+    do {                                                                                                                                   \
+        auto _sgrn_result = (expr);                                                                                                        \
+        if (!_sgrn_result.has_value())                                                                                                     \
+            return _sgrn_result.error();                                                                                                   \
+        (lhs) = std::move(_sgrn_result.value());                                                                                           \
+    } while (false)
+
+#define SGRN_RETURN_ERROR_IF(condition, error)                                                                                             \
+    do {                                                                                                                                   \
+        if (condition)                                                                                                                     \
+            return Error(error);                                                                                                           \
+    } while (false)
+
+#define SGRN_RETURN_IF(condition, error)                                                                                                   \
+    do {                                                                                                                                   \
+        if (condition)                                                                                                                     \
+            return error;                                                                                                                  \
+    } while (false)
+
+#define SGRN_RETURN_IF_NULL(ptr, error)                                                                                                    \
+    do {                                                                                                                                   \
+        if (!ptr)                                                                                                                          \
+            return error;                                                                                                                  \
+    } while (false)
 } // namespace sgrn

@@ -58,25 +58,25 @@ const uint16 FAULT_STALL = 4;
 // ─── Setup ────────────────────────────────────────────────────────────────
 
 bool setupDrive() {
-    print("  Motor/VFD controller — connecting to gateway at " + GATEWAY_IP + ":" + GATEWAY_PORT + "\n");
+    print("Motor/VFD controller — connecting to gateway at " + GATEWAY_IP + ":" + GATEWAY_PORT + "\n");
 
     @plc = S7Client(GATEWAY_IP, 0, 1, GATEWAY_PORT);
     plc.loadSclSchema(SCHEMA_PATH);
 
     if (!plc.isConnected()) {
-        print("  ERROR: could not connect to gateway: " + plc.lastError() + "\n");
+        print("ERROR: could not connect to gateway: " + plc.lastError() + "\n");
         return false;
     }
 
     @opc = OpcUaServer(plc.runtime(), 4840);
     if (!opc.start()) {
-        print("  WARNING: Could not start OPC-UA server on 4840.\n");
+        print("WARNING: Could not start OPC-UA server on 4840.\n");
     } else {
-        print("  OPC-UA control surface live at opc.tcp://" + GATEWAY_IP + ":4840\n");
-        print("  Write MotorCommand.start / speed_sp_pct / accel_time_s to drive it.\n");
+        print("OPC-UA control surface live at opc.tcp://" + GATEWAY_IP + ":4840\n");
+        print("Write MotorCommand.start / speed_sp_pct / accel_time_s to drive it.\n");
     }
 
-    print("  Connected. Scan rate: " + SCAN_HZ + " Hz\n");
+    print("Connected. Scan rate: " + SCAN_HZ + " Hz\n");
     return true;
 }
 

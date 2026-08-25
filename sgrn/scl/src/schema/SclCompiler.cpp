@@ -97,7 +97,7 @@ static Result<void, ::sgrn::scl::Error> mergeIntoRegistry(PlcSchemaStore& t_regi
             return Error(r.error());
     }
 
-    for (DataBlockRegistry& t_db : t_result.dbs) {
+    for (DbSchema& t_db : t_result.dbs) {
         if (t_db.source_file.empty()) {
             t_db.source_file = t_source_name;
         }
@@ -140,7 +140,7 @@ Result<UdtDefinition, ::sgrn::scl::Error> SclCompiler::parseUdtFile(
     return std::move(res.value().udts[0]);
 }
 
-Result<DataBlockRegistry, ::sgrn::scl::Error> SclCompiler::parseDbFile(
+Result<DbSchema, ::sgrn::scl::Error> SclCompiler::parseDbFile(
     const std::string& t_path, std::map<std::string, UdtDefinition>* tp_global_udts) {
     auto res = DbSymbolsParser::parseExportFile(t_path, tp_global_udts);
     if (res.hasError())

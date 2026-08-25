@@ -24,7 +24,7 @@
 
 #include "endian.hpp"
 #include <ctime>
-
+#include <string>
 namespace s7codec
 {
 

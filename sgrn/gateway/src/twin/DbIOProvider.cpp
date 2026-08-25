@@ -330,8 +330,8 @@ sgrn::Result<std::vector<uint8_t>, ::sgrn::scl::Error> DbIOProvider::encodeValue
     int bit_idx = t_loc.field->bit_index;
 
     auto status = s7codec::encodeScalar(t_val, t_loc.field->type, buf.data(), sz, bit_idx, t_loc.field->count, t_loc.field->endianness);
-    if (!status.ok())
-        return ::sgrn::scl::Err::InvalidType("DbIOProvider: encodeScalar failed: {}", status.message);
+    if (!status.has_value())
+        return ::sgrn::scl::Err::InvalidType("DbIOProvider: encodeScalar failed: {}", toString(status.error()));
     return buf;
 }
 

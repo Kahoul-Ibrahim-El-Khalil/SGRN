@@ -26,6 +26,7 @@ static sgrn::FieldDefinition toCoreField(const DbField& t_f) {
         core.children.push_back(toCoreField(child));
     }
     core.context["s7_type"] = static_cast<int>(t_f.type);
+    core.context["kind"] = to_string(kind_of(t_f));
     return core;
 }
 

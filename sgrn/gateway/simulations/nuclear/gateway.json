@@ -15,15 +15,14 @@
       "ip": "0.0.0.0",
       "port": 8001
     },
-   "modbus": {
-     "ip": "0.0.0.0",
-      "port": 502
-   }
-
+    "opcua" :{
+      "ip", "0.0.0.0",
+      "port": 4840
+    }
   },
   "schema": "./sgrn/gateway/simulations/nuclear/schema.scl",
-
   "state_dir": "/tmp/sgrn-gateway-state",
+  
   "telemetry_buffer": {
     "snapshot_mode": "Anchored",
     "batch_size": 100,

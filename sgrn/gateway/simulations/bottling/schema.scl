@@ -50,20 +50,21 @@ TYPE "AlarmRecord"
     active          : Bool;
     acknowledged    : Bool;
     code            : Word;
-    priority        : USInt;   // 0=info 1=warn 2=alarm 3=critical
+    priority        : USInt #ENUM(INFO, WARN, ALARM, CRITICAL);
     description_id  : UInt;
     timestamp       : DInt #UNIT("ms");
   END_VAR
 END_TYPE
 
-
+TYPE "PlantMode" : USInt #ENUM(STOPPED=0, STARTING=1, RUNNING=2, STOPPING=3, FAULT=4, STOP=5, UKNOWN)
+END_TYPE
 DATA_BLOCK "Supervisor" DB1
 VAR
-    plant_mode           : USInt;   // 0=Stopped 1=Starting 2=Running 3=Stopping 4=Fault 5=E-Stop
+    plant_mode           : "PlantMode";
     master_speed_sp      : Real #UNIT("%");   // operator overall demand, 0..100 (% of rated)
 
   line1 : STRUCT
-    mode          : USInt;   // same enum as plant_mode
+    mode          : "PlantMode";   
     speed_sp      : Real #UNIT("bpm");   // resolved bottle-per-minute target
     rated         : Real #UNIT("bpm");   // 750 mL glass line rated speed
     actual        : Real #UNIT("bpm");
@@ -74,7 +75,7 @@ VAR
 
   line2 : 
   STRUCT 
-    mode          : USInt;
+    mode          : "PlantMode";
     speed_sp      : Real #UNIT("bpm");   // 330 mL PET/can line rated speed
     rated         : Real #UNIT("bpm");
     actual        : Real #UNIT("bpm");

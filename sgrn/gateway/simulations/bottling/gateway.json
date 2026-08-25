@@ -14,6 +14,10 @@
     "websocket": {
       "ip": "0.0.0.0",
       "port": 8001
+    },
+    "opcua": {
+    "ip": "0.0.0.0",
+    "port": 4840
     }
   },
   "schema": "./sgrn/gateway/simulations/bottling/schema.scl",
@@ -32,7 +36,7 @@
     "security_script": "./sgrn/gateway/simulations/bottling/security.as"
 ,
   "persistence": {
-    "enabled": true,
+    "enabled": false,
     "mode": "changes_with_timestamp",
     "namespaces": ["DB1", "DB2", "DB3", "DB4", "DB5", "DB6", "DB7", "DB8", "DB9", "DB10", "DB11", "DB12", "DB13", "DB14", "DB15", "DB16", "DB17", "DB18"],
     "atomic_window_ms": 10,

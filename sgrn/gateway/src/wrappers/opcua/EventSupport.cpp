@@ -25,8 +25,7 @@ sgrn::Result<NodeId> registerAlarmEventType(Server& t_server) {
     UA_StatusCode sc = UA_Server_addObjectTypeNode(p_raw, alarm_type_id, base_event_type_id, UA_NODEID_NUMERIC(0, UA_NS0ID_HASSUBTYPE),
         UA_QUALIFIEDNAME(1, const_cast<char*>("SgrnAlarmEventType")), attr, nullptr, nullptr);
 
-    if (sc != UA_STATUSCODE_GOOD)
-        return fmt::format("registerAlarmEventType: {}", UA_StatusCode_name(sc));
+    SGRN_RETURN_IF(sc != UA_STATUSCODE_GOOD, fmt::format("registerAlarmEventType: {}", UA_StatusCode_name(sc)));
 
     return nodeIdFromRaw(alarm_type_id);
 }

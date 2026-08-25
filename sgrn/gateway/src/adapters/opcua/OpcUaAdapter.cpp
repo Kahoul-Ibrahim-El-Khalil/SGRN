@@ -39,7 +39,7 @@ struct OpcUaAdapter::Impl {
     std::unique_ptr<wrappers::opcua::Server> server;
     std::atomic<bool> running{false};
     std::thread server_thread;
-    twin::PlcMemory* p_s7_server{nullptr};
+    twin::PlcMemory* p_plc_memory{nullptr};
     std::shared_ptr<::sgrn::gateway::SecurityManager> ps_security_manager;
 
     std::vector<std::unique_ptr<NodeContext>> node_contexts;
@@ -66,16 +66,15 @@ OpcUaAdapter::~OpcUaAdapter() {
 }
 
 sgrn::Result<void> OpcUaAdapter::start(const std::string& /*ip*/, uint16_t t_port, const PlcSchemaStore& t_registry,
-    twin::PlcMemory& t_s7_server, std::shared_ptr<::sgrn::gateway::SecurityManager> tsp_security_manager) {
+    twin::PlcMemory& t_plc_memory, std::shared_ptr<::sgrn::gateway::SecurityManager> tsp_security_manager) {
+    SGRN_RETURN_IF(impl_->server, "OPCUA adapter already started");
 
-    impl_->p_s7_server = &t_s7_server;
+    impl_->p_plc_memory = &t_plc_memory;
     impl_->ps_security_manager = std::move(tsp_security_manager);
     impl_->server = std::make_unique<wrappers::opcua::Server>(t_port);
     impl_->server->suppressInfoLogs();
 
-    auto type_res = populateTypeRegistryFromSchema(t_registry, impl_->type_registry);
-    if (type_res.hasError())
-        return type_res;
+    SGRN_IF_ERROR_PROPAGATE(populateTypeRegistryFromSchema(t_registry, impl_->type_registry));
     impl_->server->installTypeRegistry(impl_->type_registry);
 
     impl_->session_registry.installAccessControl(impl_->server->raw());
@@ -89,9 +88,24 @@ sgrn::Result<void> OpcUaAdapter::start(const std::string& /*ip*/, uint16_t t_por
         triggerAlarmEvent(*impl_->server, impl_->alarm_event_type_id, db, path, alarm, ts);
     });
 
-    buildAddressSpace(*impl_->server, t_registry, impl_->p_s7_server, impl_->ps_security_manager.get(), impl_->node_contexts,
-        impl_->node_id_map, impl_->type_registry, impl_->alarm_event_type_id, &impl_->delta_push);
+    OpcUaAddressSpaceContext address_space_context{
+        .adapter =
+            {
+                .p_opcua_server = impl_->server.get(),
+                .p_plc_memory = impl_->p_plc_memory,
+                .p_security_manager = impl_->ps_security_manager.get(),
+                .p_type_registry = &(impl_->type_registry),
+                .p_delta_push_handler = &(impl_->delta_push),
+            },
+        .nodes =
+            {
+                .p_owned_contexts = &impl_->node_contexts,
+                .p_node_id_map = &impl_->node_id_map,
+            },
+        .p_alarm_event_type_id = &impl_->alarm_event_type_id,
+    };
 
+    buildAddressSpace(address_space_context, t_registry);
     std::promise<UA_StatusCode> startup_promise;
     auto startup_future = startup_promise.get_future();
     impl_->running = true;
@@ -121,8 +135,8 @@ sgrn::Result<void> OpcUaAdapter::start(const std::string& /*ip*/, uint16_t t_por
                     }
                 }
                 self->impl_->delta_push.flushDirtyAggregates(now_ms);
-                if (self->impl_->p_s7_server && self->impl_->p_s7_server->processor()->hasPendingCommands())
-                    self->impl_->p_s7_server->processor()->processCommands();
+                if (self->impl_->p_plc_memory && self->impl_->p_plc_memory->processor()->hasPendingCommands())
+                    self->impl_->p_plc_memory->processor()->processCommands();
             },
             this, 50, &cb_id);
         impl_->pending_write_callback_id = cb_id;

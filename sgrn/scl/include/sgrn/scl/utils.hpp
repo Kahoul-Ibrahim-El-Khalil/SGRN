@@ -1,6 +1,6 @@
 #pragma once
 #include <fmt/format.h>
-#include <sgrn/scl/types.hpp>
+#include <sgrn/scl/types/DbField.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <ctime>
 #include <limits>
@@ -35,6 +35,21 @@ std::optional<LocatedField> findFieldByPath(const std::vector<DbField>& t_fields
 sgrn::Result<void, ::sgrn::scl::Error> applyJsonPatchToFields(const std::vector<DbField>& t_fields, const std::string& t_patch_json,
     uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e = s7codec::Endian::Big);
 
+/**
+ * @brief Recursively traverse all fields (including children) with dot-separated path and absolute offset tracking.
+ */
+template <typename F>
+inline void forEachField(const std::vector<DbField>& t_fields, const std::string& t_path_prefix, int t_base_offset, F&& t_callback) {
+    for (const auto& f : t_fields) {
+        std::string current_path = t_path_prefix.empty() ? f.name : t_path_prefix + "." + f.name;
+        int current_offset = t_base_offset + f.offset;
+        t_callback(f, current_path, current_offset);
+        if (!f.children.empty()) {
+            forEachField(f.children, current_path, current_offset, t_callback);
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Time Utilities
 // -----------------------------------------------------------------------------
@@ -63,7 +78,7 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeDtlValue(
     const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e = s7codec::Endian::Big);
 
 int fieldSpanSize(const DbField& t_field);
-
+int fieldElementSpanBytes(const DbField& f);
 sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr,
     size_t t_buffer_size, s7codec::Endian t_e = s7codec::Endian::Big);
 
@@ -79,10 +94,10 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeFieldAt(const DbField& t_field, con
 /**
  * @brief Decodes a single DB buffer into a JSON string using the provided registry.
  */
-std::string decodeDbBuffer(const sgrn::scl::DataBlockRegistry& t_reg, const uint8_t* tp_buf, size_t t_buffer_size);
+std::string decodeDbBuffer(const sgrn::scl::DbSchema& t_reg, const uint8_t* tp_buf, size_t t_buffer_size);
 
 int symbolFieldSpanBytes(const DbField& t_field);
-const DbField* findFieldByName(const DataBlockRegistry& t_reg, const std::string& t_name);
+const DbField* findFieldByName(const DbSchema& t_reg, const std::string& t_name);
 
 sgrn::Result<std::vector<uint8_t>, Error> parseHexBytes(const std::string& t_joined);
 std::optional<PlcAddress> parsePlcAddress(const std::string& t_tok);

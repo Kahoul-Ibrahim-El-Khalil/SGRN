@@ -21,14 +21,13 @@ sgrn_add_component_library(
     TYPE        SHARED
     SOURCES     ${SGRN_SCL_SOURCES}
     INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include
-    PUBLIC_LIBS sgrn::core sgrn::utils fmt::fmt
+    PUBLIC_LIBS sgrn::core sgrn::utils fmt::fmt sgrn::s7codec sgrn::open62541
     ENABLE_ORIGIN_RPATH
 )
 
 target_link_libraries(sgrn_scl PRIVATE
     extern::rapidjson
     extern::xml_h
-    sgrn::s7codec
 )
 
 
@@ -41,7 +40,7 @@ sgrn_target(sgrn_scl)
 
 sgrn_add_component_executable(
     TARGET      sclc
-    SOURCES     apps/sclcompiler.cpp
+    SOURCES     apps/sclc.cpp
     ENABLE_ORIGIN_RPATH
     PRIVATE_LIBS
         sgrn_scl

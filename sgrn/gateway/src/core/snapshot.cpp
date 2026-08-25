@@ -7,8 +7,7 @@
 namespace sgrn::gateway::core
 {
 
-std::string buildSnapshotJson(sgrn::gateway::twin::PlcMemory& t_server,
-    const std::map<uint16_t, const ::sgrn::scl::DataBlockRegistry*>& t_regs,
+std::string buildSnapshotJson(sgrn::gateway::twin::PlcMemory& t_server, const std::map<uint16_t, const ::sgrn::scl::DbSchema*>& t_regs,
     const std::unordered_map<uint16_t, std::vector<std::pair<int32_t, int32_t>>>& t_filter) {
 
     if (t_filter.empty()) {

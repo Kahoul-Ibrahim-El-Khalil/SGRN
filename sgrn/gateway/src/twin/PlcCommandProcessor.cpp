@@ -26,135 +26,10 @@ void PlcCommandProcessor::processCommands() {
     if (commands.empty())
         return;
 
-    std::vector<PlcCommand> field_commands;
-
-    struct BinaryWrite {
-        const PlcNode* node;
-        DbEntry* entry;
-        std::string path;
-        uint64_t timestamp;
-        std::vector<uint8_t> data;
-    };
-
-    std::vector<BinaryWrite> binary_writes;
-    binary_writes.reserve(commands.size());
-
-    for (auto& cmd : commands) {
-        if (cmd.type == PlcCommand::WriteBinary) {
-            if (cmd.value_binary.empty())
-                continue;
-
-            const PlcNode* node = memory_.state()->find(cmd.path);
-            if (!node || !node->cached_slot_)
-                continue;
-
-            DbEntry* p_entry = const_cast<DbEntry*>(node->cached_slot_);
-            const size_t node_start = node->offset_;
-
-            if (node_start + cmd.value_binary.size() > p_entry->size)
-                continue;
-
-            binary_writes.push_back({node, p_entry, cmd.path, cmd.timestamp, std::move(cmd.value_binary)});
-        } else {
-            field_commands.push_back(std::move(cmd));
-        }
-    }
-
-    // ─── Batch WriteBinary commands, grouped by DB ───────────────────────────
-
-    if (!binary_writes.empty()) {
-        std::unordered_map<uint16_t, std::vector<size_t>> indices_by_db;
-
-        for (size_t i = 0; i < binary_writes.size(); ++i) {
-            const uint16_t db = binary_writes[i].node->db_number_;
-            indices_by_db[db].push_back(i);
-        }
-
-        for (auto& [db, indices] : indices_by_db) {
-            std::sort(indices.begin(), indices.end(),
-                [&](size_t a, size_t b) { return binary_writes[a].node->offset_ < binary_writes[b].node->offset_; });
-
-            std::vector<DbMemorySpan> spans;
-            spans.reserve(indices.size());
-
-            for (size_t i : indices) {
-                auto& bw = binary_writes[i];
-
-                spans.push_back(DbMemorySpan{db, bw.node->offset_, bw.data.size(), bw.data.data()});
-            }
-
-            auto res = memory_.writeDbMemory(std::span(spans));
-
-            if (res.hasError()) {
-                fmt::print(stderr,
-                    "[PlcCommandProcessor] Batch write to DB{} failed ({}). "
-                    "Falling back to per-span writes.\n",
-                    db, res.error());
-
-                std::vector<FieldUpdateNotification> fallback_notes;
-                fallback_notes.reserve(indices.size());
-
-                for (size_t i : indices) {
-                    auto& bw = binary_writes[i];
-
-                    uint8_t* ptr = memory_.state()->arenaData() + bw.entry->offset + bw.node->offset_;
-
-                    {
-                        std::unique_lock<std::shared_mutex> lk(bw.entry->mutex_);
-
-                        std::memcpy(ptr, bw.data.data(), bw.data.size());
-                    }
-
-                    bw.entry->last_write_ms.store(sgrn::utils::time::nowMilliseconds(), std::memory_order_release);
-
-                    bw.entry->markDirty();
-
-                    fallback_notes.push_back(
-                        makeFieldUpdateNotification(*memory_.state(), *bw.node, *bw.entry, bw.path, bw.timestamp, true));
-                }
-
-                if (!fallback_notes.empty()) {
-                    if (on_field_update_batch_) {
-                        on_field_update_batch_(std::span(fallback_notes));
-                    } else if (on_field_update_) {
-                        for (auto& note : fallback_notes)
-                            on_field_update_(std::move(note));
-                    }
-                }
-
-                continue;
-            }
-
-            const uint64_t now_ms = sgrn::utils::time::nowMilliseconds();
-
-            std::vector<FieldUpdateNotification> notifications;
-            notifications.reserve(indices.size());
-
-            for (size_t i : indices) {
-                auto& bw = binary_writes[i];
-
-                bw.entry->last_write_ms.store(now_ms, std::memory_order_release);
-
-                notifications.push_back(makeFieldUpdateNotification(*memory_.state(), *bw.node, *bw.entry, bw.path, bw.timestamp, true));
-            }
-
-            if (!notifications.empty()) {
-                if (on_field_update_batch_) {
-                    on_field_update_batch_(std::span(notifications));
-                } else if (on_field_update_) {
-                    for (auto& note : notifications)
-                        on_field_update_(std::move(note));
-                }
-            }
-        }
-    }
-
-    // ─── Batch WriteField commands, grouped by DB ────────────────────────────
-    //
-    // WriteField is the JSON/semantic write path. Previously every command
-    // acquired entry->mutex_ independently. Resolve all nodes first, group
-    // them by DB, then acquire one exclusive DB lock for the whole group.
-
+    // WriteBinary no longer exists as a queued command type — OPC UA now
+    // commits synchronously via PlcMemory::writeDbMemory() in writeValue.cpp.
+    // Only WriteField (the generic path/JSON semantic-write API) still
+    // flows through this queue.
     struct FieldWrite {
         const PlcNode* node;
         DbEntry* entry;
@@ -162,12 +37,12 @@ void PlcCommandProcessor::processCommands() {
     };
 
     std::vector<FieldWrite> field_writes;
-    field_writes.reserve(field_commands.size());
+    field_writes.reserve(commands.size());
 
     std::unordered_map<uint16_t, std::vector<size_t>> field_indices_by_db;
 
-    for (size_t i = 0; i < field_commands.size(); ++i) {
-        PlcCommand& cmd = field_commands[i];
+    for (size_t i = 0; i < commands.size(); ++i) {
+        PlcCommand& cmd = commands[i];
 
         const PlcNode* node = memory_.state()->find(cmd.path);
 
@@ -194,21 +69,6 @@ void PlcCommandProcessor::processCommands() {
 
         DbEntry* entry = field_writes[indices.front()].entry;
 
-        /*
-         * All fields in this group belong to the same DB.
-         *
-         * This is the important change:
-         *
-         *     OLD: lock -> encode -> unlock
-         *          lock -> encode -> unlock
-         *          lock -> encode -> unlock
-         *
-         *     NEW: lock
-         *              encode
-         *              encode
-         *              encode
-         *          unlock
-         */
         {
             std::unique_lock<std::shared_mutex> lk(entry->mutex_);
 
@@ -249,11 +109,6 @@ void PlcCommandProcessor::processCommands() {
             }
         }
 
-        /*
-         * Do bookkeeping and notifications after releasing the DB lock.
-         * This preserves the existing behavior where notification generation
-         * is not performed while holding entry->mutex_.
-         */
         std::vector<FieldUpdateNotification> notifications;
         notifications.reserve(indices.size());
 
@@ -271,6 +126,13 @@ void PlcCommandProcessor::processCommands() {
             fw.entry->last_write_ms.store(now_ms, std::memory_order_release);
 
             fw.entry->markDirty();
+
+            // NOTE: still needs the same version-bump fix as bumpFieldVersions
+            // below — this path writes into the arena directly and never
+            // calls incrementNodeVersion, so it's worth routing through
+            // memory_.write() here too in a follow-up pass. Flagging it,
+            // not fixing it in this diff since you asked specifically for
+            // the OPC UA direct-write refactor.
 
             auto note = makeFieldUpdateNotification(*memory_.state(), *fw.node, *fw.entry, cmd.path, cmd.timestamp);
 

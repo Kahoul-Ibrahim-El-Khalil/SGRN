@@ -50,6 +50,7 @@ private:
     std::unordered_map<std::string, SessionRecord> sessions_;
     ActivateSessionFn original_activate_session_{nullptr};
     CloseSessionFn original_close_session_{nullptr};
+    void* original_context_{nullptr};
 };
 
 } // namespace sgrn::gateway::wrappers::opcua

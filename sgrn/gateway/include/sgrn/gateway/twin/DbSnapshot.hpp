@@ -12,9 +12,7 @@ namespace sgrn::gateway::twin
 {
 using ::sgrn::gateway::wrappers::s7::S7Client;
 using ::sgrn::scl::DataType;
-using ::sgrn::scl::DbData;
 using ::sgrn::scl::DbField;
-using ::sgrn::scl::DbRawBuffer;
 using ::sgrn::scl::DbSchema;
 using ::sgrn::scl::ErrorCode;
 
@@ -50,7 +48,7 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeValue(
  */
 class DbSnapshot {
 public:
-    explicit DbSnapshot(DbSchema t_registry); // REVAMP-5: DbSchema (was DataBlockRegistry)
+    explicit DbSnapshot(DbSchema t_registry); // REVAMP-5: DbSchema (was DbSchema)
     ~DbSnapshot();
 
     // Manual copy/move due to std::atomic member
@@ -75,7 +73,7 @@ public:
     sgrn::Result<void, ::sgrn::scl::Error> write(S7Client& t_client);
 
     /// Decodes the current raw_buffer_ into JSON (supports nested UDTs)
-    sgrn::Result<DbData, ::sgrn::scl::Error> decode() const; // REVAMP-8: DbData (was DataBlockData)
+    sgrn::Result<std::string, ::sgrn::scl::Error> decode() const; // REVAMP-8: std::string (was std::string)
 
     /// Encodes a single top-level field by name into the raw_buffer_.
     sgrn::Result<void, ::sgrn::scl::Error> updateField(const std::string& t_field_name, const std::string& t_value);
@@ -126,7 +124,7 @@ public:
     const DbSchema& getRegistry() const {
         return registry_;
     }
-    const DbRawBuffer& getRawBuffer() const {
+    const std::vector<uint8_t>& getRawBuffer() const {
         return raw_buffer_.front();
     }
 

@@ -150,8 +150,8 @@ static void GenericFieldSetter_string(asIScriptGeneric* tp_gen) {
     std::vector<uint8_t> tmp(static_cast<size_t>(span), 0);
     auto dv = s7codec::DecodedValue::makeString(val);
     auto status = s7codec::encodeScalar(dv, p_meta->s7type, tmp.data(), tmp.size(), p_meta->bit_index, p_meta->count, p_meta->endian);
-    if (!status.ok()) {
-        fmt::print(stderr, "[SchemaVM] string encode failed for '{}': {}\n", p_meta->path, status.message);
+    if (!status.has_value()) {
+        fmt::print(stderr, "[SchemaVM] string encode failed for '{}': {}\n", p_meta->path, toString(status.error()));
     }
     p_db->writeFieldToMemory(p_meta->abs_offset, tmp.data(), tmp.size());
 }

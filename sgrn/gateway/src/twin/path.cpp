@@ -3,8 +3,8 @@
 #include <algorithm>
 #include <string_view>
 
-using ::sgrn::scl::DataBlockRegistry;
 using ::sgrn::scl::DataType;
+using ::sgrn::scl::DbSchema;
 
 namespace sgrn::gateway::twin
 {
@@ -41,7 +41,7 @@ int symbolFieldSpanBytes(const DbField& t_field) {
     return t_field.is_dynamic ? base + 4 : base;
 }
 
-const DbField* findFieldByName(const DataBlockRegistry& t_reg, const std::string& t_name) {
+const DbField* findFieldByName(const DbSchema& t_reg, const std::string& t_name) {
     std::vector<DbField>::const_iterator it =
         std::find_if(t_reg.fields.begin(), t_reg.fields.end(), [&](const DbField& t_f) { return t_f.name == t_name; });
     return it == t_reg.fields.end() ? nullptr : &*it;

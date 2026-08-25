@@ -311,7 +311,7 @@ sgrn::Result<void, S7Error> PlcTagTable::buildPutItems(const std::vector<std::st
 
             int bit_idx = (blk.value()->addr.word_len == S7WLBit) ? blk.value()->addr.bit_offset : 0;
             auto status = s7codec::encodeScalar(dv, fd.type, t_buf.data(), t_buf.size(), bit_idx, fd.count);
-            if (!status.ok())
+            if (!status.has_value())
                 return S7Error{S7ProtocolCode::Unknown};
             t_out_bufs.push_back(std::move(t_buf));
         }
@@ -366,7 +366,7 @@ sgrn::Result<void, S7Error> PlcTagTable::commitLocalPut(
 
             int bit_idx = (blk.value()->addr.word_len == S7WLBit) ? blk.value()->addr.bit_offset : 0;
             auto status = s7codec::encodeScalar(dv, fd.type, encoded.data(), encoded.size(), bit_idx, fd.count);
-            if (!status.ok())
+            if (!status.has_value())
                 return S7Error{S7ProtocolCode::Unknown};
         }
 

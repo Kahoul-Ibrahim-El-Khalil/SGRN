@@ -93,7 +93,7 @@ public:
         const std::string& t_path, std::map<std::string, UdtDefinition>* tp_global_udts = nullptr);
 
     /// Parses a single DB source file.
-    static sgrn::Result<DataBlockRegistry, SchemaError> parseDbFile(
+    static sgrn::Result<DbSchema, SchemaError> parseDbFile(
         const std::string& t_path, std::map<std::string, UdtDefinition>* tp_global_udts = nullptr);
 
     /// Parses a TIA Portal Tag Table XML file.
