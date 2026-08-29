@@ -43,7 +43,7 @@ class SnapshotRegistry;
  * from a static string_view literal — never stored or built dynamically,
  * so there's no dangling-pointer risk and no per-error allocation.
  */
-enum class PlcMemoryErrorStatus : uint8_t {
+enum class PlcMemoryError : uint8_t {
     PLC_STATE_NOT_INITIALIZED,      ///< attachState() was never called
     DB_SEGMENT_NOT_FOUND,           ///< db_number isn't registered in the arena
     RANGE_EXCEEDS_ALLOWED_SPACE,    ///< offset/size falls outside the segment/arena being addressed
@@ -51,76 +51,33 @@ enum class PlcMemoryErrorStatus : uint8_t {
     UNMAPPED_ARENA_REGION,          ///< an arena-relative offset doesn't fall inside ANY registered DB segment
     NULL_BUFFER,                    ///< buffer == nullptr while size > 0
     INVALID_BIT_INDEX,              ///< writeBit: bit_index not in [0, 7]
+    UKNOWN,
+    EXTERNAL
 };
 
-constexpr std::string_view toString(PlcMemoryErrorStatus t_status) noexcept {
+constexpr std::string_view toString(PlcMemoryError t_status) noexcept {
     switch (t_status) {
-        case PlcMemoryErrorStatus::PLC_STATE_NOT_INITIALIZED:
+        case PlcMemoryError::PLC_STATE_NOT_INITIALIZED:
             return "PLC state not attached";
-        case PlcMemoryErrorStatus::DB_SEGMENT_NOT_FOUND:
+        case PlcMemoryError::DB_SEGMENT_NOT_FOUND:
             return "DB segment not registered";
-        case PlcMemoryErrorStatus::RANGE_EXCEEDS_ALLOWED_SPACE:
+        case PlcMemoryError::RANGE_EXCEEDS_ALLOWED_SPACE:
             return "Range exceeds allowed space";
-        case PlcMemoryErrorStatus::RANGE_CROSSES_SEGMENT_BOUNDARY:
+        case PlcMemoryError::RANGE_CROSSES_SEGMENT_BOUNDARY:
             return "Range crosses a DB segment boundary";
-        case PlcMemoryErrorStatus::UNMAPPED_ARENA_REGION:
+        case PlcMemoryError::UNMAPPED_ARENA_REGION:
             return "Offset does not fall inside any registered DB segment";
-        case PlcMemoryErrorStatus::NULL_BUFFER:
+        case PlcMemoryError::NULL_BUFFER:
             return "Null buffer with non-zero size";
-        case PlcMemoryErrorStatus::INVALID_BIT_INDEX:
+        case PlcMemoryError::INVALID_BIT_INDEX:
             return "Bit index out of range [0, 7]";
+        case PlcMemoryError::UKNOWN:
+            return "Uknown Plc Memory Error";
+        case PlcMemoryError::EXTERNAL:
+            return "External Error that does not pertain to the Plc Memory";
     }
     return "Unknown PlcMemory error";
 }
-
-/**
- * @brief Error type for every PlcMemory raw-memory accessor.
- *
- * Behaves like the enum for control flow (comparable, implicitly convertible
- * to PlcMemoryErrorStatus so it works directly in a switch) and like a
- * formattable object for logging (fmt::format("{}", err)). Deliberately
- * carries no dynamic context (db/offset/size) — callers already have those
- * in scope and can log them alongside err.message(); keeping this POD keeps
- * every failing call cheap and keeps equality comparisons trivial.
- */
-class PlcMemoryError {
-public:
-    constexpr PlcMemoryError(PlcMemoryErrorStatus t_status) noexcept // NOLINT: implicit by design
-        : status_(t_status) {
-    }
-
-    constexpr PlcMemoryErrorStatus status() const noexcept {
-        return status_;
-    }
-    constexpr operator PlcMemoryErrorStatus() const noexcept { // NOLINT: implicit by design
-        return status_;
-    }
-    constexpr std::string_view message() const noexcept {
-        return toString(status_);
-    }
-
-    friend constexpr bool operator==(const PlcMemoryError& t_a, const PlcMemoryError& t_b) noexcept {
-        return t_a.status_ == t_b.status_;
-    }
-    friend constexpr bool operator!=(const PlcMemoryError& t_a, const PlcMemoryError& t_b) noexcept {
-        return !(t_a == t_b);
-    }
-    friend constexpr bool operator==(const PlcMemoryError& t_a, PlcMemoryErrorStatus t_s) noexcept {
-        return t_a.status_ == t_s;
-    }
-    friend constexpr bool operator!=(const PlcMemoryError& t_a, PlcMemoryErrorStatus t_s) noexcept {
-        return t_a.status_ != t_s;
-    }
-    friend constexpr bool operator==(PlcMemoryErrorStatus t_s, const PlcMemoryError& t_a) noexcept {
-        return t_a.status_ == t_s;
-    }
-    friend constexpr bool operator!=(PlcMemoryErrorStatus t_s, const PlcMemoryError& t_a) noexcept {
-        return t_a.status_ != t_s;
-    }
-
-private:
-    PlcMemoryErrorStatus status_;
-};
 
 /**
  * @brief One arena-relative byte range, for the whole-arena batch API.
@@ -174,12 +131,11 @@ public:
     void attachState(PlcState& t_state);
     PlcState* state() const;
 
-    sgrn::Result<void, ::sgrn::scl::Error> loadRegistry(const PlcSchemaStore& t_store);
-    sgrn::Result<void, ::sgrn::scl::Error> registerDb(uint16_t t_db_number, size_t t_size);
+    sgrn::Result<void, PlcMemoryError> loadRegistry(const PlcSchemaStore& t_store);
+    sgrn::Result<void, PlcMemoryError> registerDb(uint16_t t_db_number, size_t t_size);
 
-    sgrn::Result<void, ::sgrn::scl::Error> updateField(
-        uint16_t t_db_number, const std::string& t_field_path, const std::string& t_value_json);
-    sgrn::Result<void, ::sgrn::scl::Error> updateFieldWithTimestamp(
+    sgrn::Result<void, PlcMemoryError> updateField(uint16_t t_db_number, const std::string& t_field_path, const std::string& t_value_json);
+    sgrn::Result<void, PlcMemoryError> updateFieldWithTimestamp(
         uint16_t t_db_number, const std::string& t_field_path, const std::string& t_value_json, uint64_t t_timestamp);
 
     /// When set, updateField() uses this instead of wall-clock time (e.g. script simulation).
@@ -189,11 +145,11 @@ public:
     void clearTimestampProvider() {
         timestamp_provider_ = {};
     }
-    sgrn::Result<std::string, ::sgrn::scl::Error> getFieldValue(uint16_t t_db_number, const std::string& t_field_path) const;
-    sgrn::Result<std::string, ::sgrn::scl::Error> getDbJson(uint16_t t_db_number) const;
+    sgrn::Result<std::string, PlcMemoryError> getFieldValue(uint16_t t_db_number, const std::string& t_field_path) const;
+    sgrn::Result<std::string, PlcMemoryError> getDbJson(uint16_t t_db_number) const;
     /// JSON snapshot of a DB or subtree. Empty field_path uses cached_full_json when the DB is clean;
     /// non-empty paths (e.g. "pump_1") always serialize that subtree via PlcNode::serialize.
-    sgrn::Result<std::string, ::sgrn::scl::Error> getSubtreeJson(uint16_t t_db_number, const std::string& t_field_path) const;
+    sgrn::Result<std::string, PlcMemoryError> getSubtreeJson(uint16_t t_db_number, const std::string& t_field_path) const;
 
     std::string getDbJsonString(uint16_t t_db_number) const;
     std::string getMemoryLayoutAsJson() const;
@@ -269,7 +225,7 @@ private:
     struct SegmentLookup {
         DbEntry* p_entry{nullptr};
         size_t rel_offset{0};
-        PlcMemoryErrorStatus error{PlcMemoryErrorStatus::UNMAPPED_ARENA_REGION};
+        PlcMemoryError error{PlcMemoryError::UNMAPPED_ARENA_REGION};
     };
     SegmentLookup findContainingSegment(size_t t_abs_offset, size_t t_size) const;
 
@@ -295,15 +251,8 @@ private:
 } // namespace sgrn::gateway::twin
 
 template <>
-struct fmt::formatter<sgrn::gateway::twin::PlcMemoryErrorStatus> : formatter<std::string_view> {
-    auto format(sgrn::gateway::twin::PlcMemoryErrorStatus t_status, format_context& t_ctx) const {
-        return formatter<std::string_view>::format(sgrn::gateway::twin::toString(t_status), t_ctx);
-    }
-};
-
-template <>
 struct fmt::formatter<sgrn::gateway::twin::PlcMemoryError> : formatter<std::string_view> {
-    auto format(const sgrn::gateway::twin::PlcMemoryError& t_err, format_context& t_ctx) const {
-        return formatter<std::string_view>::format(t_err.message(), t_ctx);
+    auto format(sgrn::gateway::twin::PlcMemoryError t_status, format_context& t_ctx) const {
+        return formatter<std::string_view>::format(sgrn::gateway::twin::toString(t_status), t_ctx);
     }
 };

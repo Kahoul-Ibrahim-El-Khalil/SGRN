@@ -1,5 +1,6 @@
 #include <fmt/core.h>
 #include <sgrn/gateway/adapters/http.hpp>
+#include <sgrn/gateway/adapters/http/errors.hpp>
 #include <sgrn/gateway/adapters/http/path.hpp>
 #include <sgrn/gateway/twin/PlcCommandProcessor.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
@@ -132,7 +133,7 @@ void HttpAdapter::handlePost(
         // 1. Read the current array
         auto arr_res = t_memory.getFieldValue(db_num, field_path);
         if (arr_res.hasError()) {
-            t_res.status = 404;
+            t_res.status = http::toHttpStatus(arr_res.error());
             t_res.set_content(fmt::format(R"({{"error":"Array field '{}' not found"}})", field_path), "application/json");
             return;
         }
@@ -164,8 +165,9 @@ void HttpAdapter::handlePost(
         const uint64_t ts = static_cast<uint64_t>(sgrn::utils::time::nowMilliseconds());
         auto write_res = t_memory.updateFieldWithTimestamp(db_num, field_path, new_arr_json, ts);
         if (write_res.hasError()) {
-            t_res.status = 422;
-            t_res.set_content(fmt::format(R"({{"error":"Failed to write array field '{}'"}})", field_path), "application/json");
+            t_res.status = http::toHttpStatus(write_res.error());
+            t_res.set_content(fmt::format(R"({{"error":"Failed to write array field '{}': {}"}})", field_path, toString(write_res.error())),
+                "application/json");
             return;
         }
         t_memory.processor()->processCommands();

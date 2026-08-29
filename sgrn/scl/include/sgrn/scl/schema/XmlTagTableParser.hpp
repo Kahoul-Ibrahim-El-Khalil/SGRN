@@ -15,7 +15,7 @@ struct TagDefinition {
 
 class XmlTagTableParser {
 public:
-    static sgrn::Result<std::vector<TagDefinition>, ::sgrn::scl::Error> parse(const std::string& t_xml_content);
+    static sgrn::Result<std::vector<TagDefinition>, SclError> parse(const std::string& t_xml_content);
 };
 
 } // namespace sgrn::scl

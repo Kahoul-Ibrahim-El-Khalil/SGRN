@@ -1,13 +1,14 @@
 #pragma once
 
 #include <sgrn/Result.hpp>
-#include <sgrn/gateway/wrappers/s7/ProtocolError.hpp>
+#include <sgrn/gateway/twin/DbIoError.hpp>
+#include <sgrn/gateway/wrappers/s7/error.hpp>
+#include <sgrn/scl/errors.hpp>
 #include <sgrn/scl/types.hpp>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
-
 namespace sgrn::gateway::twin
 {
 class DbIOProvider;
@@ -15,6 +16,7 @@ class DbIOProvider;
 
 namespace sgrn::s7shell::shell
 {
+using ::sgrn::scl::SclError;
 
 struct ScriptS7Connection;
 class S7PathBatch;
@@ -105,11 +107,11 @@ public:
     ScriptDataBlock* get(size_t t_size); // read specific size; returns self for chaining
     void push();                         ///< Internal — write dirty buffer segments to PLC. Use put() from scripts.
 
-    // ── Error introspection (updated by every get/put) ──────────────
+    // ── SclError introspection (updated by every get/put) ──────────────
     bool getLastOpOk() const {
         return last_op_ok_;
     }
-    std::string getlastOpError() const {
+    sgrn::gateway::twin::DbIoError getlastOpError() const {
         return last_op_err_;
     }
 
@@ -167,21 +169,19 @@ private:
 
     // Last-operation error state (cleared on success, set on failure)
     bool last_op_ok_{true};
-    std::string last_op_err_;
+    sgrn::gateway::twin::DbIoError last_op_err_;
 
-    void notifyConnError(const ::sgrn::scl::Error& t_err);
+    void notifyConnError(const ::sgrn::scl::SclError& t_err);
     void notifyConnError(const ::sgrn::gateway::wrappers::s7::S7Error& t_err);
 
     template <typename T>
-    bool setOpResult(const ::sgrn::Result<T, ::sgrn::scl::Error>& t_r) {
+    bool setOpResult(const ::sgrn::Result<T, SclError>& t_r) {
         if (t_r.hasError()) {
             last_op_ok_ = false;
-            last_op_err_ = t_r.error().message();
-            notifyConnError(t_r.error());
+            last_op_err_ = gateway::wrappers::s7::fromSclErrorToS7Error(t_r.error());
             return false;
         }
         last_op_ok_ = true;
-        last_op_err_.clear();
         return true;
     }
 
@@ -189,12 +189,20 @@ private:
     bool setOpResult(const ::sgrn::Result<T, ::sgrn::gateway::wrappers::s7::S7Error>& t_r) {
         if (t_r.hasError()) {
             last_op_ok_ = false;
-            last_op_err_ = t_r.error().string();
-            notifyConnError(t_r.error());
+            last_op_err_ = gateway::twin::fromS7ErrorToDbIoError(t_r.error());
             return false;
         }
         last_op_ok_ = true;
-        last_op_err_.clear();
+        return true;
+    }
+    template <typename T>
+    bool setOpResult(const ::sgrn::Result<T, ::sgrn::gateway::twin::DbIoError>& t_r) {
+        if (t_r.hasError()) {
+            last_op_ok_ = false;
+            last_op_err_ = t_r.error();
+            return false;
+        }
+        last_op_ok_ = true;
         return true;
     }
 }; // class ScriptDataBlock

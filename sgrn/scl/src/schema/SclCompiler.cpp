@@ -77,7 +77,7 @@ static bool contentLooksLikeJson(const std::string& t_filepath) {
     return false;
 }
 
-static Result<void, ::sgrn::scl::Error> mergeIntoRegistry(PlcSchemaStore& t_registry, ParseResult&& t_result,
+static Result<void, ::sgrn::scl::SclError> mergeIntoRegistry(PlcSchemaStore& t_registry, ParseResult&& t_result,
     const std::string& t_source_name, bool t_force, const SymbolFileInfo& t_db_info = {}, const SymbolFileInfo& t_udt_info = {}) {
 
     for (const std::string& w : t_result.warnings) {
@@ -92,7 +92,7 @@ static Result<void, ::sgrn::scl::Error> mergeIntoRegistry(PlcSchemaStore& t_regi
             t_udt.name = t_udt_info.ergonomic_name;
         }
 
-        Result<void, ::sgrn::scl::Error> r = t_registry.addUdt(std::move(t_udt), t_force, false);
+        Result<void, ::sgrn::scl::SclError> r = t_registry.addUdt(std::move(t_udt), t_force, false);
         if (r.hasError())
             return Error(r.error());
     }
@@ -122,7 +122,7 @@ static Result<void, ::sgrn::scl::Error> mergeIntoRegistry(PlcSchemaStore& t_regi
                 fmt::format("[{}] auto-assigned DB number {} for block '{}'", t_source_name, t_db.db_number, t_db.db_name));
         }
 
-        Result<void, ::sgrn::scl::Error> r = t_registry.addDb(std::move(t_db), t_force, false);
+        Result<void, ::sgrn::scl::SclError> r = t_registry.addDb(std::move(t_db), t_force, false);
         if (r.hasError())
             return Error(r.error());
     }
@@ -130,36 +130,36 @@ static Result<void, ::sgrn::scl::Error> mergeIntoRegistry(PlcSchemaStore& t_regi
     return {};
 }
 
-Result<UdtDefinition, ::sgrn::scl::Error> SclCompiler::parseUdtFile(
+Result<UdtDefinition, ::sgrn::scl::SclError> SclCompiler::parseUdtFile(
     const std::string& t_path, std::map<std::string, UdtDefinition>* tp_global_udts) {
     auto res = DbSymbolsParser::parseExportFile(t_path, tp_global_udts);
     if (res.hasError())
         return res.error();
     if (res.value().udts.empty())
-        return Error{SchemaCode::Generic, "no UDT found in file"};
+        return SclError::Generic;
     return std::move(res.value().udts[0]);
 }
 
-Result<DbSchema, ::sgrn::scl::Error> SclCompiler::parseDbFile(
+Result<DbSchema, ::sgrn::scl::SclError> SclCompiler::parseDbFile(
     const std::string& t_path, std::map<std::string, UdtDefinition>* tp_global_udts) {
     auto res = DbSymbolsParser::parseExportFile(t_path, tp_global_udts);
     if (res.hasError())
         return res.error();
     if (res.value().dbs.empty())
-        return Error{SchemaCode::Generic, "no DB found in file"};
+        return SclError::Generic;
     return std::move(res.value().dbs[0]);
 }
 
-Result<std::vector<PlcTag>, ::sgrn::scl::Error> SclCompiler::parseTagTableXmlFile(const std::string& t_path) {
+Result<std::vector<PlcTag>, ::sgrn::scl::SclError> SclCompiler::parseTagTableXmlFile(const std::string& t_path) {
     std::vector<std::string> dummy;
     return ::sgrn::scl::parseTagTableXmlFile(t_path, dummy);
 }
 
-Result<void, ::sgrn::scl::Error> SclCompiler::loadFromDirectory(
+Result<void, ::sgrn::scl::SclError> SclCompiler::loadFromDirectory(
     PlcSchemaStore& t_registry, const std::string& t_symbols_dir, bool t_force) {
     std::error_code ec;
     if (!fs::is_directory(t_symbols_dir, ec))
-        return Err::Generic("symbols directory does not exist: {}", t_symbols_dir);
+        return SclError::Generic;
     t_registry.base_dir_ = t_symbols_dir;
     std::vector<std::string> text_files;
     std::vector<std::string> other_files;
@@ -193,7 +193,7 @@ Result<void, ::sgrn::scl::Error> SclCompiler::loadFromDirectory(
         for (const auto& t_path : text_files) {
             auto pr = DbSymbolsParser::parseExportFile(t_path, &t_global_udts);
             if (pr.hasError() && warned_first_pass.insert(t_path).second) {
-                t_registry.addWarning(fmt::format("[{}] parse error (UDT discovery): {}", t_path, pr.error().string()));
+                t_registry.addWarning(fmt::format("[{}] parse error (UDT discovery): {}", t_path, toString(pr.error())));
             }
         }
     }
@@ -209,7 +209,7 @@ Result<void, ::sgrn::scl::Error> SclCompiler::loadFromDirectory(
     return {};
 }
 
-Result<void, ::sgrn::scl::Error> SclCompiler::loadFromFiles(
+Result<void, ::sgrn::scl::SclError> SclCompiler::loadFromFiles(
     PlcSchemaStore& t_registry, const std::vector<std::string>& t_filepaths, bool t_force) {
     std::map<std::string, UdtDefinition> t_global_udts;
     int prev_count = -1;
@@ -220,7 +220,7 @@ Result<void, ::sgrn::scl::Error> SclCompiler::loadFromFiles(
             if (isDbOrUdtTextSymbolFile(t_path)) {
                 auto pr = DbSymbolsParser::parseExportFile(t_path, &t_global_udts);
                 if (pr.hasError() && warned_first_pass.insert(t_path).second) {
-                    t_registry.addWarning(fmt::format("[{}] parse error (UDT discovery): {}", t_path, pr.error().string()));
+                    t_registry.addWarning(fmt::format("[{}] parse error (UDT discovery): {}", t_path, toString(pr.error())));
                 }
             }
         }
@@ -234,7 +234,7 @@ Result<void, ::sgrn::scl::Error> SclCompiler::loadFromFiles(
     return {};
 }
 
-Result<void, ::sgrn::scl::Error> SclCompiler::loadFile(
+Result<void, ::sgrn::scl::SclError> SclCompiler::loadFile(
     PlcSchemaStore& t_registry, const std::string& t_filepath, bool t_force, std::map<std::string, UdtDefinition>* tp_global_udts) {
 
     if (isTagTableXmlFile(t_filepath)) {
@@ -251,7 +251,7 @@ Result<void, ::sgrn::scl::Error> SclCompiler::loadFile(
 
     std::ifstream file(t_filepath);
     if (!file.is_open())
-        return Err::FileNotFound("cannot open symbol file: {}", t_filepath);
+        return SclError::FileNotFound;
 
     std::string t_content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
@@ -265,7 +265,7 @@ Result<void, ::sgrn::scl::Error> SclCompiler::loadFile(
     return {};
 }
 
-Result<void, ::sgrn::scl::Error> SclCompiler::loadFromContent(PlcSchemaStore& t_registry, const std::string& t_content,
+Result<void, ::sgrn::scl::SclError> SclCompiler::loadFromContent(PlcSchemaStore& t_registry, const std::string& t_content,
     const std::string& t_source_name, bool t_force, std::map<std::string, UdtDefinition>* tp_global_udts) {
 
     auto first_char = [](const std::string& t_s) {
@@ -279,9 +279,9 @@ Result<void, ::sgrn::scl::Error> SclCompiler::loadFromContent(PlcSchemaStore& t_
         rapidjson::Document root;
         root.Parse(t_content.c_str());
         if (root.HasParseError())
-            return Err::ParseError("failed to parse JSON schema from {}", t_source_name);
+            return SclError::ParseError;
 
-        Result<PlcSchemaStore, ::sgrn::scl::Error> nested = PlcSchemaStore::loadFromJson(root);
+        auto nested = PlcSchemaStore::loadFromJson(root);
         if (nested.hasError())
             return Error(nested.error());
 
@@ -322,7 +322,7 @@ Result<void, ::sgrn::scl::Error> SclCompiler::loadFromContent(PlcSchemaStore& t_
 }
 // ── Phase 2: High-level compile API ─────────────────────────────────────────
 
-Result<PlcSchemaStore, SchemaError> SclCompiler::compileFile(const std::string& t_path, Options t_opts) {
+Result<PlcSchemaStore, SclError> SclCompiler::compileFile(const std::string& t_path, Options t_opts) {
     PlcSchemaStore t_store;
     auto res = loadFile(t_store, t_path, t_opts.force);
     if (res.hasError())
@@ -330,7 +330,7 @@ Result<PlcSchemaStore, SchemaError> SclCompiler::compileFile(const std::string& 
     return t_store;
 }
 
-Result<PlcSchemaStore, SchemaError> SclCompiler::compileDirectory(const std::string& t_dir, Options t_opts) {
+Result<PlcSchemaStore, SclError> SclCompiler::compileDirectory(const std::string& t_dir, Options t_opts) {
     PlcSchemaStore t_store;
     auto res = loadFromDirectory(t_store, t_dir, t_opts.force);
     if (res.hasError())
@@ -338,7 +338,7 @@ Result<PlcSchemaStore, SchemaError> SclCompiler::compileDirectory(const std::str
     return t_store;
 }
 
-Result<PlcSchemaStore, SchemaError> SclCompiler::compileFiles(const std::vector<std::string>& t_paths, Options t_opts) {
+Result<PlcSchemaStore, SclError> SclCompiler::compileFiles(const std::vector<std::string>& t_paths, Options t_opts) {
     PlcSchemaStore t_store;
     auto res = loadFromFiles(t_store, t_paths, t_opts.force);
     if (res.hasError())
@@ -348,15 +348,15 @@ Result<PlcSchemaStore, SchemaError> SclCompiler::compileFiles(const std::vector<
 
 // ── Phase 2: Emit outputs ───────────────────────────────────────────────────
 
-Result<void, SchemaError> SclCompiler::emitJson(const PlcSchemaStore& t_store, const std::string& t_output_path, bool t_pretty) {
+Result<void, SclError> SclCompiler::emitJson(const PlcSchemaStore& t_store, const std::string& t_output_path, bool t_pretty) {
     return t_store.saveToJsonFile(t_output_path);
 }
 
-Result<void, SchemaError> SclCompiler::emitScl(const PlcSchemaStore& t_store, const std::string& t_output_dir) {
+Result<void, SclError> SclCompiler::emitScl(const PlcSchemaStore& t_store, const std::string& t_output_dir) {
     std::error_code ec;
     fs::create_directories(t_output_dir, ec);
     if (ec)
-        return Err::IoError("cannot create output directory '{}': {}", t_output_dir, ec.message());
+        return SclError::IoError;
 
     // Emit UDTs
     for (const auto& t_udt : t_store.udts()) {
@@ -367,7 +367,7 @@ Result<void, SchemaError> SclCompiler::emitScl(const PlcSchemaStore& t_store, co
         std::string t_path = (fs::path(t_output_dir) / t_filename).string();
         std::ofstream t_out(t_path);
         if (!t_out.is_open())
-            return Err::IoError("cannot create file: {}", t_path);
+            return SclError::IoError;
         t_out << udtToScl(t_udt);
     }
 
@@ -384,18 +384,18 @@ Result<void, SchemaError> SclCompiler::emitScl(const PlcSchemaStore& t_store, co
         std::string t_path = (fs::path(t_output_dir) / t_filename).string();
         std::ofstream t_out(t_path);
         if (!t_out.is_open())
-            return Err::IoError("cannot create file: {}", t_path);
+            return SclError::IoError;
         t_out << dbToScl(t_db);
     }
 
     return {};
 }
 
-Result<void, SchemaError> SclCompiler::emitCanonical(const PlcSchemaStore& t_store, const std::string& t_output_dir) {
+Result<void, SclError> SclCompiler::emitCanonical(const PlcSchemaStore& t_store, const std::string& t_output_dir) {
     std::error_code ec;
     fs::create_directories(t_output_dir, ec);
     if (ec)
-        return Err::IoError("cannot create output directory '{}': {}", t_output_dir, ec.message());
+        return SclError::IoError;
 
     // Emit UDTs with canonical names
     for (const auto& t_udt : t_store.udts()) {
@@ -405,7 +405,7 @@ Result<void, SchemaError> SclCompiler::emitCanonical(const PlcSchemaStore& t_sto
         std::string t_path = (fs::path(t_output_dir) / t_filename).string();
         std::ofstream t_out(t_path);
         if (!t_out.is_open())
-            return Err::IoError("cannot create file: {}", t_path);
+            return SclError::IoError;
         t_out << udtToScl(t_udt);
     }
 
@@ -420,7 +420,7 @@ Result<void, SchemaError> SclCompiler::emitCanonical(const PlcSchemaStore& t_sto
         std::string t_path = (fs::path(t_output_dir) / t_filename).string();
         std::ofstream t_out(t_path);
         if (!t_out.is_open())
-            return Err::IoError("cannot create file: {}", t_path);
+            return SclError::IoError;
         t_out << dbToScl(t_db);
     }
 
@@ -705,7 +705,8 @@ static void emitFieldsCpp(std::string& t_out, const std::vector<DbField>& t_fiel
 
         // ── XString (raw byte array with header) ─────────────────────
         if (t_f.type == DataType::XString || t_f.type == DataType::XWString) {
-            int span = s7codec::typeSpanBytes(t_f.type, t_f.count);
+            auto span_opt = s7codec::typeSpanBytes(t_f.type, t_f.count);
+            int span = span_opt ? static_cast<int>(*span_opt) : 0;
             t_out += fmt::format("{}uint8_t {}[{}]; // {}\n", pad, sanitizeIdentifier(t_f.name), span,
                 t_f.type == DataType::XString ? fmt::format("XString[{}]", t_f.count) : fmt::format("XWString[{}]", t_f.count));
             ++i;
@@ -786,7 +787,7 @@ std::string SclCompiler::emitCppHeader(const PlcSchemaStore& t_store, const std:
     return t_out;
 }
 
-Result<void, SchemaError> SclCompiler::emitCpp(
+Result<void, SclError> SclCompiler::emitCpp(
     const PlcSchemaStore& t_store, const std::string& t_output_path, const std::string& t_guard_prefix) {
     std::string t_content = emitCppHeader(t_store, t_guard_prefix);
 
@@ -795,12 +796,12 @@ Result<void, SchemaError> SclCompiler::emitCpp(
     if (!parent.empty()) {
         fs::create_directories(parent, ec);
         if (ec)
-            return Err::IoError("cannot create directory '{}': {}", parent.string(), ec.message());
+            return SclError::IoError;
     }
 
     std::ofstream t_out(t_output_path);
     if (!t_out.is_open())
-        return Err::IoError("cannot create file: {}", t_output_path);
+        return SclError::IoError;
     t_out << t_content;
     return {};
 }

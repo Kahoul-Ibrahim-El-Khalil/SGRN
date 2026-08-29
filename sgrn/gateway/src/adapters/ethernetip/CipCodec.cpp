@@ -20,7 +20,7 @@ size_t CipCodec::alignOffset(size_t t_offset, size_t t_alignment) {
 
 size_t CipCodec::computeCipSize(const DbField& t_field) {
     size_t size = 0;
-    int limit = std::max(1, t_field.count);
+    int limit = std::max<int>(1, static_cast<int>(t_field.count));
 
     if (!t_field.children.empty()) {
         size_t struct_size = 0;
@@ -59,7 +59,7 @@ size_t CipCodec::computeCipSize(const DbField& t_field) {
 }
 
 void CipCodec::encodeToCip(const DbField& t_field, const uint8_t* tp_s7_buf, uint8_t* tp_cip_buf, size_t& t_cip_offset) {
-    int limit = std::max(1, t_field.count);
+    int limit = std::max<int>(1, static_cast<int>(t_field.count));
 
     if (!t_field.children.empty()) {
         size_t struct_align = TypeTranslation::getAlignment(t_field);
@@ -155,7 +155,7 @@ void CipCodec::encodeToCip(const DbField& t_field, const uint8_t* tp_s7_buf, uin
 }
 
 void CipCodec::decodeFromCip(const DbField& t_field, const uint8_t* tp_cip_buf, uint8_t* tp_s7_buf, size_t& t_cip_offset) {
-    int limit = std::max(1, t_field.count);
+    int limit = std::max<int>(1, static_cast<int>(t_field.count));
 
     if (!t_field.children.empty()) {
         size_t struct_align = TypeTranslation::getAlignment(t_field);

@@ -28,26 +28,28 @@ std::string buildSnapshotJson(sgrn::gateway::twin::PlcMemory& t_server, const st
         if (!state)
             continue;
 
-        auto* db_entry = state->findSegmentById(db);
-        if (!db_entry)
+        auto* p_db_entry = state->findSegmentById(db);
+
+        if (!p_db_entry)
             continue;
 
-        std::shared_lock<std::shared_mutex> lock(db_entry->mutex_);
-        const uint8_t* buf = state->arenaData() + db_entry->offset;
-        size_t b_size = db_entry->size;
+        std::shared_lock<std::shared_mutex> lock(p_db_entry->mutex_);
+        const uint8_t* buf = state->arenaData() + p_db_entry->offset;
+        size_t b_size = p_db_entry->size;
 
         const std::string key = reg->db_name.empty() ? fmt::format("DB{}", db) : reg->db_name;
         writer.Key(key.c_str(), static_cast<rapidjson::SizeType>(key.length()));
 
         writer.StartObject();
         for (const auto& field : reg->fields) {
-            int f_size = (field.type == ::sgrn::scl::DataType::Bool) ? 1 : s7codec::typeSpanBytes(field.type, field.count);
+            uint32_t f_size = (field.type == ::sgrn::scl::DataType::Bool) ? 1 : s7codec::typeSpanBytes(field.type, field.count).value_or(0);
+
             if (!field.children.empty() && field.struct_size > 0)
                 f_size = field.struct_size;
 
             bool overlaps = false;
             for (const auto& r : ranges) {
-                if (field.offset < r.second && (field.offset + f_size) > r.first) {
+                if (field.offset < r.second && (field.offset + static_cast<int32_t>(f_size)) > r.first) {
                     overlaps = true;
                     break;
                 }

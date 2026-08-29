@@ -76,9 +76,8 @@ sgrn::scl::DbField fromJson(const rapidjson::Value& t_node) {
         t_field.is_dynamic = t_node["is_dynamic"].GetBool();
 
     if (t_node.HasMember("type") && t_node["type"].IsString()) {
-        sgrn::scl::DataType parsed;
-        if (s7codec::stringToType(t_node["type"].GetString(), parsed)) {
-            t_field.type = parsed;
+        if (auto opt = s7codec::toType(t_node["type"].GetString())) {
+            t_field.type = *opt;
         } else {
             // Unknown type token → a UDT reference (resolved later against the registry).
             t_field.type = sgrn::scl::DataType::Struct;

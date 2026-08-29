@@ -37,24 +37,24 @@ public:
     // ── High-level compile API ───────────────────────────────────────────────
 
     /// Compile a single .scl/.udt/.db/.xml/.json file into a store
-    static sgrn::Result<PlcSchemaStore, SchemaError> compileFile(const std::string& t_path, Options t_opts = {});
+    static sgrn::Result<PlcSchemaStore, SclError> compileFile(const std::string& t_path, Options t_opts = {});
 
     /// Compile a directory of symbol files into a store
-    static sgrn::Result<PlcSchemaStore, SchemaError> compileDirectory(const std::string& t_dir, Options t_opts = {});
+    static sgrn::Result<PlcSchemaStore, SclError> compileDirectory(const std::string& t_dir, Options t_opts = {});
 
     /// Compile multiple input files into a store
-    static sgrn::Result<PlcSchemaStore, SchemaError> compileFiles(const std::vector<std::string>& t_paths, Options t_opts = {});
+    static sgrn::Result<PlcSchemaStore, SclError> compileFiles(const std::vector<std::string>& t_paths, Options t_opts = {});
 
     // ── Emit outputs ─────────────────────────────────────────────────────────
 
     /// Emit canonical JSON registry to a file
-    static sgrn::Result<void, SchemaError> emitJson(const PlcSchemaStore& t_store, const std::string& t_output_path, bool t_pretty = true);
+    static sgrn::Result<void, SclError> emitJson(const PlcSchemaStore& t_store, const std::string& t_output_path, bool t_pretty = true);
 
     /// Emit clean .scl source files to a directory
-    static sgrn::Result<void, SchemaError> emitScl(const PlcSchemaStore& t_store, const std::string& t_output_dir);
+    static sgrn::Result<void, SclError> emitScl(const PlcSchemaStore& t_store, const std::string& t_output_dir);
 
     /// Emit canonical directory layout (UDT{idx}-{name}.udt, DB{idx}-{name}.db)
-    static sgrn::Result<void, SchemaError> emitCanonical(const PlcSchemaStore& t_store, const std::string& t_output_dir);
+    static sgrn::Result<void, SclError> emitCanonical(const PlcSchemaStore& t_store, const std::string& t_output_dir);
 
     // ── Canonical naming ─────────────────────────────────────────────────────
 
@@ -83,36 +83,36 @@ public:
     static std::string emitCppHeader(const PlcSchemaStore& t_store, const std::string& t_guard_prefix = "SCLC_GENERATED");
 
     /// Emit s7codec C++ header to a file
-    static sgrn::Result<void, SchemaError> emitCpp(
+    static sgrn::Result<void, SclError> emitCpp(
         const PlcSchemaStore& t_store, const std::string& t_output_path, const std::string& t_guard_prefix = "SCLC_GENERATED");
 
     // ── Low-level parse API (preserved from S7RegistryParser) ────────────────
 
     /// Parses a single UDT source file.
-    static sgrn::Result<UdtDefinition, SchemaError> parseUdtFile(
+    static sgrn::Result<UdtDefinition, SclError> parseUdtFile(
         const std::string& t_path, std::map<std::string, UdtDefinition>* tp_global_udts = nullptr);
 
     /// Parses a single DB source file.
-    static sgrn::Result<DbSchema, SchemaError> parseDbFile(
+    static sgrn::Result<DbSchema, SclError> parseDbFile(
         const std::string& t_path, std::map<std::string, UdtDefinition>* tp_global_udts = nullptr);
 
     /// Parses a TIA Portal Tag Table XML file.
-    static sgrn::Result<std::vector<PlcTag>, SchemaError> parseTagTableXmlFile(const std::string& t_path);
+    static sgrn::Result<std::vector<PlcTag>, SclError> parseTagTableXmlFile(const std::string& t_path);
 
     /// Populates a registry from a directory of symbols.
-    static sgrn::Result<void, SchemaError> loadFromDirectory(
+    static sgrn::Result<void, SclError> loadFromDirectory(
         PlcSchemaStore& t_registry, const std::string& t_symbols_dir, bool t_force = false);
 
     /// Populates a registry from a list of files.
-    static sgrn::Result<void, SchemaError> loadFromFiles(
+    static sgrn::Result<void, SclError> loadFromFiles(
         PlcSchemaStore& t_registry, const std::vector<std::string>& t_filepaths, bool t_force = false);
 
     /// Loads a single file (JSON, XML, or text symbol) into the registry.
-    static sgrn::Result<void, SchemaError> loadFile(PlcSchemaStore& t_registry, const std::string& t_filepath, bool t_force = false,
+    static sgrn::Result<void, SclError> loadFile(PlcSchemaStore& t_registry, const std::string& t_filepath, bool t_force = false,
         std::map<std::string, UdtDefinition>* tp_global_udts = nullptr);
 
     /// Loads raw schema content (JSON or text symbol) into the registry.
-    static sgrn::Result<void, SchemaError> loadFromContent(PlcSchemaStore& t_registry, const std::string& t_content,
+    static sgrn::Result<void, SclError> loadFromContent(PlcSchemaStore& t_registry, const std::string& t_content,
         const std::string& t_source_name = "embedded", bool t_force = false,
         std::map<std::string, UdtDefinition>* tp_global_udts = nullptr);
 };

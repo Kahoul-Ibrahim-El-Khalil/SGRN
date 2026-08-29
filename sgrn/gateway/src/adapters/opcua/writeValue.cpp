@@ -44,6 +44,12 @@ using ::sgrn::scl::DataType;
 namespace sgrn::gateway::adapters
 {
 
+// Defined in OpcUaAdapter.cpp — set to true while the adapter's internal
+// pending-write flush is calling server->writeDataValue(), so that open62541's
+// DataSource write callback (writeValue below) can detect the re-entrant call
+// and skip writing back to PLC memory, breaking the recursive loop.
+extern thread_local bool g_is_internal_opcua_write;
+
 // Placeholder: extract client IP from UA session when SessionRegistry hooks are wired up.
 // Until installAccessControl is implemented, this returns "" (matching original behavior).
 static std::string resolveSessionIp(UA_Server* /*server*/, const UA_NodeId* /*sessionId*/) {
@@ -220,6 +226,16 @@ Result<std::vector<uint8_t>, OpcUaAdapterError> encodeBinaryWrite(NodeContext* p
 
 UA_StatusCode writeValue(UA_Server* tp_ua_server, const UA_NodeId* tp_session_id, void* /*sessionContext*/, const UA_NodeId* /*nodeId*/,
     void* tp_node_context, const UA_NumericRange* /*range*/, const UA_DataValue* tp_data_value) {
+
+    // Guard: this write was initiated by the adapter itself (pushing a PLC event to the
+    // OPC-UA address space via server->writeDataValue). open62541 calls the DataSource.write
+    // callback even for internal server-initiated writes, so without this guard we would
+    // write the value back to PLC memory, re-emit a telemetry event, and loop forever.
+    // For temporal types (DTL, LDT) the round-trip is not bit-exact (100ns UA precision
+    // vs 1ns PLC precision + timezone offset applied per pass), so memcmp always sees a
+    // change and the loop never terminates on its own.
+    if (g_is_internal_opcua_write)
+        return UA_STATUSCODE_GOOD;
 
     auto* p_ctx = static_cast<NodeContext*>(tp_node_context);
 

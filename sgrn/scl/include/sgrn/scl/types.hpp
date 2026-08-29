@@ -1,6 +1,7 @@
 #pragma once
 
 #include <sgrn/Result.hpp>
+#include <sgrn/scl/errors.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <s7codec/s7.hpp>
 
@@ -21,10 +22,10 @@
 #include <vector>
 
 #include "S7K.hpp"
+#include <sgrn/scl/errors.hpp>
 #include <sgrn/scl/types/DataType.hpp>
 #include <sgrn/scl/types/DbField.hpp>
 #include <sgrn/scl/types/DbSchema.hpp>
-#include <sgrn/scl/types/Error.hpp>
 #include <sgrn/scl/types/ParseResult.hpp>
 #include <sgrn/scl/types/UdtDefinition.hpp>
 #include <sgrn/scl/types/modbus/ModbusArea.hpp>
@@ -41,148 +42,11 @@ constexpr bool isInRange(U t_value) {
     return s7codec::isInRange<T>(t_value);
 }
 // ---------------------------------------------------------------------------
-// Error Handling — protocol-neutral structured error codes
+// Error Handling — Error enum (mirrors gateway/adapters/opcua/errors.hpp)
 // ---------------------------------------------------------------------------
-
-/**
- * @brief Schema/parse/semantic error codes.
- *
- * Used when the failure is caused by bad data, type mismatches, structural
- * conflicts, or serialization problems — nothing to do with the file system
- * or the PLC wire protocol.
- */
-enum class SchemaCode : int {
-    Generic = 1,
-    ParseError = 4,
-    Conflict = 5,
-    NotFound = 6,
-    InvalidType = 9,
-    OutOfRange = 10,
-    SerializationError = 11,
-    OptimizedAccess = 8, ///< S7 optimised-access block can't be decoded
-};
-
-/**
- * @brief File-system / IO error codes.
- *
- * Used when the failure is caused by missing files, unreadable paths,
- * or failed write operations — nothing to do with schema semantics or the
- * PLC wire protocol.
- */
-enum class IoCode : int {
-    FileNotFound = 2,
-    IoError = 3,
-};
-
-struct Error {
-    SchemaCode code_;
-    std::string message_;
-
-    SchemaCode code() const {
-        return code_;
-    }
-    std::string string() const {
-        return message_;
-    }
-};
-struct IoError {
-    IoCode code_;
-    std::string message_;
-    IoCode code() const {
-        return code_;
-    }
-    std::string string() const {
-        return message_;
-    }
-};
+// Single enum replaces Error/IoError structs + Err/IoErr factories.
+// toString() overload provides human-readable message; no payload needed.
 // ---------------------------------------------------------------------------
-// Err — static factory for schema/semantic errors (one-line returns).
-// Each method returns Error<Error>, implicitly convertible to any
-// Result<T, Error>.
-// ---------------------------------------------------------------------------
-struct Err {
-    template <typename... Args>
-    static auto NotFound(fmt::format_string<Args...> t_f, Args&&... t_a) {
-        return Error(Error{SchemaCode::NotFound, fmt::format(t_f, std::forward<Args>(t_a)...)});
-    }
-    template <typename... Args>
-    static auto ParseError(fmt::format_string<Args...> t_f, Args&&... t_a) {
-        return Error(Error{SchemaCode::ParseError, fmt::format(t_f, std::forward<Args>(t_a)...)});
-    }
-    template <typename... Args>
-    static auto Conflict(fmt::format_string<Args...> t_f, Args&&... t_a) {
-        return Error(Error{SchemaCode::Conflict, fmt::format(t_f, std::forward<Args>(t_a)...)});
-    }
-    template <typename... Args>
-    static auto InvalidType(fmt::format_string<Args...> t_f, Args&&... t_a) {
-        return Error(Error{SchemaCode::InvalidType, fmt::format(t_f, std::forward<Args>(t_a)...)});
-    }
-    template <typename... Args>
-    static auto OutOfRange(fmt::format_string<Args...> t_f, Args&&... t_a) {
-        return Error(Error{SchemaCode::OutOfRange, fmt::format(t_f, std::forward<Args>(t_a)...)});
-    }
-    template <typename... Args>
-    static auto SerializationError(fmt::format_string<Args...> t_f, Args&&... t_a) {
-        return Error(Error{SchemaCode::SerializationError, fmt::format(t_f, std::forward<Args>(t_a)...)});
-    }
-    template <typename... Args>
-    static auto Generic(fmt::format_string<Args...> t_f, Args&&... t_a) {
-        return Error(Error{SchemaCode::Generic, fmt::format(t_f, std::forward<Args>(t_a)...)});
-    }
-    template <typename... Args>
-    static auto OptimizedAccess(fmt::format_string<Args...> t_f, Args&&... t_a) {
-        return Error(Error{SchemaCode::OptimizedAccess, fmt::format(t_f, std::forward<Args>(t_a)...)});
-    }
-
-    // ── Legacy aliases kept during migration ──────────────────────────────
-    // These return unexpected<Error> (not IoError) so existing call sites
-    // with return type Result<T, Error> continue to compile.
-    // Migrate callers to IoErr::* for proper IoError typing.
-
-    /// @deprecated Use IoErr::DeviceError or sgrn::gateway::io::S7ProtocolError instead.
-    template <typename... Args>
-    static auto DeviceError(fmt::format_string<Args...> t_f, Args&&... t_a) {
-        return Error(Error{SchemaCode::Generic, fmt::format(t_f, std::forward<Args>(t_a)...)});
-    }
-    /// @deprecated Use IoErr::IoError instead.
-    template <typename... Args>
-    static auto IoError(fmt::format_string<Args...> t_f, Args&&... t_a) {
-        return Error(Error{SchemaCode::Generic, fmt::format(t_f, std::forward<Args>(t_a)...)});
-    }
-    /// @deprecated Use IoErr::FileNotFound instead.
-    template <typename... Args>
-    static auto FileNotFound(fmt::format_string<Args...> t_f, Args&&... t_a) {
-        return Error(Error{SchemaCode::NotFound, fmt::format(t_f, std::forward<Args>(t_a)...)});
-    }
-};
-
-// ---------------------------------------------------------------------------
-// IoErr — static factory for file-system IO errors (one-line returns).
-// Returns Error<IoError>, implicitly convertible to Result<T, IoError>.
-// ---------------------------------------------------------------------------
-struct IoErr {
-    template <typename... Args>
-    static auto FileNotFound(fmt::format_string<Args...> t_f, Args&&... t_a) {
-        return Error({IoCode::FileNotFound, fmt::format(t_f, std::forward<Args>(t_a)...)});
-    }
-    template <typename... Args>
-    static auto IoError(fmt::format_string<Args...> t_f, Args&&... t_a) {
-        return Error({IoCode::IoError, fmt::format(t_f, std::forward<Args>(t_a)...)});
-    }
-};
-
-// ---------------------------------------------------------------------------
-// Backward compatibility aliases (deprecated — remove after full migration)
-// ---------------------------------------------------------------------------
-/// @deprecated Use SchemaCode
-using ErrorCode = SchemaCode;
-/// @deprecated Use Error
-using SchemaError = Error;
-/// @deprecated Use SchemaCode
-using S7ErrorCode = SchemaCode;
-/// @deprecated Use Error
-using S7Error = Error;
-/// @deprecated Use DataType
 
 // ---------------------------------------------------------------------------
 // Data Types
@@ -407,7 +271,7 @@ inline std::optional<RawTypeSpec> parseRawTypeSpec(std::string t_tok) {
 }
 
 inline int rawTypeSpanBytes(DataType t_type, int t_count) {
-    return s7codec::typeSpanBytes(t_type, t_count);
+    return s7codec::typeSpanBytes(t_type, t_count).value_or(0);
 }
 
 inline int rawTypeSpanBytes(const RawTypeSpec& t_spec) {
@@ -463,17 +327,3 @@ class PlcSchemaStore;
 struct FieldTarget;
 
 } // namespace sgrn::scl
-
-template <>
-struct fmt::formatter<sgrn::scl::Error> : formatter<std::string_view> {
-    auto format(const sgrn::scl::Error& t_error, format_context& t_ctx) const {
-        return formatter<std::string_view>::format(fmt::format("Error{{message=\"{}\"}}", t_error.string()), t_ctx);
-    }
-};
-
-template <>
-struct fmt::formatter<sgrn::scl::IoError> : formatter<std::string_view> {
-    auto format(const sgrn::scl::IoError& t_error, format_context& t_ctx) const {
-        return formatter<std::string_view>::format(fmt::format("IoError{{message=\"{}\"}}", t_error.string()), t_ctx);
-    }
-};

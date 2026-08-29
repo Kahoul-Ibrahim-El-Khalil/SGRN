@@ -42,12 +42,13 @@ void PlcRuntime::loadSclSchema(const std::string& t_path) {
     std::string expanded = expandUserPath(t_path);
     auto res = schema_.loadSchema(expanded); // Note: schema.loadSchema, not loadFile
     if (res.hasError()) {
-        fmt::print(stderr, fg(fmt::color::red), "[PlcRuntime] Failed to load schema from {}: {}\n", expanded, res.error().string());
+        fmt::print(
+            stderr, fg(fmt::color::red), "[PlcRuntime] Failed to load schema from {}: {}\n", expanded, sgrn::scl::toString(res.error()));
         return;
     }
     auto r = memory_.loadRegistry(schema_);
     if (r.hasError()) {
-        fmt::print(stderr, fg(fmt::color::red), "[PlcRuntime] loadRegistry failed: {}\n", r.error().string());
+        fmt::print(stderr, fg(fmt::color::red), "[PlcRuntime] loadRegistry failed: {}\n", toString(r.error()));
         return;
     }
     fmt::print(fg(fmt::color::green), "[PlcRuntime] Loaded schema from {} ({} DBs)\n", expanded, schema_.dbs().size());
@@ -63,7 +64,8 @@ void PlcRuntime::loadJsonSchema(const std::string& t_path) {
     std::string expanded = expandUserPath(t_path);
     auto res = schema_.loadFromJsonFile(expanded);
     if (res.hasError()) {
-        fmt::print(stderr, fg(fmt::color::red), "[PlcRuntime] Failed to load JSON schema from {}: {}\n", expanded, res.error().string());
+        fmt::print(stderr, fg(fmt::color::red), "[PlcRuntime] Failed to load JSON schema from {}: {}\n", expanded,
+            sgrn::scl::toString(res.error()));
         return;
     }
     (void)memory_.loadRegistry(schema_);

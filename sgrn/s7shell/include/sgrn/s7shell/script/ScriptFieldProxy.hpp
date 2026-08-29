@@ -29,6 +29,10 @@ public:
     ScriptFieldProxy& assignDouble(double t_val);
     ScriptFieldProxy& assignInt(int32_t t_val);
     ScriptFieldProxy& assignUInt(uint32_t t_val);
+    ScriptFieldProxy& assignInt8(int8_t t_val);
+    ScriptFieldProxy& assignUInt8(uint8_t t_val);
+    ScriptFieldProxy& assignInt16(int16_t t_val);
+    ScriptFieldProxy& assignUInt16(uint16_t t_val);
     ScriptFieldProxy& assignInt64(int64_t t_val);
     ScriptFieldProxy& assignUInt64(uint64_t t_val);
     ScriptFieldProxy& assignBool(bool t_val);
@@ -40,6 +44,10 @@ public:
     double toDouble() const;
     int32_t toInt() const;
     uint32_t toUInt() const;
+    int8_t toInt8() const;
+    uint8_t toUInt8() const;
+    int16_t toInt16() const;
+    uint16_t toUInt16() const;
     int64_t toInt64() const;
     uint64_t toUInt64() const;
     bool toBool() const;

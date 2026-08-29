@@ -29,7 +29,7 @@ namespace detail
 
 /// Returns the number of 16-bit registers needed to hold byte_count bytes.
 /// A field of 1 byte occupies 1 register (padded = true).
-static int bytesToRegCount(int t_byte_count) {
+static uint32_t bytesToRegCount(uint32_t t_byte_count) {
     return (t_byte_count + 1) / 2;
 }
 
@@ -48,18 +48,18 @@ static void flattenFields(
 }
 
 /// Compute total byte_count for a leaf field (handles arrays and strings).
-static int fieldByteCount(const DbField& t_f) {
+static uint32_t fieldByteCount(const DbField& t_f) {
     if (t_f.type == DataType::Struct)
-        return t_f.struct_size * std::max(1, t_f.count);
+        return t_f.struct_size * std::max(static_cast<uint32_t>(1), t_f.count);
     if (t_f.type == DataType::Bool && t_f.count <= 1)
         return 1; // single bit occupies 1 byte in the arena
     if (t_f.type == DataType::String || t_f.type == DataType::WString || t_f.type == DataType::XString || t_f.type == DataType::XWString) {
-        return s7codec::typeSpanBytes(t_f.type, std::max(1, t_f.count));
+        return s7codec::typeSpanBytes(t_f.type, std::max(static_cast<uint32_t>(1), t_f.count)).value_or(0);
     }
-    int elem = s7codec::primitiveSize(t_f.type);
-    if (elem <= 0)
+    auto elem_opt = s7codec::primitiveSize(t_f.type);
+    if (!elem_opt.has_value() || elem_opt.value() <= 0)
         return 2; // fallback for unknowns
-    return elem * std::max(1, t_f.count);
+    return static_cast<int>(elem_opt.value()) * std::max(static_cast<uint32_t>(1), t_f.count);
 }
 
 /// Build entries for a register-based area (Holding or Input).
@@ -80,17 +80,16 @@ static void buildRegisterEntries(
         int reg_count = bytesToRegCount(t_byte_count);
         bool padded = (t_byte_count % 2 != 0);
 
-        ModbusVirtualEntry t_e;
-        t_e.db_number = t_db.db_number;
-        t_e.field_path = path;
-        t_e.type = t_f->type;
-        t_e.byte_offset = t_f->offset;
-        t_e.byte_count = t_byte_count;
-        t_e.reg_start = t_cursor;
-        t_e.reg_count = reg_count;
-        t_e.padded = padded;
-        t_e.read_only = t_read_only;
-        t_out.push_back(std::move(t_e));
+        ModbusVirtualEntry entry{.db_number = t_db.db_number,
+            .field_path = path,
+            .type = t_f->type,
+            .byte_offset = t_f->offset,
+            .byte_count = static_cast<uint32_t>(t_byte_count),
+            .reg_start = static_cast<uint32_t>(t_cursor),
+            .reg_count = static_cast<uint32_t>(reg_count),
+            .padded = padded,
+            .read_only = t_read_only};
+        t_out.push_back(std::move(entry));
 
         t_cursor += reg_count;
 
@@ -116,20 +115,19 @@ static void buildBitEntries(
             continue;
         }
 
-        int bit_count = std::max(1, t_f->count); // bool array → multiple coils
+        uint32_t bit_count = std::max(static_cast<uint32_t>(1), t_f->count); // bool array → multiple coils
 
-        ModbusVirtualEntry t_e;
-        t_e.db_number = t_db.db_number;
-        t_e.field_path = path;
-        t_e.type = DataType::Bool;
-        t_e.byte_offset = t_f->offset;
-        t_e.bit_index = t_f->bit_index;
-        t_e.byte_count = (bit_count + 7) / 8; // packed bytes in arena
-        t_e.reg_start = t_cursor;
-        t_e.reg_count = bit_count; // one coil per bit
-        t_e.padded = false;
-        t_e.read_only = t_read_only;
-        t_out.push_back(std::move(t_e));
+        ModbusVirtualEntry entry{.db_number = t_db.db_number,
+            .field_path = path,
+            .type = DataType::Bool,
+            .byte_offset = t_f->offset,
+            .bit_index = t_f->bit_index,
+            .byte_count = (bit_count + 7) / 8, // packed bytes in arena
+            .reg_start = static_cast<uint32_t>(t_cursor),
+            .reg_count = static_cast<uint32_t>(bit_count), // one coil per bit
+            .padded = false,
+            .read_only = t_read_only};
+        t_out.push_back(std::move(entry));
 
         t_cursor += bit_count;
     }

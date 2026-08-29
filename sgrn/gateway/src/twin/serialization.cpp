@@ -7,9 +7,9 @@ using ::sgrn::scl::DataType;
 
 namespace sgrn::gateway::twin
 {
-using ::sgrn::scl::DbField;
-using ::sgrn::scl::DbSchema;
-
+using sgrn::scl::DbField;
+using sgrn::scl::DbSchema;
+using sgrn::scl::SclError;
 void serializeFieldToWriter(rapidjson::Writer<rapidjson::StringBuffer>& t_writer, const DbField& t_field, const uint8_t* tp_ptr,
     size_t t_buffer_size, int t_depth) {
     // Delegate to the canonical S7 serialization utility (supports dirty-range
@@ -18,7 +18,7 @@ void serializeFieldToWriter(rapidjson::Writer<rapidjson::StringBuffer>& t_writer
     sgrn::gateway::adapters::s7::serializeComplexFieldTo(t_writer, t_field, tp_ptr, t_buffer_size, {}, t_depth);
 }
 
-sgrn::Result<std::string, ::sgrn::scl::Error> decodeFieldAt(
+sgrn::Result<std::string, SclError> decodeFieldAt(
     const DbField& t_field, const uint8_t* tp_ptr, size_t t_buffer_size, int t_depth, s7codec::Endian t_e) {
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
@@ -45,7 +45,7 @@ std::string decodeDbBuffer(const DbSchema& t_reg, const uint8_t* tp_buf, size_t 
     return std::string(sb.GetString());
 }
 
-sgrn::Result<std::string, ::sgrn::scl::Error> decodeValue(const DbField& t_field, const uint8_t* tp_buffer_ptr, size_t t_buffer_size) {
+sgrn::Result<std::string, SclError> decodeValue(const DbField& t_field, const uint8_t* tp_buffer_ptr, size_t t_buffer_size) {
     return decodeFieldAt(t_field, tp_buffer_ptr, t_buffer_size);
 }
 } // namespace sgrn::gateway::twin

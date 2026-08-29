@@ -10,31 +10,33 @@ namespace sgrn::gateway::twin
 {
 int fieldSpanSize(const DbField& t_field) {
     if (t_field.type == DataType::Struct)
-        return std::max(1, t_field.struct_size) * std::max(1, t_field.count);
-    int base = s7codec::typeSpanBytes(t_field.type, t_field.count);
+        return std::max(1, static_cast<int>(t_field.struct_size)) * std::max(1, static_cast<int>(t_field.count));
+    auto base_opt = s7codec::typeSpanBytes(t_field.type, t_field.count);
+    int base = base_opt ? static_cast<int>(*base_opt) : 0;
     return t_field.is_dynamic ? base + 4 : base;
 }
 
 int symbolFieldSpanBytes(const DbField& t_field) {
     auto prim = [&](DataType t_t) -> int {
         if (t_t == DataType::String)
-            return 2 + std::max(0, t_field.count);
+            return 2 + std::max(0, static_cast<int>(t_field.count));
         if (t_t == DataType::WString)
-            return 4 + (std::max(0, t_field.count) * 2);
+            return 4 + (std::max(0, static_cast<int>(t_field.count)) * 2);
         if (t_t == DataType::XString)
-            return 8 + std::max(0, t_field.count);
+            return 8 + std::max(0, static_cast<int>(t_field.count));
         if (t_t == DataType::XWString)
-            return 8 + (std::max(0, t_field.count) * 2);
+            return 8 + (std::max(0, static_cast<int>(t_field.count)) * 2);
         if (t_t == DataType::Struct)
             return 0;
-        return s7codec::primitiveSize(t_t);
+        auto prim_opt = s7codec::primitiveSize(t_t);
+        return prim_opt ? static_cast<int>(*prim_opt) : 0;
     };
     int base = 0;
     if (t_field.type == DataType::Struct)
-        base = std::max(1, t_field.struct_size) * std::max(1, t_field.count);
+        base = std::max(1, static_cast<int>(t_field.struct_size)) * std::max(1, static_cast<int>(t_field.count));
     else if (t_field.count > 1 && t_field.type != DataType::String && t_field.type != DataType::WString &&
              t_field.type != DataType::XString && t_field.type != DataType::XWString)
-        base = prim(t_field.type) * t_field.count;
+        base = prim(t_field.type) * static_cast<int>(t_field.count);
     else
         base = prim(t_field.type);
 

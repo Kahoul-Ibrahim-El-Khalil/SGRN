@@ -14,7 +14,7 @@ using ::sgrn::gateway::wrappers::s7::S7Client;
 using ::sgrn::scl::DataType;
 using ::sgrn::scl::DbField;
 using ::sgrn::scl::DbSchema;
-using ::sgrn::scl::ErrorCode;
+using ::sgrn::scl::SclError;
 
 // ---------------------------------------------------------------------------
 // Free functions — decodeValue / encodeValue (BUG-6)
@@ -26,14 +26,14 @@ using ::sgrn::scl::ErrorCode;
  *
  * Free function (BUG-6: was wrongly declared static member but implemented as non-static).
  */
-sgrn::Result<std::string, ::sgrn::scl::Error> decodeValue(const DbField& t_field, const uint8_t* tp_buffer_ptr, size_t t_buffer_size);
+sgrn::Result<std::string, ::sgrn::scl::SclError> decodeValue(const DbField& t_field, const uint8_t* tp_buffer_ptr, size_t t_buffer_size);
 
 /**
  * @brief Encode a typed field or array into raw bytes using S7 encoding rules.
  *
  * Free function (BUG-6).
  */
-sgrn::Result<void, ::sgrn::scl::Error> encodeValue(
+sgrn::Result<void, ::sgrn::scl::SclError> encodeValue(
     const DbField& t_field, const std::string& t_value, uint8_t* tp_buffer_ptr, size_t t_buffer_size);
 
 // ---------------------------------------------------------------------------
@@ -58,8 +58,8 @@ public:
     DbSnapshot& operator=(DbSnapshot&& t_other) noexcept;
 
     /// Reads the entire DB span from the PLC into the back buffer
-    sgrn::Result<void, ::sgrn::scl::Error> read(S7Client& t_client);
-    sgrn::Result<void, ::sgrn::scl::Error> beginAsyncRead(S7Client& t_client);
+    sgrn::Result<void, ::sgrn::scl::SclError> read(S7Client& t_client);
+    sgrn::Result<void, ::sgrn::scl::SclError> beginAsyncRead(S7Client& t_client);
 
     /**
      * @brief Commit the results of an async read.
@@ -70,20 +70,20 @@ public:
     void commitAsyncRead();
 
     /// Writes the current front buffer back to the PLC
-    sgrn::Result<void, ::sgrn::scl::Error> write(S7Client& t_client);
+    sgrn::Result<void, ::sgrn::scl::SclError> write(S7Client& t_client);
 
     /// Decodes the current raw_buffer_ into JSON (supports nested UDTs)
-    sgrn::Result<std::string, ::sgrn::scl::Error> decode() const; // REVAMP-8: std::string (was std::string)
+    sgrn::Result<std::string, ::sgrn::scl::SclError> decode() const; // REVAMP-8: std::string (was std::string)
 
     /// Encodes a single top-level field by name into the raw_buffer_.
-    sgrn::Result<void, ::sgrn::scl::Error> updateField(const std::string& t_field_name, const std::string& t_value);
+    sgrn::Result<void, ::sgrn::scl::SclError> updateField(const std::string& t_field_name, const std::string& t_value);
 
     /**
      * @brief Apply a JSON patch string to the raw buffer using RapidJSON.
      *
      * High-performance alternative to the Jsoncpp version.
      */
-    sgrn::Result<void, ::sgrn::scl::Error> updateFromJson(const std::string& t_json_patch);
+    sgrn::Result<void, ::sgrn::scl::SclError> updateFromJson(const std::string& t_json_patch);
 
     /// Returns the timestamp of the last successful PLC sync
     std::chrono::system_clock::time_point lastSyncTime() const {
@@ -96,13 +96,13 @@ public:
     }
 
     /// Reads a single field from the PLC, updating only those bytes in raw_buffer_
-    sgrn::Result<void, ::sgrn::scl::Error> readField(S7Client& t_client, const std::string& t_field_path);
+    sgrn::Result<void, ::sgrn::scl::SclError> readField(S7Client& t_client, const std::string& t_field_path);
 
     /// Writes a single field to the PLC, encoding it first into raw_buffer_
-    sgrn::Result<void, ::sgrn::scl::Error> writeField(S7Client& t_client, const std::string& t_field_path, const std::string& t_value);
+    sgrn::Result<void, ::sgrn::scl::SclError> writeField(S7Client& t_client, const std::string& t_field_path, const std::string& t_value);
 
     /// Decodes a single field from the current raw_buffer_
-    sgrn::Result<std::string, ::sgrn::scl::Error> getFieldValue(const std::string& t_field_path) const;
+    sgrn::Result<std::string, ::sgrn::scl::SclError> getFieldValue(const std::string& t_field_path) const;
 
     /**
      * @brief Patch a raw byte region in both buffers from an inbound server-side S7 PUT write.

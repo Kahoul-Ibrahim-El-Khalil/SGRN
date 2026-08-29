@@ -17,16 +17,18 @@ namespace detail
 
 static int fieldSpanBytes(const DbField& t_field) {
     if (t_field.type == DataType::Struct)
-        return std::max(1, t_field.struct_size) * std::max(1, t_field.count);
+        return std::max(1, static_cast<int>(t_field.struct_size)) * std::max(1, static_cast<int>(t_field.count));
     // For strings, struct_size holds the per-element byte span (after offset-tracker fix).
     if (t_field.type == DataType::String || t_field.type == DataType::WString || t_field.type == DataType::XString ||
         t_field.type == DataType::XWString) {
-        const int elem_span = t_field.struct_size > 0 ? t_field.struct_size
-                                                      : s7codec::typeSpanBytes(t_field.type,
-                                                            t_field.string_capacity > 0 ? t_field.string_capacity : t_field.count);
-        return elem_span * std::max(1, t_field.count);
+        const int elem_span = t_field.struct_size > 0 ? static_cast<int>(t_field.struct_size) : [&]() -> int {
+            auto opt = s7codec::typeSpanBytes(t_field.type, t_field.string_capacity > 0 ? t_field.string_capacity : t_field.count);
+            return opt ? static_cast<int>(*opt) : 0;
+        }();
+        return elem_span * std::max(1, static_cast<int>(t_field.count));
     }
-    return s7codec::typeSpanBytes(t_field.type, t_field.count);
+    auto opt = s7codec::typeSpanBytes(t_field.type, t_field.count);
+    return opt ? static_cast<int>(*opt) : 0;
 }
 
 static void resolveUdtInField(DbField& t_field, const PlcSchemaStore& t_registry) {
@@ -323,13 +325,13 @@ std::string SchemaSerializer::serialize(
 
 // --- Deserialization (rapidjson) ---
 
-static sgrn::Result<DbField, ::sgrn::scl::Error> fieldFromJson(const rapidjson::Value& t_node) {
+static sgrn::Result<DbField, scl::SclError> fieldFromJson(const rapidjson::Value& t_node) {
     if (!t_node.IsObject())
-        return Error{SchemaCode::Generic, "field entry must be an object"};
+        return scl::SclError::Generic;
 
     DbField t_field;
     if (!t_node.HasMember("name") || !t_node["name"].IsString())
-        return Error{SchemaCode::Generic, "field entry missing string 'name'"};
+        return scl::SclError::Generic;
     t_field.name = t_node["name"].GetString();
 
     if (t_node.HasMember("offset"))
@@ -371,7 +373,7 @@ static sgrn::Result<DbField, ::sgrn::scl::Error> fieldFromJson(const rapidjson::
     }
 
     if (!t_node.HasMember("type") || !t_node["type"].IsString())
-        return Err::Generic("field '{}' missing string 'type'", t_field.name);
+        return scl::SclError::Generic;
 
     std::optional<DataType> type = parseDataType(t_node["type"].GetString());
     if (!type.has_value()) {
@@ -393,14 +395,15 @@ static sgrn::Result<DbField, ::sgrn::scl::Error> fieldFromJson(const rapidjson::
         if (t_field.count < 1)
             t_field.count = 1;
         // Recompute the per-element byte span
-        t_field.struct_size = s7codec::typeSpanBytes(t_field.type, char_cap);
+        auto span_opt = s7codec::typeSpanBytes(t_field.type, char_cap);
+        t_field.struct_size = span_opt ? *span_opt : 0;
     }
 
     if (t_node.HasMember("children")) {
         if (!t_node["children"].IsArray())
-            return Err::Generic("field '{}' children must be an array", t_field.name);
+            return scl::SclError::Generic;
         for (const auto& child_node : t_node["children"].GetArray()) {
-            sgrn::Result<DbField, ::sgrn::scl::Error> child = fieldFromJson(child_node);
+            sgrn::Result<DbField, scl::SclError> child = fieldFromJson(child_node);
             if (child.hasError()) {
                 return Error(child.error());
             }
@@ -419,9 +422,9 @@ static int extractTrailingNumber(const std::string& t_value) {
     return 0;
 }
 
-sgrn::Result<UdtDefinition, ::sgrn::scl::Error> SchemaSerializer::udtFromJson(const rapidjson::Value& t_node) {
+sgrn::Result<UdtDefinition, scl::SclError> SchemaSerializer::udtFromJson(const rapidjson::Value& t_node) {
     if (!t_node.IsObject())
-        return Error{SchemaCode::Generic, "UDT entry must be an object"};
+        return scl::SclError::Generic;
 
     UdtDefinition p_udt;
     if (t_node.HasMember("udt_number"))
@@ -433,9 +436,9 @@ sgrn::Result<UdtDefinition, ::sgrn::scl::Error> SchemaSerializer::udtFromJson(co
 
     if (t_node.HasMember("fields")) {
         if (!t_node["fields"].IsArray())
-            return Error{SchemaCode::Generic, "UDT 'fields' must be an array"};
+            return scl::SclError::Generic;
         for (const auto& field_node : t_node["fields"].GetArray()) {
-            sgrn::Result<DbField, ::sgrn::scl::Error> t_field = fieldFromJson(field_node);
+            sgrn::Result<DbField, scl::SclError> t_field = fieldFromJson(field_node);
             if (t_field.hasError()) {
                 return Error(t_field.error());
             }
@@ -454,9 +457,9 @@ sgrn::Result<UdtDefinition, ::sgrn::scl::Error> SchemaSerializer::udtFromJson(co
     return p_udt;
 }
 
-sgrn::Result<DbSchema, ::sgrn::scl::Error> SchemaSerializer::dbFromJson(const rapidjson::Value& t_node) {
+sgrn::Result<DbSchema, scl::SclError> SchemaSerializer::dbFromJson(const rapidjson::Value& t_node) {
     if (!t_node.IsObject())
-        return Error{SchemaCode::Generic, "DB entry must be an object"};
+        return scl::SclError::Generic;
 
     DbSchema t_db;
     if (t_node.HasMember("db_number"))
@@ -488,9 +491,9 @@ sgrn::Result<DbSchema, ::sgrn::scl::Error> SchemaSerializer::dbFromJson(const ra
 
     if (t_node.HasMember("fields")) {
         if (!t_node["fields"].IsArray())
-            return Error{SchemaCode::Generic, "DB 'fields' must be an array"};
+            return scl::SclError::Generic;
         for (const auto& field_node : t_node["fields"].GetArray()) {
-            sgrn::Result<DbField, ::sgrn::scl::Error> t_field = fieldFromJson(field_node);
+            sgrn::Result<DbField, scl::SclError> t_field = fieldFromJson(field_node);
             if (t_field.hasError()) {
                 return Error(t_field.error());
             }
@@ -507,12 +510,12 @@ sgrn::Result<DbSchema, ::sgrn::scl::Error> SchemaSerializer::dbFromJson(const ra
     return t_db;
 }
 
-sgrn::Result<PlcTag, ::sgrn::scl::Error> SchemaSerializer::tagFromJson(const rapidjson::Value& t_node) {
+sgrn::Result<PlcTag, scl::SclError> SchemaSerializer::tagFromJson(const rapidjson::Value& t_node) {
     if (!t_node.IsObject())
-        return Error{SchemaCode::Generic, "tag entry must be an object"};
+        return scl::SclError::Generic;
     PlcTag t_tag;
     if (!t_node.HasMember("name") || !t_node["name"].IsString())
-        return Error{SchemaCode::Generic, "tag entry missing string 'name'"};
+        return scl::SclError::Generic;
     t_tag.name = t_node["name"].GetString();
     if (t_node.HasMember("table") && t_node["table"].IsString())
         t_tag.table_name = t_node["table"].GetString();
@@ -524,26 +527,26 @@ sgrn::Result<PlcTag, ::sgrn::scl::Error> SchemaSerializer::tagFromJson(const rap
         if (auto addr = parsePlcAddress(t_node["address"].GetString()))
             t_tag.addr = *addr;
         else
-            return Error{SchemaCode::Generic, fmt::format("tag '{}' has invalid address '{}'", t_tag.name, t_node["address"].GetString())};
+            return scl::SclError::Generic;
     }
     return t_tag;
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> SchemaSerializer::deserialize(PlcSchemaStore& t_registry, const rapidjson::Value& t_root) {
+sgrn::Result<void, scl::SclError> SchemaSerializer::deserialize(PlcSchemaStore& t_registry, const rapidjson::Value& t_root) {
     if (!t_root.IsObject() && !t_root.IsArray())
-        return Error{SchemaCode::Generic, "JSON registry root must be an object or array"};
+        return scl::SclError::Generic;
 
-    auto load_udts = [&](const rapidjson::Value* tp_value) -> sgrn::Result<void, ::sgrn::scl::Error> {
+    auto load_udts = [&](const rapidjson::Value* tp_value) -> sgrn::Result<void, scl::SclError> {
         if (!tp_value)
             return {};
         if (!tp_value->IsArray())
-            return Error{SchemaCode::Generic, "'udts' must be an array"};
+            return scl::SclError::Generic;
         for (const auto& t_node : tp_value->GetArray()) {
-            sgrn::Result<UdtDefinition, ::sgrn::scl::Error> p_udt = SchemaSerializer::udtFromJson(t_node);
+            sgrn::Result<UdtDefinition, scl::SclError> p_udt = SchemaSerializer::udtFromJson(t_node);
             if (p_udt.hasError()) {
                 return Error(p_udt.error());
             }
-            sgrn::Result<void, ::sgrn::scl::Error> r = t_registry.addUdt(std::move(p_udt.value()));
+            sgrn::Result<void, scl::SclError> r = t_registry.addUdt(std::move(p_udt.value()));
             if (r.hasError()) {
                 return Error(r.error());
             }
@@ -551,30 +554,30 @@ sgrn::Result<void, ::sgrn::scl::Error> SchemaSerializer::deserialize(PlcSchemaSt
         return {};
     };
 
-    auto load_dbs = [&](const rapidjson::Value* tp_value) -> sgrn::Result<void, ::sgrn::scl::Error> {
+    auto load_dbs = [&](const rapidjson::Value* tp_value) -> sgrn::Result<void, scl::SclError> {
         if (!tp_value)
             return {};
         if (!tp_value->IsArray())
-            return Error{SchemaCode::Generic, "'dbs' must be an array"};
+            return scl::SclError::Generic;
         for (const auto& t_node : tp_value->GetArray()) {
-            sgrn::Result<DbSchema, ::sgrn::scl::Error> t_db = SchemaSerializer::dbFromJson(t_node);
+            sgrn::Result<DbSchema, scl::SclError> t_db = SchemaSerializer::dbFromJson(t_node);
             if (t_db.hasError()) {
                 return Error(t_db.error());
             }
             if (t_db.value().db_number <= 0 && !t_db.value().db_name.empty())
                 t_db.value().db_number = extractTrailingNumber(t_db.value().db_name);
             if (t_db.value().db_number <= 0)
-                return Error{SchemaCode::Generic, "DB entry missing db_number"};
+                return scl::SclError::Generic;
             t_registry.dbs_[t_db.value().db_number] = std::move(t_db.value());
         }
         return {};
     };
 
-    auto load_tags = [&](const rapidjson::Value* tp_value) -> sgrn::Result<void, ::sgrn::scl::Error> {
+    auto load_tags = [&](const rapidjson::Value* tp_value) -> sgrn::Result<void, scl::SclError> {
         if (!tp_value)
             return {};
         if (!tp_value->IsArray())
-            return Error{SchemaCode::Generic, "'tags' must be an array"};
+            return scl::SclError::Generic;
         for (const auto& t_node : tp_value->GetArray()) {
             auto t_tag = SchemaSerializer::tagFromJson(t_node);
             if (t_tag.hasError())
@@ -585,17 +588,17 @@ sgrn::Result<void, ::sgrn::scl::Error> SchemaSerializer::deserialize(PlcSchemaSt
     };
 
     if (t_root.IsObject()) {
-        sgrn::Result<void, ::sgrn::scl::Error> udt_status = load_udts(t_root.HasMember("udts") ? &t_root["udts"] : nullptr);
+        sgrn::Result<void, scl::SclError> udt_status = load_udts(t_root.HasMember("udts") ? &t_root["udts"] : nullptr);
         if (udt_status.hasError())
             return udt_status;
-        sgrn::Result<void, ::sgrn::scl::Error> db_status = load_dbs(t_root.HasMember("dbs") ? &t_root["dbs"] : nullptr);
+        sgrn::Result<void, scl::SclError> db_status = load_dbs(t_root.HasMember("dbs") ? &t_root["dbs"] : nullptr);
         if (db_status.hasError())
             return db_status;
-        sgrn::Result<void, ::sgrn::scl::Error> tag_status = load_tags(t_root.HasMember("tags") ? &t_root["tags"] : nullptr);
+        sgrn::Result<void, scl::SclError> tag_status = load_tags(t_root.HasMember("tags") ? &t_root["tags"] : nullptr);
         if (tag_status.hasError())
             return tag_status;
     } else {
-        sgrn::Result<void, ::sgrn::scl::Error> db_status = load_dbs(&t_root);
+        sgrn::Result<void, scl::SclError> db_status = load_dbs(&t_root);
         if (db_status.hasError())
             return db_status;
     }

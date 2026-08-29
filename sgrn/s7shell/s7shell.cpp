@@ -48,7 +48,7 @@ int main(int t_argc, char* t_argv[]) {
             shell.run();
         }
     } catch (const std::exception& e) {
-        fmt::print(stderr, "Error: {}\n", e.what());
+        fmt::print(stderr, "SchemaError: {}\n", e.what());
         return 1;
     }
 

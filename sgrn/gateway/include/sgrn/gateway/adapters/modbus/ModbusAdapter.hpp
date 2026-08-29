@@ -43,6 +43,7 @@
  * into PlcMemory are thread-safe via the existing command queue.
  */
 
+#include <sgrn/gateway/adapters/modbus/errors.hpp>
 #include <sgrn/gateway/common/AdapterBase.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
@@ -79,9 +80,10 @@ public:
      * Builds the virtual register map from the store, allocates the
      * libmodbus mapping, and launches the background thread.
      *
-     * @return Empty error on success; error message on failure.
+     * @return Empty on success; a typed ModbusAdapterError (see
+     *         <sgrn/gateway/adapters/modbus/errors.hpp>) on failure.
      */
-    sgrn::Result<void, ::sgrn::scl::Error> start(const std::string& t_ip, uint16_t t_port, const ::sgrn::scl::PlcSchemaStore& t_store);
+    sgrn::Result<void, ModbusAdapterError> start(const std::string& t_ip, uint16_t t_port, const ::sgrn::scl::PlcSchemaStore& t_store);
 
     void stop();
 

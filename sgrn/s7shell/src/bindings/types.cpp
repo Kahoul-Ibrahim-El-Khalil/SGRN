@@ -125,6 +125,14 @@ extern ScriptHexTable* DataBlockToHexTableCast(ScriptDataBlock* tp_db);
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "FieldProxy", "FieldProxy& opAssign(uint)", asMETHOD(ScriptFieldProxy, assignUInt), asCALL_THISCALL));
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "FieldProxy", "FieldProxy& opAssign(int8)", asMETHOD(ScriptFieldProxy, assignInt8), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "FieldProxy", "FieldProxy& opAssign(uint8)", asMETHOD(ScriptFieldProxy, assignUInt8), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "FieldProxy", "FieldProxy& opAssign(int16)", asMETHOD(ScriptFieldProxy, assignInt16), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "FieldProxy", "FieldProxy& opAssign(uint16)", asMETHOD(ScriptFieldProxy, assignUInt16), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "FieldProxy", "FieldProxy& opAssign(int64)", asMETHOD(ScriptFieldProxy, assignInt64), asCALL_THISCALL));
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "FieldProxy", "FieldProxy& opAssign(uint64)", asMETHOD(ScriptFieldProxy, assignUInt64), asCALL_THISCALL));
@@ -141,6 +149,10 @@ extern ScriptHexTable* DataBlockToHexTableCast(ScriptDataBlock* tp_db);
         tp_engine->RegisterObjectMethod("FieldProxy", "double opCast() const", asMETHOD(ScriptFieldProxy, toDouble), asCALL_THISCALL));
     SGRN_AS_REG(tp_engine->RegisterObjectMethod("FieldProxy", "int opCast() const", asMETHOD(ScriptFieldProxy, toInt), asCALL_THISCALL));
     SGRN_AS_REG(tp_engine->RegisterObjectMethod("FieldProxy", "uint opCast() const", asMETHOD(ScriptFieldProxy, toUInt), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod("FieldProxy", "int8 opCast() const", asMETHOD(ScriptFieldProxy, toInt8), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod("FieldProxy", "uint8 opCast() const", asMETHOD(ScriptFieldProxy, toUInt8), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod("FieldProxy", "int16 opCast() const", asMETHOD(ScriptFieldProxy, toInt16), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod("FieldProxy", "uint16 opCast() const", asMETHOD(ScriptFieldProxy, toUInt16), asCALL_THISCALL));
     SGRN_AS_REG(
         tp_engine->RegisterObjectMethod("FieldProxy", "int64 opCast() const", asMETHOD(ScriptFieldProxy, toInt64), asCALL_THISCALL));
     SGRN_AS_REG(
@@ -157,6 +169,14 @@ extern ScriptHexTable* DataBlockToHexTableCast(ScriptDataBlock* tp_db);
         tp_engine->RegisterObjectMethod("FieldProxy", "int opImplCast() const", asMETHOD(ScriptFieldProxy, toInt), asCALL_THISCALL));
     SGRN_AS_REG(
         tp_engine->RegisterObjectMethod("FieldProxy", "uint opImplCast() const", asMETHOD(ScriptFieldProxy, toUInt), asCALL_THISCALL));
+    SGRN_AS_REG(
+        tp_engine->RegisterObjectMethod("FieldProxy", "int8 opImplCast() const", asMETHOD(ScriptFieldProxy, toInt8), asCALL_THISCALL));
+    SGRN_AS_REG(
+        tp_engine->RegisterObjectMethod("FieldProxy", "uint8 opImplCast() const", asMETHOD(ScriptFieldProxy, toUInt8), asCALL_THISCALL));
+    SGRN_AS_REG(
+        tp_engine->RegisterObjectMethod("FieldProxy", "int16 opImplCast() const", asMETHOD(ScriptFieldProxy, toInt16), asCALL_THISCALL));
+    SGRN_AS_REG(
+        tp_engine->RegisterObjectMethod("FieldProxy", "uint16 opImplCast() const", asMETHOD(ScriptFieldProxy, toUInt16), asCALL_THISCALL));
     SGRN_AS_REG(
         tp_engine->RegisterObjectMethod("FieldProxy", "int64 opImplCast() const", asMETHOD(ScriptFieldProxy, toInt64), asCALL_THISCALL));
     SGRN_AS_REG(
@@ -226,7 +246,7 @@ extern ScriptHexTable* DataBlockToHexTableCast(ScriptDataBlock* tp_db);
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "DataBlock", "DataBlock@ get(uint)", asMETHODPR(ScriptDataBlock, get, (size_t), ScriptDataBlock*), asCALL_THISCALL));
     // void push() removed — use put() which calls push() internally
-    // ── Error introspection ───────────────────────────────────────────────
+    // ── SchemaError introspection ───────────────────────────────────────────────
     SGRN_AS_REG(
         tp_engine->RegisterObjectMethod("DataBlock", "bool lastOpOk() const", asMETHOD(ScriptDataBlock, getLastOpOk), asCALL_THISCALL));
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
@@ -309,11 +329,11 @@ extern ScriptHexTable* DataBlockToHexTableCast(ScriptDataBlock* tp_db);
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "TagTable", "S7PathBatch@ path(const string &in)", asMETHOD(ScriptTagTable, getPath), asCALL_THISCALL));
 
-    // ── Error introspection ───────────────────────────────────────────────
+    // ── SchemaError introspection ───────────────────────────────────────────────
     SGRN_AS_REG(
         tp_engine->RegisterObjectMethod("TagTable", "bool lastOpOk() const", asMETHOD(ScriptTagTable, getLastOpOk), asCALL_THISCALL));
     SGRN_AS_REG(
-        tp_engine->RegisterObjectMethod("TagTable", "string lastOpError() const", asMETHOD(ScriptTagTable, lastOpError), asCALL_THISCALL));
+        tp_engine->RegisterObjectMethod("TagTable", "string lastOpError() const", asMETHOD(ScriptTagTable, getLastError), asCALL_THISCALL));
 
     // ── Retry variants ───────────────────────────────────────────────────
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(

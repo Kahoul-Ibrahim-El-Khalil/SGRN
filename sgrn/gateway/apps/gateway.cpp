@@ -16,12 +16,13 @@
  * ──────────────────────
  * 1. Load Configurations (Proxy, Database, Registry schema).
  * 2. Initialize PlcState and PlcMemory (the raw memory and semantic tree maps).
- * 3. Load TreePersistenceStore (restoring leaf values instantly without triggering callbacks).
+ * 3. Recover the twin from the JSONL WAL (RecoveryEngine -> last anchor + deltas).
  * 4. Boot internal telemetry/cache systems (TreeCacheEngine, TelemetryBroker).
  * 5. Start adapters:
  *      - Southbound: S7 ProtocolAdapter (reads/writes to physical PLC).
  *      - Northbound: HTTP (REST API), WebSockets (UI/streaming), OPC-UA, Modbus, EIP.
  */
+#include <sgrn/Result.hpp>
 #include <sgrn/gateway/adapters/ethernetip/EipAdapter.hpp>
 #include <sgrn/gateway/adapters/http.hpp>
 #include <sgrn/gateway/adapters/modbus/ModbusAdapter.hpp>
@@ -31,9 +32,10 @@
 #include <sgrn/gateway/adapters/websocket/WebSocketAdapter.hpp>
 #include <sgrn/gateway/config/gateway.hpp>
 #include <sgrn/gateway/core/GlobalContext.hpp>
+#include <sgrn/gateway/core/RecoveryEngine.hpp>
 #include <sgrn/gateway/core/ServerContext.hpp>
 #include <sgrn/gateway/core/TelemetryBroker.hpp>
-#include <sgrn/gateway/core/TreePersistenceStore.hpp>
+#include <sgrn/gateway/core/TreeCacheEngine.hpp>
 #include <sgrn/gateway/core/snapshot.hpp>
 #include <sgrn/gateway/database/GatewayDatabase.hpp>
 #include <sgrn/gateway/database/PersistenceService.hpp>
@@ -69,6 +71,7 @@
 #include <type_traits>
 #include <vector>
 
+using sgrn::Result;
 using namespace sgrn::gateway::twin;
 using namespace sgrn::gateway::adapters::websocket;
 using namespace ::sgrn::scl;
@@ -77,8 +80,7 @@ using namespace sgrn::gateway::backend;
 using namespace sgrn::gateway::core;
 
 constexpr int kLightThreads = 2;
-constexpr int kHeavyPoolThreads = 2;                // worker threads for compression/disk I/O
-constexpr uint32_t kPersistenceThrottleCycles = 50; // Save state every 50 dirty cycles (~5s at 100ms poll)
+constexpr int kHeavyPoolThreads = 2; // worker threads for compression/disk I/O
 
 class GatewayApplication {
 public:
@@ -125,7 +127,7 @@ public:
 
         auto config_res = parseNodeConfig(config_path.string());
         if (config_res.hasError()) {
-            return fmt::format("Config Loading Error: {}", config_res.error());
+            return fmt::format("Config Loading SclError: {}", config_res.error());
         }
         config_ = std::move(config_res.value());
 
@@ -140,7 +142,7 @@ public:
             const bool has_reg = !config_.schema_file.empty();
             const bool has_dir = !config_.symbols_dir.empty();
             if (!has_reg && !has_dir) {
-                return "Error: 'schema' or 'symbols_dir' must be specified in gateway.json or passed via --schema";
+                return "SclError: 'schema' or 'symbols_dir' must be specified in gateway.json or passed via --schema";
             }
             reg_arg = sgrn::utils::filesystem::expandUserPath(has_reg ? config_.schema_file : config_.symbols_dir);
         }
@@ -149,7 +151,7 @@ public:
             std::filesystem::is_directory(reg_arg) ? PlcSchemaStore::loadFromDirectory(reg_arg) : PlcSchemaStore::loadFromFile(reg_arg);
 
         if (symbolic_store_res.hasError()) {
-            return fmt::format("Registry load failed: {}", symbolic_store_res.error().string());
+            return fmt::format("Registry load failed: {}", toString(symbolic_store_res.error()));
         }
 
         if (!symbolic_store_res.value().warnings().empty()) {
@@ -206,16 +208,20 @@ public:
         server_.setCacheEnabled(config_.cache_json_north);
         server_.attachState(plc_state_);
         if (auto r = server_.loadRegistry(symbolic_store_); r.hasError()) {
-            return fmt::format("Server memory config failed: {}", r.error().string());
+            return fmt::format("Server memory config failed: {}", toString(r.error()));
         }
 
-        sgrn::gateway::core::TreePersistenceStore persistence(config_.state_dir + "/twin_state.json");
+        // A schema (re)load may have turned fields into symbolic enums — drop any
+        // cached pre-rebuild JSON blobs so the first read re-serializes fresh.
+        sgrn::gateway::core::TreeCacheEngine::instance().clear();
+
         if (server_.state()) {
-            int n = persistence.load(*server_.state());
-            if (n >= 0) {
-                SGRN_INFO_LOG("Restored {} leaf values from {}", n, config_.state_dir + "/twin_state.json");
+            auto recovery_res = sgrn::gateway::core::recoverStateFromArchives(config_.state_dir, *server_.state(), symbolic_store_);
+            if (recovery_res.hasError()) {
+                SGRN_WARN_LOG("Recovery skipped: {}", recovery_res.error());
             } else {
-                SGRN_INFO_LOG("No previous twin state — starting fresh");
+                SGRN_INFO_LOG("Restored {} leaf values from {} ({} skipped)", recovery_res.value().leaves_restored,
+                    recovery_res.value().archive_used, recovery_res.value().leaves_skipped);
             }
         }
 
@@ -303,18 +309,6 @@ public:
                 ev.dirty_paths.push_back(TreePath::fromDotted(path)); // ← tell subscribers which path changed
                 TelemetryBroker::instance().publish(std::move(ev));
             }
-
-            // Throttled persistence: save every N dirty cycles to the heavy pool.
-            static std::atomic<uint32_t> dirty_count{0};
-            if (server_.state() && (++dirty_count % kPersistenceThrottleCycles == 0)) {
-                // Must capture server_ and config_ (for state_dir) inside lambda explicitly
-                auto state = server_.state();
-                std::string state_path = config_.state_dir + "/twin_state.json";
-                asio::post(*heavy_pool_, [state, state_path]() {
-                    sgrn::gateway::core::TreePersistenceStore persistence(state_path);
-                    persistence.save(*state);
-                });
-            }
         });
 
         return {};
@@ -330,7 +324,9 @@ public:
 
         persistence_service_ = std::make_unique<sgrn::gateway::database::PersistenceService>(heavy_pool_.get());
         if (config_.persistence.enabled) {
-            if (auto res = persistence_service_->configure(config_.persistence, config_.state_dir, node_db_); res.hasError()) {
+            if (auto res = persistence_service_->configure(
+                    config_.persistence, config_.state_dir, node_db_, symbolic_store_.toJson(), &symbolic_store_);
+                res.hasError()) {
                 return fmt::format("PersistenceService configuration failed: {}", res.error());
             }
         }
@@ -354,7 +350,7 @@ public:
             s7_adapter_->setPduSizeConfig(config_.s7->pdu_size);
 
             if (auto r = s7_adapter_->bindToPlcMemory(); r.hasError()) {
-                return fmt::format("S7 Adapter memory bind failed: {}", r.error().string());
+                return fmt::format("S7 Adapter memory bind failed: {}", toString(r.error()));
             }
 
             startAdapter("S7 Adapter", config_.s7->port, [this]() { return s7_adapter_->start(config_.s7->ip, config_.s7->port); });
@@ -404,7 +400,7 @@ public:
                     [this]() { return server_.getDigitalTwinJsonString(); },
                     [this](uint16_t db, size_t offset, size_t size, uint8_t* out) -> sgrn::Result<void, std::string> {
                         if (auto r = server_.readDbMemory(db, offset, size, out); !r) {
-                            return std::string(r.error().message());
+                            return std::string(toString(r.error()));
                         }
                         return {};
                     });
@@ -506,6 +502,10 @@ private:
                     err_msg = res.error().message_;
                 } else if constexpr (requires { res.error().message; }) {
                     err_msg = res.error().message;
+                } else if constexpr (requires { toString(res.error()); }) {
+                    // Adapter-scoped error enums (http/modbus/ethernetip/errors.hpp,
+                    // opcua/errors.hpp) each ship their own toString() translator.
+                    err_msg = toString(res.error());
                 } else {
                     err_msg = "Unknown error";
                 }
@@ -549,7 +549,7 @@ private:
     int active_protocols_{0};
 };
 
-int main_cb(int argc, char** argv) {
+Result<void, std::string> start(int argc, char** argv) {
     GatewayApplication app;
 
     if (auto r = app.loadConfig(argc, argv); r.hasError()) {
@@ -558,51 +558,31 @@ int main_cb(int argc, char** argv) {
         } else {
             SGRN_ERROR_LOG("{}", r.error());
         }
-        return EXIT_FAILURE;
+        return r.error();
     }
 
-    if (auto r = app.loadSchema(); r.hasError()) {
-        SGRN_ERROR_LOG("{}", r.error());
-        return EXIT_FAILURE;
-    }
-
-    if (auto r = app.initSecurity(); r.hasError()) {
-        SGRN_ERROR_LOG("{}", r.error());
-        return EXIT_FAILURE;
-    }
-
-    if (auto r = app.initTwin(); r.hasError()) {
-        SGRN_ERROR_LOG("{}", r.error());
-        return EXIT_FAILURE;
-    }
-
-    if (auto r = app.initThreading(); r.hasError()) {
-        SGRN_ERROR_LOG("{}", r.error());
-        return EXIT_FAILURE;
-    }
-
-    if (auto r = app.wireTelemetry(); r.hasError()) {
-        SGRN_ERROR_LOG("{}", r.error());
-        return EXIT_FAILURE;
-    }
-
-    if (auto r = app.initInfrastructure(); r.hasError()) {
-        SGRN_ERROR_LOG("{}", r.error());
-        return EXIT_FAILURE;
-    }
-
-    if (auto r = app.startAdapters(); r.hasError()) {
-        SGRN_ERROR_LOG("{}", r.error());
-        return EXIT_FAILURE;
-    }
+    SGRN_IF_ERROR_PROPAGATE(app.loadSchema());
+    SGRN_IF_ERROR_PROPAGATE(app.initSecurity());
+    SGRN_IF_ERROR_PROPAGATE(app.initTwin());
+    SGRN_IF_ERROR_PROPAGATE(app.initThreading());
+    SGRN_IF_ERROR_PROPAGATE(app.wireTelemetry());
+    SGRN_IF_ERROR_PROPAGATE(app.initInfrastructure());
+    SGRN_IF_ERROR_PROPAGATE(app.startAdapters());
 
     app.feedInitialAnchor();
     app.run();
     app.shutdown();
+    return {};
+}
+int main_cb(int argc, char** argv) {
 
+    if (const Result<void, std::string> r = start(argc, argv); r.hasError()) {
+        fmt::print(stderr, "{}\n", r.error());
+        return EXIT_FAILURE;
+    }
     return EXIT_SUCCESS;
 }
 
 int main(int t_argc, char** t_argv) {
-    return sgrn::utils::app::runMain(t_argc, t_argv, main_cb, "S7Gateway");
+    return sgrn::utils::app::runMain(t_argc, t_argv, main_cb, "Gateway");
 }

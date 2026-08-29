@@ -8,9 +8,12 @@
 #include <sgrn/s7shell/utils/json_helpers.hpp>
 #include <sgrn/scl/types.hpp>
 
+#include <sgrn/s7shell/errors.hpp>
+
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <algorithm>
+#include <angelscript.h>
 #include <chrono>
 #include <cstring>
 #include <iostream>
@@ -66,7 +69,7 @@ ScriptDataBlock::ScriptDataBlock(ScriptS7Connection* tp_conn, uint16_t t_db_num)
 
 ScriptDataBlock::~ScriptDataBlock() = default;
 
-void ScriptDataBlock::notifyConnError(const ::sgrn::scl::Error& t_err) {
+void ScriptDataBlock::notifyConnError(const ::sgrn::scl::SclError& t_err) {
     if (conn_) {
         conn_->setLastError(t_err);
     }
@@ -129,7 +132,14 @@ void ScriptDataBlock::addField(const std::string& t_name, const std::string& t_t
 
 ScriptDataBlock* ScriptDataBlock::get() {
     if (db_size_ == 0) {
-        shell::logError(::sgrn::scl::Error(SchemaCode::Generic, "No schema loaded and DB size not registered"), "DataBlock::get");
+        // Bug fix: cannot perform a read without knowing the DB size.
+        // Silently returning here produced zero/stale data with no indication of failure.
+        fmt::print(stderr,
+            "[DataBlock] get() called on DB{} but db_size_ is 0. "
+            "Call get(size_t) or ensure a schema is loaded.\n",
+            db_num_);
+        last_op_ok_ = false;
+        last_op_err_ = DbIoError::LocalMemoryFailed;
         addRef();
         return this;
     }
@@ -146,9 +156,17 @@ ScriptDataBlock* ScriptDataBlock::get(size_t t_total_size) {
         if (auto r = conn_->memory_.readDbMemory(db_num_, 0, t_total_size, snapshot_buffer_.data()); r) {
             snapshot_valid_ = true;
             conn_->db_snapshots_[db_num_] = snapshot_buffer_;
+            last_op_ok_ = true;
+        } else {
+            // No data in local arena — client is not connected and no prior read.
+            // Mark as failed so scripts can detect this situation.
+            fmt::print(stderr,
+                "[DataBlock] get() on DB{}: not connected and no local data available. "
+                "Values will be zero. Check connection with isConnected().\n",
+                db_num_);
+            last_op_ok_ = false;
+            last_op_err_ = DbIoError::NetworkReadFailed;
         }
-        last_op_ok_ = true;
-        last_op_err_.clear();
         addRef();
         return this;
     }
@@ -176,7 +194,7 @@ ScriptDataBlock* ScriptDataBlock::get(size_t t_total_size) {
         fmt::print(stderr, "DataBlock::fetch: failed to write to local memory for DB{}: {}\n", db_num_, r.error());
         // Don't return nullptr — AngelScript will segfault on a null handle. Return self with error set.
         last_op_ok_ = false;
-        last_op_err_ = std::string(toString(r.error().status()));
+        last_op_err_ = DbIoError::NetworkWriteFailed;
         addRef();
         return this;
     }
@@ -185,14 +203,13 @@ ScriptDataBlock* ScriptDataBlock::get(size_t t_total_size) {
     // start from confirmed PLC data, not a stale or zero-init buffer.
     conn_->db_snapshots_[db_num_] = snapshot_buffer_;
     last_op_ok_ = true;
-    last_op_err_.clear();
     addRef();
     return this;
 }
 
 void ScriptDataBlock::push() {
     if (db_size_ == 0) {
-        shell::logError(::sgrn::scl::Error(SchemaCode::Generic, "No schema loaded and DB size not registered"), "DataBlock::push");
+        throwScriptException("No schema loaded and DB size not registered", ShellError::Generic);
         return;
     }
 
@@ -201,7 +218,7 @@ void ScriptDataBlock::push() {
 
     std::vector<uint8_t> current_mem(db_size_);
     if (!(conn_->memory_.readDbMemory(db_num_, 0, db_size_, current_mem.data()))) {
-        fmt::print(stderr, "DataBlock::push: failed to read local memory for DB{}\n", db_num_);
+        throwScriptException(fmt::format("DataBlock::push: failed to read local memory for DB{}", db_num_), ShellError::Generic);
         return;
     }
 
@@ -211,7 +228,6 @@ void ScriptDataBlock::push() {
         snapshot_buffer_ = current_mem;
         conn_->db_snapshots_[db_num_] = current_mem;
         last_op_ok_ = true;
-        last_op_err_.clear();
         return;
     }
 
@@ -233,9 +249,10 @@ void ScriptDataBlock::push() {
                 auto res = conn_->client_.writeArea(
                     S7AreaDB, db_num_, static_cast<int>(start), static_cast<int>(i - start), S7WLByte, current_mem.data() + start);
                 if (res.hasError()) {
-                    shell::logError(res.error(), fmt::format("DB{}.push (segment @{}, len {})", db_num_, start, i - start));
                     (void)setOpResult(res);
                     write_failed = true;
+                    throwScriptException(
+                        fmt::format("DB{}.push (segment @{}, len {}) failed", db_num_, start, i - start), fromS7Error(res.error()));
                 }
                 in_dirty_region = false;
             }
@@ -245,13 +262,14 @@ void ScriptDataBlock::push() {
         auto res = conn_->client_.writeArea(
             S7AreaDB, db_num_, static_cast<int>(start), static_cast<int>(db_size_ - start), S7WLByte, current_mem.data() + start);
         if (res.hasError()) {
-            shell::logError(res.error(), fmt::format("DB{}.push (segment @{}, len {})", db_num_, start, db_size_ - start));
             (void)setOpResult(res);
             write_failed = true;
+            throwScriptException(
+                fmt::format("DB{}.push (segment @{}, len {}) failed", db_num_, start, db_size_ - start), fromS7Error(res.error()));
         }
     }
     if (write_failed) {
-        fmt::print(stderr, fg(fmt::color::red), "[S7] DB{}: push aborted — PLC write failed, snapshot NOT updated\n", db_num_);
+        // Exception already thrown in the loop.
         return;
     }
 
@@ -259,7 +277,6 @@ void ScriptDataBlock::push() {
     snapshot_buffer_ = current_mem;
     conn_->db_snapshots_[db_num_] = current_mem;
     last_op_ok_ = true;
-    last_op_err_.clear();
 }
 
 void ScriptDataBlock::write(const std::string& t_path, const std::string& t_raw_val) {
@@ -270,8 +287,7 @@ void ScriptDataBlock::write(const std::string& t_path, const std::string& t_raw_
     // is the same path as put() — guarantees push() detects dirty bytes correctly.
     const auto loc = conn_->schema_.findField(db_num_, t_path);
     if (!loc) {
-        shell::logError(::sgrn::scl::Error(SchemaCode::NotFound, fmt::format("DB{}: field '{}' not found in schema", db_num_, t_path)),
-            fmt::format("DB{}.write", db_num_));
+        throwScriptException(fmt::format("DB{}: field '{}' not found in schema", db_num_, t_path), ShellError::NotFound);
         return;
     }
     ::sgrn::scl::DbField target_field = *loc->field;
@@ -286,19 +302,18 @@ void ScriptDataBlock::write(const std::string& t_path, const std::string& t_raw_
     std::vector<uint8_t> tp_before(static_cast<size_t>(span), 0);
     std::vector<uint8_t> buf(static_cast<size_t>(span), 0);
     if (!(conn_->memory_.readDbMemory(db_num_, loc->abs_offset, tp_before.size(), tp_before.data()))) {
-        shell::logError(::sgrn::scl::Error(SchemaCode::Generic, "readDbMemory failed"), fmt::format("DB{}.read('{}')", db_num_, t_path));
+        throwScriptException("readDbMemory failed", ShellError::Generic);
         return;
     }
     buf = tp_before;
     auto res =
         ::sgrn::gateway::twin::encodeFieldAt(target_field, t_json_val, buf.data(), static_cast<size_t>(span), 0, target_field.endianness);
     if (res.hasError()) {
-        shell::logError(res.error(), fmt::format("DB{}.write('{}')", db_num_, t_path));
+        throwScriptException(fmt::format("DB{}.write('{}') failed", db_num_, t_path), fromSclError(res.error()));
         return;
     }
     if (auto r = conn_->memory_.writeDbMemory(db_num_, loc->abs_offset, buf.size(), buf.data()); !r) {
-        shell::logError(::sgrn::scl::Error(SchemaCode::Generic, fmt::format("writeDbMemory failed: {}", r.error())),
-            fmt::format("DB{}.write('{}')", db_num_, t_path));
+        throwScriptException(fmt::format("writeDbMemory failed: {}", r.error()), ShellError::Generic);
         return;
     }
     snapshot_valid_ = true;
@@ -310,8 +325,7 @@ void ScriptDataBlock::writeScalar(const std::string& t_path, const s7codec::Deco
         return;
     auto loc = conn_->runtime_->getSchema().findField(db_num_, t_path);
     if (!loc) {
-        shell::logError(::sgrn::scl::Error(SchemaCode::NotFound, fmt::format("Field not found: {}", t_path)),
-            fmt::format("DB{}.writeScalar('{}')", db_num_, t_path));
+        throwScriptException(fmt::format("Field not found: {}", t_path), ShellError::NotFound);
         return;
     }
 
@@ -324,8 +338,7 @@ void ScriptDataBlock::writeScalar(const std::string& t_path, const s7codec::Deco
     auto status =
         s7codec::encodeScalar(t_val, loc->field->type, buf.data(), sz, loc->field->bit_index, loc->field->count, loc->field->endianness);
     if (!status.has_value()) {
-        shell::logError(
-            ::sgrn::scl::Error(SchemaCode::InvalidType, toString(status.error())), fmt::format("DB{}.writeScalar('{}')", db_num_, t_path));
+        throwScriptException(s7codec::toString(status.error()), ShellError::TypeMismatch);
         return;
     }
 
@@ -358,37 +371,43 @@ std::string ScriptDataBlock::val(const std::string& t_path) {
     if (!snapshot_valid_) {
         auto refresh = conn_->getOrCreateDbProvider(db_num_)->get(conn_->client_, t_path);
         if (refresh.hasError()) {
-            shell::logError(refresh.error(), fmt::format("DB{}.val('{}') [S7 read]", db_num_, t_path));
+            throwScriptException(fmt::format("DB{}.val('{}') [S7 read] failed", db_num_, t_path), fromDbIoError(refresh.error()));
             return "null";
         }
         snapshot_valid_ = true;
     }
     auto res = conn_->getOrCreateDbProvider(db_num_)->read(t_path);
     if (res.hasError()) {
-        shell::logError(res.error(), fmt::format("DB{}.val('{}') [decode]", db_num_, t_path));
+        throwScriptException(fmt::format("DB{}.val('{}') [decode] failed", db_num_, t_path), fromDbIoError(res.error()));
         return "null";
     }
     return res.value();
 }
 
 void ScriptDataBlock::setVal(const std::string& t_path, const std::string& t_json_val) {
-    shell::ok(conn_->getOrCreateDbProvider(db_num_)->write(t_path, t_json_val), fmt::format("DB{}.setVal('{}')", db_num_, t_path));
+    auto res = conn_->getOrCreateDbProvider(db_num_)->write(t_path, t_json_val);
+    if (res.hasError()) {
+        last_op_ok_ = false;
+        last_op_err_ = res.error();
+        throwScriptException(fmt::format("DB{}.setVal('{}') failed", db_num_, t_path), fromDbIoError(res.error()));
+    } else {
+        last_op_ok_ = true;
+    }
 }
 
 std::string ScriptDataBlock::get(const std::string& t_path) {
     conn_->memory_.processor()->processCommands();
     auto res = conn_->getOrCreateDbProvider(db_num_)->get(conn_->client_, t_path);
     if (res.hasError()) {
-        shell::logError(res.error(), fmt::format("DB{}.get('{}')", db_num_, t_path));
         last_op_ok_ = false;
-        last_op_err_ = res.error().string();
+        last_op_err_ = res.error();
         if (conn_)
-            conn_->setLastError(res.error());
+            conn_->setLastError(S7Error::ReadError);
+        throwScriptException(fmt::format("DB{}.get('{}') failed", db_num_, t_path), fromDbIoError(res.error()));
         return "null";
     }
     snapshot_valid_ = true;
     last_op_ok_ = true;
-    last_op_err_.clear();
     return res.value();
 }
 
@@ -397,8 +416,7 @@ s7codec::DecodedValue ScriptDataBlock::readScalar(const std::string& t_path) {
         return {};
     auto loc = conn_->runtime_->getSchema().findField(db_num_, t_path);
     if (!loc) {
-        shell::logError(::sgrn::scl::Error(SchemaCode::NotFound, fmt::format("Field not found: {}", t_path)),
-            fmt::format("DB{}.readScalar('{}')", db_num_, t_path));
+        throwScriptException(fmt::format("Field not found: {}", t_path), ShellError::NotFound);
         return {};
     }
 
@@ -407,7 +425,7 @@ s7codec::DecodedValue ScriptDataBlock::readScalar(const std::string& t_path) {
     if (!snapshot_valid_) {
         auto refresh = conn_->getOrCreateDbProvider(db_num_)->get(conn_->client_, t_path);
         if (refresh.hasError()) {
-            shell::logError(refresh.error(), fmt::format("DB{}.readScalar('{}') [S7 read]", db_num_, t_path));
+            throwScriptException(fmt::format("DB{}.readScalar('{}') [S7 read] failed", db_num_, t_path), fromDbIoError(refresh.error()));
             return {};
         }
         snapshot_valid_ = true;
@@ -418,7 +436,6 @@ s7codec::DecodedValue ScriptDataBlock::readScalar(const std::string& t_path) {
     readFieldFromMemory(loc->abs_offset, tmp.data(), sz);
     return s7codec::decodeScalar(loc->field->type, tmp.data(), sz, loc->field->bit_index, loc->field->count, loc->field->endianness);
 }
-
 double ScriptDataBlock::getReal(const std::string& t_path) {
     auto dv = readScalar(t_path);
     if (dv.kind() == s7codec::ValueKind::Float)
@@ -466,7 +483,7 @@ void ScriptDataBlock::put(const std::string& t_path, const std::string& t_raw_va
     const std::string t_json_val = ::sgrn::gateway::twin::parseRawValuePayload(t_raw_val);
     auto res = conn_->getOrCreateDbProvider(db_num_)->put(conn_->client_, t_path, t_json_val);
     if (!setOpResult(res)) {
-        shell::logError(res.error(), fmt::format("DB{}.put('{}', '{}')", db_num_, t_path, t_raw_val));
+        fmt::print("DB{}.put('{}', '{}') failed: Error:: {}", db_num_, t_path, t_raw_val, res.error());
         return;
     }
     // Write-back: encode the confirmed-written field into this instance's
@@ -529,7 +546,12 @@ std::string ScriptDataBlock::getDbName() const {
 }
 
 std::string ScriptDataBlock::toJson() const {
-    return shell::valueOr(conn_->memory_.getSubtreeJson(db_num_, ""), std::string{"{}"});
+    if (auto result = conn_->memory_.getSubtreeJson(db_num_, ""); result.hasError()) {
+
+        return std::string{"{}"};
+    } else {
+        return result.value();
+    }
 }
 
 void ScriptDataBlock::print() const {
@@ -569,18 +591,18 @@ void ScriptDataBlock::readFieldFromMemory(size_t t_offset, uint8_t* tp_data, siz
 
 std::string ScriptDataBlock::diff() const {
     if (!conn_->client_.isConnected())
-        return "Error: not connected";
+        return "SclError: not connected";
     auto schema_res = conn_->schema_.getDb(db_num_);
     if (schema_res.hasError())
-        return fmt::format("Error: DB{} not in schema", db_num_);
+        return fmt::format("SclError: DB{} not in schema", db_num_);
 
     DbSnapshot local(*schema_res.value());
     if (auto r = local.read(conn_->client_); r.hasError())
-        return fmt::format("Error: read local failed: {}", r.error().string());
+        return fmt::format("SclError: read local failed: {}", toString(r.error()));
 
     DbSnapshot live(*schema_res.value());
     if (auto r = live.read(conn_->client_); r.hasError())
-        return fmt::format("Error: read live failed: {}", r.error().string());
+        return fmt::format("SclError: read live failed: {}", toString(r.error()));
 
     std::string out = fmt::format("Diff DB{} ({}) local vs live:\n", db_num_, schema_res.value()->db_name);
     bool found = false;
@@ -618,16 +640,13 @@ std::string ScriptDataBlock::getRetry(const std::string& t_path, int t_max_retri
         auto res = conn_->getOrCreateDbProvider(db_num_)->get(conn_->client_, t_path);
         if (!res.hasError()) {
             last_op_ok_ = true;
-            last_op_err_.clear();
             snapshot_valid_ = true;
             return res.value();
         }
         last_op_ok_ = false;
-        last_op_err_ = res.error().string();
+        last_op_err_ = res.error();
         if (conn_)
-            conn_->setLastError(res.error());
-        fmt::print(stderr, fg(fmt::color::yellow), "[S7] DB{}.getRetry('{}') attempt {}/{} failed: {}\n", db_num_, t_path, attempt,
-            t_max_retries, res.error().string());
+            conn_->setLastError(S7Error::ReadError);
         if (attempt < t_max_retries)
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
@@ -642,7 +661,6 @@ bool ScriptDataBlock::putRetry(const std::string& t_path, const std::string& t_r
         auto res = conn_->getOrCreateDbProvider(db_num_)->put(conn_->client_, t_path, t_json_val);
         if (!res.hasError()) {
             last_op_ok_ = true;
-            last_op_err_.clear();
             if (auto loc = conn_->schema_.findField(db_num_, t_path)) {
                 (void)::sgrn::gateway::twin::encodeFieldAt(*loc->field, t_json_val, snapshot_buffer_.data() + loc->abs_offset,
                     db_size_ - loc->abs_offset, 0, loc->field->endianness);
@@ -651,13 +669,12 @@ bool ScriptDataBlock::putRetry(const std::string& t_path, const std::string& t_r
             return true;
         }
         last_op_ok_ = false;
-        last_op_err_ = res.error().string();
+        last_op_err_ = res.error();
         if (conn_)
-            conn_->setLastError(res.error());
-        fmt::print(stderr, fg(fmt::color::yellow), "[S7] DB{}.putRetry('{}') attempt {}/{} failed: {}\n", db_num_, t_path, attempt,
-            t_max_retries, res.error().string());
+            conn_->setLastError(S7Error::WriteError);
+
         if (attempt < t_max_retries)
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     return false;
 }

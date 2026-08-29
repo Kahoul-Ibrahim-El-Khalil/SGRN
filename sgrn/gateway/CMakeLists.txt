@@ -215,7 +215,7 @@ sgrn_target(sgrn_gateway_ethernetip)
 set(GATEWAY_TWIN_SOURCES
     src/core/snapshot.cpp
     src/core/TreeCacheEngine.cpp
-    src/core/TreePersistenceStore.cpp
+    src/core/RecoveryEngine.cpp
     src/twin/DbSnapshot.cpp
     src/twin/PlcState.cpp
     src/twin/DbIOProvider.cpp
@@ -228,6 +228,7 @@ set(GATEWAY_TWIN_SOURCES
     src/twin/PlcCommandProcessor.cpp
     src/twin/field_update.cpp
     src/twin/SnapshotRegistry.cpp
+    src/twin/LeafDictionary.cpp
 )
 
 add_library(sgrn_gateway_twin STATIC ${GATEWAY_TWIN_SOURCES})
@@ -601,7 +602,25 @@ target_include_directories(mbproxy PRIVATE
 sgrn_target(mbproxy)
 sgrn_install_component_executable(TARGET mbproxy COMPONENT gateway)
 
-# 4.3 Documentation
+# 4.3 sgrn-wal-dump
+sgrn_add_component_executable(
+    TARGET      sgrn_wal_dump
+    SOURCES     tools/wal_dump/main.cpp
+    ENABLE_ORIGIN_RPATH
+    PRIVATE_LIBS
+        sgrn_gateway_twin
+        sgrn_utils
+    WIN_LIBS
+        ${WIN_LIBS_LIST}
+)
+target_include_directories(sgrn_wal_dump PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/sgrn/scl/include
+)
+sgrn_target(sgrn_wal_dump)
+sgrn_install_component_executable(TARGET sgrn_wal_dump COMPONENT gateway)
+
+# 4.4 Documentation
 # Documentation is now embedded in the binary instead of installed as man pages.
 
 # Packaging

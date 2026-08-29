@@ -117,7 +117,10 @@ std::string PlcState::getScalarString(const std::string& t_path) const {
             byte_offset += static_cast<size_t>(array_index / 8);
             bit_index_ = array_index % 8;
         } else {
-            byte_offset += static_cast<size_t>(array_index) * s7codec::primitiveSize(p_node->type_);
+            auto elem_size = s7codec::primitiveSize(p_node->type_);
+            if (elem_size) {
+                byte_offset += static_cast<size_t>(array_index) * static_cast<size_t>(*elem_size);
+            }
         }
         count_ = 0; // single element, not the whole array
     }
@@ -127,6 +130,18 @@ std::string PlcState::getScalarString(const std::string& t_path) const {
     auto dv = s7codec::decodeScalar(p_node->type_, p_ptr, remaining, bit_index_, count_, p_node->endian_);
     if (!dv.valid())
         return "null";
+
+    // Enums round-trip as their symbolic name (scalar reads only).
+    if (!p_node->enum_map_.empty()) {
+        const int64_t numeric = (dv.kind() == s7codec::ValueKind::UnsignedInt) ? static_cast<int64_t>(dv.u())
+                                : (dv.kind() == s7codec::ValueKind::SignedInt) ? dv.i()
+                                                                               : INT64_MIN;
+        if (numeric != INT64_MIN) {
+            auto it = p_node->enum_map_.find(static_cast<int>(numeric));
+            if (it != p_node->enum_map_.end())
+                return it->second;
+        }
+    }
     return s7codec::formatDecodedValue(dv, p_node->type_);
 }
 

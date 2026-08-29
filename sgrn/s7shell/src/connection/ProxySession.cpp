@@ -126,7 +126,7 @@ void ProxySession::do_poll_and_push(ProxyMappingSPtr tsp_map) {
     // 1. Poll Source PLC
     auto read_res = src_wire.readDB(tsp_map->src_db, 0, static_cast<int>(tsp_map->size_bytes), tsp_map->buffer.data());
     if (!read_res) {
-        fmt::print(stderr, fg(fmt::color::red), "[S7Proxy] Poll Error (DB{}): {}\n", tsp_map->src_db, read_res.error().string());
+        fmt::print(stderr, fg(fmt::color::red), "[S7Proxy] Poll SchemaError (DB{}): {}\n", tsp_map->src_db, toString(read_res.error()));
         return;
     }
 
@@ -146,7 +146,8 @@ void ProxySession::do_poll_and_push(ProxyMappingSPtr tsp_map) {
     // 3. Push to Hub PLC
     auto write_res = hub_wire.writeDB(tsp_map->dst_db, 0, static_cast<int>(tsp_map->size_bytes), tsp_map->buffer.data());
     if (!write_res) {
-        fmt::print(stderr, fg(fmt::color::red), "[S7Proxy] Push Error (-> Hub DB{}): {}\n", tsp_map->dst_db, write_res.error().string());
+        fmt::print(
+            stderr, fg(fmt::color::red), "[S7Proxy] Push SchemaError (-> Hub DB{}): {}\n", tsp_map->dst_db, toString(write_res.error()));
         return;
     }
 

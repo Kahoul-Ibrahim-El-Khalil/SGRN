@@ -438,22 +438,22 @@ inline void replaceAll(std::string& t_str, std::string_view t_from, std::string_
 ///         error string describing the validation failure if invalid.
 inline sgrn::Result<void, std::string> isValidFileName(const std::string& t_name) {
     if (t_name.empty()) {
-        return sgrn::Error("Filename must not be empty");
+        return "Filename must not be empty";
     }
     if (t_name == "." || t_name == "..") {
-        return sgrn::Error("Filename must not be '.' or '..'");
+        return "Filename must not be '.' or '..'";
     }
     if (t_name.find('/') != std::string::npos) {
-        return sgrn::Error("Filename must not contain path separator '/'");
+        return "Filename must not contain path separator '/'";
     }
     if (t_name.find('\\') != std::string::npos) {
-        return sgrn::Error("Filename must not contain path separator '\\'");
+        return "Filename must not contain path separator '\\'";
     }
     if (t_name.find('\0') != std::string::npos) {
-        return sgrn::Error("Filename must not contain null bytes");
+        return "Filename must not contain null bytes";
     }
     if (t_name.find("..") != std::string::npos) {
-        return sgrn::Error("Filename must not contain '..'");
+        return "Filename must not contain '..'";
     }
     return {};
 }

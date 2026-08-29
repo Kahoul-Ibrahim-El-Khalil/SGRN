@@ -57,9 +57,8 @@ sgrn::scl::UdtDefinition fromJson(const rapidjson::Value& t_node) {
     if (t_node.HasMember("is_scalar_alias") && t_node["is_scalar_alias"].IsBool())
         udt_def.is_scalar_alias = t_node["is_scalar_alias"].GetBool();
     if (t_node.HasMember("scalar_type") && t_node["scalar_type"].IsString()) {
-        sgrn::scl::DataType parsed;
-        if (s7codec::stringToType(t_node["scalar_type"].GetString(), parsed))
-            udt_def.scalar_type = parsed;
+        if (auto opt = s7codec::toType(t_node["scalar_type"].GetString()))
+            udt_def.scalar_type = *opt;
     }
     if (t_node.HasMember("unit") && t_node["unit"].IsString())
         udt_def.unit = t_node["unit"].GetString();

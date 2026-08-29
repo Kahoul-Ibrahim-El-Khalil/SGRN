@@ -28,6 +28,9 @@ struct FieldMeta {
     int abs_offset{0};
     int bit_index{0};
     int count{0};
+    /// For String/WString/XString/XWString scalar fields: character capacity N in STRING[N].
+    /// Populated in registerFieldProperties from DbField::count (for scalars) or DbField::string_capacity.
+    uint32_t string_capacity{0};
     s7codec::Endian endian{s7codec::Endian::Big};
 };
 

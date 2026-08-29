@@ -23,7 +23,7 @@ namespace sgrn::scl
 {
 using sgrn::utils::strings::trim;
 
-int fieldElementSpanBytes(const DbField& f) {
+uint32_t fieldElementSpanBytes(const DbField& f) {
     switch (kind_of(f)) {
         case FieldKind::String:
             switch (f.type) {
@@ -39,16 +39,16 @@ int fieldElementSpanBytes(const DbField& f) {
                     return f.string_capacity;
             }
         case FieldKind::Struct:
-            return std::max(1, f.struct_size);
+            return std::max(static_cast<uint32_t>(1), f.struct_size);
         case FieldKind::Scalar:
         case FieldKind::Enum:
-            return std::max(1, info_of(f.type).storage_bytes);
+            return std::max((uint8_t)1, info_of(f.type)->storage_bytes);
     }
     return 1;
 }
 
-int fieldSpanSize(const DbField& f) {
-    const int elem = fieldElementSpanBytes(f);
+uint32_t fieldSpanSize(const DbField& f) {
+    const uint32_t elem = fieldElementSpanBytes(f);
     int base = f.count <= 1 ? elem : elem * f.count;
     return f.is_dynamic ? base + 4 : base;
 }
@@ -163,19 +163,19 @@ std::optional<LocatedField> findFieldByPath(const std::vector<DbField>& t_fields
 }
 
 // forward declarations of internal helpers
-sgrn::Result<void, ::sgrn::scl::Error> encodeArrayValue(
+sgrn::Result<void, ::sgrn::scl::SclError> encodeArrayValue(
     const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, int t_depth, s7codec::Endian t_e);
 void serializeFieldToWriter(
     rapidjson::Writer<rapidjson::StringBuffer>& t_writer, const DbField& t_field, const uint8_t* tp_ptr, size_t t_buffer_size, int t_depth);
 
-sgrn::Result<void, ::sgrn::scl::Error> applyJsonPatchToFields(
+sgrn::Result<void, ::sgrn::scl::SclError> applyJsonPatchToFields(
     const std::vector<DbField>& t_fields, const std::string& t_patch_json, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e) {
     rapidjson::Document patch;
     if (patch.Parse(t_patch_json.c_str()).HasParseError()) {
-        return Error{SchemaCode::ParseError, "patch value must be a valid JSON string"};
+        return SclError::ParseError;
     }
     if (!patch.IsObject()) {
-        return Error{SchemaCode::Generic, "patch value must be a JSON object"};
+        return SclError::Generic;
     }
 
     for (const auto& t_field : t_fields) {
@@ -192,12 +192,13 @@ sgrn::Result<void, ::sgrn::scl::Error> applyJsonPatchToFields(
             rapidjson::StringBuffer sb;
             rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
             val.Accept(t_writer);
-            sgrn::Result<void, ::sgrn::scl::Error> status =
+            sgrn::Result<void, ::sgrn::scl::SclError> status =
                 applyJsonPatchToFields(t_field.children, sb.GetString(), field_ptr, field_buffer_remaining, t_e);
             if (!status.has_value())
                 return status;
         } else {
-            sgrn::Result<void, ::sgrn::scl::Error> status = encodeFieldRapidJson(t_field, val, field_ptr, field_buffer_remaining, 0, t_e);
+            sgrn::Result<void, ::sgrn::scl::SclError> status =
+                encodeFieldRapidJson(t_field, val, field_ptr, field_buffer_remaining, 0, t_e);
             if (!status.has_value())
                 return status;
         }
@@ -281,7 +282,7 @@ std::string parseRawValuePayload(const std::string& t_raw) {
     return parseSemanticValue(trimmed);
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> encodeDtlValue(
+sgrn::Result<void, ::sgrn::scl::SclError> encodeDtlValue(
     const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e) {
     using namespace s7codec;
     DtlComponents dtl;
@@ -357,18 +358,18 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeDtlValue(
             std::mktime(&tm); // fills tm_wday (0=Sunday)
             dtl.day_of_week = static_cast<uint8_t>(tm.tm_wday + 1);
         } else {
-            return Error{SchemaCode::Generic, "invalid DTL format"};
+            return SclError::Generic;
         }
     } else {
-        return Error{SchemaCode::Generic, "expected object or string for DTL"};
+        return SclError::Generic;
     }
     auto status = encodeDtl(dtl, tp_ptr, t_buffer_size, t_e);
     if (!status.has_value())
-        return Error{SchemaCode::Generic, toString(status.error())};
+        return SclError::Generic;
     return {};
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
+sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
     const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e) {
     using namespace s7codec;
     auto to_unsigned = [](const rapidjson::Value& t_v) -> std::optional<uint64_t> {
@@ -416,11 +417,11 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
             } else if (t_value.IsNull()) {
                 b = false;
             } else {
-                return Error{SchemaCode::Generic, "expected boolean, integer, or string for Bool field"};
+                return SclError::Generic;
             }
             auto status = s7codec::encodeBool(b, t_field.bit_index, tp_ptr, t_buffer_size);
             if (!status.has_value())
-                return Error{SchemaCode::Generic, toString(status.error())};
+                return SclError::Generic;
             return {};
         }
         case DataType::Byte:
@@ -428,28 +429,28 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
         case DataType::Char: {
             auto t_v = to_unsigned(t_value);
             if (!t_v || !isInRange<uint8_t>(*t_v))
-                return Error{SchemaCode::Generic, "Value out of range"};
+                return SclError::Generic;
             auto status = encodeU8(static_cast<uint8_t>(*t_v), tp_ptr, t_buffer_size);
             if (!status.has_value())
-                return Error{SchemaCode::Generic, toString(status.error())};
+                return SclError::Generic;
             return {};
         }
         case DataType::SInt: {
             auto t_v = to_signed(t_value);
             if (!t_v || !isInRange<int8_t>(*t_v))
-                return Error{SchemaCode::Generic, "Value out of range"};
+                return SclError::Generic;
             auto status = encodeI8(static_cast<int8_t>(*t_v), tp_ptr, t_buffer_size);
             if (!status.has_value())
-                return Error{SchemaCode::Generic, toString(status.error())};
+                return SclError::Generic;
             return {};
         }
         case DataType::Int: {
             auto t_v = to_signed(t_value);
             if (!t_v || !isInRange<int16_t>(*t_v))
-                return Error{SchemaCode::Generic, "Value out of range"};
+                return SclError::Generic;
             auto status = encodeI16(static_cast<int16_t>(*t_v), tp_ptr, t_buffer_size, t_e);
             if (!status.has_value())
-                return Error{SchemaCode::Generic, toString(status.error())};
+                return SclError::Generic;
             return {};
         }
         case DataType::UInt:
@@ -460,37 +461,37 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
         case DataType::Timer: {
             auto t_v = to_unsigned(t_value);
             if (!t_v || !isInRange<uint16_t>(*t_v))
-                return Error{SchemaCode::Generic, "Value out of range"};
+                return SclError::Generic;
             auto status = encodeU16(static_cast<uint16_t>(*t_v), tp_ptr, t_buffer_size, t_e);
             if (!status.has_value())
-                return Error{SchemaCode::Generic, toString(status.error())};
+                return SclError::Generic;
             return {};
         }
         case DataType::DInt: {
             auto t_v = to_signed(t_value);
             if (!t_v || !isInRange<int32_t>(*t_v))
-                return Error{SchemaCode::Generic, "Value out of range"};
+                return SclError::Generic;
             auto status = encodeI32(static_cast<int32_t>(*t_v), tp_ptr, t_buffer_size, t_e);
             if (!status.has_value())
-                return Error{SchemaCode::Generic, toString(status.error())};
+                return SclError::Generic;
             return {};
         }
         case DataType::Time: {
             int64_t ms = 0;
             if (t_value.IsString()) {
                 if (!s7codec::parseTimeString(t_value.GetString(), ms))
-                    return Error{SchemaCode::Generic, "Invalid TIME"};
+                    return SclError::Generic;
             } else {
                 auto t_v = to_signed(t_value);
                 if (!t_v)
-                    return Error{SchemaCode::Generic, "Expected integer for TIME"};
+                    return SclError::Generic;
                 ms = *t_v;
             }
             if (!isInRange<int32_t>(ms))
-                return Error{SchemaCode::Generic, "TIME value out of range"};
+                return SclError::Generic;
             auto status = encodeI32(static_cast<int32_t>(ms), tp_ptr, t_buffer_size, t_e);
             if (!status.has_value())
-                return Error{SchemaCode::Generic, toString(status.error())};
+                return SclError::Generic;
             return {};
         }
         case DataType::UDInt:
@@ -498,10 +499,10 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
         case DataType::TimeOfDay: {
             auto t_v = to_unsigned(t_value);
             if (!t_v || !isInRange<uint32_t>(*t_v))
-                return Error{SchemaCode::Generic, "Value out of range"};
+                return SclError::Generic;
             auto status = encodeU32(static_cast<uint32_t>(*t_v), tp_ptr, t_buffer_size, t_e);
             if (!status.has_value())
-                return Error{SchemaCode::Generic, toString(status.error())};
+                return SclError::Generic;
             return {};
         }
         case DataType::LInt:
@@ -510,10 +511,10 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
         case DataType::LDTL: {
             auto t_v = to_signed(t_value);
             if (!t_v)
-                return Error{SchemaCode::Generic, "Expected integer for LINT"};
+                return SclError::Generic;
             auto status = encodeI64(*t_v, tp_ptr, t_buffer_size, t_e);
             if (!status.has_value())
-                return Error{SchemaCode::Generic, toString(status.error())};
+                return SclError::Generic;
             return {};
         }
         case DataType::ULInt:
@@ -521,33 +522,33 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
         case DataType::LTimeOfDay: {
             auto t_v = to_unsigned(t_value);
             if (!t_v)
-                return Error{SchemaCode::Generic, "Expected unsigned integer for 64-bit field"};
+                return SclError::Generic;
             auto status = encodeU64(*t_v, tp_ptr, t_buffer_size, t_e);
             if (!status.has_value())
-                return Error{SchemaCode::Generic, toString(status.error())};
+                return SclError::Generic;
             return {};
         }
         case DataType::Real: {
             auto t_v = to_float(t_value);
             if (!t_v)
-                return Error{SchemaCode::Generic, "Expected number for REAL"};
+                return SclError::Generic;
             auto status = encodeReal(static_cast<float>(*t_v), tp_ptr, t_buffer_size, t_e);
             if (!status.has_value())
-                return Error{SchemaCode::Generic, toString(status.error())};
+                return SclError::Generic;
             return {};
         }
         case DataType::LReal: {
             auto t_v = to_float(t_value);
             if (!t_v)
-                return Error{SchemaCode::Generic, "Expected number for LREAL"};
+                return SclError::Generic;
             auto status = encodeLReal(*t_v, tp_ptr, t_buffer_size, t_e);
             if (!status.has_value())
-                return Error{SchemaCode::Generic, toString(status.error())};
+                return SclError::Generic;
             return {};
         }
         case DataType::DateTime: {
             if (!t_value.IsString())
-                return Error{SchemaCode::Generic, "Expected timestamp string"};
+                return SclError::Generic;
             std::string s = t_value.GetString();
             std::tm tm{};
             if (s == "now" || s == "NOW")
@@ -555,11 +556,11 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
             else if (auto parsed = sgrn::utils::time::parseDateTimeInput(s))
                 tm = *parsed;
             else
-                return Error{SchemaCode::Generic, "Invalid DATETIME"};
+                return SclError::Generic;
             auto status = encodeDateTime(
                 tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_wday + 1, tp_ptr, t_buffer_size);
             if (!status.has_value())
-                return Error{SchemaCode::Generic, toString(status.error())};
+                return SclError::Generic;
             return {};
         }
         case DataType::DTL:
@@ -567,7 +568,7 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
         case DataType::String:
         case DataType::XString: {
             if (!t_value.IsString())
-                return Error{SchemaCode::Generic, "Expected string"};
+                return SclError::Generic;
             std::string s = t_value.GetString();
             std::expected<void, s7codec::CodecStatus> status;
             if (t_field.type == DataType::String)
@@ -575,17 +576,16 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
             else
                 status = encodeXString(s.c_str(), static_cast<int>(s.length()), t_field.count, tp_ptr, t_buffer_size, t_e);
             if (!status.has_value())
-                return Error{SchemaCode::Generic, toString(status.error())};
+                return SclError::Generic;
             return {};
         }
         case DataType::WString:
         case DataType::XWString: {
             if (!t_value.IsString())
-                return Error{SchemaCode::Generic,
-                    fmt::format("Expected string for {}", (t_field.type == DataType::WString ? "WSTRING" : "XWSTRING"))};
+                return SclError::Generic;
             auto wide = sgrn::utils::strings::utf8ToUtf16(t_value.GetString());
             if (!wide)
-                return Error{SchemaCode::Generic, "Invalid UTF-8"};
+                return SclError::Generic;
             std::expected<void, s7codec::CodecStatus> status;
             if (t_field.type == DataType::WString)
                 status = encodeWString(reinterpret_cast<const uint16_t*>(wide->c_str()), static_cast<int>(wide->size()), t_field.count,
@@ -594,16 +594,16 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(
                 status = encodeXWString(reinterpret_cast<const uint16_t*>(wide->c_str()), static_cast<int>(wide->size()), t_field.count,
                     tp_ptr, t_buffer_size, t_e);
             if (!status.has_value())
-                return Error{SchemaCode::Generic, toString(status.error())};
+                return SclError::Generic;
             return {};
         }
         case DataType::Struct:
-            return Error{SchemaCode::Generic, "STRUCT not directly encodable"};
+            return SclError::Generic;
     }
     return {};
 }
 
-sgrn::Result<std::string, ::sgrn::scl::Error> decodeFieldAt(
+sgrn::Result<std::string, ::sgrn::scl::SclError> decodeFieldAt(
     const DbField& t_field, const uint8_t* tp_ptr, size_t t_buffer_size, int t_depth, s7codec::Endian t_e) {
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
@@ -611,31 +611,28 @@ sgrn::Result<std::string, ::sgrn::scl::Error> decodeFieldAt(
     return std::string(sb.GetString());
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> encodeArrayValue(
+sgrn::Result<void, ::sgrn::scl::SclError> encodeArrayValue(
     const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, int t_depth, s7codec::Endian t_e) {
     constexpr int kMaxRecursionDepth = 10;
     if (t_depth > kMaxRecursionDepth)
-        return Error{SchemaCode::Generic, "Max recursion depth exceeded"};
+        return SclError::Generic;
 
     if (!t_value.IsArray()) {
-        return Error{SchemaCode::Generic, "Expected array for array field"};
+        return SclError::Generic;
     }
 
-    const int max_elements = std::max(0, t_field.count);
+    const uint32_t max_elements = std::max(static_cast<uint32_t>(0), t_field.count);
     if (!t_field.is_dynamic && t_value.Size() != static_cast<rapidjson::SizeType>(max_elements)) {
-        return Error{
-            SchemaCode::Generic, fmt::format("Array length mismatch for field '{}' (type {}): expected {} elements, got {} in JSON",
-                                     t_field.name, static_cast<int>(t_field.type), max_elements, t_value.Size())};
+        return SclError::Generic;
     }
     if (t_field.is_dynamic && t_value.Size() > static_cast<rapidjson::SizeType>(max_elements)) {
-        return Error{SchemaCode::Generic, fmt::format("Dynamic array overflow for field '{}': max capacity is {}, got {} in JSON",
-                                              t_field.name, max_elements, t_value.Size())};
+        return SclError::Generic;
     }
 
     size_t data_offset = 0;
     if (t_field.is_dynamic) {
         if (t_buffer_size < 4)
-            return Error{SchemaCode::Generic, "Buffer too small for dynamic header"};
+            return SclError::Generic;
         s7codec::toEndian<uint32_t>(static_cast<uint32_t>(t_value.Size()), tp_ptr, t_e);
         data_offset = 4;
     }
@@ -655,11 +652,11 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeArrayValue(
             int byte_off = i / 8;
             int bit_off = i % 8;
             if (static_cast<size_t>(byte_off + data_offset) >= t_buffer_size)
-                return Error{SchemaCode::Generic, "Buffer overflow in Bool array"};
+                return SclError::Generic;
 
             auto status = s7codec::encodeBool(b, bit_off, tp_ptr + data_offset + byte_off, t_buffer_size - data_offset - byte_off);
             if (!status.has_value())
-                return Error{SchemaCode::Generic, toString(status.error())};
+                return SclError::Generic;
         }
         return {};
     }
@@ -669,14 +666,14 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeArrayValue(
     for (rapidjson::SizeType index = 0; index < t_value.Size(); ++index) {
         size_t offset_at = data_offset + static_cast<size_t>(index * element_size);
         if (offset_at + element_size > t_buffer_size)
-            return Error{SchemaCode::Generic, "Buffer overflow"};
+            return SclError::Generic;
 
         DbField element = t_field;
         element.count = 1; // Treat as scalar for the recursive call
         element.offset = 0;
         element.is_dynamic = false; // The header is already written
 
-        sgrn::Result<void, ::sgrn::scl::Error> status =
+        sgrn::Result<void, ::sgrn::scl::SclError> status =
             encodeFieldRapidJson(element, t_value[index], tp_ptr + offset_at, element_size, t_depth + 1, t_e);
         if (!status.has_value())
             return status;
@@ -684,23 +681,23 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeArrayValue(
     return {};
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> encodeFieldRapidJson(
+sgrn::Result<void, ::sgrn::scl::SclError> encodeFieldRapidJson(
     const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, int t_depth, s7codec::Endian t_e) {
     constexpr int kMaxRecursionDepth = 10;
     if (t_depth > kMaxRecursionDepth)
-        return Error{SchemaCode::Generic, "Max recursion depth exceeded"};
+        return SclError::Generic;
 
     if (t_field.type == DataType::Struct) {
         if (t_field.count > 1)
             return encodeArrayValue(t_field, t_value, tp_ptr, t_buffer_size, t_depth, t_e);
         if (!t_value.IsObject())
-            return Error{SchemaCode::Generic, "expected object"};
+            return SclError::Generic;
         for (const DbField& child : t_field.children) {
             if (!t_value.HasMember(child.name.c_str()))
                 continue;
             if (static_cast<size_t>(child.offset) >= t_buffer_size)
-                return Error{SchemaCode::Generic, "offset out of bounds"};
-            sgrn::Result<void, ::sgrn::scl::Error> status = encodeFieldRapidJson(
+                return SclError::Generic;
+            sgrn::Result<void, ::sgrn::scl::SclError> status = encodeFieldRapidJson(
                 child, t_value[child.name.c_str()], tp_ptr + child.offset, t_buffer_size - child.offset, t_depth + 1, t_e);
             if (!status.has_value())
                 return status;
@@ -713,11 +710,11 @@ sgrn::Result<void, ::sgrn::scl::Error> encodeFieldRapidJson(
     return encodeScalarValue(t_field, t_value, tp_ptr, t_buffer_size, t_e);
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> encodeFieldAt(
+sgrn::Result<void, ::sgrn::scl::SclError> encodeFieldAt(
     const DbField& t_field, const std::string& t_value_json, uint8_t* tp_ptr, size_t t_buffer_size, int t_depth, s7codec::Endian t_e) {
     rapidjson::Document doc;
     if (doc.Parse(t_value_json.c_str()).HasParseError())
-        return Error{SchemaCode::ParseError, "Invalid JSON"};
+        return SclError::ParseError;
     return encodeFieldRapidJson(t_field, doc, tp_ptr, t_buffer_size, t_depth, t_e);
 }
 
@@ -778,8 +775,8 @@ static void serializeStructToWriter(
     rapidjson::Writer<rapidjson::StringBuffer>& w, const DbField& f, const uint8_t* ptr, size_t buf_size, int depth) {
     if (f.count > 1) {
         w.StartArray();
-        int struct_size = fieldElementSpanBytes(f);
-        for (int i = 0; i < f.count; ++i) {
+        uint32_t struct_size = fieldElementSpanBytes(f);
+        for (uint32_t i = 0; i < f.count; ++i) {
             w.StartObject();
             for (const auto& child : f.children) {
                 w.Key(child.name.c_str());
@@ -802,8 +799,8 @@ static void serializeStructToWriter(
 static void serializeStringToWriter(rapidjson::Writer<rapidjson::StringBuffer>& w, const DbField& f, const uint8_t* ptr, size_t buf_size) {
     if (f.count > 1) {
         w.StartArray();
-        int elem_size = fieldElementSpanBytes(f);
-        for (int i = 0; i < f.count; ++i) {
+        uint32_t elem_size = fieldElementSpanBytes(f);
+        for (uint32_t i = 0; i < f.count; ++i) {
             auto dv = s7codec::decodeScalar(f.type, ptr + (i * elem_size), buf_size - (i * elem_size), 0, f.string_capacity);
             writeDecodedValue(w, dv, f.type);
         }
@@ -818,8 +815,8 @@ static void serializeScalarOrArrayToWriter(
     rapidjson::Writer<rapidjson::StringBuffer>& w, const DbField& f, const uint8_t* ptr, size_t buf_size) {
     if (f.count > 1) {
         w.StartArray();
-        int elem_size = fieldElementSpanBytes(f);
-        for (int i = 0; i < f.count; ++i) {
+        uint32_t elem_size = fieldElementSpanBytes(f);
+        for (uint32_t i = 0; i < f.count; ++i) {
             const uint8_t* p_elem_ptr = ptr + (i * elem_size);
             int b_idx = f.bit_index;
             if (f.type == DataType::Bool) {
@@ -852,10 +849,10 @@ void serializeFieldToWriter(rapidjson::Writer<rapidjson::StringBuffer>& t_writer
             return serializeScalarOrArrayToWriter(t_writer, t_field, tp_ptr, t_buffer_size);
     }
 }
-sgrn::Result<std::vector<uint8_t>, Error> parseHexBytes(const std::string& t_joined) {
+sgrn::Result<std::vector<uint8_t>, SclError> parseHexBytes(const std::string& t_joined) {
     auto res = sgrn::utils::strings::hexToBytes(t_joined);
     if (!res)
-        return sgrn::Result<std::vector<uint8_t>, Error>::Error(Error{SchemaCode::Generic, "Invalid hex byte"});
+        return sgrn::Result<std::vector<uint8_t>, SclError>::Error(SclError::Generic);
     return *res;
 }
 

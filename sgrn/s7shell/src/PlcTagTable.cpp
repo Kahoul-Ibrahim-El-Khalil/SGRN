@@ -2,8 +2,8 @@
 #include <sgrn/debug.hpp>
 #include <sgrn/gateway/adapters/s7/PlcClient.hpp>
 #include <sgrn/gateway/twin/utils.hpp>
-#include <sgrn/gateway/wrappers/s7/ProtocolError.hpp>
 #include <sgrn/gateway/wrappers/s7/S7Client.hpp>
+#include <sgrn/gateway/wrappers/s7/error.hpp>
 #include <sgrn/s7shell/PlcTagTable.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <algorithm>
@@ -16,34 +16,12 @@ namespace sgrn::s7shell
 using sgrn::gateway::twin::DbField;
 using sgrn::gateway::twin::decodeFieldAt;
 using sgrn::gateway::twin::encodeFieldAt;
-using ::sgrn::scl::ErrorCode;
-using ::sgrn::scl::SchemaCode;
-using S7Error = ::sgrn::gateway::wrappers::s7::S7Error;
-using S7ProtocolCode = ::sgrn::gateway::wrappers::s7::S7ProtocolCode;
+using sgrn::gateway::wrappers::s7::fromSclErrorToS7Error;
+using ::sgrn::gateway::wrappers::s7::S7Error;
+using ::sgrn::scl::SclError;
 
-// Bridge function to translate domain-specific compilation/validation errors (sgrn::scl::Error)
+// Bridge function to translate domain-specific compilation/validation errors (sgrn::scl::SclError)
 // into lower-level protocol errors (S7Error) with an 'Unknown' categorization.
-static S7Error scl_bridge(const ::sgrn::scl::Error& t_e) noexcept {
-    S7ProtocolCode code;
-    switch (t_e.code()) {
-        case SchemaCode::NotFound:
-        case SchemaCode::InvalidType:
-        case SchemaCode::OutOfRange:
-        case SchemaCode::ParseError:
-            code = S7ProtocolCode::InvalidParam;
-            break;
-        case SchemaCode::Conflict:
-        case SchemaCode::SerializationError:
-        case SchemaCode::OptimizedAccess:
-        case SchemaCode::Generic:
-            code = S7ProtocolCode::Unknown;
-            break;
-    }
-    if (code == S7ProtocolCode::Unknown) {
-        SGRN_ERROR_LOG("PlcTagTable", "scl_bridge translation fallback: {}", t_e.string());
-    }
-    return S7Error{code};
-}
 
 namespace
 {
@@ -54,20 +32,20 @@ namespace
 PlcTagTable::PlcTagTable(const std::string& t_registry_path) {
     auto res = loadRegistry_(t_registry_path);
     if (res.hasError())
-        fmt::print(stderr, "[PlcTagTable] failed to load registry '{}': {}\n", t_registry_path, res.error().string());
+        fmt::print(stderr, "[PlcTagTable] failed to load registry '{}': {}\n", t_registry_path, ::sgrn::scl::toString(res.error()));
 }
 
 // loadRegistry_ parses the JSON tag registry file to register symbolic tags.
 // Each tag is assigned a specific S7 area, offset, data type, and size.
-sgrn::Result<void, ::sgrn::scl::Error> PlcTagTable::loadRegistry_(const std::string& t_path) {
+sgrn::Result<void, SclError> PlcTagTable::loadRegistry_(const std::string& t_path) {
     std::ifstream f(t_path);
     if (!f.is_open())
-        return ::sgrn::scl::Err::Generic("[PlcTagTable] cannot open registry file '{}'", t_path);
+        return SclError::Generic;
     std::string json_str((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     rapidjson::Document root;
     root.Parse(json_str.c_str());
     if (root.HasParseError())
-        return ::sgrn::scl::Err::InvalidType("[PlcTagTable] JSON parse error in '{}' at offset {}", t_path, root.GetErrorOffset());
+        return SclError::InvalidType;
 
     // Iterate through members of the root JSON object (one member per tag)
     for (auto it = root.MemberBegin(); it != root.MemberEnd(); ++it) {
@@ -149,8 +127,8 @@ size_t PlcTagTable::tagCount() const noexcept {
     return blocks_.size();
 }
 
-sgrn::Result<PlcTagTable::TagDescriptor, ::sgrn::scl::Error> PlcTagTable::describeTag(const std::string& t_name) const {
-    const sgrn::Result<const Block*, ::sgrn::scl::Error> blk = findBlock_(t_name);
+sgrn::Result<PlcTagTable::TagDescriptor, SclError> PlcTagTable::describeTag(const std::string& t_name) const {
+    const sgrn::Result<const Block*, SclError> blk = findBlock_(t_name);
     if (blk.hasError())
         return std::unexpected(blk.error());
     TagDescriptor d;
@@ -173,9 +151,9 @@ std::vector<std::string> PlcTagTable::tagNames() const {
 // read reads the value of a tag from the local shadow memory cache (no network activity).
 // Returns the JSON string cached during the last PLC read or local write.
 sgrn::Result<std::string, S7Error> PlcTagTable::read(const std::string& t_path) const {
-    const sgrn::Result<const Block*, ::sgrn::scl::Error> blk = findBlock_(t_path);
+    const sgrn::Result<const Block*, SclError> blk = findBlock_(t_path);
     if (blk.hasError())
-        return std::unexpected(scl_bridge(blk.error()));
+        return std::unexpected(fromSclErrorToS7Error(blk.error()));
     std::lock_guard<std::mutex> lk(blk.value()->mu);
     return blk.value()->json_cache;
 }
@@ -184,13 +162,13 @@ sgrn::Result<std::string, S7Error> PlcTagTable::read(const std::string& t_path) 
 // The value is encoded from JSON to raw binary bytes, copied to the block buffer,
 // and the tag is marked dirty so it gets pushed to the PLC during the next synchronization cycle.
 sgrn::Result<void, S7Error> PlcTagTable::write(const std::string& t_path, const std::string& t_json_val) {
-    const sgrn::Result<Block*, ::sgrn::scl::Error> blk = findBlock_(t_path);
+    const sgrn::Result<Block*, SclError> blk = findBlock_(t_path);
     if (blk.hasError())
-        return std::unexpected(scl_bridge(blk.error()));
+        return std::unexpected(fromSclErrorToS7Error(blk.error()));
 
-    sgrn::Result<std::vector<uint8_t>, ::sgrn::scl::Error> encoded = encodeValue_(*blk.value(), t_json_val);
+    sgrn::Result<std::vector<uint8_t>, SclError> encoded = encodeValue_(*blk.value(), t_json_val);
     if (encoded.hasError())
-        return std::unexpected(scl_bridge(encoded.error()));
+        return std::unexpected(fromSclErrorToS7Error(encoded.error()));
 
     std::lock_guard<std::mutex> lk(blk.value()->mu);
     std::memcpy(blk.value()->raw_data.data(), encoded.value().data(), encoded.value().size());
@@ -203,9 +181,9 @@ sgrn::Result<void, S7Error> PlcTagTable::write(const std::string& t_path, const 
 // It retrieves the raw S7 memory bytes, updates the shadow cache, decodes the raw value
 // back into JSON format, resets the dirty flag, and returns the JSON string representation.
 sgrn::Result<std::string, S7Error> PlcTagTable::get(S7Client& t_client, const std::string& t_path) {
-    const sgrn::Result<Block*, ::sgrn::scl::Error> blk = findBlock_(t_path);
+    const sgrn::Result<Block*, SclError> blk = findBlock_(t_path);
     if (blk.hasError())
-        return std::unexpected(scl_bridge(blk.error()));
+        return std::unexpected(fromSclErrorToS7Error(blk.error()));
 
     S7DataItem t_item{};
     std::vector<uint8_t> t_buf;
@@ -213,14 +191,14 @@ sgrn::Result<std::string, S7Error> PlcTagTable::get(S7Client& t_client, const st
 
     auto rc = t_client.readMultiVars(&t_item, 1);
     if (rc.hasError())
-        return std::unexpected(S7Error{S7ProtocolCode::ReadError});
+        return std::unexpected(fromSclErrorToS7Error(SclError::Generic));
     if (t_item.Result != 0)
-        return std::unexpected(S7Error{S7ProtocolCode::ReadError});
+        return std::unexpected(fromSclErrorToS7Error(SclError::Generic));
 
     // commitRaw_ decodes the bytes from the PLC and populates json_cache
     auto commit_res = commitRaw_(*blk.value(), t_item.pdata, blk.value()->addr.byte_count);
     if (commit_res.hasError())
-        return std::unexpected(scl_bridge(commit_res.error()));
+        return std::unexpected(fromSclErrorToS7Error(commit_res.error()));
 
     std::lock_guard<std::mutex> lk(blk.value()->mu);
     return blk.value()->json_cache;
@@ -230,13 +208,13 @@ sgrn::Result<std::string, S7Error> PlcTagTable::get(S7Client& t_client, const st
 // It encodes the provided JSON value into S7 raw binary format, transmits it to the PLC,
 // updates the local shadow memory buffer, and marks the block clean.
 sgrn::Result<void, S7Error> PlcTagTable::put(S7Client& t_client, const std::string& t_path, const std::string& t_json_val) {
-    const sgrn::Result<Block*, ::sgrn::scl::Error> blk = findBlock_(t_path);
+    const sgrn::Result<Block*, SclError> blk = findBlock_(t_path);
     if (blk.hasError())
-        return std::unexpected(scl_bridge(blk.error()));
+        return std::unexpected(fromSclErrorToS7Error(blk.error()));
 
-    sgrn::Result<std::vector<uint8_t>, ::sgrn::scl::Error> t_buf = encodeValue_(*blk.value(), t_json_val);
+    sgrn::Result<std::vector<uint8_t>, SclError> t_buf = encodeValue_(*blk.value(), t_json_val);
     if (t_buf.hasError())
-        return std::unexpected(scl_bridge(t_buf.error()));
+        return std::unexpected(fromSclErrorToS7Error(t_buf.error()));
 
     S7DataItem t_item{};
     t_item.Area = blk.value()->addr.area;
@@ -250,9 +228,9 @@ sgrn::Result<void, S7Error> PlcTagTable::put(S7Client& t_client, const std::stri
 
     auto rc = t_client.writeMultiVars(&t_item, 1);
     if (rc.hasError())
-        return std::unexpected(S7Error{S7ProtocolCode::WriteError});
+        return std::unexpected(fromSclErrorToS7Error(SclError::Generic));
     if (t_item.Result != 0)
-        return S7Error{S7ProtocolCode::WriteError};
+        return std::unexpected(fromSclErrorToS7Error(SclError::Generic));
 
     std::lock_guard<std::mutex> lk(blk.value()->mu);
     std::memcpy(blk.value()->raw_data.data(), t_buf.value().data(), t_buf.value().size());
@@ -264,9 +242,9 @@ sgrn::Result<void, S7Error> PlcTagTable::put(S7Client& t_client, const std::stri
 sgrn::Result<void, S7Error> PlcTagTable::buildGetItems(
     const std::vector<std::string>& t_paths, std::vector<S7DataItem>& t_out_items, std::vector<std::vector<uint8_t>>& t_out_bufs) {
     for (const auto& t_path : t_paths) {
-        const sgrn::Result<Block*, ::sgrn::scl::Error> blk = findBlock_(t_path);
+        const sgrn::Result<Block*, SclError> blk = findBlock_(t_path);
         if (blk.hasError())
-            return scl_bridge(blk.error());
+            return fromSclErrorToS7Error(blk.error());
         t_out_bufs.emplace_back();
         t_out_items.emplace_back();
         fillGetItem_(*blk.value(), t_out_items.back(), t_out_bufs.back());
@@ -278,14 +256,14 @@ sgrn::Result<void, S7Error> PlcTagTable::buildPutItems(const std::vector<std::st
     const std::vector<std::variant<std::string, s7codec::DecodedValue>>& t_values, std::vector<S7DataItem>& t_out_items,
     std::vector<std::vector<uint8_t>>& t_out_bufs) {
     for (size_t i = 0; i < t_paths.size(); ++i) {
-        const sgrn::Result<Block*, ::sgrn::scl::Error> blk = findBlock_(t_paths[i]);
+        const sgrn::Result<Block*, SclError> blk = findBlock_(t_paths[i]);
         if (blk.hasError())
-            return std::unexpected(scl_bridge(blk.error()));
+            return std::unexpected(fromSclErrorToS7Error(blk.error()));
 
         if (std::holds_alternative<std::string>(t_values[i])) {
-            sgrn::Result<std::vector<uint8_t>, ::sgrn::scl::Error> encoded = encodeValue_(*blk.value(), std::get<std::string>(t_values[i]));
+            sgrn::Result<std::vector<uint8_t>, SclError> encoded = encodeValue_(*blk.value(), std::get<std::string>(t_values[i]));
             if (encoded.hasError())
-                return std::unexpected(scl_bridge(encoded.error()));
+                return std::unexpected(fromSclErrorToS7Error(encoded.error()));
             t_out_bufs.push_back(std::move(encoded.value()));
         } else {
             const auto& dv = std::get<s7codec::DecodedValue>(t_values[i]);
@@ -312,7 +290,7 @@ sgrn::Result<void, S7Error> PlcTagTable::buildPutItems(const std::vector<std::st
             int bit_idx = (blk.value()->addr.word_len == S7WLBit) ? blk.value()->addr.bit_offset : 0;
             auto status = s7codec::encodeScalar(dv, fd.type, t_buf.data(), t_buf.size(), bit_idx, fd.count);
             if (!status.has_value())
-                return S7Error{S7ProtocolCode::Unknown};
+                return fromSclErrorToS7Error(SclError::Generic);
             t_out_bufs.push_back(std::move(t_buf));
         }
 
@@ -332,9 +310,9 @@ sgrn::Result<void, S7Error> PlcTagTable::buildPutItems(const std::vector<std::st
 sgrn::Result<void, S7Error> PlcTagTable::commitLocalPut(
     const std::vector<std::string>& t_paths, const std::vector<std::variant<std::string, s7codec::DecodedValue>>& t_values) {
     for (size_t i = 0; i < t_paths.size(); ++i) {
-        const sgrn::Result<Block*, ::sgrn::scl::Error> blk = findBlock_(t_paths[i]);
+        const sgrn::Result<Block*, SclError> blk = findBlock_(t_paths[i]);
         if (blk.hasError())
-            return std::unexpected(scl_bridge(blk.error()));
+            return std::unexpected(fromSclErrorToS7Error(blk.error()));
 
         std::vector<uint8_t> encoded;
         std::string t_json_val;
@@ -343,7 +321,7 @@ sgrn::Result<void, S7Error> PlcTagTable::commitLocalPut(
             t_json_val = std::get<std::string>(t_values[i]);
             auto enc_res = encodeValue_(*blk.value(), t_json_val);
             if (enc_res.hasError())
-                return std::unexpected(scl_bridge(enc_res.error()));
+                return std::unexpected(fromSclErrorToS7Error(enc_res.error()));
             encoded = std::move(enc_res.value());
         } else {
             const auto& dv = std::get<s7codec::DecodedValue>(t_values[i]);
@@ -366,8 +344,8 @@ sgrn::Result<void, S7Error> PlcTagTable::commitLocalPut(
 
             int bit_idx = (blk.value()->addr.word_len == S7WLBit) ? blk.value()->addr.bit_offset : 0;
             auto status = s7codec::encodeScalar(dv, fd.type, encoded.data(), encoded.size(), bit_idx, fd.count);
-            if (!status.has_value())
-                return S7Error{S7ProtocolCode::Unknown};
+
+            SGRN_RETURN_IF(!status.has_value(), fromSclErrorToS7Error(SclError::Generic));
         }
 
         std::lock_guard<std::mutex> lk(blk.value()->mu);
@@ -382,7 +360,7 @@ void PlcTagTable::commitGetResults(const std::vector<std::string>& t_paths, cons
     for (size_t i = 0; i < t_paths.size(); ++i) {
         if (t_items[i].Result != 0)
             continue;
-        const sgrn::Result<Block*, ::sgrn::scl::Error> blk = findBlock_(t_paths[i]);
+        const sgrn::Result<Block*, SclError> blk = findBlock_(t_paths[i]);
         if (blk.hasError())
             continue;
         (void)commitRaw_(*blk.value(), t_items[i].pdata, blk.value()->addr.byte_count);
@@ -391,7 +369,7 @@ void PlcTagTable::commitGetResults(const std::vector<std::string>& t_paths, cons
 
 // pullAll reads all registered tags from the PLC in one go.
 // It creates structured S7DataItems and chunks network requests into groups of 19 (the Snap7 PDU limit).
-sgrn::Result<void, ::sgrn::scl::Error> PlcTagTable::pullAll(S7Client& t_client) {
+sgrn::Result<void, SclError> PlcTagTable::pullAll(S7Client& t_client) {
     std::vector<std::string> all_paths;
     for (const auto& [t_name, _] : blocks_)
         all_paths.push_back(t_name);
@@ -400,7 +378,7 @@ sgrn::Result<void, ::sgrn::scl::Error> PlcTagTable::pullAll(S7Client& t_client) 
     std::vector<std::vector<uint8_t>> bufs;
     auto build_res = buildGetItems(all_paths, t_items, bufs);
     if (build_res.hasError())
-        return ::sgrn::scl::Err::Generic("PlcTagTable: buildGetItems failed: {}", build_res.error().string());
+        return SclError::Generic;
 
     // Chunk size is limited to 19 to fit the maximum variable items in a single S7 PDU.
     size_t offset = 0;
@@ -408,7 +386,7 @@ sgrn::Result<void, ::sgrn::scl::Error> PlcTagTable::pullAll(S7Client& t_client) 
         const size_t count = std::min(static_cast<size_t>(19), t_items.size() - offset);
         auto rc = t_client.readMultiVars(t_items.data() + offset, static_cast<int>(count));
         if (rc.hasError())
-            return ::sgrn::scl::Err::Generic("PlcTagTable: pullAll chunk failed: {}", rc.error().string());
+            return SclError::Generic;
         offset += count;
     }
     commitGetResults(all_paths, t_items);
@@ -418,7 +396,7 @@ sgrn::Result<void, ::sgrn::scl::Error> PlcTagTable::pullAll(S7Client& t_client) 
 // pushDirty writes all locally modified (dirty) tags back to the PLC.
 // If a write fails at the transaction level, it rolls back by re-marking modified tags
 // as dirty so they are not silently skipped in subsequent push cycles.
-sgrn::Result<void, ::sgrn::scl::Error> PlcTagTable::pushDirty(S7Client& t_client) {
+sgrn::Result<void, SclError> PlcTagTable::pushDirty(S7Client& t_client) {
     std::vector<std::string> dirty_paths;
     std::vector<std::variant<std::string, s7codec::DecodedValue>> dirty_values;
 
@@ -446,7 +424,7 @@ sgrn::Result<void, ::sgrn::scl::Error> PlcTagTable::pushDirty(S7Client& t_client
                 blk.value()->tracker.markDirty();
             }
         }
-        return ::sgrn::scl::Err::Generic("PlcTagTable: buildPutItems failed: {}", build_res.error().string());
+        return SclError::Generic;
     }
 
     // Write to the PLC in transactions of 19 items max
@@ -463,14 +441,14 @@ sgrn::Result<void, ::sgrn::scl::Error> PlcTagTable::pushDirty(S7Client& t_client
                     blk.value()->tracker.markDirty();
                 }
             }
-            return ::sgrn::scl::Err::Generic("PlcTagTable: pushDirty chunk failed: {}", rc.error().string());
+            return SclError::Generic;
         }
         offset += count;
     }
 
     // Commit results: mark clean only if the individual item write succeeded at the PLC.
     for (size_t i = 0; i < dirty_paths.size(); ++i) {
-        const sgrn::Result<Block*, ::sgrn::scl::Error> blk = findBlock_(dirty_paths[i]);
+        const sgrn::Result<Block*, SclError> blk = findBlock_(dirty_paths[i]);
         if (!blk.hasError()) {
             std::lock_guard<std::mutex> lk(blk.value()->mu);
             if (t_items[i].Result != 0) {
@@ -483,17 +461,17 @@ sgrn::Result<void, ::sgrn::scl::Error> PlcTagTable::pushDirty(S7Client& t_client
     return {};
 }
 
-sgrn::Result<PlcTagTable::Block*, ::sgrn::scl::Error> PlcTagTable::findBlock_(const std::string& t_path) {
+sgrn::Result<PlcTagTable::Block*, SclError> PlcTagTable::findBlock_(const std::string& t_path) {
     auto it = blocks_.find(t_path);
     if (it == blocks_.end())
-        return ::sgrn::scl::Err::NotFound("PlcTagTable: unknown tag '{}'", t_path);
+        return SclError::NotFound;
     return it->second.get();
 }
 
-sgrn::Result<const PlcTagTable::Block*, ::sgrn::scl::Error> PlcTagTable::findBlock_(const std::string& t_path) const {
+sgrn::Result<const PlcTagTable::Block*, SclError> PlcTagTable::findBlock_(const std::string& t_path) const {
     auto it = blocks_.find(t_path);
     if (it == blocks_.end())
-        return ::sgrn::scl::Err::NotFound("PlcTagTable: unknown tag '{}'", t_path);
+        return SclError::NotFound;
     return it->second.get();
 }
 
@@ -507,25 +485,25 @@ void PlcTagTable::fillGetItem_(const Block& t_b, S7DataItem& t_item, std::vector
     t_item.pdata = t_buf.data();
 }
 
-sgrn::Result<std::vector<uint8_t>, ::sgrn::scl::Error> PlcTagTable::encodeValue_(const Block& t_b, const std::string& t_json_val) const {
+sgrn::Result<std::vector<uint8_t>, SclError> PlcTagTable::encodeValue_(const Block& t_b, const std::string& t_json_val) const {
     DbField fd;
     fd.type = t_b.type;
     fd.count = 1;
     std::vector<uint8_t> t_buf(t_b.addr.byte_count, 0);
     auto res = ::sgrn::gateway::twin::encodeFieldAt(fd, t_json_val, t_buf.data(), t_b.addr.byte_count);
     if (res.hasError())
-        return ::sgrn::scl::Err::InvalidType("PlcTagTable: encode failed: {}", res.error().string());
+        return SclError::InvalidType;
     return t_buf;
 }
 
-sgrn::Result<std::string, ::sgrn::scl::Error> PlcTagTable::decodeRaw_(const Block& t_b) const {
+sgrn::Result<std::string, SclError> PlcTagTable::decodeRaw_(const Block& t_b) const {
     DbField fd;
     fd.type = t_b.type;
     fd.count = 1;
     return ::sgrn::gateway::twin::decodeFieldAt(fd, t_b.raw_data.data(), t_b.raw_data.size());
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> PlcTagTable::commitRaw_(Block& t_b, const void* tp_data, size_t t_size) {
+sgrn::Result<void, SclError> PlcTagTable::commitRaw_(Block& t_b, const void* tp_data, size_t t_size) {
     std::lock_guard<std::mutex> lk(t_b.mu);
     const auto* p_bytes = static_cast<const uint8_t*>(tp_data);
     t_b.tracker.checkDirty(t_b.raw_data.data(), p_bytes, t_size);

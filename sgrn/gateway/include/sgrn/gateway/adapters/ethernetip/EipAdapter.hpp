@@ -1,5 +1,6 @@
 #pragma once
 
+#include <sgrn/gateway/adapters/ethernetip/errors.hpp>
 #include <sgrn/gateway/common/AdapterBase.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
@@ -20,9 +21,8 @@ namespace sgrn::gateway::adapters::ethernetip
 
 class EipAdapter : public common::AdapterBase<EipAdapter> {
 public:
-    struct Error {
-        std::string message;
-    };
+    /// Typed, adapter-scoped error for the cascading sgrn::Result pattern —
+    /// see <sgrn/gateway/adapters/ethernetip/errors.hpp>.
 
     explicit EipAdapter(twin::PlcMemory& t_memory, std::shared_ptr<::sgrn::gateway::SecurityManager> tsp_security_manager);
     ~EipAdapter();
@@ -34,7 +34,7 @@ public:
      * @brief Bind to the interface and start the EtherNet/IP adapter.
      * Stores configuration and launches the serve loop.
      */
-    sgrn::Result<void, Error> start(const std::string& t_ip, uint16_t t_port, const ::sgrn::scl::PlcSchemaStore& t_store);
+    sgrn::Result<void, ::sgrn::scl::SclError> start(const std::string& t_ip, uint16_t t_port, const ::sgrn::scl::PlcSchemaStore& t_store);
 
     void stop();
 

@@ -1,5 +1,6 @@
 #include <fmt/core.h>
 #include <sgrn/gateway/adapters/http.hpp>
+#include <sgrn/gateway/adapters/http/errors.hpp>
 #include <sgrn/gateway/adapters/http/path.hpp>
 #include <sgrn/gateway/common/json_helper.hpp>
 #include <sgrn/gateway/core/TreeCacheEngine.hpp>
@@ -88,6 +89,11 @@ void HttpAdapter::handleGetData(
     if (schema) {
         if (array_index.has_value()) {
             auto arr_res = t_memory.getFieldValue(schema->db_number, field_path);
+            if (arr_res.hasError()) {
+                t_res.status = http::toHttpStatus(arr_res.error());
+                t_res.set_content(fmt::format(R"({{"error":"Field '{}' not found"}})", field_path), "application/json");
+                return;
+            }
             if (!arr_res.hasError()) {
                 rapidjson::Document arr_doc;
                 if (!arr_doc.Parse(arr_res.value().c_str()).HasParseError() && arr_doc.IsArray()) {

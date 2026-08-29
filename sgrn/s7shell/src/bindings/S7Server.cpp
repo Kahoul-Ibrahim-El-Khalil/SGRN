@@ -20,7 +20,7 @@ static bool S7Server_start(ScriptS7Server* tp_server) {
     auto res = tp_server->startServer();
     if (res.hasError()) {
         if (auto* p_ctx = asGetActiveContext()) {
-            p_ctx->SetException(("S7Server start failed: " + res.error().string()).c_str());
+            p_ctx->SetException(fmt::format("S7Server start failed: {}", toString(res.error())).c_str());
         }
         return false;
     }

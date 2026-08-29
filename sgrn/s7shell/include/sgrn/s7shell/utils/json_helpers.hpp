@@ -2,8 +2,8 @@
 
 #include <fmt/format.h>
 #include <sgrn/Result.hpp>
-#include <sgrn/gateway/wrappers/s7/ProtocolError.hpp>
 #include <sgrn/gateway/wrappers/s7/S7Client.hpp>
+#include <sgrn/gateway/wrappers/s7/error.hpp>
 #include <sgrn/scl/types.hpp>
 #include <sgrn/utils/encoding.hpp>
 #include <sgrn/utils/filesystem.hpp>
@@ -21,14 +21,14 @@ class CScriptArray;
 namespace sgrn::s7shell::shell
 {
 
-void logError(const ::sgrn::scl::Error& t_err);
-void logError(const ::sgrn::scl::Error& t_err, std::string_view t_ctx);
+void logError(scl::SclError t_err);
+void logError(scl::SclError t_err, std::string_view t_ctx);
 
-void logError(const ::sgrn::gateway::wrappers::s7::S7Error& t_err);
-void logError(const ::sgrn::gateway::wrappers::s7::S7Error& t_err, std::string_view t_ctx);
+void logError(::sgrn::gateway::wrappers::s7::S7Error t_err);
+void logError(::sgrn::gateway::wrappers::s7::S7Error t_err, std::string_view t_ctx);
 
 template <typename T>
-T valueOr(sgrn::Result<T, ::sgrn::scl::Error>&& t_res, T t_fallback, std::string_view t_ctx = {}) {
+T valueOr(sgrn::Result<T, sgrn::scl::SclError>&& t_res, T t_fallback, std::string_view t_ctx = {}) {
     if (t_res.hasError()) {
         if (t_ctx.empty())
             logError(t_res.error());
@@ -51,7 +51,7 @@ T valueOr(sgrn::Result<T, ::sgrn::gateway::wrappers::s7::S7Error>&& t_res, T t_f
     return std::move(t_res.value());
 }
 
-bool ok(sgrn::Result<void, ::sgrn::scl::Error>&& t_res, std::string_view t_ctx = {});
+bool ok(sgrn::Result<void, sgrn::scl::SclError>&& t_res, std::string_view t_ctx = {});
 bool ok(sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error>&& t_res, std::string_view t_ctx = {});
 
 double jsonScalarDouble(const std::string& t_json, double t_fallback = 0.0);

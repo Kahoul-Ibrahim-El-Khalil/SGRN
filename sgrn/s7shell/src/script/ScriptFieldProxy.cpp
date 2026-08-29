@@ -1,7 +1,10 @@
 #include <sgrn/s7shell/script/ScriptDataBlock.hpp>
 #include <sgrn/s7shell/script/ScriptFieldProxy.hpp>
+#include <sgrn/s7shell/connection/S7Connection.hpp>
 
 #include <fmt/format.h>
+
+using ::sgrn::scl::DataType;
 
 namespace sgrn::s7shell::shell
 {
@@ -45,6 +48,26 @@ ScriptFieldProxy& ScriptFieldProxy::assignUInt(uint32_t t_val) {
     return *this;
 }
 
+ScriptFieldProxy& ScriptFieldProxy::assignInt8(int8_t t_val) {
+    db_->writeScalar(path_, s7codec::DecodedValue::makeSigned(t_val));
+    return *this;
+}
+
+ScriptFieldProxy& ScriptFieldProxy::assignUInt8(uint8_t t_val) {
+    db_->writeScalar(path_, s7codec::DecodedValue::makeUnsigned(t_val));
+    return *this;
+}
+
+ScriptFieldProxy& ScriptFieldProxy::assignInt16(int16_t t_val) {
+    db_->writeScalar(path_, s7codec::DecodedValue::makeSigned(t_val));
+    return *this;
+}
+
+ScriptFieldProxy& ScriptFieldProxy::assignUInt16(uint16_t t_val) {
+    db_->writeScalar(path_, s7codec::DecodedValue::makeUnsigned(t_val));
+    return *this;
+}
+
 ScriptFieldProxy& ScriptFieldProxy::assignInt64(int64_t t_val) {
     db_->writeScalar(path_, s7codec::DecodedValue::makeSigned(t_val));
     return *this;
@@ -61,6 +84,15 @@ ScriptFieldProxy& ScriptFieldProxy::assignBool(bool t_val) {
 }
 
 ScriptFieldProxy& ScriptFieldProxy::assignString(const std::string& t_val) {
+    if (db_ && db_->conn_) {
+        if (auto loc = db_->conn_->schema_.findField(db_->db_num_, path_)) {
+            if (loc->field->type == DataType::Char || loc->field->type == DataType::WChar) {
+                uint8_t char_val = t_val.empty() ? 0 : static_cast<uint8_t>(t_val[0]);
+                db_->writeScalar(path_, s7codec::DecodedValue::makeUnsigned(char_val));
+                return *this;
+            }
+        }
+    }
     db_->writeScalar(path_, s7codec::DecodedValue::makeString(t_val));
     return *this;
 }
@@ -96,6 +128,22 @@ uint32_t ScriptFieldProxy::toUInt() const {
     if (dv.kind() == s7codec::ValueKind::SignedInt)
         return static_cast<uint32_t>(dv.i());
     return 0;
+}
+
+int8_t ScriptFieldProxy::toInt8() const {
+    return static_cast<int8_t>(toInt());
+}
+
+uint8_t ScriptFieldProxy::toUInt8() const {
+    return static_cast<uint8_t>(toUInt());
+}
+
+int16_t ScriptFieldProxy::toInt16() const {
+    return static_cast<int16_t>(toInt());
+}
+
+uint16_t ScriptFieldProxy::toUInt16() const {
+    return static_cast<uint16_t>(toUInt());
 }
 
 int64_t ScriptFieldProxy::toInt64() const {

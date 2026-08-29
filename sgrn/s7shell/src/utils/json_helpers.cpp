@@ -10,24 +10,25 @@
 
 namespace sgrn::s7shell::shell
 {
-
-void logError(const ::sgrn::scl::Error& t_err) {
-    fmt::print(stderr, fg(fmt::color::red), "Error: {}\n", t_err.string());
+using sgrn::gateway::wrappers::s7::S7Error;
+using sgrn::scl::SclError;
+void logError(SclError t_err) {
+    fmt::print(stderr, fg(fmt::color::red), "SclError: {}\n", toString(t_err));
 }
 
-void logError(const ::sgrn::scl::Error& t_err, std::string_view t_ctx) {
-    fmt::print(stderr, fg(fmt::color::red), "Error in {}: {}\n", t_ctx, t_err.string());
+void logError(SclError t_err, std::string_view t_ctx) {
+    fmt::print(stderr, fg(fmt::color::red), "SclError in {}: {}\n", t_ctx, toString(t_err));
 }
 
-void logError(const ::sgrn::gateway::wrappers::s7::S7Error& t_err) {
-    fmt::print(stderr, fg(fmt::color::red), "Error: {}\n", t_err.string());
+void logError(S7Error t_err) {
+    fmt::print(stderr, fg(fmt::color::red), "SclError: {}\n", toString(t_err));
 }
 
-void logError(const ::sgrn::gateway::wrappers::s7::S7Error& t_err, std::string_view t_ctx) {
-    fmt::print(stderr, fg(fmt::color::red), "Error in {}: {}\n", t_ctx, t_err.string());
+void logError(::sgrn::gateway::wrappers::s7::S7Error t_err, std::string_view t_ctx) {
+    fmt::print(stderr, fg(fmt::color::red), "SclError in {}: {}\n", t_ctx, toString(t_err));
 }
 
-bool ok(sgrn::Result<void, ::sgrn::scl::Error>&& t_res, std::string_view t_ctx) {
+bool ok(sgrn::Result<void, SclError>&& t_res, std::string_view t_ctx) {
     if (t_res.hasError()) {
         if (t_ctx.empty())
             logError(t_res.error());

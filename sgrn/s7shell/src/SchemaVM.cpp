@@ -32,7 +32,7 @@ ScriptS7Connection* p_g_active_connection = nullptr;
 // ── Generic getters: decode from ScriptDataBlock buffer ──────────────────────
 
 static s7codec::DecodedValue decodeFromLiveMemory(ScriptDataBlock* tp_db, FieldMeta* tp_meta) {
-    size_t span = s7codec::typeSpanBytes(tp_meta->s7type, tp_meta->count);
+    size_t span = s7codec::typeSpanBytes(tp_meta->s7type, tp_meta->count).value_or(0);
     std::vector<uint8_t> tmp(span, 0);
     tp_db->readFieldFromMemory(tp_meta->abs_offset, tmp.data(), span);
     return s7codec::decodeScalar(tp_meta->s7type, tmp.data(), span, tp_meta->bit_index, tp_meta->count, tp_meta->endian);
@@ -53,7 +53,15 @@ static void GenericFieldGetter_double(asIScriptGeneric* tp_gen) {
 static void GenericFieldGetter_int(asIScriptGeneric* tp_gen) {
     auto* p_db = static_cast<ScriptDataBlock*>(tp_gen->GetObject());
     auto* p_meta = static_cast<FieldMeta*>(tp_gen->GetAuxiliary());
-    tp_gen->SetReturnDWord(static_cast<asDWORD>(decodeFromLiveMemory(p_db, p_meta).asInt64()));
+    auto val = decodeFromLiveMemory(p_db, p_meta).asInt64();
+    auto primitive_sz = s7codec::primitiveSize(p_meta->s7type).value_or(4);
+    if (primitive_sz == 1) {
+        tp_gen->SetReturnByte(static_cast<asBYTE>(val));
+    } else if (primitive_sz == 2) {
+        tp_gen->SetReturnWord(static_cast<asWORD>(val));
+    } else {
+        tp_gen->SetReturnDWord(static_cast<asDWORD>(val));
+    }
 }
 
 static void GenericFieldGetter_int64(asIScriptGeneric* tp_gen) {
@@ -71,7 +79,14 @@ static void GenericFieldGetter_bool(asIScriptGeneric* tp_gen) {
 static void GenericFieldGetter_string(asIScriptGeneric* tp_gen) {
     auto* p_db = static_cast<ScriptDataBlock*>(tp_gen->GetObject());
     auto* p_meta = static_cast<FieldMeta*>(tp_gen->GetAuxiliary());
-    new (tp_gen->GetAddressOfReturnLocation()) std::string(decodeFromLiveMemory(p_db, p_meta).s());
+    
+    auto dv = decodeFromLiveMemory(p_db, p_meta);
+    if (p_meta->s7type == s7codec::Type::Char || p_meta->s7type == s7codec::Type::WChar) {
+        char c = static_cast<char>(dv.u());
+        new (tp_gen->GetAddressOfReturnLocation()) std::string(1, c);
+    } else {
+        new (tp_gen->GetAddressOfReturnLocation()) std::string(dv.s());
+    }
 }
 
 // Struct/UDT field → returns a FieldProxy for chaining
@@ -95,7 +110,8 @@ static void GenericFieldSetter_float(asIScriptGeneric* tp_gen) {
     uint8_t tmp[16]{};
     auto dv = s7codec::DecodedValue::makeFloat(val);
     s7codec::encodeScalar(dv, p_meta->s7type, tmp, sizeof(tmp), p_meta->bit_index, p_meta->count, p_meta->endian);
-    p_db->writeFieldToMemory(p_meta->abs_offset, tmp, static_cast<size_t>(s7codec::typeSpanBytes(p_meta->s7type, p_meta->count)));
+    p_db->writeFieldToMemory(
+        p_meta->abs_offset, tmp, static_cast<size_t>(s7codec::typeSpanBytes(p_meta->s7type, p_meta->count).value_or(0)));
 }
 
 static void GenericFieldSetter_double(asIScriptGeneric* tp_gen) {
@@ -105,27 +121,35 @@ static void GenericFieldSetter_double(asIScriptGeneric* tp_gen) {
     uint8_t tmp[16]{};
     auto dv = s7codec::DecodedValue::makeDouble(val);
     s7codec::encodeScalar(dv, p_meta->s7type, tmp, sizeof(tmp), p_meta->bit_index, p_meta->count, p_meta->endian);
-    p_db->writeFieldToMemory(p_meta->abs_offset, tmp, static_cast<size_t>(s7codec::typeSpanBytes(p_meta->s7type, p_meta->count)));
+    p_db->writeFieldToMemory(
+        p_meta->abs_offset, tmp, static_cast<size_t>(s7codec::typeSpanBytes(p_meta->s7type, p_meta->count).value_or(0)));
 }
 
 static void GenericFieldSetter_int(asIScriptGeneric* tp_gen) {
     auto* p_db = static_cast<ScriptDataBlock*>(tp_gen->GetObject());
     auto* p_meta = static_cast<FieldMeta*>(tp_gen->GetAuxiliary());
+
+    // All integer setters are now declared with 'int' parameter in AngelScript
+    // so that hex literals (0x10) work without explicit narrowing casts.
+    // Always read as DWORD; encodeScalar will truncate to the correct width.
     int32_t val = static_cast<int32_t>(tp_gen->GetArgDWord(0));
-    uint8_t tmp[16]{};
+
+    uint32_t span = static_cast<uint32_t>(s7codec::typeSpanBytes(p_meta->s7type, p_meta->count).value_or(8));
+    std::vector<uint8_t> tmp(span, 0);
     auto dv = s7codec::DecodedValue::makeSigned(static_cast<int64_t>(val));
-    s7codec::encodeScalar(dv, p_meta->s7type, tmp, sizeof(tmp), p_meta->bit_index, p_meta->count, p_meta->endian);
-    p_db->writeFieldToMemory(p_meta->abs_offset, tmp, static_cast<size_t>(s7codec::typeSpanBytes(p_meta->s7type, p_meta->count)));
+    s7codec::encodeScalar(dv, p_meta->s7type, tmp.data(), tmp.size(), p_meta->bit_index, p_meta->count, p_meta->endian);
+    p_db->writeFieldToMemory(p_meta->abs_offset, tmp.data(), tmp.size());
 }
 
 static void GenericFieldSetter_int64(asIScriptGeneric* tp_gen) {
     auto* p_db = static_cast<ScriptDataBlock*>(tp_gen->GetObject());
     auto* p_meta = static_cast<FieldMeta*>(tp_gen->GetAuxiliary());
     int64_t val = static_cast<int64_t>(tp_gen->GetArgQWord(0));
-    uint8_t tmp[16]{};
+    uint32_t span = static_cast<uint32_t>(s7codec::typeSpanBytes(p_meta->s7type, p_meta->count).value_or(8));
+    std::vector<uint8_t> tmp(span, 0);
     auto dv = s7codec::DecodedValue::makeSigned(val);
-    s7codec::encodeScalar(dv, p_meta->s7type, tmp, sizeof(tmp), p_meta->bit_index, p_meta->count, p_meta->endian);
-    p_db->writeFieldToMemory(p_meta->abs_offset, tmp, static_cast<size_t>(s7codec::typeSpanBytes(p_meta->s7type, p_meta->count)));
+    s7codec::encodeScalar(dv, p_meta->s7type, tmp.data(), tmp.size(), p_meta->bit_index, p_meta->count, p_meta->endian);
+    p_db->writeFieldToMemory(p_meta->abs_offset, tmp.data(), tmp.size());
 }
 
 static void GenericFieldSetter_bool(asIScriptGeneric* tp_gen) {
@@ -146,12 +170,24 @@ static void GenericFieldSetter_string(asIScriptGeneric* tp_gen) {
     auto* p_db = static_cast<ScriptDataBlock*>(tp_gen->GetObject());
     auto* p_meta = static_cast<FieldMeta*>(tp_gen->GetAuxiliary());
     const std::string& val = *static_cast<const std::string*>(tp_gen->GetArgAddress(0));
-    int span = s7codec::typeSpanBytes(p_meta->s7type, p_meta->count);
+    uint32_t span = static_cast<uint32_t>(s7codec::typeSpanBytes(p_meta->s7type, p_meta->string_capacity > 0 ? p_meta->string_capacity : p_meta->count).value_or(0));
     std::vector<uint8_t> tmp(static_cast<size_t>(span), 0);
-    auto dv = s7codec::DecodedValue::makeString(val);
-    auto status = s7codec::encodeScalar(dv, p_meta->s7type, tmp.data(), tmp.size(), p_meta->bit_index, p_meta->count, p_meta->endian);
+    
+    s7codec::DecodedValue dv;
+    if (p_meta->s7type == s7codec::Type::Char || p_meta->s7type == s7codec::Type::WChar) {
+        uint8_t char_val = val.empty() ? 0 : static_cast<uint8_t>(val[0]);
+        dv = s7codec::DecodedValue::makeUnsigned(char_val);
+    } else {
+        dv = s7codec::DecodedValue::makeString(val);
+    }
+
+    // Bug fix: for STRING[N], count==1 (one scalar string element) but the
+    // encode needs the CHARACTER capacity N, not 1. Use string_capacity which
+    // was stored as N from the schema parser.
+    uint32_t max_chars = p_meta->string_capacity > 0 ? p_meta->string_capacity : p_meta->count;
+    auto status = s7codec::encodeScalar(dv, p_meta->s7type, tmp.data(), tmp.size(), p_meta->bit_index, max_chars, p_meta->endian);
     if (!status.has_value()) {
-        fmt::print(stderr, "[SchemaVM] string encode failed for '{}': {}\n", p_meta->path, toString(status.error()));
+        fmt::print(stderr, "[SchemaVM] string encode failed for '{}': {}\n", p_meta->path, s7codec::toString(status.error()));
     }
     p_db->writeFieldToMemory(p_meta->abs_offset, tmp.data(), tmp.size());
 }
@@ -161,64 +197,37 @@ static void GenericFieldSetter_string(asIScriptGeneric* tp_gen) {
 static const char* s7TypeToAS(s7codec::Type t_t) {
     using T = s7codec::Type;
     switch (t_t) {
-        case T::Bool:
-            return "BOOL";
-        case T::Real:
-            return "REAL";
-        case T::LReal:
-            return "LREAL";
-        case T::SInt:
-            return "SINT";
-        case T::USInt:
-            return "USINT";
-        case T::Byte:
-            return "BYTE";
-        case T::Int:
-            return "INT";
-        case T::UInt:
-            return "UINT";
-        case T::Word:
-            return "WORD";
-        case T::DInt:
-            return "DINT";
-        case T::UDInt:
-            return "UDINT";
-        case T::DWord:
-            return "DWORD";
-        case T::LInt:
-            return "LINT";
-        case T::ULInt:
-            return "ULINT";
-        case T::LWord:
-            return "LWORD";
-        case T::Time:
-            return "TIME";
-        case T::LTime:
-            return "LTIME";
-        case T::Date:
-            return "DATE";
-        case T::TimeOfDay:
-            return "TOD";
-        case T::LTimeOfDay:
-            return "LTOD";
-        case T::DTL:
-        case T::DateTime:
-            return nullptr; // Handled as FieldProxy to allow opAssign
-        case T::Char:
-            return "uint8";
-        case T::WChar:
-            return "uint16";
-        case T::Counter:
-            return "uint16";
-        case T::Timer:
-            return "uint16";
+        case T::Bool: return "bool";
+        case T::Byte: return "uint8";
+        case T::Word: return "uint16";
+        case T::DWord: return "uint";
+        case T::LWord: return "uint64";
+        case T::SInt: return "int8";
+        case T::USInt: return "uint8";
+        case T::Int: return "int16";
+        case T::UInt: return "uint16";
+        case T::DInt: return "int";
+        case T::UDInt: return "uint";
+        case T::LInt: return "int64";
+        case T::ULInt: return "uint64";
+        case T::Real: return "float";
+        case T::LReal: return "double";
+        case T::Char: return "string";
+        case T::WChar: return "string";
+        case T::Counter: return "uint16";
+        case T::Timer: return "uint16";
         case T::String:
         case T::WString:
         case T::XString:
-        case T::XWString:
-            return "string";
-        default:
-            return nullptr;
+        case T::XWString: return "string";
+        case T::Time: return "int";
+        case T::LTime: return "int64";
+        case T::Date: return "uint16";
+        case T::TimeOfDay: return "uint";
+        case T::LTimeOfDay: return "uint64";
+        case T::DTL:
+        case T::DateTime: return nullptr;
+        default: return nullptr;
     }
 }
 
@@ -266,6 +275,61 @@ static void GenericUDTFieldSetter_double(asIScriptGeneric* tp_gen) {
     double val = tp_gen->GetArgDouble(0);
     auto* p_sub_proxy = p_proxy->index(field_name);
     p_sub_proxy->assignDouble(val);
+    p_sub_proxy->release();
+}
+
+static void GenericUDTFieldGetter_int8(asIScriptGeneric* tp_gen) {
+    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
+    std::string field_name = getUdtFieldName(tp_gen);
+    auto* p_sub_proxy = p_proxy->index(field_name);
+    tp_gen->SetReturnByte(p_sub_proxy->toUInt8());
+    p_sub_proxy->release();
+}
+
+static void GenericUDTFieldSetter_int8(asIScriptGeneric* tp_gen) {
+    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
+    std::string field_name = getUdtFieldName(tp_gen);
+    // Setter signature uses 'int' to accept integer literals/hex without AS narrowing errors.
+    // Truncate to uint8 here in C++.
+    uint8_t val = static_cast<uint8_t>(tp_gen->GetArgDWord(0));
+    auto* p_sub_proxy = p_proxy->index(field_name);
+    p_sub_proxy->assignUInt8(val);
+    p_sub_proxy->release();
+}
+
+static void GenericUDTFieldGetter_int16(asIScriptGeneric* tp_gen) {
+    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
+    std::string field_name = getUdtFieldName(tp_gen);
+    auto* p_sub_proxy = p_proxy->index(field_name);
+    tp_gen->SetReturnWord(p_sub_proxy->toUInt16());
+    p_sub_proxy->release();
+}
+
+static void GenericUDTFieldSetter_int16(asIScriptGeneric* tp_gen) {
+    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
+    std::string field_name = getUdtFieldName(tp_gen);
+    // Setter signature uses 'int' to accept integer literals/hex without AS narrowing errors.
+    // Truncate to uint16 here in C++.
+    uint16_t val = static_cast<uint16_t>(tp_gen->GetArgDWord(0));
+    auto* p_sub_proxy = p_proxy->index(field_name);
+    p_sub_proxy->assignUInt16(val);
+    p_sub_proxy->release();
+}
+
+static void GenericUDTFieldGetter_int64(asIScriptGeneric* tp_gen) {
+    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
+    std::string field_name = getUdtFieldName(tp_gen);
+    auto* p_sub_proxy = p_proxy->index(field_name);
+    tp_gen->SetReturnQWord(p_sub_proxy->toUInt64());
+    p_sub_proxy->release();
+}
+
+static void GenericUDTFieldSetter_int64(asIScriptGeneric* tp_gen) {
+    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
+    std::string field_name = getUdtFieldName(tp_gen);
+    uint64_t val = tp_gen->GetArgQWord(0);
+    auto* p_sub_proxy = p_proxy->index(field_name);
+    p_sub_proxy->assignUInt64(val);
     p_sub_proxy->release();
 }
 
@@ -385,7 +449,7 @@ static void GenericFieldGetter_primitive_array(asIScriptGeneric* tp_gen) {
 
         } else {
 
-            const size_t element_size = s7codec::typeSpanBytes(p_meta->s7type, 1);
+            const size_t element_size = s7codec::typeSpanBytes(p_meta->s7type, 1).value_or(0);
 
             element.abs_offset = p_meta->abs_offset + static_cast<size_t>(i) * element_size;
         }
@@ -473,18 +537,19 @@ struct GenericAccessors {
 static GenericAccessors accessorsForASType(const char* tp_as_type) {
     if (!tp_as_type)
         return {asFUNCTION(GenericFieldGetter_proxy), {0}};
-    if (std::strcmp(tp_as_type, "float") == 0 || std::strcmp(tp_as_type, "REAL") == 0)
+    if (std::strcmp(tp_as_type, "float") == 0)
         return {asFUNCTION(GenericFieldGetter_float), asFUNCTION(GenericFieldSetter_float)};
-    if (std::strcmp(tp_as_type, "double") == 0 || std::strcmp(tp_as_type, "LREAL") == 0)
+    if (std::strcmp(tp_as_type, "double") == 0)
         return {asFUNCTION(GenericFieldGetter_double), asFUNCTION(GenericFieldSetter_double)};
-    if (std::strcmp(tp_as_type, "bool") == 0 || std::strcmp(tp_as_type, "BOOL") == 0)
+    if (std::strcmp(tp_as_type, "bool") == 0)
         return {asFUNCTION(GenericFieldGetter_bool), asFUNCTION(GenericFieldSetter_bool)};
-    if (std::strcmp(tp_as_type, "int64") == 0 || std::strcmp(tp_as_type, "uint64") == 0 || std::strcmp(tp_as_type, "LINT") == 0 ||
-        std::strcmp(tp_as_type, "ULINT") == 0 || std::strcmp(tp_as_type, "LWORD") == 0 || std::strcmp(tp_as_type, "LTIME") == 0 ||
-        std::strcmp(tp_as_type, "LTOD") == 0)
+    if (std::strcmp(tp_as_type, "int64") == 0 || std::strcmp(tp_as_type, "uint64") == 0)
         return {asFUNCTION(GenericFieldGetter_int64), asFUNCTION(GenericFieldSetter_int64)};
     if (std::strcmp(tp_as_type, "string") == 0)
         return {asFUNCTION(GenericFieldGetter_string), asFUNCTION(GenericFieldSetter_string)};
+    // All remaining numeric types: int/uint/int8/uint8/int16/uint16 all use
+    // 32-bit generic get/set. AngelScript's generic calling convention always
+    // passes/receives sub-32-bit values as 32-bit DWORDs.
     return {asFUNCTION(GenericFieldGetter_int), asFUNCTION(GenericFieldSetter_int)};
 }
 
@@ -585,6 +650,15 @@ static void registerProxyStructType(sgrn::scripting::ScriptHost& t_host, const s
         } else if (ast == "DTL@") {
             getter = asFUNCTION(GenericUDTFieldGetter_dtl);
             setter = asFUNCTION(GenericUDTFieldSetter_dtl);
+        } else if (ast == "int8" || ast == "uint8") {
+            getter = asFUNCTION(GenericUDTFieldGetter_int8);
+            setter = asFUNCTION(GenericUDTFieldSetter_int8);
+        } else if (ast == "int16" || ast == "uint16") {
+            getter = asFUNCTION(GenericUDTFieldGetter_int16);
+            setter = asFUNCTION(GenericUDTFieldSetter_int16);
+        } else if (ast == "int64" || ast == "uint64") {
+            getter = asFUNCTION(GenericUDTFieldGetter_int64);
+            setter = asFUNCTION(GenericUDTFieldSetter_int64);
         } else {
             getter = asFUNCTION(GenericUDTFieldGetter_int32);
             setter = asFUNCTION(GenericUDTFieldSetter_int32);
@@ -598,8 +672,16 @@ static void registerProxyStructType(sgrn::scripting::ScriptHost& t_host, const s
 
         if (ast == "string") {
             setter_sig = fmt::format("void set_{}(const string &in)", safe_name);
-        } else {
+        } else if (ast == "int64" || ast == "uint64") {
             setter_sig = fmt::format("void set_{}({} val)", safe_name, as_field_type);
+        } else if (ast == "float" || ast == "double" || ast == "bool" || ast == "DTL@") {
+            setter_sig = fmt::format("void set_{}({} val)", safe_name, as_field_type);
+        } else {
+            // Sub-32-bit types (int8, uint8, int16, uint16, int, uint, etc.)
+            // Use 'int' as the setter parameter so that integer literals and hex
+            // (e.g. 0x10) can be passed without requiring explicit casts in AS.
+            // The C++ generic function handles truncation.
+            setter_sig = fmt::format("void set_{}(int val)", safe_name);
         }
 
         engine->RegisterObjectMethod(t_type_name.c_str(), setter_sig.c_str(), setter, asCALL_GENERIC, raw_name);
@@ -764,6 +846,10 @@ static void registerFieldProperties(sgrn::scripting::ScriptHost& t_host, const s
         p_meta->bit_index = f.bit_index;
         p_meta->count = f.count;
         p_meta->endian = f.endianness;
+        // For scalar STRING[N] fields f.count holds N (the character capacity).
+        // f.string_capacity is non-zero only for array-of-strings; for scalar
+        // strings f.count IS the capacity and f.string_capacity stays 0.
+        p_meta->string_capacity = (f.string_capacity > 0) ? f.string_capacity : f.count;
 
         FieldMeta* raw = p_meta.get();
 
@@ -797,11 +883,17 @@ static void registerFieldProperties(sgrn::scripting::ScriptHost& t_host, const s
         // Setter
         // ------------------------------------------------------------
         std::string setter_sig;
+        std::string ast_type = as_field_type;
 
-        if (std::string(as_field_type) == "string") {
+        if (ast_type == "string") {
             setter_sig = fmt::format("void set_{}(const string &in)", safe_name);
-        } else {
+        } else if (ast_type == "int64" || ast_type == "uint64" || ast_type == "float" || ast_type == "double" || ast_type == "bool") {
             setter_sig = fmt::format("void set_{}({} val)", safe_name, as_field_type);
+        } else {
+            // Sub-32-bit and 32-bit integer types: use 'int' so that integer
+            // literals and hex (e.g. 0x10) are accepted without explicit casts.
+            // The GenericFieldSetter_int reads GetArgDWord and truncates internally.
+            setter_sig = fmt::format("void set_{}(int val)", safe_name);
         }
 
         int r2 = t_host.getEngine()->RegisterObjectMethod(t_as_type_name.c_str(), setter_sig.c_str(), acc.setter, asCALL_GENERIC, raw);
@@ -884,6 +976,15 @@ static void registerUdtFieldProperties(sgrn::scripting::ScriptHost& t_host, cons
         } else if (ast == "DTL@") {
             getter = asFUNCTION(GenericUDTFieldGetter_dtl);
             setter = asFUNCTION(GenericUDTFieldSetter_dtl);
+        } else if (ast == "int8" || ast == "uint8") {
+            getter = asFUNCTION(GenericUDTFieldGetter_int8);
+            setter = asFUNCTION(GenericUDTFieldSetter_int8);
+        } else if (ast == "int16" || ast == "uint16") {
+            getter = asFUNCTION(GenericUDTFieldGetter_int16);
+            setter = asFUNCTION(GenericUDTFieldSetter_int16);
+        } else if (ast == "int64" || ast == "uint64") {
+            getter = asFUNCTION(GenericUDTFieldGetter_int64);
+            setter = asFUNCTION(GenericUDTFieldSetter_int64);
         } else {
             getter = asFUNCTION(GenericUDTFieldGetter_int32);
             setter = asFUNCTION(GenericUDTFieldSetter_int32);
@@ -896,10 +997,14 @@ static void registerUdtFieldProperties(sgrn::scripting::ScriptHost& t_host, cons
         }
 
         std::string setter_sig;
-        if (std::string(as_field_type) == "string") {
+        std::string ast_sig = as_field_type;
+        if (ast_sig == "string") {
             setter_sig = fmt::format("void set_{}(const string &in)", safe_name);
-        } else {
+        } else if (ast_sig == "int64" || ast_sig == "uint64" || ast_sig == "float" || ast_sig == "double" || ast_sig == "bool" || ast_sig == "DTL@") {
             setter_sig = fmt::format("void set_{}({} val)", safe_name, as_field_type);
+        } else {
+            // Use 'int' for sub-32-bit/32-bit integer types so hex literals work without casts.
+            setter_sig = fmt::format("void set_{}(int val)", safe_name);
         }
         int r2 = t_host.getEngine()->RegisterObjectMethod(t_as_type_name.c_str(), setter_sig.c_str(), setter, asCALL_GENERIC, raw_name);
         if (r2 < 0) {

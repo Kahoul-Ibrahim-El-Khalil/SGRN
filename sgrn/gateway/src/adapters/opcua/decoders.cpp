@@ -75,8 +75,10 @@ Result<UA_DataValue, OpcUaAdapterError> decodeTypedArrayToDataValue(const OpcUaD
     const bool t_is_string = t_ctx.p_node_ctx->type == DataType::String || t_ctx.p_node_ctx->type == DataType::WString ||
                              t_ctx.p_node_ctx->type == DataType::XString || t_ctx.p_node_ctx->type == DataType::XWString;
 
-    const size_t elem_stride =
-        t_is_string ? (n > 0 ? t_ctx.size / n : 0) : static_cast<size_t>(s7codec::primitiveSize(t_ctx.p_node_ctx->type));
+    const size_t elem_stride = t_is_string ? (n > 0 ? t_ctx.size / n : 0) : [&]() -> size_t {
+        auto opt = s7codec::primitiveSize(t_ctx.p_node_ctx->type);
+        return opt ? static_cast<size_t>(*opt) : 0;
+    }();
 
     for (size_t i = 0; i < n; ++i) {
         const uint8_t* p_elem_ptr = t_ctx.p_raw_data;
@@ -219,10 +221,12 @@ size_t leafS7Span(const PlcScalarView& t_view) {
     }
 
     if (t_view.count > 1) {
-        return static_cast<size_t>(s7codec::typeSpanBytes(t_view.type, static_cast<int>(t_view.count)));
+        auto span_opt = s7codec::typeSpanBytes(t_view.type, static_cast<uint32_t>(t_view.count));
+        return span_opt ? static_cast<size_t>(*span_opt) : 0;
     }
 
-    return static_cast<size_t>(s7codec::primitiveSize(t_view.type));
+    auto prim_opt = s7codec::primitiveSize(t_view.type);
+    return prim_opt ? static_cast<size_t>(*prim_opt) : 0;
 }
 
 Result<void, OpcUaAdapterError> writeDecodedToUaMember(

@@ -1,20 +1,19 @@
 #pragma once
 
-#include <sgrn/gateway/wrappers/s7/ProtocolError.hpp>
+#include <sgrn/gateway/wrappers/s7/S7Server.hpp>
+#include <sgrn/gateway/wrappers/s7/error.hpp>
 #include <sgrn/scl/types.hpp>
-#include <snap7.h>
-
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <snap7.h>
 #include <string>
 #include <utility>
 
 namespace sgrn::gateway::wrappers::s7
 {
 using ::sgrn::gateway::wrappers::s7::S7Error;
-using ::sgrn::gateway::wrappers::s7::S7ProtocolCode;
 using ::sgrn::scl::S7ServerEvent;
 
 /**
@@ -61,7 +60,7 @@ public:
 
     int clientsCount() const;
     int getCpuStatus() const;
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> setCpuStatus(int t_status);
+    sgrn::Result<void, S7Error> setCpuStatus(int t_status);
 
     /**
      * @brief Set a callback for server events.

@@ -1,7 +1,6 @@
-#include <sgrn/gateway/twin/DbSnapshot.hpp>
-// DbSnapshot.cpp — management of S7 Data Block snapshots
-
 #include <fmt/core.h>
+#include <sgrn/Result.hpp>
+#include <sgrn/gateway/twin/DbSnapshot.hpp>
 #include <sgrn/gateway/twin/utils.hpp>
 #include <sgrn/utils/endianess.hpp>
 #include <sgrn/utils/strings.hpp>
@@ -15,20 +14,17 @@ namespace
 {
 namespace fs = std::filesystem;
 using sgrn::Result;
-using ::sgrn::scl::Err;
 } // namespace
 
 namespace sgrn::gateway::twin
 {
 using ::sgrn::gateway::wrappers::s7::S7Client;
+using sgrn::gateway::wrappers::s7::S7Error;
 using ::sgrn::scl::DataType;
 using ::sgrn::scl::DbField;
 using ::sgrn::scl::DbSchema;
-using ::sgrn::scl::Error;
-using ::sgrn::scl::ErrorCode;
-using ::sgrn::scl::SchemaCode;
+using sgrn::scl::SclError;
 using sgrn::utils::strings::trim;
-
 // ── DbSnapshot Implementation ─────────────────────────────────────────────
 
 DbSnapshot::DbSnapshot(DbSchema t_registry)
@@ -96,18 +92,18 @@ DbSnapshot::~DbSnapshot() {
     }
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> DbSnapshot::read(S7Client& t_client) {
+sgrn::Result<void, ::sgrn::scl::SclError> DbSnapshot::read(S7Client& t_client) {
     if (registry_.size_bytes == 0) {
         return {};
     }
     std::lock_guard lock(state_mutex_);
     if (async_in_progress_) {
-        return Error{SchemaCode::Generic, "Cannot perform synchronous read while an async read is in progress"};
+        return SclError::Generic;
     }
 
     auto proto_res = t_client.readDB(registry_.db_number, 0, registry_.size_bytes, raw_buffer_.back_data());
     if (proto_res.hasError())
-        return Error{SchemaCode::Generic, proto_res.error().string()};
+        return SclError::Generic;
 
     raw_buffer_.swap();
     last_sync_time_ms_ = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -115,13 +111,13 @@ sgrn::Result<void, ::sgrn::scl::Error> DbSnapshot::read(S7Client& t_client) {
     return {};
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> DbSnapshot::beginAsyncRead(S7Client& t_client) {
+sgrn::Result<void, ::sgrn::scl::SclError> DbSnapshot::beginAsyncRead(S7Client& t_client) {
     if (registry_.size_bytes == 0) {
         return {};
     }
     std::lock_guard lock(state_mutex_);
     if (async_in_progress_) {
-        return Error{SchemaCode::Generic, "Async read already in progress"};
+        return SclError::Generic;
     }
 
     last_client_ = &t_client;
@@ -133,7 +129,7 @@ sgrn::Result<void, ::sgrn::scl::Error> DbSnapshot::beginAsyncRead(S7Client& t_cl
     if (proto_res.hasError()) {
         async_in_progress_ = false;
         last_client_ = nullptr;
-        return Error{SchemaCode::Generic, proto_res.error().string()};
+        return SclError::Generic;
     }
     return {};
 }
@@ -153,16 +149,16 @@ void DbSnapshot::commitAsyncRead() {
     last_client_ = nullptr;
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> DbSnapshot::write(S7Client& t_client) {
+sgrn::Result<void, ::sgrn::scl::SclError> DbSnapshot::write(S7Client& t_client) {
     if (registry_.size_bytes == 0)
         return {};
     std::lock_guard lock(state_mutex_);
     if (async_in_progress_) {
-        return Error{SchemaCode::Generic, "Cannot perform synchronous write while an async read is in progress"};
+        return SclError::Generic;
     }
     auto proto_res = t_client.writeDB(registry_.db_number, 0, registry_.size_bytes, raw_buffer_.front_data());
     if (proto_res.hasError())
-        return Error{SchemaCode::Generic, proto_res.error().string()};
+        return SclError::Generic;
 
     is_dirty_ = false;
     return {};
@@ -175,15 +171,15 @@ namespace
 using namespace rapidjson;
 } // namespace
 
-sgrn::Result<std::string, ::sgrn::scl::Error> DbSnapshot::decode() const {
+sgrn::Result<std::string, ::sgrn::scl::SclError> DbSnapshot::decode() const {
     // Wait-free check on buffer size.
     // registry_ is immutable after construction.
     if (raw_buffer_.size() < static_cast<size_t>(registry_.size_bytes)) {
-        return Error{SchemaCode::SerializationError, "Buffer size mismatch"};
+        return SclError::SerializationError;
     }
 
     if (registry_.max_depth > 16) {
-        return Error{SchemaCode::SerializationError, "Max depth exceeded"};
+        return SclError::SerializationError;
     }
 
     StringBuffer sb;
@@ -200,13 +196,13 @@ sgrn::Result<std::string, ::sgrn::scl::Error> DbSnapshot::decode() const {
     return std::string(sb.GetString());
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> DbSnapshot::updateField(const std::string& t_field_path, const std::string& t_value) {
+sgrn::Result<void, ::sgrn::scl::SclError> DbSnapshot::updateField(const std::string& t_field_path, const std::string& t_value) {
     std::lock_guard lock(state_mutex_);
     std::optional<LocatedField> located = ::sgrn::gateway::twin::findFieldByPath(registry_.fields, t_field_path);
     if (!located.has_value()) {
-        return Err::Generic("field '{}' not found in DB{}", t_field_path, registry_.db_number);
+        return SclError::Generic;
     }
-    sgrn::Result<void, ::sgrn::scl::Error> status = ::sgrn::gateway::twin::encodeValue(*located.value().field, t_value,
+    sgrn::Result<void, ::sgrn::scl::SclError> status = ::sgrn::gateway::twin::encodeValue(*located.value().field, t_value,
         raw_buffer_.front_data_rw() + located.value().abs_offset, registry_.size_bytes - located.value().abs_offset);
     if (status.hasError())
         return status;
@@ -222,10 +218,10 @@ sgrn::Result<void, ::sgrn::scl::Error> DbSnapshot::updateField(const std::string
 namespace
 {
 
-sgrn::Result<void, ::sgrn::scl::Error> applyRapidJsonPatch(
+sgrn::Result<void, ::sgrn::scl::SclError> applyRapidJsonPatch(
     const std::vector<DbField>& t_fields, const rapidjson::Value& t_patch, uint8_t* tp_ptr, size_t t_buffer_size) {
     if (!t_patch.IsObject())
-        return Error{SchemaCode::Generic, "Patch must be an object"};
+        return SclError::Generic;
 
     for (const auto& field : t_fields) {
         if (!t_patch.HasMember(field.name.c_str()))
@@ -250,10 +246,10 @@ sgrn::Result<void, ::sgrn::scl::Error> applyRapidJsonPatch(
 }
 } // namespace
 
-sgrn::Result<void, ::sgrn::scl::Error> DbSnapshot::updateFromJson(const std::string& t_json_patch) {
+sgrn::Result<void, ::sgrn::scl::SclError> DbSnapshot::updateFromJson(const std::string& t_json_patch) {
     rapidjson::Document doc;
     if (doc.Parse(t_json_patch.c_str()).HasParseError()) {
-        return Error{SchemaCode::ParseError, "Invalid JSON patch string"};
+        return SclError::ParseError;
     }
 
     std::lock_guard lock(state_mutex_);
@@ -266,19 +262,19 @@ sgrn::Result<void, ::sgrn::scl::Error> DbSnapshot::updateFromJson(const std::str
     return res;
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> DbSnapshot::readField(S7Client& t_client, const std::string& t_field_path) {
+sgrn::Result<void, ::sgrn::scl::SclError> DbSnapshot::readField(S7Client& t_client, const std::string& t_field_path) {
     std::lock_guard lock(state_mutex_);
     if (async_in_progress_) {
-        return Error{SchemaCode::Generic, "Cannot perform field read while an async read is in progress"};
+        return SclError::Generic;
     }
     auto located = ::sgrn::gateway::twin::findFieldByPath(registry_.fields, t_field_path);
     if (!located.has_value())
-        return Err::Generic("field '{}' not found in DB{}", t_field_path, registry_.db_number);
+        return SclError::Generic;
 
     const int size = ::sgrn::gateway::twin::fieldSpanSize(*located.value().field);
     auto proto_res = t_client.readDB(registry_.db_number, located.value().abs_offset, size);
     if (proto_res.hasError())
-        return Error{SchemaCode::Generic, proto_res.error().string()};
+        return SclError::Generic;
     const std::vector<uint8_t>& res_buf = proto_res.value();
 
     std::memcpy(raw_buffer_.front_data_rw() + located.value().abs_offset, res_buf.data(), size);
@@ -287,15 +283,15 @@ sgrn::Result<void, ::sgrn::scl::Error> DbSnapshot::readField(S7Client& t_client,
     return {};
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> DbSnapshot::writeField(
+sgrn::Result<void, ::sgrn::scl::SclError> DbSnapshot::writeField(
     S7Client& t_client, const std::string& t_field_path, const std::string& t_value) {
     std::lock_guard lock(state_mutex_);
     if (async_in_progress_) {
-        return Error{SchemaCode::Generic, "Cannot perform field write while an async read is in progress"};
+        return SclError::Generic;
     }
     std::optional<LocatedField> located = ::sgrn::gateway::twin::findFieldByPath(registry_.fields, t_field_path);
     if (!located.has_value())
-        return Err::Generic("field '{}' not found in DB{}", t_field_path, registry_.db_number);
+        return SclError::Generic;
     const int abs_offset = located.value().abs_offset;
     const DbField& field = *located.value().field;
     const int size = ::sgrn::gateway::twin::fieldSpanSize(field);
@@ -303,7 +299,7 @@ sgrn::Result<void, ::sgrn::scl::Error> DbSnapshot::writeField(
     if (field.type == DataType::Bool) {
         auto cur_res = t_client.readDB(registry_.db_number, abs_offset, size);
         if (cur_res.hasError())
-            return Error{SchemaCode::Generic, cur_res.error().string()};
+            return SclError::Generic;
         std::memcpy(raw_buffer_.front_data_rw() + abs_offset, cur_res.value().data(), size);
         std::memcpy(raw_buffer_.back_data() + abs_offset, cur_res.value().data(), size);
     }
@@ -315,26 +311,26 @@ sgrn::Result<void, ::sgrn::scl::Error> DbSnapshot::writeField(
 
     auto write_res = t_client.writeDB(registry_.db_number, abs_offset, size, raw_buffer_.front_data() + abs_offset);
     if (write_res.hasError())
-        return Error{SchemaCode::Generic, write_res.error().string()};
+        return SclError::Generic;
 
     // Sync back buffer
     std::memcpy(raw_buffer_.back_data() + abs_offset, raw_buffer_.front_data() + abs_offset, size);
     return {};
 }
 
-sgrn::Result<std::string, ::sgrn::scl::Error> DbSnapshot::getFieldValue(const std::string& t_field_path) const {
+sgrn::Result<std::string, ::sgrn::scl::SclError> DbSnapshot::getFieldValue(const std::string& t_field_path) const {
     // Wait-free read from front data
     std::optional<LocatedField> located = ::sgrn::gateway::twin::findFieldByPath(registry_.fields, t_field_path);
     if (!located.has_value())
-        return Error{SchemaCode::Generic, "Field not found"};
+        return SclError::Generic;
 
     return ::sgrn::gateway::twin::decodeFieldAt(
         *located.value().field, raw_buffer_.front_data() + located.value().abs_offset, registry_.size_bytes - located.value().abs_offset);
 }
 
 void DbSnapshot::updateRawRegion(size_t t_offset, const uint8_t* tp_src, size_t t_bytes) {
-    if (!tp_src || t_bytes == 0)
-        return;
+
+    SGRN_RETURN_IF(!tp_src || t_bytes == 0, ;);
 
     std::lock_guard lock(state_mutex_);
 

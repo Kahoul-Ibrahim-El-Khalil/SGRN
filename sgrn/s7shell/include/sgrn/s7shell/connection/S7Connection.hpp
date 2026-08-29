@@ -5,7 +5,7 @@
 #include <sgrn/gateway/twin/DbIOProvider.hpp>
 #include <sgrn/gateway/twin/DbSnapshot.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
-#include <sgrn/gateway/wrappers/s7/ProtocolError.hpp>
+#include <sgrn/gateway/wrappers/s7/error.hpp>
 #include <sgrn/s7shell/PlcTagTable.hpp>
 #include <sgrn/s7shell/runtime/PlcRuntime.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
@@ -72,17 +72,17 @@ struct ScriptS7Connection {
     uint16_t conn_local_tsap_{0x0100};
     uint16_t conn_remote_tsap_{0x0102};
 
-    // ── Error tracking — updated by all S7 operations —————————————
+    // ── SclError tracking — updated by all S7 operations —————————————
     std::string last_error_msg_;
     int last_error_code_{0}; ///< 0 = no error
 
-    void setLastError(const ::sgrn::scl::Error& t_err) {
-        last_error_msg_ = t_err.string();
-        last_error_code_ = static_cast<int>(t_err.code());
+    void setLastError(::sgrn::scl::SclError t_err) {
+        last_error_msg_ = toString(t_err);
+        last_error_code_ = static_cast<int>(t_err);
     }
-    void setLastError(const ::sgrn::gateway::wrappers::s7::S7Error& t_err) {
-        last_error_msg_ = t_err.string();
-        last_error_code_ = static_cast<int>(t_err.code());
+    void setLastError(::sgrn::gateway::wrappers::s7::S7Error t_err) {
+        last_error_msg_ = toString(t_err);
+        last_error_code_ = static_cast<int>(t_err);
     }
     void clearLastError() {
         last_error_msg_.clear();
@@ -105,9 +105,9 @@ struct ScriptS7Connection {
     ~ScriptS7Connection();
 
     void loadRegistry(const std::string& t_path);
-    sgrn::Result<void, ::sgrn::scl::Error> reconnect();
+    sgrn::Result<void, scl::SclError> reconnect();
     void setConnectionSettings(uint16_t t_type, uint16_t t_port, bool t_reconnect_if_connected = true);
-    sgrn::Result<void, ::sgrn::scl::Error> connectWithTsap(const std::string& t_ip, uint16_t t_local_tsap, uint16_t t_remote_tsap);
+    sgrn::Result<void, scl::SclError> connectWithTsap(const std::string& t_ip, uint16_t t_local_tsap, uint16_t t_remote_tsap);
     void setTsapMode(uint16_t t_local_tsap, uint16_t t_remote_tsap);
     void setRackSlotMode();
 
@@ -170,7 +170,7 @@ public:
     bool isConnected() const;
     bool ping(); ///< lightweight PLC liveness check
 
-    // ── Error introspection ──────────────────────────────────────────
+    // ── SclError introspection ──────────────────────────────────────────
     std::string lastError() const; ///< last S7 error message (empty = no error)
     int getLastErrorCode() const;  ///< last S7 error code (0 = no error)
     bool lastOpOk() const {

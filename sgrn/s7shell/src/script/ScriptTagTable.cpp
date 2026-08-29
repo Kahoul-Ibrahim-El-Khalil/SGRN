@@ -21,6 +21,8 @@
 namespace sgrn::s7shell::shell
 {
 
+using sgrn::gateway::wrappers::s7::S7Error;
+using sgrn::scl::SclError;
 ScriptTagTable::ScriptTagTable(ScriptS7Connection* tp_conn)
     : conn_(tp_conn)
     , engine_(conn_->tag_table_ ? std::make_unique<::sgrn::s7shell::S7BatchEngine<::sgrn::s7shell::PlcTagTable>>(*conn_->tag_table_)
@@ -29,12 +31,12 @@ ScriptTagTable::ScriptTagTable(ScriptS7Connection* tp_conn)
 
 ScriptTagTable::~ScriptTagTable() = default;
 
-void ScriptTagTable::notifyConnError(const ::sgrn::scl::Error& t_err) {
+void ScriptTagTable::notifyConnError(SclError t_err) {
     if (conn_)
         conn_->setLastError(t_err);
 }
 
-void ScriptTagTable::notifyConnError(const ::sgrn::gateway::wrappers::s7::S7Error& t_err) {
+void ScriptTagTable::notifyConnError(S7Error t_err) {
     if (conn_)
         conn_->setLastError(t_err);
 }
@@ -68,7 +70,7 @@ void ScriptTagTable::setVal(const std::string& t_path, const std::string& t_json
 std::string ScriptTagTable::get(const std::string& t_path) {
     if (!conn_->tag_table_) {
         last_op_ok_ = false;
-        last_op_err_ = "Tag table not initialized";
+        last_op_err_ = S7Error::ReadError;
         return "null";
     }
     auto res = conn_->tag_table_->get(conn_->client_, t_path);
@@ -92,7 +94,7 @@ bool ScriptTagTable::getBool(const std::string& t_path) {
 void ScriptTagTable::put(const std::string& t_path, const std::string& t_raw_val) {
     if (!conn_->tag_table_) {
         last_op_ok_ = false;
-        last_op_err_ = "Tag table not initialized";
+        last_op_err_ = S7Error::ReadError;
         return;
     }
     const std::string t_json_val = ::sgrn::gateway::twin::parseRawValuePayload(t_raw_val);
@@ -104,7 +106,7 @@ void ScriptTagTable::put(const std::string& t_path, const std::string& t_raw_val
 void ScriptTagTable::put(const std::string& t_path, double t_val) {
     if (!conn_->tag_table_) {
         last_op_ok_ = false;
-        last_op_err_ = "Tag table not initialized";
+        last_op_err_ = S7Error::ReadError;
         return;
     }
     rapidjson::StringBuffer sb;
@@ -118,7 +120,7 @@ void ScriptTagTable::put(const std::string& t_path, double t_val) {
 void ScriptTagTable::put(const std::string& t_path, int32_t t_val) {
     if (!conn_->tag_table_) {
         last_op_ok_ = false;
-        last_op_err_ = "Tag table not initialized";
+        last_op_err_ = S7Error::ReadError;
         return;
     }
     rapidjson::StringBuffer sb;
@@ -132,7 +134,7 @@ void ScriptTagTable::put(const std::string& t_path, int32_t t_val) {
 void ScriptTagTable::put(const std::string& t_path, bool t_val) {
     if (!conn_->tag_table_) {
         last_op_ok_ = false;
-        last_op_err_ = "Tag table not initialized";
+        last_op_err_ = S7Error::ReadError;
         return;
     }
     auto res = conn_->tag_table_->put(conn_->client_, t_path, t_val ? "true" : "false");
@@ -142,75 +144,72 @@ void ScriptTagTable::put(const std::string& t_path, bool t_val) {
 // write (string overload) queues a tag write in the S7BatchEngine (no network action).
 // Queued operations will be sent in one network PDU-optimized chunk when put() is called.
 void ScriptTagTable::write(const std::string& t_path, const std::string& t_raw_val) {
-    if (std::visit([&](const auto& e) { return e == nullptr; }, engine_))
-        return;
+    SGRN_RETURN_IF(isEngineNull(), ;);
     const std::string t_json_val = ::sgrn::gateway::twin::parseRawValuePayload(t_raw_val);
     std::visit([&](auto& e) { e->path(t_path).write(t_json_val); }, engine_);
-    if (std::visit([&](auto& e) { return e->hasError(); }, engine_)) {
+
+    if (doesEngineHaveAnError()) {
         last_op_ok_ = false;
-        last_op_err_ = std::visit([&](auto& e) { return e->getLastError().string(); }, engine_);
+        last_op_err_ = getLastS7ErrorFromEngine();
+
         shell::logError(
             std::visit([&](auto& e) { return e->getLastError(); }, engine_), fmt::format("tags.write('{}', '{}')", t_path, t_raw_val));
     }
 }
 
 void ScriptTagTable::write(const std::string& t_path, double t_val) {
-    if (std::visit([&](const auto& e) { return e == nullptr; }, engine_))
-        return;
+    SGRN_RETURN_IF(isEngineNull(), ;);
     std::visit([&](auto& e) { e->path(t_path).write(t_val); }, engine_);
-    if (std::visit([&](auto& e) { return e->hasError(); }, engine_)) {
+
+    if (doesEngineHaveAnError()) {
         last_op_ok_ = false;
-        last_op_err_ = std::visit([&](auto& e) { return e->getLastError().string(); }, engine_);
-        shell::logError(std::visit([&](auto& e) { return e->getLastError(); }, engine_));
+        last_op_err_ = getLastS7ErrorFromEngine();
     }
 }
 
 void ScriptTagTable::write(const std::string& t_path, int32_t t_val) {
-    if (std::visit([&](const auto& e) { return e == nullptr; }, engine_))
-        return;
+    SGRN_RETURN_IF(isEngineNull(), ;);
     std::visit([&](auto& e) { e->path(t_path).write(t_val); }, engine_);
-    if (std::visit([&](auto& e) { return e->hasError(); }, engine_)) {
+    if (doesEngineHaveAnError()) {
         last_op_ok_ = false;
-        last_op_err_ = std::visit([&](auto& e) { return e->getLastError().string(); }, engine_);
-        shell::logError(std::visit([&](auto& e) { return e->getLastError(); }, engine_));
+
+        last_op_err_ = getLastS7ErrorFromEngine();
     }
 }
 
 void ScriptTagTable::write(const std::string& t_path, bool t_val) {
-    if (std::visit([&](const auto& e) { return e == nullptr; }, engine_))
-        return;
+    SGRN_RETURN_IF(isEngineNull(), ;);
     std::visit([&](auto& e) { e->path(t_path).write(t_val); }, engine_);
-    if (std::visit([&](auto& e) { return e->hasError(); }, engine_)) {
+    if (doesEngineHaveAnError()) {
         last_op_ok_ = false;
-        last_op_err_ = std::visit([&](auto& e) { return e->getLastError().string(); }, engine_);
-        shell::logError(std::visit([&](auto& e) { return e->getLastError(); }, engine_));
+        last_op_err_ = getLastS7ErrorFromEngine();
     }
 }
 
 void ScriptTagTable::write(const std::string& t_path, CScriptDictionary* tp_dict) {
-    if (std::visit([&](const auto& e) { return e == nullptr; }, engine_))
-        return;
+    SGRN_RETURN_IF(isEngineNull(), ;);
     std::visit([&](auto& e) { e->path(t_path).write(shell::convertDictToJson(tp_dict)); }, engine_);
-    if (std::visit([&](auto& e) { return e->hasError(); }, engine_)) {
+    if (doesEngineHaveAnError()) {
         last_op_ok_ = false;
-        last_op_err_ = std::visit([&](auto& e) { return e->getLastError().string(); }, engine_);
-        shell::logError(std::visit([&](auto& e) { return e->getLastError(); }, engine_));
+
+        last_op_err_ = getLastS7ErrorFromEngine();
     }
 }
 
 void ScriptTagTable::write(const std::string& t_path, CScriptArray* tp_arr) {
-    if (std::visit([&](const auto& e) { return e == nullptr; }, engine_))
-        return;
+    SGRN_RETURN_IF(isEngineNull(), ;);
+
     std::visit([&](auto& e) { e->path(t_path).write(shell::convertArrayToJson(tp_arr)); }, engine_);
-    if (std::visit([&](auto& e) { return e->hasError(); }, engine_)) {
+
+    if (doesEngineHaveAnError()) {
         last_op_ok_ = false;
-        last_op_err_ = std::visit([&](auto& e) { return e->getLastError().string(); }, engine_);
-        shell::logError(std::visit([&](auto& e) { return e->getLastError(); }, engine_));
+
+        last_op_err_ = getLastS7ErrorFromEngine();
     }
 }
 
 void ScriptTagTable::put() {
-    sgrn::Result<void, ::sgrn::scl::Error> res = {};
+    sgrn::Result<void, SclError> res = {};
     if (std::visit([&](const auto& e) { return e != nullptr; }, engine_) && !std::visit([&](auto& e) { return e->empty(); }, engine_)) {
         res = std::visit([&](auto& e) { return e->put(conn_->client_); }, engine_);
         std::visit([&](auto& e) { e->reset(); }, engine_); // Always reset the builder engine so it can accept new batches
@@ -228,7 +227,7 @@ void ScriptTagTable::put() {
 void ScriptTagTable::get() {
     if (!conn_->tag_table_) {
         last_op_ok_ = false;
-        last_op_err_ = "Tag table not initialized";
+        last_op_err_ = S7Error::ReadError;
         return;
     }
     auto res = conn_->tag_table_->pullAll(conn_->client_);
@@ -247,22 +246,22 @@ std::string ScriptTagTable::getRetry(const std::string& t_path, int t_max_retrie
         t_max_retries = 1;
     if (!conn_->tag_table_) {
         last_op_ok_ = false;
-        last_op_err_ = "Tag table not initialized";
+        last_op_err_ = S7Error::ReadError;
         return "null";
     }
     for (int attempt = 1; attempt <= t_max_retries; ++attempt) {
         auto res = conn_->tag_table_->get(conn_->client_, t_path);
         if (!res.hasError()) {
             last_op_ok_ = true;
-            last_op_err_.clear();
+
             return res.value();
         }
         last_op_ok_ = false;
-        last_op_err_ = res.error().string();
+        last_op_err_ = res.error();
         if (conn_)
             conn_->setLastError(res.error());
         fmt::print(stderr, fg(fmt::color::yellow), "[S7] TagTable.getRetry('{}') attempt {}/{} failed: {}\n", t_path, attempt,
-            t_max_retries, res.error().string());
+            t_max_retries, toString(res.error()));
         if (attempt < t_max_retries)
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
@@ -274,7 +273,7 @@ bool ScriptTagTable::putRetry(const std::string& t_path, const std::string& t_ra
         t_max_retries = 1;
     if (!conn_->tag_table_) {
         last_op_ok_ = false;
-        last_op_err_ = "Tag table not initialized";
+        last_op_err_ = S7Error::ReadError;
         return false;
     }
     const std::string t_json_val = ::sgrn::gateway::twin::parseRawValuePayload(t_raw_val);
@@ -282,15 +281,15 @@ bool ScriptTagTable::putRetry(const std::string& t_path, const std::string& t_ra
         auto res = conn_->tag_table_->put(conn_->client_, t_path, t_json_val);
         if (!res.hasError()) {
             last_op_ok_ = true;
-            last_op_err_.clear();
+
             return true;
         }
         last_op_ok_ = false;
-        last_op_err_ = res.error().string();
+        last_op_err_ = res.error();
         if (conn_)
             conn_->setLastError(res.error());
         fmt::print(stderr, fg(fmt::color::yellow), "[S7] TagTable.putRetry('{}') attempt {}/{} failed: {}\n", t_path, attempt,
-            t_max_retries, res.error().string());
+            t_max_retries, toString(res.error()));
         if (attempt < t_max_retries)
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }

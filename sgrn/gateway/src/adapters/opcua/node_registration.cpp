@@ -128,15 +128,23 @@ static uint32_t computeFieldSize(const DbField& t_field, bool t_is_array) {
         // struct_size is the per-element byte span after the offset-tracker fix.
         // Return the TOTAL field size (per-element span × element count) so that
         // readDbMemory reads the entire string array in one call.
-        const uint32_t elem_span = static_cast<uint32_t>(
-            t_field.struct_size > 0
-                ? t_field.struct_size
-                : s7codec::typeSpanBytes(t_field.type, t_field.string_capacity > 0 ? t_field.string_capacity : t_field.count));
+        const uint32_t elem_span = [&]() -> uint32_t {
+            if (t_field.struct_size > 0)
+                return static_cast<uint32_t>(t_field.struct_size);
+            auto span_opt = s7codec::typeSpanBytes(t_field.type, t_field.string_capacity > 0 ? t_field.string_capacity : t_field.count);
+            return span_opt ? *span_opt : 0;
+        }();
         const uint32_t n_elems = static_cast<uint32_t>(t_field.count > 0 ? t_field.count : 1);
         return elem_span * n_elems;
     }
 
-    return static_cast<uint32_t>(t_is_array ? s7codec::typeSpanBytes(t_field.type, t_field.count) : s7codec::primitiveSize(t_field.type));
+    if (t_is_array) {
+        auto span_opt = s7codec::typeSpanBytes(t_field.type, t_field.count);
+        return span_opt ? *span_opt : 0;
+    }
+
+    auto prim_opt = s7codec::primitiveSize(t_field.type);
+    return prim_opt ? static_cast<uint32_t>(*prim_opt) : 0;
 }
 
 static void configureVariableAttributes(UA_VariableAttributes& t_v_attr, const DbField& t_field, bool t_is_array, bool t_is_custom_udt,

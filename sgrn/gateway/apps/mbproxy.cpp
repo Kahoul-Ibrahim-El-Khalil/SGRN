@@ -80,7 +80,7 @@ private:
         }
 
         if (!read_ok) {
-            fmt::print(stderr, fg(fmt::color::red), "[{}] Poll Error ({} Addr: {} count: {})\n", plc_name_, map_.type, map_.src_address,
+            fmt::print(stderr, fg(fmt::color::red), "[{}] Poll SclError ({} Addr: {} count: {})\n", plc_name_, map_.type, map_.src_address,
                 map_.count);
             return;
         }
@@ -113,7 +113,7 @@ private:
         }
 
         if (!write_ok) {
-            fmt::print(stderr, fg(fmt::color::red), "[{}] Push Error -> Hub ({} Addr: {})\n", plc_name_, map_.type, map_.dst_address);
+            fmt::print(stderr, fg(fmt::color::red), "[{}] Push SclError -> Hub ({} Addr: {})\n", plc_name_, map_.type, map_.dst_address);
         } else {
             std::memcpy(last_state_.data(), buffer_.data(), buffer_.size());
             first_run_ = false;
@@ -167,7 +167,7 @@ int main_cb(int t_argc, char** tp_argv) {
     const std::string config_path = sgrn::utils::filesystem::expandUserPath(tp_argv[1]);
     auto config_res = parseMbProxyConfig(config_path);
     if (config_res.hasError()) {
-        fmt::print(stderr, fg(fmt::color::red), "Config Error: {}\n", config_res.error());
+        fmt::print(stderr, fg(fmt::color::red), "Config SclError: {}\n", config_res.error());
         return EXIT_FAILURE;
     }
     auto config = std::move(config_res.value());

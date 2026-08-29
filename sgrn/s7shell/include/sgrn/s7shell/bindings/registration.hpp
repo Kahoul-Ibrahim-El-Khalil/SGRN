@@ -165,6 +165,85 @@ inline void Script_resetPlcTime() {
     g_plc_clock.useWallClock();
 }
 
+// ── DTL factory behaviour (called by asBEHAVE_FACTORY) ───────────────────────
+// This allows `DTL myVar;` in scripts to initialize to the current clock time.
+inline ScriptDtl* ScriptDtl_factory() {
+    return makeScriptDtlFromClock();
+}
+
+// ── Time conversion helpers for AngelScript ──────────────────────────────────
+
+/// Returns the current PLC clock value in milliseconds since the Unix epoch.
+inline int64_t script_now_ms() {
+    return static_cast<int64_t>(g_plc_clock.nowMs());
+}
+
+/// Returns the current TIME value (milliseconds since midnight) as an S7 int.
+inline int32_t script_now_time() {
+    std::tm t = g_plc_clock.nowLocalTm();
+    int64_t ms = (static_cast<int64_t>(t.tm_hour) * 3600 + static_cast<int64_t>(t.tm_min) * 60 + static_cast<int64_t>(t.tm_sec)) * 1000 +
+                 static_cast<int64_t>(g_plc_clock.nowMs() % 1000);
+    return static_cast<int32_t>(ms);
+}
+
+/// Returns the current TOD (Time-Of-Day) value in milliseconds since midnight.
+inline uint32_t script_now_tod() {
+    return static_cast<uint32_t>(script_now_time());
+}
+
+/// Formats an S7 TIME value (int, milliseconds) as "T#Xh_Xm_Xs_Xms".
+inline std::string script_formatTime(int32_t t_ms) {
+    bool neg = t_ms < 0;
+    int64_t ms = neg ? -static_cast<int64_t>(t_ms) : static_cast<int64_t>(t_ms);
+    int64_t h = ms / 3600000;
+    ms %= 3600000;
+    int64_t m = ms / 60000;
+    ms %= 60000;
+    int64_t s = ms / 1000;
+    ms %= 1000;
+    return fmt::format("{}T#{}h_{}m_{}s_{}ms", neg ? "-" : "", h, m, s, ms);
+}
+
+/// Formats an S7 DATE value (uint16, days since 1990-01-01) as "YYYY-MM-DD".
+inline std::string script_formatDate(uint16_t t_days) {
+    // S7 DATE epoch is 1990-01-01
+    std::time_t epoch = 631152000; // 1990-01-01 00:00:00 UTC
+    std::time_t ts = epoch + static_cast<std::time_t>(t_days) * 86400;
+    std::tm* tm_val = std::gmtime(&ts);
+    if (!tm_val)
+        return "DATE#invalid";
+    return fmt::format("DATE#{:04d}-{:02d}-{:02d}", tm_val->tm_year + 1900, tm_val->tm_mon + 1, tm_val->tm_mday);
+}
+
+/// Formats an S7 TOD value (uint, milliseconds since midnight) as "HH:MM:SS.mmm".
+inline std::string script_formatTOD(uint32_t t_ms) {
+    uint32_t h = t_ms / 3600000;
+    t_ms %= 3600000;
+    uint32_t m = t_ms / 60000;
+    t_ms %= 60000;
+    uint32_t s = t_ms / 1000;
+    t_ms %= 1000;
+    return fmt::format("TOD#{:02d}:{:02d}:{:02d}.{:03d}", h, m, s, t_ms);
+}
+
+/// Converts a DTL@ object to its TIME-of-day value in milliseconds since midnight.
+inline int32_t script_dtlToTimeMs(ScriptDtl* tp_dtl) {
+    if (!tp_dtl)
+        return 0;
+    const std::string& ts = tp_dtl->timestamp_str_;
+    // DTL string format: "YYYY-MM-DD HH:MM:SS.nnnnnnnnn"
+    if (ts.size() < 19)
+        return 0;
+    int h = 0, m = 0, s = 0;
+    std::sscanf(ts.c_str() + 11, "%d:%d:%d", &h, &m, &s);
+    return static_cast<int32_t>((h * 3600 + m * 60 + s) * 1000);
+}
+
+/// Converts a DTL@ object to its TOD value in milliseconds since midnight.
+inline uint32_t script_dtlToTodMs(ScriptDtl* tp_dtl) {
+    return static_cast<uint32_t>(script_dtlToTimeMs(tp_dtl));
+}
+
 inline void printFloat(float t_v) {
     fmt::print("{}\n", t_v);
 }
@@ -290,7 +369,7 @@ public:
         auto res = impl_->getMemory().writeBit(t_db, t_byte_offset, t_bit_index, t_value);
         if (res.hasError()) {
             fmt::print(stderr, fg(fmt::color::red), "[PlcRuntime] setBit(DB{}.{}.{}) failed: {}\n", t_db, t_byte_offset, t_bit_index,
-                res.error().message());
+                toString(res.error()));
             return false;
         }
         impl_->markDirty(t_db, t_byte_offset, 1);
@@ -355,6 +434,8 @@ public:
                 return "DATE";
             case T::TimeOfDay:
                 return "TOD";
+            case T::LTimeOfDay:
+                return "LTOD";
             case T::DTL:
             case T::DateTime:
                 return "DTL";
@@ -390,7 +471,10 @@ public:
                 if (f.count > 1)
                     type_col += fmt::format("[{}]", f.count);
             }
-            int span = s7codec::typeSpanBytes(f.type, f.count > 0 ? f.count : 1);
+            int span = [&]() -> int {
+                auto opt = s7codec::typeSpanBytes(f.type, f.count > 0 ? f.count : 1);
+                return opt ? static_cast<int>(*opt) : 0;
+            }();
             if (f.struct_size > 0)
                 span = f.struct_size;
             t_rows.emplace_back(indent + f.name, type_col, f.offset, fmt::format("{} B", span));

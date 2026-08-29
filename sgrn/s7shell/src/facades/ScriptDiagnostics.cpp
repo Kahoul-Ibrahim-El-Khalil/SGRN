@@ -48,7 +48,7 @@ std::string ScriptS7Diagnostics::pduInfo() const {
         return "Error: not connected";
     auto r = conn_->client_.getPduLength();
     if (r.hasError())
-        return fmt::format("Error: {}", r.error().string());
+        return fmt::format("Error: {}", toString(r.error()));
     return fmt::format("requested={} negotiated={}", r->requested, r->negotiated);
 }
 
@@ -70,7 +70,7 @@ std::string ScriptS7Diagnostics::cpuInfo() const {
         return "Error: not connected";
     auto r = conn_->client_.getCpuInfo();
     if (r.hasError())
-        return fmt::format("Error: {}", r.error().string());
+        return fmt::format("Error: {}", toString(r.error()));
     return fmt::format("Module Type : {}\nSerial No   : {}\nAS Name     : {}\nCopyright   : {}\nModule Name : {}\n", r->module_type_name,
         r->serial_number, r->as_name, r->copyright, r->module_name);
 }
@@ -80,7 +80,7 @@ std::string ScriptS7Diagnostics::orderCode() const {
         return "Error: not connected";
     auto r = conn_->client_.getOrderCode();
     if (r.hasError())
-        return fmt::format("Error: {}", r.error().string());
+        return fmt::format("Error: {}", toString(r.error()));
     return fmt::format("Order Code  : {}\nFirmware    : {}.{}.{}\n", r->code, r->version_major, r->version_minor, r->version_patch);
 }
 
@@ -89,7 +89,7 @@ std::string ScriptS7Diagnostics::cpInfo() const {
         return "Error: not connected";
     auto r = conn_->client_.getCpInfo();
     if (r.hasError())
-        return fmt::format("Error: {}", r.error().string());
+        return fmt::format("Error: {}", toString(r.error()));
     return fmt::format("Max PDU     : {}\nMax Conn    : {}\nMax MPI     : {}\nMax Bus     : {}\n", r->max_pdu_length, r->max_connections,
         r->max_mpi_rate, r->max_bus_rate);
 }
@@ -103,7 +103,7 @@ std::string ScriptS7Diagnostics::diagnosticBuffer(int t_count) const {
         return "Error: not connected";
     auto r = conn_->client_.readDiagnosticBuffer();
     if (r.hasError())
-        return fmt::format("Error: {}", r.error().string());
+        return fmt::format("Error: {}", toString(r.error()));
     const int n = std::max(0, std::min(t_count, static_cast<int>(r->size())));
     std::string out = fmt::format("Last {} diagnostic entries:\n", n);
     const int start = std::max(0, static_cast<int>(r->size()) - n);
@@ -120,7 +120,7 @@ std::string ScriptS7Diagnostics::szl(int t_id, int t_index) const {
         return "Error: not connected";
     auto r = conn_->client_.readSzl(t_id, t_index);
     if (r.hasError())
-        return fmt::format("Error: {}", r.error().string());
+        return fmt::format("Error: {}", toString(r.error()));
     const auto& szl = r.value();
     const int entry_len = szl.Header.LENTHDR;
     const int entry_count = szl.Header.N_DR;
@@ -142,7 +142,7 @@ std::string ScriptS7Diagnostics::listBlocks() const {
         return "Error: not connected";
     auto r = conn_->client_.listBlocks();
     if (r.hasError())
-        return fmt::format("Error: {}", r.error().string());
+        return fmt::format("Error: {}", toString(r.error()));
     return fmt::format("OB={} FB={} FC={} SFB={} SFC={} DB={} SDB={}\n", r->ob_count, r->fb_count, r->fc_count, r->sfb_count, r->sfc_count,
         r->db_count, r->sdb_count);
 }
@@ -152,7 +152,7 @@ std::string ScriptS7Diagnostics::listBlocksOfType(int t_block_type) const {
         return "Error: not connected";
     auto r = conn_->client_.listBlocksOfType(t_block_type);
     if (r.hasError())
-        return fmt::format("Error: {}", r.error().string());
+        return fmt::format("Error: {}", toString(r.error()));
     std::string out;
     for (uint16_t num : r.value())
         out += fmt::format("{}\n", num);
@@ -164,7 +164,7 @@ std::string ScriptS7Diagnostics::blockInfo(int t_block_type, uint16_t t_block_nu
         return "Error: not connected";
     auto r = conn_->client_.getAgBlockInfo(t_block_type, t_block_number);
     if (r.hasError())
-        return fmt::format("Error: {}", r.error().string());
+        return fmt::format("Error: {}", toString(r.error()));
     return shell::formatBlockInfo(r.value());
 }
 
@@ -173,7 +173,7 @@ std::string ScriptS7Diagnostics::protection() const {
         return "Error: not connected";
     auto r = conn_->client_.getProtection();
     if (r.hasError())
-        return fmt::format("Error: {}", r.error().string());
+        return fmt::format("Error: {}", toString(r.error()));
     return fmt::format(
         "sch_schal={} sch_par={} sch_rel={} bart_sch={} anl_sch={}\n", r->sch_schal, r->sch_par, r->sch_rel, r->bart_sch, r->anl_sch);
 }

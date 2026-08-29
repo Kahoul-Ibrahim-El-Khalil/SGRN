@@ -60,9 +60,9 @@ The configuration is organized into nested blocks. At least one protocol under `
 
   "datastore": {
     "url": "https://localhost:8443",
-    "public_token": "ptk_...",
-    "private_token": "stk_...",
-    "object_name": "MyGateway",
+    "public_token": "1e78dbe3-1f5b-404f-89c1-ae0c07e98c5c",
+    "private_token": "FEcPKSxEuJzpst-MYcR8OlQWzFYxPoVDK9Sk3qmGn6A",
+    "object_name": "gateway-simulation",
     "upload_mode": "telemetry",
     "telemetry_enabled": true,
     "vfs_remote_dir": "/gateway/snapshots",

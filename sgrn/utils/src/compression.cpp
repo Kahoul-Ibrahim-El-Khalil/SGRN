@@ -2,6 +2,7 @@
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/compression.hpp>
 
+#include <algorithm>
 #include <cstdio> // FILE, fopen, fclose, fread, fwrite
 #include <filesystem>
 #include <string>
@@ -308,6 +309,280 @@ Result<size_t> compressFileStreamingZstd(const fs::path& t_src, const fs::path& 
 
     // 7) Return final compressed size
     return fs::file_size(t_dest);
+}
+
+// -----------------------------------------------------------------------------
+// ZstdLineWriter — long-lived incremental line-oriented compression stream.
+// -----------------------------------------------------------------------------
+
+ZstdLineWriter::ZstdLineWriter(const fs::path& t_path, int t_level) {
+    p_file_ = fopen(t_path.string().c_str(), "wb");
+    if (!p_file_) {
+        init_error_ = "ZstdLineWriter: cannot open output file: " + t_path.string();
+        return;
+    }
+
+    p_cstream_ = ZSTD_createCStream();
+    if (!p_cstream_) {
+        init_error_ = "ZstdLineWriter: failed to create compression stream";
+        return;
+    }
+
+    size_t const init_result = ZSTD_initCStream(p_cstream_, t_level);
+    if (ZSTD_isError(init_result)) {
+        init_error_ = fmt::format("ZstdLineWriter: zstd init error: {}", ZSTD_getErrorName(init_result));
+        ZSTD_freeCStream(p_cstream_);
+        p_cstream_ = nullptr;
+        fclose(p_file_);
+        p_file_ = nullptr;
+        return;
+    }
+
+    in_buf_.resize(ZSTD_CStreamInSize());
+    out_buf_.resize(ZSTD_CStreamOutSize());
+    if (in_buf_.empty() || out_buf_.empty()) {
+        init_error_ = "ZstdLineWriter: failed to allocate stream buffers";
+        ZSTD_freeCStream(p_cstream_);
+        p_cstream_ = nullptr;
+        fclose(p_file_);
+        p_file_ = nullptr;
+    }
+}
+
+ZstdLineWriter::~ZstdLineWriter() {
+    if (!closed_) {
+        (void)close();
+    }
+}
+
+Result<void> ZstdLineWriter::writeLine(std::string_view t_line) {
+    if (closed_) {
+        return Error("ZstdLineWriter: write failed — writer already closed");
+    }
+    if (poisoned_) {
+        return Error(init_error_.empty() ? "ZstdLineWriter: write failed — writer in poisoned state" : init_error_);
+    }
+    if (t_line.size() > kMaxLineBytes) {
+        poisoned_ = true;
+        return Error(fmt::format("ZstdLineWriter: line exceeds maximum allowed size ({})", kMaxLineBytes));
+    }
+
+    // Feed the line through the stream in in_buf_-sized chunks so a very large
+    // line never needs a contiguous copy of itself.
+    size_t processed = 0;
+    while (processed < t_line.size()) {
+        const size_t chunk = std::min(t_line.size() - processed, in_buf_.size());
+        ZSTD_inBuffer input{t_line.data() + processed, chunk, 0};
+        while (input.pos < input.size) {
+            ZSTD_outBuffer output{out_buf_.data(), out_buf_.size(), 0};
+            size_t const ret = ZSTD_compressStream(p_cstream_, &output, &input);
+            if (ZSTD_isError(ret)) {
+                poisoned_ = true;
+                return Error(fmt::format("ZstdLineWriter: zstd error: {}", ZSTD_getErrorName(ret)));
+            }
+            if (output.pos > 0 && fwrite(out_buf_.data(), 1, output.pos, p_file_) != output.pos) {
+                poisoned_ = true;
+                return Error("ZstdLineWriter: failed to write compressed output to file");
+            }
+            bytes_out_ += output.pos;
+        }
+        processed += chunk;
+    }
+
+    // Terminate the JSONL record.
+    const char newline = '\n';
+    ZSTD_inBuffer input{&newline, 1, 0};
+    while (input.pos < input.size) {
+        ZSTD_outBuffer output{out_buf_.data(), out_buf_.size(), 0};
+        size_t const ret = ZSTD_compressStream(p_cstream_, &output, &input);
+        if (ZSTD_isError(ret)) {
+            poisoned_ = true;
+            return Error(fmt::format("ZstdLineWriter: zstd error: {}", ZSTD_getErrorName(ret)));
+        }
+        if (output.pos > 0 && fwrite(out_buf_.data(), 1, output.pos, p_file_) != output.pos) {
+            poisoned_ = true;
+            return Error("ZstdLineWriter: failed to write compressed output to file");
+        }
+        bytes_out_ += output.pos;
+    }
+
+    return {};
+}
+
+Result<void> ZstdLineWriter::close() {
+    if (closed_)
+        return {};
+
+    Result<void> res;
+
+    // Finish the ZSTD frame (drains any data buffered inside the compressor).
+    size_t remaining = 1;
+    while (remaining != 0) {
+        ZSTD_outBuffer output{out_buf_.data(), out_buf_.size(), 0};
+        remaining = ZSTD_endStream(p_cstream_, &output);
+        if (ZSTD_isError(remaining)) {
+            res = Error(fmt::format("ZstdLineWriter: end-stream error: {}", ZSTD_getErrorName(remaining)));
+            poisoned_ = true;
+            break;
+        }
+        if (output.pos > 0 && fwrite(out_buf_.data(), 1, output.pos, p_file_) != output.pos) {
+            res = Error("ZstdLineWriter: failed to flush compressed output to file");
+            poisoned_ = true;
+            break;
+        }
+        bytes_out_ += output.pos;
+    }
+
+    if (p_cstream_) {
+        ZSTD_freeCStream(p_cstream_);
+        p_cstream_ = nullptr;
+    }
+    if (p_file_) {
+        fclose(p_file_);
+        p_file_ = nullptr;
+    }
+    closed_ = true;
+    return res;
+}
+// -----------------------------------------------------------------------------
+// ZstdLineReader — incremental line-oriented decompression stream.
+// -----------------------------------------------------------------------------
+
+ZstdLineReader::ZstdLineReader(const fs::path& t_path) {
+    p_file_ = fopen(t_path.string().c_str(), "rb");
+    if (!p_file_) {
+        error_ = true;
+        error_message_ = "ZstdLineReader: cannot open input file: " + t_path.string();
+        return;
+    }
+
+    p_dstream_ = ZSTD_createDStream();
+    if (!p_dstream_) {
+        error_ = true;
+        error_message_ = "ZstdLineReader: failed to create decompression stream";
+        fclose(p_file_);
+        p_file_ = nullptr;
+        return;
+    }
+
+    size_t const init_result = ZSTD_initDStream(p_dstream_);
+    if (ZSTD_isError(init_result)) {
+        error_ = true;
+        error_message_ = fmt::format("ZstdLineReader: zstd init error: {}", ZSTD_getErrorName(init_result));
+        ZSTD_freeDStream(p_dstream_);
+        p_dstream_ = nullptr;
+        fclose(p_file_);
+        p_file_ = nullptr;
+        return;
+    }
+
+    in_buf_.resize(ZSTD_DStreamInSize());
+    out_buf_.resize(ZSTD_DStreamOutSize());
+    if (in_buf_.empty() || out_buf_.empty()) {
+        error_ = true;
+        error_message_ = "ZstdLineReader: failed to allocate stream buffers";
+        ZSTD_freeDStream(p_dstream_);
+        p_dstream_ = nullptr;
+        fclose(p_file_);
+        p_file_ = nullptr;
+    }
+}
+
+ZstdLineReader::~ZstdLineReader() {
+    if (p_dstream_) {
+        ZSTD_freeDStream(p_dstream_);
+        p_dstream_ = nullptr;
+    }
+    if (p_file_) {
+        fclose(p_file_);
+        p_file_ = nullptr;
+    }
+}
+
+bool ZstdLineReader::refill() {
+    // Decompress until new output is available, the compressed input runs out,
+    // or the frame ends.
+    size_t safety = 0;
+    while (true) {
+        if (in_pos_ == in_size_) {
+            in_size_ = fread(in_buf_.data(), 1, in_buf_.size(), p_file_);
+            in_pos_ = 0;
+            if (in_size_ == 0) {
+                eof_ = true;
+                return false;
+            }
+        }
+
+        ZSTD_inBuffer in{in_buf_.data(), in_size_, in_pos_};
+        ZSTD_outBuffer out{out_buf_.data(), out_buf_.size(), 0};
+        size_t const ret = ZSTD_decompressStream(p_dstream_, &out, &in);
+        if (ZSTD_isError(ret)) {
+            error_ = true;
+            error_message_ = fmt::format("ZstdLineReader: zstd stream error: {}", ZSTD_getErrorName(ret));
+            return false;
+        }
+
+        in_pos_ = in.pos;
+
+        if (out.pos > 0) {
+            pending_.append(out_buf_.data(), out.pos);
+            if (pending_.size() > kMaxLineBytes) {
+                error_ = true;
+                error_message_ = fmt::format("ZstdLineReader: line exceeds maximum allowed size ({})", kMaxLineBytes);
+                return false;
+            }
+            return true;
+        }
+
+        // No output this round but the stream is progressing — a frame just
+        // completed. Keep feeding until output appears or input runs out.
+        if (ret == 0 && in_pos_ == in_size_) {
+            eof_ = true;
+            return false;
+        }
+
+        // Safety net against pathological streams that burn CPU without ever
+        // producing output.
+        if (++safety > (1ULL << 20)) {
+            error_ = true;
+            error_message_ = "ZstdLineReader: decompression made no progress";
+            return false;
+        }
+    }
+}
+
+bool ZstdLineReader::readLine(std::string& t_out) {
+    if (error_)
+        return false;
+
+    while (true) {
+        const size_t nl = pending_.find('\n');
+        if (nl != std::string::npos) {
+            t_out.assign(pending_.data(), nl);
+            pending_.erase(0, nl + 1);
+            ++line_index_;
+            return true;
+        }
+
+        if (pending_.size() >= kMaxLineBytes) {
+            error_ = true;
+            error_message_ = fmt::format("ZstdLineReader: line exceeds maximum allowed size ({})", kMaxLineBytes);
+            return false;
+        }
+
+        if (eof_ || !refill()) {
+            if (error_)
+                return false;
+            // Clean EOF — yield a trailing unterminated record if one exists.
+            if (!pending_.empty()) {
+                t_out = std::move(pending_);
+                pending_.clear();
+                ++line_index_;
+                return true;
+            }
+            return false;
+        }
+    }
 }
 
 } // namespace sgrn::utils::compression

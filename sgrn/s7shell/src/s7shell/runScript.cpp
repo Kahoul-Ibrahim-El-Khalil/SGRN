@@ -32,6 +32,7 @@ namespace sgrn::s7shell::shell
 namespace fs = std::filesystem;
 
 using sgrn::Result;
+using ::sgrn::scl::SclError;
 using sgrn::utils::filesystem::expandUserPath;
 // Forward declaration — scanIncludes() recurses back into preScanFile() for
 // each resolved #include/import target.
@@ -105,7 +106,7 @@ static Result<std::string, std::string> extractLiteralOrConstArg(const std::stri
 // it onto a directory and lexically-normalizing it is meaningless (and
 // potentially corrupting) for literal SCL source text.
 // ─────────────────────────────────────────────────────────────────────────────
-static Result<::sgrn::scl::PlcSchemaStore, ::sgrn::scl::Error> loadScannedSchema(
+static Result<::sgrn::scl::PlcSchemaStore, SclError> loadScannedSchema(
     const std::string& t_method, const std::string& t_raw_arg, const fs::path& t_script_dir) {
     const auto resolved = resolveAgainstBase(t_script_dir, t_raw_arg);
 
@@ -116,7 +117,7 @@ static Result<::sgrn::scl::PlcSchemaStore, ::sgrn::scl::Error> loadScannedSchema
         ::sgrn::scl::PlcSchemaStore store;
         auto res = store.loadFile(resolved);
         if (res.hasError())
-            return Error(res.error());
+            return res.error();
         return store;
     }
 
@@ -124,12 +125,12 @@ static Result<::sgrn::scl::PlcSchemaStore, ::sgrn::scl::Error> loadScannedSchema
     // Only SCL-flavored calls (loadSclSchema/loadSchema) support this;
     // loadJsonSchema stays file-only.
     if (t_method == "loadJsonSchema")
-        return Error(::sgrn::scl::Err::NotFound("inline JSON schema content isn't supported by loadJsonSchema()"));
+        return SclError::NotFound;
 
     ::sgrn::scl::PlcSchemaStore store;
     auto res = store.loadSchema(t_raw_arg); // raw arg, not `resolved`
     if (res.hasError()) {
-        return Error(res.error());
+        return res.error();
     }
     return store;
 }
@@ -205,7 +206,7 @@ static void scanSchemaLoads(const std::string& t_content, const std::string& t_a
                 auto store_res = loadScannedSchema(method, literal.value(), script_dir);
                 if (store_res.hasError()) {
                     fmt::print(stderr, fg(fmt::color::red), "[s7shell] Schema compilation failed for {}('{}'): {}\n", method,
-                        literal.value(), store_res.error().string());
+                        literal.value(), toString(store_res.error()));
                 } else {
                     registerScannedSchema(tp_script_engine, tp_repl_module, store_res.value(), client_var, t_db_preamble);
                 }
@@ -240,7 +241,7 @@ static void scanPlcRuntimeConstructors(const std::string& t_content, const std::
                 auto store_res = loadScannedSchema("loadSclSchema", *literal, script_dir);
                 if (store_res.hasError()) {
                     fmt::print(stderr, fg(fmt::color::red), "[s7shell] Schema compilation failed for PlcRuntime('{}'): {}\n", *literal,
-                        store_res.error().string());
+                        toString(store_res.error()));
                 } else {
                     registerScannedSchema(tp_script_engine, tp_repl_module, store_res.value(), "plc", t_db_preamble);
                 }

@@ -58,7 +58,7 @@ NetworkResult<std::string> addressToString(const sockaddr_storage& addr, uint16_
 
 } // namespace
 
-// ---- Error strings ----
+// ---- SchemaError strings ----
 
 const char* toString(NetworkIpParsingError code) noexcept {
     using enum NetworkIpParsingError;

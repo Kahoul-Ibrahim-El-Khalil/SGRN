@@ -53,7 +53,25 @@ void serializeFieldTo(Writer& t_writer, const DbField& t_field, const uint8_t* p
             }
             break;
         case s7codec::ValueKind::UnsignedInt:
-            if (t_field.type == DataType::Byte) {
+            if (t_field.type == DataType::Char) {
+                char c = static_cast<char>(dv.u());
+                std::string s(1, c);
+                t_writer.String(s.c_str(), 1);
+            } else if (t_field.type == DataType::WChar) {
+                uint16_t wc = static_cast<uint16_t>(dv.u());
+                std::string s;
+                if (wc < 0x80) {
+                    s += static_cast<char>(wc);
+                } else if (wc < 0x800) {
+                    s += static_cast<char>(0xC0 | (wc >> 6));
+                    s += static_cast<char>(0x80 | (wc & 0x3F));
+                } else {
+                    s += static_cast<char>(0xE0 | (wc >> 12));
+                    s += static_cast<char>(0x80 | ((wc >> 6) & 0x3F));
+                    s += static_cast<char>(0x80 | (wc & 0x3F));
+                }
+                t_writer.String(s.c_str(), static_cast<rapidjson::SizeType>(s.length()));
+            } else if (t_field.type == DataType::Byte) {
                 std::string s = fmt::format("0x{:02X}", static_cast<uint8_t>(dv.u()));
                 t_writer.String(s.c_str(), static_cast<rapidjson::SizeType>(s.length()));
             } else if (t_field.type == DataType::Word) {
@@ -104,8 +122,8 @@ void serializeComplexFieldTo(Writer& t_writer, const DbField& t_field, const uin
     if (t_field.type == DataType::Struct) {
         if (t_field.count > 1) {
             t_writer.StartArray();
-            int struct_size = std::max(1, t_field.struct_size);
-            for (int i = 0; i < t_field.count; ++i) {
+            uint32_t struct_size = std::max(static_cast<uint32_t>(1), t_field.struct_size);
+            for (uint32_t i = 0; i < t_field.count; ++i) {
                 int elem_offset = t_field.offset + (i * struct_size);
                 if (static_cast<size_t>(elem_offset + struct_size) > t_buffer_size)
                     break;
@@ -116,7 +134,8 @@ void serializeComplexFieldTo(Writer& t_writer, const DbField& t_field, const uin
 
                 t_writer.StartObject();
                 for (const auto& child : t_field.children) {
-                    if (overlapsAnyRange(elem_offset + child.offset, s7codec::typeSpanBytes(child.type, child.count), t_ranges)) {
+                    if (overlapsAnyRange(
+                            elem_offset + child.offset, s7codec::typeSpanBytes(child.type, child.count).value_or(0), t_ranges)) {
                         t_writer.Key(child.name.c_str(), static_cast<rapidjson::SizeType>(child.name.length()));
                         serializeComplexFieldTo(
                             t_writer, child, tp_base_ptr + elem_offset, t_buffer_size - elem_offset, t_ranges, t_depth + 1);
@@ -129,7 +148,8 @@ void serializeComplexFieldTo(Writer& t_writer, const DbField& t_field, const uin
             t_writer.StartObject();
             for (const auto& child : t_field.children) {
                 // Nested check: only serialize dirty children
-                if (overlapsAnyRange(t_field.offset + child.offset, s7codec::typeSpanBytes(child.type, child.count), t_ranges)) {
+                if (overlapsAnyRange(
+                        t_field.offset + child.offset, s7codec::typeSpanBytes(child.type, child.count).value_or(0), t_ranges)) {
                     t_writer.Key(child.name.c_str(), static_cast<rapidjson::SizeType>(child.name.length()));
                     serializeComplexFieldTo(t_writer, child, p_ptr, t_buffer_size - t_field.offset, t_ranges, t_depth + 1);
                 }
@@ -138,8 +158,8 @@ void serializeComplexFieldTo(Writer& t_writer, const DbField& t_field, const uin
         }
     } else if (t_field.count > 1 && t_field.type != DataType::String && t_field.type != DataType::WString) {
         t_writer.StartArray();
-        int elem_size = s7codec::primitiveSize(t_field.type);
-        for (int i = 0; i < t_field.count; ++i) {
+        uint32_t elem_size = s7codec::primitiveSize(t_field.type).value_or(0);
+        for (uint32_t i = 0; i < t_field.count; ++i) {
             int elem_offset = t_field.offset + (i * elem_size);
             if (static_cast<size_t>(elem_offset + elem_size) > t_buffer_size)
                 break;

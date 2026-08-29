@@ -18,7 +18,8 @@ static sgrn::FieldDefinition toCoreField(const DbField& t_f) {
     sgrn::FieldDefinition core;
     core.name = t_f.name;
     core.offset = t_f.offset;
-    core.size = s7codec::typeSpanBytes(t_f.type, t_f.count);
+    auto span = s7codec::typeSpanBytes(t_f.type, t_f.count);
+    core.size = span ? static_cast<size_t>(*span) : 0;
     core.bit_index = t_f.bit_index;
     core.count = t_f.count;
     core.template_name = t_f.udt_name;
@@ -74,50 +75,50 @@ void PlcSchemaStore::rebuildIndices() {
 
 // ── Factory Methods ─────────────────────────────────────────────────────────
 
-sgrn::Result<PlcSchemaStore, ::sgrn::scl::Error> PlcSchemaStore::loadFromDirectory(const std::string& t_symbols_dir, bool t_force) {
+sgrn::Result<PlcSchemaStore, SclError> PlcSchemaStore::loadFromDirectory(const std::string& t_symbols_dir, bool t_force) {
     PlcSchemaStore store;
     auto res = SclCompiler::loadFromDirectory(store, t_symbols_dir, t_force);
     if (res.hasError())
-        return Error(res.error());
+        return res.error();
     return store;
 }
 
-sgrn::Result<PlcSchemaStore, ::sgrn::scl::Error> PlcSchemaStore::loadFromFile(const std::string& t_filepath, bool t_force) {
+sgrn::Result<PlcSchemaStore, SclError> PlcSchemaStore::loadFromFile(const std::string& t_filepath, bool t_force) {
     return loadFromFiles({t_filepath}, t_force);
 }
 
-sgrn::Result<PlcSchemaStore, ::sgrn::scl::Error> PlcSchemaStore::loadFromFiles(const std::vector<std::string>& t_filepaths, bool t_force) {
+sgrn::Result<PlcSchemaStore, SclError> PlcSchemaStore::loadFromFiles(const std::vector<std::string>& t_filepaths, bool t_force) {
     PlcSchemaStore store;
     auto res = SclCompiler::loadFromFiles(store, t_filepaths, t_force);
     if (res.hasError())
-        return Error(res.error());
+        return res.error();
     return store;
 }
 
-sgrn::Result<PlcSchemaStore, ::sgrn::scl::Error> PlcSchemaStore::loadFromJsonFile(const std::string& t_path) {
+sgrn::Result<PlcSchemaStore, SclError> PlcSchemaStore::loadFromJsonFile(const std::string& t_path) {
     std::ifstream file(t_path);
     if (!file.is_open())
-        return Err::FileNotFound("cannot open symbol JSON file: {}", t_path);
+        return SclError::FileNotFound;
 
     std::string json_str((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     rapidjson::Document t_root;
     t_root.Parse(json_str.c_str());
     if (t_root.HasParseError())
-        return Err::ParseError("failed to parse symbol JSON '{}': offset {}", t_path, t_root.GetErrorOffset());
+        return SclError::ParseError;
 
-    sgrn::Result<PlcSchemaStore, ::sgrn::scl::Error> store_res = loadFromJson(t_root);
+    auto store_res = loadFromJson(t_root);
     if (store_res.hasError())
-        return Error(store_res.error());
+        return store_res.error();
 
     store_res->base_dir_ = fs::path(t_path).parent_path().string();
     return store_res;
 }
 
-sgrn::Result<PlcSchemaStore, ::sgrn::scl::Error> PlcSchemaStore::loadFromJson(const rapidjson::Value& t_root) {
+sgrn::Result<PlcSchemaStore, SclError> PlcSchemaStore::loadFromJson(const rapidjson::Value& t_root) {
     PlcSchemaStore store;
     auto res = SchemaSerializer::deserialize(store, t_root);
     if (res.hasError())
-        return Error(res.error());
+        return res.error();
     return store;
 }
 
@@ -131,17 +132,17 @@ bool PlcSchemaStore::hasDb(const std::string& t_db_name) const {
     return dbs_by_name_.count(t_db_name) > 0;
 }
 
-sgrn::Result<const DbSchema*, ::sgrn::scl::Error> PlcSchemaStore::getDb(uint16_t t_db_number) const {
+sgrn::Result<const DbSchema*, ::sgrn::scl::SclError> PlcSchemaStore::getDb(uint16_t t_db_number) const {
     auto it = dbs_.find(t_db_number);
     if (it == dbs_.end())
-        return Err::NotFound("DB{} has no symbol file loaded", t_db_number);
+        return SclError::NotFound;
     return &it->second;
 }
 
-sgrn::Result<const DbSchema*, ::sgrn::scl::Error> PlcSchemaStore::getDbByName(const std::string& t_db_name) const {
+sgrn::Result<const DbSchema*, ::sgrn::scl::SclError> PlcSchemaStore::getDbByName(const std::string& t_db_name) const {
     auto it = dbs_by_name_.find(t_db_name);
     if (it == dbs_by_name_.end())
-        return Err::NotFound("DB '{}' has no symbol file loaded", t_db_name);
+        return SclError::NotFound;
     return it->second;
 }
 
@@ -232,27 +233,27 @@ bool PlcSchemaStore::hasUdt(const std::string& t_udt_name) const {
     return udts_by_name_.count(t_udt_name) > 0;
 }
 
-sgrn::Result<const UdtDefinition*, ::sgrn::scl::Error> PlcSchemaStore::getUdt(uint16_t t_udt_number) const {
+sgrn::Result<const UdtDefinition*, ::sgrn::scl::SclError> PlcSchemaStore::getUdt(uint16_t t_udt_number) const {
     auto it = udts_by_number_.find(t_udt_number);
     if (it == udts_by_number_.end())
-        return Err::NotFound("UDT{} has no symbol file loaded", t_udt_number);
+        return SclError::NotFound;
     return it->second;
 }
 
-sgrn::Result<const UdtDefinition*, ::sgrn::scl::Error> PlcSchemaStore::getUdtByName(const std::string& t_udt_name) const {
+sgrn::Result<const UdtDefinition*, ::sgrn::scl::SclError> PlcSchemaStore::getUdtByName(const std::string& t_udt_name) const {
     auto it = udts_by_name_.find(t_udt_name);
     if (it == udts_by_name_.end())
-        return Err::NotFound("UDT '{}' has no symbol file loaded", t_udt_name);
+        return SclError::NotFound;
     return it->second;
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> PlcSchemaStore::addDb(DbSchema&& t_reg, bool t_force, bool t_rebuild_index) {
+sgrn::Result<void, ::sgrn::scl::SclError> PlcSchemaStore::addDb(DbSchema&& t_reg, bool t_force, bool t_rebuild_index) {
     if (dbs_.count(t_reg.db_number)) {
         if (!t_force) {
             auto& p_existing = dbs_[t_reg.db_number];
             if (p_existing.db_name == t_reg.db_name)
                 return {};
-            return Err::Conflict("DB{} already exists", t_reg.db_number);
+            return SclError::Conflict;
         }
         dbs_.erase(t_reg.db_number);
     }
@@ -261,7 +262,7 @@ sgrn::Result<void, ::sgrn::scl::Error> PlcSchemaStore::addDb(DbSchema&& t_reg, b
         auto it = dbs_by_name_.find(t_reg.db_name);
         if (it != dbs_by_name_.end()) {
             if (!t_force)
-                return Err::Conflict("Name '{}' already used by DB{}", t_reg.db_name, it->second->db_number);
+                return SclError::Conflict;
             dbs_.erase(it->second->db_number);
         }
     }
@@ -276,14 +277,14 @@ sgrn::Result<void, ::sgrn::scl::Error> PlcSchemaStore::addDb(DbSchema&& t_reg, b
     return {};
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> PlcSchemaStore::removeDb(uint16_t t_db_number) {
+sgrn::Result<void, ::sgrn::scl::SclError> PlcSchemaStore::removeDb(uint16_t t_db_number) {
     if (dbs_.erase(t_db_number) == 0)
-        return Err::NotFound("DB{} does not exist", t_db_number);
+        return SclError::NotFound;
     rebuildIndices();
     return {};
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> PlcSchemaStore::addUdt(UdtDefinition&& t_udt, bool t_force, bool t_rebuild_index) {
+sgrn::Result<void, ::sgrn::scl::SclError> PlcSchemaStore::addUdt(UdtDefinition&& t_udt, bool t_force, bool t_rebuild_index) {
     const UdtDefinition* p_existing = nullptr;
     if (t_udt.udt_number > 0) {
         auto it = udts_by_number_.find(t_udt.udt_number);
@@ -301,8 +302,8 @@ sgrn::Result<void, ::sgrn::scl::Error> PlcSchemaStore::addUdt(UdtDefinition&& t_
             if (p_existing->udt_number == t_udt.udt_number && p_existing->name == t_udt.name)
                 return {};
             if (p_existing->udt_number > 0 && t_udt.udt_number > 0 && p_existing->udt_number == t_udt.udt_number)
-                return Err::Conflict("UDT {} already exists", t_udt.udt_number);
-            return Err::Conflict("Name '{}' already exists", t_udt.name);
+                return SclError::Conflict;
+            return SclError::Conflict;
         }
         udts_.erase(std::remove_if(udts_.begin(), udts_.end(), [&](const UdtDefinition& u) { return &u == p_existing; }), udts_.end());
     }
@@ -317,10 +318,10 @@ sgrn::Result<void, ::sgrn::scl::Error> PlcSchemaStore::addUdt(UdtDefinition&& t_
     return {};
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> PlcSchemaStore::removeUdt(uint16_t t_udt_number) {
+sgrn::Result<void, ::sgrn::scl::SclError> PlcSchemaStore::removeUdt(uint16_t t_udt_number) {
     auto it = udts_by_number_.find(t_udt_number);
     if (it == udts_by_number_.end())
-        return Err::NotFound("UDT{} does not exist", t_udt_number);
+        return SclError::NotFound;
 
     const UdtDefinition* p_ptr = it->second;
     udts_.erase(std::remove_if(udts_.begin(), udts_.end(), [&](const UdtDefinition& u) { return &u == p_ptr; }), udts_.end());
@@ -329,26 +330,26 @@ sgrn::Result<void, ::sgrn::scl::Error> PlcSchemaStore::removeUdt(uint16_t t_udt_
     return {};
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> PlcSchemaStore::addTag(PlcTag&& t_tag, bool t_force) {
+sgrn::Result<void, ::sgrn::scl::SclError> PlcSchemaStore::addTag(PlcTag&& t_tag, bool t_force) {
     if (tags_.count(t_tag.name)) {
         if (!t_force)
-            return Err::Conflict("Tag '{}' already exists", t_tag.name);
+            return SclError::Conflict;
         tags_.erase(t_tag.name);
     }
     tags_[t_tag.name] = std::move(t_tag);
     return {};
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> PlcSchemaStore::removeTag(const std::string& t_tag_name) {
+sgrn::Result<void, ::sgrn::scl::SclError> PlcSchemaStore::removeTag(const std::string& t_tag_name) {
     if (tags_.erase(t_tag_name) == 0)
-        return Err::NotFound("Tag '{}' does not exist", t_tag_name);
+        return SclError::NotFound;
     return {};
 }
 
-sgrn::Result<const PlcTag*, ::sgrn::scl::Error> PlcSchemaStore::getTag(const std::string& t_tag_name) const {
+sgrn::Result<const PlcTag*, ::sgrn::scl::SclError> PlcSchemaStore::getTag(const std::string& t_tag_name) const {
     auto it = tags_.find(t_tag_name);
     if (it == tags_.end())
-        return Err::NotFound("Tag '{}' not found", t_tag_name);
+        return SclError::NotFound;
     return &it->second;
 }
 
@@ -373,21 +374,21 @@ void PlcSchemaStore::clear() {
     base_dir_.clear();
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> PlcSchemaStore::saveToJsonFile(const std::string& t_path) const {
+sgrn::Result<void, ::sgrn::scl::SclError> PlcSchemaStore::saveToJsonFile(const std::string& t_path) const {
     std::ofstream file(t_path);
     if (!file.is_open())
-        return Err::Generic("cannot open file for writing: {}", t_path);
+        return SclError::Generic;
 
     file << toJson(std::nullopt, false, true) << std::endl;
     return {};
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> PlcSchemaStore::loadFile(
+sgrn::Result<void, ::sgrn::scl::SclError> PlcSchemaStore::loadFile(
     const std::string& t_filepath, bool t_force, std::map<std::string, UdtDefinition>* tp_global_udts) {
     return SclCompiler::loadFile(*this, t_filepath, t_force, tp_global_udts);
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> PlcSchemaStore::loadSchema(const std::string& t_path_or_content, bool t_force) {
+sgrn::Result<void, ::sgrn::scl::SclError> PlcSchemaStore::loadSchema(const std::string& t_path_or_content, bool t_force) {
     if (t_path_or_content.empty())
         return {};
 

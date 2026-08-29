@@ -2,6 +2,7 @@
 #include <sgrn/gateway/adapters/ethernetip/CipCodec.hpp>
 #include <sgrn/gateway/adapters/ethernetip/EipAdapter.hpp>
 #include <sgrn/gateway/adapters/ethernetip/TypeTranslation.hpp>
+#include <sgrn/gateway/adapters/ethernetip/errors.hpp>
 #include <sgrn/gateway/common/SecurityHelper.hpp>
 #include <sgrn/gateway/wrappers/ethernetip/Types.hpp>
 #include <sgrn/scl/types.hpp>
@@ -63,7 +64,7 @@ EipAdapter::~EipAdapter() {
     allocated_attrs_.clear();
 }
 
-sgrn::Result<void, EipAdapter::Error> EipAdapter::start(
+sgrn::Result<void, ::sgrn::scl::SclError> EipAdapter::start(
     const std::string& t_ip, uint16_t t_port, const ::sgrn::scl::PlcSchemaStore& t_store) {
     // Store configuration for configure() to use
     config_ip_ = t_ip;
@@ -73,7 +74,7 @@ sgrn::Result<void, EipAdapter::Error> EipAdapter::start(
     // Call AdapterBase::start which invokes configure() then serveLoop()
     auto res = common::AdapterBase<EipAdapter>::start(t_ip, t_port);
     if (res.hasError()) {
-        return Error(Error{std::string(res.error())});
+        return ::sgrn::scl::SclError::Generic;
     }
     return {};
 }
@@ -313,7 +314,8 @@ int EipAdapter::handlePostSet(void* tp_instance_ptr, void* tp_attribute_ptr, uin
         size_t cip_offset = 0;
         CipCodec::decodeFromCip(f_copy, p_ba->data, raw_buf.data(), cip_offset);
         if (auto r = getMemory().writeDbMemory(alloc->db_number, alloc->field_offset, s7_size, raw_buf.data()); !r) {
-            SGRN_WARN_LOG("EtherNet/IP PostSet: writeDbMemory failed for DB{}/{}: {}", alloc->db_number, alloc->field_path, r.error());
+            SGRN_WARN_LOG("EtherNet/IP PostSet: writeDbMemory failed for DB{}/{}: {} (cip_status=0x{:02x})", alloc->db_number,
+                alloc->field_path, r.error(), toCipStatus(r.error()));
         }
         return 0;
     }
@@ -321,7 +323,8 @@ int EipAdapter::handlePostSet(void* tp_instance_ptr, void* tp_attribute_ptr, uin
     if (alloc->type == DataType::Bool) {
         const bool val = (*static_cast<uint8_t*>(alloc->buffer) != 0);
         if (auto r = getMemory().writeBit(alloc->db_number, alloc->field_offset, alloc->bit_index, val); !r) {
-            SGRN_WARN_LOG("EtherNet/IP PostSet: writeBit failed for DB{}/{}: {}", alloc->db_number, alloc->field_path, r.error());
+            SGRN_WARN_LOG("EtherNet/IP PostSet: writeBit failed for DB{}/{}: {} (cip_status=0x{:02x})", alloc->db_number, alloc->field_path,
+                r.error(), toCipStatus(r.error()));
             return -1;
         }
         return 0;
@@ -332,7 +335,8 @@ int EipAdapter::handlePostSet(void* tp_instance_ptr, void* tp_attribute_ptr, uin
     std::vector<uint8_t> raw_buf(s7_size, 0);
     TypeTranslation::storeScalarToS7(alloc->field, alloc->buffer, raw_buf.data());
     if (auto r = getMemory().writeDbMemory(alloc->db_number, alloc->field_offset, s7_size, raw_buf.data()); !r) {
-        SGRN_WARN_LOG("EtherNet/IP: writeDbMemory DB{}/{} failed: {}", alloc->db_number, alloc->field_path, r.error());
+        SGRN_WARN_LOG("EtherNet/IP: writeDbMemory DB{}/{} failed: {} (cip_status=0x{:02x})", alloc->db_number, alloc->field_path, r.error(),
+            toCipStatus(r.error()));
         return -1;
     }
     return 0;

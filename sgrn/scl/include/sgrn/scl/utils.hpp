@@ -1,5 +1,7 @@
 #pragma once
 #include <fmt/format.h>
+#include <sgrn/scl/errors.hpp>
+#include <sgrn/scl/types.hpp>
 #include <sgrn/scl/types/DbField.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <ctime>
@@ -32,8 +34,8 @@ std::optional<LocatedField> findFieldByPath(const std::vector<DbField>& t_fields
 /**
  * @brief Recursively apply a JSON patch object to a set of schema fields.
  */
-sgrn::Result<void, ::sgrn::scl::Error> applyJsonPatchToFields(const std::vector<DbField>& t_fields, const std::string& t_patch_json,
-    uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e = s7codec::Endian::Big);
+sgrn::Result<void, SclError> applyJsonPatchToFields(const std::vector<DbField>& t_fields, const std::string& t_patch_json, uint8_t* tp_ptr,
+    size_t t_buffer_size, s7codec::Endian t_e = s7codec::Endian::Big);
 
 /**
  * @brief Recursively traverse all fields (including children) with dot-separated path and absolute offset tracking.
@@ -74,32 +76,32 @@ std::string parseSemanticValue(const std::string& t_raw);
  */
 std::string parseRawValuePayload(const std::string& t_raw);
 
-sgrn::Result<void, ::sgrn::scl::Error> encodeDtlValue(
+sgrn::Result<void, SclError> encodeDtlValue(
     const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e = s7codec::Endian::Big);
 
-int fieldSpanSize(const DbField& t_field);
-int fieldElementSpanBytes(const DbField& f);
-sgrn::Result<void, ::sgrn::scl::Error> encodeScalarValue(const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr,
+uint32_t fieldSpanSize(const DbField& t_field);
+uint32_t fieldElementSpanBytes(const DbField& f);
+sgrn::Result<void, SclError> encodeScalarValue(const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr,
     size_t t_buffer_size, s7codec::Endian t_e = s7codec::Endian::Big);
 
-sgrn::Result<std::string, ::sgrn::scl::Error> decodeFieldAt(
+sgrn::Result<std::string, SclError> decodeFieldAt(
     const DbField& t_field, const uint8_t* tp_ptr, size_t t_buffer_size, int t_depth = 0, s7codec::Endian t_e = s7codec::Endian::Big);
 
-sgrn::Result<void, ::sgrn::scl::Error> encodeFieldRapidJson(const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr,
+sgrn::Result<void, SclError> encodeFieldRapidJson(const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr,
     size_t t_buffer_size, int t_depth = 0, s7codec::Endian t_e = s7codec::Endian::Big);
 
-sgrn::Result<void, ::sgrn::scl::Error> encodeFieldAt(const DbField& t_field, const std::string& t_value_json, uint8_t* tp_ptr,
-    size_t t_buffer_size, int t_depth = 0, s7codec::Endian t_e = s7codec::Endian::Big);
+sgrn::Result<void, SclError> encodeFieldAt(const DbField& t_field, const std::string& t_value_json, uint8_t* tp_ptr, size_t t_buffer_size,
+    int t_depth = 0, s7codec::Endian t_e = s7codec::Endian::Big);
 
 /**
  * @brief Decodes a single DB buffer into a JSON string using the provided registry.
  */
 std::string decodeDbBuffer(const sgrn::scl::DbSchema& t_reg, const uint8_t* tp_buf, size_t t_buffer_size);
 
-int symbolFieldSpanBytes(const DbField& t_field);
+uint32_t symbolFieldSpanBytes(const DbField& t_field);
 const DbField* findFieldByName(const DbSchema& t_reg, const std::string& t_name);
 
-sgrn::Result<std::vector<uint8_t>, Error> parseHexBytes(const std::string& t_joined);
+sgrn::Result<std::vector<uint8_t>, SclError> parseHexBytes(const std::string& t_joined);
 std::optional<PlcAddress> parsePlcAddress(const std::string& t_tok);
 std::optional<uint64_t> parseCLiteral(const std::string& t_raw);
 bool hasCLiteralPrefix(const std::string& t_val);

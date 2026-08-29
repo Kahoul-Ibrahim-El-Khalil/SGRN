@@ -14,10 +14,6 @@
     "websocket": {
       "ip": "0.0.0.0",
       "port": 8001
-    },
-    "opcua" :{
-      "ip", "0.0.0.0",
-      "port": 4840
     }
   },
   "schema": "./sgrn/gateway/simulations/nuclear/schema.scl",
@@ -33,8 +29,7 @@
   },
   "reconnect_ms": 5000,
     "security_policy": "strict",
-    "security_script": "./sgrn/gateway/simulations/nuclear/security.as"
-,
+    "security_script": "./sgrn/gateway/simulations/nuclear/security.as",
   "persistence": {
     "enabled": true,
     "mode": "changes_with_timestamp",

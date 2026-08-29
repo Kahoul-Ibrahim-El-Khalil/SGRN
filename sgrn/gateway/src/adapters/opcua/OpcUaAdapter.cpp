@@ -28,6 +28,8 @@
 namespace sgrn::gateway::adapters
 {
 
+thread_local bool g_is_internal_opcua_write = false;
+
 using PlcSchemaStore = ::sgrn::scl::PlcSchemaStore;
 
 struct PendingWrite {
@@ -128,11 +130,13 @@ sgrn::Result<void> OpcUaAdapter::start(const std::string& /*ip*/, uint16_t t_por
                 uint64_t now_ms = sgrn::utils::time::nowMilliseconds();
                 {
                     std::lock_guard lock(self->impl_->pending_mutex);
+                    g_is_internal_opcua_write = true;
                     while (!self->impl_->pending_writes.empty()) {
                         PendingWrite pw = std::move(self->impl_->pending_writes.front());
                         self->impl_->pending_writes.pop();
                         self->impl_->server->writeDataValue(pw.node_id, pw.value);
                     }
+                    g_is_internal_opcua_write = false;
                 }
                 self->impl_->delta_push.flushDirtyAggregates(now_ms);
                 if (self->impl_->p_plc_memory && self->impl_->p_plc_memory->processor()->hasPendingCommands())

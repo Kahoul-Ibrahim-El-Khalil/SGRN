@@ -198,7 +198,7 @@ sgrn::Result<::sgrn::scl::PlcSchemaStore> EngineStateStore::loadRegistryFromSQLi
 
         auto res = ::sgrn::scl::PlcSchemaStore::loadFromJson(root);
         if (res.hasError()) {
-            return fmt::format("Failed to parse registry: {}", res.error().string());
+            return fmt::format("Failed to parse registry: {}", toString(res.error()));
         }
         return res.value();
     } catch (const std::exception& e) {

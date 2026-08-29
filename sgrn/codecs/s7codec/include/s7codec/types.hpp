@@ -39,6 +39,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <optional>
 #include <string>
 
 namespace s7codec
@@ -533,6 +534,13 @@ inline bool stringToType(const char* name, Type& out) {
     return false;
 }
 
+inline std::optional<Type> toType(const char* name) {
+    Type out;
+    if (stringToType(name, out))
+        return out;
+    return std::nullopt;
+}
+
 // ---------------------------------------------------------------------------
 // Type sizing
 // ---------------------------------------------------------------------------
@@ -543,7 +551,7 @@ inline bool stringToType(const char* name, Type& out) {
  * Returns 0 for String, WString, and Struct (whose sizes depend on field
  * metadata that this freestanding header does not model).
  */
-inline constexpr int primitiveSize(Type type) {
+inline constexpr std::optional<uint8_t> primitiveSize(Type type) {
     switch (type) {
         case Type::Bool:
         case Type::Byte:
@@ -596,7 +604,7 @@ inline constexpr int primitiveSize(Type type) {
  * @param count  For String: max chars; for WString: max wchars;
  *               for arrays: number of elements.
  */
-inline constexpr int typeSpanBytes(Type type, int count) {
+inline constexpr std::optional<uint32_t> typeSpanBytes(Type type, uint32_t count) {
     switch (type) {
         case Type::String:
             return 2 + (count > 0 ? count : 0);
@@ -609,8 +617,10 @@ inline constexpr int typeSpanBytes(Type type, int count) {
         case Type::Struct:
             return 0; // Caller must use struct_size from schema metadata
         default: {
-            int elem = primitiveSize(type);
-            return (count > 1 ? count : 1) * elem;
+            auto elem = primitiveSize(type);
+            if (!elem)
+                return std::nullopt;
+            return (count > 1 ? count : 1) * static_cast<uint32_t>(*elem);
         }
     }
 }

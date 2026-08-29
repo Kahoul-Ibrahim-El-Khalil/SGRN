@@ -40,9 +40,8 @@ sgrn::scl::ModbusVirtualEntry fromJson(const rapidjson::Value& t_node) {
     if (t_node.HasMember("field_path") && t_node["field_path"].IsString())
         t_e.field_path = t_node["field_path"].GetString();
     if (t_node.HasMember("type") && t_node["type"].IsString()) {
-        sgrn::scl::DataType parsed;
-        if (s7codec::stringToType(t_node["type"].GetString(), parsed))
-            t_e.type = parsed;
+        if (auto opt = s7codec::toType(t_node["type"].GetString()))
+            t_e.type = *opt;
     }
     if (t_node.HasMember("byte_offset"))
         t_e.byte_offset = t_node["byte_offset"].GetInt();

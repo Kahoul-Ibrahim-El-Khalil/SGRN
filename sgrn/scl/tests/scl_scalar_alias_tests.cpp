@@ -13,7 +13,7 @@ using sgrn::Result;
 using namespace sgrn::scl;
 
 // ── Small test helpers ───────────────────────────────────────────────────────
-static Result<ParseResult, ::sgrn::scl::Error> parseIt(const std::string& src) {
+static Result<ParseResult, SchemaError> parseIt(const std::string& src) {
     return DbSymbolsParser::parseString(src);
 }
 
@@ -80,7 +80,7 @@ int main() {
     // 1. Scalar alias parsing
     auto p = parseIt(kScalarSchema);
     if (!p.has_value()) {
-        fmt::print(stderr, "Parse error: {}\n", p.error().string());
+        fmt::print(stderr, "Parse error: {}\n", sgrn::scl::toString(p.error()));
         return 1;
     }
     const auto& motor = findUdt(p.value(), "MotorState");

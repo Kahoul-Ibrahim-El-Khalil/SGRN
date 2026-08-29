@@ -81,13 +81,13 @@ void ScriptS7Blocks::dbFill(uint16_t t_db_number, int t_fill_char) {
 
 std::string ScriptS7Blocks::pgBlockInfo(const std::string& t_hex) const {
     if (!conn_)
-        return "Error: no connection";
+        return "SchemaError: no connection";
     const auto bytes = ::sgrn::scl::parseHexBytes(t_hex);
     if (bytes.hasError())
-        return fmt::format("Error: {}", bytes.error().string());
+        return fmt::format("SchemaError: {}", toString(bytes.error()));
     const auto res = conn_->client_.getPgBlockInfo(bytes.value().data(), static_cast<int>(bytes.value().size()));
     if (res.hasError())
-        return fmt::format("Error: {}", res.error().string());
+        return fmt::format("SchemaError: {}", toString(res.error()));
     return shell::formatBlockInfo(res.value());
 }
 

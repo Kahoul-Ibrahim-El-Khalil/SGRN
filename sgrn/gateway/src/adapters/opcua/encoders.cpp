@@ -207,7 +207,10 @@ Result<void, OpcUaAdapterError> encodeScalarOpcUaToMemory(const OpcUaEncodingCon
 
     SGRN_RETURN_IF_NULL(t_ctx.p_memory, OpcUaAdapterError::NULL_POINTER);
 
-    const size_t s7_size = s7codec::primitiveSize(t_ctx.view.type);
+    const size_t s7_size = [&]() -> size_t {
+        auto opt = s7codec::primitiveSize(t_ctx.view.type);
+        return opt ? static_cast<size_t>(*opt) : 0;
+    }();
 
     if (t_ctx.p_ua_type && t_ctx.p_ua_type->typeKind == UA_DATATYPEKIND_ENUM) {
 

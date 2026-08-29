@@ -46,7 +46,7 @@
  *     Content-Type: application/octet-stream
  *     Body: raw bytes (exactly <sz> bytes)
  *
- *   Error responses:
+ *   SchemaError responses:
  *     400 - Missing or invalid path parameters
  *     403 - Client IP not authorized for this DB
  *     404 - DB not found or offset+size exceeds DB bounds
@@ -70,7 +70,7 @@
  *     Content-Type: application/octet-stream
  *     Body: echoed raw bytes (confirms write; S7 semantics)
  *
- *   Error responses: (same as GET)
+ *   SchemaError responses: (same as GET)
  *
  *   Example:
  *     PUT /memory/db/1/offset/0/size/4
@@ -96,7 +96,7 @@
  *       {"db": 2, "offset": 8, "size": 2, "data": "AQ=="}
  *     ]
  *
- *   Error responses:
+ *   SchemaError responses:
  *     400 - Missing, invalid, or mismatched triplets
  *     403 - Client IP not authorized for any DB
  *     404 - Any DB not found or range exceeds bounds
@@ -129,7 +129,7 @@
  *       {"db": 2, "offset": 8, "size": 2, "written": "AQ=="}
  *     ]
  *
- *   Error responses:
+ *   SchemaError responses:
  *     400 - Invalid JSON or missing required fields
  *     403 - Client IP not authorized for any DB
  *     404 - Any DB not found or range exceeds bounds

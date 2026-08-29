@@ -17,7 +17,7 @@ namespace sgrn::scl
 namespace str = sgrn::utils::strings;
 
 using sgrn::Result;
-using sgrn::scl::Error;
+using sgrn::scl::SclError;
 namespace
 {
 
@@ -66,12 +66,13 @@ struct OffsetTracker {
         }
 
         // Non-Bool fields
-        int element_size = s7codec::primitiveSize(t_field.type);
+        auto element_size_opt = s7codec::primitiveSize(t_field.type);
+        int element_size = element_size_opt ? static_cast<int>(*element_size_opt) : 0;
         if (t_field.type == DataType::Struct)
             element_size = t_field.struct_size;
 
         int total_size = 0;
-        int num_elements = std::max(1, t_field.count);
+        int num_elements = std::max(1, static_cast<int>(t_field.count));
 
         // ── String / WString / XString / XWString ──────────────────────────────
         if (t_field.type == DataType::String || t_field.type == DataType::WString || t_field.type == DataType::XString ||
@@ -94,7 +95,8 @@ struct OffsetTracker {
             // struct_size = byte span of one element, count = 1.
             // For a string array (num_elements > 1), keep count intact and
             // set struct_size to the per-element byte span.
-            int elem_span = s7codec::typeSpanBytes(t_field.type, char_capacity);
+            auto elem_span_opt = s7codec::typeSpanBytes(t_field.type, char_capacity);
+            int elem_span = elem_span_opt ? static_cast<int>(*elem_span_opt) : 0;
             if (num_elements <= 1) {
                 t_field.struct_size = elem_span;
                 t_field.count = 1;
@@ -537,7 +539,7 @@ public:
         advance();
     }
 
-    Result<ParseResult, Error> parse() {
+    Result<ParseResult, SclError> parse() {
         while (!check(TokenType::EndOfFile) && !m_has_error_) {
             if (matchKeyword("TYPE"))
                 parseUdt();
@@ -548,7 +550,7 @@ public:
         }
 
         if (m_has_error_) {
-            return Result<ParseResult, Error>::Error(Error{SchemaCode::ParseError, m_error_msg_});
+            return Result<ParseResult, SclError>::Error(SclError::ParseError);
         }
 
         bool changed = true;
@@ -651,7 +653,8 @@ private:
 
             matchPunctuation(";");
 
-            udt.size_bytes = s7codec::typeSpanBytes(udt.scalar_type, 0);
+            auto udt_span_opt = s7codec::typeSpanBytes(udt.scalar_type, 0);
+            udt.size_bytes = udt_span_opt ? static_cast<int>(*udt_span_opt) : 0;
             udt.max_depth = 1;
 
             if (!matchKeyword("END_TYPE")) {
@@ -940,7 +943,7 @@ private:
         t_udt.min_val = std::move(base.min_val);
         t_udt.max_val = std::move(base.max_val);
         t_udt.endianness = base.endianness;
-        t_udt.size_bytes = (kind_of(base) == FieldKind::String) ? fieldElementSpanBytes(base) : info_of(base.type).storage_bytes;
+        t_udt.size_bytes = (kind_of(base) == FieldKind::String) ? fieldElementSpanBytes(base) : info_of(base.type)->storage_bytes;
         t_udt.max_depth = 1;
 
         if (!matchKeyword("END_TYPE")) {
@@ -1112,11 +1115,11 @@ private:
 // Public API
 // -----------------------------------------------------------------------
 
-Result<ParseResult, Error> DbSymbolsParser::parseExportFile(
+Result<ParseResult, SclError> DbSymbolsParser::parseExportFile(
     const std::string& t_filepath, std::map<std::string, UdtDefinition>* tp_global_udts) {
     std::ifstream file(t_filepath);
     if (!file.is_open())
-        return Err::FileNotFound("could not open export file: {}", t_filepath);
+        return SclError::FileNotFound;
 
     std::vector<std::string> lines;
     std::string line;
@@ -1126,10 +1129,10 @@ Result<ParseResult, Error> DbSymbolsParser::parseExportFile(
     return parseLines(lines, tp_global_udts);
 }
 
-Result<ParseResult, Error> DbSymbolsParser::parseLines(
+Result<ParseResult, SclError> DbSymbolsParser::parseLines(
     const std::vector<std::string>& t_lines, std::map<std::string, UdtDefinition>* tp_global_udts) {
     if (t_lines.empty()) {
-        return Result<ParseResult, Error>::Error(Error{SchemaCode::ParseError, "symbol lines are empty"});
+        return Result<ParseResult, SclError>::Error(SclError::ParseError);
     }
 
     std::string source;
@@ -1139,10 +1142,10 @@ Result<ParseResult, Error> DbSymbolsParser::parseLines(
     return parseString(source, tp_global_udts);
 }
 
-Result<ParseResult, Error> DbSymbolsParser::parseString(
+Result<ParseResult, SclError> DbSymbolsParser::parseString(
     const std::string& t_content, std::map<std::string, UdtDefinition>* tp_global_udts) {
     if (t_content.empty()) {
-        return Result<ParseResult, Error>::Error(Error{SchemaCode::ParseError, "symbol content is empty"});
+        return Result<ParseResult, SclError>::Error(SclError::ParseError);
     }
 
     std::map<std::string, UdtDefinition> udt_map;
@@ -1150,7 +1153,7 @@ Result<ParseResult, Error> DbSymbolsParser::parseString(
         udt_map = *tp_global_udts;
 
     ast::AstParser parser(t_content, udt_map);
-    Result<ParseResult, Error> result = parser.parse();
+    Result<ParseResult, SclError> result = parser.parse();
 
     if (result.hasError()) {
         return result;
@@ -1162,13 +1165,13 @@ Result<ParseResult, Error> DbSymbolsParser::parseString(
     }
 
     if (result.value().dbs.empty() && result.value().udts.empty()) {
-        return Result<ParseResult, Error>::Error(Error{SchemaCode::ParseError, "no DB schemas or UDTs found in symbols (check format)"});
+        return SclError::ParseError;
     }
 
     return result;
 }
 
-Result<ParseResult, Error> DbSymbolsParser::parseCollection(const std::vector<std::string>& t_filepaths) {
+Result<ParseResult, SclError> DbSymbolsParser::parseCollection(const std::vector<std::string>& t_filepaths) {
     if (t_filepaths.empty())
         return ParseResult{};
 
@@ -1186,7 +1189,7 @@ Result<ParseResult, Error> DbSymbolsParser::parseCollection(const std::vector<st
     for (const auto& path : t_filepaths) {
         auto res = parseExportFile(path, &tp_global_udts);
         if (res.hasError()) {
-            if (res.error().string().find("no DB schemas or UDTs found") != std::string::npos)
+            if (toString(res.error()).find("no DB schemas or UDTs found") != std::string::npos)
                 continue;
             return Error(res.error());
         }

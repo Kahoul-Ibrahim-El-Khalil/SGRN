@@ -8,7 +8,6 @@ using namespace sgrn::gateway::twin;
 using ::sgrn::gateway::twin::DbEntry;
 using ::sgrn::gateway::twin::PlcState;
 using ::sgrn::gateway::wrappers::s7::S7Error;
-using ::sgrn::gateway::wrappers::s7::S7ProtocolCode;
 
 #include <sgrn/gateway/adapters/s7/TypeTranslation.hpp>
 
@@ -45,14 +44,14 @@ void S7ProtocolAdapter::configureBeforeStart() {
 
 sgrn::Result<void, S7Error> S7ProtocolAdapter::bindToPlcMemory() {
     PlcState* p_state = plc_memory_.state();
-    if (!p_state) {
-        return Error(S7Error{S7ProtocolCode::NotConnected});
-    }
+
+    SGRN_RETURN_IF_NULL(p_state, S7Error::Unknown);
 
     for (uint16_t db_num : p_state->topLevelNumbers()) {
         const DbEntry* p_entry = p_state->findSegmentById(db_num);
-        if (!p_entry)
+        if (!p_entry) {
             continue;
+        }
 
         // NOTE: We do NOT call server_->RegisterArea here for DBs anymore.
         // By NOT registering the area, Snap7 will trigger s7RequestCallback
@@ -69,17 +68,15 @@ sgrn::Result<void, S7Error> S7ProtocolAdapter::bindToPlcMemory() {
 int S7API S7ProtocolAdapter::s7RequestCallback(void* tp_usr_ptr, int t_sender, int t_operation, PS7Tag t_tag, void* tp_data) {
 
     auto* p_adapter = static_cast<S7ProtocolAdapter*>(tp_usr_ptr);
-    if (!p_adapter || !t_tag) {
-        return ::evrErrException;
-    }
 
-    auto t_size = TypeTranslation::requestByteSize(*t_tag);
-    if (!t_size.has_value()) {
-        return ::evrErrTransportSize;
-    }
+    SGRN_RETURN_IF(!p_adapter || !t_tag, ::evrErrException);
+
+    std::optional<size_t> size_opt = TypeTranslation::requestByteSize(*t_tag);
+
+    SGRN_RETURN_IF_NULL(size_opt, evrErrTransportSize);
 
     const size_t start = t_tag->Start < 0 ? 0U : static_cast<size_t>(t_tag->Start);
-    const size_t bytes = t_size.value();
+    const size_t bytes = size_opt.value();
     const int area = TypeTranslation::normalizeServerAreaCode(t_tag->Area);
 
     if (area == ::srvAreaDB) {
@@ -106,7 +103,7 @@ int S7API S7ProtocolAdapter::s7RequestCallback(void* tp_usr_ptr, int t_sender, i
                 return ::evrErrException;
             }
 
-            if (auto r = p_adapter->plc_memory_.writeDbMemory(db_num, start, bytes, static_cast<const uint8_t*>(tp_data)); !r) {
+            if (auto r = p_adapter->plc_memory_.writeDbMemory(db_num, start, bytes, static_cast<const uint8_t*>(tp_data)); r.hasError()) {
                 fmt::print(stderr, "[ERROR] S7 PUT to DB{} offset={} size={} failed – writeDbMemory failed: {}\n", db_num, start, bytes,
                     r.error());
                 return ::evrErrOutOfRange;

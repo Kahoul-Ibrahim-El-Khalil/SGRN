@@ -6,6 +6,7 @@
 #include <sgrn/debug.hpp>
 #include <sgrn/gateway/adapters/modbus/ModbusAdapter.hpp>
 #include <sgrn/gateway/adapters/modbus/TypeTranslation.hpp>
+#include <sgrn/gateway/adapters/modbus/errors.hpp>
 #include <sgrn/gateway/common/SecurityHelper.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
 #include <sgrn/gateway/wrappers/modbus/Server.hpp>
@@ -56,17 +57,20 @@ ModbusAdapter::~ModbusAdapter() {
     stop();
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> ModbusAdapter::start(
+sgrn::Result<void, ModbusAdapterError> ModbusAdapter::start(
     const std::string& t_ip, uint16_t t_port, const ::sgrn::scl::PlcSchemaStore& t_store) {
     // Store configuration for configure() to use
     config_ip_ = t_ip;
     config_port_ = t_port;
     p_store_ = &t_store;
 
-    // Call AdapterBase::start which invokes configure() then serveLoop()
+    // Call AdapterBase::start which invokes configure() then serveLoop().
+    // configure() logs the precise failure cause (schema store missing, TCP
+    // bind, mapping alloc); the typed error collapses those onto the
+    // server-device-failure class for the wire boundary.
     auto res = common::AdapterBase<ModbusAdapter>::start(t_ip, t_port);
     if (res.hasError()) {
-        return ::sgrn::scl::Err::Generic("{}", res.error());
+        return ModbusAdapterError::SERVER_DEVICE_FAILURE;
     }
     return {};
 }
@@ -248,7 +252,8 @@ void ModbusAdapter::syncArenaToMapping() {
 
         // Single batch read: one lock per unique DB instead of per entry
         if (auto r = getMemory().readDbMemory(std::span(spans)); !r) {
-            SGRN_WARN_LOG("Modbus syncRegEntries batch read failed (DB scope): {}", r.error());
+            SGRN_WARN_LOG("Modbus syncRegEntries batch read failed (DB scope): {} (modbus_exception=0x{:02x})", r.error(),
+                toExceptionCode(r.error()));
             return;
         }
 
@@ -336,7 +341,7 @@ void ModbusAdapter::syncEntryToArena(const ModbusVirtualEntry& t_entry, const st
 
     auto res = getMemory().updateField(t_entry.db_number, t_entry.field_path, json_val);
     if (res.hasError()) {
-        SGRN_WARN_LOG("Modbus: updateField DB{}/'{}'  failed: {}", t_entry.db_number, t_entry.field_path, res.error().string());
+        SGRN_WARN_LOG("Modbus: updateField DB{}/'{}'  failed: {}", t_entry.db_number, t_entry.field_path, toString(res.error()));
     }
 }
 

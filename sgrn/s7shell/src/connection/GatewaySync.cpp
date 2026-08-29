@@ -154,7 +154,7 @@ bool GatewaySync::writeFieldThroughRuntime(const std::string& t_target, const st
     const std::string json_val = ::sgrn::gateway::twin::parseRawValuePayload(t_raw_val);
     auto write_res = runtime_->getMemory().updateField(ft->db_number, ft->field_path, json_val);
     if (write_res.hasError()) {
-        t_err = write_res.error().string();
+        t_err = toString(write_res.error());
         return false;
     }
 
@@ -264,7 +264,7 @@ bool GatewaySync::publishDirtyBatch() {
             std::vector<uint8_t> bytes(region.length, 0);
             if (auto r = runtime_->getMemory().readDbMemory(db_num, region.offset, region.length, bytes.data()); !r) {
                 std::lock_guard<std::mutex> lk(err_mutex_);
-                last_error_ = std::string(r.error().message());
+                last_error_ = std::string(toString(r.error()));
                 unsent_regions.emplace_back(db_num, region);
                 continue;
             }

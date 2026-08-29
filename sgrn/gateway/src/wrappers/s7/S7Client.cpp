@@ -1,5 +1,5 @@
-#include <sgrn/gateway/wrappers/s7/ProtocolError.hpp>
 #include <sgrn/gateway/wrappers/s7/S7Client.hpp>
+#include <sgrn/gateway/wrappers/s7/error.hpp>
 #include <sgrn/utils/encoding.hpp>
 #include <asio.hpp>
 
@@ -12,8 +12,9 @@ namespace sgrn::gateway::wrappers::s7
 
 namespace
 {
-using sgrn::gateway::wrappers::s7::fromSnap7;
+using sgrn::gateway::wrappers::s7::fromSnap7ErrorToS7Error;
 using sgrn::gateway::wrappers::s7::S7Error;
+using sgrn::utils::encoding::bcdToDec;
 template <typename T>
 std::string trimRight(const T& t_chars) {
     std::string tp_value(t_chars);
@@ -39,7 +40,7 @@ static std::string resolveHostname(const std::string& t_host) {
 
 // Calls fn(value), propagating any error; returns value on success.
 template <typename T, typename Fn>
-sgrn::Result<T, S7Error> invokeValue(Fn&& t_fn) {
+Result<T, S7Error> invokeValue(Fn&& t_fn) {
     T tp_value{};
     const auto status = t_fn(tp_value);
     if (status.hasError()) {
@@ -49,7 +50,7 @@ sgrn::Result<T, S7Error> invokeValue(Fn&& t_fn) {
 }
 
 template <typename Fn>
-sgrn::Result<std::vector<uint8_t>, S7Error> invokeSizedBuffer(int t_size, Fn&& t_fn) {
+Result<std::vector<uint8_t>, S7Error> invokeSizedBuffer(int t_size, Fn&& t_fn) {
     std::vector<uint8_t> tp_buffer(static_cast<size_t>(std::max(t_size, 0)), 0);
     const auto status = t_fn(tp_buffer.data(), t_size);
     if (status.hasError()) {
@@ -99,35 +100,35 @@ S7Client& S7Client::operator=(S7Client&& t_other) noexcept {
     return *this;
 }
 
-sgrn::Result<void, S7Error> S7Client::makeStatus(int t_error_code) const {
+Result<void, S7Error> S7Client::makeStatus(int t_error_code) const {
     if (t_error_code == 0) {
         return {};
     }
-    return S7Error{classifySnap7(t_error_code)};
+    return fromSnap7ErrorToS7Error(t_error_code);
 }
 
-sgrn::Result<void, S7Error> S7Client::requireClient() const {
+Result<void, S7Error> S7Client::requireClient() const {
     if (client_) {
         return {};
     }
-    return S7Error{S7ProtocolCode::InvalidParam};
+    return S7Error::NotConnected;
 }
 
-sgrn::Result<void, S7Error> S7Client::validateRange(int t_start, int t_size_or_amount, const char* tp_label) const {
+Result<void, S7Error> S7Client::validateRange(int t_start, int t_size_or_amount, const char* tp_label) const {
     if (t_start < 0 || t_size_or_amount < 0) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
     return {};
 }
 
-sgrn::Result<void, S7Error> S7Client::validateBuffer(const void* tp_buffer, int t_size_or_amount, const char* tp_label) const {
+Result<void, S7Error> S7Client::validateBuffer(const void* tp_buffer, int t_size_or_amount, const char* tp_label) const {
     if (t_size_or_amount > 0 && tp_buffer == nullptr) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
     return {};
 }
 
-sgrn::Result<void, S7Error> S7Client::connect() {
+Result<void, S7Error> S7Client::connect() {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
@@ -137,21 +138,20 @@ sgrn::Result<void, S7Error> S7Client::connect() {
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::connect(
-    const std::string& t_ip, int t_rack, int t_slot, uint16_t t_connection_type, uint16_t t_port) {
+Result<void, S7Error> S7Client::connect(const std::string& t_ip, int t_rack, int t_slot, uint16_t t_connection_type, uint16_t t_port) {
     return connect(ConnectionInfo{.ip = t_ip, .rack = t_rack, .slot = t_slot, .connection_type = t_connection_type, .port = t_port});
 }
 
-sgrn::Result<void, S7Error> S7Client::connect(const ConnectionInfo& t_connection_info) {
+Result<void, S7Error> S7Client::connect(const ConnectionInfo& t_connection_info) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
     }
     if (t_connection_info.ip.empty()) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
     if (t_connection_info.rack < 0 || t_connection_info.slot < 0) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
 
     connection_info_data_ = t_connection_info;
@@ -169,13 +169,13 @@ sgrn::Result<void, S7Error> S7Client::connect(const ConnectionInfo& t_connection
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::setConnectionParams(const std::string& t_ip, uint16_t t_local_tsap, uint16_t t_remote_tsap) {
+Result<void, S7Error> S7Client::setConnectionParams(const std::string& t_ip, uint16_t t_local_tsap, uint16_t t_remote_tsap) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
     }
     if (t_ip.empty()) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
 
     connection_info_data_.ip = t_ip;
@@ -184,7 +184,7 @@ sgrn::Result<void, S7Error> S7Client::setConnectionParams(const std::string& t_i
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::connectWithTsap(const std::string& t_ip, uint16_t t_local_tsap, uint16_t t_remote_tsap) {
+Result<void, S7Error> S7Client::connectWithTsap(const std::string& t_ip, uint16_t t_local_tsap, uint16_t t_remote_tsap) {
     auto status = setConnectionParams(t_ip, t_local_tsap, t_remote_tsap);
     if (status.hasError()) {
         return status;
@@ -192,7 +192,7 @@ sgrn::Result<void, S7Error> S7Client::connectWithTsap(const std::string& t_ip, u
     return connect();
 }
 
-sgrn::Result<void, S7Error> S7Client::setConnectionType(uint16_t t_connection_type) {
+Result<void, S7Error> S7Client::setConnectionType(uint16_t t_connection_type) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
@@ -203,7 +203,7 @@ sgrn::Result<void, S7Error> S7Client::setConnectionType(uint16_t t_connection_ty
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::disconnect() {
+Result<void, S7Error> S7Client::disconnect() {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
@@ -221,40 +221,38 @@ bool S7Client::isConnected() const {
     return client_ && client_->Connected();
 }
 
-sgrn::Result<void, S7Error> S7Client::getParam(int t_param_number, void* tp_value) {
+Result<void, S7Error> S7Client::getParam(int t_param_number, void* tp_value) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
     }
     if (tp_value == nullptr) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
 
     last_error_ = client_->GetParam(t_param_number, tp_value);
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::setParam(int t_param_number, void* tp_value) {
+Result<void, S7Error> S7Client::setParam(int t_param_number, void* tp_value) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
     }
     if (tp_value == nullptr) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
 
     last_error_ = client_->SetParam(t_param_number, tp_value);
     return makeStatus(last_error_);
 }
 
-sgrn::Result<std::vector<uint8_t>, S7Error> S7Client::readArea(
-    int t_area, uint16_t t_db_number, int t_start, int t_amount, int t_word_len) {
+Result<std::vector<uint8_t>, S7Error> S7Client::readArea(int t_area, uint16_t t_db_number, int t_start, int t_amount, int t_word_len) {
     return invokeSizedBuffer(
         t_amount, [&](uint8_t* tp_buffer, int t_size) { return readArea(t_area, t_db_number, t_start, t_size, t_word_len, tp_buffer); });
 }
 
-sgrn::Result<void, S7Error> S7Client::readArea(
-    int t_area, uint16_t t_db_number, int t_start, int t_amount, int t_word_len, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::readArea(int t_area, uint16_t t_db_number, int t_start, int t_amount, int t_word_len, uint8_t* tp_buffer) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
@@ -271,7 +269,7 @@ sgrn::Result<void, S7Error> S7Client::readArea(
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::writeArea(
+Result<void, S7Error> S7Client::writeArea(
     int t_area, uint16_t t_db_number, int t_start, int t_amount, int t_word_len, const uint8_t* tp_buffer) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
@@ -291,58 +289,58 @@ sgrn::Result<void, S7Error> S7Client::writeArea(
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::readMultiVars(S7DataItem* tp_items, int t_item_count) {
+Result<void, S7Error> S7Client::readMultiVars(S7DataItem* tp_items, int t_item_count) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
     }
     if (t_item_count < 0 || t_item_count > MaxVars) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
     if (t_item_count > 0 && tp_items == nullptr) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
 
     last_error_ = t_item_count == 0 ? 0 : client_->ReadMultiVars(tp_items, t_item_count);
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::readMultiVars(std::vector<S7DataItem>& tp_items) {
+Result<void, S7Error> S7Client::readMultiVars(std::vector<S7DataItem>& tp_items) {
     return readMultiVars(tp_items.data(), static_cast<int>(tp_items.size()));
 }
 
-sgrn::Result<void, S7Error> S7Client::writeMultiVars(S7DataItem* tp_items, int t_item_count) {
+Result<void, S7Error> S7Client::writeMultiVars(S7DataItem* tp_items, int t_item_count) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
     }
     if (t_item_count < 0 || t_item_count > MaxVars) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
     if (t_item_count > 0 && tp_items == nullptr) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
 
     last_error_ = t_item_count == 0 ? 0 : client_->WriteMultiVars(tp_items, t_item_count);
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::writeMultiVars(std::vector<S7DataItem>& tp_items) {
+Result<void, S7Error> S7Client::writeMultiVars(std::vector<S7DataItem>& tp_items) {
     return writeMultiVars(tp_items.data(), static_cast<int>(tp_items.size()));
 }
 
-sgrn::Result<std::vector<uint8_t>, S7Error> S7Client::readDB(uint16_t t_db_number, int t_start, int t_size) {
+Result<std::vector<uint8_t>, S7Error> S7Client::readDB(uint16_t t_db_number, int t_start, int t_size) {
     return invokeSizedBuffer(
         t_size, [&](uint8_t* tp_buffer, int t_buffer_size) { return readDB(t_db_number, t_start, t_buffer_size, tp_buffer); });
 }
 
-sgrn::Result<void, S7Error> S7Client::readDB(uint16_t t_db_number, int t_start, int t_size, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::readDB(uint16_t t_db_number, int t_start, int t_size, uint8_t* tp_buffer) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
     }
     if (t_db_number == 0) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
     const auto range_status = validateRange(t_start, t_size, "DB offset and size");
     if (range_status.hasError()) {
@@ -357,13 +355,13 @@ sgrn::Result<void, S7Error> S7Client::readDB(uint16_t t_db_number, int t_start, 
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::writeDB(uint16_t t_db_number, int t_start, int t_size, const uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::writeDB(uint16_t t_db_number, int t_start, int t_size, const uint8_t* tp_buffer) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
     }
     if (t_db_number == 0) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
     const auto range_status = validateRange(t_start, t_size, "DB offset and size");
     if (range_status.hasError()) {
@@ -377,11 +375,11 @@ sgrn::Result<void, S7Error> S7Client::writeDB(uint16_t t_db_number, int t_start,
     return makeStatus(last_error_);
 }
 
-sgrn::Result<std::vector<uint8_t>, S7Error> S7Client::readMB(int t_start, int t_size) {
+Result<std::vector<uint8_t>, S7Error> S7Client::readMB(int t_start, int t_size) {
     return invokeSizedBuffer(t_size, [&](uint8_t* tp_buffer, int t_buffer_size) { return readMB(t_start, t_buffer_size, tp_buffer); });
 }
 
-sgrn::Result<void, S7Error> S7Client::readMB(int t_start, int t_size, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::readMB(int t_start, int t_size, uint8_t* tp_buffer) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
@@ -399,7 +397,7 @@ sgrn::Result<void, S7Error> S7Client::readMB(int t_start, int t_size, uint8_t* t
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::writeMB(int t_start, int t_size, const uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::writeMB(int t_start, int t_size, const uint8_t* tp_buffer) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
@@ -416,11 +414,11 @@ sgrn::Result<void, S7Error> S7Client::writeMB(int t_start, int t_size, const uin
     return makeStatus(last_error_);
 }
 
-sgrn::Result<std::vector<uint8_t>, S7Error> S7Client::readEB(int t_start, int t_size) {
+Result<std::vector<uint8_t>, S7Error> S7Client::readEB(int t_start, int t_size) {
     return invokeSizedBuffer(t_size, [&](uint8_t* tp_buffer, int t_buffer_size) { return readEB(t_start, t_buffer_size, tp_buffer); });
 }
 
-sgrn::Result<void, S7Error> S7Client::readEB(int t_start, int t_size, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::readEB(int t_start, int t_size, uint8_t* tp_buffer) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
@@ -438,7 +436,7 @@ sgrn::Result<void, S7Error> S7Client::readEB(int t_start, int t_size, uint8_t* t
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::writeEB(int t_start, int t_size, const uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::writeEB(int t_start, int t_size, const uint8_t* tp_buffer) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
@@ -456,11 +454,11 @@ sgrn::Result<void, S7Error> S7Client::writeEB(int t_start, int t_size, const uin
     return makeStatus(last_error_);
 }
 
-sgrn::Result<std::vector<uint8_t>, S7Error> S7Client::readAB(int t_start, int t_size) {
+Result<std::vector<uint8_t>, S7Error> S7Client::readAB(int t_start, int t_size) {
     return invokeSizedBuffer(t_size, [&](uint8_t* tp_buffer, int t_buffer_size) { return readAB(t_start, t_buffer_size, tp_buffer); });
 }
 
-sgrn::Result<void, S7Error> S7Client::readAB(int t_start, int t_size, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::readAB(int t_start, int t_size, uint8_t* tp_buffer) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
@@ -478,7 +476,7 @@ sgrn::Result<void, S7Error> S7Client::readAB(int t_start, int t_size, uint8_t* t
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::writeAB(int t_start, int t_size, const uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::writeAB(int t_start, int t_size, const uint8_t* tp_buffer) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
@@ -496,12 +494,12 @@ sgrn::Result<void, S7Error> S7Client::writeAB(int t_start, int t_size, const uin
     return makeStatus(last_error_);
 }
 
-sgrn::Result<std::vector<uint8_t>, S7Error> S7Client::readTM(int t_start, int t_amount) {
+Result<std::vector<uint8_t>, S7Error> S7Client::readTM(int t_start, int t_amount) {
     return invokeSizedBuffer(
         t_amount * static_cast<int>(sizeof(uint16_t)), [&](uint8_t* tp_buffer, int) { return readTM(t_start, t_amount, tp_buffer); });
 }
 
-sgrn::Result<void, S7Error> S7Client::readTM(int t_start, int t_amount, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::readTM(int t_start, int t_amount, uint8_t* tp_buffer) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
@@ -519,7 +517,7 @@ sgrn::Result<void, S7Error> S7Client::readTM(int t_start, int t_amount, uint8_t*
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::writeTM(int t_start, int t_amount, const uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::writeTM(int t_start, int t_amount, const uint8_t* tp_buffer) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
@@ -537,12 +535,12 @@ sgrn::Result<void, S7Error> S7Client::writeTM(int t_start, int t_amount, const u
     return makeStatus(last_error_);
 }
 
-sgrn::Result<std::vector<uint8_t>, S7Error> S7Client::readCT(int t_start, int t_amount) {
+Result<std::vector<uint8_t>, S7Error> S7Client::readCT(int t_start, int t_amount) {
     return invokeSizedBuffer(
         t_amount * static_cast<int>(sizeof(uint16_t)), [&](uint8_t* tp_buffer, int) { return readCT(t_start, t_amount, tp_buffer); });
 }
 
-sgrn::Result<void, S7Error> S7Client::readCT(int t_start, int t_amount, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::readCT(int t_start, int t_amount, uint8_t* tp_buffer) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
@@ -560,7 +558,7 @@ sgrn::Result<void, S7Error> S7Client::readCT(int t_start, int t_amount, uint8_t*
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::writeCT(int t_start, int t_amount, const uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::writeCT(int t_start, int t_amount, const uint8_t* tp_buffer) {
     const auto client_status = requireClient();
     if (client_status.hasError()) {
         return client_status;
@@ -578,7 +576,7 @@ sgrn::Result<void, S7Error> S7Client::writeCT(int t_start, int t_amount, const u
     return makeStatus(last_error_);
 }
 
-sgrn::Result<BlockCounts, S7Error> S7Client::listBlocks() {
+Result<BlockCounts, S7Error> S7Client::listBlocks() {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status.error();
     }
@@ -586,7 +584,7 @@ sgrn::Result<BlockCounts, S7Error> S7Client::listBlocks() {
     TS7BlocksList raw{};
     last_error_ = client_->ListBlocks(&raw);
     if (last_error_ != 0) {
-        return S7Error{classifySnap7(last_error_)};
+        return S7Error::InvalidParam;
     }
 
     return BlockCounts{
@@ -595,12 +593,12 @@ sgrn::Result<BlockCounts, S7Error> S7Client::listBlocks() {
         .fc_count = raw.FCCount,
         .sfb_count = raw.SFBCount,
         .sfc_count = raw.SFCCount,
-        .db_count = raw.DBCount,
+        .db_count = static_cast<uint16_t>(raw.DBCount),
         .sdb_count = raw.SDBCount,
     };
 }
 
-sgrn::Result<S7BlockInfo, S7Error> S7Client::getAgBlockInfo(int t_block_type, uint16_t t_block_number) {
+Result<S7BlockInfo, S7Error> S7Client::getAgBlockInfo(int t_block_type, uint16_t t_block_number) {
     return invokeValue<S7BlockInfo>([&](S7BlockInfo& t_info) {
         if (const auto client_status = requireClient(); !client_status) {
             return client_status;
@@ -610,7 +608,7 @@ sgrn::Result<S7BlockInfo, S7Error> S7Client::getAgBlockInfo(int t_block_type, ui
     });
 }
 
-sgrn::Result<S7BlockInfo, S7Error> S7Client::getPgBlockInfo(const void* tp_block_data, int t_size) {
+Result<S7BlockInfo, S7Error> S7Client::getPgBlockInfo(const void* tp_block_data, int t_size) {
     return invokeValue<S7BlockInfo>([&](S7BlockInfo& t_info) {
         if (const auto client_status = requireClient(); !client_status) {
             return client_status;
@@ -623,18 +621,18 @@ sgrn::Result<S7BlockInfo, S7Error> S7Client::getPgBlockInfo(const void* tp_block
     });
 }
 
-sgrn::Result<std::vector<uint16_t>, S7Error> S7Client::listBlocksOfType(int t_block_type, int t_max_items) {
+Result<std::vector<uint16_t>, S7Error> S7Client::listBlocksOfType(int t_block_type, int t_max_items) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status.error();
     }
     if (t_max_items <= 0) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
     TS7BlocksOfType raw{};
     int items_count = std::min(t_max_items, static_cast<int>(sizeof(raw) / sizeof(raw[0])));
     last_error_ = client_->ListBlocksOfType(t_block_type, &raw, &items_count);
     if (last_error_ != 0) {
-        return S7Error{classifySnap7(last_error_)};
+        return S7Error::InvalidParam;
     }
 
     std::vector<uint16_t> values;
@@ -645,43 +643,43 @@ sgrn::Result<std::vector<uint16_t>, S7Error> S7Client::listBlocksOfType(int t_bl
     return values;
 }
 
-sgrn::Result<std::vector<uint8_t>, S7Error> S7Client::upload(int t_block_type, uint16_t t_block_number, int t_buffer_size) {
+Result<std::vector<uint8_t>, S7Error> S7Client::upload(int t_block_type, uint16_t t_block_number, int t_buffer_size) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status.error();
     }
     if (t_buffer_size <= 0) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
 
     std::vector<uint8_t> tp_buffer(static_cast<size_t>(t_buffer_size), 0);
     int t_size = t_buffer_size;
     last_error_ = client_->Upload(t_block_type, t_block_number, tp_buffer.data(), &t_size);
     if (last_error_ != 0) {
-        return S7Error{classifySnap7(last_error_)};
+        return S7Error::InvalidParam;
     }
     tp_buffer.resize(static_cast<size_t>(std::max(t_size, 0)));
     return tp_buffer;
 }
 
-sgrn::Result<std::vector<uint8_t>, S7Error> S7Client::fullUpload(int t_block_type, uint16_t t_block_number, int t_buffer_size) {
+Result<std::vector<uint8_t>, S7Error> S7Client::fullUpload(int t_block_type, uint16_t t_block_number, int t_buffer_size) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status.error();
     }
     if (t_buffer_size <= 0) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
 
     std::vector<uint8_t> tp_buffer(static_cast<size_t>(t_buffer_size), 0);
     int t_size = t_buffer_size;
     last_error_ = client_->FullUpload(t_block_type, t_block_number, tp_buffer.data(), &t_size);
     if (last_error_ != 0) {
-        return S7Error{classifySnap7(last_error_)};
+        return S7Error::InvalidParam;
     }
     tp_buffer.resize(static_cast<size_t>(std::max(t_size, 0)));
     return tp_buffer;
 }
 
-sgrn::Result<void, S7Error> S7Client::download(uint16_t t_block_number, const uint8_t* tp_buffer, int t_size) {
+Result<void, S7Error> S7Client::download(uint16_t t_block_number, const uint8_t* tp_buffer, int t_size) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -693,7 +691,7 @@ sgrn::Result<void, S7Error> S7Client::download(uint16_t t_block_number, const ui
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::deleteBlock(int t_block_type, uint16_t t_block_number) {
+Result<void, S7Error> S7Client::deleteBlock(int t_block_type, uint16_t t_block_number) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -702,37 +700,37 @@ sgrn::Result<void, S7Error> S7Client::deleteBlock(int t_block_type, uint16_t t_b
     return makeStatus(last_error_);
 }
 
-sgrn::Result<std::vector<uint8_t>, S7Error> S7Client::dbGet(uint16_t t_db_number, int t_buffer_size) {
+Result<std::vector<uint8_t>, S7Error> S7Client::dbGet(uint16_t t_db_number, int t_buffer_size) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status.error();
     }
     if (t_buffer_size <= 0) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
 
     std::vector<uint8_t> tp_buffer(static_cast<size_t>(t_buffer_size), 0);
     int t_size = t_buffer_size;
     last_error_ = client_->DBGet(t_db_number, tp_buffer.data(), &t_size);
     if (last_error_ != 0) {
-        return S7Error{classifySnap7(last_error_)};
+        return S7Error::InvalidParam;
     }
     tp_buffer.resize(static_cast<size_t>(std::max(t_size, 0)));
     return tp_buffer;
 }
 
-sgrn::Result<void, S7Error> S7Client::dbFill(uint16_t t_db_number, int t_fill_char) {
+Result<void, S7Error> S7Client::dbFill(uint16_t t_db_number, int t_fill_char) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
     if (t_db_number == 0) {
-        return sgrn::Result<void, S7Error>::Error(S7Error{S7ProtocolCode::InvalidParam});
+        return Result<void, S7Error>::Error(S7Error::InvalidParam);
     }
 
     last_error_ = client_->DBFill(t_db_number, t_fill_char);
     return makeStatus(last_error_);
 }
 
-sgrn::Result<std::tm, S7Error> S7Client::getPlcDateTime() {
+Result<std::tm, S7Error> S7Client::getPlcDateTime() {
     return invokeValue<std::tm>([&](std::tm& tp_value) {
         if (const auto client_status = requireClient(); !client_status) {
             return client_status;
@@ -742,7 +740,7 @@ sgrn::Result<std::tm, S7Error> S7Client::getPlcDateTime() {
     });
 }
 
-sgrn::Result<void, S7Error> S7Client::setPlcDateTime(const std::tm& t_date_time) {
+Result<void, S7Error> S7Client::setPlcDateTime(const std::tm& t_date_time) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -752,7 +750,7 @@ sgrn::Result<void, S7Error> S7Client::setPlcDateTime(const std::tm& t_date_time)
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::setPlcSystemDateTime() {
+Result<void, S7Error> S7Client::setPlcSystemDateTime() {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -760,7 +758,7 @@ sgrn::Result<void, S7Error> S7Client::setPlcSystemDateTime() {
     return makeStatus(last_error_);
 }
 
-sgrn::Result<OrderCodeInfo, S7Error> S7Client::getOrderCode() {
+Result<OrderCodeInfo, S7Error> S7Client::getOrderCode() {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status.error();
     }
@@ -768,7 +766,7 @@ sgrn::Result<OrderCodeInfo, S7Error> S7Client::getOrderCode() {
     TS7OrderCode raw{};
     last_error_ = client_->GetOrderCode(&raw);
     if (last_error_ != 0) {
-        return S7Error{classifySnap7(last_error_)};
+        return S7Error::InvalidParam;
     }
 
     return OrderCodeInfo{
@@ -779,7 +777,7 @@ sgrn::Result<OrderCodeInfo, S7Error> S7Client::getOrderCode() {
     };
 }
 
-sgrn::Result<CpuInfo, S7Error> S7Client::getCpuInfo() {
+Result<CpuInfo, S7Error> S7Client::getCpuInfo() {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status.error();
     }
@@ -787,7 +785,7 @@ sgrn::Result<CpuInfo, S7Error> S7Client::getCpuInfo() {
     TS7CpuInfo raw{};
     last_error_ = client_->GetCpuInfo(&raw);
     if (last_error_ != 0) {
-        return S7Error{classifySnap7(last_error_)};
+        return S7Error::InvalidParam;
     }
 
     return CpuInfo{
@@ -799,7 +797,7 @@ sgrn::Result<CpuInfo, S7Error> S7Client::getCpuInfo() {
     };
 }
 
-sgrn::Result<CpInfo, S7Error> S7Client::getCpInfo() {
+Result<CpInfo, S7Error> S7Client::getCpInfo() {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status.error();
     }
@@ -807,7 +805,7 @@ sgrn::Result<CpInfo, S7Error> S7Client::getCpInfo() {
     TS7CpInfo raw{};
     last_error_ = client_->GetCpInfo(&raw);
     if (last_error_ != 0) {
-        return S7Error{classifySnap7(last_error_)};
+        return S7Error::InvalidParam;
     }
 
     return CpInfo{
@@ -818,7 +816,7 @@ sgrn::Result<CpInfo, S7Error> S7Client::getCpInfo() {
     };
 }
 
-sgrn::Result<S7Szl, S7Error> S7Client::readSzl(int t_id, int t_index, int t_buffer_size) {
+Result<S7Szl, S7Error> S7Client::readSzl(int t_id, int t_index, int t_buffer_size) {
     return invokeValue<S7Szl>([&](S7Szl& tp_value) {
         if (const auto client_status = requireClient(); !client_status) {
             return client_status;
@@ -829,7 +827,7 @@ sgrn::Result<S7Szl, S7Error> S7Client::readSzl(int t_id, int t_index, int t_buff
     });
 }
 
-sgrn::Result<S7SzlList, S7Error> S7Client::readSzlList(int t_item_capacity) {
+Result<S7SzlList, S7Error> S7Client::readSzlList(int t_item_capacity) {
     return invokeValue<S7SzlList>([&](S7SzlList& tp_value) {
         if (const auto client_status = requireClient(); !client_status) {
             return client_status;
@@ -840,7 +838,7 @@ sgrn::Result<S7SzlList, S7Error> S7Client::readSzlList(int t_item_capacity) {
     });
 }
 
-sgrn::Result<PlcStatus, S7Error> S7Client::getPlcStatus() {
+Result<PlcStatus, S7Error> S7Client::getPlcStatus() {
     if (const auto client_status = requireClient(); !client_status) {
         return Error(client_status.error());
     }
@@ -848,14 +846,14 @@ sgrn::Result<PlcStatus, S7Error> S7Client::getPlcStatus() {
     const int t_raw_status = client_->PlcStatus();
     if (t_raw_status != S7CpuStatusRun && t_raw_status != S7CpuStatusStop) {
         last_error_ = t_raw_status;
-        return S7Error{classifySnap7(last_error_)};
+        return S7Error::InvalidParam;
     }
 
     last_error_ = 0;
     return plcStatusFromRaw(t_raw_status);
 }
 
-sgrn::Result<void, S7Error> S7Client::plcHotStart() {
+Result<void, S7Error> S7Client::plcHotStart() {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -863,7 +861,7 @@ sgrn::Result<void, S7Error> S7Client::plcHotStart() {
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::plcColdStart() {
+Result<void, S7Error> S7Client::plcColdStart() {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -871,7 +869,7 @@ sgrn::Result<void, S7Error> S7Client::plcColdStart() {
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::plcStop() {
+Result<void, S7Error> S7Client::plcStop() {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -879,7 +877,7 @@ sgrn::Result<void, S7Error> S7Client::plcStop() {
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::copyRamToRom(int t_timeout_ms) {
+Result<void, S7Error> S7Client::copyRamToRom(int t_timeout_ms) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -887,7 +885,7 @@ sgrn::Result<void, S7Error> S7Client::copyRamToRom(int t_timeout_ms) {
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::compress(int t_timeout_ms) {
+Result<void, S7Error> S7Client::compress(int t_timeout_ms) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -895,7 +893,7 @@ sgrn::Result<void, S7Error> S7Client::compress(int t_timeout_ms) {
     return makeStatus(last_error_);
 }
 
-sgrn::Result<S7Protection, S7Error> S7Client::getProtection() {
+Result<S7Protection, S7Error> S7Client::getProtection() {
     return invokeValue<S7Protection>([&](S7Protection& tp_value) {
         if (const auto client_status = requireClient(); !client_status) {
             return client_status;
@@ -905,7 +903,7 @@ sgrn::Result<S7Protection, S7Error> S7Client::getProtection() {
     });
 }
 
-sgrn::Result<void, S7Error> S7Client::setSessionPassword(const std::string& t_password) {
+Result<void, S7Error> S7Client::setSessionPassword(const std::string& t_password) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -916,7 +914,7 @@ sgrn::Result<void, S7Error> S7Client::setSessionPassword(const std::string& t_pa
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::clearSessionPassword() {
+Result<void, S7Error> S7Client::clearSessionPassword() {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -924,7 +922,7 @@ sgrn::Result<void, S7Error> S7Client::clearSessionPassword() {
     return makeStatus(last_error_);
 }
 
-sgrn::Result<int, S7Error> S7Client::getExecTime() {
+Result<int, S7Error> S7Client::getExecTime() {
     return invokeValue<int>([&](int& tp_value) {
         if (const auto client_status = requireClient(); !client_status) {
             return client_status;
@@ -939,7 +937,7 @@ sgrn::Result<int, S7Error> S7Client::getExecTime() {
     });
 }
 
-sgrn::Result<int, S7Error> S7Client::getLastError() {
+Result<int, S7Error> S7Client::getLastError() {
     return invokeValue<int>([&](int& tp_value) {
         if (const auto client_status = requireClient(); !client_status) {
             return client_status;
@@ -954,7 +952,7 @@ sgrn::Result<int, S7Error> S7Client::getLastError() {
     });
 }
 
-sgrn::Result<PduLengthInfo, S7Error> S7Client::getPduLength() {
+Result<PduLengthInfo, S7Error> S7Client::getPduLength() {
     return invokeValue<PduLengthInfo>([&](PduLengthInfo& tp_value) {
         if (const auto client_status = requireClient(); !client_status) {
             return client_status;
@@ -976,7 +974,7 @@ sgrn::Result<PduLengthInfo, S7Error> S7Client::getPduLength() {
     });
 }
 
-sgrn::Result<int, S7Error> S7Client::getPduRequested() {
+Result<int, S7Error> S7Client::getPduRequested() {
     auto pdu = getPduLength();
     if (!pdu) {
         return Error(pdu.error());
@@ -984,7 +982,7 @@ sgrn::Result<int, S7Error> S7Client::getPduRequested() {
     return pdu->requested;
 }
 
-sgrn::Result<int, S7Error> S7Client::getNegotiatedPduLength() {
+Result<int, S7Error> S7Client::getNegotiatedPduLength() {
     auto pdu = getPduLength();
     if (!pdu) {
         return Error(pdu.error());
@@ -1000,7 +998,7 @@ std::string S7Client::errorText(int t_error_code) {
     return std::string(CliErrorText(t_error_code).c_str());
 }
 
-sgrn::Result<void, S7Error> S7Client::setAsyncCallback(S7CompletionCallback t_callback, void* tp_user_ptr) {
+Result<void, S7Error> S7Client::setAsyncCallback(S7CompletionCallback t_callback, void* tp_user_ptr) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -1008,7 +1006,7 @@ sgrn::Result<void, S7Error> S7Client::setAsyncCallback(S7CompletionCallback t_ca
     return makeStatus(last_error_);
 }
 
-sgrn::Result<AsyncCompletionInfo, S7Error> S7Client::checkAsyncCompletion() {
+Result<AsyncCompletionInfo, S7Error> S7Client::checkAsyncCompletion() {
     if (const auto client_status = requireClient(); !client_status) {
         return Error(client_status.error());
     }
@@ -1019,7 +1017,7 @@ sgrn::Result<AsyncCompletionInfo, S7Error> S7Client::checkAsyncCompletion() {
     return AsyncCompletionInfo{.completed = completed, .operation_result = operation_result};
 }
 
-sgrn::Result<void, S7Error> S7Client::waitAsyncCompletion(uint32_t t_timeout_ms) {
+Result<void, S7Error> S7Client::waitAsyncCompletion(uint32_t t_timeout_ms) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -1027,7 +1025,7 @@ sgrn::Result<void, S7Error> S7Client::waitAsyncCompletion(uint32_t t_timeout_ms)
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncReadArea(
+Result<void, S7Error> S7Client::asyncReadArea(
     int t_area, uint16_t t_db_number, int t_start, int t_amount, int t_word_len, uint8_t* tp_buffer) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
@@ -1042,7 +1040,7 @@ sgrn::Result<void, S7Error> S7Client::asyncReadArea(
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncWriteArea(
+Result<void, S7Error> S7Client::asyncWriteArea(
     int t_area, uint16_t t_db_number, int t_start, int t_amount, int t_word_len, uint8_t* tp_buffer) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
@@ -1057,7 +1055,7 @@ sgrn::Result<void, S7Error> S7Client::asyncWriteArea(
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncReadDB(uint16_t t_db_number, int t_start, int t_size, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::asyncReadDB(uint16_t t_db_number, int t_start, int t_size, uint8_t* tp_buffer) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -1068,7 +1066,7 @@ sgrn::Result<void, S7Error> S7Client::asyncReadDB(uint16_t t_db_number, int t_st
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncWriteDB(uint16_t t_db_number, int t_start, int t_size, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::asyncWriteDB(uint16_t t_db_number, int t_start, int t_size, uint8_t* tp_buffer) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -1079,7 +1077,7 @@ sgrn::Result<void, S7Error> S7Client::asyncWriteDB(uint16_t t_db_number, int t_s
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncReadMB(int t_start, int t_size, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::asyncReadMB(int t_start, int t_size, uint8_t* tp_buffer) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -1090,7 +1088,7 @@ sgrn::Result<void, S7Error> S7Client::asyncReadMB(int t_start, int t_size, uint8
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncWriteMB(int t_start, int t_size, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::asyncWriteMB(int t_start, int t_size, uint8_t* tp_buffer) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -1101,7 +1099,7 @@ sgrn::Result<void, S7Error> S7Client::asyncWriteMB(int t_start, int t_size, uint
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncReadEB(int t_start, int t_size, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::asyncReadEB(int t_start, int t_size, uint8_t* tp_buffer) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -1112,7 +1110,7 @@ sgrn::Result<void, S7Error> S7Client::asyncReadEB(int t_start, int t_size, uint8
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncWriteEB(int t_start, int t_size, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::asyncWriteEB(int t_start, int t_size, uint8_t* tp_buffer) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -1123,7 +1121,7 @@ sgrn::Result<void, S7Error> S7Client::asyncWriteEB(int t_start, int t_size, uint
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncReadAB(int t_start, int t_size, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::asyncReadAB(int t_start, int t_size, uint8_t* tp_buffer) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -1134,7 +1132,7 @@ sgrn::Result<void, S7Error> S7Client::asyncReadAB(int t_start, int t_size, uint8
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncWriteAB(int t_start, int t_size, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::asyncWriteAB(int t_start, int t_size, uint8_t* tp_buffer) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -1145,7 +1143,7 @@ sgrn::Result<void, S7Error> S7Client::asyncWriteAB(int t_start, int t_size, uint
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncReadTM(int t_start, int t_amount, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::asyncReadTM(int t_start, int t_amount, uint8_t* tp_buffer) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -1156,7 +1154,7 @@ sgrn::Result<void, S7Error> S7Client::asyncReadTM(int t_start, int t_amount, uin
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncWriteTM(int t_start, int t_amount, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::asyncWriteTM(int t_start, int t_amount, uint8_t* tp_buffer) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -1167,7 +1165,7 @@ sgrn::Result<void, S7Error> S7Client::asyncWriteTM(int t_start, int t_amount, ui
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncReadCT(int t_start, int t_amount, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::asyncReadCT(int t_start, int t_amount, uint8_t* tp_buffer) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -1178,7 +1176,7 @@ sgrn::Result<void, S7Error> S7Client::asyncReadCT(int t_start, int t_amount, uin
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncWriteCT(int t_start, int t_amount, uint8_t* tp_buffer) {
+Result<void, S7Error> S7Client::asyncWriteCT(int t_start, int t_amount, uint8_t* tp_buffer) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -1189,62 +1187,62 @@ sgrn::Result<void, S7Error> S7Client::asyncWriteCT(int t_start, int t_amount, ui
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncListBlocksOfType(int t_block_type, TS7BlocksOfType* tp_blocks, int* tp_item_count) {
+Result<void, S7Error> S7Client::asyncListBlocksOfType(int t_block_type, TS7BlocksOfType* tp_blocks, int* tp_item_count) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
     if (tp_blocks == nullptr || tp_item_count == nullptr) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
     last_error_ = client_->AsListBlocksOfType(t_block_type, tp_blocks, tp_item_count);
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncReadSzl(int t_id, int t_index, S7Szl* tp_szl, int* t_size) {
+Result<void, S7Error> S7Client::asyncReadSzl(int t_id, int t_index, S7Szl* tp_szl, int* t_size) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
     if (tp_szl == nullptr || t_size == nullptr) {
-        return S7Error{S7ProtocolCode::InvalidParam};
+        return S7Error::InvalidParam;
     }
     last_error_ = client_->AsReadSZL(t_id, t_index, tp_szl, t_size);
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncReadSzlList(S7SzlList* tp_list, int* tp_item_count) {
+Result<void, S7Error> S7Client::asyncReadSzlList(S7SzlList* tp_list, int* tp_item_count) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
     if (tp_list == nullptr || tp_item_count == nullptr) {
-        return sgrn::Result<void, S7Error>::Error(S7Error{S7ProtocolCode::InvalidParam});
+        return Result<void, S7Error>::Error(S7Error::InvalidParam);
     }
     last_error_ = client_->AsReadSZLList(tp_list, tp_item_count);
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncUpload(int t_block_type, uint16_t t_block_number, uint8_t* tp_buffer, int* t_size) {
+Result<void, S7Error> S7Client::asyncUpload(int t_block_type, uint16_t t_block_number, uint8_t* tp_buffer, int* t_size) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
     if (tp_buffer == nullptr || t_size == nullptr) {
-        return sgrn::Result<void, S7Error>::Error(S7Error{S7ProtocolCode::InvalidParam});
+        return Result<void, S7Error>::Error(S7Error::InvalidParam);
     }
     last_error_ = client_->AsUpload(t_block_type, t_block_number, tp_buffer, t_size);
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncFullUpload(int t_block_type, uint16_t t_block_number, uint8_t* tp_buffer, int* t_size) {
+Result<void, S7Error> S7Client::asyncFullUpload(int t_block_type, uint16_t t_block_number, uint8_t* tp_buffer, int* t_size) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
     if (tp_buffer == nullptr || t_size == nullptr) {
-        return sgrn::Result<void, S7Error>::Error(S7Error{S7ProtocolCode::InvalidParam});
+        return Result<void, S7Error>::Error(S7Error::InvalidParam);
     }
     last_error_ = client_->AsFullUpload(t_block_type, t_block_number, tp_buffer, t_size);
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncDownload(uint16_t t_block_number, uint8_t* tp_buffer, int t_size) {
+Result<void, S7Error> S7Client::asyncDownload(uint16_t t_block_number, uint8_t* tp_buffer, int t_size) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -1255,7 +1253,7 @@ sgrn::Result<void, S7Error> S7Client::asyncDownload(uint16_t t_block_number, uin
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncCopyRamToRom(int t_timeout_ms) {
+Result<void, S7Error> S7Client::asyncCopyRamToRom(int t_timeout_ms) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -1263,7 +1261,7 @@ sgrn::Result<void, S7Error> S7Client::asyncCopyRamToRom(int t_timeout_ms) {
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncCompress(int t_timeout_ms) {
+Result<void, S7Error> S7Client::asyncCompress(int t_timeout_ms) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -1271,18 +1269,18 @@ sgrn::Result<void, S7Error> S7Client::asyncCompress(int t_timeout_ms) {
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncDBGet(uint16_t t_db_number, uint8_t* tp_buffer, int* t_size) {
+Result<void, S7Error> S7Client::asyncDBGet(uint16_t t_db_number, uint8_t* tp_buffer, int* t_size) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
     if (tp_buffer == nullptr || t_size == nullptr) {
-        return sgrn::Result<void, S7Error>::Error(S7Error{S7ProtocolCode::InvalidParam});
+        return Error(S7Error::InvalidParam);
     }
     last_error_ = client_->AsDBGet(t_db_number, tp_buffer, t_size);
     return makeStatus(last_error_);
 }
 
-sgrn::Result<void, S7Error> S7Client::asyncDBFill(uint16_t t_db_number, int t_fill_char) {
+Result<void, S7Error> S7Client::asyncDBFill(uint16_t t_db_number, int t_fill_char) {
     if (const auto client_status = requireClient(); !client_status) {
         return client_status;
     }
@@ -1290,11 +1288,11 @@ sgrn::Result<void, S7Error> S7Client::asyncDBFill(uint16_t t_db_number, int t_fi
     return makeStatus(last_error_);
 }
 
-sgrn::Result<std::vector<S7DiagnosticBufferEntry>, S7Error> S7Client::readDiagnosticBuffer() {
+Result<std::vector<S7DiagnosticBufferEntry>, S7Error> S7Client::readDiagnosticBuffer() {
     // SZL ID 0x00A0 = Diagnostic buffer
     auto szl_res = readSzl(0x00A0, 0x0000, 0x4000);
     if (!szl_res) {
-        return sgrn::Result<std::vector<S7DiagnosticBufferEntry>, S7Error>::Error(szl_res.error());
+        return Result<std::vector<S7DiagnosticBufferEntry>, S7Error>::Error(szl_res.error());
     }
 
     const auto& t_szl = *szl_res;
@@ -1302,7 +1300,7 @@ sgrn::Result<std::vector<S7DiagnosticBufferEntry>, S7Error> S7Client::readDiagno
     const int entry_count = t_szl.Header.N_DR;
 
     if (entry_len < 20) {
-        return S7Error{S7ProtocolCode::Unknown};
+        return S7Error::InvalidParam;
     }
 
     std::vector<S7DiagnosticBufferEntry> entries;
@@ -1323,17 +1321,17 @@ sgrn::Result<std::vector<S7DiagnosticBufferEntry>, S7Error> S7Client::readDiagno
 
         // Timestamp (8 bytes BCD starting at offset 12)
         const uint8_t* p_ts = p_ptr + 12;
-        int year = sgrn::utils::encoding::bcdToDec(p_ts[0]);
+        int year = bcdToDec(p_ts[0]);
         if (year < 90)
             year += 2000;
         else
             year += 1900;
-        int month = sgrn::utils::encoding::bcdToDec(p_ts[1]);
-        int day = sgrn::utils::encoding::bcdToDec(p_ts[2]);
-        int hour = sgrn::utils::encoding::bcdToDec(p_ts[3]);
-        int min = sgrn::utils::encoding::bcdToDec(p_ts[4]);
-        int sec = sgrn::utils::encoding::bcdToDec(p_ts[5]);
-        int msec = (sgrn::utils::encoding::bcdToDec(p_ts[6]) * 10) + (p_ts[7] >> 4);
+        int month = bcdToDec(p_ts[1]);
+        int day = bcdToDec(p_ts[2]);
+        int hour = bcdToDec(p_ts[3]);
+        int min = bcdToDec(p_ts[4]);
+        int sec = bcdToDec(p_ts[5]);
+        int msec = (bcdToDec(p_ts[6]) * 10) + (p_ts[7] >> 4);
 
         item.timestamp = fmt::format("{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}.{:03d}", year, month, day, hour, min, sec, msec);
         entries.push_back(std::move(item));

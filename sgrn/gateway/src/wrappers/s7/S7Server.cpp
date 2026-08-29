@@ -1,7 +1,11 @@
 #include <sgrn/gateway/twin/utils.hpp>
 #include <sgrn/gateway/wrappers/s7/S7Server.hpp>
 
+using sgrn::gateway::wrappers::s7::fromSnap7ErrorToS7Error;
+
+using sgrn::gateway::wrappers::s7::S7Error;
 namespace sgrn::gateway::wrappers::s7
+
 {
 
 S7Server::S7Server()
@@ -29,9 +33,9 @@ std::pair<int, word> S7Server::areaKey(int t_area_code, word t_index) {
     return {t_area_code, t_index};
 }
 
-sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> S7Server::start(const std::string& t_ip, uint16_t t_port) {
+sgrn::Result<void, S7Error> S7Server::start(const std::string& t_ip, uint16_t t_port) {
     if (!server_) {
-        return S7Error{S7ProtocolCode::NotConnected};
+        return S7Error::InvalidParam;
     }
 
     int port_status = server_->SetParam(p_u16_LocalPort, &t_port);
@@ -50,9 +54,9 @@ sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> S7Server::start(const
     return makeStatus(res);
 }
 
-sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> S7Server::stop() {
+sgrn::Result<void, S7Error> S7Server::stop() {
     if (!server_) {
-        return S7Error{S7ProtocolCode::NotConnected};
+        return S7Error::InvalidParam;
     }
     int res = server_->Stop();
     return makeStatus(res);
@@ -83,11 +87,9 @@ int S7Server::getCpuStatus() const {
     return server_->GetCpuStatus();
 }
 
-sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> S7Server::setCpuStatus(int t_status) {
+sgrn::Result<void, S7Error> S7Server::setCpuStatus(int t_status) {
     if (!server_) {
-        return S7Error{
-            S7ProtocolCode::NotConnected,
-        };
+        return S7Error::InvalidParam;
     }
     int res = server_->SetCpuStatus(t_status);
     return makeStatus(res);
@@ -135,14 +137,14 @@ std::string S7Server::eventText(const S7ServerEvent& t_event) const {
     return "";
 }
 
-sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> S7Server::makeStatus(int t_error_code) const {
+sgrn::Result<void, S7Error> S7Server::makeStatus(int t_error_code) const {
     if (t_error_code == 0) {
         return {};
     }
 
     char buffer[256];
     Srv_ErrorText(t_error_code, buffer, sizeof(buffer));
-    return Error(fromSnap7(t_error_code, std::string(buffer)));
+    return Error(fromSnap7ErrorToS7Error(t_error_code));
 }
 
 } // namespace sgrn::gateway::wrappers::s7

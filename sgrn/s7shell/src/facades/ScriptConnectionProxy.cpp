@@ -78,7 +78,7 @@ void ScriptS7ConnectionProxy::setParamUInt16(int t_param, uint16_t t_value) {
 
 std::string ScriptS7ConnectionProxy::paramSummary() const {
     if (!conn_)
-        return "Error: no connection";
+        return "SchemaError: no connection";
     std::string out = "Snap7 client parameters:\n";
     out += fmt::format("  RemotePort     = {}\n", getParamUInt16(p_u16_RemotePort));
     out += fmt::format("  PingTimeout    = {} ms\n", getParamInt(p_i32_PingTimeout));

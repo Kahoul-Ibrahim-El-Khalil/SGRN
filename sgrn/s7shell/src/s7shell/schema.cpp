@@ -104,7 +104,7 @@ void S7Shell::loadSchema(const std::string& t_schema_path, const std::string& t_
 
     if (std::filesystem::exists(resolved)) {
         sgrn::scl::PlcSchemaStore t_store;
-        std::optional<sgrn::scl::Error> err;
+        std::optional<sgrn::scl::SclError> err;
 
         if (resolved.ends_with(".json")) {
             auto res = t_store.loadFromJsonFile(resolved);
@@ -121,7 +121,7 @@ void S7Shell::loadSchema(const std::string& t_schema_path, const std::string& t_
         }
 
         if (err.has_value()) {
-            fmt::print(stderr, fg(fmt::color::red), "[s7shell] Schema compilation failed for '{}': {}\n", resolved, err->string());
+            fmt::print(stderr, fg(fmt::color::red), "[s7shell] Schema compilation failed for '{}': {}\n", resolved, toString(*err));
             // Surface any partial warnings gathered during the attempted load
             for (const auto& w : t_store.warnings())
                 fmt::print(stderr, fg(fmt::color::yellow), "[s7shell]   warning: {}\n", w);

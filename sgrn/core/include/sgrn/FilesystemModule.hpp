@@ -281,14 +281,14 @@ inline std::string ls(const std::string& t_path) {
         std::string expanded = expandUserPath(t_path);
         fs::path p = expanded.empty() ? fs::current_path() : fs::path(expanded);
         if (!fs::exists(p))
-            return "Error: Path does not exist\n";
+            return "SchemaError: Path does not exist\n";
 
         for (const auto& entry : fs::directory_iterator(p)) {
             const char kind = entry.is_directory() ? 'd' : '-';
             out += fmt::format("{} {}\n", kind, entry.path().filename().string());
         }
     } catch (const std::exception& e) {
-        out = fmt::format("Error: {}\n", e.what());
+        out = fmt::format("SchemaError: {}\n", e.what());
     }
     return out;
 }

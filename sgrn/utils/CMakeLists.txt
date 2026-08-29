@@ -77,3 +77,19 @@ sgrn_package_runtime_dependencies(
     LIBS sgrn_utils
     COMPONENT utils
 )
+
+# ── Tests ─────────────────────────────────────────────────────────────────────
+
+if(SGRN_BUILD_TESTS)
+    sgrn_add_component_executable(
+        TARGET compression_test
+        SOURCES tests/compression_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn_utils
+            fmt::fmt
+            sgrn::zstd
+    )
+    add_test(NAME compression_test COMMAND compression_test)
+    target_compile_features(compression_test PRIVATE cxx_std_23)
+endif()

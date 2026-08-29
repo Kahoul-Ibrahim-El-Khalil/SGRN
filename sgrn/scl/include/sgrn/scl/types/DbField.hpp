@@ -11,17 +11,17 @@ namespace sgrn::scl
 {
 struct DbField {
     std::string name;
-    int offset{0};
-    int bit_index{0};
+    int32_t offset{0};
+    uint8_t bit_index{0};
     DataType type{DataType::Byte};
-    int count{0};
+    uint32_t count{0};
     int array_lower_bound{0};
     int array_upper_bound{0};
-    int string_capacity{0};
+    uint32_t string_capacity{0};
 
     std::string udt_name;
     std::vector<DbField> children;
-    int struct_size{0};
+    uint32_t struct_size{0};
     s7codec::Endian endianness{s7codec::Endian::Big};
     std::optional<std::string> unit;
     std::optional<double> min_val;

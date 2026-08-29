@@ -9,11 +9,11 @@ namespace sgrn::gateway::adapters
 {
 
 sgrn::Result<int, std::string> dataTypeToUaTypeIndex(DataType t_type) {
-    try {
-        return sgrn::scl::info_of(t_type).ua_type_index;
-    } catch (...) {
-        return sgrn::Error("Data Type unkwown");
+    auto* info = sgrn::scl::info_of(t_type);
+    if (!info) {
+        return sgrn::Error("Data Type unknown");
     }
+    return info->ua_type_index;
 }
 
 } // namespace sgrn::gateway::adapters

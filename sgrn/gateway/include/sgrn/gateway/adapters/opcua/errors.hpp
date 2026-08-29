@@ -7,7 +7,7 @@ namespace sgrn::gateway::adapters
 {
 
 /**
- * @brief Error outcomes that can flow out of the OPC UA <-> encode/decode
+ * @brief SchemaError outcomes that can flow out of the OPC UA <-> encode/decode
  *        layer in the protocol adapter.
  *
  * Every Result<..., ...> in the opcua adapter (encoders.hpp / decoders.hpp)
@@ -108,18 +108,18 @@ inline UA_StatusCode toUAStatusCode(OpcUaAdapterError error) {
     return UA_STATUSCODE_BADINTERNALERROR;
 }
 
-inline UA_StatusCode toUAStatusCode(sgrn::gateway::twin::PlcMemoryErrorStatus t_status) {
+inline UA_StatusCode toUAStatusCode(sgrn::gateway::twin::PlcMemoryError t_status) {
     switch (t_status) {
-        case twin::PlcMemoryErrorStatus::PLC_STATE_NOT_INITIALIZED:
+        case twin::PlcMemoryError::PLC_STATE_NOT_INITIALIZED:
             return UA_STATUSCODE_BADSERVERNOTCONNECTED;
-        case twin::PlcMemoryErrorStatus::DB_SEGMENT_NOT_FOUND:
-        case twin::PlcMemoryErrorStatus::UNMAPPED_ARENA_REGION:
+        case twin::PlcMemoryError::DB_SEGMENT_NOT_FOUND:
+        case twin::PlcMemoryError::UNMAPPED_ARENA_REGION:
             return UA_STATUSCODE_BADNODEIDUNKNOWN;
-        case twin::PlcMemoryErrorStatus::RANGE_EXCEEDS_ALLOWED_SPACE:
-        case twin::PlcMemoryErrorStatus::RANGE_CROSSES_SEGMENT_BOUNDARY:
+        case twin::PlcMemoryError::RANGE_EXCEEDS_ALLOWED_SPACE:
+        case twin::PlcMemoryError::RANGE_CROSSES_SEGMENT_BOUNDARY:
             return UA_STATUSCODE_BADOUTOFRANGE;
-        case twin::PlcMemoryErrorStatus::NULL_BUFFER:
-        case twin::PlcMemoryErrorStatus::INVALID_BIT_INDEX:
+        case twin::PlcMemoryError::NULL_BUFFER:
+        case twin::PlcMemoryError::INVALID_BIT_INDEX:
             return UA_STATUSCODE_BADINTERNALERROR;
     }
     return UA_STATUSCODE_BADINTERNALERROR;

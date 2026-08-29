@@ -33,7 +33,7 @@ size_t getAlignment(const sgrn::scl::DbField& t_field) {
 
 size_t s7SpanBytes(const sgrn::scl::DbField& t_field) {
     return (!t_field.children.empty() || t_field.type == sgrn::scl::DataType::Struct)
-               ? size_t(t_field.struct_size) * size_t(std::max(1, t_field.count))
+               ? size_t(t_field.struct_size) * size_t(std::max<uint32_t>(1u, t_field.count))
                : size_t(sgrn::scl::rawTypeSpanBytes(t_field.type, t_field.count));
 }
 

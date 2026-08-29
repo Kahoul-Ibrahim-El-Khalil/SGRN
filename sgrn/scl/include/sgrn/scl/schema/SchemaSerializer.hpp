@@ -20,9 +20,9 @@ public:
     static std::string dbToJson(const DbSchema& t_db);
     static std::string tagToJson(const PlcTag& t_tag);
 
-    static sgrn::Result<UdtDefinition, ::sgrn::scl::Error> udtFromJson(const rapidjson::Value& t_node);
-    static sgrn::Result<DbSchema, ::sgrn::scl::Error> dbFromJson(const rapidjson::Value& t_node);
-    static sgrn::Result<PlcTag, ::sgrn::scl::Error> tagFromJson(const rapidjson::Value& t_node);
+    static sgrn::Result<UdtDefinition, scl::SclError> udtFromJson(const rapidjson::Value& t_node);
+    static sgrn::Result<DbSchema, scl::SclError> dbFromJson(const rapidjson::Value& t_node);
+    static sgrn::Result<PlcTag, scl::SclError> tagFromJson(const rapidjson::Value& t_node);
 
     /**
      * @brief Serializes the registry to JSON string, with optional filtering.
@@ -34,7 +34,7 @@ public:
     /**
      * @brief Deserializes a JSON object into a registry.
      */
-    static sgrn::Result<void, ::sgrn::scl::Error> deserialize(PlcSchemaStore& t_registry, const rapidjson::Value& t_root);
+    static sgrn::Result<void, scl::SclError> deserialize(PlcSchemaStore& t_registry, const rapidjson::Value& t_root);
 
 private:
     static void resolveUdtsInRegistry(PlcSchemaStore& t_registry);

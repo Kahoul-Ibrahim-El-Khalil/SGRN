@@ -83,12 +83,12 @@ public:
     // ── Subscriptions ────────────────────────────────────────────────────────
 
     /// Returns the subscription id on success.
-    /// Error if called while disconnected.
+    /// SclError if called while disconnected.
     sgrn::Result<UA_UInt32> createSubscription(uint32_t t_publish_interval_ms);
 
     /// Register a data-change monitored item.
     /// The callback receives a DataValueView — never a raw UA_* type.
-    /// Error if called while disconnected.
+    /// SclError if called while disconnected.
     sgrn::Result<UA_UInt32> addMonitoredItem(
         UA_UInt32 t_subscription_id, const NodeId& t_node, std::function<void(const DataValueView&)> t_callback);
 

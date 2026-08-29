@@ -1,6 +1,6 @@
 #pragma once
 
-#include <sgrn/gateway/wrappers/s7/ProtocolError.hpp>
+#include <sgrn/gateway/wrappers/s7/error.hpp>
 #include <sgrn/scl/types.hpp>
 #include <snap7.h>
 
@@ -17,7 +17,6 @@ namespace sgrn::gateway::wrappers::s7
 {
 
 using ::sgrn::gateway::wrappers::s7::S7Error;
-using ::sgrn::gateway::wrappers::s7::S7ProtocolCode;
 
 using S7DataItem = TS7DataItem;
 using S7BlockInfo = TS7BlockInfo;
@@ -45,7 +44,7 @@ struct BlockCounts {
     int fc_count{0};
     int sfb_count{0};
     int sfc_count{0};
-    int db_count{0};
+    uint16_t db_count{0};
     int sdb_count{0};
 };
 
@@ -102,24 +101,22 @@ public:
     S7Client& operator=(S7Client&& t_other) noexcept;
 
     // Connection and lifecycle ------------------------------------------------
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> connect();
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> connect(
+    sgrn::Result<void, S7Error> connect();
+    sgrn::Result<void, S7Error> connect(
         const std::string& t_ip, int t_rack, int t_slot, uint16_t t_connection_type = CONNTYPE_PG, uint16_t t_port = 102);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> connect(const ConnectionInfo& t_connection_info);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> setConnectionParams(
-        const std::string& t_ip, uint16_t t_local_tsap, uint16_t t_remote_tsap);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> connectWithTsap(
-        const std::string& t_ip, uint16_t t_local_tsap, uint16_t t_remote_tsap);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> setConnectionType(uint16_t t_connection_type);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> disconnect();
+    sgrn::Result<void, S7Error> connect(const ConnectionInfo& t_connection_info);
+    sgrn::Result<void, S7Error> setConnectionParams(const std::string& t_ip, uint16_t t_local_tsap, uint16_t t_remote_tsap);
+    sgrn::Result<void, S7Error> connectWithTsap(const std::string& t_ip, uint16_t t_local_tsap, uint16_t t_remote_tsap);
+    sgrn::Result<void, S7Error> setConnectionType(uint16_t t_connection_type);
+    sgrn::Result<void, S7Error> disconnect();
     bool isConnected() const;
 
     // Client parameters -------------------------------------------------------
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> getParam(int t_param_number, void* tp_value);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> setParam(int t_param_number, void* tp_value);
+    sgrn::Result<void, S7Error> getParam(int t_param_number, void* tp_value);
+    sgrn::Result<void, S7Error> setParam(int t_param_number, void* tp_value);
 
     template <typename T>
-    sgrn::Result<T, ::sgrn::gateway::wrappers::s7::S7Error> getParamValue(int t_param_number) {
+    sgrn::Result<T, S7Error> getParamValue(int t_param_number) {
         T t_value{};
         auto t_status = getParam(t_param_number, &t_value);
         if (t_status)
@@ -128,96 +125,91 @@ public:
     }
 
     template <typename T>
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> setParamValue(int t_param_number, const T& t_value) {
+    sgrn::Result<void, S7Error> setParamValue(int t_param_number, const T& t_value) {
         T copy = t_value;
         return setParam(t_param_number, &copy);
     }
 
     // Main area I/O -----------------------------------------------------------
-    sgrn::Result<std::vector<uint8_t>, ::sgrn::gateway::wrappers::s7::S7Error> readArea(
+    sgrn::Result<std::vector<uint8_t>, S7Error> readArea(
         int t_area, uint16_t t_db_number, int t_start, int t_amount, int t_word_len = S7WLByte);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> readArea(
-        int t_area, uint16_t t_db_number, int t_start, int t_amount, int t_word_len, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> writeArea(
+    sgrn::Result<void, S7Error> readArea(int t_area, uint16_t t_db_number, int t_start, int t_amount, int t_word_len, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> writeArea(
         int t_area, uint16_t t_db_number, int t_start, int t_amount, int t_word_len, const uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> readMultiVars(S7DataItem* tp_items, int t_item_count);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> readMultiVars(std::vector<S7DataItem>& t_items);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> writeMultiVars(S7DataItem* tp_items, int t_item_count);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> writeMultiVars(std::vector<S7DataItem>& t_items);
+    sgrn::Result<void, S7Error> readMultiVars(S7DataItem* tp_items, int t_item_count);
+    sgrn::Result<void, S7Error> readMultiVars(std::vector<S7DataItem>& t_items);
+    sgrn::Result<void, S7Error> writeMultiVars(S7DataItem* tp_items, int t_item_count);
+    sgrn::Result<void, S7Error> writeMultiVars(std::vector<S7DataItem>& t_items);
 
     // Lean area I/O -----------------------------------------------------------
-    sgrn::Result<std::vector<uint8_t>, ::sgrn::gateway::wrappers::s7::S7Error> readDB(uint16_t t_db_number, int t_start, int t_size);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> readDB(uint16_t t_db_number, int t_start, int t_size, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> writeDB(
-        uint16_t t_db_number, int t_start, int t_size, const uint8_t* tp_buffer);
+    sgrn::Result<std::vector<uint8_t>, S7Error> readDB(uint16_t t_db_number, int t_start, int t_size);
+    sgrn::Result<void, S7Error> readDB(uint16_t t_db_number, int t_start, int t_size, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> writeDB(uint16_t t_db_number, int t_start, int t_size, const uint8_t* tp_buffer);
 
-    sgrn::Result<std::vector<uint8_t>, ::sgrn::gateway::wrappers::s7::S7Error> readMB(int t_start, int t_size);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> readMB(int t_start, int t_size, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> writeMB(int t_start, int t_size, const uint8_t* tp_buffer);
+    sgrn::Result<std::vector<uint8_t>, S7Error> readMB(int t_start, int t_size);
+    sgrn::Result<void, S7Error> readMB(int t_start, int t_size, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> writeMB(int t_start, int t_size, const uint8_t* tp_buffer);
 
-    sgrn::Result<std::vector<uint8_t>, ::sgrn::gateway::wrappers::s7::S7Error> readEB(int t_start, int t_size);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> readEB(int t_start, int t_size, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> writeEB(int t_start, int t_size, const uint8_t* tp_buffer);
+    sgrn::Result<std::vector<uint8_t>, S7Error> readEB(int t_start, int t_size);
+    sgrn::Result<void, S7Error> readEB(int t_start, int t_size, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> writeEB(int t_start, int t_size, const uint8_t* tp_buffer);
 
-    sgrn::Result<std::vector<uint8_t>, ::sgrn::gateway::wrappers::s7::S7Error> readAB(int t_start, int t_size);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> readAB(int t_start, int t_size, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> writeAB(int t_start, int t_size, const uint8_t* tp_buffer);
+    sgrn::Result<std::vector<uint8_t>, S7Error> readAB(int t_start, int t_size);
+    sgrn::Result<void, S7Error> readAB(int t_start, int t_size, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> writeAB(int t_start, int t_size, const uint8_t* tp_buffer);
 
-    sgrn::Result<std::vector<uint8_t>, ::sgrn::gateway::wrappers::s7::S7Error> readTM(int t_start, int t_amount);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> readTM(int t_start, int t_amount, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> writeTM(int t_start, int t_amount, const uint8_t* tp_buffer);
+    sgrn::Result<std::vector<uint8_t>, S7Error> readTM(int t_start, int t_amount);
+    sgrn::Result<void, S7Error> readTM(int t_start, int t_amount, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> writeTM(int t_start, int t_amount, const uint8_t* tp_buffer);
 
-    sgrn::Result<std::vector<uint8_t>, ::sgrn::gateway::wrappers::s7::S7Error> readCT(int t_start, int t_amount);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> readCT(int t_start, int t_amount, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> writeCT(int t_start, int t_amount, const uint8_t* tp_buffer);
+    sgrn::Result<std::vector<uint8_t>, S7Error> readCT(int t_start, int t_amount);
+    sgrn::Result<void, S7Error> readCT(int t_start, int t_amount, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> writeCT(int t_start, int t_amount, const uint8_t* tp_buffer);
 
     // Directory and block metadata -------------------------------------------
-    sgrn::Result<BlockCounts, ::sgrn::gateway::wrappers::s7::S7Error> listBlocks();
-    sgrn::Result<S7BlockInfo, ::sgrn::gateway::wrappers::s7::S7Error> getAgBlockInfo(int t_block_type, uint16_t t_block_number);
-    sgrn::Result<S7BlockInfo, ::sgrn::gateway::wrappers::s7::S7Error> getPgBlockInfo(const void* tp_block_data, int t_size);
-    sgrn::Result<std::vector<uint16_t>, ::sgrn::gateway::wrappers::s7::S7Error> listBlocksOfType(int t_block_type, int t_max_items = 8192);
+    sgrn::Result<BlockCounts, S7Error> listBlocks();
+    sgrn::Result<S7BlockInfo, S7Error> getAgBlockInfo(int t_block_type, uint16_t t_block_number);
+    sgrn::Result<S7BlockInfo, S7Error> getPgBlockInfo(const void* tp_block_data, int t_size);
+    sgrn::Result<std::vector<uint16_t>, S7Error> listBlocksOfType(int t_block_type, int t_max_items = 8192);
 
     // Block transfer ----------------------------------------------------------
-    sgrn::Result<std::vector<uint8_t>, ::sgrn::gateway::wrappers::s7::S7Error> upload(
-        int t_block_type, uint16_t t_block_number, int t_buffer_size = 65536);
-    sgrn::Result<std::vector<uint8_t>, ::sgrn::gateway::wrappers::s7::S7Error> fullUpload(
-        int t_block_type, uint16_t t_block_number, int t_buffer_size = 65536);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> download(uint16_t t_block_number, const uint8_t* tp_buffer, int t_size);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> deleteBlock(int t_block_type, uint16_t t_block_number);
-    sgrn::Result<std::vector<uint8_t>, ::sgrn::gateway::wrappers::s7::S7Error> dbGet(uint16_t t_db_number, int t_buffer_size = 65536);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> dbFill(uint16_t t_db_number, int t_fill_char);
+    sgrn::Result<std::vector<uint8_t>, S7Error> upload(int t_block_type, uint16_t t_block_number, int t_buffer_size = 65536);
+    sgrn::Result<std::vector<uint8_t>, S7Error> fullUpload(int t_block_type, uint16_t t_block_number, int t_buffer_size = 65536);
+    sgrn::Result<void, S7Error> download(uint16_t t_block_number, const uint8_t* tp_buffer, int t_size);
+    sgrn::Result<void, S7Error> deleteBlock(int t_block_type, uint16_t t_block_number);
+    sgrn::Result<std::vector<uint8_t>, S7Error> dbGet(uint16_t t_db_number, int t_buffer_size = 65536);
+    sgrn::Result<void, S7Error> dbFill(uint16_t t_db_number, int t_fill_char);
 
     // Clock and time ----------------------------------------------------------
-    sgrn::Result<std::tm, ::sgrn::gateway::wrappers::s7::S7Error> getPlcDateTime();
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> setPlcDateTime(const std::tm& t_date_time);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> setPlcSystemDateTime();
+    sgrn::Result<std::tm, S7Error> getPlcDateTime();
+    sgrn::Result<void, S7Error> setPlcDateTime(const std::tm& t_date_time);
+    sgrn::Result<void, S7Error> setPlcSystemDateTime();
 
     // System information ------------------------------------------------------
-    sgrn::Result<OrderCodeInfo, ::sgrn::gateway::wrappers::s7::S7Error> getOrderCode();
-    sgrn::Result<CpuInfo, ::sgrn::gateway::wrappers::s7::S7Error> getCpuInfo();
-    sgrn::Result<CpInfo, ::sgrn::gateway::wrappers::s7::S7Error> getCpInfo();
-    sgrn::Result<std::vector<S7DiagnosticBufferEntry>, ::sgrn::gateway::wrappers::s7::S7Error> readDiagnosticBuffer();
-    sgrn::Result<S7Szl, ::sgrn::gateway::wrappers::s7::S7Error> readSzl(int t_id, int t_index, int t_buffer_size = sizeof(S7Szl));
-    sgrn::Result<S7SzlList, ::sgrn::gateway::wrappers::s7::S7Error> readSzlList(
-        int t_item_capacity = static_cast<int>(sizeof(S7SzlList::List) / sizeof(word)));
+    sgrn::Result<OrderCodeInfo, S7Error> getOrderCode();
+    sgrn::Result<CpuInfo, S7Error> getCpuInfo();
+    sgrn::Result<CpInfo, S7Error> getCpInfo();
+    sgrn::Result<std::vector<S7DiagnosticBufferEntry>, S7Error> readDiagnosticBuffer();
+    sgrn::Result<S7Szl, S7Error> readSzl(int t_id, int t_index, int t_buffer_size = sizeof(S7Szl));
+    sgrn::Result<S7SzlList, S7Error> readSzlList(int t_item_capacity = static_cast<int>(sizeof(S7SzlList::List) / sizeof(word)));
 
     // PLC control and security -----------------------------------------------
-    sgrn::Result<PlcStatus, ::sgrn::gateway::wrappers::s7::S7Error> getPlcStatus();
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> plcHotStart();
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> plcColdStart();
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> plcStop();
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> copyRamToRom(int t_timeout_ms);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> compress(int t_timeout_ms);
-    sgrn::Result<S7Protection, ::sgrn::gateway::wrappers::s7::S7Error> getProtection();
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> setSessionPassword(const std::string& t_password);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> clearSessionPassword();
+    sgrn::Result<PlcStatus, S7Error> getPlcStatus();
+    sgrn::Result<void, S7Error> plcHotStart();
+    sgrn::Result<void, S7Error> plcColdStart();
+    sgrn::Result<void, S7Error> plcStop();
+    sgrn::Result<void, S7Error> copyRamToRom(int t_timeout_ms);
+    sgrn::Result<void, S7Error> compress(int t_timeout_ms);
+    sgrn::Result<S7Protection, S7Error> getProtection();
+    sgrn::Result<void, S7Error> setSessionPassword(const std::string& t_password);
+    sgrn::Result<void, S7Error> clearSessionPassword();
 
     // Low-level and misc ------------------------------------------------------
-    sgrn::Result<int, ::sgrn::gateway::wrappers::s7::S7Error> getExecTime();
-    sgrn::Result<int, ::sgrn::gateway::wrappers::s7::S7Error> getLastError();
-    sgrn::Result<PduLengthInfo, ::sgrn::gateway::wrappers::s7::S7Error> getPduLength();
-    sgrn::Result<int, ::sgrn::gateway::wrappers::s7::S7Error> getPduRequested();
-    sgrn::Result<int, ::sgrn::gateway::wrappers::s7::S7Error> getNegotiatedPduLength();
+    sgrn::Result<int, S7Error> getExecTime();
+    sgrn::Result<int, S7Error> getLastError();
+    sgrn::Result<PduLengthInfo, S7Error> getPduLength();
+    sgrn::Result<int, S7Error> getPduRequested();
+    sgrn::Result<int, S7Error> getNegotiatedPduLength();
     std::string getLastErrorText() const;
     static std::string errorText(int t_error_code);
     int lastErrorCode() const {
@@ -228,48 +220,42 @@ public:
     }
 
     // Async API ---------------------------------------------------------------
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> setAsyncCallback(S7CompletionCallback t_callback, void* tp_user_ptr);
-    sgrn::Result<AsyncCompletionInfo, ::sgrn::gateway::wrappers::s7::S7Error> checkAsyncCompletion();
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> waitAsyncCompletion(uint32_t t_timeout_ms);
+    sgrn::Result<void, S7Error> setAsyncCallback(S7CompletionCallback t_callback, void* tp_user_ptr);
+    sgrn::Result<AsyncCompletionInfo, S7Error> checkAsyncCompletion();
+    sgrn::Result<void, S7Error> waitAsyncCompletion(uint32_t t_timeout_ms);
 
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncReadArea(
+    sgrn::Result<void, S7Error> asyncReadArea(
         int t_area, uint16_t t_db_number, int t_start, int t_amount, int t_word_len, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncWriteArea(
+    sgrn::Result<void, S7Error> asyncWriteArea(
         int t_area, uint16_t t_db_number, int t_start, int t_amount, int t_word_len, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncReadDB(
-        uint16_t t_db_number, int t_start, int t_size, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncWriteDB(
-        uint16_t t_db_number, int t_start, int t_size, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncReadMB(int t_start, int t_size, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncWriteMB(int t_start, int t_size, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncReadEB(int t_start, int t_size, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncWriteEB(int t_start, int t_size, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncReadAB(int t_start, int t_size, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncWriteAB(int t_start, int t_size, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncReadTM(int t_start, int t_amount, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncWriteTM(int t_start, int t_amount, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncReadCT(int t_start, int t_amount, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncWriteCT(int t_start, int t_amount, uint8_t* tp_buffer);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncListBlocksOfType(
-        int t_block_type, TS7BlocksOfType* tp_blocks, int* tp_item_count);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncReadSzl(int t_id, int t_index, S7Szl* tp_szl, int* tp_size);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncReadSzlList(S7SzlList* tp_list, int* tp_item_count);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncUpload(
-        int t_block_type, uint16_t t_block_number, uint8_t* tp_buffer, int* tp_size);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncFullUpload(
-        int t_block_type, uint16_t t_block_number, uint8_t* tp_buffer, int* tp_size);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncDownload(uint16_t t_block_number, uint8_t* tp_buffer, int t_size);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncCopyRamToRom(int t_timeout_ms);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncCompress(int t_timeout_ms);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncDBGet(uint16_t t_db_number, uint8_t* tp_buffer, int* tp_size);
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> asyncDBFill(uint16_t t_db_number, int t_fill_char);
+    sgrn::Result<void, S7Error> asyncReadDB(uint16_t t_db_number, int t_start, int t_size, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> asyncWriteDB(uint16_t t_db_number, int t_start, int t_size, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> asyncReadMB(int t_start, int t_size, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> asyncWriteMB(int t_start, int t_size, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> asyncReadEB(int t_start, int t_size, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> asyncWriteEB(int t_start, int t_size, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> asyncReadAB(int t_start, int t_size, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> asyncWriteAB(int t_start, int t_size, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> asyncReadTM(int t_start, int t_amount, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> asyncWriteTM(int t_start, int t_amount, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> asyncReadCT(int t_start, int t_amount, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> asyncWriteCT(int t_start, int t_amount, uint8_t* tp_buffer);
+    sgrn::Result<void, S7Error> asyncListBlocksOfType(int t_block_type, TS7BlocksOfType* tp_blocks, int* tp_item_count);
+    sgrn::Result<void, S7Error> asyncReadSzl(int t_id, int t_index, S7Szl* tp_szl, int* tp_size);
+    sgrn::Result<void, S7Error> asyncReadSzlList(S7SzlList* tp_list, int* tp_item_count);
+    sgrn::Result<void, S7Error> asyncUpload(int t_block_type, uint16_t t_block_number, uint8_t* tp_buffer, int* tp_size);
+    sgrn::Result<void, S7Error> asyncFullUpload(int t_block_type, uint16_t t_block_number, uint8_t* tp_buffer, int* tp_size);
+    sgrn::Result<void, S7Error> asyncDownload(uint16_t t_block_number, uint8_t* tp_buffer, int t_size);
+    sgrn::Result<void, S7Error> asyncCopyRamToRom(int t_timeout_ms);
+    sgrn::Result<void, S7Error> asyncCompress(int t_timeout_ms);
+    sgrn::Result<void, S7Error> asyncDBGet(uint16_t t_db_number, uint8_t* tp_buffer, int* tp_size);
+    sgrn::Result<void, S7Error> asyncDBFill(uint16_t t_db_number, int t_fill_char);
 
 private:
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> makeStatus(int t_error_code) const;
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> requireClient() const;
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> validateRange(int t_start, int t_size_or_amount, const char* tp_label) const;
-    sgrn::Result<void, ::sgrn::gateway::wrappers::s7::S7Error> validateBuffer(
-        const void* tp_buffer, int t_size_or_amount, const char* tp_label) const;
+    sgrn::Result<void, S7Error> makeStatus(int t_error_code) const;
+    sgrn::Result<void, S7Error> requireClient() const;
+    sgrn::Result<void, S7Error> validateRange(int t_start, int t_size_or_amount, const char* tp_label) const;
+    sgrn::Result<void, S7Error> validateBuffer(const void* tp_buffer, int t_size_or_amount, const char* tp_label) const;
 
     std::unique_ptr<TS7Client> client_;
     int last_error_{0};

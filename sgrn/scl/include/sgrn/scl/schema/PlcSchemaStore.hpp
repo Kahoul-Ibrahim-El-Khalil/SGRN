@@ -40,21 +40,19 @@ class PlcSchemaStore : public ::sgrn::SchemaStore {
 
 public:
     // ── Factory methods (loading) ─────────────────────────────────────────────
-
-    static sgrn::Result<PlcSchemaStore, ::sgrn::scl::Error> loadFromDirectory(const std::string& t_symbols_dir, bool t_force = false);
-    static sgrn::Result<PlcSchemaStore, ::sgrn::scl::Error> loadFromFile(const std::string& t_filepath, bool t_force = false);
-    static sgrn::Result<PlcSchemaStore, ::sgrn::scl::Error> loadFromFiles(
-        const std::vector<std::string>& t_filepaths, bool t_force = false);
-    static sgrn::Result<PlcSchemaStore, ::sgrn::scl::Error> loadFromJsonFile(const std::string& t_path);
-    static sgrn::Result<PlcSchemaStore, ::sgrn::scl::Error> loadFromJson(const rapidjson::Value& t_root);
+    static sgrn::Result<PlcSchemaStore, SclError> loadFromDirectory(const std::string& t_symbols_dir, bool t_force = false);
+    static sgrn::Result<PlcSchemaStore, SclError> loadFromFile(const std::string& t_filepath, bool t_force = false);
+    static sgrn::Result<PlcSchemaStore, SclError> loadFromFiles(const std::vector<std::string>& t_filepaths, bool t_force = false);
+    static sgrn::Result<PlcSchemaStore, SclError> loadFromJsonFile(const std::string& t_path);
+    static sgrn::Result<PlcSchemaStore, SclError> loadFromJson(const rapidjson::Value& t_root);
 
     // ── DB schema queries ─────────────────────────────────────────────────────
 
     bool hasDb(uint16_t t_db_number) const;
     bool hasDb(const std::string& t_db_name) const;
 
-    sgrn::Result<const DbSchema*, ::sgrn::scl::Error> getDb(uint16_t t_db_number) const;
-    sgrn::Result<const DbSchema*, ::sgrn::scl::Error> getDbByName(const std::string& t_db_name) const;
+    sgrn::Result<const DbSchema*, SclError> getDb(uint16_t t_db_number) const;
+    sgrn::Result<const DbSchema*, SclError> getDbByName(const std::string& t_db_name) const;
 
     // ── Field lookup ─────────────────────────────────────────────────────────
 
@@ -72,20 +70,20 @@ public:
     const std::deque<UdtDefinition>& udts() const;
     bool hasUdt(uint16_t t_udt_number) const;
     bool hasUdt(const std::string& t_udt_name) const;
-    sgrn::Result<const UdtDefinition*, ::sgrn::scl::Error> getUdt(uint16_t t_udt_number) const;
-    sgrn::Result<const UdtDefinition*, ::sgrn::scl::Error> getUdtByName(const std::string& t_udt_name) const;
+    sgrn::Result<const UdtDefinition*, SclError> getUdt(uint16_t t_udt_number) const;
+    sgrn::Result<const UdtDefinition*, SclError> getUdtByName(const std::string& t_udt_name) const;
 
     // ── Mutation (add/remove) ─────────────────────────────────────────────────
 
-    sgrn::Result<void, ::sgrn::scl::Error> addDb(DbSchema&& t_reg, bool t_force = false, bool t_rebuild_index = true);
-    sgrn::Result<void, ::sgrn::scl::Error> removeDb(uint16_t t_db_number);
+    sgrn::Result<void, SclError> addDb(DbSchema&& t_reg, bool t_force = false, bool t_rebuild_index = true);
+    sgrn::Result<void, SclError> removeDb(uint16_t t_db_number);
 
-    sgrn::Result<void, ::sgrn::scl::Error> addUdt(UdtDefinition&& t_udt, bool t_force = false, bool t_rebuild_index = true);
-    sgrn::Result<void, ::sgrn::scl::Error> removeUdt(uint16_t t_udt_number);
+    sgrn::Result<void, SclError> addUdt(UdtDefinition&& t_udt, bool t_force = false, bool t_rebuild_index = true);
+    sgrn::Result<void, SclError> removeUdt(uint16_t t_udt_number);
 
-    sgrn::Result<void, ::sgrn::scl::Error> addTag(PlcTag&& t_tag, bool t_force = false);
-    sgrn::Result<void, ::sgrn::scl::Error> removeTag(const std::string& t_tag_name);
-    sgrn::Result<const PlcTag*, ::sgrn::scl::Error> getTag(const std::string& t_tag_name) const;
+    sgrn::Result<void, SclError> addTag(PlcTag&& t_tag, bool t_force = false);
+    sgrn::Result<void, SclError> removeTag(const std::string& t_tag_name);
+    sgrn::Result<const PlcTag*, SclError> getTag(const std::string& t_tag_name) const;
 
     const std::map<std::string, PlcTag>& tags() const;
 
@@ -98,11 +96,11 @@ public:
     // ── Persistence ───────────────────────────────────────────────────────────
 
     void clear();
-    sgrn::Result<void, ::sgrn::scl::Error> saveToJsonFile(const std::string& t_path) const;
-    sgrn::Result<void, ::sgrn::scl::Error> loadFile(
+    sgrn::Result<void, SclError> saveToJsonFile(const std::string& t_path) const;
+    sgrn::Result<void, SclError> loadFile(
         const std::string& t_filepath, bool t_force = false, std::map<std::string, UdtDefinition>* tp_global_udts = nullptr);
 
-    sgrn::Result<void, ::sgrn::scl::Error> loadSchema(const std::string& t_path_or_content, bool t_force = false);
+    sgrn::Result<void, SclError> loadSchema(const std::string& t_path_or_content, bool t_force = false);
 
     std::string toJson(std::optional<uint16_t> t_db_number = std::nullopt, bool t_headers_only = false, bool t_pretty = false) const;
 

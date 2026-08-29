@@ -20,6 +20,9 @@ using namespace sgrn::gateway::twin;
 namespace sgrn::gateway::adapters
 {
 
+// Defined in OpcUaAdapter.cpp — see writeValue.cpp for the full explanation.
+extern thread_local bool g_is_internal_opcua_write;
+
 using wrappers::opcua::DataValue;
 
 DeltaPushHandler::DeltaPushHandler(wrappers::opcua::Server* tp_server)
@@ -48,8 +51,11 @@ void DeltaPushHandler::enqueueDataValue(const wrappers::opcua::NodeId& t_node_id
         return;
     }
 
-    if (server_)
+    if (server_) {
+        g_is_internal_opcua_write = true;
         server_->writeDataValue(t_node_id, DataValue::adopt(std::move(t_raw_dv)));
+        g_is_internal_opcua_write = false;
+    }
 }
 
 bool DeltaPushHandler::buildDataValueFromEvent(const core::TelemetryEvent& t_event, const NodeContext* tp_ctx, UA_DataValue& t_raw_dv) {

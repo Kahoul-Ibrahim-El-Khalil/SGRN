@@ -38,30 +38,31 @@
 namespace sgrn::s7shell::shell
 {
 using sgrn::s7shell::runtime::PlcRuntimeSPtr;
-static ::sgrn::scl::Error proto_bridge(const ::sgrn::gateway::wrappers::s7::S7Error& t_e) {
-    ::sgrn::scl::ErrorCode mapped_code;
-    switch (t_e.code()) {
-        case ::sgrn::gateway::wrappers::s7::S7ProtocolCode::Success:
-        case ::sgrn::gateway::wrappers::s7::S7ProtocolCode::ConnectionFailed:
-        case ::sgrn::gateway::wrappers::s7::S7ProtocolCode::Timeout:
-        case ::sgrn::gateway::wrappers::s7::S7ProtocolCode::PduError:
-        case ::sgrn::gateway::wrappers::s7::S7ProtocolCode::ReadError:
-        case ::sgrn::gateway::wrappers::s7::S7ProtocolCode::WriteError:
-        case ::sgrn::gateway::wrappers::s7::S7ProtocolCode::DeviceBusy:
-        case ::sgrn::gateway::wrappers::s7::S7ProtocolCode::NotConnected:
-        case ::sgrn::gateway::wrappers::s7::S7ProtocolCode::Unknown:
-            mapped_code = ::sgrn::scl::ErrorCode::Generic;
+
+using sgrn::gateway::wrappers::s7::S7Error;
+
+using sgrn::scl::SclError;
+
+static SclError proto_bridge(const S7Error& t_e) {
+    SclError mapped_code = SclError::Generic;
+    switch (t_e) {
+        case S7Error::Success:
+        case S7Error::ConnectionFailed:
+        case S7Error::Timeout:
+        case S7Error::PduError:
+        case S7Error::ReadError:
+        case S7Error::WriteError:
+        case S7Error::DeviceBusy:
+        case S7Error::NotConnected:
+        case S7Error::Unknown:
+            mapped_code = SclError::Generic;
             break;
-        case ::sgrn::gateway::wrappers::s7::S7ProtocolCode::InvalidParam:
-            mapped_code = ::sgrn::scl::ErrorCode::InvalidType; // closest schema equivalent
+        case S7Error::InvalidParam:
+            mapped_code = SclError::InvalidType; // closest schema equivalent
             break;
     }
-    return ::sgrn::scl::Error{mapped_code, t_e.string()};
+    return mapped_code;
 }
-
-// ============================================================================
-// ScriptS7Connection Implementation
-// ============================================================================
 
 ScriptS7Connection::ScriptS7Connection(const std::string& t_ip, int t_rack, int t_slot, uint16_t t_port)
     : ScriptS7Connection(t_ip, t_rack, t_slot, t_port, ::sgrn::s7shell::runtime::PlcRuntime::empty()) {
@@ -85,7 +86,6 @@ ScriptS7Connection::ScriptS7Connection(const std::string& t_ip, int t_rack, int 
     client_.attachSchema(schema_);
     auto res = client_.connect(t_ip, t_rack, t_slot, conn_type_, conn_port_);
     if (res.hasError()) {
-        fmt::print(stderr, fg(fmt::color::red), "Connect failed: {}\n", res.error().string());
         setLastError(res.error());
     }
     p_g_active_connection = this;
@@ -101,7 +101,7 @@ void ScriptS7Connection::loadRegistry(const std::string& t_path) {
     runtime_->loadRegistry(t_path);
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> ScriptS7Connection::reconnect() {
+sgrn::Result<void, SclError> ScriptS7Connection::reconnect() {
     (void)client_.disconnect();
     if (conn_use_tsap_) {
         auto res = client_.connectWithTsap(conn_ip_, conn_local_tsap_, conn_remote_tsap_);
@@ -123,8 +123,7 @@ void ScriptS7Connection::setConnectionSettings(uint16_t t_type, uint16_t t_port,
     }
 }
 
-sgrn::Result<void, ::sgrn::scl::Error> ScriptS7Connection::connectWithTsap(
-    const std::string& t_ip, uint16_t t_local_tsap, uint16_t t_remote_tsap) {
+sgrn::Result<void, SclError> ScriptS7Connection::connectWithTsap(const std::string& t_ip, uint16_t t_local_tsap, uint16_t t_remote_tsap) {
     conn_ip_ = t_ip;
     conn_use_tsap_ = true;
     conn_local_tsap_ = t_local_tsap;
@@ -219,7 +218,7 @@ ScriptDataBlock* ScriptS7Client::dbByName(const std::string& t_name) {
     auto res = conn_->schema_.getDbByName(t_name);
     if (!res.has_value() || res.hasError()) {
         if (auto* p_ctx = asGetActiveContext()) {
-            p_ctx->SetException(fmt::format("DB '{}' not found in schema_", t_name).c_str());
+            p_ctx->SetException(toString(res.error()).data());
         }
         return nullptr;
     }
@@ -293,7 +292,7 @@ std::string ScriptS7Client::read(const std::string& t_target) {
         auto res = conn_->memory_.getSubtreeJson(*whole, "");
         if (res.hasError()) {
             if (auto* p_ctx = asGetActiveContext()) {
-                p_ctx->SetException(fmt::format("Failed to read DB symbol '{}': {}", t_target, res.error().string()).c_str());
+                p_ctx->SetException(toString(res.error()).data());
             }
             return "null";
         }
@@ -316,7 +315,7 @@ std::string ScriptS7Client::read(const std::string& t_target) {
     auto res = p_provider->get(conn_->client_, ft->field_path);
     if (res.hasError()) {
         if (auto* p_ctx = asGetActiveContext()) {
-            p_ctx->SetException(fmt::format("Failed to read field '{}': {}", t_target, res.error().string()).c_str());
+            p_ctx->SetException(fmt::format("Failed to read field '{}': {}", t_target, toString(res.error())).c_str());
         }
         return "null";
     }
@@ -343,22 +342,21 @@ void ScriptS7Client::write(const std::string& t_target, const std::string& t_raw
         auto read_res = block.read(conn_->client_);
         if (read_res.hasError()) {
             if (auto* p_ctx = asGetActiveContext()) {
-                p_ctx->SetException(fmt::format("Failed to read DB '{}' before write: {}", *whole, read_res.error().string()).c_str());
+                p_ctx->SetException(fmt::format("Failed to read DB '{}' before write: {}", *whole, toString(read_res.error())).c_str());
             }
             return;
         }
         auto update_res = block.updateFromJson(json_val);
         if (update_res.hasError()) {
             if (auto* p_ctx = asGetActiveContext()) {
-                p_ctx->SetException(
-                    fmt::format("Failed to decode JSON value for DB '{}': {}", *whole, update_res.error().string()).c_str());
+                p_ctx->SetException(toString(update_res.error()).data());
             }
             return;
         }
         auto write_res = block.write(conn_->client_);
         if (write_res.hasError()) {
             if (auto* p_ctx = asGetActiveContext()) {
-                p_ctx->SetException(fmt::format("Failed to write DB '{}': {}", *whole, write_res.error().string()).c_str());
+                p_ctx->SetException(fmt::format("Failed to write DB '{}': {}", *whole, toString(write_res.error())).c_str());
             }
         }
         return;
@@ -380,7 +378,7 @@ void ScriptS7Client::write(const std::string& t_target, const std::string& t_raw
     auto write_res = p_provider->put(conn_->client_, ft->field_path, json_val);
     if (write_res.hasError()) {
         if (auto* p_ctx = asGetActiveContext()) {
-            p_ctx->SetException(fmt::format("Failed to write field '{}': {}", t_target, write_res.error().string()).c_str());
+            p_ctx->SetException(fmt::format("Failed to write field '{}': {}", t_target, toString(write_res.error())).c_str());
         }
     }
 }
@@ -435,12 +433,9 @@ bool ScriptS7Client::reconnectWithRetry(int t_max_attempts, int t_delay_ms) {
             return true;
         }
         conn_->setLastError(r.error());
-        fmt::print(stderr, fg(fmt::color::yellow), "[S7] reconnectWithRetry: attempt {}/{} failed: {}\n", attempt, t_max_attempts,
-            r.error().string());
         if (attempt < t_max_attempts && t_delay_ms > 0)
             std::this_thread::sleep_for(std::chrono::milliseconds(t_delay_ms));
     }
-    fmt::print(stderr, fg(fmt::color::red), "[S7] reconnectWithRetry: all {} attempts exhausted\n", t_max_attempts);
     return false;
 }
 

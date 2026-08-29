@@ -7,9 +7,9 @@
 #include <sgrn/TagTable.hpp>
 
 #include <sgrn/gateway/twin/S7ChangeTracker.hpp>
-#include <sgrn/gateway/wrappers/s7/ProtocolError.hpp>
+#include <sgrn/gateway/wrappers/s7/S7Client.hpp>
+#include <sgrn/gateway/wrappers/s7/error.hpp>
 #include <sgrn/scl/types.hpp>
-
 #include <memory>
 #include <mutex>
 #include <string>
@@ -22,6 +22,7 @@ namespace sgrn::s7shell
 using sgrn::gateway::wrappers::s7::S7Client;
 using sgrn::gateway::wrappers::s7::S7DataItem;
 using sgrn::scl::DataType;
+using ::sgrn::scl::SclError;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TagAddress — PLC address parsed from the registry JSON
@@ -54,7 +55,6 @@ public:
     // ── IS7MemoryProvider ───────────────────────────────────────────────────
 
     using S7Error = ::sgrn::gateway::wrappers::s7::S7Error;
-    using S7ProtocolCode = ::sgrn::gateway::wrappers::s7::S7ProtocolCode;
 
     sgrn::Result<std::string, S7Error> read(const std::string& t_path) const;
     sgrn::Result<void, S7Error> write(const std::string& t_path, const std::string& t_json_val);
@@ -76,9 +76,9 @@ public:
 
     // ── Convenience ─────────────────────────────────────────────────────────
 
-    sgrn::Result<void, ::sgrn::scl::Error> pullAll(S7Client& t_client);
+    sgrn::Result<void, SclError> pullAll(S7Client& t_client);
     void addTag(const ::sgrn::scl::PlcTag& t_tag);
-    sgrn::Result<void, ::sgrn::scl::Error> pushDirty(S7Client& t_client);
+    sgrn::Result<void, SclError> pushDirty(S7Client& t_client);
     size_t tagCount() const noexcept;
 
     /// Metadata for low-level / hex I/O (address, type, span).
@@ -89,7 +89,7 @@ public:
         DataType type{DataType::Bool};
     };
 
-    sgrn::Result<TagDescriptor, ::sgrn::scl::Error> describeTag(const std::string& t_name) const;
+    sgrn::Result<TagDescriptor, SclError> describeTag(const std::string& t_name) const;
     std::vector<std::string> tagNames() const;
 
 private:
@@ -109,12 +109,12 @@ private:
 
     std::unordered_map<std::string, std::unique_ptr<Block>> blocks_;
 
-    sgrn::Result<Block*, ::sgrn::scl::Error> findBlock_(const std::string& t_path);
-    sgrn::Result<const Block*, ::sgrn::scl::Error> findBlock_(const std::string& t_path) const;
+    sgrn::Result<Block*, SclError> findBlock_(const std::string& t_path);
+    sgrn::Result<const Block*, SclError> findBlock_(const std::string& t_path) const;
     void fillGetItem_(const Block& t_b, S7DataItem& t_item, std::vector<uint8_t>& t_buf) const;
-    sgrn::Result<std::vector<uint8_t>, ::sgrn::scl::Error> encodeValue_(const Block& t_b, const std::string& t_json_val) const;
-    sgrn::Result<std::string, ::sgrn::scl::Error> decodeRaw_(const Block& t_b) const;
-    sgrn::Result<void, ::sgrn::scl::Error> commitRaw_(Block& t_b, const void* tp_data, size_t t_size);
-    sgrn::Result<void, ::sgrn::scl::Error> loadRegistry_(const std::string& t_path);
+    sgrn::Result<std::vector<uint8_t>, SclError> encodeValue_(const Block& t_b, const std::string& t_json_val) const;
+    sgrn::Result<std::string, SclError> decodeRaw_(const Block& t_b) const;
+    sgrn::Result<void, SclError> commitRaw_(Block& t_b, const void* tp_data, size_t t_size);
+    sgrn::Result<void, SclError> loadRegistry_(const std::string& t_path);
 };
 } // namespace sgrn::s7shell

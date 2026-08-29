@@ -41,10 +41,10 @@ void ScriptS7PlcControl::stop() {
 
 std::string ScriptS7PlcControl::clock() const {
     if (!conn_ || !conn_->client_.isConnected())
-        return "Error: not connected";
+        return "SchemaError: not connected";
     auto r = conn_->client_.getPlcDateTime();
     if (r.hasError())
-        return fmt::format("Error: {}", r.error().string());
+        return fmt::format("SchemaError: {}", toString(r.error()));
     return sgrn::utils::time::formatDateTime(r.value());
 }
 

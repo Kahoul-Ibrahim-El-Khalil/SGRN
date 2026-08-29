@@ -231,7 +231,7 @@ std::string ScriptS7Memory::decodeTag(const std::string& t_name, const std::stri
         return fmt::format("unknown tag '{}'", t_name);
     const auto bytes = ::sgrn::scl::parseHexBytes(t_hex);
     if (bytes.hasError())
-        return fmt::format("invalid hex: {}", bytes.error().string());
+        return fmt::format("invalid hex: {}", toString(bytes.error()));
     if (static_cast<int>(bytes.value().size()) != p_tag->io.amount)
         return fmt::format("hex length {} != tag span {} bytes", bytes.value().size(), p_tag->io.amount);
     DbField fd;

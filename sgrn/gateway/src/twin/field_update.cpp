@@ -28,8 +28,8 @@ size_t nodeByteSpan(const PlcNode& t_node) {
             return static_cast<size_t>(t_node.size_);
         }
         if (t_node.count_ > 1)
-            return static_cast<size_t>(s7codec::typeSpanBytes(t_node.type_, static_cast<int>(t_node.count_)));
-        return static_cast<size_t>(s7codec::primitiveSize(t_node.type_));
+            return static_cast<size_t>(s7codec::typeSpanBytes(t_node.type_, static_cast<int>(t_node.count_)).value_or(0));
+        return static_cast<size_t>(s7codec::primitiveSize(t_node.type_).value_or(0));
     }
     return static_cast<size_t>(t_node.size_);
 }

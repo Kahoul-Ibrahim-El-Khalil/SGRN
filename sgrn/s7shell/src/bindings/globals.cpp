@@ -42,7 +42,21 @@ Result<void, std::string> registerS7Globals(asIScriptEngine* tp_engine) {
 
     SGRN_AS_REG(tp_engine->RegisterGlobalFunction("DTL@ dtl(const string &in)", asFUNCTION(ScriptDtl_fromString), asCALL_CDECL));
 
+    // Bug 8 fix: register DTL factory so `DTL myVar;` initializes to the current clock time.
+    SGRN_AS_REG(tp_engine->RegisterObjectBehaviour(
+        "DTL", asBEHAVE_FACTORY, "DTL@ f()", asFUNCTION(ScriptDtl_factory), asCALL_CDECL));
+
     SGRN_AS_REG(tp_engine->RegisterObjectMethod("DTL", "string toString() const", asMETHOD(ScriptDtl, toString), asCALL_THISCALL));
+
+    // ── Time / date conversion helpers ───────────────────────────────────────
+    SGRN_AS_REG(tp_engine->RegisterGlobalFunction("int64 now_ms()", asFUNCTION(script_now_ms), asCALL_CDECL));
+    SGRN_AS_REG(tp_engine->RegisterGlobalFunction("int now_time()", asFUNCTION(script_now_time), asCALL_CDECL));
+    SGRN_AS_REG(tp_engine->RegisterGlobalFunction("uint now_tod()", asFUNCTION(script_now_tod), asCALL_CDECL));
+    SGRN_AS_REG(tp_engine->RegisterGlobalFunction("string formatTime(int)", asFUNCTION(script_formatTime), asCALL_CDECL));
+    SGRN_AS_REG(tp_engine->RegisterGlobalFunction("string formatDate(uint16)", asFUNCTION(script_formatDate), asCALL_CDECL));
+    SGRN_AS_REG(tp_engine->RegisterGlobalFunction("string formatTOD(uint)", asFUNCTION(script_formatTOD), asCALL_CDECL));
+    SGRN_AS_REG(tp_engine->RegisterGlobalFunction("int dtlToTimeMs(DTL@)", asFUNCTION(script_dtlToTimeMs), asCALL_CDECL));
+    SGRN_AS_REG(tp_engine->RegisterGlobalFunction("uint dtlToTodMs(DTL@)", asFUNCTION(script_dtlToTodMs), asCALL_CDECL));
 
     SGRN_AS_REG(tp_engine->RegisterGlobalFunction(
         "void setPlcTime(int year, int month, int day, int hour, int minute, int second)", asFUNCTION(Script_setPlcTime), asCALL_CDECL));

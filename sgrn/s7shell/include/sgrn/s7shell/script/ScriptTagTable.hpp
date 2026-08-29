@@ -1,7 +1,7 @@
 #pragma once
 
 #include <sgrn/Result.hpp>
-#include <sgrn/gateway/wrappers/s7/ProtocolError.hpp>
+#include <sgrn/gateway/wrappers/s7/error.hpp>
 #include <sgrn/scl/types.hpp>
 #include <cstdint>
 #include <memory>
@@ -24,6 +24,18 @@ namespace sgrn::s7shell::shell
 
 struct ScriptS7Connection;
 class S7PathBatch;
+
+using sgrn::gateway::twin::DbIOProvider;
+using sgrn::s7shell::PlcTagTable;
+using sgrn::s7shell::S7BatchEngine;
+
+using S7BatchEngineForDbIo = S7BatchEngine<DbIOProvider>;
+using S7BatchEngineForTagTable = S7BatchEngine<PlcTagTable>;
+
+using S7BatchEngineForDbIoUPtr = std::unique_ptr<S7BatchEngineForDbIo>;
+using S7BatchEngineForTagTableUPtr = std::unique_ptr<S7BatchEngineForTagTable>;
+
+using EngineVariant = std::variant<S7BatchEngineForDbIoUPtr, S7BatchEngineForTagTableUPtr>;
 
 class ScriptTagTable {
     friend class S7PathBatch;
@@ -59,11 +71,11 @@ public:
     void get();
     S7PathBatch* getPath(const std::string& t_p);
 
-    // ── Error introspection (updated by every get/put) ──────────────
+    // ── SclError introspection (updated by every get/put) ──────────────
     bool getLastOpOk() const {
         return last_op_ok_;
     }
-    std::string lastOpError() const {
+    sgrn::gateway::wrappers::s7::S7Error getLastError() const {
         return last_op_err_;
     }
 
@@ -83,21 +95,20 @@ private:
 
     // Last-operation error state (cleared on success, set on failure)
     bool last_op_ok_{true};
-    std::string last_op_err_;
+    sgrn::gateway::wrappers::s7::S7Error last_op_err_;
 
-    void notifyConnError(const ::sgrn::scl::Error& t_err);
-    void notifyConnError(const ::sgrn::gateway::wrappers::s7::S7Error& t_err);
+    void notifyConnError(::sgrn::scl::SclError t_err);
+    void notifyConnError(::sgrn::gateway::wrappers::s7::S7Error t_err);
 
     template <typename T>
-    bool setOpResult(const ::sgrn::Result<T, ::sgrn::scl::Error>& t_r) {
+    bool setOpResult(const ::sgrn::Result<T, SclError>& t_r) {
         if (t_r.hasError()) {
             last_op_ok_ = false;
-            last_op_err_ = t_r.error().string();
+            last_op_err_ = gateway::wrappers::s7::fromSclErrorToS7Error(t_r.error());
             notifyConnError(t_r.error());
             return false;
         }
         last_op_ok_ = true;
-        last_op_err_.clear();
         return true;
     }
 
@@ -105,13 +116,22 @@ private:
     bool setOpResult(const ::sgrn::Result<T, ::sgrn::gateway::wrappers::s7::S7Error>& t_r) {
         if (t_r.hasError()) {
             last_op_ok_ = false;
-            last_op_err_ = t_r.error().string();
+            last_op_err_ = t_r.error();
             notifyConnError(t_r.error());
             return false;
         }
         last_op_ok_ = true;
-        last_op_err_.clear();
         return true;
+    }
+    inline bool doesEngineHaveAnError() {
+        return std::visit([&](auto& e) { return e->hasError(); }, engine_);
+        ;
+    }
+    inline S7Error getLastS7ErrorFromEngine() {
+        return std::visit([&](auto& e) { return gateway::wrappers::s7::fromSclErrorToS7Error(e->getLastError()); }, engine_);
+    }
+    inline bool isEngineNull() {
+        return std::visit([&](const auto& e) { return e == nullptr; }, engine_);
     }
 }; // class ScriptTagTable
 

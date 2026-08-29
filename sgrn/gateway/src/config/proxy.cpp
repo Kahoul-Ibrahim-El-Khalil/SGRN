@@ -21,7 +21,7 @@ Result<S7ProxyConfig, std::string> parseProxyConfig(const std::string& t_path) {
     rapidjson::Document doc;
     if (doc.Parse(content.c_str()).HasParseError()) {
         return Error(
-            fmt::format("JSON Parse Error: {} at offset {}", rapidjson::GetParseError_En(doc.GetParseError()), doc.GetErrorOffset()));
+            fmt::format("JSON Parse SchemaError: {} at offset {}", rapidjson::GetParseError_En(doc.GetParseError()), doc.GetErrorOffset()));
     }
 
     if (!doc.IsObject()) {

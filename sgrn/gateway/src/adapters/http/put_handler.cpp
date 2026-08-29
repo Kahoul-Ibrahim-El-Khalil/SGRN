@@ -1,5 +1,6 @@
 #include <fmt/core.h>
 #include <sgrn/gateway/adapters/http.hpp>
+#include <sgrn/gateway/adapters/http/errors.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/utils/encoding.hpp>
@@ -197,10 +198,10 @@ void HttpAdapter::handlePut(
     // ── 4. Write to PLC arena ─────────────────────────────────────────────
     // writeDbMemory() enforces: offset + size <= DB.size_bytes
     if (auto r = t_memory.writeDbMemory(db_num, t_offset, t_size, payload.data()); !r) {
-        t_res.status = 413;
-        t_res.set_content(
-            fmt::format(R"json({{"error":"Write to DB{} t_offset={} t_size={} failed (out of bounds or unknown DB): {}"}})json", db_num,
-                t_offset, t_size, r.error()),
+        // Unified mapping: PlcMemoryError -> HTTP status.
+        t_res.status = http::toHttpStatus(static_cast<twin::PlcMemoryError>(r.error()));
+        t_res.set_content(fmt::format(R"json({{"error":"Write to DB{} t_offset={} t_size={} failed: {}"}})json", db_num, t_offset, t_size,
+                              toString(r.error())),
             "application/json");
         return;
     }

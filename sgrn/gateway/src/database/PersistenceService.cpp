@@ -1,8 +1,19 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // PersistenceService.cpp
 //
-// Independent local historian / archiver service.
+// Independent local historian / JSONL-WAL archiver service.
 // See PersistenceService.hpp for full architectural documentation.
+//
+// JSONL WAL LINE CONTRACT (one JSON object per line inside a single Zstd frame):
+//   Line 1      {"type":"schema","schema":{<serialized PlcSchemaStore>}|null}
+//   Line 2      {"type":"manifest","start_time":"<iso8601>","mode":"...",
+//                 "namespaces":[...]}
+//   Lines 3..N-1 {"type":"anchor","ts":<ms>,"data":{<full tree>}}  (sync points)
+//                {"type":"delta","ts":<ms>,"changes":{<path>:<value>, ...}}
+//   Line N      {"type":"footer","last_anchor_line":<line>,"record_count":<line>}
+//
+// RecoveryEngine reads this file at boot: the footer's last_anchor_line points
+// at the most recent anchor, so recovery never re-reads the whole file.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include <sgrn/gateway/core/GlobalContext.hpp>
@@ -39,8 +50,8 @@ PersistenceService::~PersistenceService() {
     stop();
 }
 
-sgrn::Result<void> PersistenceService::configure(
-    const PersistenceConfig& t_cfg, const std::string& t_state_dir, std::shared_ptr<GatewayDatabase> tsp_db) {
+sgrn::Result<void> PersistenceService::configure(const PersistenceConfig& t_cfg, const std::string& t_state_dir,
+    std::shared_ptr<GatewayDatabase> tsp_db, const std::string& t_schema_json, const scl::PlcSchemaStore* t_schema_store) {
     if (!t_cfg.enabled) {
         fmt::print(fg(fmt::color::yellow), "[persist] Persistence disabled — skipping.\n");
         return {};
@@ -50,6 +61,7 @@ sgrn::Result<void> PersistenceService::configure(
     state_dir_ = t_state_dir;
     unsynced_dir_ = t_state_dir + "/unsynced";
     db_ = std::move(tsp_db);
+    schema_json_ = t_schema_json;
 
     try {
         std::filesystem::create_directories(unsynced_dir_);
@@ -58,12 +70,38 @@ sgrn::Result<void> PersistenceService::configure(
     }
 
     const int64_t t_now = sgrn::utils::time::nowMilliseconds();
-    last_flush_ts_ = t_now;
     last_anchor_ts_ = t_now;
 
     // Subscribe to the global TelemetryBroker.
-    // All callbacks arrive on the io_context, so batch state is single-threaded.
+    // All callbacks arrive on the io_context, so WAL state is single-threaded.
     broker_sub_id_ = TelemetryBroker::instance().subscribe([this](const TelemetryEvent& t_ev) { onTelemetryEvent(t_ev); });
+
+    if (t_schema_store) {
+        dict_ = twin::LeafDictionary::buildFrom(*t_schema_store);
+    }
+
+    // Build allowed_by_id_
+    if (!dict_.id_to_path.empty()) {
+        size_t max_id = 0;
+        for (const auto& [id, _] : dict_.id_to_path) {
+            if (id > max_id)
+                max_id = id;
+        }
+        allowed_by_id_.resize(max_id + 1, false);
+        for (const auto& [id, path] : dict_.id_to_path) {
+            bool passes = true;
+            if (!cfg_.namespaces.empty()) {
+                passes = false;
+                for (const auto& ns : cfg_.namespaces) {
+                    if (path.rfind(ns, 0) == 0) {
+                        passes = true;
+                        break;
+                    }
+                }
+            }
+            allowed_by_id_[id] = passes;
+        }
+    }
 
     active_.store(true, std::memory_order_relaxed);
 
@@ -81,6 +119,10 @@ void PersistenceService::stop() {
         TelemetryBroker::instance().unsubscribe(broker_sub_id_);
         broker_sub_id_ = 0;
     }
+    // Close any archive still open so the WAL on disk ends with a valid footer.
+    if (current_archive_) {
+        finalizeArchive(sgrn::utils::time::nowMilliseconds());
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -90,12 +132,12 @@ void PersistenceService::stop() {
 void PersistenceService::onTelemetryEvent(const TelemetryEvent& t_event) {
     if (!active_.load(std::memory_order_relaxed))
         return;
-    if (pending_tasks_.load() >= max_pending_)
+    if (pending_tasks_.load(std::memory_order_relaxed) >= max_pending_)
         return;
 
     const int64_t t_now = sgrn::utils::time::nowMilliseconds();
 
-    // ── FullSnapshot: always write an anchor regardless of mode ──────────────
+    // ── FullSnapshot: write an anchor line regardless of mode ────────────────
     if (t_event.type == EventType::FullSnapshot && t_event.json_value) {
         const std::string& json = *t_event.json_value;
         if (!json.empty() && json != "{}") {
@@ -119,24 +161,18 @@ void PersistenceService::onTelemetryEvent(const TelemetryEvent& t_event) {
     // ── PERFORMANCE NOTE: JSON Parsing and Filtering ─────────────────────────
     // The TelemetryBroker broadcasts the SAME shared_ptr<string> to all subscribers.
     // This JSON was already serialized once by PlcState::getDeltaSnapshot().
-    // However, PersistenceService must:
+    // PersistenceService must:
     //   1. Parse the JSON (RapidJSON DOM construction)
     //   2. Extract individual field paths and values
     //   3. Apply namespace filtering per field
-    //   4. Re-serialize each field individually for batching
-    //   5. Compress the batch with zstd
+    //   4. Re-serialize each field individually as a JSONL delta line
     //
-    // This is EXPENSIVE but necessary for:
-    //   - Field-level namespace filtering (only persist what you need)
-    //   - Atomic merge windows (batch multiple deltas into one record)
-    //   - Compression (zstd dominates the cost, not parsing)
-    //
-    // The parsing overhead is ~25-30% of total persistence cost. The compression
-    // step dominates. This runs on heavy_pool_ to avoid blocking the io_context.
+    // The actual zstd compression now happens incrementally inside the writer
+    // (bounded by ZSTD_CStreamOutSize()), so a full-batch compress + envelope
+    // pass is gone: per-event cost is O(line size) in both CPU and memory.
     // ─────────────────────────────────────────────────────────────────────────
 
     // For the other two modes we apply namespace filtering and atomic merging.
-    // Parse the incoming delta JSON to extract individual field paths+values.
     rapidjson::Document doc;
     doc.Parse(t_event.json_value->c_str());
     if (doc.HasParseError() || !doc.IsObject())
@@ -149,14 +185,19 @@ void PersistenceService::onTelemetryEvent(const TelemetryEvent& t_event) {
             continue;
         for (auto f_it = db_it->value.MemberBegin(); f_it != db_it->value.MemberEnd(); ++f_it) {
             const std::string t_path = db_name + "." + f_it->name.GetString();
-            if (!passesFilter(t_path))
+            auto id_it = dict_.path_to_id.find(t_path);
+            if (id_it == dict_.path_to_id.end()) {
+                continue;
+            }
+            twin::LeafId id = id_it->second;
+            if (!passesFilter(id))
                 continue;
 
             rapidjson::StringBuffer sb;
             rapidjson::Writer<rapidjson::StringBuffer> w(sb);
             f_it->value.Accept(w);
 
-            mergeOrFlushEvent(t_path, sb.GetString(), t_now);
+            mergeOrFlushEvent(id, sb.GetString(), t_now);
         }
     }
 
@@ -170,15 +211,20 @@ void PersistenceService::onTelemetryEvent(const TelemetryEvent& t_event) {
 void PersistenceService::ingestFullTree(const std::string& t_full_tree_json) {
     const int64_t t_now = sgrn::utils::time::nowMilliseconds();
 
-    // Flush any pending delta batch before writing a full tree, so that the
-    // archive timeline is consistent.
-    if (!batch_records_.empty())
-        flushBatch(t_now);
+    if (auto res = openNewArchive(t_now); res.hasError()) {
+        fmt::print(fg(fmt::color::red), "[persist] Cannot open WAL archive: {}\n", res.error());
+        return;
+    }
 
-    const bool t_is_anchor = (cfg_.mode == "full_tree_with_anchor");
-    writeFullTreeFile(t_full_tree_json, t_now, t_is_anchor);
+    // Commit any open atomic merge window so archive ordering is consistent.
+    commitMergeBuffer();
 
-    if (t_is_anchor)
+    if (auto res = writeAnchorLine(t_full_tree_json, t_now); res.hasError()) {
+        fmt::print(fg(fmt::color::red), "[persist] Anchor line write failed: {}\n", res.error());
+        return;
+    }
+
+    if (cfg_.mode == "full_tree_with_anchor")
         resetAnchor(t_now);
 }
 
@@ -186,44 +232,44 @@ void PersistenceService::ingestFullTree(const std::string& t_full_tree_json) {
 // Namespace filter
 // ─────────────────────────────────────────────────────────────────────────────
 
-bool PersistenceService::passesFilter(const std::string& t_path) const {
-    if (cfg_.namespaces.empty())
+bool PersistenceService::passesFilter(twin::LeafId t_id) const {
+    if (allowed_by_id_.empty())
         return true;
-    for (const auto& ns : cfg_.namespaces) {
-        if (t_path.rfind(ns, 0) == 0) // starts_with
-            return true;
-    }
-    return false;
+    if (t_id >= allowed_by_id_.size())
+        return false;
+    return allowed_by_id_[t_id];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Atomic merge window
 // ─────────────────────────────────────────────────────────────────────────────
 
-void PersistenceService::mergeOrFlushEvent(const std::string& t_path, const std::string& t_value_json, int64_t t_now) {
+void PersistenceService::mergeOrFlushEvent(twin::LeafId t_id, const std::string& t_value_json, int64_t t_now) {
     const uint32_t window = cfg_.atomic_window_ms;
 
     if (window == 0) {
-        // Merging disabled — emit a standalone record immediately.
+        // Merging disabled — emit a standalone delta line immediately.
         rapidjson::StringBuffer sb;
         rapidjson::Writer<rapidjson::StringBuffer> w(sb);
         w.StartObject();
-        w.Key("timestamp");
-        const std::string t_ts = sgrn::utils::time::iso8601Timestamp(t_now);
-        w.String(t_ts.c_str(), static_cast<rapidjson::SizeType>(t_ts.size()));
+        w.Key("type");
+        w.String("delta");
+        w.Key("ts");
+        w.Int64(t_now);
         w.Key("changes");
         w.StartObject();
-        w.Key(t_path.c_str(), static_cast<rapidjson::SizeType>(t_path.size()));
+        std::string id_str = std::to_string(t_id);
+        w.Key(id_str.c_str(), static_cast<rapidjson::SizeType>(id_str.size()));
         w.RawValue(t_value_json.c_str(), t_value_json.size(), rapidjson::kObjectType);
         w.EndObject();
         w.EndObject();
-        appendRecord(sb.GetString());
+        (void)writeDeltaLine(sb.GetString());
         return;
     }
 
     // If the merge buffer is open and within the atomic window, accumulate.
     if (merge_buf_.open_ts != 0 && (t_now - merge_buf_.open_ts) <= static_cast<int64_t>(window)) {
-        merge_buf_.fields[t_path] = t_value_json;
+        merge_buf_.fields[t_id] = t_value_json;
         return;
     }
 
@@ -232,7 +278,7 @@ void PersistenceService::mergeOrFlushEvent(const std::string& t_path, const std:
         commitMergeBuffer();
 
     merge_buf_.open_ts = t_now;
-    merge_buf_.fields[t_path] = t_value_json;
+    merge_buf_.fields[t_id] = t_value_json;
 }
 
 void PersistenceService::commitMergeBuffer() {
@@ -242,159 +288,250 @@ void PersistenceService::commitMergeBuffer() {
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> w(sb);
     w.StartObject();
-    w.Key("timestamp");
-    const std::string t_ts = sgrn::utils::time::iso8601Timestamp(merge_buf_.open_ts);
-    w.String(t_ts.c_str(), static_cast<rapidjson::SizeType>(t_ts.size()));
+    w.Key("type");
+    w.String("delta");
+    w.Key("ts");
+    w.Int64(merge_buf_.open_ts);
     w.Key("changes");
     w.StartObject();
-    for (const auto& [t_path, val] : merge_buf_.fields) {
-        w.Key(t_path.c_str(), static_cast<rapidjson::SizeType>(t_path.size()));
+    for (const auto& [t_id, val] : merge_buf_.fields) {
+        std::string id_str = std::to_string(t_id);
+        w.Key(id_str.c_str(), static_cast<rapidjson::SizeType>(id_str.size()));
         w.RawValue(val.c_str(), val.size(), rapidjson::kObjectType);
     }
     w.EndObject();
     w.EndObject();
 
-    appendRecord(sb.GetString());
+    (void)writeDeltaLine(sb.GetString());
 
     merge_buf_.open_ts = 0;
     merge_buf_.fields.clear();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Batch accumulation
+// WAL archive lifecycle
 // ─────────────────────────────────────────────────────────────────────────────
 
-void PersistenceService::appendRecord(const std::string& t_record_json) {
-    if (batch_records_.empty())
-        batch_start_ts_ = sgrn::utils::time::nowMilliseconds();
+sgrn::Result<void, std::string> PersistenceService::openNewArchive(int64_t t_now) {
+    if (current_archive_)
+        return {};
 
-    batch_records_.push_back(t_record_json);
+    const std::string date_dir = sgrn::utils::time::datePath(t_now);
+    const std::string start_file = sgrn::utils::time::timePath(t_now);
+    const std::string target_dir = unsynced_dir_ + "/" + date_dir;
+    try {
+        std::filesystem::create_directories(target_dir);
+    } catch (const std::exception& e) {
+        return fmt::format("PersistenceService: cannot create archive directory: {}", e.what());
+    }
+
+    // Provisional path — renamed to <start>-<end>.jsonl.zst on finalize.
+    const std::string tmp_path = target_dir + "/" + start_file + ".jsonl.zst.tmp";
+
+    current_archive_ = std::make_unique<sgrn::utils::compression::ZstdLineWriter>(tmp_path, cfg_.zstd_level);
+    current_archive_path_ = tmp_path;
+    current_archive_start_ts_ = t_now;
+    current_line_counter_ = 0;
+    last_anchor_line_index_ = 0;
+
+    // ── Line 1: schema ───────────────────────────────────────────────────────
+    // A null schema (no schema JSON provided at configure time) instructs
+    // RecoveryEngine to skip schema validation for this archive.
+    rapidjson::StringBuffer sb;
+    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+    w.StartObject();
+    w.Key("type");
+    w.String("schema");
+    w.Key("schema");
+    if (schema_json_.empty()) {
+        w.Null();
+    } else {
+        w.RawValue(schema_json_.c_str(), schema_json_.size(), rapidjson::kObjectType);
+    }
+    w.EndObject();
+
+    auto schema_res = current_archive_->writeLine(sb.GetString());
+    if (schema_res.hasError())
+        return fmt::format("PersistenceService: schema line write failed: {}", schema_res.error());
+    ++current_line_counter_;
+
+    // ── Line 2: dictionary ───────────────────────────────────────────────────
+    rapidjson::StringBuffer dsb;
+    rapidjson::Writer<rapidjson::StringBuffer> dw(dsb);
+    dw.StartObject();
+    dw.Key("type");
+    dw.String("dictionary");
+    dw.Key("leaves");
+    dw.StartArray();
+    for (const auto& [id, path] : dict_.id_to_path) {
+        dw.StartObject();
+        dw.Key("id");
+        dw.Uint(id);
+        dw.Key("path");
+        dw.String(path.c_str(), static_cast<rapidjson::SizeType>(path.size()));
+        dw.EndObject();
+    }
+    dw.EndArray();
+    dw.EndObject();
+
+    auto dict_res = current_archive_->writeLine(dsb.GetString());
+    if (dict_res.hasError())
+        return fmt::format("PersistenceService: dictionary line write failed: {}", dict_res.error());
+    ++current_line_counter_;
+
+    // ── Line 3: manifest ─────────────────────────────────────────────────────
+    rapidjson::StringBuffer msb;
+    rapidjson::Writer<rapidjson::StringBuffer> mw(msb);
+    mw.StartObject();
+    mw.Key("type");
+    mw.String("manifest");
+    mw.Key("start_time");
+    const std::string ts_str = sgrn::utils::time::iso8601Timestamp(t_now);
+    mw.String(ts_str.c_str(), static_cast<rapidjson::SizeType>(ts_str.size()));
+    mw.Key("mode");
+    mw.String(cfg_.mode.c_str(), static_cast<rapidjson::SizeType>(cfg_.mode.size()));
+    mw.Key("namespaces");
+    mw.StartArray();
+    for (const auto& ns : cfg_.namespaces) {
+        mw.String(ns.c_str(), static_cast<rapidjson::SizeType>(ns.size()));
+    }
+    mw.EndArray();
+    mw.EndObject();
+
+    auto manifest_res = current_archive_->writeLine(msb.GetString());
+    if (manifest_res.hasError())
+        return fmt::format("PersistenceService: manifest line write failed: {}", manifest_res.error());
+    ++current_line_counter_;
+
+    return {};
+}
+
+sgrn::Result<void> PersistenceService::writeDeltaLine(const std::string& t_record_json) {
+    if (!current_archive_) {
+        if (auto res = openNewArchive(sgrn::utils::time::nowMilliseconds()); res.hasError())
+            return res.error();
+    }
+
+    auto res = current_archive_->writeLine(t_record_json);
+    if (res.hasError())
+        return res;
+    ++current_line_counter_;
     ++changes_since_anchor_;
+    return {};
+}
+
+sgrn::Result<void> PersistenceService::writeAnchorLine(const std::string& t_full_tree_json, int64_t t_ts) {
+    if (!current_archive_) {
+        if (auto res = openNewArchive(sgrn::utils::time::nowMilliseconds()); res.hasError())
+            return res.error();
+    }
+
+    rapidjson::StringBuffer sb;
+    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+    w.StartObject();
+    w.Key("type");
+    w.String("anchor");
+    w.Key("ts");
+    w.Int64(t_ts);
+    w.Key("data");
+    w.RawValue(t_full_tree_json.c_str(), t_full_tree_json.size(), rapidjson::kObjectType);
+    w.EndObject();
+
+    auto res = current_archive_->writeLine(sb.GetString());
+    if (res.hasError())
+        return res;
+    ++current_line_counter_;
+
+    // This is the line index the footer must advertise so recovery can seek
+    // straight to the most recent anchor.
+    last_anchor_line_index_ = static_cast<int64_t>(current_line_counter_);
+    return {};
+}
+
+void PersistenceService::finalizeArchive(int64_t t_ts_end) {
+    if (!current_archive_)
+        return;
+
+    // Commit any open atomic merge window so no buffered change is lost.
+    commitMergeBuffer();
+
+    // ── Footer line ──────────────────────────────────────────────────────────
+    rapidjson::StringBuffer sb;
+    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+    w.StartObject();
+    w.Key("type");
+    w.String("footer");
+    w.Key("last_anchor_line");
+    w.Int64(last_anchor_line_index_);
+    w.Key("record_count");
+    w.Uint64(static_cast<uint64_t>(current_line_counter_));
+    w.EndObject();
+
+    auto footer_res = current_archive_->writeLine(sb.GetString());
+    if (footer_res.hasError())
+        fmt::print(fg(fmt::color::red), "[persist] Footer write failed: {}\n", footer_res.error());
+
+    auto close_res = current_archive_->close();
+    if (close_res.hasError())
+        fmt::print(fg(fmt::color::red), "[persist] Archive close failed: {}\n", close_res.error());
+
+    const std::string provisional_path = current_archive_path_;
+    const int64_t t_ts_start = current_archive_start_ts_;
+    current_archive_.reset();
+    current_archive_path_.clear();
+    current_line_counter_ = 0;
+    last_anchor_line_index_ = 0;
+
+    // Final name: unsynced/<YYYY-MM-DD>/<start_time>-<end_time>.jsonl.zst
+    const std::string start_file = sgrn::utils::time::timePath(t_ts_start);
+    const std::string end_file = sgrn::utils::time::timePath(t_ts_end);
+    const std::string final_path =
+        unsynced_dir_ + "/" + sgrn::utils::time::datePath(t_ts_start) + "/" + fmt::format("{}-{}.jsonl.zst", start_file, end_file);
+
+    // The stream is already closed (bounded flush). The remaining work — rename
+    // into place + DB bookkeeping — is the only part that needs the heavy pool.
+    if (pending_tasks_.load(std::memory_order_relaxed) < max_pending_) {
+        ++pending_tasks_;
+        asio::post(*heavy_pool_, [this, provisional_path, final_path, t_ts_start, t_ts_end]() {
+            try {
+                std::filesystem::rename(provisional_path, final_path);
+            } catch (const std::exception& e) {
+                fmt::print(fg(fmt::color::red), "[persist] Rename {} -> {} failed: {}\n", provisional_path, final_path, e.what());
+            }
+            if (db_) {
+                (void)db_->recordPendingBatch(final_path, t_ts_start, t_ts_end);
+            }
+            fmt::print(fg(fmt::color::green), "[persist] Wrote {}\n", final_path);
+            --pending_tasks_;
+        });
+    } else {
+        // Queue saturated — the closed archive is still on disk under its
+        // provisional name; RecoveryEngine scans *.jsonl.zst.tmp too.
+        fmt::print(fg(fmt::color::red), "[persist] Finalize queue saturated — archive left at {}\n", provisional_path);
+    }
 }
 
 void PersistenceService::maybeFlushBatch(int64_t t_now) {
-    const bool size_triggered = !batch_records_.empty() && batch_records_.size() >= static_cast<size_t>(cfg_.batch_size);
+    if (!current_archive_)
+        return;
 
-    const bool time_triggered = !batch_records_.empty() && (t_now - last_flush_ts_) >= static_cast<int64_t>(cfg_.batch_interval_s) * 1000;
+    const bool size_triggered = current_line_counter_ >= 2 + static_cast<size_t>(cfg_.batch_size);
+    const bool time_triggered = (t_now - current_archive_start_ts_) >= static_cast<int64_t>(cfg_.batch_interval_s) * 1000;
 
-    if (size_triggered || time_triggered)
-        flushBatch(t_now);
+    if (size_triggered || time_triggered) {
+        finalizeArchive(t_now);
+        return;
+    }
 
     // For full_tree_with_anchor: check if a new anchor is due.
     if (cfg_.mode == "full_tree_with_anchor" && anchorDue(t_now)) {
-        // Flush any pending delta batch first so the archive timeline is consistent.
-        if (!batch_records_.empty())
-            flushBatch(t_now);
-        // Signal that a fresh FullSnapshot is needed. Do NOT call resetAnchor() here —
-        // that would prematurely clear the counters. resetAnchor() is called inside
-        // ingestFullTree() when the actual anchor snapshot is written.
+        // Roll the archive so the fresh anchor starts a clean file. Do NOT call
+        // resetAnchor() here — that would prematurely clear the counters.
+        // resetAnchor() is called inside ingestFullTree() when the new anchor
+        // line is actually written.
+        finalizeArchive(t_now);
         needs_first_anchor_ = true;
     }
-}
-
-void PersistenceService::flushBatch(int64_t t_ts_end) {
-    if (batch_records_.empty())
-        return;
-
-    // Commit any open merge window before flushing.
-    commitMergeBuffer();
-
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-    w.StartObject();
-    w.Key("type");
-    w.String("DELTA_BATCH");
-    w.Key("size");
-    w.Uint(static_cast<unsigned int>(batch_records_.size()));
-    w.Key("data");
-    w.StartArray();
-    for (const auto& rec : batch_records_)
-        w.RawValue(rec.c_str(), rec.size(), rapidjson::kObjectType);
-    w.EndArray();
-    w.EndObject();
-
-    std::string envelope = sb.GetString();
-    batch_records_.clear();
-
-    const int64_t t_ts_start = batch_start_ts_;
-    last_flush_ts_ = t_ts_end;
-    batch_start_ts_ = 0;
-
-    // Build file path: unsynced/<YYYY-MM-DD>/<start_time>-<end_time>.json.zst
-    const std::string date_dir = sgrn::utils::time::datePath(t_ts_start);
-    const std::string start_file = sgrn::utils::time::timePath(t_ts_start);
-    const std::string end_file = sgrn::utils::time::timePath(t_ts_end);
-    const std::string filename = fmt::format("{}-{}.json.zst", start_file, end_file);
-    const std::string target_dir = unsynced_dir_ + "/" + date_dir;
-    std::filesystem::create_directories(target_dir);
-    const std::string t_filepath = target_dir + "/" + filename;
-
-    ++pending_tasks_;
-    asio::post(*heavy_pool_, [this, envelope = std::move(envelope), t_filepath, t_ts_start, t_ts_end]() {
-        writeBatchFile(envelope, t_filepath, t_ts_start, t_ts_end, cfg_.zstd_level);
-    });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// File I/O (runs on heavy_pool_)
-// ─────────────────────────────────────────────────────────────────────────────
-
-void PersistenceService::writeFullTreeFile(const std::string& t_tree_json, int64_t t_ts, bool t_is_anchor) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-    w.StartObject();
-    w.Key("type");
-    w.String(t_is_anchor ? "ANCHOR" : "FULL_TREE");
-    w.Key("timestamp");
-    const std::string ts_str = sgrn::utils::time::iso8601Timestamp(t_ts);
-    w.String(ts_str.c_str(), static_cast<rapidjson::SizeType>(ts_str.size()));
-    w.Key("data");
-    w.RawValue(t_tree_json.c_str(), t_tree_json.size(), rapidjson::kObjectType);
-    w.EndObject();
-
-    const std::string envelope = sb.GetString();
-    const std::string date_dir = sgrn::utils::time::datePath(t_ts);
-    const std::string time_file = sgrn::utils::time::timePath(t_ts);
-    const std::string suffix = t_is_anchor ? "-anchor" : "";
-    const std::string target_dir = unsynced_dir_ + "/" + date_dir;
-    std::filesystem::create_directories(target_dir);
-    const std::string t_filepath = target_dir + "/" + time_file + suffix + ".json.zst";
-
-    const uint8_t level = t_is_anchor ? cfg_.anchor_zstd_level : cfg_.zstd_level;
-
-    ++pending_tasks_;
-    asio::post(*heavy_pool_,
-        [this, envelope = std::move(envelope), t_filepath, t_ts, level]() { writeBatchFile(envelope, t_filepath, t_ts, t_ts, level); });
-}
-
-void PersistenceService::writeBatchFile(
-    const std::string& t_envelope_json, const std::string& t_filepath, int64_t t_ts_start, int64_t t_ts_end, uint8_t t_compression_level) {
-    try {
-        auto comp_res = sgrn::utils::compressStringZstd(t_envelope_json, t_compression_level);
-        if (comp_res.hasError()) {
-            fmt::print(fg(fmt::color::red), "[persist] Compression failed: {}\n", comp_res.error());
-            --pending_tasks_;
-            return;
-        }
-
-        std::ofstream ofs(t_filepath, std::ios::binary);
-        if (!ofs) {
-            fmt::print(fg(fmt::color::red), "[persist] Cannot open for write: {}\n", t_filepath);
-            --pending_tasks_;
-            return;
-        }
-        ofs << comp_res.value();
-        ofs.close();
-
-        if (db_) {
-            (void)db_->recordPendingBatch(t_filepath, t_ts_start, t_ts_end);
-        }
-
-        fmt::print(fg(fmt::color::green), "[persist] Wrote {}\n", t_filepath);
-    } catch (const std::exception& e) {
-        fmt::print(fg(fmt::color::red), "[persist] Write error: {}\n", e.what());
-    }
-    --pending_tasks_;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -29,6 +29,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 #include <fmt/color.h>
 #include <fmt/format.h>
+#include <sgrn/gateway/twin/DbIoError.hpp>
 #include <sgrn/gateway/wrappers/s7/S7Client.hpp>
 #include <optional>
 #include <rapidjson/document.h>
@@ -42,9 +43,29 @@
 namespace sgrn::s7shell
 {
 
-using ::sgrn::scl::Error;
-using ::sgrn::scl::SchemaCode;
+using ::sgrn::scl::SclError;
 
+inline ::sgrn::scl::SclError proto_bridge(::sgrn::gateway::twin::DbIoError t_e) noexcept {
+    using ::sgrn::gateway::twin::DbIoError;
+    using ::sgrn::scl::SclError;
+    switch (t_e) {
+        case DbIoError::Success:
+            return SclError::Generic; // unreachable in practice: proto_bridge is only
+                                      // ever called on a Result that hasError()
+        case DbIoError::FieldNotFound:
+            return SclError::NotFound;
+        case DbIoError::EncodeFailed:
+            return SclError::InvalidType;
+        case DbIoError::NotConnected:
+        case DbIoError::NetworkReadFailed:
+        case DbIoError::NetworkWriteFailed:
+        case DbIoError::LocalMemoryFailed:
+        case DbIoError::SnapshotSyncFailed:
+        case DbIoError::Generic:
+            return SclError::Generic;
+    }
+    return SclError::Generic;
+}
 using sgrn::gateway::wrappers::s7::S7Client;
 using sgrn::gateway::wrappers::s7::S7DataItem;
 
@@ -80,22 +101,22 @@ public:
     // ── Shadow-buffer read (no network) ─────────────────────────────────────
 
     /// Read the value of the last path() from the shadow buffer.
-    sgrn::Result<std::string, ::sgrn::scl::Error> read() const;
+    sgrn::Result<std::string, SclError> read() const;
 
     /// Return JSON object of all pending paths and their shadow-buffer values.
-    sgrn::Result<std::string, ::sgrn::scl::Error> toJson() const;
+    sgrn::Result<std::string, SclError> toJson() const;
 
     // ── Network operations ───────────────────────────────────────────────────
 
     /// Flush pending paths → shadow buffer → PLC.
     /// Chunks into ⌈N/19⌉ writeMultiVars calls.
-    sgrn::Result<void, ::sgrn::scl::Error> put(S7Client& t_client);
+    sgrn::Result<void, SclError> put(S7Client& t_client);
 
     /// PLC → shadow buffer (local cache).
-    sgrn::Result<void, ::sgrn::scl::Error> commitLocal();
+    sgrn::Result<void, SclError> commitLocal();
 
     /// PLC → shadow buffer.  Chunks into ⌈N/19⌉ readMultiVars calls.
-    sgrn::Result<void, ::sgrn::scl::Error> get(S7Client& t_client);
+    sgrn::Result<void, SclError> get(S7Client& t_client);
 
     // ── State management ─────────────────────────────────────────────────────
 
@@ -112,7 +133,7 @@ public:
     bool hasError() const noexcept {
         return last_error_.has_value();
     }
-    const Error& getLastError() const {
+    const SclError& getLastError() const {
         return *last_error_;
     }
 
@@ -120,18 +141,18 @@ private:
     Provider& provider_;
     std::vector<std::string> pending_paths_;
     std::vector<std::variant<std::string, s7codec::DecodedValue>> pending_values_;
-    std::optional<Error> last_error_;
+    std::optional<SclError> last_error_;
 
-    void setError_(Error t_err);
-    sgrn::Result<void, ::sgrn::scl::Error> executePut_(S7Client& t_client);
-    sgrn::Result<void, ::sgrn::scl::Error> executeGet_(S7Client& t_client);
+    void setError_(SclError t_err);
+    sgrn::Result<void, SclError> executePut_(S7Client& t_client);
+    sgrn::Result<void, SclError> executeGet_(S7Client& t_client);
 };
 
-using ::sgrn::scl::SchemaCode;
+using ::sgrn::scl::SclError;
 using S7Error = ::sgrn::gateway::wrappers::s7::S7Error;
 
-inline ::sgrn::scl::Error proto_bridge(const S7Error& t_e) noexcept {
-    return ::sgrn::scl::Error{SchemaCode::Generic, t_e.string()};
+inline ::sgrn::scl::SclError proto_bridge(const S7Error& t_e) noexcept {
+    return ::sgrn::scl::SclError::Generic;
 }
 
 template <typename Provider>
@@ -139,7 +160,7 @@ inline S7BatchEngine<Provider>::S7BatchEngine(Provider& t_provider)
     : provider_(t_provider) {
 }
 template <typename Provider>
-inline void S7BatchEngine<Provider>::setError_(Error t_err) {
+inline void S7BatchEngine<Provider>::setError_(SclError t_err) {
     if (!last_error_.has_value())
         last_error_ = std::move(t_err);
 }
@@ -162,7 +183,7 @@ inline S7BatchEngine<Provider>& S7BatchEngine<Provider>::write(const std::string
     if (last_error_.has_value())
         return *this;
     if (pending_paths_.empty()) {
-        setError_(Error(SchemaCode::Generic, "S7BatchEngine::write() called before path()"));
+        setError_(SclError::Generic);
         return *this;
     }
     pending_values_.back() = t_json_val;
@@ -175,7 +196,7 @@ inline S7BatchEngine<Provider>& S7BatchEngine<Provider>::write(double t_val) {
     if (last_error_.has_value())
         return *this;
     if (pending_paths_.empty()) {
-        setError_(Error(SchemaCode::Generic, "S7BatchEngine::write() called before path()"));
+        setError_(SclError::Generic);
         return *this;
     }
     pending_values_.back() = s7codec::DecodedValue::makeDouble(t_val);
@@ -188,7 +209,7 @@ inline S7BatchEngine<Provider>& S7BatchEngine<Provider>::write(int32_t t_val) {
     if (last_error_.has_value())
         return *this;
     if (pending_paths_.empty()) {
-        setError_(Error(SchemaCode::Generic, "S7BatchEngine::write() called before path()"));
+        setError_(SclError::Generic);
         return *this;
     }
     pending_values_.back() = s7codec::DecodedValue::makeUnsigned(t_val);
@@ -201,28 +222,27 @@ inline S7BatchEngine<Provider>& S7BatchEngine<Provider>::write(bool t_val) {
     if (last_error_.has_value())
         return *this;
     if (pending_paths_.empty()) {
-        setError_(Error(SchemaCode::Generic, "S7BatchEngine::write() called before path()"));
+        setError_(SclError::Generic);
         return *this;
     }
     pending_values_.back() = s7codec::DecodedValue::makeBool(t_val);
     return *this;
 }
 template <typename Provider>
-inline sgrn::Result<std::string, ::sgrn::scl::Error> S7BatchEngine<Provider>::read() const {
+inline sgrn::Result<std::string, SclError> S7BatchEngine<Provider>::read() const {
     if (last_error_.has_value())
-        return sgrn::Result<std::string, ::sgrn::scl::Error>::Error(*last_error_);
+        return sgrn::Result<std::string, SclError>::Error(*last_error_);
     if (pending_paths_.empty())
-        return sgrn::Result<std::string, ::sgrn::scl::Error>::Error(
-            ::sgrn::scl::Error{SchemaCode::Generic, "S7BatchEngine::read() called before path()"});
+        return sgrn::Result<std::string, SclError>::Error(::sgrn::scl::SclError::Generic);
     auto raw = provider_.read(pending_paths_.back());
     if (raw.hasError())
         return std::unexpected(proto_bridge(raw.error()));
     return std::move(raw).value();
 }
 template <typename Provider>
-inline sgrn::Result<std::string, ::sgrn::scl::Error> S7BatchEngine<Provider>::toJson() const {
+inline sgrn::Result<std::string, SclError> S7BatchEngine<Provider>::toJson() const {
     if (last_error_.has_value())
-        return sgrn::Result<std::string, ::sgrn::scl::Error>::Error(*last_error_);
+        return sgrn::Result<std::string, SclError>::Error(*last_error_);
 
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
@@ -240,17 +260,17 @@ inline sgrn::Result<std::string, ::sgrn::scl::Error> S7BatchEngine<Provider>::to
     return std::string(sb.GetString());
 }
 template <typename Provider>
-inline sgrn::Result<void, ::sgrn::scl::Error> S7BatchEngine<Provider>::put(S7Client& t_client) {
+inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::put(S7Client& t_client) {
     if (last_error_.has_value())
-        return sgrn::Result<void, ::sgrn::scl::Error>::Error(*last_error_);
+        return sgrn::Result<void, SclError>::Error(*last_error_);
     if (pending_paths_.empty())
         return {};
     return executePut_(t_client);
 }
 template <typename Provider>
-inline sgrn::Result<void, ::sgrn::scl::Error> S7BatchEngine<Provider>::commitLocal() {
+inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::commitLocal() {
     if (last_error_.has_value())
-        return sgrn::Result<void, ::sgrn::scl::Error>::Error(*last_error_);
+        return sgrn::Result<void, SclError>::Error(*last_error_);
     if (pending_paths_.empty())
         return {};
     auto res = provider_.commitLocalPut(pending_paths_, pending_values_);
@@ -259,9 +279,9 @@ inline sgrn::Result<void, ::sgrn::scl::Error> S7BatchEngine<Provider>::commitLoc
     return {};
 }
 template <typename Provider>
-inline sgrn::Result<void, ::sgrn::scl::Error> S7BatchEngine<Provider>::get(S7Client& t_client) {
+inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::get(S7Client& t_client) {
     if (last_error_.has_value())
-        return sgrn::Result<void, ::sgrn::scl::Error>::Error(*last_error_);
+        return sgrn::Result<void, SclError>::Error(*last_error_);
     if (pending_paths_.empty())
         return {};
     return executeGet_(t_client);
@@ -276,7 +296,7 @@ inline void S7BatchEngine<Provider>::reset() {
 // executePut_ constructs the Snap7 raw item payloads and writes them to the PLC.
 // It chunks the writes into maximum 19-item packages to respect S7 PDU limitations.
 template <typename Provider>
-inline sgrn::Result<void, ::sgrn::scl::Error> S7BatchEngine<Provider>::executePut_(S7Client& t_client) {
+inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::executePut_(S7Client& t_client) {
     std::vector<S7DataItem> all_items;
     std::vector<std::vector<uint8_t>> all_bufs;
     auto build_res = provider_.buildPutItems(pending_paths_, pending_values_, all_items, all_bufs);
@@ -319,8 +339,7 @@ inline sgrn::Result<void, ::sgrn::scl::Error> S7BatchEngine<Provider>::executePu
         }
 
         if (rc.hasError()) {
-            return sgrn::Result<void, ::sgrn::scl::Error>::Error(::sgrn::scl::Error{
-                SchemaCode::Generic, fmt::format("S7BatchEngine: writeMultiVars chunk {} failed: {}", chunk_idx, rc.error().string())});
+            return std::unexpected(proto_bridge(rc.error()));
         }
 
         offset += count;
@@ -332,7 +351,7 @@ inline sgrn::Result<void, ::sgrn::scl::Error> S7BatchEngine<Provider>::executePu
 // executeGet_ constructs read items and reads them from the PLC.
 // Like executePut_, it chunks requests into transactions of 19 items max.
 template <typename Provider>
-inline sgrn::Result<void, ::sgrn::scl::Error> S7BatchEngine<Provider>::executeGet_(S7Client& t_client) {
+inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::executeGet_(S7Client& t_client) {
     std::vector<S7DataItem> all_items;
     std::vector<std::vector<uint8_t>> all_bufs;
     auto build_res = provider_.buildGetItems(pending_paths_, all_items, all_bufs);
@@ -343,9 +362,8 @@ inline sgrn::Result<void, ::sgrn::scl::Error> S7BatchEngine<Provider>::executeGe
 
     const size_t total = all_items.size();
     size_t offset = 0;
-    int chunk_idx = 0;
     bool any_item_error = false;
-
+    int chunk_idx = 0;
     // Transmit read requests to PLC, committing each chunk's results to the
     // shadow memory as soon as it lands. A later chunk failing at the
     // transport level must not discard reads the PLC already returned.
@@ -368,17 +386,14 @@ inline sgrn::Result<void, ::sgrn::scl::Error> S7BatchEngine<Provider>::executeGe
         }
 
         if (rc.hasError()) {
-            return sgrn::Result<void, ::sgrn::scl::Error>::Error(::sgrn::scl::Error{
-                SchemaCode::Generic, fmt::format("S7BatchEngine: readMultiVars chunk {} failed: {}", chunk_idx, rc.error().string())});
+            return std::unexpected(proto_bridge(rc.error()));
         }
 
         offset += count;
         chunk_idx += 1;
     }
 
-    if (any_item_error)
-        return sgrn::Result<void, ::sgrn::scl::Error>::Error(
-            ::sgrn::scl::Error{SchemaCode::Generic, "S7BatchEngine: one or more GET items rejected by PLC (see above)"});
+    SGRN_RETURN_ERROR_IF(any_item_error, SclError::Generic);
     return {};
 }
 } // namespace sgrn::s7shell

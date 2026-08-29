@@ -27,7 +27,7 @@
 #include <vector>
 
 namespace fs = std::filesystem;
-using sgrn::scl::Err;
+
 using sgrn::scl::PlcSchemaStore;
 using sgrn::scl::SclCompiler;
 
@@ -204,14 +204,14 @@ int cmdCompile(int t_argc, char** tp_argv) {
         if (fs::is_directory(input_path)) {
             auto store_res = SclCompiler::compileDirectory(input_path, {.force = force});
             if (store_res.hasError()) {
-                fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error().string());
+                fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
                 return EXIT_FAILURE;
             }
             registry = std::move(store_res.value());
         } else {
             auto store_res = SclCompiler::compileFile(input_path, {.force = force});
             if (store_res.hasError()) {
-                fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error().string());
+                fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
                 return EXIT_FAILURE;
             }
             registry = std::move(store_res.value());
@@ -222,7 +222,7 @@ int cmdCompile(int t_argc, char** tp_argv) {
             f = sgrn::utils::filesystem::expandUserPath(f);
         auto store_res = SclCompiler::compileFiles(files, {.force = force});
         if (store_res.hasError()) {
-            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error().string());
+            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
             return EXIT_FAILURE;
         }
         registry = std::move(store_res.value());
@@ -275,7 +275,7 @@ int cmdEmitScl(int t_argc, char** tp_argv) {
     if (res.count("input")) {
         auto store_res = PlcSchemaStore::loadFromJsonFile(res["input"].as<std::string>());
         if (store_res.hasError()) {
-            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error().string());
+            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
             return EXIT_FAILURE;
         }
         registry = std::move(store_res.value());
@@ -285,7 +285,7 @@ int cmdEmitScl(int t_argc, char** tp_argv) {
         auto store_res = fs::is_directory(input) ? SclCompiler::compileDirectory(input, {.force = force})
                                                  : SclCompiler::compileFile(input, {.force = force});
         if (store_res.hasError()) {
-            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error().string());
+            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
             return EXIT_FAILURE;
         }
         registry = std::move(store_res.value());
@@ -298,7 +298,7 @@ int cmdEmitScl(int t_argc, char** tp_argv) {
 
     auto emit_res = SclCompiler::emitScl(registry, res["output"].as<std::string>());
     if (emit_res.hasError()) {
-        fmt::print(stderr, "\033[31merror:\033[0m {}\n", emit_res.error().string());
+        fmt::print(stderr, "\033[31merror:\033[0m {}\n", emit_res.error());
         return EXIT_FAILURE;
     }
     fmt::print(stderr, "\033[32memitted:\033[0m .scl files to {}\n", res["output"].as<std::string>());
@@ -326,7 +326,7 @@ int cmdEmitDir(int t_argc, char** tp_argv) {
     if (res.count("input")) {
         auto store_res = PlcSchemaStore::loadFromJsonFile(res["input"].as<std::string>());
         if (store_res.hasError()) {
-            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error().string());
+            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
             return EXIT_FAILURE;
         }
         registry = std::move(store_res.value());
@@ -336,7 +336,7 @@ int cmdEmitDir(int t_argc, char** tp_argv) {
         auto store_res = fs::is_directory(input) ? SclCompiler::compileDirectory(input, {.force = force})
                                                  : SclCompiler::compileFile(input, {.force = force});
         if (store_res.hasError()) {
-            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error().string());
+            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
             return EXIT_FAILURE;
         }
         registry = std::move(store_res.value());
@@ -349,7 +349,7 @@ int cmdEmitDir(int t_argc, char** tp_argv) {
 
     auto emit_res = SclCompiler::emitCanonical(registry, res["output"].as<std::string>());
     if (emit_res.hasError()) {
-        fmt::print(stderr, "\033[31merror:\033[0m {}\n", emit_res.error().string());
+        fmt::print(stderr, "\033[31merror:\033[0m {}\n", emit_res.error());
         return EXIT_FAILURE;
     }
     fmt::print(stderr, "\033[32memitted:\033[0m canonical directory to {}\n", res["output"].as<std::string>());
@@ -429,7 +429,7 @@ int cmdCodegen(int t_argc, char** tp_argv) {
     if (res.count("input")) {
         auto store_res = PlcSchemaStore::loadFromJsonFile(res["input"].as<std::string>());
         if (store_res.hasError()) {
-            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error().string());
+            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
             return EXIT_FAILURE;
         }
         registry = std::move(store_res.value());
@@ -439,7 +439,7 @@ int cmdCodegen(int t_argc, char** tp_argv) {
         auto store_res = fs::is_directory(input) ? SclCompiler::compileDirectory(input, {.force = force})
                                                  : SclCompiler::compileFile(input, {.force = force});
         if (store_res.hasError()) {
-            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error().string());
+            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
             return EXIT_FAILURE;
         }
         registry = std::move(store_res.value());
@@ -461,7 +461,7 @@ int cmdCodegen(int t_argc, char** tp_argv) {
 
     auto emit_res = SclCompiler::emitCpp(registry, output_path, guard_prefix);
     if (emit_res.hasError()) {
-        fmt::print(stderr, "\033[31merror:\033[0m {}\n", emit_res.error().string());
+        fmt::print(stderr, "\033[31merror:\033[0m {}\n", emit_res.error());
         return EXIT_FAILURE;
     }
     fmt::print(stderr, "\033[32mgenerated:\033[0m {}\n", output_path);

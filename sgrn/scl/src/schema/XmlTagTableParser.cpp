@@ -9,13 +9,13 @@ extern "C" {
 namespace sgrn::scl
 {
 
-sgrn::Result<std::vector<TagDefinition>, ::sgrn::scl::Error> XmlTagTableParser::parse(const std::string& t_xml_content) {
+sgrn::Result<std::vector<TagDefinition>, SclError> XmlTagTableParser::parse(const std::string& t_xml_content) {
     std::vector<TagDefinition> tags;
 
     XMLNode* p_root = xml_parse_string(t_xml_content.c_str());
     if (!p_root) {
-        return sgrn::scl::Error({SchemaCode::ParseError, "Failed to parse XML content"});
-    };
+        return sgrn::Result<std::vector<TagDefinition>, SclError>::Error(SclError::ParseError);
+    }
 
     // Traverse the document: Tagtable -> Tag
     for (size_t i = 0; i < p_root->children->len; i++) {

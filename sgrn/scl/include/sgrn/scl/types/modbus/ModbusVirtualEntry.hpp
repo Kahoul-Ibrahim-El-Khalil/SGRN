@@ -15,13 +15,13 @@ struct ModbusVirtualEntry {
     uint16_t db_number{0};
     std::string field_path; ///< dot-separated path inside DB, e.g. "pump_1.setpoint"
     DataType type{DataType::Word};
-    int byte_offset{0};    ///< byte offset of field inside DB arena
-    int bit_index{0};      ///< bit index inside the byte (only for BOOL fields)
-    int byte_count{0};     ///< real field size in bytes
-    int reg_start{0};      ///< first register / coil address in virtual map
-    int reg_count{0};      ///< number of 16-bit registers, or number of coils/bits
-    bool padded{false};    ///< true → byte_count is odd; high byte of last reg is unused
-    bool read_only{false}; ///< Input / Discrete areas are read-only
+    int byte_offset{0};     ///< byte offset of field inside DB arena
+    uint8_t bit_index{0};   ///< bit index inside the byte (only for BOOL fields)
+    uint32_t byte_count{0}; ///< real field size in bytes
+    uint32_t reg_start{0};  ///< first register / coil address in virtual map
+    uint32_t reg_count{0};  ///< number of 16-bit registers, or number of coils/bits
+    bool padded{false};     ///< true → byte_count is odd; high byte of last reg is unused
+    bool read_only{false};  ///< Input / Discrete areas are read-only
 };
 
 } // namespace sgrn::scl

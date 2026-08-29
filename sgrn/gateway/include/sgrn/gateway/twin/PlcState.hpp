@@ -9,6 +9,7 @@
 #include <sgrn/types/UniversalType.hpp>
 #include <sgrn/utils/endianess.hpp>
 #include <sgrn/utils/time.hpp>
+#include <map>
 #include <memory>
 #include <optional>
 #include <rapidjson/stringbuffer.h>
@@ -54,6 +55,9 @@ struct PlcNode {
     s7codec::Type type_{s7codec::Type::Byte};
     s7codec::Endian endian_{s7codec::Endian::Big};
     bool is_dynamic_{false};
+    /// Numeric→symbolic mapping for enum-typed fields (from scl::DbField::enum_map).
+    /// Used by the JSON read paths so enums round-trip as symbolic strings.
+    std::map<int, std::string> enum_map_;
     std::vector<PlcNode> children_;
     std::string full_path_; // Store for collision verification in find()
     // PlcNode struct — add after string_capacity_
@@ -78,6 +82,7 @@ struct PlcNode {
         , type_(t_other.type_)
         , endian_(t_other.endian_)
         , is_dynamic_(t_other.is_dynamic_)
+        , enum_map_(t_other.enum_map_)
         , children_(t_other.children_)
         , full_path_(t_other.full_path_)
         , cached_slot_(t_other.cached_slot_)
@@ -97,6 +102,7 @@ struct PlcNode {
         , type_(t_other.type_)
         , endian_(t_other.endian_)
         , is_dynamic_(t_other.is_dynamic_)
+        , enum_map_(t_other.enum_map_)
         , children_(std::move(t_other.children_))
         , full_path_(std::move(t_other.full_path_))
         , cached_slot_(t_other.cached_slot_)
@@ -117,6 +123,7 @@ struct PlcNode {
             type_ = t_other.type_;
             endian_ = t_other.endian_;
             is_dynamic_ = t_other.is_dynamic_;
+            enum_map_ = t_other.enum_map_;
             children_ = std::move(t_other.children_);
             full_path_ = std::move(t_other.full_path_);
             cached_slot_ = t_other.cached_slot_;
@@ -139,6 +146,7 @@ struct PlcNode {
             type_ = t_other.type_;
             endian_ = t_other.endian_;
             is_dynamic_ = t_other.is_dynamic_;
+            enum_map_ = t_other.enum_map_;
             children_ = t_other.children_;
             full_path_ = t_other.full_path_;
             cached_slot_ = t_other.cached_slot_;
@@ -257,6 +265,35 @@ struct PlcNode {
                 if (!dv.valid()) {
                     t_writer.Null();
                 } else {
+                    // Enum fields round-trip as their symbolic name instead of a
+                    // bare number (scalar-only; arrays stay numeric).
+                    if (!enum_map_.empty() && !is_array) {
+                        const int64_t numeric = (dv.kind() == s7codec::ValueKind::UnsignedInt) ? static_cast<int64_t>(dv.u())
+                                                : (dv.kind() == s7codec::ValueKind::SignedInt) ? dv.i()
+                                                                                               : INT64_MIN;
+                        if (numeric != INT64_MIN) {
+                            auto it = enum_map_.find(static_cast<int>(numeric));
+                            if (it != enum_map_.end()) {
+                                t_writer.String(it->second.c_str(), static_cast<rapidjson::SizeType>(it->second.length()));
+                            } else {
+                                // Unknown numeric value — fall back to the number.
+                                switch (dv.kind()) {
+                                    case s7codec::ValueKind::SignedInt:
+                                        t_writer.Int64(dv.i());
+                                        break;
+                                    case s7codec::ValueKind::UnsignedInt:
+                                        t_writer.Uint64(dv.u());
+                                        break;
+                                    default:
+                                        t_writer.Null();
+                                        break;
+                                }
+                            }
+                            if (!is_array)
+                                break;
+                            continue;
+                        }
+                    }
                     // AFTER
                     switch (dv.kind()) {
                         case s7codec::ValueKind::Bool:
