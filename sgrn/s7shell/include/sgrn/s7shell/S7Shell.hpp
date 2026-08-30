@@ -6,6 +6,7 @@
 #include <chrono>
 #include <memory>
 #include <sstream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -67,6 +68,10 @@ private:
     /// Auto-generated DataBlock@ handle declarations, prepended to every runScript() compilation.
     /// Accumulated from all schema loads via injectDbRefs/buildDbPreamble.
     std::string db_preamble_;
+
+    /// Track loaded schema paths to avoid duplicate injection.
+    std::set<std::string> loaded_schemas_;
+
     static char** completionDispatch(const char* tp_text, int t_start, int t_end);
 
     int last_shell_exit_code_;

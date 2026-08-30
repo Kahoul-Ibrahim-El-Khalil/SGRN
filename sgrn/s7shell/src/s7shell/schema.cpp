@@ -100,7 +100,18 @@ std::string buildDbPreamble(const sgrn::scl::PlcSchemaStore& t_store, const std:
 // ─────────────────────────────────────────────────────────────────────────────
 void S7Shell::loadSchema(const std::string& t_schema_path, const std::string& t_output_dir) {
     std::filesystem::path p(t_schema_path);
-    std::string resolved = sgrn::utils::filesystem::expandUserPath(p.lexically_normal().string());
+    std::string expanded = sgrn::utils::filesystem::expandUserPath(p.string());
+    std::filesystem::path resolved_path(expanded);
+    if (resolved_path.is_relative()) {
+        resolved_path = std::filesystem::absolute(resolved_path);
+    }
+    std::string resolved = resolved_path.lexically_normal().string();
+
+    // Deduplicate: skip if already loaded
+    if (loaded_schemas_.count(resolved)) {
+        fmt::print(fg(fmt::color::gray), "[s7shell] Schema already loaded, skipping: {}\n", resolved);
+        return;
+    }
 
     if (std::filesystem::exists(resolved)) {
         sgrn::scl::PlcSchemaStore t_store;
@@ -127,6 +138,8 @@ void S7Shell::loadSchema(const std::string& t_schema_path, const std::string& t_
                 fmt::print(stderr, fg(fmt::color::yellow), "[s7shell]   warning: {}\n", w);
             return;
         }
+
+        loaded_schemas_.insert(resolved);
 
         sgrn::scripting::ScriptHost host(p_script_engine_);
         registerSchemaTypes(host, t_store);

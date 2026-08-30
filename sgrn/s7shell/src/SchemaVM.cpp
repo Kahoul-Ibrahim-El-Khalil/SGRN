@@ -79,7 +79,7 @@ static void GenericFieldGetter_bool(asIScriptGeneric* tp_gen) {
 static void GenericFieldGetter_string(asIScriptGeneric* tp_gen) {
     auto* p_db = static_cast<ScriptDataBlock*>(tp_gen->GetObject());
     auto* p_meta = static_cast<FieldMeta*>(tp_gen->GetAuxiliary());
-    
+
     auto dv = decodeFromLiveMemory(p_db, p_meta);
     if (p_meta->s7type == s7codec::Type::Char || p_meta->s7type == s7codec::Type::WChar) {
         char c = static_cast<char>(dv.u());
@@ -170,9 +170,10 @@ static void GenericFieldSetter_string(asIScriptGeneric* tp_gen) {
     auto* p_db = static_cast<ScriptDataBlock*>(tp_gen->GetObject());
     auto* p_meta = static_cast<FieldMeta*>(tp_gen->GetAuxiliary());
     const std::string& val = *static_cast<const std::string*>(tp_gen->GetArgAddress(0));
-    uint32_t span = static_cast<uint32_t>(s7codec::typeSpanBytes(p_meta->s7type, p_meta->string_capacity > 0 ? p_meta->string_capacity : p_meta->count).value_or(0));
+    uint32_t span = static_cast<uint32_t>(
+        s7codec::typeSpanBytes(p_meta->s7type, p_meta->string_capacity > 0 ? p_meta->string_capacity : p_meta->count).value_or(0));
     std::vector<uint8_t> tmp(static_cast<size_t>(span), 0);
-    
+
     s7codec::DecodedValue dv;
     if (p_meta->s7type == s7codec::Type::Char || p_meta->s7type == s7codec::Type::WChar) {
         uint8_t char_val = val.empty() ? 0 : static_cast<uint8_t>(val[0]);
@@ -197,37 +198,64 @@ static void GenericFieldSetter_string(asIScriptGeneric* tp_gen) {
 static const char* s7TypeToAS(s7codec::Type t_t) {
     using T = s7codec::Type;
     switch (t_t) {
-        case T::Bool: return "bool";
-        case T::Byte: return "uint8";
-        case T::Word: return "uint16";
-        case T::DWord: return "uint";
-        case T::LWord: return "uint64";
-        case T::SInt: return "int8";
-        case T::USInt: return "uint8";
-        case T::Int: return "int16";
-        case T::UInt: return "uint16";
-        case T::DInt: return "int";
-        case T::UDInt: return "uint";
-        case T::LInt: return "int64";
-        case T::ULInt: return "uint64";
-        case T::Real: return "float";
-        case T::LReal: return "double";
-        case T::Char: return "string";
-        case T::WChar: return "string";
-        case T::Counter: return "uint16";
-        case T::Timer: return "uint16";
+        case T::Bool:
+            return "bool";
+        case T::Byte:
+            return "uint8";
+        case T::Word:
+            return "uint16";
+        case T::DWord:
+            return "uint";
+        case T::LWord:
+            return "uint64";
+        case T::SInt:
+            return "int8";
+        case T::USInt:
+            return "uint8";
+        case T::Int:
+            return "int16";
+        case T::UInt:
+            return "uint16";
+        case T::DInt:
+            return "int";
+        case T::UDInt:
+            return "uint";
+        case T::LInt:
+            return "int64";
+        case T::ULInt:
+            return "uint64";
+        case T::Real:
+            return "float";
+        case T::LReal:
+            return "double";
+        case T::Char:
+            return "string";
+        case T::WChar:
+            return "string";
+        case T::Counter:
+            return "uint16";
+        case T::Timer:
+            return "uint16";
         case T::String:
         case T::WString:
         case T::XString:
-        case T::XWString: return "string";
-        case T::Time: return "int";
-        case T::LTime: return "int64";
-        case T::Date: return "uint16";
-        case T::TimeOfDay: return "uint";
-        case T::LTimeOfDay: return "uint64";
+        case T::XWString:
+            return "string";
+        case T::Time:
+            return "int";
+        case T::LTime:
+            return "int64";
+        case T::Date:
+            return "uint16";
+        case T::TimeOfDay:
+            return "uint";
+        case T::LTimeOfDay:
+            return "uint64";
         case T::DTL:
-        case T::DateTime: return nullptr;
-        default: return nullptr;
+        case T::DateTime:
+            return nullptr;
+        default:
+            return nullptr;
     }
 }
 
@@ -350,6 +378,42 @@ static void GenericUDTFieldSetter_int32(asIScriptGeneric* tp_gen) {
     p_sub_proxy->release();
 }
 
+static void GenericUDTFieldSetter_uint8(asIScriptGeneric* tp_gen) {
+    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
+    std::string field_name = getUdtFieldName(tp_gen);
+    uint8_t val = static_cast<uint8_t>(tp_gen->GetArgDWord(0));
+    auto* p_sub_proxy = p_proxy->index(field_name);
+    p_sub_proxy->assignUInt8(val);
+    p_sub_proxy->release();
+}
+
+static void GenericUDTFieldSetter_uint16(asIScriptGeneric* tp_gen) {
+    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
+    std::string field_name = getUdtFieldName(tp_gen);
+    uint16_t val = static_cast<uint16_t>(tp_gen->GetArgDWord(0));
+    auto* p_sub_proxy = p_proxy->index(field_name);
+    p_sub_proxy->assignUInt16(val);
+    p_sub_proxy->release();
+}
+
+static void GenericUDTFieldSetter_uint32(asIScriptGeneric* tp_gen) {
+    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
+    std::string field_name = getUdtFieldName(tp_gen);
+    uint32_t val = tp_gen->GetArgDWord(0);
+    auto* p_sub_proxy = p_proxy->index(field_name);
+    p_sub_proxy->assignUInt(val);
+    p_sub_proxy->release();
+}
+
+static void GenericUDTFieldSetter_uint64(asIScriptGeneric* tp_gen) {
+    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
+    std::string field_name = getUdtFieldName(tp_gen);
+    uint64_t val = tp_gen->GetArgQWord(0);
+    auto* p_sub_proxy = p_proxy->index(field_name);
+    p_sub_proxy->assignUInt64(val);
+    p_sub_proxy->release();
+}
+
 static void GenericUDTFieldGetter_bool(asIScriptGeneric* tp_gen) {
     auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
     std::string field_name = getUdtFieldName(tp_gen);
@@ -409,6 +473,96 @@ static void GenericUDTFieldSetter_dtl(asIScriptGeneric* tp_gen) {
     p_sub_proxy->assignDtl(p_dtl_obj);
     p_sub_proxy->release();
 }
+
+// ── Templated integer getters/setters (replaces per-type functions) ─────────────
+
+template <typename T>
+static void GenericUDTFieldGetter_int(asIScriptGeneric* gen) {
+    auto* proxy = static_cast<ScriptFieldProxy*>(gen->GetObject());
+    std::string name = getUdtFieldName(gen);
+    auto* sub = proxy->index(name);
+    if constexpr (std::is_same_v<T, int8_t>)
+        gen->SetReturnByte(sub->toUInt8());
+    else if constexpr (std::is_same_v<T, uint8_t>)
+        gen->SetReturnByte(sub->toUInt8());
+    else if constexpr (std::is_same_v<T, int16_t>)
+        gen->SetReturnWord(sub->toUInt16());
+    else if constexpr (std::is_same_v<T, uint16_t>)
+        gen->SetReturnWord(sub->toUInt16());
+    else if constexpr (std::is_same_v<T, int32_t>)
+        gen->SetReturnDWord(sub->toInt());
+    else if constexpr (std::is_same_v<T, uint32_t>)
+        gen->SetReturnDWord(sub->toUInt());
+    else if constexpr (std::is_same_v<T, int64_t>)
+        gen->SetReturnQWord(sub->toUInt64());
+    else if constexpr (std::is_same_v<T, uint64_t>)
+        gen->SetReturnQWord(sub->toUInt64());
+    sub->release();
+}
+
+template <typename T>
+static void GenericUDTFieldSetter_int(asIScriptGeneric* gen) {
+    auto* proxy = static_cast<ScriptFieldProxy*>(gen->GetObject());
+    std::string name = getUdtFieldName(gen);
+    auto* sub = proxy->index(name);
+    if constexpr (std::is_same_v<T, int8_t>)
+        sub->assignInt8(static_cast<int8_t>(gen->GetArgDWord(0)));
+    else if constexpr (std::is_same_v<T, uint8_t>)
+        sub->assignUInt8(static_cast<uint8_t>(gen->GetArgDWord(0)));
+    else if constexpr (std::is_same_v<T, int16_t>)
+        sub->assignInt16(static_cast<int16_t>(gen->GetArgDWord(0)));
+    else if constexpr (std::is_same_v<T, uint16_t>)
+        sub->assignUInt16(static_cast<uint16_t>(gen->GetArgDWord(0)));
+    else if constexpr (std::is_same_v<T, int32_t>)
+        sub->assignInt(static_cast<int32_t>(gen->GetArgDWord(0)));
+    else if constexpr (std::is_same_v<T, uint32_t>)
+        sub->assignUInt(static_cast<uint32_t>(gen->GetArgDWord(0)));
+    else if constexpr (std::is_same_v<T, int64_t>)
+        sub->assignInt64(gen->GetArgQWord(0));
+    else if constexpr (std::is_same_v<T, uint64_t>)
+        sub->assignUInt64(gen->GetArgQWord(0));
+    sub->release();
+}
+
+// ── Static dispatch table (const array, no heap allocation) ────────────────
+
+struct TypeDispatch {
+    const char* name;
+    asSFuncPtr getter;
+    asSFuncPtr setter;
+};
+
+static const TypeDispatch kTypeDispatch[] = {
+    {"float", asFUNCTION(GenericUDTFieldGetter_float), asFUNCTION(GenericUDTFieldSetter_float)},
+    {"double", asFUNCTION(GenericUDTFieldGetter_double), asFUNCTION(GenericUDTFieldSetter_double)},
+    {"bool", asFUNCTION(GenericUDTFieldGetter_bool), asFUNCTION(GenericUDTFieldSetter_bool)},
+    {"string", asFUNCTION(GenericUDTFieldGetter_string), asFUNCTION(GenericUDTFieldSetter_string)},
+    {"DTL@", asFUNCTION(GenericUDTFieldGetter_dtl), asFUNCTION(GenericUDTFieldSetter_dtl)},
+    {"int8", asFUNCTION(GenericUDTFieldGetter_int<int8_t>), asFUNCTION(GenericUDTFieldSetter_int<int8_t>)},
+    {"uint8", asFUNCTION(GenericUDTFieldGetter_int<uint8_t>), asFUNCTION(GenericUDTFieldSetter_int<uint8_t>)},
+    {"int16", asFUNCTION(GenericUDTFieldGetter_int<int16_t>), asFUNCTION(GenericUDTFieldSetter_int<int16_t>)},
+    {"uint16", asFUNCTION(GenericUDTFieldGetter_int<uint16_t>), asFUNCTION(GenericUDTFieldSetter_int<uint16_t>)},
+    {"int", asFUNCTION(GenericUDTFieldGetter_int<int32_t>), asFUNCTION(GenericUDTFieldSetter_int<int32_t>)},
+    {"uint", asFUNCTION(GenericUDTFieldGetter_int<uint32_t>), asFUNCTION(GenericUDTFieldSetter_int<uint32_t>)},
+    {"int64", asFUNCTION(GenericUDTFieldGetter_int<int64_t>), asFUNCTION(GenericUDTFieldSetter_int<int64_t>)},
+    {"uint64", asFUNCTION(GenericUDTFieldGetter_int<uint64_t>), asFUNCTION(GenericUDTFieldSetter_int<uint64_t>)},
+};
+
+static constexpr size_t kTypeDispatchSize = sizeof(kTypeDispatch) / sizeof(kTypeDispatch[0]);
+
+static void findTypeDispatch(const std::string& t_ast, asSFuncPtr& t_getter, asSFuncPtr& t_setter) {
+    for (size_t i = 0; i < kTypeDispatchSize; ++i) {
+        if (t_ast == kTypeDispatch[i].name) {
+            t_getter = kTypeDispatch[i].getter;
+            t_setter = kTypeDispatch[i].setter;
+            return;
+        }
+    }
+    // Default fallback to int
+    t_getter = kTypeDispatch[10].getter;
+    t_setter = kTypeDispatch[10].setter;
+}
+
 static void GenericFieldGetter_primitive_array(asIScriptGeneric* tp_gen) {
     auto* p_db = static_cast<ScriptDataBlock*>(tp_gen->GetObject());
     auto* p_meta = static_cast<FieldMeta*>(tp_gen->GetAuxiliary());
@@ -634,35 +788,7 @@ static void registerProxyStructType(sgrn::scripting::ScriptHost& t_host, const s
         asSFuncPtr setter{};
 
         std::string ast = as_field_type;
-
-        if (ast == "float" || ast == "REAL") {
-            getter = asFUNCTION(GenericUDTFieldGetter_float);
-            setter = asFUNCTION(GenericUDTFieldSetter_float);
-        } else if (ast == "double" || ast == "LREAL") {
-            getter = asFUNCTION(GenericUDTFieldGetter_double);
-            setter = asFUNCTION(GenericUDTFieldSetter_double);
-        } else if (ast == "bool" || ast == "BOOL") {
-            getter = asFUNCTION(GenericUDTFieldGetter_bool);
-            setter = asFUNCTION(GenericUDTFieldSetter_bool);
-        } else if (ast == "string") {
-            getter = asFUNCTION(GenericUDTFieldGetter_string);
-            setter = asFUNCTION(GenericUDTFieldSetter_string);
-        } else if (ast == "DTL@") {
-            getter = asFUNCTION(GenericUDTFieldGetter_dtl);
-            setter = asFUNCTION(GenericUDTFieldSetter_dtl);
-        } else if (ast == "int8" || ast == "uint8") {
-            getter = asFUNCTION(GenericUDTFieldGetter_int8);
-            setter = asFUNCTION(GenericUDTFieldSetter_int8);
-        } else if (ast == "int16" || ast == "uint16") {
-            getter = asFUNCTION(GenericUDTFieldGetter_int16);
-            setter = asFUNCTION(GenericUDTFieldSetter_int16);
-        } else if (ast == "int64" || ast == "uint64") {
-            getter = asFUNCTION(GenericUDTFieldGetter_int64);
-            setter = asFUNCTION(GenericUDTFieldSetter_int64);
-        } else {
-            getter = asFUNCTION(GenericUDTFieldGetter_int32);
-            setter = asFUNCTION(GenericUDTFieldSetter_int32);
-        }
+        findTypeDispatch(ast, getter, setter);
 
         std::string getter_sig = fmt::format("{} get_{}() const", as_field_type, safe_name);
 
@@ -672,16 +798,10 @@ static void registerProxyStructType(sgrn::scripting::ScriptHost& t_host, const s
 
         if (ast == "string") {
             setter_sig = fmt::format("void set_{}(const string &in)", safe_name);
-        } else if (ast == "int64" || ast == "uint64") {
-            setter_sig = fmt::format("void set_{}({} val)", safe_name, as_field_type);
-        } else if (ast == "float" || ast == "double" || ast == "bool" || ast == "DTL@") {
+        } else if (ast == "int64" || ast == "uint64" || ast == "float" || ast == "double" || ast == "bool" || ast == "DTL@") {
             setter_sig = fmt::format("void set_{}({} val)", safe_name, as_field_type);
         } else {
-            // Sub-32-bit types (int8, uint8, int16, uint16, int, uint, etc.)
-            // Use 'int' as the setter parameter so that integer literals and hex
-            // (e.g. 0x10) can be passed without requiring explicit casts in AS.
-            // The C++ generic function handles truncation.
-            setter_sig = fmt::format("void set_{}(int val)", safe_name);
+            setter_sig = fmt::format("void set_{}({} val)", safe_name, as_field_type);
         }
 
         engine->RegisterObjectMethod(t_type_name.c_str(), setter_sig.c_str(), setter, asCALL_GENERIC, raw_name);
@@ -890,10 +1010,7 @@ static void registerFieldProperties(sgrn::scripting::ScriptHost& t_host, const s
         } else if (ast_type == "int64" || ast_type == "uint64" || ast_type == "float" || ast_type == "double" || ast_type == "bool") {
             setter_sig = fmt::format("void set_{}({} val)", safe_name, as_field_type);
         } else {
-            // Sub-32-bit and 32-bit integer types: use 'int' so that integer
-            // literals and hex (e.g. 0x10) are accepted without explicit casts.
-            // The GenericFieldSetter_int reads GetArgDWord and truncates internally.
-            setter_sig = fmt::format("void set_{}(int val)", safe_name);
+            setter_sig = fmt::format("void set_{}({} val)", safe_name, as_field_type);
         }
 
         int r2 = t_host.getEngine()->RegisterObjectMethod(t_as_type_name.c_str(), setter_sig.c_str(), acc.setter, asCALL_GENERIC, raw);
@@ -961,34 +1078,7 @@ static void registerUdtFieldProperties(sgrn::scripting::ScriptHost& t_host, cons
         asSFuncPtr getter = {0};
         asSFuncPtr setter = {0};
         std::string ast = as_field_type;
-        if (ast == "float" || ast == "REAL") {
-            getter = asFUNCTION(GenericUDTFieldGetter_float);
-            setter = asFUNCTION(GenericUDTFieldSetter_float);
-        } else if (ast == "double" || ast == "LREAL") {
-            getter = asFUNCTION(GenericUDTFieldGetter_double);
-            setter = asFUNCTION(GenericUDTFieldSetter_double);
-        } else if (ast == "bool" || ast == "BOOL") {
-            getter = asFUNCTION(GenericUDTFieldGetter_bool);
-            setter = asFUNCTION(GenericUDTFieldSetter_bool);
-        } else if (ast == "string") {
-            getter = asFUNCTION(GenericUDTFieldGetter_string);
-            setter = asFUNCTION(GenericUDTFieldSetter_string);
-        } else if (ast == "DTL@") {
-            getter = asFUNCTION(GenericUDTFieldGetter_dtl);
-            setter = asFUNCTION(GenericUDTFieldSetter_dtl);
-        } else if (ast == "int8" || ast == "uint8") {
-            getter = asFUNCTION(GenericUDTFieldGetter_int8);
-            setter = asFUNCTION(GenericUDTFieldSetter_int8);
-        } else if (ast == "int16" || ast == "uint16") {
-            getter = asFUNCTION(GenericUDTFieldGetter_int16);
-            setter = asFUNCTION(GenericUDTFieldSetter_int16);
-        } else if (ast == "int64" || ast == "uint64") {
-            getter = asFUNCTION(GenericUDTFieldGetter_int64);
-            setter = asFUNCTION(GenericUDTFieldSetter_int64);
-        } else {
-            getter = asFUNCTION(GenericUDTFieldGetter_int32);
-            setter = asFUNCTION(GenericUDTFieldSetter_int32);
-        }
+        findTypeDispatch(ast, getter, setter);
 
         std::string getter_sig = fmt::format("{} get_{}() const", as_field_type, safe_name);
         int r1 = t_host.getEngine()->RegisterObjectMethod(t_as_type_name.c_str(), getter_sig.c_str(), getter, asCALL_GENERIC, raw_name);
@@ -1000,11 +1090,11 @@ static void registerUdtFieldProperties(sgrn::scripting::ScriptHost& t_host, cons
         std::string ast_sig = as_field_type;
         if (ast_sig == "string") {
             setter_sig = fmt::format("void set_{}(const string &in)", safe_name);
-        } else if (ast_sig == "int64" || ast_sig == "uint64" || ast_sig == "float" || ast_sig == "double" || ast_sig == "bool" || ast_sig == "DTL@") {
+        } else if (ast_sig == "int64" || ast_sig == "uint64" || ast_sig == "float" || ast_sig == "double" || ast_sig == "bool" ||
+                   ast_sig == "DTL@") {
             setter_sig = fmt::format("void set_{}({} val)", safe_name, as_field_type);
         } else {
-            // Use 'int' for sub-32-bit/32-bit integer types so hex literals work without casts.
-            setter_sig = fmt::format("void set_{}(int val)", safe_name);
+            setter_sig = fmt::format("void set_{}({} val)", safe_name, as_field_type);
         }
         int r2 = t_host.getEngine()->RegisterObjectMethod(t_as_type_name.c_str(), setter_sig.c_str(), setter, asCALL_GENERIC, raw_name);
         if (r2 < 0) {

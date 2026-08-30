@@ -37,7 +37,8 @@ using sgrn::utils::filesystem::expandUserPath;
 // Forward declaration — scanIncludes() recurses back into preScanFile() for
 // each resolved #include/import target.
 static void preScanFile(const std::string& t_filename, const std::string& t_content, asIScriptEngine* tp_script_engine,
-    asIScriptModule* tp_repl_module, std::string& t_db_preamble, std::set<std::string>& t_scanned_files);
+    asIScriptModule* tp_repl_module, std::string& t_db_preamble, std::set<std::string>& t_scanned_files,
+    std::set<std::string>& t_loaded_schemas);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // resolveAgainstBase — resolve a possibly-relative, possibly-~-prefixed path
@@ -96,6 +97,14 @@ static Result<std::string, std::string> extractLiteralOrConstArg(const std::stri
     return "";
 }
 // ─────────────────────────────────────────────────────────────────────────────
+// SchemaLoadResult — holds loaded schema and its deduplication key
+// ─────────────────────────────────────────────────────────────────────────────
+struct SchemaLoadResult {
+    ::sgrn::scl::PlcSchemaStore store;
+    std::string schema_key;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // loadScannedSchema — load a PlcSchemaStore for a detected schema-load call.
 //
 // Mirrors PlcSchemaStore::loadSchema()'s own path-vs-content auto-detection,
@@ -106,19 +115,30 @@ static Result<std::string, std::string> extractLiteralOrConstArg(const std::stri
 // it onto a directory and lexically-normalizing it is meaningless (and
 // potentially corrupting) for literal SCL source text.
 // ─────────────────────────────────────────────────────────────────────────────
-static Result<::sgrn::scl::PlcSchemaStore, SclError> loadScannedSchema(
-    const std::string& t_method, const std::string& t_raw_arg, const fs::path& t_script_dir) {
+static Result<SchemaLoadResult, SclError> loadScannedSchema(
+    const std::string& t_method, const std::string& t_raw_arg, const fs::path& t_script_dir,
+    const std::set<std::string>& t_loaded_schemas) {
     const auto resolved = resolveAgainstBase(t_script_dir, t_raw_arg);
+    std::string schema_key = resolved; // Use resolved path as deduplication key
+
+    // Check for duplicate BEFORE loading
+    if (t_loaded_schemas.count(schema_key)) {
+        return SclError::DuplicateDefinition;
+    }
 
     if (fs::exists(resolved)) {
-        if (t_method == "loadJsonSchema")
-            return ::sgrn::scl::PlcSchemaStore::loadFromJsonFile(resolved);
+        if (t_method == "loadJsonSchema") {
+            auto res = ::sgrn::scl::PlcSchemaStore::loadFromJsonFile(resolved);
+            if (res.hasError())
+                return res.error();
+            return SchemaLoadResult{std::move(res.value()), schema_key};
+        }
 
         ::sgrn::scl::PlcSchemaStore store;
         auto res = store.loadFile(resolved);
         if (res.hasError())
             return res.error();
-        return store;
+        return SchemaLoadResult{std::move(store), schema_key};
     }
 
     // Not a file on disk — treat the raw argument as inline schema source.
@@ -132,7 +152,15 @@ static Result<::sgrn::scl::PlcSchemaStore, SclError> loadScannedSchema(
     if (res.hasError()) {
         return res.error();
     }
-    return store;
+    // For inline schemas, use a hash of the content as key
+    schema_key = "inline:" + std::to_string(std::hash<std::string>{}(t_raw_arg));
+    
+    // Check again for inline schemas (in case same inline schema loaded twice)
+    if (t_loaded_schemas.count(schema_key)) {
+        return SclError::DuplicateDefinition;
+    }
+    
+    return SchemaLoadResult{std::move(store), schema_key};
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -153,7 +181,8 @@ static void registerScannedSchema(asIScriptEngine* tp_engine, asIScriptModule* t
 // recursively preScanFile() each resolved target.
 // ─────────────────────────────────────────────────────────────────────────────
 static void scanIncludes(const std::string& t_content, const std::string& t_abs_path, asIScriptEngine* tp_script_engine,
-    asIScriptModule* tp_repl_module, std::string& t_db_preamble, std::set<std::string>& t_scanned_files) {
+    asIScriptModule* tp_repl_module, std::string& t_db_preamble, std::set<std::string>& t_scanned_files,
+    std::set<std::string>& t_loaded_schemas) {
     static const std::regex include_regex(
         R"((?:^\s*import\s+["']([^"']+)["']\s*;?)|(?:^\s*#include\s+["']([^"']+)["']))", std::regex::multiline);
 
@@ -168,7 +197,7 @@ static void scanIncludes(const std::string& t_content, const std::string& t_abs_
         std::ifstream ifs(resolved_inc);
         if (ifs.is_open()) {
             std::string inc_content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-            preScanFile(resolved_inc, inc_content, tp_script_engine, tp_repl_module, t_db_preamble, t_scanned_files);
+            preScanFile(resolved_inc, inc_content, tp_script_engine, tp_repl_module, t_db_preamble, t_scanned_files, t_loaded_schemas);
         }
         search_inc = inc_match.suffix().first;
     }
@@ -187,7 +216,7 @@ static void scanIncludes(const std::string& t_content, const std::string& t_abs_
 // unrelated ones in the same file.
 // ─────────────────────────────────────────────────────────────────────────────
 static void scanSchemaLoads(const std::string& t_content, const std::string& t_abs_path, asIScriptEngine* tp_script_engine,
-    asIScriptModule* tp_repl_module, std::string& t_db_preamble) {
+    asIScriptModule* tp_repl_module, std::string& t_db_preamble, std::set<std::string>& t_loaded_schemas) {
     static const std::regex load_call_regex(R"(([a-zA-Z0-9_]+)\s*\.\s*(loadSclSchema|loadSchema|loadJsonSchema)\s*\(\s*([^)]+)\s*\))");
 
     const fs::path script_dir = std::filesystem::path(t_abs_path).parent_path();
@@ -203,12 +232,14 @@ static void scanSchemaLoads(const std::string& t_content, const std::string& t_a
             if (literal.hasError()) {
                 fmt::print(stderr, fg(fmt::color::red), "[s7shell] Literal extraction error: {}\n", literal.error());
             } else {
-                auto store_res = loadScannedSchema(method, literal.value(), script_dir);
+                auto store_res = loadScannedSchema(method, literal.value(), script_dir, t_loaded_schemas);
                 if (store_res.hasError()) {
                     fmt::print(stderr, fg(fmt::color::red), "[s7shell] Schema compilation failed for {}('{}'): {}\n", method,
                         literal.value(), toString(store_res.error()));
                 } else {
-                    registerScannedSchema(tp_script_engine, tp_repl_module, store_res.value(), client_var, t_db_preamble);
+                    const auto& [store, schema_key] = store_res.value();
+                    t_loaded_schemas.insert(schema_key);
+                    registerScannedSchema(tp_script_engine, tp_repl_module, store, client_var, t_db_preamble);
                 }
             }
         }
@@ -221,7 +252,7 @@ static void scanSchemaLoads(const std::string& t_content, const std::string& t_a
 // load the schema from the string argument (literal or const string).
 // ─────────────────────────────────────────────────────────────────────────────
 static void scanPlcRuntimeConstructors(const std::string& t_content, const std::string& t_abs_path, asIScriptEngine* tp_script_engine,
-    asIScriptModule* tp_repl_module, std::string& t_db_preamble) {
+    asIScriptModule* tp_repl_module, std::string& t_db_preamble, std::set<std::string>& t_loaded_schemas) {
     static const std::regex ctor_regex(R"(\bPlcRuntime\s*\(\s*([^)]+)\s*\))");
 
     const fs::path script_dir = std::filesystem::path(t_abs_path).parent_path();
@@ -238,12 +269,14 @@ static void scanPlcRuntimeConstructors(const std::string& t_content, const std::
             if (literal.hasError()) {
                 fmt::print(stderr, fg(fmt::color::red), "[s7shell] Literal extraction error: {}\n", literal.error());
             } else {
-                auto store_res = loadScannedSchema("loadSclSchema", *literal, script_dir);
+                auto store_res = loadScannedSchema("loadSclSchema", *literal, script_dir, t_loaded_schemas);
                 if (store_res.hasError()) {
                     fmt::print(stderr, fg(fmt::color::red), "[s7shell] Schema compilation failed for PlcRuntime('{}'): {}\n", *literal,
                         toString(store_res.error()));
                 } else {
-                    registerScannedSchema(tp_script_engine, tp_repl_module, store_res.value(), "plc", t_db_preamble);
+                    const auto& [store, schema_key] = store_res.value();
+                    t_loaded_schemas.insert(schema_key);
+                    registerScannedSchema(tp_script_engine, tp_repl_module, store, "plc", t_db_preamble);
                 }
             }
         }
@@ -256,15 +289,16 @@ static void scanPlcRuntimeConstructors(const std::string& t_content, const std::
 // includes (recursively) followed by schema-load calls in this file.
 // ─────────────────────────────────────────────────────────────────────────────
 static void preScanFile(const std::string& t_filename, const std::string& t_content, asIScriptEngine* tp_script_engine,
-    asIScriptModule* tp_repl_module, std::string& t_db_preamble, std::set<std::string>& t_scanned_files) {
+    asIScriptModule* tp_repl_module, std::string& t_db_preamble, std::set<std::string>& t_scanned_files,
+    std::set<std::string>& t_loaded_schemas) {
     const std::string abs_path = sgrn::utils::filesystem::expandUserPath(fs::absolute(t_filename).string());
     if (t_scanned_files.count(abs_path))
         return;
     t_scanned_files.insert(abs_path);
 
-    scanIncludes(t_content, abs_path, tp_script_engine, tp_repl_module, t_db_preamble, t_scanned_files);
-    scanSchemaLoads(t_content, abs_path, tp_script_engine, tp_repl_module, t_db_preamble);
-    scanPlcRuntimeConstructors(t_content, abs_path, tp_script_engine, tp_repl_module, t_db_preamble);
+    scanIncludes(t_content, abs_path, tp_script_engine, tp_repl_module, t_db_preamble, t_scanned_files, t_loaded_schemas);
+    scanSchemaLoads(t_content, abs_path, tp_script_engine, tp_repl_module, t_db_preamble, t_loaded_schemas);
+    scanPlcRuntimeConstructors(t_content, abs_path, tp_script_engine, tp_repl_module, t_db_preamble, t_loaded_schemas);
 }
 void S7Shell::runScript(const std::string& t_filename) {
     std::ifstream ifs(t_filename);
@@ -279,7 +313,7 @@ void S7Shell::runScript(const std::string& t_filename) {
         std::regex_replace(t_content, std::regex(R"(^\s*import\s+["']([^"']+)["']\s*;?)", std::regex::multiline), "#include \"$1\"");
 
     std::set<std::string> t_scanned_files;
-    preScanFile(t_filename, t_content, p_script_engine_, p_repl_module_, db_preamble_, t_scanned_files);
+    preScanFile(t_filename, t_content, p_script_engine_, p_repl_module_, db_preamble_, t_scanned_files, loaded_schemas_);
 
     // Build — prepend auto-generated DB references as an anonymous section
     CScriptBuilder builder;
@@ -367,7 +401,7 @@ void S7Shell::runScripts(const std::vector<std::string>& t_filenames) {
     // ── Step 2: pre-scan ALL files for loadSclSchema calls ───────────────────
     std::set<std::string> t_scanned_files;
     for (size_t i = 0; i < t_filenames.size(); ++i) {
-        preScanFile(t_filenames[i], contents[i], p_script_engine_, p_repl_module_, db_preamble_, t_scanned_files);
+        preScanFile(t_filenames[i], contents[i], p_script_engine_, p_repl_module_, db_preamble_, t_scanned_files, loaded_schemas_);
     }
 
     // ── Step 3: compile all sections into a single module ────────────────────
