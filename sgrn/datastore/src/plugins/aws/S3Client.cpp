@@ -1,6 +1,7 @@
 #include <drogon/drogon.h>
 #include <fmt/format.h>
 #include <sgrn/datastore/plugins/aws/S3Client.hpp>
+#include <sgrn/datastore/plugins/aws/S3Error.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
 #include <sgrn/debug.hpp>
 #include <aws/core/auth/AWSCredentials.h>
@@ -100,7 +101,7 @@ Task<BackendResult<void>> S3Client::uploadFile(std::string t_bucket, std::string
         if (!*input_stream) {
             std::string error = "Cannot open file: " + t_file_path;
             ERROR_LOG(error);
-            return ::sgrn::datastore::BackendError{::sgrn::datastore::scope_file_system, std::move(error)};
+            return ::sgrn::datastore::BackendError(::sgrn::datastore::BackendErrorKind::Filesystem, std::move(error));
         }
 
         req.SetBody(input_stream);
@@ -108,9 +109,10 @@ Task<BackendResult<void>> S3Client::uploadFile(std::string t_bucket, std::string
         auto outcome = t_client.PutObject(req);
 
         if (!outcome.IsSuccess()) {
+            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
             std::string error = "Upload failed: " + outcome.GetError().GetMessage();
             ERROR_LOG(error);
-            return ::sgrn::datastore::BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
         }
         return {};
     });
@@ -133,9 +135,10 @@ Task<BackendResult<void>> S3Client::uploadFromMemory(
         auto outcome = t_client.PutObject(req);
 
         if (!outcome.IsSuccess()) {
+            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
             std::string error = "Upload from memory failed: " + outcome.GetError().GetMessage();
             ERROR_LOG(error);
-            return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
         }
         return {};
     });
@@ -154,7 +157,7 @@ Task<BackendResult<void>> S3Client::uploadWithMetadata(
         if (!*input_stream) {
             std::string error = "Cannot open file: " + t_file_path;
             ERROR_LOG(error);
-            return BackendError{::sgrn::datastore::scope_file_system, std::move(error)};
+            return BackendError(::sgrn::datastore::BackendErrorKind::Filesystem, std::move(error));
         }
 
         req.SetBody(input_stream);
@@ -166,9 +169,10 @@ Task<BackendResult<void>> S3Client::uploadWithMetadata(
         auto outcome = t_client.PutObject(req);
 
         if (!outcome.IsSuccess()) {
+            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
             std::string error = "[S3Client] Upload with metadata failed: " + outcome.GetError().GetMessage();
             ERROR_LOG(error);
-            return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
         }
 
         return {};
@@ -185,14 +189,16 @@ Task<BackendResult<void>> S3Client::downloadFile(std::string t_bucket, std::stri
         auto outcome = t_client.GetObject(req);
 
         if (!outcome.IsSuccess()) {
+            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
             std::string error = "Download failed: " + outcome.GetError().GetMessage();
             ERROR_LOG(error);
-            return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
         }
 
         std::ofstream out(t_download_path, std::ios::binary);
         if (!out) {
-            return BackendError{::sgrn::datastore::scope_file_system, "Failed to open local file for writing: " + t_download_path};
+            return BackendError(
+                ::sgrn::datastore::BackendErrorKind::Filesystem, "Failed to open local file for writing: " + t_download_path);
         }
         out << outcome.GetResult().GetBody().rdbuf();
         return {};
@@ -215,14 +221,16 @@ Task<BackendResult<void>> S3Client::downloadFileRange(
             auto outcome = t_client.GetObject(req);
 
             if (!outcome.IsSuccess()) {
+                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
                 std::string error = "[S3Client] Download range failed: " + outcome.GetError().GetMessage();
                 ERROR_LOG(error);
-                return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
             }
 
             std::ofstream out(t_download_path, std::ios::binary);
             if (!out) {
-                return BackendError{::sgrn::datastore::scope_file_system, "Failed to open local file for writing: " + t_download_path};
+                return BackendError(
+                    ::sgrn::datastore::BackendErrorKind::Filesystem, "Failed to open local file for writing: " + t_download_path);
             }
             out << outcome.GetResult().GetBody().rdbuf();
             return {};
@@ -239,9 +247,10 @@ Task<BackendResult<std::string>> S3Client::getObjectContent(std::string t_bucket
             auto outcome = t_client.GetObject(req);
 
             if (!outcome.IsSuccess()) {
+                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
                 std::string error = "[S3Client] GetObject failed: " + outcome.GetError().GetMessage();
                 ERROR_LOG(error);
-                return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
             }
 
             auto& result = outcome.GetResult();
@@ -266,9 +275,10 @@ Task<BackendResult<void>> S3Client::deleteFile(std::string t_bucket, std::string
             auto outcome = t_client.DeleteObject(req);
 
             if (!outcome.IsSuccess()) {
+                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
                 std::string error = "[S3Client] Delete failed: " + outcome.GetError().GetMessage();
                 ERROR_LOG(error);
-                return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
             }
 
             return {};
@@ -296,9 +306,10 @@ Task<BackendResult<Json::Value>> S3Client::deleteFiles(std::string t_bucket, std
             auto outcome = t_client.DeleteObjects(req);
 
             if (!outcome.IsSuccess()) {
+                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
                 std::string error = "Bulk delete failed: " + outcome.GetError().GetMessage();
                 ERROR_LOG(error);
-                return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
             }
 
             for (const auto& deleted : outcome.GetResult().GetDeleted()) {
@@ -331,9 +342,10 @@ Task<BackendResult<void>> S3Client::copyFile(
             auto outcome = t_client.CopyObject(req);
 
             if (!outcome.IsSuccess()) {
+                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
                 std::string error = "Copy failed: " + outcome.GetError().GetMessage();
                 ERROR_LOG(error);
-                return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
             }
 
             return {};
@@ -360,7 +372,7 @@ Task<BackendResult<bool>> S3Client::exists(std::string t_bucket, std::string t_k
 
             std::string error_msg = "HeadObject failed: " + error.GetMessage();
             ERROR_LOG(error_msg);
-            return BackendError{::sgrn::datastore::scope_minio, std::move(error_msg)};
+            return ::sgrn::datastore::plugins::aws::toBackendError(::sgrn::datastore::plugins::aws::fromAwsError(error), error_msg);
         });
 }
 
@@ -374,9 +386,10 @@ Task<BackendResult<Json::Value>> S3Client::statObject(std::string t_bucket, std:
         auto outcome = t_client.HeadObject(req);
 
         if (!outcome.IsSuccess()) {
+            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
             std::string error = "[S3Client] Head failed: " + outcome.GetError().GetMessage();
             ERROR_LOG(error);
-            return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
         }
 
         auto& result = outcome.GetResult();
@@ -419,9 +432,10 @@ Task<BackendResult<Json::Value>> S3Client::listObjects(
         auto outcome = t_client.ListObjectsV2(req);
 
         if (!outcome.IsSuccess()) {
+            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
             std::string error = "[S3Client] List objects failed: " + outcome.GetError().GetMessage();
             ERROR_LOG(error);
-            return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
         }
 
         auto& list_result = outcome.GetResult();
@@ -454,9 +468,10 @@ Task<BackendResult<void>> S3Client::createBucket(std::string t_bucket) {
         auto outcome = t_client.CreateBucket(req);
 
         if (!outcome.IsSuccess()) {
+            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
             std::string error = "Create bucket failed: " + outcome.GetError().GetMessage();
             ERROR_LOG(error);
-            return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
         }
 
         return {};
@@ -471,9 +486,10 @@ Task<BackendResult<void>> S3Client::deleteBucket(std::string t_bucket) {
         auto outcome = t_client.DeleteBucket(req);
 
         if (!outcome.IsSuccess()) {
+            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
             std::string error = "Delete bucket failed: " + outcome.GetError().GetMessage();
             ERROR_LOG(error);
-            return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
         }
 
         return {};
@@ -498,7 +514,7 @@ Task<BackendResult<bool>> S3Client::bucketExists(std::string t_bucket) {
 
         std::string error_msg = "HeadBucket failed: " + error.GetMessage();
         ERROR_LOG(error_msg);
-        return BackendError{::sgrn::datastore::scope_minio, std::move(error_msg)};
+        return ::sgrn::datastore::plugins::aws::toBackendError(::sgrn::datastore::plugins::aws::fromAwsError(error), error_msg);
     });
 }
 
@@ -507,9 +523,10 @@ Task<BackendResult<Json::Value>> S3Client::listBuckets() {
         auto outcome = t_client.ListBuckets();
 
         if (!outcome.IsSuccess()) {
+            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
             std::string error = "List buckets failed: " + outcome.GetError().GetMessage();
             ERROR_LOG(error);
-            return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
         }
 
         Json::Value result;
@@ -537,9 +554,10 @@ Task<BackendResult<Json::Value>> S3Client::getObjectTags(std::string t_bucket, s
             auto outcome = t_client.GetObjectTagging(req);
 
             if (!outcome.IsSuccess()) {
+                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
                 std::string error = "[S3Client] Get tags failed: " + outcome.GetError().GetMessage();
                 ERROR_LOG(error);
-                return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
             }
 
             for (const auto& tag : outcome.GetResult().GetTagSet()) {
@@ -568,9 +586,10 @@ Task<BackendResult<void>> S3Client::putObjectTags(std::string t_bucket, std::str
         auto outcome = t_client.PutObjectTagging(req);
 
         if (!outcome.IsSuccess()) {
+            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
             std::string error = "Put tags failed: " + outcome.GetError().GetMessage();
             ERROR_LOG(error);
-            return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
         }
 
         return {};
@@ -587,9 +606,10 @@ Task<BackendResult<void>> S3Client::deleteObjectTags(std::string t_bucket, std::
             auto outcome = t_client.DeleteObjectTagging(req);
 
             if (!outcome.IsSuccess()) {
+                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
                 std::string error = "Delete tags failed: " + outcome.GetError().GetMessage();
                 ERROR_LOG(error);
-                return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
             }
 
             return {};
@@ -611,9 +631,10 @@ Task<BackendResult<std::string>> S3Client::createMultipartUpload(std::string t_b
             auto outcome = t_client.CreateMultipartUpload(req);
 
             if (!outcome.IsSuccess()) {
+                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
                 std::string error = "Create multipart upload failed: " + outcome.GetError().GetMessage();
                 ERROR_LOG(error);
-                return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
             }
 
             return outcome.GetResult().GetUploadId();
@@ -638,9 +659,10 @@ Task<BackendResult<std::string>> S3Client::uploadPart(
             auto outcome = t_client.UploadPart(req);
 
             if (!outcome.IsSuccess()) {
+                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
                 std::string error = "Upload part failed: " + outcome.GetError().GetMessage();
                 ERROR_LOG(error);
-                return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
             }
 
             return outcome.GetResult().GetETag();
@@ -668,9 +690,10 @@ Task<BackendResult<void>> S3Client::completeMultipartUpload(
         auto outcome = t_client.CompleteMultipartUpload(req);
 
         if (!outcome.IsSuccess()) {
+            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
             std::string error = "Complete multipart upload failed: " + outcome.GetError().GetMessage();
             ERROR_LOG(error);
-            return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
         }
 
         return {};
@@ -688,9 +711,10 @@ Task<BackendResult<void>> S3Client::abortMultipartUpload(std::string t_bucket, s
         auto outcome = t_client.AbortMultipartUpload(req);
 
         if (!outcome.IsSuccess()) {
+            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
             std::string error = "Abort multipart upload failed: " + outcome.GetError().GetMessage();
             ERROR_LOG(error);
-            return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
         }
 
         return {};
@@ -716,9 +740,10 @@ Task<BackendResult<Json::Value>> S3Client::listParts(
         auto outcome = t_client.ListParts(req);
 
         if (!outcome.IsSuccess()) {
+            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
             std::string error = "List parts failed: " + outcome.GetError().GetMessage();
             ERROR_LOG(error);
-            return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
         }
 
         for (const auto& part : outcome.GetResult().GetParts()) {
@@ -753,7 +778,7 @@ Task<BackendResult<std::string>> S3Client::generatePresignedUrl(
         } catch (const std::exception& ex) {
             std::string error = "Generate presigned URL failed: " + std::string(ex.what());
             ERROR_LOG(error);
-            return BackendError{::sgrn::datastore::scope_minio, std::move(error)};
+            return ::sgrn::datastore::plugins::aws::toBackendError(::sgrn::datastore::plugins::aws::S3Error::RequestFailed, error);
         }
     });
 }

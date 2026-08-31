@@ -17,6 +17,7 @@
 #define INFO_LOG(msg, ...) SGRN_INFO("AdminHandler", msg __VA_OPT__(, ) __VA_ARGS__)
 #define WARN_LOG(msg, ...) SGRN_WARN("AdminHandler", msg __VA_OPT__(, ) __VA_ARGS__)
 #define ERROR_LOG(msg, ...) SGRN_ERROR("AdminHandler", msg __VA_OPT__(, ) __VA_ARGS__)
+#include <sgrn/datastore/error/ApiErrors.hpp>
 #include <sgrn/datastore/handlers/admin.hpp>
 #include <sgrn/datastore/plugins/postgrest/PostgrestClient.hpp>
 #include <sgrn/datastore/services/admin.hpp>
@@ -86,7 +87,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleGetUsers(HttpRequestPtr tsp_req) {
 
         co_return createJsonResponse(users_json, k200OK);
     } catch (const std::exception& e) {
-        co_return createErrorResponse("Failed to fetch users", k500InternalServerError);
+        co_return createErrorResponse(AdminApiError::DbError);
     }
 }
 
@@ -115,32 +116,32 @@ Task<HttpResponsePtr> AdminApiHandler::handleRegisterUser(HttpRequestPtr tsp_req
         }
     } catch (const std::exception& e) {
         ERROR_LOG("User registration error: {}", e.what());
-        co_return createErrorResponse("Registration failed", k500InternalServerError);
+        co_return createErrorResponse(AdminApiError::DbError);
     }
 }
 
 Task<HttpResponsePtr> AdminApiHandler::handleRegisterAutomatedService(HttpRequestPtr tsp_req) {
     auto json = tsp_req->getJsonObject();
     if (json == nullptr) {
-        co_return createErrorResponse("Invalid JSON payload", k400BadRequest);
+        co_return createErrorResponse(AdminApiError::InvalidPayload);
     }
 
     std::string name = sgrn::utils::strings::trim(json->get("name", "").asString());
     std::string kind = sgrn::utils::strings::trim(json->get("kind", "").asString());
 
     if (name.empty()) {
-        co_return createErrorResponse("Missing required field: name", k400BadRequest);
+        co_return createErrorResponse(AdminApiError::InvalidPayload);
     }
 
     try {
         // Bind automated services to the creator's organisation by default.
         const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
         if (!session.isMember("user") || !session["user"].isMember("organisation") || !session["user"]["organisation"].isString()) {
-            co_return createErrorResponse("Organisation not found in session", k403Forbidden);
+            co_return createErrorResponse(AdminApiError::InvalidSession);
         }
         const std::string org = session["user"]["organisation"].asString();
         if (org.empty()) {
-            co_return createErrorResponse("Organisation not found in session", k403Forbidden);
+            co_return createErrorResponse(AdminApiError::InvalidSession);
         }
 
         auto db_res = sgrn::datastore::core::getDbClient();
@@ -176,7 +177,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleRegisterAutomatedService(HttpReques
             "SELECT * FROM core.create_automated_service($1, $2::jsonb, $3, $4, $5)", name, meta_str, org, storage_limit, domain);
 
         if (res.empty())
-            co_return createErrorResponse("Failed to create automated service", k500InternalServerError);
+            co_return createErrorResponse(AdminApiError::DbError);
 
         Json::Value resp;
         resp["success"] = true;
@@ -191,17 +192,17 @@ Task<HttpResponsePtr> AdminApiHandler::handleRegisterAutomatedService(HttpReques
         co_return createJsonResponse(resp, k201Created);
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Automated service registration DB error: {}", e.base().what());
-        co_return createErrorResponse("Registration failed: Database error", k500InternalServerError);
+        co_return createErrorResponse(AdminApiError::DbError);
     } catch (const std::exception& e) {
         ERROR_LOG("Automated service registration error: {}", e.what());
-        co_return createErrorResponse("Registration failed", k500InternalServerError);
+        co_return createErrorResponse(AdminApiError::DbError);
     }
 }
 
 Task<HttpResponsePtr> AdminApiHandler::handleListAutomatedServices(HttpRequestPtr tsp_req) {
     const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
     if (!session.isMember("user") || !session["user"].isMember("organisation") || !session["user"]["organisation"].isString()) {
-        co_return createErrorResponse("Organisation not found in session", k403Forbidden);
+        co_return createErrorResponse(AdminApiError::InvalidSession);
     }
     const std::string org = session["user"]["organisation"].asString();
 
@@ -243,7 +244,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleListAutomatedServices(HttpRequestPt
         co_return createJsonResponse(automated_services, k200OK);
     } catch (const std::exception& e) {
         ERROR_LOG("Failed to list automated services: {}", e.what());
-        co_return createErrorResponse("Failed to list automated services", k500InternalServerError);
+        co_return createErrorResponse(AdminApiError::DbError);
     }
 }
 
@@ -251,10 +252,15 @@ Task<HttpResponsePtr> AdminApiHandler::handleUpdateAutomatedServiceMetadata(Http
     const std::string id_str = tsp_req->getParameter("id");
     auto json = tsp_req->getJsonObject();
     if (id_str.empty() || !json || !json->isMember("metadata")) {
-        co_return createErrorResponse("id and metadata are required", k400BadRequest);
+        co_return createErrorResponse(AdminApiError::InvalidPayload);
     }
 
-    const int32_t automated_service_id = std::stoi(id_str);
+    int32_t automated_service_id;
+    try {
+        automated_service_id = std::stoi(id_str);
+    } catch (const std::exception&) {
+        co_return createErrorResponse(AdminApiError::InvalidPayload);
+    }
     const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
     const std::string org = session["user"]["organisation"].asString();
 
@@ -274,13 +280,13 @@ Task<HttpResponsePtr> AdminApiHandler::handleUpdateAutomatedServiceMetadata(Http
             automated_service_id, org);
 
         if (res.affectedRows() == 0) {
-            co_return createErrorResponse("Automated service not found or access denied", k404NotFound);
+            co_return createErrorResponse(AdminApiError::InvalidUserId);
         }
 
         co_return createJsonResponse("Automated service metadata updated successfully", k200OK);
     } catch (const std::exception& e) {
         ERROR_LOG("Failed to update automated service metadata: {}", e.what());
-        co_return createErrorResponse("Failed to update metadata", k500InternalServerError);
+        co_return createErrorResponse(AdminApiError::DbError);
     }
 }
 
@@ -323,7 +329,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleListIotObjects(HttpRequestPtr tsp_r
         co_return createJsonResponse(objects, k200OK);
     } catch (const std::exception& e) {
         ERROR_LOG("Failed to list iot objects: {}", e.what());
-        co_return createErrorResponse("Failed to list objects", k500InternalServerError);
+        co_return createErrorResponse(AdminApiError::DbError);
     }
 }
 
@@ -331,10 +337,15 @@ Task<HttpResponsePtr> AdminApiHandler::handleUpdateIotObjectMetadata(HttpRequest
     const std::string id_str = tsp_req->getParameter("id");
     auto json = tsp_req->getJsonObject();
     if (id_str.empty() || !json || !json->isMember("metadata")) {
-        co_return createErrorResponse("id and metadata are required", k400BadRequest);
+        co_return createErrorResponse(AdminApiError::InvalidPayload);
     }
 
-    const int32_t obj_id = std::stoi(id_str);
+    int32_t obj_id;
+    try {
+        obj_id = std::stoi(id_str);
+    } catch (const std::exception&) {
+        co_return createErrorResponse(AdminApiError::InvalidPayload);
+    }
     const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
     const std::string org = session["user"]["organisation"].asString();
 
@@ -355,30 +366,30 @@ Task<HttpResponsePtr> AdminApiHandler::handleUpdateIotObjectMetadata(HttpRequest
             meta_str, obj_id, org);
 
         if (res.affectedRows() == 0) {
-            co_return createErrorResponse("IoT object not found or access denied", k404NotFound);
+            co_return createErrorResponse(AdminApiError::InvalidUserId);
         }
 
         co_return createJsonResponse("IoT object metadata updated successfully", k200OK);
     } catch (const std::exception& e) {
         ERROR_LOG("Failed to update iot object metadata: {}", e.what());
-        co_return createErrorResponse("Failed to update metadata", k500InternalServerError);
+        co_return createErrorResponse(AdminApiError::DbError);
     }
 }
 
 Task<HttpResponsePtr> AdminApiHandler::handleRotateAutomatedServiceToken(HttpRequestPtr tsp_req) {
     auto json = tsp_req->getJsonObject();
     if (!json || !json->isMember("automated_service_id")) {
-        co_return createErrorResponse("automated_service_id is required", k400BadRequest);
+        co_return createErrorResponse(AdminApiError::InvalidPayload);
     }
 
     const int32_t automated_service_id = json->get("automated_service_id", 0).asInt();
     if (automated_service_id <= 0) {
-        co_return createErrorResponse("Invalid automated_service_id", k400BadRequest);
+        co_return createErrorResponse(AdminApiError::InvalidUserId);
     }
 
     const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
     if (!session.isMember("user") || !session["user"].isMember("organisation") || !session["user"]["organisation"].isString()) {
-        co_return createErrorResponse("Organisation not found in session", k403Forbidden);
+        co_return createErrorResponse(AdminApiError::InvalidSession);
     }
     const std::string org = session["user"]["organisation"].asString();
 
@@ -391,16 +402,16 @@ Task<HttpResponsePtr> AdminApiHandler::handleRotateAutomatedServiceToken(HttpReq
     try {
         auto owner_res = co_await db->execSqlCoro("SELECT organisation FROM core.automated_services WHERE id = $1", automated_service_id);
         if (owner_res.empty()) {
-            co_return createErrorResponse("Automated service not found", k404NotFound);
+            co_return createErrorResponse(AdminApiError::InvalidUserId);
         }
         const std::string owner_org = owner_res[0]["organisation"].as<std::string>();
         if (owner_org != org) {
-            co_return createErrorResponse("Automated service does not belong to your organisation", k403Forbidden);
+            co_return createErrorResponse(AdminApiError::InvalidUserId);
         }
 
         auto rotation = co_await db->execSqlCoro("SELECT * FROM core.rotate_automated_service_credentials($1, true)", automated_service_id);
         if (rotation.empty()) {
-            co_return createErrorResponse("Failed to rotate automated service credentials", k500InternalServerError);
+            co_return createErrorResponse(AdminApiError::DbError);
         }
 
         const auto& updated = rotation[0];
@@ -423,7 +434,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleRotateAutomatedServiceToken(HttpReq
         co_return createJsonResponse(resp, k200OK);
     } catch (const std::exception& e) {
         ERROR_LOG("Failed to rotate credentials: {}", e.what());
-        co_return createErrorResponse("Failed to rotate credentials", k500InternalServerError);
+        co_return createErrorResponse(AdminApiError::DbError);
     }
 }
 

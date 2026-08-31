@@ -16,6 +16,12 @@
 # Consume with:
 #   find_package(sgrn CONFIG REQUIRED)
 #
+# Install targets (split for fast iteration):
+#   install-prefix       — headers + sgrn-config.cmake only (rarely changes)
+#   install-binaries     — our libs + executables (changes every .cpp edit)
+#   install-deps-binaries— third-party system libraries (stable, rarely changes)
+#   install              — everything (built-in CMake target, for CI/final builds)
+#
 
 include_guard(GLOBAL)
 
@@ -61,6 +67,7 @@ function(sgrn_stage_library target)
         RUNTIME  DESTINATION ${SGRN_LOCAL_PREFIX}/bin
         LIBRARY  DESTINATION ${SGRN_LOCAL_PREFIX}/lib
         ARCHIVE  DESTINATION ${SGRN_LOCAL_PREFIX}/lib
+        COMPONENT sgrn-binaries
     )
 endfunction()
 
@@ -68,6 +75,7 @@ endfunction()
 # Headers go to SGRN_SHARED_PREFIX/include/ — shared across all platforms.
 function(sgrn_stage_headers source_dir dest_subdir)
     install(DIRECTORY "${source_dir}/"
+        COMPONENT sgrn-prefix
         DESTINATION "${SGRN_SHARED_PREFIX}/include/${dest_subdir}"
         FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
     )
@@ -146,6 +154,7 @@ macro(sgrn_stage_to_prefix)
         if(TARGET ${_exe})
             install(TARGETS ${_exe}
                 RUNTIME DESTINATION ${SGRN_LOCAL_PREFIX}/bin
+                COMPONENT sgrn-binaries
             )
         endif()
     endforeach()
@@ -185,9 +194,9 @@ macro(sgrn_stage_to_prefix)
         )
         foreach(_lib_pattern IN LISTS _SGRN_HARVEST_PATTERNS)
             file(GLOB _matches "${SGRN_CONDA_PREFIX}/lib/${_lib_pattern}")
-            foreach(_m IN LISTS _matches)
-                install(FILES "${_m}" DESTINATION ${SGRN_LOCAL_PREFIX}/lib)
-            endforeach()
+foreach(_m IN LISTS _matches)
+            install(FILES "${_m}" DESTINATION ${SGRN_LOCAL_PREFIX}/lib COMPONENT sgrn-deps-binaries)
+        endforeach()
         endforeach()
     endif()
 
@@ -480,6 +489,25 @@ set(sgrn_sclc_EXECUTABLE      "${_bin}/sclc")
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/sgrn-config.cmake" "${SGRN_CONFIG_CONTENT}")
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/sgrn-config.cmake"
         DESTINATION "${_sgrn_cmake_dir}"
-        COMPONENT sgrn
+        COMPONENT sgrn-prefix
+    )
+
+    # ── 10. Custom install targets ─────────────────────────────────────────────
+    # install-prefix:       headers + cmake config only (rarely changes)
+    # install-binaries:     our libs + executables (fast dev loop)
+    # install-deps-binaries: third-party system libraries (stable, rarely changes)
+    add_custom_target(install-prefix
+        COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --component sgrn-prefix
+        COMMENT "Installing SGRN headers and cmake config to prefix..."
+    )
+
+    add_custom_target(install-binaries
+        COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --component sgrn-binaries
+        COMMENT "Installing SGRN binaries and libraries..."
+    )
+
+    add_custom_target(install-deps-binaries
+        COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --component sgrn-deps-binaries
+        COMMENT "Installing third-party system libraries..."
     )
 endmacro()

@@ -39,7 +39,7 @@ inline BackendResult<drogon::orm::DbClientPtr> getDbClient() {
     if (!db) {
         DB_ERROR_LOG("Database client is not initialized or unavailable");
         return BackendResult<drogon::orm::DbClientPtr>::Error(
-            BackendError{::sgrn::datastore::scope_database, "Database client is not initialized or unavailable"});
+            BackendError{"Database", "Database client is not initialized or unavailable"});
     }
     return db;
 }
@@ -51,8 +51,7 @@ inline BackendResult<drogon::nosql::RedisClientPtr> getRedisClient() {
     auto redis = drogon::app().getRedisClient();
     if (!redis) {
         REDIS_ERROR_LOG("Redis client is not initialized or unavailable");
-        return BackendResult<drogon::nosql::RedisClientPtr>::Error(
-            BackendError{::sgrn::datastore::scope_redis, "Redis client is not initialized or unavailable"});
+        return BackendResult<drogon::nosql::RedisClientPtr>::Error(BackendError{"Redis", "Redis client is not initialized or unavailable"});
     }
     return redis;
 }
@@ -63,8 +62,7 @@ inline BackendResult<drogon::nosql::RedisClientPtr> getRedisClient() {
 inline BackendResult<plugins::RedisMiddleware*> getRedisMiddleware() {
     auto* p_plugin = drogon::app().getPlugin<plugins::RedisMiddleware>();
     if (!p_plugin) {
-        return BackendResult<plugins::RedisMiddleware*>::Error(
-            BackendError{::sgrn::datastore::scope_runtime, "RedisMiddleware plugin is not initialized"});
+        return BackendResult<plugins::RedisMiddleware*>::Error(BackendError{"Runtime", "RedisMiddleware plugin is not initialized"});
     }
     return p_plugin;
 }
@@ -76,7 +74,7 @@ template <typename T>
 inline BackendResult<T*> getPlugin() {
     auto* p_plugin = drogon::app().getPlugin<T>();
     if (!p_plugin) {
-        return BackendResult<T*>::Error(BackendError{::sgrn::datastore::scope_runtime, "Required system plugin is not initialized"});
+        return BackendResult<T*>::Error(BackendError{"Runtime", "Required system plugin is not initialized"});
     }
     return p_plugin;
 }

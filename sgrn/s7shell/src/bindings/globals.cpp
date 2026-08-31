@@ -43,8 +43,7 @@ Result<void, std::string> registerS7Globals(asIScriptEngine* tp_engine) {
     SGRN_AS_REG(tp_engine->RegisterGlobalFunction("DTL@ dtl(const string &in)", asFUNCTION(ScriptDtl_fromString), asCALL_CDECL));
 
     // Bug 8 fix: register DTL factory so `DTL myVar;` initializes to the current clock time.
-    SGRN_AS_REG(tp_engine->RegisterObjectBehaviour(
-        "DTL", asBEHAVE_FACTORY, "DTL@ f()", asFUNCTION(ScriptDtl_factory), asCALL_CDECL));
+    SGRN_AS_REG(tp_engine->RegisterObjectBehaviour("DTL", asBEHAVE_FACTORY, "DTL@ f()", asFUNCTION(ScriptDtl_factory), asCALL_CDECL));
 
     SGRN_AS_REG(tp_engine->RegisterObjectMethod("DTL", "string toString() const", asMETHOD(ScriptDtl, toString), asCALL_THISCALL));
 

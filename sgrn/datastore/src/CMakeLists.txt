@@ -2,6 +2,8 @@
 # SGRN Backend Unified Consolidation
 # ==============================================================================
 
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
 set(BACKEND_SOURCES "")
 set(ORM_SOURCES "")
 
@@ -200,7 +202,7 @@ add_custom_command(
 add_custom_command(
     OUTPUT "${DASHBOARD_GEN_DIR}/web_assets.hpp"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DASHBOARD_GEN_DIR}"
-    COMMAND python3
+    COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/scripts/generate_web_headers.py"
             "${DASHBOARD_BUILD_DIR}"
             "${DASHBOARD_GEN_DIR}"
@@ -226,7 +228,7 @@ file(GLOB_RECURSE SQL_DEPS "${SQL_SRC_DIR}/*.sql")
 add_custom_command(
     OUTPUT "${SQL_GEN_DIR}/sql_assets.hpp"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${SQL_GEN_DIR}"
-    COMMAND python3
+    COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/scripts/generate_embedded_assets.py"
             "${SQL_SRC_DIR}"
             "${SQL_GEN_DIR}"
@@ -254,7 +256,7 @@ file(GLOB_RECURSE CONFIG_DEPS "${CONFIG_SRC_DIR}/*")
 add_custom_command(
     OUTPUT "${CONFIG_GEN_DIR}/config_assets.hpp"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CONFIG_GEN_DIR}"
-    COMMAND python3
+    COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/scripts/generate_embedded_assets.py"
             "${CONFIG_SRC_DIR}"
             "${CONFIG_GEN_DIR}"

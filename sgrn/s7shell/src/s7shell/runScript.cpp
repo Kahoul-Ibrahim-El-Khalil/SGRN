@@ -115,9 +115,8 @@ struct SchemaLoadResult {
 // it onto a directory and lexically-normalizing it is meaningless (and
 // potentially corrupting) for literal SCL source text.
 // ─────────────────────────────────────────────────────────────────────────────
-static Result<SchemaLoadResult, SclError> loadScannedSchema(
-    const std::string& t_method, const std::string& t_raw_arg, const fs::path& t_script_dir,
-    const std::set<std::string>& t_loaded_schemas) {
+static Result<SchemaLoadResult, SclError> loadScannedSchema(const std::string& t_method, const std::string& t_raw_arg,
+    const fs::path& t_script_dir, const std::set<std::string>& t_loaded_schemas) {
     const auto resolved = resolveAgainstBase(t_script_dir, t_raw_arg);
     std::string schema_key = resolved; // Use resolved path as deduplication key
 
@@ -154,12 +153,12 @@ static Result<SchemaLoadResult, SclError> loadScannedSchema(
     }
     // For inline schemas, use a hash of the content as key
     schema_key = "inline:" + std::to_string(std::hash<std::string>{}(t_raw_arg));
-    
+
     // Check again for inline schemas (in case same inline schema loaded twice)
     if (t_loaded_schemas.count(schema_key)) {
         return SclError::DuplicateDefinition;
     }
-    
+
     return SchemaLoadResult{std::move(store), schema_key};
 }
 

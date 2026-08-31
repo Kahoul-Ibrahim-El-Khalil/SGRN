@@ -1,6 +1,6 @@
+#include <sgrn/s7shell/connection/S7Connection.hpp>
 #include <sgrn/s7shell/script/ScriptDataBlock.hpp>
 #include <sgrn/s7shell/script/ScriptFieldProxy.hpp>
-#include <sgrn/s7shell/connection/S7Connection.hpp>
 
 #include <fmt/format.h>
 

@@ -3,6 +3,23 @@
 #include <drogon/HttpTypes.h>
 #include <string>
 
+// =========================================================
+// TAXONOMY DECISION: Option (a) — Two intentionally separate layers
+// =========================================================
+// ApiErrors.hpp enums represent request/business-logic-level failures
+// (validation, "already exists", "not found by business rule") and
+// BackendErrorKind represents resource/infra-level failures (DB, Redis,
+// S3, Postgrest). They are two separate layers that are never merged.
+// Both must always produce the SAME wire shape:
+//   { error, scope, code?, metadata? }
+// The createErrorResponse(EnumT) bridge maps each ApiErrors variant to
+// an HttpError {code_name, message, status}, and the scope field is
+// derived from the code_name prefix (e.g. "ADMIN_API_*" → "AdminApi").
+// BackendErrorKind::toScopeString() provides the scope for the infra
+// path. Both paths converge on the same JSON wire format via
+// ResultJson::toJson() / createErrorResponse().
+// =========================================================
+
 namespace sgrn
 {
 
@@ -40,7 +57,7 @@ inline HttpError makeHttpError(GenericApiError e) {
 // =========================================================
 // Auth API Errors
 // =========================================================
-enum class AuthApiError { InvalidCredentials, TokenExpired, MissingSessionToken, SessionExpired, SessionInvalid };
+enum class AuthApiError { InvalidCredentials, TokenExpired, MissingSessionToken, SessionExpired, SessionInvalid, InvalidPayload };
 
 inline HttpError makeHttpError(AuthApiError e) {
     switch (e) {
@@ -54,6 +71,8 @@ inline HttpError makeHttpError(AuthApiError e) {
             return {"AUTH_API_SESSION_EXPIRED", "Authentication failed: Session expired.", drogon::k401Unauthorized};
         case AuthApiError::SessionInvalid:
             return {"AUTH_API_SESSION_INVALID", "Authentication failed: Session invalid.", drogon::k401Unauthorized};
+        case AuthApiError::InvalidPayload:
+            return {"AUTH_API_INVALID_PAYLOAD", "Authentication API error: Invalid request payload.", drogon::k400BadRequest};
     }
     return {"AUTH_API_UNKNOWN", "Authentication failed.", drogon::k500InternalServerError};
 }
@@ -65,6 +84,7 @@ enum class AdminApiError {
     UserAlreadyExists,
     InvalidUserId,
     InvalidPayload,
+    InvalidSession,
     FailedToOpenEndpointsFile,
     EndpointsFileEmpty,
     DbUnavailable,
@@ -79,6 +99,8 @@ inline HttpError makeHttpError(AdminApiError e) {
             return {"ADMIN_API_INVALID_USER_ID", "Admin API error: Invalid user ID.", drogon::k400BadRequest};
         case AdminApiError::InvalidPayload:
             return {"ADMIN_API_INVALID_PAYLOAD", "Admin API error: Invalid request payload.", drogon::k400BadRequest};
+        case AdminApiError::InvalidSession:
+            return {"ADMIN_API_INVALID_SESSION", "Admin API error: Invalid or corrupted session.", drogon::k401Unauthorized};
         case AdminApiError::FailedToOpenEndpointsFile:
             return {"ADMIN_API_FAILED_TO_OPEN_ENDPOINTS_FILE", "Admin API error: Failed to open endpoints configuration file.",
                 drogon::k500InternalServerError};
@@ -88,8 +110,7 @@ inline HttpError makeHttpError(AdminApiError e) {
         case AdminApiError::DbUnavailable:
             return {"ADMIN_API_DB_UNAVAILABLE", "Admin API error: Database unavailable.", drogon::k503ServiceUnavailable};
         case AdminApiError::DbError:
-            return {
-                "ADMIN_API_DB_ERROR", "Admin API error: Database operation failed.", drogon::k409Conflict}; // Conflict used in old switch
+            return {"ADMIN_API_DB_ERROR", "Admin API error: Database operation failed.", drogon::k500InternalServerError};
     }
     return {"ADMIN_API_UNKNOWN", "Admin API error.", drogon::k500InternalServerError};
 }
@@ -97,7 +118,7 @@ inline HttpError makeHttpError(AdminApiError e) {
 // =========================================================
 // Query API Errors
 // =========================================================
-enum class QueryApiError { InvalidOrgId, DbUnavailable, DbError, InvalidUserId, UserNotFound };
+enum class QueryApiError { InvalidOrgId, DbUnavailable, DbError, InvalidUserId, UserNotFound, InvalidPayload };
 
 inline HttpError makeHttpError(QueryApiError e) {
     switch (e) {
@@ -111,6 +132,8 @@ inline HttpError makeHttpError(QueryApiError e) {
             return {"QUERY_API_INVALID_USER_ID", "Query API error: Invalid or missing user ID.", drogon::k400BadRequest};
         case QueryApiError::UserNotFound:
             return {"QUERY_API_USER_NOT_FOUND", "Query API error: User not found.", drogon::k404NotFound};
+        case QueryApiError::InvalidPayload:
+            return {"QUERY_API_INVALID_PAYLOAD", "Query API error: Invalid request payload.", drogon::k400BadRequest};
     }
     return {"QUERY_API_UNKNOWN", "Query API error.", drogon::k500InternalServerError};
 }

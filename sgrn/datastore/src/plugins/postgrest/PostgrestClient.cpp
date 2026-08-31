@@ -1,4 +1,5 @@
 #include <sgrn/datastore/plugins/postgrest/PostgrestClient.hpp>
+#include <sgrn/datastore/plugins/postgrest/PostgrestError.hpp>
 
 #include <drogon/HttpTypes.h>
 #include <drogon/drogon.h>
@@ -129,7 +130,8 @@ Task<HttpResponsePtr> PostgrestClient::sendRequest(HttpRequestPtr tsp_req) {
 
         if (!client_) {
             co_return sgrn::createErrorResponse(
-                {sgrn::datastore::scope_postgrest, "Postgrest client not initialized"}, drogon::k500InternalServerError);
+                ::sgrn::datastore::plugins::toBackendError(::sgrn::datastore::plugins::PostgrestError::NotInitialized),
+                drogon::k500InternalServerError);
         }
 
         // Send request to PostgREST and await response
@@ -144,7 +146,9 @@ Task<HttpResponsePtr> PostgrestClient::sendRequest(HttpRequestPtr tsp_req) {
     } catch (const std::exception& e) {
         ERROR_LOG("Error forwarding request to PostgREST: {}", e.what());
         co_return sgrn::createErrorResponse(
-            {sgrn::datastore::scope_postgrest, "Failed to communicate with the database rest service"}, drogon::k503ServiceUnavailable);
+            ::sgrn::datastore::plugins::toBackendError(
+                ::sgrn::datastore::plugins::PostgrestError::RequestFailed, "Failed to communicate with the database rest service"),
+            drogon::k503ServiceUnavailable);
     }
 }
 } // namespace sgrn::datastore::plugins

@@ -1,7 +1,9 @@
 #include <drogon/drogon.h>
 #include <fmt/core.h>
 #include <sgrn/datastore/BackendError.hpp>
+#include <sgrn/datastore/DbError.hpp>
 #include <sgrn/datastore/plugins/postgrest/PostgrestClient.hpp>
+#include <sgrn/datastore/plugins/redis/RedisError.hpp>
 #include <sgrn/datastore/plugins/redis/RedisMiddleware.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
@@ -25,11 +27,10 @@
 using namespace drogon;
 using namespace drogon::orm;
 using ::sgrn::datastore::BackendError;
+using ::sgrn::datastore::BackendErrorKind;
+using ::sgrn::datastore::fromDrogonException;
 using ::sgrn::datastore::makeBackendError;
-using ::sgrn::datastore::scope_authentication;
-using ::sgrn::datastore::scope_database;
-using ::sgrn::datastore::scope_redis;
-using ::sgrn::datastore::scope_runtime;
+using ::sgrn::datastore::plugins::RedisError;
 
 namespace sgrn::datastore::handlers::auth
 {
@@ -45,7 +46,7 @@ Task<HttpResponsePtr> performSignInProcess(HttpRequestPtr tsp_http_req, std::str
     const std::string t_secret = app().getCustomConfig()["jwt_secret"].asString();
     if (t_secret.empty()) {
         co_return sgrn::createJsonResponse(
-            makeBackendError(scope_runtime, "Auth system initialization failed (Secret missing)").setSubCode("Auth.Config"));
+            makeBackendError(BackendErrorKind::Runtime, "Auth system initialization failed (Secret missing)").setSubCode("Auth.Config"));
     }
     const std::string peer_ip = tsp_http_req->getPeerAddr().toIp();
 
@@ -59,16 +60,16 @@ Task<HttpResponsePtr> performSignInProcess(HttpRequestPtr tsp_http_req, std::str
             t_email, t_password);
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Signin Database Error: {}", e.base().what());
-        co_return sgrn::createJsonResponse(
-            makeBackendError(scope_database, "Database query failed: {}", e.base().what()).setSubCode("Auth.Database"));
+        co_return sgrn::createJsonResponse(toBackendError(fromDrogonException(e), e.base().what()).setSubCode("Auth.Database"));
     } catch (const std::exception& e) {
         ERROR_LOG("Signin Error: {}", e.what());
-        co_return sgrn::createJsonResponse(makeBackendError(scope_runtime, "Internal Error: {}", e.what()).setSubCode("Auth.Internal"));
+        co_return sgrn::createJsonResponse(
+            makeBackendError(BackendErrorKind::Runtime, std::string("Internal Error: ") + e.what()).setSubCode("Auth.Internal"));
     }
 
     if (!result_opt || result_opt->empty()) {
         co_return sgrn::createJsonResponse(
-            makeBackendError(scope_authentication, "Invalid email or password").setSubCode("Auth.Credentials").setStatus(k401Unauthorized));
+            BackendError(BackendErrorKind::Auth, "Invalid email or password").setSubCode("Auth.Credentials"));
     }
 
     const auto& row = (*result_opt)[0];
@@ -120,8 +121,8 @@ Task<HttpResponsePtr> performSignInProcess(HttpRequestPtr tsp_http_req, std::str
         p_redis = redis_res.value();
     } catch (const std::exception& e) {
         ERROR_LOG("Signin Mapping Error: {}", e.what());
-        co_return sgrn::createJsonResponse(
-            makeBackendError(scope_runtime, "Failed to map user data: {}", e.what()).setSubCode("Auth.DataMapping"));
+        co_return sgrn::createJsonResponse(makeBackendError(BackendErrorKind::Runtime, std::string("Failed to map user data: ") + e.what())
+                .setSubCode("Auth.DataMapping"));
     }
 
     try {
@@ -146,7 +147,8 @@ Task<HttpResponsePtr> performSignInProcess(HttpRequestPtr tsp_http_req, std::str
                 "INSERT INTO core.sessions (user_id, token, ip) VALUES ($1, $2::uuid, $3::inet) RETURNING id", user_id, t_token, peer_ip);
             if (session_result.empty()) {
                 co_return sgrn::createJsonResponse(
-                    makeBackendError(scope_database, "Sign-in failed: session could not be created").setSubCode("Auth.Database"));
+                    makeBackendError(BackendErrorKind::Database, "Sign-in failed: session could not be created")
+                        .setSubCode("Auth.Database"));
             }
             session_id = session_result[0]["id"].as<int64_t>();
         }
@@ -163,7 +165,7 @@ Task<HttpResponsePtr> performSignInProcess(HttpRequestPtr tsp_http_req, std::str
         auto store_res = co_await p_redis->storeSession(t_token, claims, 3600);
         if (store_res.hasError()) {
             co_return sgrn::createJsonResponse(
-                makeBackendError(store_res.error().scope_, "Redis store session error: " + store_res.error().message_)
+                toBackendError(RedisError::CommandFailed, "Redis store session error: " + store_res.error().message_)
                     .setSubCode("Auth.Redis"));
         }
         auto cache_res = co_await p_redis->storeUserCache(t_email, t_token, 3600);
@@ -172,11 +174,11 @@ Task<HttpResponsePtr> performSignInProcess(HttpRequestPtr tsp_http_req, std::str
         }
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Signin Session Database Error: {}", e.base().what());
-        co_return sgrn::createJsonResponse(
-            makeBackendError(scope_database, "Session database error: {}", e.base().what()).setSubCode("Auth.Database"));
+        co_return sgrn::createJsonResponse(toBackendError(fromDrogonException(e), e.base().what()).setSubCode("Auth.Database"));
     } catch (const std::exception& e) {
         ERROR_LOG("Signin Redis/Session Error: {}", e.what());
-        co_return sgrn::createJsonResponse(makeBackendError(scope_redis, "Redis/Session error: {}", e.what()).setSubCode("Auth.Redis"));
+        co_return sgrn::createJsonResponse(
+            toBackendError(RedisError::CommandFailed, std::string("Redis/Session error: ") + e.what()).setSubCode("Auth.Redis"));
     }
 
     // 6. Construct response
@@ -205,19 +207,18 @@ Task<HttpResponsePtr> updatePassword(
             t_email, t_old_password);
 
         if (result.empty()) {
-            co_return sgrn::createJsonResponse(
-                makeBackendError(scope_authentication, "Invalid old password").setSubCode("Auth.Credentials").setStatus(k401Unauthorized));
+            co_return sgrn::createJsonResponse(BackendError(BackendErrorKind::Auth, "Invalid old password").setSubCode("Auth.Credentials"));
         }
 
         user_id = result[0]["id"].as<int32_t>();
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Update Password DB Error: {}", e.base().what());
-        co_return sgrn::createJsonResponse(
-            makeBackendError(scope_database, "Database error verifying password: {}", e.base().what()).setSubCode("Auth.Database"));
+        co_return sgrn::createJsonResponse(toBackendError(fromDrogonException(e), e.base().what()).setSubCode("Auth.Database"));
     } catch (const std::exception& e) {
         ERROR_LOG("Update Password Mapping Error: {}", e.what());
         co_return sgrn::createJsonResponse(
-            makeBackendError(scope_runtime, "Mapping error verifying password: {}", e.what()).setSubCode("Auth.DataMapping"));
+            makeBackendError(BackendErrorKind::Runtime, std::string("Mapping error verifying password: ") + e.what())
+                .setSubCode("Auth.DataMapping"));
     }
 
     std::optional<drogon::orm::Result> terminated;
@@ -237,12 +238,12 @@ Task<HttpResponsePtr> updatePassword(
             user_id);
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Update Password Session DB Error: {}", e.base().what());
-        co_return sgrn::createJsonResponse(
-            makeBackendError(scope_database, "Database error updating password/sessions: {}", e.base().what()).setSubCode("Auth.Database"));
+        co_return sgrn::createJsonResponse(toBackendError(fromDrogonException(e), e.base().what()).setSubCode("Auth.Database"));
     } catch (const std::exception& e) {
         ERROR_LOG("Update Password Session Error: {}", e.what());
         co_return sgrn::createJsonResponse(
-            makeBackendError(scope_runtime, "Internal error updating password/sessions: {}", e.what()).setSubCode("Auth.Internal"));
+            makeBackendError(BackendErrorKind::Runtime, std::string("Internal error updating password/sessions: ") + e.what())
+                .setSubCode("Auth.Internal"));
     }
 
     try {
@@ -281,9 +282,8 @@ Task<HttpResponsePtr> performAutomatedServiceSignInProcess(HttpRequestPtr tsp_ht
         //    Postgres will throw if it's not a valid UUID string.
         auto result = co_await db_client->execSqlCoro("SELECT * FROM core.authenticate_automated_service($1::uuid, $2)", t_token, t_secret);
         if (result.empty()) {
-            co_return sgrn::createJsonResponse(makeBackendError(scope_authentication, "Invalid token or secret")
-                    .setSubCode("Auth.Credentials")
-                    .setStatus(k401Unauthorized));
+            co_return sgrn::createJsonResponse(
+                BackendError(BackendErrorKind::Auth, "Invalid token or secret").setSubCode("Auth.Credentials"));
         }
 
         const auto& row = result[0];
@@ -362,7 +362,7 @@ Task<HttpResponsePtr> performAutomatedServiceSignInProcess(HttpRequestPtr tsp_ht
         auto store_res = co_await p_redis->storeSession(session_token, claims, 3600);
         if (store_res.hasError()) {
             co_return sgrn::createJsonResponse(
-                makeBackendError(store_res.error().scope_, "Redis store session error: " + store_res.error().message_)
+                toBackendError(RedisError::CommandFailed, "Redis store session error: " + store_res.error().message_)
                     .setSubCode("Auth.Redis"));
         }
         // Evict old sessions from Redis
@@ -388,7 +388,7 @@ Task<HttpResponsePtr> performAutomatedServiceSignInProcess(HttpRequestPtr tsp_ht
     } catch (const std::exception& e) {
         ERROR_LOG("Automated Service Signin Error: {}", e.what());
         co_return sgrn::createJsonResponse(
-            makeBackendError(scope_runtime, "Internal Server Error: {}", e.what()).setSubCode("Auth.Internal"));
+            makeBackendError(BackendErrorKind::Runtime, std::string("Internal Server Error: ") + e.what()).setSubCode("Auth.Internal"));
     }
 }
 } // namespace sgrn::datastore::handlers::auth

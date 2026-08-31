@@ -28,9 +28,10 @@ HttpAdapter::~HttpAdapter() {
 
 sgrn::Result<void> HttpAdapter::start(const std::string& t_ip, uint16_t t_port, const PlcSchemaStore& t_registry, PlcMemory& t_memory,
     std::shared_ptr<sgrn::gateway::database::GatewayDatabase> tsp_db, std::shared_ptr<::sgrn::gateway::SecurityManager> tsp_security,
-    const ::sgrn::scl::ModbusVirtualMap* tp_modbus_map) {
+    const ::sgrn::scl::ModbusVirtualMap* tp_modbus_map, uint16_t t_ws_port) {
     security_manager_ = std::move(tsp_security);
     modbus_map_ = tp_modbus_map;
+    ws_port_ = t_ws_port;
 
     server_->set_pre_routing_handler([](const httplib::Request& t_req, httplib::Response& res) {
         // HIGH-6: Reflect Origin only if it matches the allowed list.

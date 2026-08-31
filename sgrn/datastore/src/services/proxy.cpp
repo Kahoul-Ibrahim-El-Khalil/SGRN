@@ -13,19 +13,18 @@ using namespace sgrn::datastore;
 
 Task<HttpResponsePtr> PostgrestProxyService::proxyToPostgrest(HttpRequestPtr tsp_req, const std::string& t_table_name) {
     if (!tsp_req->attributes()->find("session_json")) {
-        co_return sgrn::createErrorResponse({scope_authentication, "Unauthorized: Session missing"}, k401Unauthorized);
+        co_return sgrn::createErrorResponse({"Authentication", "Unauthorized: Session missing"}, k401Unauthorized);
     }
     const Json::Value& t_session = tsp_req->attributes()->get<Json::Value>("session_json");
 
     if (injectIsolationFilters(tsp_req, t_session) == false) {
-        co_return sgrn::createErrorResponse(
-            {scope_authentication, "Unauthorized: Organization identity not found in session"}, k403Forbidden);
+        co_return sgrn::createErrorResponse({"Authentication", "Unauthorized: Organization identity not found in session"}, k403Forbidden);
     }
 
     auto* p_plugin = drogon::app().getPlugin<sgrn::datastore::plugins::PostgrestClient>();
     if (p_plugin == nullptr) {
         co_return sgrn::createErrorResponse(
-            {scope_postgrest, "Internal Proxy Error: PostgrestClient plugin not found"}, k500InternalServerError);
+            {"Postgrest", "Internal Proxy Error: PostgrestClient plugin not found"}, k500InternalServerError);
     }
 
     // Set the path to the PostgREST table

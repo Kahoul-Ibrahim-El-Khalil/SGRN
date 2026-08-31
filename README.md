@@ -81,7 +81,15 @@ To build using a preset:
 micromamba activate SGRN
 
 cmake --preset <preset-name>
+
+# Install everything (headers + binaries + deps):
 cmake --build .build/{preset} --target install
+
+# Install third-party system libraries (rarely needed, once per machine):
+cmake --build .build/{preset} --target install-deps-binaries
+
+# Or install incrementally — only our binaries/libs, skip headers and deps (fast):
+cmake --build .build/{preset} --target install-binaries
 ```
 
 > **Environment requirement.** Activating `SGRN` first is mandatory — not optional.

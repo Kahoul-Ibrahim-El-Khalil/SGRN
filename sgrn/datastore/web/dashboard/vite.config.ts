@@ -1,6 +1,7 @@
 import react from "@vitejs/plugin-react";
 import path from "path";
 import { defineConfig } from "vite";
+import { viteSingleFile } from "vite-plugin-singlefile";
 
 // ===========================
 // ⚙️ Vite Configuration
@@ -12,6 +13,7 @@ export default defineConfig({
                 plugins: [["babel-plugin-react-compiler"]],
             },
         }),
+        viteSingleFile(),
     ],
     resolve: {
         alias: {

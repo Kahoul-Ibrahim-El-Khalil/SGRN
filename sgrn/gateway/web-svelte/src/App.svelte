@@ -7,10 +7,16 @@
   import DocsLayout from "./pages/DocsLayout.svelte";
   import Header from "./components/Header.svelte";
   import { theme } from "./lib/theme";
-  import { packets, rate, statusText, statusDotClass, debugLog, liveTelemetryValues, setWorkerRef } from "./lib/telemetryStore";
+  import {
+    packets,
+    rate,
+    statusText,
+    statusDotClass,
+    debugLog,
+    liveTelemetryValues,
+    setWorkerRef,
+  } from "./lib/telemetryStore";
   import { fetchRegistryHeaders, ws } from "@sgrn/gateway";
-  import TelemetryWorker from "./lib/worker?worker";
-
   theme.subscribe(() => {});
 
   const routes = {
@@ -18,7 +24,7 @@
     "/projections": Projections,
     "/policy": SecurityPolicy,
     "/docs": DocsLayout,
-    "/docs/:doc": DocsLayout
+    "/docs/:doc": DocsLayout,
   };
 
   let worker: Worker;
@@ -27,20 +33,20 @@
     try {
       const registry = await fetchRegistryHeaders();
 
-      worker = new TelemetryWorker();
+      worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
       setWorkerRef(worker);
-      
+
       const wsUrl = ws("/ws");
       worker.postMessage({
         command: "connect",
-        args: { url: wsUrl }
+        args: { url: wsUrl },
       });
 
       if (registry.dbs) {
-        registry.dbs.forEach(db => {
+        registry.dbs.forEach((db) => {
           worker.postMessage({
             command: "subscribe",
-            args: { path: db.db_name }
+            args: { path: db.db_name },
           });
         });
       }
@@ -59,7 +65,7 @@
             statusDotClass.set("offline");
           }
         } else if (msg.type === "debug") {
-          debugLog.update(logs => [...logs.slice(-99), msg.args]);
+          debugLog.update((logs) => [...logs.slice(-99), msg.args]);
         } else if (msg.type === "batch") {
           const now = Date.now();
           const elapsed = now - lastPacketTime;
@@ -68,14 +74,14 @@
             const hz = Math.round(1000 / elapsed);
             rate.set(hz);
           }
-          liveTelemetryValues.update(values => {
+          liveTelemetryValues.update((values) => {
             const next = { ...values };
             let count = 0;
             for (const key in msg.updates) {
               next[key] = msg.updates[key];
               count++;
             }
-            packets.update(p => p + count);
+            packets.update((p) => p + count);
             return next;
           });
         }

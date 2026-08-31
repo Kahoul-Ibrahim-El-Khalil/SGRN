@@ -382,9 +382,10 @@ public:
         if (config_.http.has_value()) {
             http_adapter_.emplace();
             auto vmap = modbus_adapter_ ? &modbus_adapter_->virtualMap() : nullptr;
-            startAdapter("HTTP Adapter", config_.http->port, [this, vmap]() {
+            uint16_t ws_port = config_.websocket.has_value() ? config_.websocket->port : 0;
+            startAdapter("HTTP Adapter", config_.http->port, [this, vmap, ws_port]() {
                 return http_adapter_->start(
-                    config_.http->ip, config_.http->port, symbolic_store_, server_, node_db_, security_manager_, vmap);
+                    config_.http->ip, config_.http->port, symbolic_store_, server_, node_db_, security_manager_, vmap, ws_port);
             });
         }
 

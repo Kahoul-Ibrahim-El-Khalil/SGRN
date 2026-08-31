@@ -45,19 +45,17 @@ static const std::string kEndpointsMessage = R"({
  * This avoids repeated decompression and repeated allocations for the asset
  * buffers, but each request still requires cpp-httplib to allocate its own
  * response body and copy the payload into it.
- *
- * Eliminating that final copy would require library support for zero-copy
- * response buffers or response body views, which cpp-httplib does not
- * currently provide.
  */
+using sgrn::utils::strings::replaceAll;
+
+// The gateway assumes it always runs behind the nginx reverse proxy (see
+// sites-enabled/sgrn.conf). index.html is served with a single, fixed
+// runtime head: <base href="/gateway/"> plus __SGRN_BASE__, so the SPA's
+// asset/API/WS requests all resolve through nginx on the page's own
+// origin. There is no unproxied variant and no WS-port injection.
 constexpr std::string_view kInjectedRuntimeForHtmlOverProxy = R"(<base href="/gateway/">
 <script>
 window.__SGRN_BASE__="/gateway";
-</script>)";
-
-[[maybe_unused]] constexpr std::string_view kInjectedRuntimeForHtmlOverLocal = R"(<base href="/gateway/">
-<script>
-window.__SGRN_BASE__= null;
 </script>)";
 
 void HttpAdapter::registerWebAssets() {
@@ -65,16 +63,11 @@ void HttpAdapter::registerWebAssets() {
 
     for (size_t i = 0; i < web::ASSET_COUNT; ++i) {
 
-        struct Cache {
-            std::string normal;
-            std::string gateway;
-        };
-
-        auto cache = std::make_shared<Cache>();
+        auto cached = std::make_shared<std::string>();
         auto flag = std::make_shared<std::once_flag>();
         auto has_error = std::make_shared<bool>(false);
 
-        auto handler = [i, cache, flag, has_error](const httplib::Request& t_req, httplib::Response& t_res) {
+        auto handler = [i, cached, flag, has_error](const httplib::Request& t_req, httplib::Response& t_res) {
             const auto& asset = web::ASSETS[i];
 
             t_res.set_header("Vary", "Accept-Encoding");
@@ -82,10 +75,9 @@ void HttpAdapter::registerWebAssets() {
             const bool client_supports_zstd =
                 t_req.has_header("Accept-Encoding") && t_req.get_header_value("Accept-Encoding").find("zstd") != std::string::npos;
 
-            bool serve_precompressed = client_supports_zstd;
-            if (asset.virtual_path == "/index.html" && t_req.has_header("X-Forwarded-Prefix")) {
-                serve_precompressed = false;
-            }
+            // index.html carries the runtime <base>/__SGRN_BASE__ placeholder
+            // that must be patched in — never serve the pre-baked zstd blob for it.
+            bool serve_precompressed = client_supports_zstd && asset.virtual_path != "/index.html";
 
             if (serve_precompressed) {
                 t_res.set_header("Content-Encoding", "zstd");
@@ -98,49 +90,25 @@ void HttpAdapter::registerWebAssets() {
 
                 if (decompressed.hasError()) {
                     SGRN_ERROR("Gateway", "Decompress failed for {}: {}", asset.virtual_path, decompressed.error());
-
                     *has_error = true;
                     return;
                 }
 
-                cache->normal = std::move(decompressed.value());
+                *cached = std::move(decompressed.value());
 
-                //
-                // Only modify index.html
-                //
-
-                cache->gateway = cache->normal;
                 if (asset.virtual_path == "/index.html") {
-                    // Inject runtime HTML (<base> tag + __SGRN_BASE__ script) into
-                    // index.html so the SPA knows its mount point behind a reverse proxy.
-                    // Uses sgrn::utils::strings::replaceAll() for the in-place substitution.
-                    sgrn::utils::strings::replaceAll(cache->gateway, "<!-- SGRN_RUNTIME_HEAD -->", kInjectedRuntimeForHtmlOverProxy);
-
-                } else {
-
-                    cache->gateway = cache->normal;
+                    replaceAll(*cached, "<!-- SGRN_RUNTIME_HEAD -->", std::string(kInjectedRuntimeForHtmlOverProxy));
                 }
             });
 
-            if (*has_error || (cache->normal.empty() && asset.original_size > 0)) {
-
+            if (*has_error || (cached->empty() && asset.original_size > 0)) {
                 t_res.status = 500;
                 t_res.set_content("Failed to decompress asset", "text/plain");
                 return;
             }
 
-            //
-            // Decide which cached version to serve.
-            //
-            if (asset.virtual_path == "/index.html" && t_req.has_header("X-Forwarded-Prefix")) {
-
-                t_res.set_content(cache->gateway.data(), cache->gateway.size(), asset.content_type.data());
-
-            } else {
-
-                t_res.set_content(cache->normal.data(), cache->normal.size(), asset.content_type.data());
-            }
-            fmt::print("Serving: {}", t_res.body);
+            t_res.set_content(cached->data(), cached->size(), asset.content_type.data());
+            SGRN_DEBUG("Gateway", "Serving asset: {} ({} bytes)", asset.virtual_path, t_res.body.size());
         };
 
         const auto& asset = web::ASSETS[i];

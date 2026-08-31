@@ -57,7 +57,7 @@ public:
      */
     sgrn::Result<void> start(const std::string& t_ip, uint16_t t_port, const PlcSchemaStore& t_registry, PlcMemory& t_memory,
         std::shared_ptr<sgrn::gateway::database::GatewayDatabase> tsp_db, std::shared_ptr<::sgrn::gateway::SecurityManager> tsp_security,
-        const ::sgrn::scl::ModbusVirtualMap* tp_modbus_map = nullptr);
+        const ::sgrn::scl::ModbusVirtualMap* tp_modbus_map = nullptr, uint16_t t_ws_port = 0);
 
     void stop();
 
@@ -102,6 +102,10 @@ private:
 
     // Modbus virtual map for REST discovery
     const ::sgrn::scl::ModbusVirtualMap* modbus_map_{nullptr};
+
+    // WebSocket port — injected into the SPA runtime so the frontend can
+    // connect to the correct port (which may differ from the HTTP port).
+    uint16_t ws_port_{0};
 };
 
 } // namespace sgrn::gateway::adapters

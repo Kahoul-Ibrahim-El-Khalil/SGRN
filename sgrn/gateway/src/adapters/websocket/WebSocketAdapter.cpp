@@ -47,9 +47,9 @@ sgrn::Result<void> WebSocketAdapter::start(const std::string& t_ip, uint16_t t_p
     setupConnectionHandler();
 
     auto res = server_->listen();
-    if (!res.first) {
-        return fmt::format("WebSocket server failed to listen: {}", res.second);
-    }
+
+    SGRN_RETURN_IF(!res.first, fmt::format("WebSocket server failed to listen: {}", res.second));
+
     server_->start();
     running_.store(true, std::memory_order_release);
 
@@ -60,8 +60,7 @@ sgrn::Result<void> WebSocketAdapter::start(const std::string& t_ip, uint16_t t_p
 void WebSocketAdapter::setupConnectionHandler() {
     server_->setOnConnectionCallback([this](std::weak_ptr<ix::WebSocket> webSocket, std::shared_ptr<ix::ConnectionState> connectionState) {
         auto tsp_ws = webSocket.lock();
-        if (!tsp_ws)
-            return;
+        SGRN_RETURN_IF(!tsp_ws, ;);
 
         // The client is NOT registered in clients_ here. It is only added once
         // the Open handshake has completed and we have queued the current full
@@ -147,26 +146,26 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
 
     // Parse the full JSON once if any client needs field-level filtering.
     // The parsed document is reused for all filtered clients.
-    std::unique_ptr<rapidjson::Document> t_parsed_doc;
+    std::unique_ptr<rapidjson::Document> parsed_doc;
     if (t_any_needs_filter) {
-        t_parsed_doc = std::make_unique<rapidjson::Document>();
-        t_parsed_doc->Parse(t_event.json_value->c_str());
-        if (t_parsed_doc->HasParseError() || !t_parsed_doc->IsObject()) {
+        parsed_doc = std::make_unique<rapidjson::Document>();
+        parsed_doc->Parse(t_event.json_value->c_str());
+        if (parsed_doc->HasParseError() || !parsed_doc->IsObject()) {
             // Parse failed — fall back to sending full JSON to all clients.
-            t_parsed_doc.reset();
+            parsed_doc.reset();
         }
     }
 
     // Send to each client — either full JSON (zero overhead) or filtered
     for (auto& target : targets) {
-        if (target.needs_filter && t_parsed_doc) {
+        if (target.needs_filter && parsed_doc) {
             // Convert slash-separated subscription paths to dotted PLC paths
             // for the common json_helper::filterFields utility.
             std::set<std::string> dotted_subs;
             for (const auto& sub : target.field_subs) {
                 dotted_subs.insert(path_utils::topicToPlcPath(sub));
             }
-            auto payload = json_helper::filterFields(*t_parsed_doc, dotted_subs);
+            auto payload = json_helper::filterFields(*parsed_doc, dotted_subs);
             target.sp_ws->send(payload);
         } else {
             target.sp_ws->send(*t_event.json_value);
@@ -593,8 +592,9 @@ void WebSocketAdapter::stop() {
         TelemetryBroker::instance().unsubscribe(broker_sub_id_);
         broker_sub_id_ = 0;
     }
-    if (server_)
+    if (server_) {
         server_->stop();
+    }
     running_.store(false, std::memory_order_release);
 }
 

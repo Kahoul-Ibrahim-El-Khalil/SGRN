@@ -162,7 +162,7 @@ Task<HttpResponsePtr> QueryApiHandler::handleQueryUserInfo(HttpRequestPtr tsp_ht
 drogon::Task<drogon::HttpResponsePtr> QueryApiHandler::handleUpdateUserInfo(drogon::HttpRequestPtr tsp_http_req) {
     const auto p_json = tsp_http_req->getJsonObject();
     if (p_json == nullptr) {
-        co_return sgrn::createErrorResponse("Invalid JSON", drogon::k400BadRequest);
+        co_return sgrn::createErrorResponse(QueryApiError::InvalidPayload);
     }
 
     std::string first_name = p_json->get("first_name", "").asString();
@@ -170,7 +170,7 @@ drogon::Task<drogon::HttpResponsePtr> QueryApiHandler::handleUpdateUserInfo(drog
     std::string phone_number = p_json->get("phone_number", "").asString();
 
     if (first_name.empty() || family_name.empty()) {
-        co_return sgrn::createErrorResponse("Missing first name or family name", drogon::k400BadRequest);
+        co_return sgrn::createErrorResponse(QueryApiError::InvalidPayload);
     }
 
     // Extract user_id from session (set by UserAuthFilter)

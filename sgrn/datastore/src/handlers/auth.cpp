@@ -1,6 +1,7 @@
 #include <sgrn/datastore/handlers/auth.hpp>
 
 #include <drogon/drogon.h>
+#include <sgrn/datastore/error/ApiErrors.hpp>
 #include <sgrn/datastore/plugins/redis/RedisMiddleware.hpp>
 #include <sgrn/datastore/services/auth.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
@@ -26,14 +27,14 @@ using namespace drogon;
 Task<HttpResponsePtr> AuthApiHandler::handleSignIn(HttpRequestPtr tsp_req) {
     const auto p_json = tsp_req->getJsonObject();
     if (p_json == nullptr) {
-        co_return sgrn::createErrorResponse("Invalid JSON", k400BadRequest);
+        co_return sgrn::createErrorResponse(AuthApiError::InvalidPayload);
     }
 
     std::string email = p_json->get("email", "").asString();
     std::string password = p_json->get("password", "").asString();
 
     if (email.empty() || password.empty()) {
-        co_return sgrn::createErrorResponse("Missing Email or Password", drogon::k400BadRequest);
+        co_return sgrn::createErrorResponse(AuthApiError::InvalidPayload);
     }
 
     co_return co_await performSignInProcess(tsp_req, std::move(email), std::move(password));
@@ -92,14 +93,14 @@ Task<HttpResponsePtr> AuthApiHandler::handleSignOut(HttpRequestPtr tsp_req) {
 Task<HttpResponsePtr> AuthApiHandler::handleUpdatePassword(HttpRequestPtr tsp_req) {
     const auto p_json = tsp_req->getJsonObject();
     if (p_json == nullptr) {
-        co_return sgrn::createErrorResponse("Invalid JSON", drogon::k400BadRequest);
+        co_return sgrn::createErrorResponse(AuthApiError::InvalidPayload);
     }
 
     std::string old_password = p_json->get("old_password", "").asString();
     std::string new_password = p_json->get("new_password", "").asString();
 
     if (old_password.empty() || new_password.empty()) {
-        co_return sgrn::createErrorResponse("Missing old or new password", k400BadRequest);
+        co_return sgrn::createErrorResponse(AuthApiError::InvalidPayload);
     }
 
     // Extract email from request attributes (set by AuthFilter)
@@ -112,14 +113,14 @@ Task<HttpResponsePtr> AuthApiHandler::handleUpdatePassword(HttpRequestPtr tsp_re
 Task<HttpResponsePtr> AuthApiHandler::handleAutomatedServiceSignIn(drogon::HttpRequestPtr tsp_req) {
     const auto* p_body = tsp_req->getJsonObject().get();
     if (!p_body || !p_body->isMember("token") || !p_body->isMember("secret")) {
-        co_return createJsonErrorResponse("Bad Request: 'token' and 'secret' fields are required", k400BadRequest);
+        co_return createErrorResponse(AuthApiError::InvalidPayload);
     }
 
     const std::string token = (*p_body)["token"].asString();
     const std::string secret = (*p_body)["secret"].asString();
 
     if (token.empty() || secret.empty()) {
-        co_return createJsonErrorResponse("Bad Request: 'token' and 'secret' must not be empty", k400BadRequest);
+        co_return createErrorResponse(AuthApiError::InvalidPayload);
     }
 
     INFO_LOG("AuthApiHandler::handleAutomatedServiceSignIn — token prefix '{:.8}'", token);
@@ -142,7 +143,7 @@ Task<HttpResponsePtr> AuthApiHandler::handleAutomatedServiceSignOut(HttpRequestP
 
     std::optional<std::string> token_opt = getBearerToken(tsp_req);
     if (token_opt.has_value() == false) {
-        co_return createJsonErrorResponse("Unauthorized", k401Unauthorized);
+        co_return createErrorResponse(AuthApiError::MissingSessionToken);
     }
     const std::string& token = token_opt.value();
 
@@ -167,7 +168,7 @@ Task<HttpResponsePtr> AuthApiHandler::handleAutomatedServiceSignOut(HttpRequestP
 
     } catch (const std::exception& ex) {
         ERROR_LOG("AuthApiHandler::handleAutomatedServiceSignOut error: {}", ex.what());
-        co_return createJsonErrorResponse("Internal Server Error", k500InternalServerError);
+        co_return createErrorResponse(GenericApiError::InternalServerError);
     }
 }
 

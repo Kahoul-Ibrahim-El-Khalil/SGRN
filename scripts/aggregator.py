@@ -23,14 +23,14 @@ class GitIgnoreFilter:
     """
     Uses Git itself to determine whether paths are ignored.
 
-    This respects:
+    Respects Git's ignore rules, including:
       - .gitignore
       - nested .gitignore files
       - .git/info/exclude
       - Git global excludes
-      - Git's complete ignore pattern semantics
 
-    Tracked files are not considered ignored by git check-ignore.
+    Git is queried with --no-index so paths are evaluated against ignore
+    patterns regardless of whether they are tracked.
     """
 
     def __init__(self, directory: Path):
@@ -38,7 +38,7 @@ class GitIgnoreFilter:
         self.repo_root = self._find_repo_root(directory)
 
     @staticmethod
-    def _find_repo_root(directory: Path):
+    def _find_repo_root(directory: Path) -> Path | None:
         try:
             result = subprocess.run(
                 [
@@ -57,20 +57,18 @@ class GitIgnoreFilter:
             if result.returncode != 0:
                 return None
 
-            return Path(result.stdout.strip()).resolve()
+            root = result.stdout.strip()
+            return Path(root).resolve() if root else None
 
-        except FileNotFoundError:
+        except (FileNotFoundError, OSError):
             return None
 
     @property
-    def enabled(self):
+    def enabled(self) -> bool:
         return self.repo_root is not None
 
     def ignored(self, path: Path) -> bool:
-        """
-        Return True if Git considers the path ignored.
-        """
-
+        """Return True if Git considers the path ignored."""
         if not self.enabled:
             return False
 
@@ -95,7 +93,7 @@ class GitIgnoreFilter:
 
             return result.returncode == 0
 
-        except ValueError:
+        except (ValueError, OSError):
             return False
 
 
@@ -105,21 +103,31 @@ def is_hidden(path: Path) -> bool:
 
 def should_include(
     file_path: Path,
-    extensions,
-    exclude_dirs,
-    regex_patterns,
+    extensions: set[str],
+    exclude_dirs: set[str],
+    regex_patterns: list[re.Pattern],
     relative_path: str,
-    gitignore,
+    gitignore: GitIgnoreFilter,
+    output_path: Path,
 ) -> bool:
+    # Never aggregate the output file itself.
+    try:
+        if file_path.resolve() == output_path:
+            return False
+    except OSError:
+        pass
+
+    # Never follow/include symlinked files unless explicitly supported.
+    if file_path.is_symlink():
+        return False
 
     # Ignore hidden files/directories.
     if is_hidden(file_path):
         return False
 
     # Ignore explicitly excluded directories.
-    for part in file_path.parts:
-        if part in exclude_dirs:
-            return False
+    if any(part in exclude_dirs for part in file_path.parts):
+        return False
 
     # Ignore anything Git ignores.
     if gitignore.ignored(file_path):
@@ -130,25 +138,22 @@ def should_include(
         return False
 
     # Regex filtering.
-    if regex_patterns:
-        if not any(
-            pattern.search(relative_path)
-            for pattern in regex_patterns
-        ):
-            return False
+    if regex_patterns and not any(
+        pattern.search(relative_path) for pattern in regex_patterns
+    ):
+        return False
 
     return True
 
 
 def aggregate_directory(
-    directory,
+    directory: Path,
     outfile,
-    extensions,
-    exclude_dirs,
-    calling_directory,
-    regex_patterns,
-):
-
+    extensions: set[str],
+    exclude_dirs: set[str],
+    regex_patterns: list[re.Pattern],
+    output_path: Path,
+) -> int:
     directory = Path(directory).resolve()
 
     if not directory.exists():
@@ -168,29 +173,27 @@ def aggregate_directory(
 
     total_files = 0
 
-    for root, dirs, files in os.walk(directory):
+    def on_walk_error(error: OSError) -> None:
+        print(f"[!] Cannot access {error.filename or directory}: {error}")
 
+    for root, dirs, files in os.walk(directory, onerror=on_walk_error):
         root_path = Path(root)
 
-        # --------------------------------------------------------------
         # Filter directories before os.walk enters them.
-        # --------------------------------------------------------------
-
         filtered_dirs = []
 
-        for dirname in dirs:
-
+        for dirname in sorted(dirs):
             dir_path = root_path / dirname
 
-            # Hidden directories.
             if dirname.startswith("."):
                 continue
 
-            # Explicit exclusions.
             if dirname in exclude_dirs:
                 continue
 
-            # Git ignored directories.
+            if dir_path.is_symlink():
+                continue
+
             if gitignore.ignored(dir_path):
                 print(f"[-] Git ignored: {dir_path}")
                 continue
@@ -199,21 +202,15 @@ def aggregate_directory(
 
         dirs[:] = filtered_dirs
 
-        # --------------------------------------------------------------
         # Files
-        # --------------------------------------------------------------
-
         for filename in sorted(files):
-
             if filename.startswith("."):
                 continue
 
             file_path = root_path / filename
 
             try:
-                relative_path = str(
-                    file_path.relative_to(calling_directory)
-                )
+                relative_path = str(file_path.relative_to(directory))
             except ValueError:
                 relative_path = str(file_path)
 
@@ -224,6 +221,7 @@ def aggregate_directory(
                 regex_patterns=regex_patterns,
                 relative_path=relative_path,
                 gitignore=gitignore,
+                output_path=output_path,
             ):
                 continue
 
@@ -232,9 +230,8 @@ def aggregate_directory(
                     file_path,
                     "r",
                     encoding="utf-8",
-                    errors="ignore",
+                    errors="strict",
                 ) as infile:
-
                     separator = "=" * 100
 
                     outfile.write(
@@ -247,19 +244,17 @@ def aggregate_directory(
                     outfile.write("\n")
 
                     total_files += 1
-
                     print(f"[+] Added: {relative_path}")
 
-            except Exception as e:
-                print(
-                    f"[!] Failed: {file_path} -> {e}"
-                )
+            except UnicodeDecodeError as e:
+                print(f"[!] Skipped non-UTF-8 file: {file_path} -> {e}")
+            except (OSError, UnicodeError) as e:
+                print(f"[!] Failed: {file_path} -> {e}")
 
     return total_files
 
 
-def main():
-
+def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Recursive multi-directory file concatenator "
@@ -267,10 +262,7 @@ def main():
         )
     )
 
-    # ------------------------------------------------------------------
     # Directories
-    # ------------------------------------------------------------------
-
     parser.add_argument(
         "-d",
         "--directory",
@@ -284,10 +276,7 @@ def main():
         ),
     )
 
-    # ------------------------------------------------------------------
     # Output
-    # ------------------------------------------------------------------
-
     parser.add_argument(
         "-o",
         "--output",
@@ -296,10 +285,7 @@ def main():
         help="Output file (default: combined.txt)",
     )
 
-    # ------------------------------------------------------------------
     # Extensions
-    # ------------------------------------------------------------------
-
     parser.add_argument(
         "-e",
         "--ext",
@@ -313,27 +299,21 @@ def main():
         ),
     )
 
-    # ------------------------------------------------------------------
     # Explicit directory exclusions
-    # ------------------------------------------------------------------
-
     parser.add_argument(
         "-x",
         "--exclude",
         dest="excludes",
         action="append",
-        default=None,
+        default=[],
         metavar="DIR",
         help=(
-            "Directory name to exclude in addition to Git ignores. "
-            "Can be specified multiple times."
+            "Directory name to exclude in addition to the default "
+            "and Git ignores. Can be specified multiple times."
         ),
     )
 
-    # ------------------------------------------------------------------
     # Regex
-    # ------------------------------------------------------------------
-
     parser.add_argument(
         "-r",
         "--include-regex",
@@ -342,28 +322,20 @@ def main():
         default=[],
         metavar="REGEX",
         help=(
-            "Regex to match against relative file paths. "
+            "Regex to match against paths relative to each input directory. "
             "Can be specified multiple times."
         ),
     )
 
     args = parser.parse_args()
 
-    # ------------------------------------------------------------------
-    # Normalize extensions
-    # ------------------------------------------------------------------
-
+    # Normalize extensions.
     extensions = {
-        ext.lower()
-        if ext.startswith(".")
-        else f".{ext.lower()}"
+        ext.lower() if ext.startswith(".") else f".{ext.lower()}"
         for ext in args.extensions
     }
 
-    # ------------------------------------------------------------------
-    # Compile regex patterns
-    # ------------------------------------------------------------------
-
+    # Compile regex patterns.
     try:
         regex_patterns = [
             re.compile(pattern)
@@ -372,50 +344,46 @@ def main():
     except re.error as e:
         parser.error(f"Invalid regular expression: {e}")
 
-    # ------------------------------------------------------------------
-    # Explicit excludes
-    # ------------------------------------------------------------------
-
-    if args.excludes is None:
-        exclude_dirs = set(DEFAULT_EXCLUDES)
-    else:
-        exclude_dirs = set(args.excludes)
-
-    # ------------------------------------------------------------------
-    # Aggregate
-    # ------------------------------------------------------------------
+    # Explicit excludes extend the defaults.
+    exclude_dirs = set(DEFAULT_EXCLUDES)
+    exclude_dirs.update(args.excludes)
 
     calling_directory = Path.cwd().resolve()
+    output_path = Path(args.output).resolve()
+
+    # Prevent accidentally placing the output inside a directory that will
+    # subsequently be aggregated.
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
     total_files = 0
 
     try:
         with open(
-            args.output,
+            output_path,
             "w",
             encoding="utf-8",
+            errors="strict",
         ) as outfile:
-
             for directory in args.directories:
-
                 total_files += aggregate_directory(
-                    directory=directory,
+                    directory=Path(directory),
                     outfile=outfile,
                     extensions=extensions,
                     exclude_dirs=exclude_dirs,
-                    calling_directory=calling_directory,
                     regex_patterns=regex_patterns,
+                    output_path=output_path,
                 )
 
     except OSError as e:
         parser.error(
             f"Could not open output file "
-            f"'{args.output}': {e}"
+            f"'{output_path}': {e}"
         )
 
     print(
         f"\n[✓] Aggregated "
         f"{total_files} files into: "
-        f"{args.output}"
+        f"{output_path}"
     )
 
 

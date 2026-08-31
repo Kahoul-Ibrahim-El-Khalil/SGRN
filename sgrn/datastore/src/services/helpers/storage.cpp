@@ -61,7 +61,7 @@ BackendResult<FileHash> computeHashInMemory(std::string_view t_data) {
     FileHash result;
     Result<std::string> hash = utils::computeSha512Data(t_data, utils::HashEncoding::base64url);
     if (!hash.has_value()) {
-        return BackendResult<FileHash>::Error(scope_hashing, std::move(hash.error()));
+        return BackendResult<FileHash>::Error(BackendError(BackendErrorKind::Hashing, std::move(hash.error())));
     }
     result.key = std::move(hash.value());
     result.original_size = t_data.size();
@@ -72,7 +72,7 @@ BackendResult<FileHash> computeHashFromFile(const fs::path& t_file_path) {
     FileHash result;
     Result<std::string> hash = utils::computeSha512File(t_file_path, utils::HashEncoding::base64url);
     if (!hash.has_value()) {
-        return BackendResult<FileHash>::Error(scope_hashing, std::move(hash.error()));
+        return BackendResult<FileHash>::Error(BackendError(BackendErrorKind::Hashing, std::move(hash.error())));
     }
     result.key = std::move(hash.value());
     result.original_size = fs::file_size(t_file_path);
@@ -82,14 +82,15 @@ BackendResult<FileHash> computeHashFromFile(const fs::path& t_file_path) {
 Task<BackendResult<FileHash>> computeHashFromFileAsync(fs::path t_file_path) {
     BackendResult<plugins::Threadpool*> tp_res = core::getPlugin<plugins::Threadpool>();
     if (!tp_res) {
-        co_return BackendResult<FileHash>::Error(tp_res.error().scope_, tp_res.error().message_);
+        co_return BackendResult<FileHash>::Error(tp_res.error());
     }
     plugins::Threadpool* p_tp = tp_res.value();
     co_return co_await utils::runInPool(p_tp->getPool(), [t_path = std::move(t_file_path)]() -> BackendResult<FileHash> {
         try {
             return computeHashFromFile(t_path);
         } catch (const std::exception& ex) {
-            return BackendResult<FileHash>::Error(scope_runtime, std::format("Hash computation failed: {}", ex.what()));
+            return BackendResult<FileHash>::Error(
+                BackendError(BackendErrorKind::Hashing, std::format("Hash computation failed: {}", ex.what())));
         }
     });
 }
@@ -101,14 +102,14 @@ Task<BackendResult<FileHash>> computeHashFromFileAsync(fs::path t_file_path) {
 Task<BackendResult<std::string>> compressInMemory(std::string&& t_data, uint8_t t_compression_level) {
     BackendResult<plugins::Threadpool*> tp_res = core::getPlugin<plugins::Threadpool>();
     if (!tp_res) {
-        co_return BackendResult<std::string>::Error(tp_res.error().scope_, tp_res.error().message_);
+        co_return BackendResult<std::string>::Error(tp_res.error());
     }
     plugins::Threadpool* p_tp = tp_res.value();
     co_return co_await utils::runInPool(
         p_tp->getPool(), [buffer = std::move(t_data), level = t_compression_level]() -> BackendResult<std::string> {
             Result<std::string> tp_res = utils::compressStringZstd(buffer, level);
             if (!tp_res) {
-                return BackendResult<std::string>::Error(scope_compression, std::move(tp_res.error()));
+                return BackendResult<std::string>::Error(BackendError(BackendErrorKind::Compression, std::move(tp_res.error())));
             }
             return std::move(tp_res.value());
         });
@@ -117,7 +118,8 @@ Task<BackendResult<std::string>> compressInMemory(std::string&& t_data, uint8_t 
 BackendResult<fs::path> compressFile(const fs::path& t_input_path, const fs::path& t_output_path, uint8_t t_compression_level) {
     Result<size_t> tp_res = sgrn::utils::compression::compressFileStreamingZstd(t_input_path, t_output_path, t_compression_level);
     if (!tp_res.has_value()) {
-        return BackendResult<fs::path>::Error(BackendError{scope_runtime, std::format("Compression failed: {}", tp_res.error())});
+        return BackendResult<fs::path>::Error(
+            BackendError(BackendErrorKind::Runtime, std::format("Compression failed: {}", tp_res.error())));
     }
     return t_output_path;
 }
@@ -125,7 +127,7 @@ BackendResult<fs::path> compressFile(const fs::path& t_input_path, const fs::pat
 Task<BackendResult<fs::path>> compressFileAsync(fs::path t_input_path, fs::path t_output_path, uint8_t t_compression_level) {
     BackendResult<plugins::Threadpool*> tp_res = core::getPlugin<plugins::Threadpool>();
     if (!tp_res) {
-        co_return BackendResult<fs::path>::Error(tp_res.error().scope_, tp_res.error().message_);
+        co_return BackendResult<fs::path>::Error(tp_res.error());
     }
 
     plugins::Threadpool* p_tp = tp_res.value();
@@ -133,7 +135,7 @@ Task<BackendResult<fs::path>> compressFileAsync(fs::path t_input_path, fs::path 
         [in = std::move(t_input_path), out = std::move(t_output_path), level = t_compression_level]() -> BackendResult<fs::path> {
             Result<size_t> tp_res = utils::compression::compressFileStreamingZstd(in, out, level);
             if (tp_res.hasError()) {
-                return BackendResult<fs::path>::Error(scope_runtime, std::move(tp_res.error()));
+                return BackendResult<fs::path>::Error(BackendError(BackendErrorKind::Runtime, std::move(tp_res.error())));
             }
             return out;
         });
@@ -212,11 +214,12 @@ Task<BackendResult<int64_t>> insertObject(drogon::orm::DbClientPtr tsp_db_client
             t_compression_level.has_value() ? std::optional<int32_t>(static_cast<int32_t>(*t_compression_level)) : std::nullopt);
 
         if (result.empty() || result[0]["id"].isNull()) {
-            co_return BackendResult<int64_t>::Error(scope_database, "Failed to upsert object: no ID returned");
+            co_return BackendResult<int64_t>::Error(BackendError(BackendErrorKind::Database, "Failed to upsert object: no ID returned"));
         }
         co_return result[0]["id"].as<int64_t>();
     } catch (const std::exception& ex) {
-        co_return BackendResult<int64_t>::Error(scope_database, std::format("Failed to upsert object: {}", ex.what()));
+        co_return BackendResult<int64_t>::Error(
+            BackendError(BackendErrorKind::Database, std::format("Failed to upsert object: {}", ex.what())));
     }
 }
 
@@ -241,11 +244,12 @@ Task<BackendResult<int64_t>> insertFile(drogon::orm::DbClientPtr tsp_db_client, 
             t_domain.empty() ? std::optional<std::string>(std::nullopt) : std::optional<std::string>(t_domain));
 
         if (tp_res.empty()) {
-            co_return BackendResult<int64_t>::Error(scope_database, "Failed to insert file");
+            co_return BackendResult<int64_t>::Error(BackendError(BackendErrorKind::Database, "Failed to insert file"));
         }
         co_return tp_res[0]["id"].as<int64_t>();
     } catch (const std::exception& ex) {
-        co_return BackendResult<int64_t>::Error(scope_database, std::format("Failed to insert file: {}", ex.what()));
+        co_return BackendResult<int64_t>::Error(
+            BackendError(BackendErrorKind::Database, std::format("Failed to insert file: {}", ex.what())));
     }
 }
 
@@ -270,7 +274,8 @@ Task<BackendResult<std::optional<int64_t>>> resolveDirectoryPath(drogon::orm::Db
         }
         co_return tp_res[0]["dir_id"].as<int64_t>();
     } catch (const std::exception& ex) {
-        co_return BackendResult<std::optional<int64_t>>::Error(scope_database, std::format("Failed to resolve directory: {}", ex.what()));
+        co_return BackendResult<std::optional<int64_t>>::Error(
+            BackendError(BackendErrorKind::Database, std::format("Failed to resolve directory: {}", ex.what())));
     }
 }
 
@@ -290,7 +295,8 @@ Task<BackendResult<std::optional<int64_t>>> ensureDirectoryPath(drogon::orm::DbC
         }
         co_return tp_res[0]["dir_id"].as<int64_t>();
     } catch (const std::exception& ex) {
-        co_return BackendResult<std::optional<int64_t>>::Error(scope_database, std::format("Failed to ensure directory: {}", ex.what()));
+        co_return BackendResult<std::optional<int64_t>>::Error(
+            BackendError(BackendErrorKind::Database, std::format("Failed to ensure directory: {}", ex.what())));
     }
 }
 
@@ -421,13 +427,14 @@ BackendResult<TempFileGuard> saveToTempFile(const drogon::HttpFile& t_file) {
         std::ofstream output(temp_path, std::ios::binary);
         if (!output) {
             return BackendResult<TempFileGuard>::Error(
-                scope_file_system, std::format("Failed to create temp file: {}", temp_path.string()));
+                BackendError(BackendErrorKind::Filesystem, std::format("Failed to create temp file: {}", temp_path.string())));
         }
         output.write(t_file.fileData(), t_file.fileLength());
         output.close();
         return TempFileGuard(temp_path);
     } catch (const std::exception& ex) {
-        return BackendResult<TempFileGuard>::Error(scope_file_system, std::format("Failed to save temp file: {}", ex.what()));
+        return BackendResult<TempFileGuard>::Error(
+            BackendError(BackendErrorKind::Filesystem, std::format("Failed to save temp file: {}", ex.what())));
     }
 }
 
@@ -437,13 +444,14 @@ BackendResult<TempFileGuard> saveToTempFile(const std::string& t_data) {
         std::ofstream output(temp_path, std::ios::binary);
         if (!output) {
             return BackendResult<TempFileGuard>::Error(
-                scope_file_system, std::format("Failed to create temp file: {}", temp_path.string()));
+                BackendError(BackendErrorKind::Filesystem, std::format("Failed to create temp file: {}", temp_path.string())));
         }
         output.write(t_data.data(), t_data.size());
         output.close();
         return TempFileGuard(temp_path);
     } catch (const std::exception& ex) {
-        return BackendResult<TempFileGuard>::Error(scope_file_system, std::format("Failed to save temp file: {}", ex.what()));
+        return BackendResult<TempFileGuard>::Error(
+            BackendError(BackendErrorKind::Filesystem, std::format("Failed to save temp file: {}", ex.what())));
     }
 }
 
@@ -454,7 +462,7 @@ BackendResult<TempFileGuard> saveToTempFile(const std::string& t_data) {
 Task<BackendResult<UserFileRecord>> fetchFileRecord(drogon::orm::DbClientPtr tsp_db_client, const ScopeContext& t_ctx) {
     std::optional<UserFileRecord> opt = co_await findFileByPath(tsp_db_client, t_ctx);
     if (!opt.has_value()) {
-        co_return BackendResult<UserFileRecord>::Error(scope_database, "File not found or access denied");
+        co_return BackendResult<UserFileRecord>::Error(BackendError(BackendErrorKind::Database, "File not found or access denied"));
     }
     co_return std::move(*opt);
 }
@@ -462,7 +470,7 @@ Task<BackendResult<UserFileRecord>> fetchFileRecord(drogon::orm::DbClientPtr tsp
 Task<BackendResult<std::string>> resolveObjectKey(drogon::orm::DbClientPtr tsp_db_client, int64_t t_object_id) {
     std::optional<std::string> opt_key = co_await getObjectKey(tsp_db_client, t_object_id);
     if (!opt_key.has_value()) {
-        co_return BackendResult<std::string>::Error(scope_database, "Object key not found in database");
+        co_return BackendResult<std::string>::Error(BackendError(BackendErrorKind::Database, "Object key not found in database"));
     }
     co_return std::move(opt_key.value());
 }
@@ -536,7 +544,7 @@ Task<BackendResult<ScopeContext>> resolveScopeSession(
         if (actor_role != "global_admin" && actor_role != "admin") {
             if (actor_domain != target_domain) {
                 co_return BackendResult<ScopeContext>::Error(
-                    scope_authorization, "Access Denied: Actor domain does not match target operational domain space.");
+                    BackendError(BackendErrorKind::Auth, "Access Denied: Actor domain does not match target operational domain space."));
             }
         }
 
@@ -558,7 +566,7 @@ Task<BackendResult<ScopeContext>> resolveScopeSession(
             if (perm_res.empty()) {
                 // Zero-Trust Default: access denied if no capability is registered
                 co_return BackendResult<ScopeContext>::Error(
-                    scope_authorization, "Access Denied: No domain capability permissions configured for this user.");
+                    BackendError(BackendErrorKind::Auth, "Access Denied: No domain capability permissions configured for this user."));
             } else {
                 t_ctx.allowed_subpath = perm_res[0]["allowed_subpath"].as<std::string>();
                 t_ctx.can_read = perm_res[0]["can_read"].as<bool>();
@@ -576,8 +584,8 @@ Task<BackendResult<ScopeContext>> resolveScopeSession(
                     rule_path = "/" + rule_path;
 
                 if (check_path.rfind(rule_path, 0) != 0) {
-                    co_return BackendResult<ScopeContext>::Error(
-                        scope_authorization, "Access Denied: Path is outside your operational sandbox boundary (" + rule_path + ").");
+                    co_return BackendResult<ScopeContext>::Error(BackendError(
+                        BackendErrorKind::Auth, "Access Denied: Path is outside your operational sandbox boundary (" + rule_path + ")."));
                 }
             }
         }
@@ -586,7 +594,7 @@ Task<BackendResult<ScopeContext>> resolveScopeSession(
 
     const std::string role = t_session["user"]["role"]["name"].asString();
     if (role != "admin") {
-        co_return BackendResult<ScopeContext>::Error(scope_authorization, "Admin access required for this scope");
+        co_return BackendResult<ScopeContext>::Error(BackendError(BackendErrorKind::Auth, "Admin access required for this scope"));
     }
 
     if (t_path == "/" || t_path.empty()) {
@@ -645,7 +653,7 @@ Task<BackendResult<ScopeContext>> resolveScopeSession(
         }
 
         if (!tp_res.has_value() || tp_res->empty()) {
-            co_return BackendResult<ScopeContext>::Error(scope_database, "Target namespace not found");
+            co_return BackendResult<ScopeContext>::Error(BackendError(BackendErrorKind::Database, "Target namespace not found"));
         }
 
         t_ctx.owner_id = (*tp_res)[0]["owner_id"].as<int32_t>();
@@ -662,7 +670,8 @@ Task<BackendResult<ScopeContext>> resolveScopeSession(
         t_ctx.t_session_id = (*tp_res)[0]["session_id"].isNull() ? 0 : (*tp_res)[0]["session_id"].as<int32_t>();
         co_return t_ctx;
     } catch (const std::exception& e) {
-        co_return BackendResult<ScopeContext>::Error(scope_database, std::format("Database error during scope resolution: {}", e.what()));
+        co_return BackendResult<ScopeContext>::Error(
+            BackendError(BackendErrorKind::Database, std::format("Database error during scope resolution: {}", e.what())));
     }
 }
 

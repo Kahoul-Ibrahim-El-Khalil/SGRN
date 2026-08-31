@@ -1,4 +1,6 @@
+#include <drogon/nosql/RedisException.h>
 #include <fmt/core.h>
+#include <sgrn/datastore/plugins/redis/RedisError.hpp>
 #include <sgrn/datastore/plugins/redis/RedisMiddleware.hpp>
 #include <sgrn/debug.hpp>
 #include <sstream>
@@ -19,6 +21,26 @@ void RedisMiddleware::initAndStart(const Json::Value& t_config) {
 
 void RedisMiddleware::shutdown() {
     SGRN_INFO("RedisMiddleware", "RedisMiddleware plugin shutting down.");
+}
+
+static RedisError classifyRedisException(const drogon::nosql::RedisException& e) {
+    switch (e.code()) {
+        case drogon::nosql::RedisErrorCode::kConnectionBroken:
+        case drogon::nosql::RedisErrorCode::kNoConnectionAvailable:
+            return RedisError::ConnectionFailed;
+        case drogon::nosql::RedisErrorCode::kBadType:
+            return RedisError::WrongType;
+        case drogon::nosql::RedisErrorCode::kInternalError:
+            return RedisError::InternalError;
+        case drogon::nosql::RedisErrorCode::kTimeout:
+            return RedisError::Timeout;
+        case drogon::nosql::RedisErrorCode::kNone:
+        case drogon::nosql::RedisErrorCode::kUnknown:
+        case drogon::nosql::RedisErrorCode::kRedisError:
+        case drogon::nosql::RedisErrorCode::kTransactionCancelled:
+            return RedisError::CommandFailed;
+    }
+    return RedisError::CommandFailed;
 }
 
 static std::string serializeJson(const Json::Value& t_val) {
@@ -58,17 +80,20 @@ drogon::Task<void> RedisMiddleware::setJson(const std::string& t_key, const Json
 drogon::Task<BackendResult<std::string>> RedisMiddleware::get(const std::string& t_key) {
     auto redis = drogon::app().getRedisClient();
     if (redis == nullptr)
-        co_return BackendResult<std::string>::Error(scope_redis, "Redis client not available");
+        co_return BackendResult<std::string>::Error(toBackendError(RedisError::NotInitialized));
 
     auto prefixed = prefix(t_key);
     try {
         auto res = co_await redis->execCommandCoro("GET %s", prefixed.c_str());
         if (res.isNil())
-            co_return BackendResult<std::string>::Error(scope_redis, "key not found");
+            co_return BackendResult<std::string>::Error(toBackendError(RedisError::NotFound));
         co_return res.asString();
+    } catch (const drogon::nosql::RedisException& e) {
+        SGRN_ERROR_LOG("RedisMiddleware", "GET RedisException: " + std::string(e.what()));
+        co_return BackendResult<std::string>::Error(toBackendError(classifyRedisException(e), std::string("GET error: ") + e.what()));
     } catch (const std::exception& e) {
         SGRN_ERROR_LOG("RedisMiddleware", "GET error: " + std::string(e.what()));
-        co_return BackendResult<std::string>::Error(scope_redis, std::string("GET error: ") + e.what());
+        co_return BackendResult<std::string>::Error(toBackendError(RedisError::Unknown, std::string("GET error: ") + e.what()));
     }
 }
 
@@ -79,14 +104,14 @@ drogon::Task<BackendResult<Json::Value>> RedisMiddleware::getJson(const std::str
 
     auto json_val = deserializeJson(res.value());
     if (!json_val.has_value())
-        co_return BackendResult<Json::Value>::Error(scope_redis, "Invalid JSON data");
+        co_return BackendResult<Json::Value>::Error(toBackendError(RedisError::CommandFailed, "Invalid JSON data"));
     co_return json_val.value();
 }
 
 BackendResult<std::string> RedisMiddleware::getSync(const std::string& t_key) {
     auto redis = drogon::app().getRedisClient();
     if (redis == nullptr)
-        return BackendResult<std::string>::Error(scope_redis, "Redis client not available");
+        return BackendResult<std::string>::Error(toBackendError(RedisError::NotInitialized));
 
     auto prefixed = prefix(t_key);
     try {
@@ -98,14 +123,17 @@ BackendResult<std::string> RedisMiddleware::getSync(const std::string& t_key) {
             },
             "GET %s", prefixed.c_str());
         if (!res.has_value())
-            return BackendResult<std::string>::Error(scope_redis, "key not found");
+            return BackendResult<std::string>::Error(toBackendError(RedisError::NotFound));
         return res.value();
+    } catch (const drogon::nosql::RedisException& e) {
+        SGRN_ERROR_LOG("RedisMiddleware", "getSync RedisException: " + std::string(e.what()));
+        return BackendResult<std::string>::Error(toBackendError(classifyRedisException(e), std::string("getSync error: ") + e.what()));
     } catch (const std::exception& e) {
         SGRN_ERROR_LOG("RedisMiddleware", "getSync error: " + std::string(e.what()));
-        return BackendResult<std::string>::Error(scope_redis, std::string("getSync error: ") + e.what());
+        return BackendResult<std::string>::Error(toBackendError(RedisError::Unknown, std::string("getSync error: ") + e.what()));
     } catch (...) {
         SGRN_ERROR_LOG("RedisMiddleware", "getSync unknown error");
-        return BackendResult<std::string>::Error(scope_redis, "getSync unknown error");
+        return BackendResult<std::string>::Error(toBackendError(RedisError::Unknown));
     }
 }
 
@@ -116,7 +144,7 @@ BackendResult<Json::Value> RedisMiddleware::getJsonSync(const std::string& t_key
 
     auto json_val = deserializeJson(res.value());
     if (!json_val.has_value())
-        return BackendResult<Json::Value>::Error(scope_redis, "Invalid JSON data");
+        return BackendResult<Json::Value>::Error(toBackendError(RedisError::CommandFailed, "Invalid JSON data"));
     return json_val.value();
 }
 
@@ -160,9 +188,12 @@ drogon::Task<BackendResult<void>> RedisMiddleware::storeSession(
             co_await set(upload_redis_key, "1", t_ttl_seconds);
         }
         co_return {};
+    } catch (const drogon::nosql::RedisException& e) {
+        SGRN_ERROR_LOG("RedisMiddleware", "storeSession RedisException: " + std::string(e.what()));
+        co_return BackendResult<void>::Error(toBackendError(classifyRedisException(e), std::string("storeSession error: ") + e.what()));
     } catch (const std::exception& e) {
         SGRN_ERROR_LOG("RedisMiddleware", "storeSession error: " + std::string(e.what()));
-        co_return BackendResult<void>::Error(makeBackendError(scope_redis, "storeSession error: {}", e.what()));
+        co_return BackendResult<void>::Error(toBackendError(RedisError::Unknown, std::string("storeSession error: ") + e.what()));
     }
 }
 
@@ -186,9 +217,12 @@ drogon::Task<BackendResult<void>> RedisMiddleware::deleteSession(const std::stri
         }
         co_await del(session_key);
         co_return {};
+    } catch (const drogon::nosql::RedisException& e) {
+        SGRN_ERROR_LOG("RedisMiddleware", "deleteSession RedisException: " + std::string(e.what()));
+        co_return BackendResult<void>::Error(toBackendError(classifyRedisException(e), std::string("deleteSession error: ") + e.what()));
     } catch (const std::exception& e) {
         SGRN_ERROR_LOG("RedisMiddleware", "deleteSession error: " + std::string(e.what()));
-        co_return BackendResult<void>::Error(makeBackendError(scope_redis, "deleteSession error: {}", e.what()));
+        co_return BackendResult<void>::Error(toBackendError(RedisError::Unknown, std::string("deleteSession error: ") + e.what()));
     }
 }
 
@@ -200,9 +234,12 @@ drogon::Task<BackendResult<void>> RedisMiddleware::storeUserCache(
         cache["token"] = t_token;
         co_await setJson(t_key, cache, t_ttl_seconds);
         co_return {};
+    } catch (const drogon::nosql::RedisException& e) {
+        SGRN_ERROR_LOG("RedisMiddleware", "storeUserCache RedisException: " + std::string(e.what()));
+        co_return BackendResult<void>::Error(toBackendError(classifyRedisException(e), std::string("storeUserCache error: ") + e.what()));
     } catch (const std::exception& e) {
         SGRN_ERROR_LOG("RedisMiddleware", "storeUserCache error: " + std::string(e.what()));
-        co_return BackendResult<void>::Error(makeBackendError(scope_redis, "storeUserCache error: {}", e.what()));
+        co_return BackendResult<void>::Error(toBackendError(RedisError::Unknown, std::string("storeUserCache error: ") + e.what()));
     }
 }
 
@@ -214,7 +251,7 @@ drogon::Task<BackendResult<std::string>> RedisMiddleware::getTokenFromUserCache(
     if (json.value().isMember("token")) {
         co_return json.value()["token"].asString();
     }
-    co_return BackendResult<std::string>::Error(scope_redis, "token not found in cache");
+    co_return BackendResult<std::string>::Error(toBackendError(RedisError::NotFound, "token not found in cache"));
 }
 
 drogon::Task<BackendResult<void>> RedisMiddleware::deleteUserCache(const std::string& t_email) {
@@ -222,9 +259,12 @@ drogon::Task<BackendResult<void>> RedisMiddleware::deleteUserCache(const std::st
         std::string t_key = fmt::format(kUserCacheFmt, t_email);
         co_await del(t_key);
         co_return {};
+    } catch (const drogon::nosql::RedisException& e) {
+        SGRN_ERROR_LOG("RedisMiddleware", "deleteUserCache RedisException: " + std::string(e.what()));
+        co_return BackendResult<void>::Error(toBackendError(classifyRedisException(e), std::string("deleteUserCache error: ") + e.what()));
     } catch (const std::exception& e) {
         SGRN_ERROR_LOG("RedisMiddleware", "deleteUserCache error: " + std::string(e.what()));
-        co_return BackendResult<void>::Error(makeBackendError(scope_redis, "deleteUserCache error: {}", e.what()));
+        co_return BackendResult<void>::Error(toBackendError(RedisError::Unknown, std::string("deleteUserCache error: ") + e.what()));
     }
 }
 

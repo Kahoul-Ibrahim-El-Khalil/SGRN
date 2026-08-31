@@ -145,6 +145,11 @@ export const ErrorScope = {
     Service: "Service",
     Allocation: "Allocation",
     PLC: "PLC",
+    // API-domain scopes (from ApiErrors code_name prefix)
+    AdminApi: "AdminApi",
+    AuthApi: "AuthApi",
+    QueryApi: "QueryApi",
+    Sgrn: "Sgrn",
     Unknown: "Unknown",
 } as const;
 

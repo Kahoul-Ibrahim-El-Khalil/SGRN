@@ -133,6 +133,30 @@ cmake --preset win64-static && cmake --build --preset win64-static
 Phase 2 auto-detects the staged prefix by checking for:
 `.prefix/<platform>/lib/cmake/extern/extern-config.cmake`
 
+### Install Targets (split for fast iteration)
+
+The install step is split into three custom targets so headers are not
+re-copied on every build, and third-party system libraries (which change
+rarely) are separated from our own binaries. CMake's install mechanism
+checks file timestamps — only files newer than the destination are copied;
+the rest are skipped as "Up-to-date".
+
+| Target                 | What gets installed                                              | Use case                        |
+|:-----------------------|:-----------------------------------------------------------------|:--------------------------------|
+| `install-prefix`       | Headers + `sgrn-config.cmake` → `.prefix/`                       | First-time setup, after header changes |
+| `install-binaries`     | **Our** libs + executables → `.prefix/<platform>/`               | Every `.cpp` edit (fast)        |
+| `install-deps-binaries`| Third-party system libs (OpenSSL, zstd, etc.) → `.prefix/<platform>/lib/` | Rarely; first build or dep updates |
+| `install`              | Everything (built-in CMake target)                               | CI, final builds                |
+
+**Typical dev loop** (after initial `install-prefix` and `install-deps-binaries`):
+
+```bash
+cmake --build .build/linux-static-release -j12 --target install-binaries
+```
+
+This only copies the libraries and executables that changed since the last
+install — headers and system libs are untouched.
+
 ---
 
 ## 4. Sysroot Layout (`.prefix/`)

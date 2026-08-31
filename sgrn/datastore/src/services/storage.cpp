@@ -455,7 +455,7 @@ Task<BackendResult<void>> StorageService::deleteFile(drogon::orm::DbClientPtr ts
         co_await tsp_db_client->execSqlCoro("DELETE FROM storage.files WHERE id = $1", t_file_id);
         co_return {};
     } catch (const std::exception& ex) {
-        co_return BackendError{::sgrn::datastore::scope_database, ex.what()};
+        co_return BackendError{"Database", ex.what()};
     }
 }
 
@@ -573,7 +573,7 @@ Task<BackendResult<Json::Value>> StorageService::uploadFile(UploadContext t_cont
         response["key"] = t_context.identity.hash.key;
         co_return BackendResult<Json::Value>(std::move(response));
     } catch (const std::exception& ex) {
-        co_return BackendError{::sgrn::datastore::scope_runtime, std::format("Upload failed: {}", ex.what())};
+        co_return BackendError{"Runtime", std::format("Upload failed: {}", ex.what())};
     }
 }
 
@@ -597,14 +597,14 @@ Task<bool> StorageService::objectExists(std::string t_bucket, std::string t_key)
 
 BackendResult<bool> StorageService::validateFileSize(size_t t_size) {
     if (t_size > getConfig().maxFileSizeBytes())
-        return BackendError{::sgrn::datastore::scope_file_system, "File too large"};
+        return BackendError{"Filesystem", "File too large"};
     return true;
 }
 
 BackendResult<bool> StorageService::validateExtension(std::string_view t_filename) {
     // SEC: Use lowercase comparison to prevent bypass via ".PHP", ".JSP", etc.
     if (!getConfig().isExtensionAllowed(helpers::extractExtensionLower(t_filename)))
-        return BackendError{::sgrn::datastore::scope_file_system, "Extension not allowed"};
+        return BackendError{"Filesystem", "Extension not allowed"};
     return true;
 }
 

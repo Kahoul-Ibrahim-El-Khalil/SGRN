@@ -130,7 +130,7 @@ inline std::optional<T> extractHeaderNumericalValue(const drogon::HttpRequestPtr
 inline BackendResult<std::string> extractRequiredParam(const drogon::HttpRequestPtr& tsp_req, const std::string& t_name) {
     std::string value = tsp_req->getParameter(t_name);
     if (value.empty()) {
-        return BackendResult<std::string>::Error(sgrn::datastore::scope_application_logic, "Missing required parameter: " + t_name);
+        return BackendResult<std::string>::Error("Application", "Missing required parameter: " + t_name);
     }
     return value;
 }

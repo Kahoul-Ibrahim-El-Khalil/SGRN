@@ -5,8 +5,8 @@
 #include <angelscript.h>
 #include <chrono>
 #include <memory>
-#include <sstream>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 

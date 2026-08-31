@@ -1,3 +1,5 @@
+#include <drogon/orm/Exception.h>
+#include <sgrn/datastore/error/ApiErrors.hpp>
 #include <sgrn/datastore/handlers/storage.hpp>
 #include <sgrn/datastore/services/proxy.hpp>
 #include <sgrn/datastore/services/storage.hpp>
@@ -123,13 +125,13 @@ Task<HttpResponsePtr> StorageApiHandler::handleFileRequest(HttpRequestPtr tsp_re
         // ── 1. Path Normalization & Security �────────────────────────
         auto path_opt = tsp_req->getOptionalParameter<std::string>("path");
         if (!path_opt.has_value()) {
-            co_return sgrn::createErrorResponse({::sgrn::datastore::scope_application_logic, "Missing path parameter"}, k400BadRequest);
+            co_return sgrn::createErrorResponse({"Application", "Missing path parameter"}, k400BadRequest);
         }
 
         auto norm = normalizePath(std::move(path_opt.value()));
         if (!norm.has_value()) {
             // This catches directory traversal attempts (e.g. "../")
-            co_return sgrn::createErrorResponse({::sgrn::datastore::scope_application_logic, "Invalid path"}, k400BadRequest);
+            co_return sgrn::createErrorResponse({"Application", "Invalid path"}, k400BadRequest);
         }
         std::string path_str = std::move(*norm);
         DEBUG_LOG("[StorageApiHandler::handleFileRequest] Normalized path: '{}'", path_str);
@@ -218,9 +220,12 @@ Task<HttpResponsePtr> StorageApiHandler::handleFileRequest(HttpRequestPtr tsp_re
 
         co_return createJsonErrorResponse("Method not allowed", k405MethodNotAllowed);
 
+    } catch (const drogon::orm::DrogonDbException& e) {
+        ERROR_LOG("Handler DB exception: {}", e.base().what());
+        co_return createErrorResponse(GenericApiError::InternalServerError);
     } catch (const std::exception& ex) {
         ERROR_LOG("Handler exception: {}", ex.what());
-        co_return createJsonErrorResponse(std::format("Internal error: {}", ex.what()), k500InternalServerError);
+        co_return createErrorResponse(GenericApiError::InternalServerError);
     }
 }
 
@@ -248,10 +253,10 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
         }
 
         if (!session["user"].isMember("id") || !session["user"]["id"].isInt()) {
-            co_return createJsonErrorResponse("Invalid session: user.id missing or not an integer", k401Unauthorized);
+            co_return createJsonErrorResponse("Corrupted session: user.id missing or not an integer", k500InternalServerError);
         }
         if (!session["user"].isMember("role") || !session["user"]["role"].isMember("name") || !session["user"]["role"]["name"].isString()) {
-            co_return createJsonErrorResponse("Invalid session: user.role.name missing or not a string", k401Unauthorized);
+            co_return createJsonErrorResponse("Corrupted session: user.role.name missing or not a string", k500InternalServerError);
         }
 
         const int32_t user_id = session["user"]["id"].asInt();
@@ -259,7 +264,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
         const bool is_admin = (role == "admin");
 
         if (!is_admin && !session["session_id"].isInt()) {
-            co_return createJsonErrorResponse("Invalid session: session_id missing or not an integer", k401Unauthorized);
+            co_return createJsonErrorResponse("Corrupted session: session_id missing or not an integer", k500InternalServerError);
         }
 
         // 2. Scope and Path Resolution
@@ -479,9 +484,12 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
         response["total_pages"] = std::max(1, (int32_t)std::ceil((double)(total_folders + total_files) / limit));
 
         co_return drogon::HttpResponse::newHttpJsonResponse(std::move(response));
+    } catch (const drogon::orm::DrogonDbException& e) {
+        ERROR_LOG("Drive list DB exception: {}", e.base().what());
+        co_return createErrorResponse(GenericApiError::InternalServerError);
     } catch (const std::exception& ex) {
         ERROR_LOG("Drive list handler exception: {}", ex.what());
-        co_return createJsonErrorResponse(std::format("Internal error: {}", ex.what()), k500InternalServerError);
+        co_return createErrorResponse(GenericApiError::InternalServerError);
     }
 }
 
@@ -519,7 +527,7 @@ Task<BackendResult<void>> StorageApiHandler::buildVirtualRootListing(Json::Value
         co_return {};
 
     } catch (const std::exception& ex) {
-        co_return BackendError{scope_database, std::string("buildVirtualRootListing failed: ") + ex.what()};
+        co_return BackendError{"Database", std::string("buildVirtualRootListing failed: ") + ex.what()};
     }
 }
 
@@ -762,9 +770,12 @@ Task<HttpResponsePtr> StorageApiHandler::handleCreateDirectory(HttpRequestPtr ts
 
         co_return co_await storage_service_.handleCreateDirectoryRequest(std::move(session), std::move(scope), std::move(path));
 
+    } catch (const drogon::orm::DrogonDbException& e) {
+        ERROR_LOG("Create directory DB exception: {}", e.base().what());
+        co_return createErrorResponse(GenericApiError::InternalServerError);
     } catch (const std::exception& ex) {
         ERROR_LOG("Create directory handler exception: {}", ex.what());
-        co_return createJsonErrorResponse(std::format("Internal error: {}", ex.what()), k500InternalServerError);
+        co_return createErrorResponse(GenericApiError::InternalServerError);
     }
 }
 
@@ -772,7 +783,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleAutomatedServiceFileRequest(HttpR
     try {
         auto norm = normalizePath(tsp_req->getOptionalParameter<std::string>("path").value_or(""));
         if (!norm.has_value()) {
-            co_return sgrn::createErrorResponse({::sgrn::datastore::scope_application_logic, "Invalid path"}, k400BadRequest);
+            co_return sgrn::createErrorResponse({"Application", "Invalid path"}, k400BadRequest);
         }
         std::string path_str = std::move(*norm);
         const HttpMethod method = tsp_req->getMethod();
@@ -838,9 +849,12 @@ Task<HttpResponsePtr> StorageApiHandler::handleAutomatedServiceFileRequest(HttpR
 
         co_return createJsonErrorResponse("Method not allowed", k405MethodNotAllowed);
 
+    } catch (const drogon::orm::DrogonDbException& e) {
+        ERROR_LOG("AutomatedServiceApiHandler::handleFileRequest DB exception: {}", e.base().what());
+        co_return createErrorResponse(GenericApiError::InternalServerError);
     } catch (const std::exception& ex) {
         ERROR_LOG("AutomatedServiceApiHandler::handleFileRequest exception: {}", ex.what());
-        co_return createJsonErrorResponse(fmt::format("Internal error: {}", ex.what()), k500InternalServerError);
+        co_return createErrorResponse(GenericApiError::InternalServerError);
     }
 }
 
@@ -853,17 +867,17 @@ Task<HttpResponsePtr> StorageApiHandler::handleMove(HttpRequestPtr tsp_req) {
         }
 
         if (!session.isMember("user") || !session["user"].isMember("id") || !session["user"]["id"].isInt()) {
-            co_return createJsonErrorResponse("Invalid session: user.id missing or not an integer", k401Unauthorized);
+            co_return createJsonErrorResponse("Corrupted session: user.id missing or not an integer", k500InternalServerError);
         }
         if (!session["user"].isMember("role") || !session["user"]["role"].isMember("name") || !session["user"]["role"]["name"].isString()) {
-            co_return createJsonErrorResponse("Invalid session: user.role.name missing or not a string", k401Unauthorized);
+            co_return createJsonErrorResponse("Corrupted session: user.role.name missing or not a string", k500InternalServerError);
         }
 
         const int32_t user_id = session["user"]["id"].asInt();
         const bool is_admin = (session["user"]["role"]["name"].asString() == "admin");
 
         if (!session["session_id"].isInt()) {
-            co_return createJsonErrorResponse("Invalid session: session_id missing", k401Unauthorized);
+            co_return createJsonErrorResponse("Corrupted session: session_id missing", k500InternalServerError);
         }
 
         // 2. Parameter Extraction
@@ -948,9 +962,12 @@ Task<HttpResponsePtr> StorageApiHandler::handleMove(HttpRequestPtr tsp_req) {
             co_return co_await moveFolder(transaction, entity_id, user_id, is_admin, target_parent_id, target_name);
         }
 
+    } catch (const drogon::orm::DrogonDbException& e) {
+        ERROR_LOG("Move handler DB exception: {}", e.base().what());
+        co_return createErrorResponse(GenericApiError::InternalServerError);
     } catch (const std::exception& ex) {
         ERROR_LOG("Move handler exception: {}", ex.what());
-        co_return createJsonErrorResponse(std::format("Internal error: {}", ex.what()), k500InternalServerError);
+        co_return createErrorResponse(GenericApiError::InternalServerError);
     }
 }
 
@@ -1147,15 +1164,15 @@ Task<HttpResponsePtr> StorageApiHandler::handleDelete(HttpRequestPtr tsp_req) {
 
         if (!session.isMember("user") || !session["user"].isMember("role") || !session["user"]["role"].isMember("name") ||
             !session["user"]["role"]["name"].isString()) {
-            co_return createJsonErrorResponse("Invalid session: user.role.name missing or not a string", k401Unauthorized);
+            co_return createJsonErrorResponse("Corrupted session: user.role.name missing or not a string", k500InternalServerError);
         }
         if (!session.isMember("user") || !session["user"].isMember("id") || !session["user"]["id"].isInt()) {
-            co_return createJsonErrorResponse("Invalid session: user.id missing or not an integer", k401Unauthorized);
+            co_return createJsonErrorResponse("Corrupted session: user.id missing or not an integer", k500InternalServerError);
         }
 
         const bool is_admin = (session["user"]["role"]["name"].asString() == "admin");
         if (!session["session_id"].isInt()) {
-            co_return createJsonErrorResponse("Invalid session: session_id mismatch", k401Unauthorized);
+            co_return createJsonErrorResponse("Corrupted session: session_id missing", k500InternalServerError);
         }
 
         const int32_t user_id = session["user"]["id"].asInt();
@@ -1188,9 +1205,12 @@ Task<HttpResponsePtr> StorageApiHandler::handleDelete(HttpRequestPtr tsp_req) {
         response["type"] = type;
         co_return createJsonResponse(std::move(response), k200OK);
 
+    } catch (const drogon::orm::DrogonDbException& e) {
+        ERROR_LOG("Delete handler DB exception: {}", e.base().what());
+        co_return createErrorResponse(GenericApiError::InternalServerError);
     } catch (const std::exception& ex) {
         ERROR_LOG("Delete handler exception: {}", ex.what());
-        co_return createJsonErrorResponse(std::format("Internal error: {}", ex.what()), k500InternalServerError);
+        co_return createErrorResponse(GenericApiError::InternalServerError);
     }
 }
 
@@ -1408,9 +1428,12 @@ Task<HttpResponsePtr> StorageApiHandler::handleBulkAction(HttpRequestPtr tsp_req
         final_res["results"] = results;
         co_return createJsonResponse(std::move(final_res), k200OK);
 
+    } catch (const drogon::orm::DrogonDbException& e) {
+        ERROR_LOG("Bulk action handler DB exception: {}", e.base().what());
+        co_return createErrorResponse(GenericApiError::InternalServerError);
     } catch (const std::exception& ex) {
         ERROR_LOG("Bulk action handler exception: {}", ex.what());
-        co_return createJsonErrorResponse(std::format("Internal error: {}", ex.what()), k500InternalServerError);
+        co_return createErrorResponse(GenericApiError::InternalServerError);
     }
 }
 
@@ -1473,12 +1496,17 @@ Task<HttpResponsePtr> StorageApiHandler::handleGetStorageStats(HttpRequestPtr ts
             co_return HttpResponse::newHttpJsonResponse(std::move(stats));
         } catch (const drogon::orm::DrogonDbException& e) {
             SGRN_ERROR_LOG("handleGetStorageStats: SQL Execution Error: {}", e.base().what());
-            co_return createJsonErrorResponse(std::format("Database Error: {}", e.base().what()), k500InternalServerError);
+            co_return createErrorResponse(GenericApiError::InternalServerError);
+        } catch (const std::exception& ex) {
+            SGRN_ERROR_LOG("Storage stats handler exception: {}", ex.what());
+            co_return createErrorResponse(GenericApiError::InternalServerError);
         }
-
+    } catch (const drogon::orm::DrogonDbException& e) {
+        SGRN_ERROR_LOG("handleGetStorageStats: DB exception: {}", e.base().what());
+        co_return createErrorResponse(GenericApiError::InternalServerError);
     } catch (const std::exception& ex) {
-        SGRN_ERROR_LOG("Storage stats handler exception: {}", ex.what());
-        co_return createJsonErrorResponse(std::format("Internal error: {}", ex.what()), k500InternalServerError);
+        SGRN_ERROR_LOG("handleGetStorageStats: exception: {}", ex.what());
+        co_return createErrorResponse(GenericApiError::InternalServerError);
     }
 }
 

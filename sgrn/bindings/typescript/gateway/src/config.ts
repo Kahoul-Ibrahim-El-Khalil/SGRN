@@ -40,5 +40,7 @@ export function ws(path: string): string {
     typeof window !== "undefined" ? window.location : globalThis.location;
   const scheme = locationLike?.protocol === "https:" ? "wss" : "ws";
   const host = locationLike?.host ?? "localhost";
+  // Always routed through the nginx reverse proxy — nginx terminates TLS
+  // and proxies <base>/ws to the internal WS port. No direct-port fallback.
   return `${scheme}://${host}${getBasePath()}${path}`;
 }

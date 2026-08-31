@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 project(sgrn_gateway LANGUAGES CXX)
 
 find_package(Threads REQUIRED)
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 include(${CMAKE_SOURCE_DIR}/cmake/core.cmake)
 
@@ -426,7 +427,7 @@ add_custom_command(
 # ── Glob the Vite dist and bake into web_assets.hpp ──────────────────────────
 add_custom_command(
     OUTPUT  "${WEB_GEN_DIR}/web_assets.hpp"
-    COMMAND python3
+    COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/scripts/generate_web_headers.py"
         "${WEB_DIST_DIR}" "${WEB_GEN_DIR}"
         --level 22 --namespace "sgrn::gateway::assets::web"
@@ -446,7 +447,7 @@ file(GLOB_RECURSE DOC_DEPS CONFIGURE_DEPENDS "${DOC_SRC_DIR}/*")
 add_custom_command(
     OUTPUT "${DOC_GEN_DIR}/doc_assets.hpp"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DOC_GEN_DIR}"
-    COMMAND python3
+    COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/scripts/generate_embedded_assets.py"
             "${DOC_SRC_DIR}"
             "${DOC_GEN_DIR}"
