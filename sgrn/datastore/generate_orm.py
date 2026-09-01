@@ -7,7 +7,7 @@ import shutil
 
 # Defaults
 DEFAULT_TARGET_DIR = "src/orm/models"
-DEFAULT_SCHEMAS = ["core", "storage", "telemetry"]
+DEFAULT_SCHEMAS = ["core", "storage"]
 
 # Database Defaults
 DB_CONFIG_TEMPLATE = {

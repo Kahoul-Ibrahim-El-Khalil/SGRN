@@ -17,7 +17,6 @@ grant connect on database ${POSTGRES_DB} to sgrn_datastore,
   sgrn_postgrest;
 grant usage on schema core,
   storage,
-  telemetry,
   postgrest to sgrn_datastore,
   sgrn_postgrest;
 -- sgrn_datastore: full crud
@@ -26,48 +25,40 @@ grant select,
   update,
   delete on all tables in schema core,
   storage,
-  telemetry,
   postgrest to sgrn_datastore;
 grant usage,
   select,
   update on all sequences in schema core,
   storage,
-  telemetry,
   postgrest to sgrn_datastore;
 -- sgrn_postgrest: no delete
 grant select,
   insert,
   update on all tables in schema core,
-  storage,
-  telemetry to sgrn_postgrest;
+  storage to sgrn_postgrest;
 grant usage,
   select,
   update on all sequences in schema core,
-  storage,
-  telemetry to sgrn_postgrest;
+  storage to sgrn_postgrest;
 -- default privileges for future tables
 alter default privileges in schema core,
-storage,
-telemetry
+storage
 grant select,
   insert,
   update,
   delete on tables to sgrn_datastore;
 alter default privileges in schema core,
-storage,
-telemetry
+storage
 grant usage,
   select,
   update on sequences to sgrn_datastore;
 alter default privileges in schema core,
-storage,
-telemetry
+storage
 grant select,
   insert,
   update on tables to sgrn_postgrest;
 alter default privileges in schema core,
-storage,
-telemetry
+storage
 grant usage,
   select,
   update on sequences to sgrn_postgrest;
@@ -77,6 +68,5 @@ grant usage,
 -- neither role is an owner, so they are implicitly blocked.
 -- ============================================================
 revoke all privileges on all tables in schema core,
-storage,
-telemetry
+storage
 from public;

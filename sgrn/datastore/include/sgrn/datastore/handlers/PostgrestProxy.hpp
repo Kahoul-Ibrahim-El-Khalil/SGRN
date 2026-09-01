@@ -32,18 +32,9 @@ public:
     drogon::Task<drogon::HttpResponsePtr> handleProxyRequest(drogon::HttpRequestPtr tsp_http_req);
 
 private:
-    static inline const std::array<sgrn::IHandler<PostgrestProxyHandler>::route_config, 6> kRoutes = {
-        {{"/api/v1/postgrest/telemetry/objects", &PostgrestProxyHandler::handleProxyRequest, {drogon::Get},
+    static inline const std::array<sgrn::IHandler<PostgrestProxyHandler>::route_config, 2> kRoutes = {
+        {{"/api/v1/postgrest/storage/files", &PostgrestProxyHandler::handleProxyRequest, {drogon::Get},
              {"sgrn::datastore::filters::UserAuthFilter"}},
-            {"/api/v1/postgrest/telemetry/data", &PostgrestProxyHandler::handleProxyRequest, {drogon::Get},
-                {"sgrn::datastore::filters::UserAuthFilter"}},
-            {"/api/v1/postgrest/storage/files", &PostgrestProxyHandler::handleProxyRequest, {drogon::Get},
-                {"sgrn::datastore::filters::UserAuthFilter"}},
-
-            {"/api/v1/postgrest/automated-service/telemetry/objects", &PostgrestProxyHandler::handleProxyRequest, {drogon::Get},
-                {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}},
-            {"/api/v1/postgrest/automated-service/telemetry/data", &PostgrestProxyHandler::handleProxyRequest, {drogon::Get},
-                {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}},
             {"/api/v1/postgrest/automated-service/storage/files", &PostgrestProxyHandler::handleProxyRequest, {drogon::Get},
                 {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}}}};
 };

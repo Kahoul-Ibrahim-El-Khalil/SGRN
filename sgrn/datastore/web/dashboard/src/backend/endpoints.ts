@@ -5,8 +5,6 @@ export const AdminBackendApiEndpoints = {
     LIST_AUTOMATED_SERVICES: "/api/v1/admin/automated-services",
     UPDATE_AUTOMATED_SERVICE_METADATA: (id: number) => `/api/v1/admin/automated-services/${id}/metadata`,
     ROTATE_AUTOMATED_SERVICE_TOKEN: "/api/v1/admin/automated-services/rotate-token",
-    LIST_IOT_OBJECTS: "/api/v1/admin/telemetry/objects",
-    UPDATE_IOT_OBJECT_METADATA: (id: number) => `/api/v1/admin/telemetry/objects/${id}/metadata`,
 } as const;
 export const SessionBackendApiEndpoints = {
     SIGN_IN: "/api/v1/auth/user/signin",

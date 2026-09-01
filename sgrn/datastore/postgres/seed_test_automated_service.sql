@@ -1,6 +1,6 @@
 -- ============================================================
 -- seed_test_automated_service.sql
--- Seeds a dedicated test automated service and telemetry object for SDK testing.
+-- Seeds a dedicated test automated service for SDK testing.
 -- ============================================================
 DO $$
 DECLARE
@@ -8,7 +8,7 @@ DECLARE
     v_token UUID;
     v_secret TEXT;
     v_org TEXT;
-    v_object_id INT;
+
 BEGIN
     -- 0. Clean up existing test data to ensure a fresh run
     DELETE FROM core.automated_services WHERE name = 'sdk-test-service';
@@ -28,13 +28,7 @@ BEGIN
     RAISE NOTICE '  Token: %', v_token;
     RAISE NOTICE '  Secret: %', v_secret;
 
-    INSERT INTO telemetry."object" (organisation, automated_service_id, name, metadata, status)
-    VALUES (v_org, v_automated_service_id, 'test-plc-01', '{"mac": "00:11:22:33:44:55", "model": "S7-1200"}'::jsonb, 'online')
-    RETURNING id INTO v_object_id;
 
-    RAISE NOTICE 'Test telemetry object Created:';
-    RAISE NOTICE '  ID: %', v_object_id;
-    RAISE NOTICE '  Name: test-plc-01';
 
     -- 3. Output credentials
 END $$;

@@ -32,8 +32,8 @@ create table if not exists core.organisations (
 
 -- FIX #5: core.domains now holds the canonical operational-domain names
 -- (Production, Maintenance, …). The unique (organisation, name) constraint
--- is the target for composite FKs on users, automated_services, and
--- telemetry.object below — making dangling domain text values impossible.
+-- is the target for composite FKs on users and automated_services,
+-- making dangling domain text values impossible.
 create table if not exists core.domains (
   id int generated always as identity primary key,
   organisation text not null references core.organisations (name) on delete cascade on update cascade,

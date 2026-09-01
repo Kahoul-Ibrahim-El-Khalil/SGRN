@@ -78,7 +78,7 @@ export default function AdminTab() {
     const [submitting, setSubmitting] = useState(false);
 
     // Query Builder State
-    const [queryTable, setQueryTable] = useState<string>("telemetry_objects");
+    const [queryTable, setQueryTable] = useState<string>("automated_services");
     const [queryParams, setQueryParams] = useState<string>("");
     const [queryResult, setQueryResult] = useState<any>(null);
     const [queryLoading, setQueryLoading] = useState(false);
@@ -589,14 +589,11 @@ export default function AdminTab() {
                                         value={queryTable}
                                         onChange={(e) => setQueryTable(e.target.value)}
                                     >
-                                        <option value="telemetry_objects">IoT OBJECTS</option>
-                                        <option value="telemetry_data">RAW TELEMETRY</option>
-                                        <option value="telemetry">TELEMETRY DASHBOARD</option>
-                                        <option value="files">STORAGE FILES</option>
+                                        <option value="automated_services">AUTOMATED SERVICES</option>
                                         <option value="users">USER ROSTER</option>
                                         <option value="organisations">ORGANISATIONS</option>
                                         <option value="domains">DOMAINS</option>
-                                        <option value="automated_services">AUTOMATED SERVICES</option>
+                                        <option value="files">STORAGE FILES</option>
                                     </select>
                                     <input
                                         className="input-desktop flex-1"

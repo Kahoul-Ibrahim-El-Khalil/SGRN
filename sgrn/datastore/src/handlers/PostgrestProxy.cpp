@@ -16,7 +16,7 @@ drogon::Task<drogon::HttpResponsePtr> PostgrestProxyHandler::handleProxyRequest(
         // Extract suffix after "/api/v1/postgrest/"
         std::string suffix = path.substr(kProxyPrefix.length() + 1);
         if (!suffix.empty()) {
-            // Replace '/' with '_' (e.g. telemetry/data -> telemetry_data)
+            // Replace '/' with '_' to form PostgREST view names
             std::replace(suffix.begin(), suffix.end(), '/', '_');
             table = suffix;
         }

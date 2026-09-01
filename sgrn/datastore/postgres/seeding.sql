@@ -551,6 +551,9 @@ values
   ('wmv',  'video/x-ms-wmv',   true,  'Windows Media Video', true),
   -- data
   ('json', 'application/json', false, 'JSON Data File',      true),
+  
+  ('jsonl', 'application/json', false, 'JSONL Data File',    true),
+  
   -- images (webp was missing)
   ('webp', 'image/webp',       true,  'WebP Image',          true)
 on conflict (extension) do nothing;

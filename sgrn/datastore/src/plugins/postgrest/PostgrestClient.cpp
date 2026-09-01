@@ -61,13 +61,6 @@ Task<HttpResponsePtr> PostgrestClient::sendRequest(HttpRequestPtr tsp_req) {
             path = "/";
         }
 
-        // Compatibility: the proxy exposes some nested paths for readability,
-        // while PostgREST resources are flat view names.
-        if (path == "/telemetry/objects")
-            path = "/telemetry_objects";
-        if (path == "/telemetry/data")
-            path = "/telemetry_data";
-
         t_req->setPath(path);
 
         // Fix #1: Forward all query parameters (critical for PostgREST filtering/selection)

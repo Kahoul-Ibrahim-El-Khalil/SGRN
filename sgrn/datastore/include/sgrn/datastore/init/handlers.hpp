@@ -5,7 +5,6 @@
 #include <sgrn/datastore/handlers/auth.hpp>
 #include <sgrn/datastore/handlers/query.hpp>
 #include <sgrn/datastore/handlers/storage.hpp>
-#include <sgrn/datastore/handlers/telemetry.hpp>
 
 namespace sgrn::datastore::handlers
 {
@@ -18,7 +17,7 @@ inline void initHandlers() {
     static admin::AdminApiHandler admin_api_handler;
     static query::QueryApiHandler query_api_handler;
     static storage::StorageApiHandler storage_api_handler;
-    static telemetry::TelemetryHandler telemetry_handler;
+
     static query::PostgrestProxyHandler postgrest_proxy_handler;
 }
 

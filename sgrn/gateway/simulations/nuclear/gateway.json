@@ -41,5 +41,13 @@
     "anchor_change_count": 10,
     "zstd_level": 5,
     "anchor_zstd_level": 12
+  },
+  "datastore": {
+    "url": "https://localhost/datastore",
+    "public_token": "1e78dbe3-1f5b-404f-89c1-ae0c07e98c5c",
+    "private_token": "FEcPKSxEuJzpst-MYcR8OlQWzFYxPoVDK9Sk3qmGn6A",
+    "telemetry_enabled": true,
+    "vfs_remote_dir": "/gateway/snapshots",
+    "sync_interval_s": 30
   }
 }

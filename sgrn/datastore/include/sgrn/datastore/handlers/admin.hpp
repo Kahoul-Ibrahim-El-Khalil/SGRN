@@ -29,13 +29,11 @@ public:
     drogon::Task<drogon::HttpResponsePtr> handleListAutomatedServices(drogon::HttpRequestPtr tsp_req);
     drogon::Task<drogon::HttpResponsePtr> handleUpdateAutomatedServiceMetadata(drogon::HttpRequestPtr tsp_req);
     drogon::Task<drogon::HttpResponsePtr> handleRotateAutomatedServiceToken(drogon::HttpRequestPtr tsp_req);
-    drogon::Task<drogon::HttpResponsePtr> handleListIotObjects(drogon::HttpRequestPtr tsp_req);
-    drogon::Task<drogon::HttpResponsePtr> handleUpdateIotObjectMetadata(drogon::HttpRequestPtr tsp_req);
 
 private:
     std::string endpoints_cache_;
 
-    inline static const std::array<::sgrn::IHandler<AdminApiHandler>::route_config, 11> kRoutes = {{
+    inline static const std::array<::sgrn::IHandler<AdminApiHandler>::route_config, 9> kRoutes = {{
         {"/api/v1/admin/status", &AdminApiHandler::handleGetStatus, {drogon::Get},
             {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
         {"/api/v1/admin/users", &AdminApiHandler::handleGetUsers, {drogon::Get},
@@ -50,10 +48,6 @@ private:
         {"/api/v1/admin/automated-services/{id}/metadata", &AdminApiHandler::handleUpdateAutomatedServiceMetadata, {drogon::Patch},
             {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
         {"/api/v1/admin/automated-services/rotate-token", &AdminApiHandler::handleRotateAutomatedServiceToken, {drogon::Post},
-            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
-        {"/api/v1/admin/telemetry/objects", &AdminApiHandler::handleListIotObjects, {drogon::Get},
-            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
-        {"/api/v1/admin/telemetry/objects/{id}/metadata", &AdminApiHandler::handleUpdateIotObjectMetadata, {drogon::Patch},
             {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
         {"~^/api/v1/postgrest/.*", &AdminApiHandler::handlePostgrestProxyRequest,
             {drogon::Get, drogon::Post, drogon::Put, drogon::Patch, drogon::Delete},

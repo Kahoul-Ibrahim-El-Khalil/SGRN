@@ -95,71 +95,6 @@ select
   on postgrest.automated_services to sgrn_datastore,
   sgrn_postgrest;
 
--- telemetry dashboard
--- telemetry_view already filters deleted objects/services (FIX #7 in telemetry.sql)
-create or replace view postgrest.telemetry as
-select
-  *
-from
-  telemetry.telemetry_view;
-
-grant
-select
-  on postgrest.telemetry to sgrn_datastore,
-  sgrn_postgrest;
-
--- IoT objects
--- FIX #7: filter soft-deleted objects and their owning services.
-create or replace view postgrest.telemetry_objects as
-select
-  o.*
-from
-  telemetry."object" o
-  join core.automated_services a on a.id = o.automated_service_id
-where
-  o.deleted_at is null -- FIX #7
-  and a.deleted_at is null;
-
--- FIX #7
-grant
-select
-  on postgrest.telemetry_objects to sgrn_datastore,
-  sgrn_postgrest;
-
--- raw telemetry data
--- FIX #7: filter soft-deleted objects and services.
--- raw telemetry data — stub until a replacement timeseries backend is wired in.
--- (telemetry.object_telemetry was a TimescaleDB hypertable; TimescaleDB removed.)
-create or replace view postgrest.telemetry_data as
-select
-  now()            as time,
-  null::int        as iot_object_id,
-  '{}'::jsonb      as metrics,
-  null::text       as organisation
-where false;
-
--- FIX #7
-grant
-select
-  on postgrest.telemetry_data to sgrn_datastore,
-  sgrn_postgrest;
-
--- storage directory tree (recursive sizes/counts for UI browsing)
-create or replace view postgrest.directory_tree as
-select
-  *
-from
-  storage.directory_tree;
-
-grant
-select
-  on postgrest.directory_tree to sgrn_datastore,
-  sgrn_postgrest;
-
--- ============================================================
--- complex rpc operations
--- ============================================================
--- create automated service (proxy to core.create_automated_service)
 create or replace function postgrest.create_automated_service (
   name varchar(128),
   metadata jsonb default '{}',
@@ -183,7 +118,6 @@ grant
 execute on function postgrest.create_automated_service (varchar, jsonb, text) to sgrn_datastore,
 sgrn_postgrest;
 
--- backwards-compatible 2-argument wrapper
 create or replace function postgrest.create_automated_service (name varchar(128), metadata jsonb default '{}') returns table (
   id int,
   organisation text,

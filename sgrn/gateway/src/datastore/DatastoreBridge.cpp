@@ -136,14 +136,9 @@ void DatastoreBridge::tryConnect() {
 
             // Perform Backend Handshake
             if (client_->hasSessionToken() || client_->signIn()) {
-                // Verification: Ensure the 'Telemetry Object' for this gateway exists in SGRN.
-                if (verifyObject()) {
-                    session_ready_ = true;
-                    cfg_reconnect_ms_ = reconnect_ms_base_; // reset backoff to 5s
-                    fmt::print(fg(fmt::color::green), "[backend] Session established with {}\n", cfg_.url);
-                } else {
-                    scheduleReconnect();
-                }
+                session_ready_ = true;
+                cfg_reconnect_ms_ = reconnect_ms_base_; // reset backoff to 5s
+                fmt::print(fg(fmt::color::green), "[backend] Session established with {}\n", cfg_.url);
             } else {
                 scheduleReconnect();
             }
@@ -153,40 +148,6 @@ void DatastoreBridge::tryConnect() {
         }
         connecting_ = false;
     });
-}
-
-bool DatastoreBridge::verifyObject() {
-    if (cfg_.upload_mode != "telemetry")
-        return true;
-
-    try {
-        auto objs = client_->query("telemetry_objects");
-        bool exists = false;
-        if (objs.IsArray()) {
-            for (const auto& o : objs.GetArray()) {
-                if (o.HasMember("name") && o["name"].IsString() && o["name"].GetString() == cfg_.object_name) {
-                    exists = true;
-                    break;
-                }
-            }
-        }
-        if (!exists) {
-            rapidjson::Document meta;
-            auto& alloc = meta.GetAllocator();
-            meta.SetObject();
-            meta.AddMember("source", rapidjson::Value("gateway", alloc), alloc);
-            meta.AddMember("kind", rapidjson::Value("plant-image", alloc), alloc);
-            meta.AddMember("registry_source", rapidjson::Value(registry_source_.c_str(), alloc), alloc);
-            meta.AddMember("name", rapidjson::Value(cfg_.object_name.c_str(), alloc), alloc);
-
-            client_->makeRequest(
-                "POST", "/api/v1/postgrest/automated-service/telemetry/objects", sgrn::utils::json::serializeCompact(meta));
-        }
-        return true;
-    } catch (const std::exception& e) {
-        fmt::print(fg(fmt::color::red), "[backend] Exception in verifyObject: {}\n", e.what());
-        return false;
-    }
 }
 
 void DatastoreBridge::setReconnectBase(int t_ms) {
@@ -235,33 +196,12 @@ void DatastoreBridge::processPendingBatches() {
             continue;
         }
 
-        bool success = false;
-        if (cfg_.upload_mode == "telemetry") {
-            success = uploadTelemetry(t_file_path);
-        } else {
-            success = uploadRaw(t_file_path);
-        }
+        bool success = uploadRaw(t_file_path);
 
         if (success) {
             moveToSynced(t_file_path);
             markSynced(t_id, t_file_path);
         }
-    }
-}
-
-bool DatastoreBridge::uploadTelemetry(const std::string& t_file_path) {
-    try {
-        std::ifstream ifs(t_file_path, std::ios::binary);
-        if (!ifs)
-            return false;
-        std::string compressed_body((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-        ifs.close();
-
-        client_->makeRequest("POST", "/api/v1/telemetry/ingest", compressed_body, "application/json; encoding=zstd");
-        return true;
-    } catch (const std::exception& e) {
-        fmt::print(fg(fmt::color::red), "[backend] Telemetry upload error: {}\n", e.what());
-        return false;
     }
 }
 

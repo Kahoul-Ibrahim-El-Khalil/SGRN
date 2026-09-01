@@ -140,7 +140,7 @@ private:
     const std::vector<std::string> updateColumns() const;
     void updateArgs(drogon::orm::internal::SqlBinder& binder) const;
     /// For mysql or sqlite3
-    void updateId(const uint64_t id_);
+    void updateId(const uint64_t id);
     std::shared_ptr<int32_t> id_;
     std::shared_ptr<std::string> organisation_;
     std::shared_ptr<std::string> name_;

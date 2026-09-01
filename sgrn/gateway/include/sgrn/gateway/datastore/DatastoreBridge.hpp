@@ -69,12 +69,10 @@ private:
     void startUploader();
     void scheduleUploaderTick();
     void tryConnect();
-    bool verifyObject();
     void scheduleReconnect();
     void stopClient();
 
     void processPendingBatches();
-    bool uploadTelemetry(const std::string& t_file_path);
     bool uploadRaw(const std::string& t_file_path);
 
     void moveToSynced(const std::string& t_file_path);

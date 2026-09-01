@@ -1,10 +1,10 @@
 {
-  "rdbms": "postgresql",
-  "host": "127.0.0.1",
-  "port": 59449,
-  "dbname": "sgrn",
-  "user": "sgrn_datastore",
-  "passwd": "dracaeris",
-  "tables": [],
-  "schema": "storage"
+    "rdbms": "postgresql",
+    "host": "127.0.0.1",
+    "port": 5432,
+    "dbname": "sgrn",
+    "user": "sgrn_datastore",
+    "passwd": "dracaeris",
+    "tables": [],
+    "schema": "storage"
 }
