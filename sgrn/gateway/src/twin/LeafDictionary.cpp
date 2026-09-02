@@ -21,9 +21,8 @@ LeafDictionary LeafDictionary::buildFrom(const scl::PlcSchemaStore& t_store) {
         visitDbFields(schema.fields, [&](const DbFieldVisitInfo& t_info) {
             if (t_info.is_leaf) {
                 const std::string full_path = db_prefix + "." + t_info.path;
-                dict.id_to_path.push_back({next_id, full_path});
+                dict.path_by_id.push_back(full_path);
                 dict.path_to_id[full_path] = next_id;
-                dict.id_to_path_map[next_id] = full_path;
                 ++next_id;
             }
         });
@@ -31,7 +30,7 @@ LeafDictionary LeafDictionary::buildFrom(const scl::PlcSchemaStore& t_store) {
 
     return dict;
 }
-Result<void, std::string> expandRecordKeys(const rapidjson::Value& t_record, const std::unordered_map<LeafId, std::string>& t_id_to_path,
+Result<void, std::string> expandRecordKeys(const rapidjson::Value& t_record, const std::vector<std::string>& t_path_by_id,
     rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out) {
 
     if (!t_record.IsObject()) {
@@ -59,10 +58,9 @@ Result<void, std::string> expandRecordKeys(const rapidjson::Value& t_record, con
                 std::string p_key_str = p_it->name.GetString();
                 try {
                     LeafId id = static_cast<LeafId>(std::stoul(p_key_str));
-                    auto path_it = t_id_to_path.find(id);
-                    if (path_it != t_id_to_path.end()) {
+                    if (id < t_path_by_id.size()) {
                         rapidjson::Value new_key(
-                            path_it->second.c_str(), static_cast<rapidjson::SizeType>(path_it->second.length()), t_alloc);
+                            t_path_by_id[id].c_str(), static_cast<rapidjson::SizeType>(t_path_by_id[id].length()), t_alloc);
                         rapidjson::Value new_value;
                         new_value.CopyFrom(p_it->value, t_alloc);
                         expanded_payload.AddMember(new_key, new_value, t_alloc);
@@ -100,8 +98,9 @@ Result<void, std::string> expandRecordKeys(const rapidjson::Value& t_record, con
 // id-keyed entries for every leaf whose dotted path resolves in path_to_id.
 namespace
 {
-void flattenWalk(const rapidjson::Value& t_node, const std::string& t_prefix, const std::unordered_map<std::string, LeafId>& t_path_to_id,
-    const std::vector<bool>* t_allowed, rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out) {
+void flattenWalk(const rapidjson::Value& t_node, const std::string& t_prefix,
+    const ankerl::unordered_dense::map<std::string, LeafId>& t_path_to_id, const std::vector<bool>* t_allowed,
+    rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out) {
     if (t_node.IsObject()) {
         for (auto it = t_node.MemberBegin(); it != t_node.MemberEnd(); ++it) {
             std::string child_path = t_prefix.empty() ? it->name.GetString() : t_prefix + "." + it->name.GetString();
@@ -143,8 +142,9 @@ void flattenWalk(const rapidjson::Value& t_node, const std::string& t_prefix, co
 }
 } // anonymous namespace
 
-Result<void, std::string> flattenNestedTree(const rapidjson::Value& t_nested, const std::unordered_map<std::string, LeafId>& t_path_to_id,
-    rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out) {
+Result<void, std::string> flattenNestedTree(const rapidjson::Value& t_nested,
+    const ankerl::unordered_dense::map<std::string, LeafId>& t_path_to_id, rapidjson::Document::AllocatorType& t_alloc,
+    rapidjson::Value& t_out) {
     SGRN_RETURN_ERROR_IF(!t_nested.IsObject(), "flattenNestedTree: input is not a JSON object");
     t_out.SetObject();
     flattenWalk(t_nested, "", t_path_to_id, nullptr, t_alloc, t_out);
@@ -152,7 +152,7 @@ Result<void, std::string> flattenNestedTree(const rapidjson::Value& t_nested, co
 }
 
 Result<void, std::string> flattenNestedTreeFiltered(const rapidjson::Value& t_nested,
-    const std::unordered_map<std::string, LeafId>& t_path_to_id, const std::vector<bool>& t_allowed,
+    const ankerl::unordered_dense::map<std::string, LeafId>& t_path_to_id, const std::vector<bool>& t_allowed,
     rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out) {
 
     SGRN_RETURN_ERROR_IF(!t_nested.IsObject(), "flattenNestedTreeFiltered: input is not a JSON object");

@@ -112,12 +112,8 @@ sgrn::Result<std::vector<std::pair<int64_t, std::string>>> EngineStateStore::lis
             return "SQLite database is not open";
         }
         std::vector<std::pair<int64_t, std::string>> rows;
-        for (auto row : *db_ << "SELECT id, compressed_path FROM engine_payloads WHERE synced = 0 ORDER BY id") {
-            int64_t id = 0;
-            std::string t_compressed_path;
-            row >> id >> t_compressed_path;
-            rows.emplace_back(id, std::move(t_compressed_path));
-        }
+        (*db_) << "SELECT id, compressed_path FROM engine_payloads WHERE synced = 0 ORDER BY id" >>
+            [&](int64_t id, std::string t_compressed_path) { rows.emplace_back(id, std::move(t_compressed_path)); };
         return rows;
     } catch (const std::exception& e) {
         return fmt::format("Failed to list pending payloads: {}", e.what());
@@ -154,12 +150,8 @@ sgrn::Result<std::vector<std::pair<int64_t, std::string>>> EngineStateStore::lis
         if (!db_)
             return "SQLite database is not open";
         std::vector<std::pair<int64_t, std::string>> rows;
-        for (auto row : *db_ << "SELECT id, json_path FROM engine_snapshots WHERE synced = 0 ORDER BY id") {
-            int64_t id = 0;
-            std::string path;
-            row >> id >> path;
-            rows.emplace_back(id, std::move(path));
-        }
+        (*db_) << "SELECT id, json_path FROM engine_snapshots WHERE synced = 0 ORDER BY id" >>
+            [&](int64_t id, std::string path) { rows.emplace_back(id, std::move(path)); };
         return rows;
     } catch (const std::exception& e) {
         return fmt::format("Failed to list pending snapshots: {}", e.what());

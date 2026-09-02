@@ -6,6 +6,7 @@
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/structures/SharedBuffer.hpp>
 #include <sgrn/utils/threading.hpp>
+#include <ankerl/unordered_dense.h>
 #include <asio.hpp>
 #include <atomic>
 #include <condition_variable>
@@ -163,7 +164,7 @@ public:
     std::string getDeltaSnapshot(const std::vector<uint16_t>& t_filter = {});
     /// Flat numeric-keyed delta (dictionary / Phase-4 mode): {"<id>": val, ...}
     std::string getDeltaSnapshotFlat(
-        const std::unordered_map<std::string, uint32_t>& t_path_to_id, const std::vector<uint16_t>& t_filter = {});
+        const ankerl::unordered_dense::map<std::string, uint32_t>& t_path_to_id, const std::vector<uint16_t>& t_filter = {});
     std::vector<FieldUpdateNotification> collectTypedDirtyLeaves(uint16_t t_db_number);
     std::vector<uint16_t> getDirtyDbNumbers() const;
     bool waitForDirty(int t_timeout_ms);

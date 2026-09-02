@@ -3,6 +3,7 @@
 #include <sgrn/Result.hpp>
 #include <rapidjson/document.h>
 
+#include <ankerl/unordered_dense.h>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -25,9 +26,8 @@ using LeafId = uint32_t;
  * to contiguous integer IDs.
  */
 struct LeafDictionary {
-    std::vector<std::pair<LeafId, std::string>> id_to_path; // ordered, for writing the dictionary line
-    std::unordered_map<std::string, LeafId> path_to_id;     // for the write path (fast encode)
-    std::unordered_map<LeafId, std::string> id_to_path_map; // for the read path (fast decode)
+    ankerl::unordered_dense::map<std::string, LeafId> path_to_id; // for the write path (fast encode)
+    std::vector<std::string> path_by_id;                          // dense array for the read path (fast decode)
 
     /// Builds the dictionary in a fixed order: DBs ascending by db_number,
     /// fields within a DB in visitDbFields()'s declaration order. This
@@ -50,8 +50,8 @@ struct LeafDictionary {
  * Takes a rapidjson::Value (a changes/data object), an id_to_path mapping,
  * and an allocator. Writes the resolved dotted-path keyed object into t_out.
  */
-sgrn::Result<void, std::string> expandRecordKeys(const rapidjson::Value& t_record,
-    const std::unordered_map<LeafId, std::string>& t_id_to_path, rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out);
+sgrn::Result<void, std::string> expandRecordKeys(const rapidjson::Value& t_record, const std::vector<std::string>& t_path_by_id,
+    rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out);
 
 /**
  * @brief Flattens a nested JSON tree into a flat id-keyed map using path_to_id.
@@ -62,7 +62,8 @@ sgrn::Result<void, std::string> expandRecordKeys(const rapidjson::Value& t_recor
  * Leaves whose path is not in path_to_id are skipped.
  */
 sgrn::Result<void, std::string> flattenNestedTree(const rapidjson::Value& t_nested,
-    const std::unordered_map<std::string, LeafId>& t_path_to_id, rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out);
+    const ankerl::unordered_dense::map<std::string, LeafId>& t_path_to_id, rapidjson::Document::AllocatorType& t_alloc,
+    rapidjson::Value& t_out);
 
 /**
  * @brief Like flattenNestedTree, but also applies a leaf-ID filter.
@@ -71,7 +72,7 @@ sgrn::Result<void, std::string> flattenNestedTree(const rapidjson::Value& t_nest
  * pre-built to cover all IDs in the dictionary.
  */
 sgrn::Result<void, std::string> flattenNestedTreeFiltered(const rapidjson::Value& t_nested,
-    const std::unordered_map<std::string, LeafId>& t_path_to_id, const std::vector<bool>& t_allowed,
+    const ankerl::unordered_dense::map<std::string, LeafId>& t_path_to_id, const std::vector<bool>& t_allowed,
     rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out);
 
 } // namespace sgrn::gateway::twin

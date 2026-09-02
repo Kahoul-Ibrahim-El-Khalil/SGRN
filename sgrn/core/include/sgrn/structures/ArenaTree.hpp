@@ -2,6 +2,7 @@
 #pragma once
 
 #include <algorithm>
+#include <ankerl/unordered_dense.h>
 #include <atomic>
 #include <map>
 #include <memory>
@@ -395,8 +396,8 @@ private:
     std::map<std::string, std::unique_ptr<Segment>> segments_;
     std::map<uint32_t, Segment*> segments_by_id_;
     std::unique_ptr<TreeNode> root_;
-    std::unordered_map<uint16_t, LeafDescriptor*> id_map_;
-    std::unordered_map<std::string, LeafDescriptor*> path_map_;
+    ankerl::unordered_dense::map<uint16_t, LeafDescriptor*> id_map_;
+    ankerl::unordered_dense::map<std::string, LeafDescriptor*> path_map_;
     std::vector<std::unique_ptr<LeafDescriptor>> leaf_storage_;
 
     Guard lock(std::vector<std::string> t_paths, Guard::Mode t_mode) {

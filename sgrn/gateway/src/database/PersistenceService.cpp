@@ -94,7 +94,7 @@ Result<void> PersistenceService::configure(const PersistenceConfig& t_cfg, const
     // All callbacks arrive on the io_context, so WAL state is single-threaded.
     broker_sub_id_ = TelemetryBroker::instance().subscribe([this](const TelemetryEvent& t_ev) { onTelemetryEvent(t_ev); });
 
-    if (t_schema_store && dict_.id_to_path.empty()) {
+    if (t_schema_store && dict_.path_by_id.empty()) {
         dict_ = twin::LeafDictionary::buildFrom(*t_schema_store);
     }
 
@@ -183,10 +183,6 @@ void PersistenceService::onTelemetryEvent(const TelemetryEvent& t_event) {
     walkFields = [&](const std::string& t_prefix, const rapidjson::Value& t_obj) {
         for (auto f_it = t_obj.MemberBegin(); f_it != t_obj.MemberEnd(); ++f_it) {
             const std::string t_path = t_prefix.empty() ? f_it->name.GetString() : t_prefix + "." + f_it->name.GetString();
-            if (f_it->value.IsObject()) {
-                walkFields(t_path, f_it->value);
-                continue;
-            }
             auto id_it = dict_.path_to_id.find(t_path);
             if (id_it == dict_.path_to_id.end()) {
                 continue;
@@ -252,15 +248,11 @@ bool PersistenceService::passesFilter(twin::LeafId t_id) const {
 
 void PersistenceService::rebuildAllowedByIndex() {
     allowed_by_id_.clear();
-    if (dict_.id_to_path.empty())
+    if (dict_.path_by_id.empty())
         return;
-    size_t max_id = 0;
-    for (const auto& [id, _] : dict_.id_to_path) {
-        if (id > max_id)
-            max_id = id;
-    }
-    allowed_by_id_.resize(max_id + 1, false);
-    for (const auto& [id, path] : dict_.id_to_path) {
+    allowed_by_id_.resize(dict_.path_by_id.size(), false);
+    for (size_t id = 0; id < dict_.path_by_id.size(); ++id) {
+        const std::string& path = dict_.path_by_id[id];
         bool passes = true;
         if (!cfg_.namespaces.empty()) {
             passes = false;
@@ -398,10 +390,11 @@ Result<void, std::string> PersistenceService::openNewArchive(int64_t t_now) {
     dw.String("dictionary");
     dw.Key("leaves");
     dw.StartArray();
-    for (const auto& [id, path] : dict_.id_to_path) {
+    for (size_t id = 0; id < dict_.path_by_id.size(); ++id) {
+        const auto& path = dict_.path_by_id[id];
         dw.StartObject();
         dw.Key("id");
-        dw.Uint(id);
+        dw.Uint(static_cast<uint32_t>(id));
         dw.Key("path");
         dw.String(path.c_str(), static_cast<rapidjson::SizeType>(path.size()));
         dw.EndObject();

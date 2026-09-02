@@ -110,7 +110,7 @@ void WebSocketAdapter::setupConnectionHandler() {
                 // Push the leaf dictionary once at connect time so clients
                 // that opt into dictionary mode can decode flat id-keyed
                 // payloads before the first batch arrives.
-                if (dict_ && !dict_->id_to_path.empty()) {
+                if (dict_ && !dict_->path_by_id.empty()) {
                     rapidjson::StringBuffer dsb;
                     rapidjson::Writer<rapidjson::StringBuffer> dw(dsb);
                     dw.StartObject();
@@ -118,10 +118,11 @@ void WebSocketAdapter::setupConnectionHandler() {
                     dw.String("dictionary");
                     dw.Key("leaves");
                     dw.StartArray();
-                    for (const auto& [id, path] : dict_->id_to_path) {
+                    for (size_t id = 0; id < dict_->path_by_id.size(); ++id) {
+                        const auto& path = dict_->path_by_id[id];
                         dw.StartObject();
                         dw.Key("id");
-                        dw.Uint(id);
+                        dw.Uint(static_cast<uint32_t>(id));
                         dw.Key("path");
                         dw.String(path.c_str(), static_cast<rapidjson::SizeType>(path.size()));
                         dw.EndObject();

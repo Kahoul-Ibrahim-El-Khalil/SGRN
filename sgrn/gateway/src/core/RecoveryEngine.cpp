@@ -173,7 +173,7 @@ int applyValueToNode(PlcState& t_state, const std::string& t_path, const PlcNode
 // Old anchors remain genuinely nested. This function decides nested-vs-flat
 // by inspecting the payload's own keys rather than trusting the line type,
 // so both formats replay correctly without an archive version flag.
-int applyPayload(PlcState& t_state, const rapidjson::Value& t_root, const std::unordered_map<twin::LeafId, std::string>& t_id_to_path_map) {
+int applyPayload(PlcState& t_state, const rapidjson::Value& t_root, const std::vector<std::string>& t_path_by_id) {
     int skipped = 0;
     const rapidjson::Value* payload = nullptr;
     if (t_root.HasMember("data") && t_root["data"].IsObject())
@@ -198,10 +198,9 @@ int applyPayload(PlcState& t_state, const rapidjson::Value& t_root, const std::u
         // Flat form (dictionary encoded): dotted-path map { "123": <value>, … }
         for (auto it = payload->MemberBegin(); it != payload->MemberEnd(); ++it) {
             twin::LeafId id = static_cast<twin::LeafId>(std::stoul(it->name.GetString()));
-            auto path_it = t_id_to_path_map.find(id);
-            if (path_it != t_id_to_path_map.end()) {
-                const PlcNode* p_node = t_state.find(path_it->second);
-                restored += applyValueToNode(t_state, path_it->second, p_node, it->value, skipped);
+            if (id < t_path_by_id.size()) {
+                const PlcNode* p_node = t_state.find(t_path_by_id[id]);
+                restored += applyValueToNode(t_state, t_path_by_id[id], p_node, it->value, skipped);
             } else {
                 ++skipped;
             }
@@ -238,7 +237,7 @@ struct ReplayOutcome {
     int64_t last_anchor_line{0}; ///< 0 = no anchor found in this archive
     bool schema_ok{false};       ///< line 1 matched the live schema (or was null)
     bool found_footer{false};
-    std::unordered_map<twin::LeafId, std::string> id_to_path_map;
+    std::vector<std::string> path_by_id;
 };
 
 // Pass 1: stream the archive once, checking the schema line and learning the
@@ -273,7 +272,10 @@ ReplayOutcome scanArchive(
                     const auto& item = leaves[i];
                     if (item.IsObject() && item.HasMember("id") && item["id"].IsUint() && item.HasMember("path") &&
                         item["path"].IsString()) {
-                        out.id_to_path_map[item["id"].GetUint()] = item["path"].GetString();
+                        auto id = item["id"].GetUint();
+                        if (id >= out.path_by_id.size())
+                            out.path_by_id.resize(id + 1);
+                        out.path_by_id[id] = item["path"].GetString();
                     }
                 }
             }
@@ -290,8 +292,8 @@ ReplayOutcome scanArchive(
 
 // Pass 2: replay a scanned archive. Reads forward to last_anchor_line, decodes
 // the anchor as the base state, then applies every delta line after it.
-ReplayOutcome replayArchive(const fs::path& t_path, PlcState& t_state, int64_t t_last_anchor_line,
-    const std::unordered_map<twin::LeafId, std::string>& t_id_to_path_map) {
+ReplayOutcome replayArchive(
+    const fs::path& t_path, PlcState& t_state, int64_t t_last_anchor_line, const std::vector<std::string>& t_path_by_id) {
     sgrn::utils::compression::ZstdLineReader reader(t_path);
     if (!reader.ok())
         return ReplayOutcome{}; // caller already warned during pass 1
@@ -306,7 +308,7 @@ ReplayOutcome replayArchive(const fs::path& t_path, PlcState& t_state, int64_t t
             doc.Parse(line.c_str());
             if (doc.IsObject() && doc.HasMember("type") && doc["type"].IsString() &&
                 std::string_view(doc["type"].GetString()) == "anchor") {
-                out.restored += applyPayload(t_state, doc, t_id_to_path_map);
+                out.restored += applyPayload(t_state, doc, t_path_by_id);
             }
             continue;
         }
@@ -315,7 +317,7 @@ ReplayOutcome replayArchive(const fs::path& t_path, PlcState& t_state, int64_t t
         if (doc.HasParseError() || !doc.IsObject())
             continue;
 
-        out.restored += applyPayload(t_state, doc, t_id_to_path_map);
+        out.restored += applyPayload(t_state, doc, t_path_by_id);
     }
     out.schema_ok = true;
     out.last_anchor_line = t_last_anchor_line;
@@ -353,7 +355,7 @@ sgrn::Result<RecoveryResult, std::string> recoverStateFromArchives(
 
         // Second pass: seek forward (reader is forward-only) to the anchor line,
         // decode it as the base state, then replay the deltas after it.
-        ReplayOutcome replay = replayArchive(cand.path, t_state, scan.last_anchor_line, scan.id_to_path_map);
+        ReplayOutcome replay = replayArchive(cand.path, t_state, scan.last_anchor_line, scan.path_by_id);
         result.leaves_restored += replay.restored;
         result.leaves_skipped += replay.skipped;
         result.archive_used = cand.path.string();

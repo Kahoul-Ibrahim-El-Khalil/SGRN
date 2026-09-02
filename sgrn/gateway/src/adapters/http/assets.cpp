@@ -108,7 +108,6 @@ void HttpAdapter::registerWebAssets() {
             }
 
             t_res.set_content(cached->data(), cached->size(), asset.content_type.data());
-            SGRN_DEBUG("Gateway", "Serving asset: {} ({} bytes)", asset.virtual_path, t_res.body.size());
         };
 
         const auto& asset = web::ASSETS[i];

@@ -270,11 +270,12 @@ if(TARGET trantor)
     )
 endif()
 
-# 2m. Header-only deps (rapidjson, cpp-httplib, xml_h, sqlite_modern_cpp, s7codec)
-# These are fetched by the MAIN build via cmake/deps/header_only.cmake, not by this
-# deps-only build. Guard each with an existence check: when the source is undefined
-# here, install(DIRECTORY "/") would recursively copy the ENTIRE filesystem root
-# into the prefix (catastrophic). The main build installs them instead.
+# 2m. Header-only deps (rapidjson, cpp-httplib, xml_h, sqlite_modern_cpp,
+# unordered_dense, s7codec)
+# These are fetched by the deps-only build (see deps/CMakeLists.txt) so their headers
+# can be staged into the shared prefix here. Guard each with an existence check: when
+# the source is undefined here, install(DIRECTORY "/") would recursively copy the
+# ENTIRE filesystem root into the prefix (catastrophic).
 if(EXISTS "${rapidjson_SOURCE_DIR}/include")
     install(DIRECTORY "${rapidjson_SOURCE_DIR}/include/"
         DESTINATION "${_INC}"
@@ -295,6 +296,12 @@ if(EXISTS "${xml_h_SOURCE_DIR}")
 endif()
 if(EXISTS "${sqlite_modern_cpp_SOURCE_DIR}/hdr")
     install(DIRECTORY "${sqlite_modern_cpp_SOURCE_DIR}/hdr/"
+        DESTINATION "${_INC}"
+        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+    )
+endif()
+if(EXISTS "${unordered_dense_SOURCE_DIR}/include")
+    install(DIRECTORY "${unordered_dense_SOURCE_DIR}/include/"
         DESTINATION "${_INC}"
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
     )
@@ -564,6 +571,15 @@ if(NOT TARGET sqlite_modern_cpp)
 endif()
 if(NOT TARGET extern::sqlite_modern_cpp)
     add_library(extern::sqlite_modern_cpp ALIAS sqlite_modern_cpp)
+endif()
+
+# ── Header-only: unordered_dense ──────────────────────────────────────────────
+if(NOT TARGET unordered_dense)
+    add_library(unordered_dense INTERFACE IMPORTED GLOBAL)
+    target_include_directories(unordered_dense INTERFACE "${_inc}")
+endif()
+if(NOT TARGET extern::unordered_dense)
+    add_library(extern::unordered_dense ALIAS unordered_dense)
 endif()
 
 # ── Header-only: s7codec ─────────────────────────────────────────────────────

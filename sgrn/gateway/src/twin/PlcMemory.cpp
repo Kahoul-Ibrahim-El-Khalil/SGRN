@@ -572,7 +572,7 @@ std::string PlcMemory::getDeltaSnapshot(const std::vector<uint16_t>& t_filter) {
 }
 
 std::string PlcMemory::getDeltaSnapshotFlat(
-    const std::unordered_map<std::string, uint32_t>& t_path_to_id, const std::vector<uint16_t>& t_filter) {
+    const ankerl::unordered_dense::map<std::string, uint32_t>& t_path_to_id, const std::vector<uint16_t>& t_filter) {
     return p_plc_state_ ? p_plc_state_->getDeltaSnapshotFlat(t_path_to_id, t_filter) : "{}";
 }
 

@@ -95,6 +95,7 @@ sgrn_alias(sgrn::postgres)
 
 sgrn_alias(sgrn::redis)
 sgrn_alias(sgrn::aws)
+sgrn_alias(sgrn::unordered_dense)
 
 # 5. Build Areas (Extern First)
 if(SGRN_CROSS_WIN64 OR SGRN_CROSS_ARM64)
@@ -174,6 +175,7 @@ sgrn_link_dependency(sgrn::rapidjson rapidjson extern::rapidjson)
 sgrn_link_dependency(sgrn::httplib httplib extern::httplib)
 sgrn_link_dependency(sgrn::xml_h extern::xml_h extern::xml_h)
 sgrn_link_dependency(sgrn::sqlite_modern_cpp sqlite_modern_cpp extern::sqlite_modern_cpp)
+sgrn_link_dependency(sgrn::unordered_dense unordered_dense extern::unordered_dense)
 
 if(SGRN_USE_INSTALLED_DEPS)
     if(SGRN_BUILD_S7 AND (NOT TARGET extern::snap7cpp OR NOT TARGET extern::angelscript_addons))

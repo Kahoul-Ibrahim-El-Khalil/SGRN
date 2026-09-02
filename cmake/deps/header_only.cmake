@@ -53,3 +53,11 @@ if(NOT TARGET sqlite_modern_cpp)
     target_link_libraries(sqlite_modern_cpp INTERFACE sgrn::sqlite)
     add_library(extern::sqlite_modern_cpp ALIAS sqlite_modern_cpp)
 endif()
+
+# unordered_dense
+if(NOT TARGET unordered_dense)
+    sgrn_fetch_source(unordered_dense)
+    add_library(unordered_dense INTERFACE)
+    target_include_directories(unordered_dense SYSTEM INTERFACE "${unordered_dense_SOURCE_DIR}/include")
+    add_library(extern::unordered_dense ALIAS unordered_dense)
+endif()

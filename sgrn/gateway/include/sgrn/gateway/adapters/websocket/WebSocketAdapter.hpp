@@ -7,6 +7,7 @@
 #include <sgrn/gateway/security/SecurityManager.hpp>
 #include <sgrn/gateway/twin/LeafDictionary.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
+#include <ankerl/unordered_dense.h>
 #include <atomic>
 #include <condition_variable>
 #include <functional>
@@ -152,7 +153,7 @@ private:
     std::unique_ptr<ix::WebSocketServer> server_;
     std::mutex clients_mutex_;
     size_t broker_sub_id_ = 0;
-    std::unordered_map<std::shared_ptr<ix::WebSocket>, ClientContext> clients_;
+    ankerl::unordered_dense::map<std::shared_ptr<ix::WebSocket>, ClientContext> clients_;
 
     // Snapshot queue — enqueued by producer, dequeued by worker
     std::mutex queue_mutex_;

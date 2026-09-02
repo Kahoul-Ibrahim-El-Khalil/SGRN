@@ -238,6 +238,7 @@ target_include_directories(sgrn_gateway_twin PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/
 target_link_libraries(sgrn_gateway_twin PUBLIC sgrn_gateway_s7_wrappers sgrn_scl fmt::fmt)
 target_link_libraries(sgrn_gateway_twin PUBLIC extern::rapidjson)
 target_link_libraries(sgrn_gateway_twin PRIVATE sgrn::open62541)
+target_link_libraries(sgrn_gateway_twin PUBLIC sgrn::unordered_dense)
 
 set_target_properties(sgrn_gateway_twin PROPERTIES
     POSITION_INDEPENDENT_CODE ON
@@ -530,6 +531,7 @@ target_link_libraries(sgrn_gateway PRIVATE
     extern::sqlite_modern_cpp
     extern::httplib
     extern::rapidjson
+    sgrn::unordered_dense
 )
 
 sgrn_target(sgrn_gateway)

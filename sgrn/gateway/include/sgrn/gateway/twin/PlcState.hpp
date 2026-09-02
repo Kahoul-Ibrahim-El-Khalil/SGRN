@@ -9,6 +9,7 @@
 #include <sgrn/types/UniversalType.hpp>
 #include <sgrn/utils/endianess.hpp>
 #include <sgrn/utils/time.hpp>
+#include <ankerl/unordered_dense.h>
 #include <map>
 #include <memory>
 #include <optional>
@@ -433,7 +434,7 @@ public:
 
     const PlcNode* find(const std::string& t_path) const; // REVAMP-10: O(1) hashed lookup
 
-    using NodeMap = std::unordered_map<std::string, PlcNode, CaseInsensitiveHash, CaseInsensitiveEqual>;
+    using NodeMap = ankerl::unordered_dense::map<std::string, PlcNode, CaseInsensitiveHash, CaseInsensitiveEqual>;
     const NodeMap& nodes() const {
         return nodes_;
     }
@@ -495,7 +496,7 @@ public:
      * Dirty flags are cleared identically to getDeltaSnapshot().
      */
     std::string getDeltaSnapshotFlat(
-        const std::unordered_map<std::string, uint32_t>& t_path_to_id, const std::vector<uint16_t>& t_filter = {}) const;
+        const ankerl::unordered_dense::map<std::string, uint32_t>& t_path_to_id, const std::vector<uint16_t>& t_filter = {}) const;
 
     // ── Cache control ─────────────────────────────────────────────────────────
 
@@ -505,7 +506,7 @@ public:
 
 private:
     // PlcArena arena_; // Removed: using base Registry::tree()
-    std::unordered_map<std::string, PlcNode, CaseInsensitiveHash, CaseInsensitiveEqual> nodes_;
+    ankerl::unordered_dense::map<std::string, PlcNode, CaseInsensitiveHash, CaseInsensitiveEqual> nodes_;
 
     // MPSC Queue using mutex for now (low contention, fast)
     mutable std::mutex command_mutex_;

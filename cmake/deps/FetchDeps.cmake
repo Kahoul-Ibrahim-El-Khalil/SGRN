@@ -101,12 +101,15 @@ set(SGRN_DEP_rapidjson_TAG  "master")
 # cpp-httplib v0.53.0
 set(SGRN_DEP_cpp_httplib_URL "https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.53.0.tar.gz")
 
-# xml_h — no release tags
+# xml_h v2.1 (repo tags only, no release tarballs)
 set(SGRN_DEP_xml_h_REPO "https://github.com/mrvladus/xml.h.git")
-set(SGRN_DEP_xml_h_TAG  "e25eef90d2e76406ede5d3cfbd2a7595f166fe51")
+set(SGRN_DEP_xml_h_TAG  "2.1")
 
 # sqlite_modern_cpp v3.2
 set(SGRN_DEP_sqlite_modern_cpp_URL "https://github.com/SqliteModernCpp/sqlite_modern_cpp/archive/refs/tags/v3.2.tar.gz")
+
+# unordered_dense v4.4.0
+set(SGRN_DEP_unordered_dense_URL "https://github.com/martinus/unordered_dense/archive/refs/tags/v4.4.0.tar.gz")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # sgrn_fetch_source(<name>)

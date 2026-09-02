@@ -317,7 +317,7 @@ std::string PlcState::getDeltaSnapshot(const std::vector<uint16_t>& t_filter) co
 }
 
 std::string PlcState::getDeltaSnapshotFlat(
-    const std::unordered_map<std::string, uint32_t>& t_path_to_id, const std::vector<uint16_t>& t_filter) const {
+    const ankerl::unordered_dense::map<std::string, uint32_t>& t_path_to_id, const std::vector<uint16_t>& t_filter) const {
     rapidjson::StringBuffer buffer;
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
 

@@ -117,6 +117,18 @@ if(SGRN_BUILD_EXTERN_BACKEND)
     include(${CMAKE_CURRENT_LIST_DIR}/../cmake/deps/drogon.cmake)
 endif() # SGRN_BUILD_EXTERN_BACKEND
 
+# ── Header-only dependencies ──────────────────────────────────────────────────
+# These have no compiled artifacts, but the staged sysroot must still ship their
+# headers. The main build in installed-deps mode imports them from the prefix via
+# extern-config.cmake — it does NOT re-fetch them from CPM. Fetch the sources here
+# so staging.cmake (§2m, guarded by EXISTS checks) can copy their headers into the
+# shared prefix. Mirrors the packages wired in cmake/deps/header_only.cmake.
+sgrn_fetch_source(rapidjson)
+sgrn_fetch_source(cpp_httplib)
+sgrn_fetch_source(xml_h)
+sgrn_fetch_source(sqlite_modern_cpp)
+sgrn_fetch_source(unordered_dense)
+
 # End of third-party section: our own staging follows.
 
 # ── Staging: prefix/<platform> is libraries only ─────────────────────────────

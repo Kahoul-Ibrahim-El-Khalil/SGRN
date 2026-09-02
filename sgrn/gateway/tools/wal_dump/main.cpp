@@ -127,7 +127,7 @@ int main(int argc, char** argv) {
         std::string line;
         std::string archive_schema_json;
         std::string archive_dict_json;
-        std::unordered_map<LeafId, std::string> id_to_path_map;
+        std::vector<std::string> path_by_id;
         rapidjson::Document manifest_doc;
         rapidjson::Document footer_doc;
 
@@ -150,7 +150,10 @@ int main(int argc, char** argv) {
                     for (const auto& item : doc["leaves"].GetArray()) {
                         if (item.IsObject() && item.HasMember("id") && item["id"].IsUint() && item.HasMember("path") &&
                             item["path"].IsString()) {
-                            id_to_path_map[item["id"].GetUint()] = item["path"].GetString();
+                            auto id = item["id"].GetUint();
+                            if (id >= path_by_id.size())
+                                path_by_id.resize(id + 1);
+                            path_by_id[id] = item["path"].GetString();
                         }
                     }
                 }
@@ -197,8 +200,8 @@ int main(int argc, char** argv) {
                 }
 
                 rapidjson::Document doc_out;
-                if (!id_to_path_map.empty()) {
-                    if (!expandRecordKeys(doc, id_to_path_map, doc_out.GetAllocator(), doc_out).hasError()) {
+                if (!path_by_id.empty()) {
+                    if (!expandRecordKeys(doc, path_by_id, doc_out.GetAllocator(), doc_out).hasError()) {
                         data_out << serializeCompact(doc_out) << "\n";
                         continue;
                     }
