@@ -123,9 +123,9 @@ inline std::string datePath(int64_t t_ms) {
     auto tt = std::chrono::system_clock::to_time_t(tp);
     std::tm tm{};
 #ifdef _WIN32
-    gmtime_s(&tm, &tt);
+    localtime_s(&tm, &tt);
 #else
-    gmtime_r(&tt, &tm);
+    localtime_r(&tt, &tm);
 #endif
     std::ostringstream ss;
     ss << std::put_time(&tm, "%Y-%m-%d");
@@ -140,9 +140,9 @@ inline std::string timePath(int64_t t_ms) {
     auto tt = std::chrono::system_clock::to_time_t(tp);
     std::tm tm{};
 #ifdef _WIN32
-    gmtime_s(&tm, &tt);
+    localtime_s(&tm, &tt);
 #else
-    gmtime_r(&tt, &tm);
+    localtime_r(&tt, &tm);
 #endif
     std::ostringstream ss;
     ss << std::put_time(&tm, "%H:%M:%S");

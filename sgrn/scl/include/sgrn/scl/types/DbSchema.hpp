@@ -33,9 +33,9 @@ namespace sgrn::scl::db
 template <typename Writer>
 inline void serializeToWriter(Writer& t_writer, const sgrn::scl::DbSchema& t_db, bool t_headers_only = false) {
     t_writer.StartObject();
-    t_writer.Key("db_number");
+    t_writer.Key("number");
     t_writer.Int(t_db.db_number);
-    t_writer.Key("db_name");
+    t_writer.Key("name");
     t_writer.String(t_db.db_name.c_str());
     t_writer.Key("size_bytes");
     t_writer.Int(t_db.size_bytes);

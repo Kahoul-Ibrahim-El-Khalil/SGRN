@@ -76,6 +76,13 @@ public:
         std::shared_ptr<GatewayDatabase> tsp_db, const std::string& t_schema_json = std::string{},
         const scl::PlcSchemaStore* t_schema_store = nullptr);
 
+    /// Inject a pre-built LeafDictionary (from GatewayApplication). When set,
+    /// PersistenceService skips building its own and reuses the shared instance.
+    void setLeafDictionary(const twin::LeafDictionary& t_dict) {
+        dict_ = t_dict;
+        rebuildAllowedByIndex();
+    }
+
     void stop();
 
     /// True if the service is active (configured and not stopped).
@@ -88,7 +95,7 @@ public:
      *
      * Writes an "anchor" line into the current WAL archive.
      */
-    void ingestFullTree(const std::string& t_full_tree_json);
+    void ingestFullTree(const std::string& t_full_tree_json, const std::string& t_flat_tree_json = "");
 
 private:
     // -- Internal event handler --------------------------------------------
@@ -96,6 +103,7 @@ private:
 
     // -- Namespace filter ---------------------------------------------------
     bool passesFilter(twin::LeafId t_id) const;
+    void rebuildAllowedByIndex();
 
     // -- Atomic merge buffer ------------------------------------------------
     struct MergeBuffer {

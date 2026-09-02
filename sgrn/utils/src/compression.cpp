@@ -359,8 +359,11 @@ Result<void> ZstdLineWriter::writeLine(std::string_view t_line) {
     if (closed_) {
         return Error("ZstdLineWriter: write failed — writer already closed");
     }
+    if (!init_error_.empty()) {
+        return Error(init_error_);
+    }
     if (poisoned_) {
-        return Error(init_error_.empty() ? "ZstdLineWriter: write failed — writer in poisoned state" : init_error_);
+        return Error("ZstdLineWriter: write failed — writer in poisoned state");
     }
     if (t_line.size() > kMaxLineBytes) {
         poisoned_ = true;

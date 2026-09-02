@@ -32,7 +32,7 @@ namespace sgrn::scl::modbus::entry
 template <typename Writer>
 inline void serializeToWriter(Writer& t_writer, const sgrn::scl::ModbusVirtualEntry& t_e) {
     t_writer.StartObject();
-    t_writer.Key("db_number");
+    t_writer.Key("number");
     t_writer.Int(t_e.db_number);
     t_writer.Key("field_path");
     t_writer.String(t_e.field_path.c_str());
@@ -40,7 +40,7 @@ inline void serializeToWriter(Writer& t_writer, const sgrn::scl::ModbusVirtualEn
     t_writer.String(s7codec::s7TypeToString(t_e.type));
     t_writer.Key("byte_offset");
     t_writer.Int(t_e.byte_offset);
-    t_writer.Key("bit_index");
+    t_writer.Key("bit");
     t_writer.Int(t_e.bit_index);
     t_writer.Key("byte_count");
     t_writer.Int(t_e.byte_count);

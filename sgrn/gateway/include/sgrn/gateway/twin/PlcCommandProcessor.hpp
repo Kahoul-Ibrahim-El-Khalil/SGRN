@@ -1,6 +1,7 @@
 #pragma once
 #include <sgrn/gateway/twin/PlcCommand.hpp>
 #include <sgrn/gateway/twin/field_update.hpp>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -33,7 +34,7 @@ public:
     void setOnFieldUpdate(FieldUpdateCallback t_cb) {
         on_field_update_ = std::move(t_cb);
     }
-    void setDirtyHandler(std::function<void(std::vector<std::string>)> t_cb) {
+    void setDirtyHandler(std::function<void(std::vector<uint16_t>)> t_cb) {
         dirty_callback_ = std::move(t_cb);
     }
     void setContexts(asio::io_context* tp_light_ctx, asio::thread_pool* tp_heavy_pool) {
@@ -58,7 +59,14 @@ private:
     asio::io_context* light_ctx_{nullptr};
     asio::thread_pool* heavy_pool_{nullptr};
     FieldUpdateCallback on_field_update_;
-    std::function<void(std::vector<std::string>)> dirty_callback_;
+    std::function<void(std::vector<uint16_t>)> dirty_callback_;
     FieldUpdateBatchCallback on_field_update_batch_;
+
+    // Single-flight dirty processing: at most one processDirty() task
+    // is scheduled on light_ctx_ at any time. If a write arrives while
+    // processing is underway, dirty_recheck_ is set so the completion
+    // handler reschedules another pass.
+    std::atomic<bool> dirty_scheduled_{false};
+    std::atomic<bool> dirty_recheck_{false};
 };
 } // namespace sgrn::gateway::twin

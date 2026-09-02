@@ -54,7 +54,7 @@ static void serializeDbField(Writer& t_writer, const DbField& t_field) {
     t_writer.String(t_field.name.c_str());
     t_writer.Key("offset");
     t_writer.Int(t_field.offset);
-    t_writer.Key("bit_index");
+    t_writer.Key("bit");
     t_writer.Int(t_field.bit_index);
     t_writer.Key("type");
     t_writer.String(s7codec::s7TypeToString(t_field.type));
@@ -164,9 +164,9 @@ static void serializeUdtDefinition(Writer& t_writer, const UdtDefinition& t_udt)
 template <typename Writer>
 static void serializeDbSchema(Writer& t_writer, const DbSchema& t_db, bool t_headers_only) {
     t_writer.StartObject();
-    t_writer.Key("db_number");
+    t_writer.Key("number");
     t_writer.Int(t_db.db_number);
-    t_writer.Key("db_name");
+    t_writer.Key("name");
     t_writer.String(t_db.db_name.c_str());
     t_writer.Key("size_bytes");
     t_writer.Int(t_db.size_bytes);
@@ -336,7 +336,9 @@ static sgrn::Result<DbField, scl::SclError> fieldFromJson(const rapidjson::Value
 
     if (t_node.HasMember("offset"))
         t_field.offset = t_node["offset"].GetInt();
-    if (t_node.HasMember("bit_index"))
+    if (t_node.HasMember("bit"))
+        t_field.bit_index = t_node["bit"].GetInt();
+    else if (t_node.HasMember("bit_index"))
         t_field.bit_index = t_node["bit_index"].GetInt();
     if (t_node.HasMember("count"))
         t_field.count = t_node["count"].GetInt();
@@ -462,9 +464,13 @@ sgrn::Result<DbSchema, scl::SclError> SchemaSerializer::dbFromJson(const rapidjs
         return scl::SclError::Generic;
 
     DbSchema t_db;
-    if (t_node.HasMember("db_number"))
+    if (t_node.HasMember("number"))
+        t_db.db_number = t_node["number"].GetInt();
+    else if (t_node.HasMember("db_number"))
         t_db.db_number = t_node["db_number"].GetInt();
-    if (t_node.HasMember("db_name") && t_node["db_name"].IsString())
+    if (t_node.HasMember("name") && t_node["name"].IsString())
+        t_db.db_name = t_node["name"].GetString();
+    else if (t_node.HasMember("db_name") && t_node["db_name"].IsString())
         t_db.db_name = t_node["db_name"].GetString();
     if (t_node.HasMember("size_bytes"))
         t_db.size_bytes = t_node["size_bytes"].GetInt();

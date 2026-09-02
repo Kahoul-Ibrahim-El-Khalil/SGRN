@@ -115,7 +115,7 @@
                 {#each modbusMap.coils as reg}
                   <tr>
                     <td class="code">{reg.address}</td>
-                    <td>{reg.bit_index}</td>
+                    <td>{reg.bit}</td>
                     <td class="source-col">{reg.source}</td>
                     <td class="code">{reg.type}</td>
                     <td>{reg.access.toUpperCase()}</td>
@@ -125,7 +125,7 @@
                 {#each modbusMap.discrete_inputs as reg}
                   <tr>
                     <td class="code">{reg.address}</td>
-                    <td>{reg.bit_index}</td>
+                    <td>{reg.bit}</td>
                     <td class="source-col">{reg.source}</td>
                     <td class="code">{reg.type}</td>
                     <td>{reg.access.toUpperCase()}</td>

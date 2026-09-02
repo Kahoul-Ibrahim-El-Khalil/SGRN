@@ -8,6 +8,7 @@
 #include <sgrn/gateway/common/json_helper.hpp>
 #include <sgrn/gateway/common/path_utils.hpp>
 #include <sgrn/gateway/core/TelemetryBroker.hpp>
+#include <sgrn/gateway/twin/LeafDictionary.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <sgrn/utils/time.hpp>
 #include <ixwebsocket/IXWebSocket.h>
@@ -106,8 +107,32 @@ void WebSocketAdapter::setupConnectionHandler() {
                     }
                 }
 
+                // Push the leaf dictionary once at connect time so clients
+                // that opt into dictionary mode can decode flat id-keyed
+                // payloads before the first batch arrives.
+                if (dict_ && !dict_->id_to_path.empty()) {
+                    rapidjson::StringBuffer dsb;
+                    rapidjson::Writer<rapidjson::StringBuffer> dw(dsb);
+                    dw.StartObject();
+                    dw.Key("type");
+                    dw.String("dictionary");
+                    dw.Key("leaves");
+                    dw.StartArray();
+                    for (const auto& [id, path] : dict_->id_to_path) {
+                        dw.StartObject();
+                        dw.Key("id");
+                        dw.Uint(id);
+                        dw.Key("path");
+                        dw.String(path.c_str(), static_cast<rapidjson::SizeType>(path.size()));
+                        dw.EndObject();
+                    }
+                    dw.EndArray();
+                    dw.EndObject();
+                    ws_locked->send(dsb.GetString());
+                }
+
                 std::lock_guard<std::mutex> lk(clients_mutex_);
-                clients_[ws_locked] = ClientContext{connectionState->getRemoteIp(), origin, std::move(header_names), {}, {}};
+                clients_[ws_locked] = ClientContext{connectionState->getRemoteIp(), origin, std::move(header_names), {}, {}, false, {}};
             } else if (msg->type == ix::WebSocketMessageType::Close) {
                 std::lock_guard<std::mutex> lk(clients_mutex_);
                 clients_.erase(ws_locked);
@@ -158,15 +183,63 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
 
     // Send to each client — either full JSON (zero overhead) or filtered
     for (auto& target : targets) {
-        if (target.needs_filter && parsed_doc) {
-            // Convert slash-separated subscription paths to dotted PLC paths
-            // for the common json_helper::filterFields utility.
+        if (target.dictionary_mode && dict_ && !dict_->path_to_id.empty()) {
+            // Dictionary-mode client: flatten the nested delta snapshot into
+            // a flat {"<leaf_id>": value} map, filtering by pre-resolved ranges.
+            if (!parsed_doc) {
+                parsed_doc = std::make_unique<rapidjson::Document>();
+                parsed_doc->Parse(t_event.json_value->c_str());
+                if (parsed_doc->HasParseError() || !parsed_doc->IsObject()) {
+                    parsed_doc.reset();
+                }
+            }
+            if (parsed_doc) {
+                // Flatten the full snapshot once
+                rapidjson::Document flat_doc;
+                if (!twin::flattenNestedTree(*parsed_doc, dict_->path_to_id, flat_doc.GetAllocator(), flat_doc).hasError()) {
+                    // If the client has specific subscriptions, filter by ranges
+                    if (!target.leaf_ranges.empty()) {
+                        rapidjson::Document filtered_doc;
+                        filtered_doc.SetObject();
+                        for (auto it = flat_doc.MemberBegin(); it != flat_doc.MemberEnd(); ++it) {
+                            twin::LeafId id = static_cast<twin::LeafId>(std::stoul(it->name.GetString()));
+                            for (const auto& range : target.leaf_ranges) {
+                                if (id >= range.start && id <= range.end) {
+                                    rapidjson::Value key;
+                                    key.CopyFrom(it->name, filtered_doc.GetAllocator());
+                                    rapidjson::Value val;
+                                    val.CopyFrom(it->value, filtered_doc.GetAllocator());
+                                    filtered_doc.AddMember(key, val, filtered_doc.GetAllocator());
+                                    break;
+                                }
+                            }
+                        }
+                        rapidjson::StringBuffer filtered_sb;
+                        rapidjson::Writer<rapidjson::StringBuffer> filtered_w(filtered_sb);
+                        filtered_doc.Accept(filtered_w);
+                        if (!filtered_doc.ObjectEmpty())
+                            target.sp_ws->send(filtered_sb.GetString());
+                    } else {
+                        rapidjson::StringBuffer flat_sb;
+                        rapidjson::Writer<rapidjson::StringBuffer> flat_w(flat_sb);
+                        flat_doc.Accept(flat_w);
+                        target.sp_ws->send(flat_sb.GetString());
+                    }
+                } else {
+                    target.sp_ws->send(*t_event.json_value);
+                }
+            } else {
+                target.sp_ws->send(*t_event.json_value);
+            }
+        } else if (target.needs_filter && parsed_doc) {
+            // Non-dictionary filtered client: legacy path-based filtering
             std::set<std::string> dotted_subs;
             for (const auto& sub : target.field_subs) {
                 dotted_subs.insert(path_utils::topicToPlcPath(sub));
             }
             auto payload = json_helper::filterFields(*parsed_doc, dotted_subs);
-            target.sp_ws->send(payload);
+            if (!payload.empty() && payload != "{}")
+                target.sp_ws->send(payload);
         } else {
             target.sp_ws->send(*t_event.json_value);
         }
@@ -263,9 +336,10 @@ std::vector<WebSocketAdapter::TargetInfo> WebSocketAdapter::collectTargets(const
 
                 if (needs_filter) {
                     t_any_needs_filter = true;
-                    targets.push_back({std::move(tsp_ws), true, std::move(t_field_subs)});
+                    targets.push_back(
+                        {std::move(tsp_ws), true, it->second.dictionary_mode, std::move(t_field_subs), it->second.leaf_ranges});
                 } else {
-                    targets.push_back({std::move(tsp_ws), false, {}});
+                    targets.push_back({std::move(tsp_ws), false, it->second.dictionary_mode, {}, it->second.leaf_ranges});
                 }
             }
             ++it;
@@ -428,10 +502,12 @@ void WebSocketAdapter::handleClientMessage(std::shared_ptr<ix::WebSocket> tsp_ws
                         return;
                     }
                     it->second.subscriptions.insert(path);
+                    resolveLeafRanges(it->second);
                 }
             } else {
                 std::lock_guard<std::mutex> lk(clients_mutex_);
                 clients_[tsp_ws].subscriptions.insert(path);
+                resolveLeafRanges(clients_[tsp_ws]);
             }
         } else if (cmd == "subscribe_binary" && doc.HasMember("db")) {
             if (!registry_) {
@@ -532,6 +608,7 @@ void WebSocketAdapter::handleClientMessage(std::shared_ptr<ix::WebSocket> tsp_ws
             auto it = clients_.find(tsp_ws);
             if (it != clients_.end()) {
                 it->second.subscriptions.erase(path);
+                resolveLeafRanges(it->second);
             }
         } else if (cmd == "unsubscribe_binary" && doc.HasMember("db")) {
             if (!registry_) {
@@ -583,6 +660,14 @@ void WebSocketAdapter::handleClientMessage(std::shared_ptr<ix::WebSocket> tsp_ws
                 it->second.subscriptions.clear();
                 it->second.binary_subscriptions.clear();
             }
+        } else if (cmd == "setDictionaryMode") {
+            const bool enabled = doc.HasMember("enabled") && doc["enabled"].IsBool() && doc["enabled"].GetBool();
+            std::lock_guard<std::mutex> lk(clients_mutex_);
+            auto it = clients_.find(tsp_ws);
+            if (it != clients_.end()) {
+                it->second.dictionary_mode = enabled;
+                resolveLeafRanges(it->second);
+            }
         }
     }
 }
@@ -596,6 +681,61 @@ void WebSocketAdapter::stop() {
         server_->stop();
     }
     running_.store(false, std::memory_order_release);
+}
+
+void WebSocketAdapter::resolveLeafRanges(ClientContext& t_ctx) {
+    t_ctx.leaf_ranges.clear();
+    if (!dict_ || dict_->path_to_id.empty() || !t_ctx.dictionary_mode)
+        return;
+
+    // For each subscription, find all matching leaf ids and collect their ranges.
+    // LeafDictionary assigns ids contiguously per DB in DB-ascending order,
+    // so a whole-DB subscription is exactly one contiguous range.
+    for (const auto& sub : t_ctx.subscriptions) {
+        // Convert slash-separated topic path to dotted PLC path
+        std::string dotted = path_utils::topicToPlcPath(sub);
+        auto dot_pos = dotted.find('.');
+        std::string sub_db = dot_pos != std::string::npos ? dotted.substr(0, dot_pos) : dotted;
+        std::string sub_field = dot_pos != std::string::npos ? dotted.substr(dot_pos + 1) : "";
+
+        for (const auto& [path, id] : dict_->path_to_id) {
+            // Check if this leaf matches the subscription
+            auto leaf_dot = path.find('.');
+            std::string leaf_db = leaf_dot != std::string::npos ? path.substr(0, leaf_dot) : path;
+            std::string leaf_field = leaf_dot != std::string::npos ? path.substr(leaf_dot + 1) : "";
+
+            if (sub_db != leaf_db)
+                continue;
+
+            // DB-level subscription: all fields in the DB match
+            if (sub_field.empty()) {
+                t_ctx.leaf_ranges.push_back({id, id});
+                continue;
+            }
+
+            // Field-level subscription: exact match or prefix match
+            if (leaf_field == sub_field || (leaf_field.substr(0, sub_field.size()) == sub_field &&
+                                               (leaf_field.size() == sub_field.size() || leaf_field[sub_field.size()] == '.'))) {
+                t_ctx.leaf_ranges.push_back({id, id});
+            }
+        }
+    }
+
+    // Merge overlapping/adjacent ranges for efficiency
+    if (t_ctx.leaf_ranges.size() > 1) {
+        std::sort(t_ctx.leaf_ranges.begin(), t_ctx.leaf_ranges.end(), [](const auto& a, const auto& b) { return a.start < b.start; });
+        std::vector<ClientContext::LeafRange> merged;
+        merged.push_back(t_ctx.leaf_ranges[0]);
+        for (size_t i = 1; i < t_ctx.leaf_ranges.size(); ++i) {
+            auto& back = merged.back();
+            if (t_ctx.leaf_ranges[i].start <= back.end + 1) {
+                back.end = std::max(back.end, t_ctx.leaf_ranges[i].end);
+            } else {
+                merged.push_back(t_ctx.leaf_ranges[i]);
+            }
+        }
+        t_ctx.leaf_ranges = std::move(merged);
+    }
 }
 
 } // namespace sgrn::gateway::adapters::websocket

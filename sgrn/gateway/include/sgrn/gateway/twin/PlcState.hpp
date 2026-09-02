@@ -67,6 +67,11 @@ struct PlcNode {
     // Tier 1: Version tracking
     std::atomic<uint64_t> version_{0};
 
+    // Field-level dirty tracking: set by bumpFieldVersions() when this
+    // leaf's byte range overlaps a write and the data actually changed.
+    // Cleared by collectTypedDirtyLeaves() after the change is delivered.
+    mutable std::atomic<bool> field_dirty_{false};
+
     PlcNode() = default;
 
     PlcNode(const PlcNode& t_other)
@@ -86,7 +91,8 @@ struct PlcNode {
         , children_(t_other.children_)
         , full_path_(t_other.full_path_)
         , cached_slot_(t_other.cached_slot_)
-        , version_(t_other.version_.load(std::memory_order_relaxed)) {
+        , version_(t_other.version_.load(std::memory_order_relaxed))
+        , field_dirty_(t_other.field_dirty_.load(std::memory_order_relaxed)) {
     }
 
     PlcNode(PlcNode&& t_other) noexcept
@@ -106,7 +112,8 @@ struct PlcNode {
         , children_(std::move(t_other.children_))
         , full_path_(std::move(t_other.full_path_))
         , cached_slot_(t_other.cached_slot_)
-        , version_(t_other.version_.load(std::memory_order_relaxed)) {
+        , version_(t_other.version_.load(std::memory_order_relaxed))
+        , field_dirty_(t_other.field_dirty_.load(std::memory_order_relaxed)) {
     }
 
     PlcNode& operator=(PlcNode&& t_other) noexcept {
@@ -128,6 +135,7 @@ struct PlcNode {
             full_path_ = std::move(t_other.full_path_);
             cached_slot_ = t_other.cached_slot_;
             version_.store(t_other.version_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            field_dirty_.store(t_other.field_dirty_.load(std::memory_order_relaxed), std::memory_order_relaxed);
         }
         return *this;
     }
@@ -151,6 +159,7 @@ struct PlcNode {
             full_path_ = t_other.full_path_;
             cached_slot_ = t_other.cached_slot_;
             version_.store(t_other.version_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            field_dirty_.store(t_other.field_dirty_.load(std::memory_order_relaxed), std::memory_order_relaxed);
         }
         return *this;
     }
@@ -465,9 +474,15 @@ public:
     std::string getFullSnapshot() const;
 
     /**
+     * @brief Flat, leaf-id-keyed snapshot (dictionary mode)
+     */
+    std::string getFullSnapshotFlat(
+        const std::unordered_map<std::string, uint32_t>& t_path_to_id, const std::vector<bool>& t_allowed_by_id = {}) const;
+
+    /**
      * @brief Delta snapshot — serializes only dirty DB ranges, clears dirty marks.
      */
-    std::string getDeltaSnapshot(const std::vector<std::string>& t_filter = {}) const;
+    std::string getDeltaSnapshot(const std::vector<uint16_t>& t_filter = {}) const;
 
     // ── Cache control ─────────────────────────────────────────────────────────
 

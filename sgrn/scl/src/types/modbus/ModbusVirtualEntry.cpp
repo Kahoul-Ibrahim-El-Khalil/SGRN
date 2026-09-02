@@ -35,7 +35,9 @@ sgrn::scl::ModbusVirtualEntry fromJson(const rapidjson::Value& t_node) {
     if (!t_node.IsObject())
         return t_e;
 
-    if (t_node.HasMember("db_number"))
+    if (t_node.HasMember("number"))
+        t_e.db_number = t_node["number"].GetUint();
+    else if (t_node.HasMember("db_number"))
         t_e.db_number = t_node["db_number"].GetUint();
     if (t_node.HasMember("field_path") && t_node["field_path"].IsString())
         t_e.field_path = t_node["field_path"].GetString();
@@ -45,7 +47,9 @@ sgrn::scl::ModbusVirtualEntry fromJson(const rapidjson::Value& t_node) {
     }
     if (t_node.HasMember("byte_offset"))
         t_e.byte_offset = t_node["byte_offset"].GetInt();
-    if (t_node.HasMember("bit_index"))
+    if (t_node.HasMember("bit"))
+        t_e.bit_index = t_node["bit"].GetInt();
+    else if (t_node.HasMember("bit_index"))
         t_e.bit_index = t_node["bit_index"].GetInt();
     if (t_node.HasMember("byte_count"))
         t_e.byte_count = t_node["byte_count"].GetInt();

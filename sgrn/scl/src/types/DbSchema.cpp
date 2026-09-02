@@ -44,7 +44,9 @@ sgrn::scl::DbSchema fromJson(const rapidjson::Value& t_node) {
     if (!t_node.IsObject())
         return t_db;
 
-    if (t_node.HasMember("db_number"))
+    if (t_node.HasMember("number"))
+        t_db.db_number = t_node["number"].GetUint();
+    else if (t_node.HasMember("db_number"))
         t_db.db_number = t_node["db_number"].GetUint();
     if (t_node.HasMember("db_name") && t_node["db_name"].IsString())
         t_db.db_name = t_node["db_name"].GetString();

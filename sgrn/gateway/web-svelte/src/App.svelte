@@ -46,7 +46,7 @@
         registry.dbs.forEach((db) => {
           worker.postMessage({
             command: "subscribe",
-            args: { path: db.db_name },
+            args: { path: db.name },
           });
         });
       }

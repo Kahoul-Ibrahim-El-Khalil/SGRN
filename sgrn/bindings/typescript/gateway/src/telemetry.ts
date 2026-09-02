@@ -117,6 +117,21 @@ export class GatewayClient {
     }
   }
 
+  sendMessage(msg: Record<string, unknown>): SgrnResult<void> {
+    if (!this.socket || !this.connected) {
+      return { error: "WebSocket is not connected", scope: ErrorScope.Network };
+    }
+    try {
+      this.socket.send(JSON.stringify(msg));
+      return { data: undefined };
+    } catch (e) {
+      return {
+        error: `Failed to send message: ${e instanceof Error ? e.message : String(e)}`,
+        scope: ErrorScope.Runtime,
+      };
+    }
+  }
+
   onRawMessage(callback: RawMessageCallback): () => boolean {
     this.rawListeners.add(callback);
     return () => this.rawListeners.delete(callback);

@@ -11,6 +11,25 @@ let FLUSH_INTERVAL = 32; // ~30 Hz flush rate for UI smoothness
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 const activeSubscriptions = new Set<string>();
 
+// ── Dictionary-mode state ─────────────────────────────────────────────────
+let dictionaryMode = false;
+let idToPath = new Map<number, string>();
+
+/** Convert a dotted PLC path (ReactorCore.rods.position_pct) to the
+ *  registry key format (ReactorCore-rods/position_pct). */
+function toRegistryKey(path: string): string {
+  const dotIdx = path.indexOf(".");
+  if (dotIdx < 0) return path;
+  const db = path.substring(0, dotIdx);
+  const field = path.substring(dotIdx + 1).replace(/\./g, "/");
+  return `${db}-${field}`;
+}
+
+/** Convert a dotted PLC path to slash-separated format for subscription matching. */
+function toSlashPath(path: string): string {
+  return path.replace(/\./g, "/");
+}
+
 /** Checks if a given db or db/path is covered by any active subscription. */
 function isSubscribed(db: string, path: string): boolean {
   if (activeSubscriptions.size === 0) return false;
@@ -79,6 +98,8 @@ function flush(): void {
     const { url } = args;
     client = new GatewayClient(url);
     validKeys = null;
+    dictionaryMode = false;
+    idToPath.clear();
 
     client.onRawMessage((data: unknown) => {
       const debugMsg: WorkerMessage = {
@@ -93,10 +114,65 @@ function flush(): void {
       if (!data || typeof data !== "object") return;
       const ts = Date.now();
 
-      for (const dbName in data as Record<string, unknown>) {
-        const dbData = (data as Record<string, unknown>)[dbName];
-        if (typeof dbData !== "object" || dbData === null) continue;
-        flattenTelemetry(dbName, "", dbData, ts);
+      // Handle dictionary line from the server
+      if (
+        "type" in (data as Record<string, unknown>) &&
+        (data as Record<string, unknown>).type === "dictionary"
+      ) {
+        const dictData = data as { type: string; leaves: { id: number; path: string }[] };
+        if (dictData.leaves && Array.isArray(dictData.leaves)) {
+          idToPath.clear();
+          for (const leaf of dictData.leaves) {
+            idToPath.set(leaf.id, leaf.path);
+          }
+          // Enable dictionary mode on the server
+          client?.sendMessage({ command: "setDictionaryMode", enabled: true });
+          dictionaryMode = true;
+          const dictMsg: WorkerMessage = {
+            type: "debug",
+            args: { msg: `Dictionary mode enabled (${idToPath.size} leaves)`, color: "var(--accent)" },
+          };
+          self.postMessage(dictMsg);
+        }
+        return;
+      }
+
+      // Dictionary-mode: flat id-keyed batch from server
+      if (dictionaryMode && idToPath.size > 0) {
+        for (const idStr in data as Record<string, unknown>) {
+          const id = Number(idStr);
+          if (isNaN(id)) continue;
+
+          const path = idToPath.get(id);
+          if (!path) continue;
+
+          // Convert dotted path to registry key format: ReactorCore-rods/position_pct
+          const fullKey = toRegistryKey(path);
+          const slashPath = toSlashPath(path);
+          const dotIdx = path.indexOf(".");
+          const db = dotIdx > 0 ? path.substring(0, dotIdx) : path;
+
+          if (!isSubscribed(db, slashPath)) continue;
+          if (validKeys && !validKeys.has(fullKey)) continue;
+
+          const entry = (data as Record<string, unknown>)[idStr];
+          let value: unknown;
+          let entryTs = ts;
+          if (entry && typeof entry === "object" && "value" in (entry as Record<string, unknown>)) {
+            value = (entry as { value: unknown }).value;
+            entryTs = (entry as { ts: number }).ts || ts;
+          } else {
+            value = entry;
+          }
+          updateBuffer.set(fullKey, { value, ts: entryTs });
+        }
+      } else {
+        // Legacy mode: nested DB-object map
+        for (const dbName in data as Record<string, unknown>) {
+          const dbData = (data as Record<string, unknown>)[dbName];
+          if (typeof dbData !== "object" || dbData === null) continue;
+          flattenTelemetry(dbName, "", dbData, ts);
+        }
       }
 
       if (flushTimer !== null) clearTimeout(flushTimer);

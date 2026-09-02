@@ -488,6 +488,7 @@ set(GATEWAY_LIB_SOURCES
     src/database/GatewayDatabase.cpp
     src/database/EngineStateStore.cpp
     src/database/PersistenceService.cpp
+    src/gateway.cpp
 )
 
 sgrn_add_component_library(
@@ -503,6 +504,8 @@ sgrn_add_component_library(
         sgrn_gateway_s7
         sgrn_gateway_twin
         sgrn_gateway_opcua          # ← replaces inline OPC-UA sources
+        sgrn_gateway_ethernetip
+        sgrn_gateway_modbus
         sgrn_scl
     ENABLE_ORIGIN_RPATH
 )

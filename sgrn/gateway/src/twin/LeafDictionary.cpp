@@ -4,6 +4,7 @@
 
 #include <fmt/core.h>
 
+using sgrn::Result;
 namespace sgrn::gateway::twin
 {
 
@@ -12,11 +13,17 @@ LeafDictionary LeafDictionary::buildFrom(const scl::PlcSchemaStore& t_store) {
     LeafId next_id = 0;
 
     for (const auto& [db_num, schema] : t_store.dbs()) {
+        // Match the naming convention PlcState::registerSegment() already uses
+        // (see PlcState.cpp:27118) — dictionary paths must agree with the actual
+        // top-level segment/JSON key names, or every lookup silently misses.
+        const std::string db_prefix = schema.db_name.empty() ? fmt::format("DB{}", db_num) : schema.db_name;
+
         visitDbFields(schema.fields, [&](const DbFieldVisitInfo& t_info) {
             if (t_info.is_leaf) {
-                dict.id_to_path.push_back({next_id, t_info.path});
-                dict.path_to_id[t_info.path] = next_id;
-                dict.id_to_path_map[next_id] = t_info.path;
+                const std::string full_path = db_prefix + "." + t_info.path;
+                dict.id_to_path.push_back({next_id, full_path});
+                dict.path_to_id[full_path] = next_id;
+                dict.id_to_path_map[next_id] = full_path;
                 ++next_id;
             }
         });
@@ -24,12 +31,11 @@ LeafDictionary LeafDictionary::buildFrom(const scl::PlcSchemaStore& t_store) {
 
     return dict;
 }
-
-sgrn::Result<void, std::string> expandRecordKeys(const rapidjson::Value& t_record,
-    const std::unordered_map<LeafId, std::string>& t_id_to_path, rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out) {
+Result<void, std::string> expandRecordKeys(const rapidjson::Value& t_record, const std::unordered_map<LeafId, std::string>& t_id_to_path,
+    rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out) {
 
     if (!t_record.IsObject()) {
-        return sgrn::Error("Record is not a JSON object");
+        return Error("Record is not a JSON object");
     }
 
     t_out.SetObject();
@@ -86,6 +92,73 @@ sgrn::Result<void, std::string> expandRecordKeys(const rapidjson::Value& t_recor
         }
     }
 
+    return {};
+}
+
+// ── flattenNestedTree ────────────────────────────────────────────────────────
+// Internal recursive helper that walks a nested JSON object and emits flat
+// id-keyed entries for every leaf whose dotted path resolves in path_to_id.
+namespace
+{
+void flattenWalk(const rapidjson::Value& t_node, const std::string& t_prefix, const std::unordered_map<std::string, LeafId>& t_path_to_id,
+    const std::vector<bool>* t_allowed, rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out) {
+    if (t_node.IsObject()) {
+        for (auto it = t_node.MemberBegin(); it != t_node.MemberEnd(); ++it) {
+            std::string child_path = t_prefix.empty() ? it->name.GetString() : t_prefix + "." + it->name.GetString();
+            flattenWalk(it->value, child_path, t_path_to_id, t_allowed, t_alloc, t_out);
+        }
+    } else if (t_node.IsArray()) {
+        // First check if this prefix is itself a dictionary leaf (array-typed field).
+        // If so, emit the whole array value as-is rather than descending with [i] suffixes.
+        auto id_it = t_path_to_id.find(t_prefix);
+        if (id_it != t_path_to_id.end()) {
+            if (t_allowed && id_it->second < t_allowed->size() && !(*t_allowed)[id_it->second])
+                return;
+            std::string id_str = std::to_string(id_it->second);
+            rapidjson::Value key(id_str.c_str(), static_cast<rapidjson::SizeType>(id_str.size()), t_alloc);
+            rapidjson::Value val;
+            val.CopyFrom(t_node, t_alloc);
+            t_out.AddMember(key, val, t_alloc);
+            return;
+        }
+        // Not a leaf: descend into elements (for nested array-of-struct schemas).
+        for (rapidjson::SizeType i = 0; i < t_node.Size(); ++i) {
+            std::string elem_path = t_prefix + "[" + std::to_string(i) + "]";
+            flattenWalk(t_node[i], elem_path, t_path_to_id, t_allowed, t_alloc, t_out);
+        }
+    } else {
+        // Leaf value — look up the dotted path in the dictionary.
+        auto id_it = t_path_to_id.find(t_prefix);
+        SGRN_RETURN_IF(id_it == t_path_to_id.end(), ;);
+
+        SGRN_RETURN_IF(t_allowed && id_it->second < t_allowed->size() && !(*t_allowed)[id_it->second], ;);
+
+        std::string id_str = std::to_string(id_it->second);
+
+        rapidjson::Value key(id_str.c_str(), static_cast<rapidjson::SizeType>(id_str.size()), t_alloc);
+        rapidjson::Value val;
+        val.CopyFrom(t_node, t_alloc);
+        t_out.AddMember(key, val, t_alloc);
+    }
+}
+} // anonymous namespace
+
+Result<void, std::string> flattenNestedTree(const rapidjson::Value& t_nested, const std::unordered_map<std::string, LeafId>& t_path_to_id,
+    rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out) {
+    SGRN_RETURN_ERROR_IF(!t_nested.IsObject(), "flattenNestedTree: input is not a JSON object");
+    t_out.SetObject();
+    flattenWalk(t_nested, "", t_path_to_id, nullptr, t_alloc, t_out);
+    return {};
+}
+
+Result<void, std::string> flattenNestedTreeFiltered(const rapidjson::Value& t_nested,
+    const std::unordered_map<std::string, LeafId>& t_path_to_id, const std::vector<bool>& t_allowed,
+    rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out) {
+
+    SGRN_RETURN_ERROR_IF(!t_nested.IsObject(), "flattenNestedTreeFiltered: input is not a JSON object");
+
+    t_out.SetObject();
+    flattenWalk(t_nested, "", t_path_to_id, &t_allowed, t_alloc, t_out);
     return {};
 }
 

@@ -5,6 +5,7 @@
 // This keeps the networking layer decoupled from the PLC/memory layer.
 #include <sgrn/Result.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
+#include <sgrn/gateway/twin/LeafDictionary.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <atomic>
 #include <condition_variable>
@@ -86,6 +87,11 @@ public:
         BinaryReadFn t_binary_read_fn = {});
     void stop();
 
+    /// Inject a pre-built LeafDictionary for dictionary-mode live traffic.
+    void setLeafDictionary(const twin::LeafDictionary& t_dict) {
+        dict_ = &t_dict;
+    }
+
     struct Envelope {
         uint16_t db;
         std::string payload;
@@ -99,26 +105,6 @@ public:
     void broadcastDelta(const std::string& t_json_snapshot, uint64_t t_timestamp_ms = 0);
 
 private:
-    struct TargetInfo {
-        std::shared_ptr<ix::WebSocket> sp_ws;
-        bool needs_filter;
-        std::set<std::string> field_subs;
-    };
-
-    void setupConnectionHandler();
-    void handleTelemetryEvent(const sgrn::gateway::core::TelemetryEvent& t_event);
-    std::vector<TargetInfo> collectTargets(const sgrn::gateway::core::TelemetryEvent& t_event, bool& t_any_needs_filter);
-    std::map<std::tuple<uint16_t, size_t, size_t>, std::vector<std::shared_ptr<ix::WebSocket>>> collectBinaryTargets(uint16_t t_db);
-    bool sendBinaryFrame(
-        const std::shared_ptr<ix::WebSocket>& tsp_ws, uint16_t t_db, size_t t_offset, size_t t_size, double t_timestamp_seconds);
-    void workerLoop();
-    void handleClientMessage(std::shared_ptr<ix::WebSocket> tsp_ws, const std::string& t_message);
-
-    // IXWebSocket server
-    std::unique_ptr<ix::WebSocketServer> server_;
-
-    // Connected clients and their path-level subscriptions.
-    // An empty set means the client receives all updates.
     struct ClientContext {
         struct BinarySubscription {
             uint16_t db;
@@ -131,7 +117,39 @@ private:
         std::vector<std::string> headers;
         std::set<std::string> subscriptions;
         std::vector<BinarySubscription> binary_subscriptions;
+        bool dictionary_mode{false}; ///< when true, send flat id-keyed payloads
+        /// Pre-resolved leaf-id ranges for dictionary-mode subscription checks.
+        /// Computed once at subscribe/unsubscribe time — avoids per-event path
+        /// resolution and string-based overlap detection.
+        struct LeafRange {
+            twin::LeafId start;
+            twin::LeafId end;
+        };
+        std::vector<LeafRange> leaf_ranges;
     };
+
+    struct TargetInfo {
+        std::shared_ptr<ix::WebSocket> sp_ws;
+        bool needs_filter;
+        bool dictionary_mode;
+        std::set<std::string> field_subs;
+        std::vector<ClientContext::LeafRange> leaf_ranges;
+    };
+
+    void setupConnectionHandler();
+    void handleTelemetryEvent(const sgrn::gateway::core::TelemetryEvent& t_event);
+    std::vector<TargetInfo> collectTargets(const sgrn::gateway::core::TelemetryEvent& t_event, bool& t_any_needs_filter);
+    std::map<std::tuple<uint16_t, size_t, size_t>, std::vector<std::shared_ptr<ix::WebSocket>>> collectBinaryTargets(uint16_t t_db);
+    bool sendBinaryFrame(
+        const std::shared_ptr<ix::WebSocket>& tsp_ws, uint16_t t_db, size_t t_offset, size_t t_size, double t_timestamp_seconds);
+    void workerLoop();
+    void handleClientMessage(std::shared_ptr<ix::WebSocket> tsp_ws, const std::string& t_message);
+    /// Resolve a client's string subscriptions to contiguous leaf-id ranges
+    /// using the shared dictionary. Called once at subscribe/unsubscribe time.
+    void resolveLeafRanges(ClientContext& t_ctx);
+
+    // IXWebSocket server
+    std::unique_ptr<ix::WebSocketServer> server_;
     std::mutex clients_mutex_;
     size_t broker_sub_id_ = 0;
     std::unordered_map<std::shared_ptr<ix::WebSocket>, ClientContext> clients_;
@@ -152,6 +170,8 @@ private:
     // current (possibly persistence-restored) twin state. See start().
     std::function<std::string()> full_snapshot_provider_;
     BinaryReadFn binary_read_fn_;
+
+    const twin::LeafDictionary* dict_{nullptr}; ///< shared dictionary for dictionary-mode
 };
 
 } // namespace sgrn::gateway::adapters::websocket

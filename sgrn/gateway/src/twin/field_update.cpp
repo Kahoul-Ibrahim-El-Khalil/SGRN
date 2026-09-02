@@ -138,17 +138,56 @@ std::vector<FieldUpdateNotification> gatherTypedDirtyLeaves(PlcState& t_state, c
     const uint64_t t_timestamp = sgrn::utils::time::nowMilliseconds();
 
     std::shared_lock<std::shared_mutex> lk(p_entry->mutex_);
-    // HIGH-2: Snapshot the segment's arena slice under the lock so that
-    // makeFieldUpdateNotification reads from a stable copy, not from live
-    // arena bytes that a concurrent writeDbMemory call can overwrite.
     std::vector<uint8_t> arena_snapshot(p_entry->size);
     std::memcpy(arena_snapshot.data(), t_state.arenaData() + p_entry->offset, p_entry->size);
     lk.unlock();
 
-    for (const auto& [path, t_node] : t_state.nodes()) {
+    for (auto& [path, t_node] : t_state.nodes()) {
         if (path.size() <= prefix.size() || path.compare(0, prefix.size(), prefix) != 0)
             continue;
         if (!t_node.children_.empty() || !t_node.cached_slot_)
+            continue;
+        // Field-level: only emit nodes whose byte range was actually touched.
+        if (!t_node.field_dirty_.exchange(false, std::memory_order_acq_rel))
+            continue;
+        out.push_back(makeFieldUpdateNotification(t_state, t_node, *p_entry, path, t_timestamp, t_include_json));
+    }
+    return out;
+}
+
+std::vector<FieldUpdateNotification> gatherTypedDirtyLeavesByDb(PlcState& t_state, uint16_t t_db_number, bool t_include_json) {
+    std::vector<FieldUpdateNotification> out;
+
+    auto* p_entry = t_state.findSegmentById(t_db_number);
+    if (!p_entry)
+        return out;
+
+    if (!p_entry->is_dirty_.load(std::memory_order_acquire))
+        return out;
+
+    std::string db_name;
+    for (const auto& [name, seg] : t_state.segments()) {
+        if (seg.get() == p_entry) {
+            db_name = name;
+            break;
+        }
+    }
+    if (db_name.empty())
+        return out;
+
+    const std::string prefix = db_name + ".";
+    const uint64_t t_timestamp = sgrn::utils::time::nowMilliseconds();
+
+    std::shared_lock<std::shared_mutex> lk(p_entry->mutex_);
+    lk.unlock();
+
+    for (auto& [path, t_node] : t_state.nodes()) {
+        if (path.size() <= prefix.size() || path.compare(0, prefix.size(), prefix) != 0)
+            continue;
+        if (!t_node.children_.empty() || !t_node.cached_slot_)
+            continue;
+        // Field-level: only emit nodes whose byte range was actually touched.
+        if (!t_node.field_dirty_.exchange(false, std::memory_order_acq_rel))
             continue;
         out.push_back(makeFieldUpdateNotification(t_state, t_node, *p_entry, path, t_timestamp, t_include_json));
     }

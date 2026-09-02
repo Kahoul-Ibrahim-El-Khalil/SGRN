@@ -65,6 +65,12 @@ inline ShellError fromS7Error(sgrn::gateway::wrappers::s7::S7Error e) {
             return ShellError::InvalidParam;
         case S7Error::Timeout:
             return ShellError::Timeout;
+        case S7Error::ConnectionFailed:
+            return ShellError::NotConnected;
+        case S7Error::DeviceBusy:
+            return ShellError::Timeout;
+        case S7Error::PduError:
+            return ShellError::Generic;
         default:
             return ShellError::Generic;
     }

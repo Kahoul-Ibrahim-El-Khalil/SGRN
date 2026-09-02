@@ -38,7 +38,7 @@ export function buildRegistryTree(
     t_parent_row_id: string,
   ): void {
     const full_path = t_parent_path ? `${t_parent_path}/${t_field.name}` : t_field.name;
-    const key = `${t_db.db_name}-${full_path}`;
+    const key = `${t_db.name}-${full_path}`;
     const children = resolveChildren(t_field, t_registry);
     const is_struct = !!(children && children.length > 0);
     const is_array =
@@ -51,8 +51,8 @@ export function buildRegistryTree(
     const node: RegistryTreeNode = {
       id: row_id,
       type: "field",
-      db_num: t_db.db_number,
-      db_name: t_db.db_name,
+      db_num: t_db.number,
+      db_name: t_db.name,
       name: t_field.name,
       path: full_path,
       key,
@@ -89,8 +89,8 @@ export function buildRegistryTree(
         nodes.push({
           id: `${row_id}-truncated`,
           type: "field",
-          db_num: t_db.db_number,
-          db_name: t_db.db_name,
+      db_num: t_db.number,
+          db_name: t_db.name,
           name: `Truncated: ${t_field.count - render_limit} more elements...`,
           path: "",
           key: "",
@@ -106,13 +106,13 @@ export function buildRegistryTree(
   }
 
   for (const db of t_registry.dbs ?? []) {
-    db_names.push(db.db_name);
+    db_names.push(db.name);
     const node: RegistryTreeNode = {
-      id: `db-${db.db_number}`,
+      id: `db-${db.number}`,
       type: "db",
-      db_num: db.db_number,
-      db_name: db.db_name,
-      name: db.db_name,
+      db_num: db.number,
+      db_name: db.name,
+      name: db.name,
       path: "",
       key: "",
       depth: 0,
@@ -141,7 +141,7 @@ export function flattenRegistryFields(
   if (!t_fields) return [];
   const results: FlatRegistryField[] = [];
   for (const field of t_fields) {
-    const offset = field.bit_index > 0 ? `${field.offset}.${field.bit_index}` : `${field.offset}.0`;
+    const offset = field.bit > 0 ? `${field.offset}.${field.bit}` : `${field.offset}.0`;
     const full_path = t_parent_path ? `${t_parent_path}/${field.name}` : field.name;
     results.push({
       name: field.name,
@@ -169,7 +169,7 @@ export function filterDbs(t_dbs: DbSchema[], t_term: string): DbSchema[] {
   if (!t_term) return t_dbs;
   return t_dbs.filter((db) => {
     const db_match =
-      db.db_name.toLowerCase().includes(t_term) || `db${db.db_number}`.includes(t_term);
+      db.name.toLowerCase().includes(t_term) || `db${db.number}`.includes(t_term);
     const field_match =
       db.fields?.some((field) => field.name.toLowerCase().includes(t_term)) ?? false;
     return db_match || field_match;
@@ -217,8 +217,8 @@ export function buildEipProjection(t_registry: RegistryResponse): EipProjectionR
         (field.children && field.children.length > 0) ||
         field.type.includes("String");
       rows.push({
-        db: db.db_name,
-        instance: db.db_number,
+        db: db.name,
+        instance: db.number,
         attr: attr++,
         field: field.name,
         cipType: isComposite ? "BYTE_ARRAY (0xD3)" : getCipType(field.type),
@@ -233,8 +233,8 @@ export function buildOpcuaProjection(t_registry: RegistryResponse): OpcuaProject
 
   for (const db of t_registry.dbs ?? []) {
     rows.push({
-      db: db.db_name,
-      nodeId: `ns=1;s=${db.db_name}`,
+      db: db.name,
+      nodeId: `ns=1;s=${db.name}`,
       dataType: "FolderType",
       valueRank: "Scalar",
     });
@@ -244,8 +244,8 @@ export function buildOpcuaProjection(t_registry: RegistryResponse): OpcuaProject
         const fullPath = parentPath ? `${parentPath}.${field.name}` : field.name;
         const isArray = field.count > 1 || field.type.includes("Array");
         rows.push({
-          db: db.db_name,
-          nodeId: `ns=1;s=${db.db_name}.${fullPath}.Value`,
+          db: db.name,
+          nodeId: `ns=1;s=${db.name}.${fullPath}.Value`,
           dataType: field.udt_name ? field.udt_name : field.type,
           valueRank: isArray ? "OneDimension" : "Scalar",
         });

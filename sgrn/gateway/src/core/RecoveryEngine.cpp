@@ -167,7 +167,13 @@ int applyValueToNode(PlcState& t_state, const std::string& t_path, const PlcNode
 // Applies one line's payload: an "anchor" line exposes .data (DB-object map),
 // a "delta" line exposes .changes (flat dotted-path map). Both recurse into
 // whatever node structure exists.
-int applyPayload(PlcState& t_state, const rapidjson::Value& t_root) {
+//
+// After Phase 1, new anchors are written as flat id-keyed maps and expanded
+// by expandRecordKeys() into flat dotted-path maps (same shape as deltas).
+// Old anchors remain genuinely nested. This function decides nested-vs-flat
+// by inspecting the payload's own keys rather than trusting the line type,
+// so both formats replay correctly without an archive version flag.
+int applyPayload(PlcState& t_state, const rapidjson::Value& t_root, const std::unordered_map<twin::LeafId, std::string>& t_id_to_path_map) {
     int skipped = 0;
     const rapidjson::Value* payload = nullptr;
     if (t_root.HasMember("data") && t_root["data"].IsObject())
@@ -181,9 +187,33 @@ int applyPayload(PlcState& t_state, const rapidjson::Value& t_root) {
     }
 
     int restored = 0;
-    bool is_delta = t_root.HasMember("changes") && payload == &t_root["changes"];
-    if (is_delta) {
-        // Delta form: flat dotted-path map { "DB10.field": <value>, … }
+
+    if (payload->MemberBegin() == payload->MemberEnd())
+        return 0;
+
+    const std::string first_key = payload->MemberBegin()->name.GetString();
+    bool is_numeric = std::all_of(first_key.begin(), first_key.end(), ::isdigit);
+
+    if (is_numeric) {
+        // Flat form (dictionary encoded): dotted-path map { "123": <value>, … }
+        for (auto it = payload->MemberBegin(); it != payload->MemberEnd(); ++it) {
+            twin::LeafId id = static_cast<twin::LeafId>(std::stoul(it->name.GetString()));
+            auto path_it = t_id_to_path_map.find(id);
+            if (path_it != t_id_to_path_map.end()) {
+                const PlcNode* p_node = t_state.find(path_it->second);
+                restored += applyValueToNode(t_state, path_it->second, p_node, it->value, skipped);
+            } else {
+                ++skipped;
+            }
+        }
+        return restored;
+    }
+
+    const PlcNode* first_node = t_state.find(first_key);
+    const bool is_flat = first_node && first_node->children_.empty();
+
+    if (is_flat) {
+        // Flat form: dotted-path map { "DB10.field": <value>, … }
         for (auto it = payload->MemberBegin(); it != payload->MemberEnd(); ++it) {
             const std::string path = it->name.GetString();
             const PlcNode* p_node = t_state.find(path);
@@ -191,7 +221,7 @@ int applyPayload(PlcState& t_state, const rapidjson::Value& t_root) {
         }
         return restored;
     }
-    // Anchor form: nested DB-object map { "DB10": { … }, … }
+    // Nested form: DB-object map { "DB10": { … }, … }
     for (auto it = payload->MemberBegin(); it != payload->MemberEnd(); ++it) {
         const std::string name = it->name.GetString();
         const PlcNode* p_node = t_state.find(name);
@@ -276,14 +306,7 @@ ReplayOutcome replayArchive(const fs::path& t_path, PlcState& t_state, int64_t t
             doc.Parse(line.c_str());
             if (doc.IsObject() && doc.HasMember("type") && doc["type"].IsString() &&
                 std::string_view(doc["type"].GetString()) == "anchor") {
-                if (!t_id_to_path_map.empty()) {
-                    rapidjson::Document doc_out;
-                    if (!twin::expandRecordKeys(doc, t_id_to_path_map, doc_out.GetAllocator(), doc_out).hasError()) {
-                        out.restored += applyPayload(t_state, doc_out);
-                        continue;
-                    }
-                }
-                out.restored += applyPayload(t_state, doc);
+                out.restored += applyPayload(t_state, doc, t_id_to_path_map);
             }
             continue;
         }
@@ -292,14 +315,7 @@ ReplayOutcome replayArchive(const fs::path& t_path, PlcState& t_state, int64_t t
         if (doc.HasParseError() || !doc.IsObject())
             continue;
 
-        if (!t_id_to_path_map.empty()) {
-            rapidjson::Document doc_out;
-            if (!twin::expandRecordKeys(doc, t_id_to_path_map, doc_out.GetAllocator(), doc_out).hasError()) {
-                out.restored += applyPayload(t_state, doc_out);
-                continue;
-            }
-        }
-        out.restored += applyPayload(t_state, doc);
+        out.restored += applyPayload(t_state, doc, t_id_to_path_map);
     }
     out.schema_ok = true;
     out.last_anchor_line = t_last_anchor_line;

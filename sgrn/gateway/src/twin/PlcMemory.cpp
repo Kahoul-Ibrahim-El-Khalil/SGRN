@@ -567,25 +567,23 @@ bool PlcMemory::checkDirty() {
     return false;
 }
 
-std::string PlcMemory::getDeltaSnapshot(const std::vector<std::string>& t_filter) {
-
+std::string PlcMemory::getDeltaSnapshot(const std::vector<uint16_t>& t_filter) {
     return p_plc_state_ ? p_plc_state_->getDeltaSnapshot(t_filter) : "{}";
 }
 
-std::vector<FieldUpdateNotification> PlcMemory::collectTypedDirtyLeaves(const std::string& t_segment_name) {
-
-    return p_plc_state_ ? gatherTypedDirtyLeaves(*p_plc_state_, t_segment_name) : std::vector<FieldUpdateNotification>{};
+std::vector<FieldUpdateNotification> PlcMemory::collectTypedDirtyLeaves(uint16_t t_db_number) {
+    return p_plc_state_ ? gatherTypedDirtyLeavesByDb(*p_plc_state_, t_db_number) : std::vector<FieldUpdateNotification>{};
 }
 
-std::vector<std::string> PlcMemory::getDirtyPaths() const {
-    std::vector<std::string> out;
+std::vector<uint16_t> PlcMemory::getDirtyDbNumbers() const {
+    std::vector<uint16_t> out;
 
     if (!p_plc_state_)
         return out;
 
     for (auto& [name_, seg] : p_plc_state_->segments()) {
         if (seg->is_dirty_.load(std::memory_order_acquire)) {
-            out.push_back(seg->name);
+            out.push_back(static_cast<uint16_t>(seg->id));
         }
     }
 
@@ -640,6 +638,10 @@ void PlcMemory::bumpFieldVersions(
                 auto tp = TreePath::fromDotted(path);
 
                 p_plc_state_->incrementNodeVersion(tp);
+
+                // Field-level dirty: mark this leaf so collectTypedDirtyLeaves
+                // can skip unchanged fields without scanning the full prefix.
+                node.field_dirty_.store(true, std::memory_order_release);
 
                 for (auto parent = tp.parent(); parent.has_value(); parent = parent->parent()) {
 

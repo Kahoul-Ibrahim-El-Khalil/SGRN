@@ -251,8 +251,9 @@ void ScriptDataBlock::push() {
                 if (res.hasError()) {
                     (void)setOpResult(res);
                     write_failed = true;
-                    throwScriptException(
-                        fmt::format("DB{}.push (segment @{}, len {}) failed", db_num_, start, i - start), fromS7Error(res.error()));
+                    auto shell_err = fromS7Error(res.error());
+                    throwScriptException(fmt::format("DB{}.push (segment @{}, len {}) failed", db_num_, start, i - start),
+                        shell_err == ShellError::Generic ? ShellError::WriteFailed : shell_err);
                 }
                 in_dirty_region = false;
             }
@@ -264,8 +265,9 @@ void ScriptDataBlock::push() {
         if (res.hasError()) {
             (void)setOpResult(res);
             write_failed = true;
-            throwScriptException(
-                fmt::format("DB{}.push (segment @{}, len {}) failed", db_num_, start, db_size_ - start), fromS7Error(res.error()));
+            auto shell_err = fromS7Error(res.error());
+            throwScriptException(fmt::format("DB{}.push (segment @{}, len {}) failed", db_num_, start, db_size_ - start),
+                shell_err == ShellError::Generic ? ShellError::WriteFailed : shell_err);
         }
     }
     if (write_failed) {

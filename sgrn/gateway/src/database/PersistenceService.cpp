@@ -18,6 +18,7 @@
 
 #include <sgrn/gateway/core/GlobalContext.hpp>
 #include <sgrn/gateway/database/PersistenceService.hpp>
+#include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/utils/compression.hpp>
 #include <sgrn/utils/json.hpp>
 #include <sgrn/utils/time.hpp>
@@ -31,16 +32,14 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 
 namespace sgrn::gateway::database
 {
-
 using namespace sgrn::gateway::core;
 using namespace sgrn::gateway::config;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Construction / configuration
-// ─────────────────────────────────────────────────────────────────────────────
+using sgrn::Result;
 
 PersistenceService::PersistenceService(asio::thread_pool* tp_heavy_pool)
     : heavy_pool_(tp_heavy_pool) {
@@ -50,7 +49,7 @@ PersistenceService::~PersistenceService() {
     stop();
 }
 
-sgrn::Result<void> PersistenceService::configure(const PersistenceConfig& t_cfg, const std::string& t_state_dir,
+Result<void> PersistenceService::configure(const PersistenceConfig& t_cfg, const std::string& t_state_dir,
     std::shared_ptr<GatewayDatabase> tsp_db, const std::string& t_schema_json, const scl::PlcSchemaStore* t_schema_store) {
     if (!t_cfg.enabled) {
         fmt::print(fg(fmt::color::yellow), "[persist] Persistence disabled — skipping.\n");
@@ -58,6 +57,25 @@ sgrn::Result<void> PersistenceService::configure(const PersistenceConfig& t_cfg,
     }
 
     cfg_ = t_cfg;
+    if (t_schema_store) {
+        // Expand legacy "DBx" namespaces to actual DB names if present in schema.
+        std::vector<std::string> expanded_namespaces;
+        for (const auto& ns : cfg_.namespaces) {
+            if (ns.rfind("DB", 0) == 0 && ns.size() > 2 && std::all_of(ns.begin() + 2, ns.end(), ::isdigit)) {
+                uint16_t db_num = std::stoi(ns.substr(2));
+                auto it = t_schema_store->dbs().find(db_num);
+                if (it != t_schema_store->dbs().end() && !it->second.db_name.empty()) {
+                    expanded_namespaces.push_back(it->second.db_name);
+                } else {
+                    expanded_namespaces.push_back(ns);
+                }
+            } else {
+                expanded_namespaces.push_back(ns);
+            }
+        }
+        cfg_.namespaces = expanded_namespaces;
+    }
+
     state_dir_ = t_state_dir;
     unsynced_dir_ = t_state_dir + "/unsynced";
     db_ = std::move(tsp_db);
@@ -76,32 +94,11 @@ sgrn::Result<void> PersistenceService::configure(const PersistenceConfig& t_cfg,
     // All callbacks arrive on the io_context, so WAL state is single-threaded.
     broker_sub_id_ = TelemetryBroker::instance().subscribe([this](const TelemetryEvent& t_ev) { onTelemetryEvent(t_ev); });
 
-    if (t_schema_store) {
+    if (t_schema_store && dict_.id_to_path.empty()) {
         dict_ = twin::LeafDictionary::buildFrom(*t_schema_store);
     }
 
-    // Build allowed_by_id_
-    if (!dict_.id_to_path.empty()) {
-        size_t max_id = 0;
-        for (const auto& [id, _] : dict_.id_to_path) {
-            if (id > max_id)
-                max_id = id;
-        }
-        allowed_by_id_.resize(max_id + 1, false);
-        for (const auto& [id, path] : dict_.id_to_path) {
-            bool passes = true;
-            if (!cfg_.namespaces.empty()) {
-                passes = false;
-                for (const auto& ns : cfg_.namespaces) {
-                    if (path.rfind(ns, 0) == 0) {
-                        passes = true;
-                        break;
-                    }
-                }
-            }
-            allowed_by_id_[id] = passes;
-        }
-    }
+    rebuildAllowedByIndex();
 
     active_.store(true, std::memory_order_relaxed);
 
@@ -132,6 +129,7 @@ void PersistenceService::stop() {
 void PersistenceService::onTelemetryEvent(const TelemetryEvent& t_event) {
     if (!active_.load(std::memory_order_relaxed))
         return;
+
     if (pending_tasks_.load(std::memory_order_relaxed) >= max_pending_)
         return;
 
@@ -178,13 +176,17 @@ void PersistenceService::onTelemetryEvent(const TelemetryEvent& t_event) {
     if (doc.HasParseError() || !doc.IsObject())
         return;
 
-    // Iterate top-level keys (DB names) → fields
-    for (auto db_it = doc.MemberBegin(); db_it != doc.MemberEnd(); ++db_it) {
-        const std::string db_name = db_it->name.GetString();
-        if (!db_it->value.IsObject())
-            continue;
-        for (auto f_it = db_it->value.MemberBegin(); f_it != db_it->value.MemberEnd(); ++f_it) {
-            const std::string t_path = db_name + "." + f_it->name.GetString();
+    // Iterate top-level keys (DB names) → fields recursively.
+    // getDeltaSnapshot() may contain nested leaves (e.g. ReactorCore.rods.position_pct),
+    // so we walk the full JSON tree and emit one delta per leaf.
+    std::function<void(const std::string&, const rapidjson::Value&)> walkFields;
+    walkFields = [&](const std::string& t_prefix, const rapidjson::Value& t_obj) {
+        for (auto f_it = t_obj.MemberBegin(); f_it != t_obj.MemberEnd(); ++f_it) {
+            const std::string t_path = t_prefix.empty() ? f_it->name.GetString() : t_prefix + "." + f_it->name.GetString();
+            if (f_it->value.IsObject()) {
+                walkFields(t_path, f_it->value);
+                continue;
+            }
             auto id_it = dict_.path_to_id.find(t_path);
             if (id_it == dict_.path_to_id.end()) {
                 continue;
@@ -199,6 +201,13 @@ void PersistenceService::onTelemetryEvent(const TelemetryEvent& t_event) {
 
             mergeOrFlushEvent(id, sb.GetString(), t_now);
         }
+    };
+
+    for (auto db_it = doc.MemberBegin(); db_it != doc.MemberEnd(); ++db_it) {
+        const std::string db_name = db_it->name.GetString();
+        if (!db_it->value.IsObject())
+            continue;
+        walkFields(db_name, db_it->value);
     }
 
     maybeFlushBatch(t_now);
@@ -208,7 +217,7 @@ void PersistenceService::onTelemetryEvent(const TelemetryEvent& t_event) {
 // Public ingestion of full-tree snapshots
 // ─────────────────────────────────────────────────────────────────────────────
 
-void PersistenceService::ingestFullTree(const std::string& t_full_tree_json) {
+void PersistenceService::ingestFullTree(const std::string& t_full_tree_json, const std::string& t_flat_tree_json) {
     const int64_t t_now = sgrn::utils::time::nowMilliseconds();
 
     if (auto res = openNewArchive(t_now); res.hasError()) {
@@ -219,7 +228,8 @@ void PersistenceService::ingestFullTree(const std::string& t_full_tree_json) {
     // Commit any open atomic merge window so archive ordering is consistent.
     commitMergeBuffer();
 
-    if (auto res = writeAnchorLine(t_full_tree_json, t_now); res.hasError()) {
+    const std::string& anchor_json = t_flat_tree_json.empty() ? t_full_tree_json : t_flat_tree_json;
+    if (auto res = writeAnchorLine(anchor_json, t_now); res.hasError()) {
         fmt::print(fg(fmt::color::red), "[persist] Anchor line write failed: {}\n", res.error());
         return;
     }
@@ -238,6 +248,31 @@ bool PersistenceService::passesFilter(twin::LeafId t_id) const {
     if (t_id >= allowed_by_id_.size())
         return false;
     return allowed_by_id_[t_id];
+}
+
+void PersistenceService::rebuildAllowedByIndex() {
+    allowed_by_id_.clear();
+    if (dict_.id_to_path.empty())
+        return;
+    size_t max_id = 0;
+    for (const auto& [id, _] : dict_.id_to_path) {
+        if (id > max_id)
+            max_id = id;
+    }
+    allowed_by_id_.resize(max_id + 1, false);
+    for (const auto& [id, path] : dict_.id_to_path) {
+        bool passes = true;
+        if (!cfg_.namespaces.empty()) {
+            passes = false;
+            for (const auto& ns : cfg_.namespaces) {
+                if (path.rfind(ns, 0) == 0) {
+                    passes = true;
+                    break;
+                }
+            }
+        }
+        allowed_by_id_[id] = passes;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -312,7 +347,7 @@ void PersistenceService::commitMergeBuffer() {
 // WAL archive lifecycle
 // ─────────────────────────────────────────────────────────────────────────────
 
-sgrn::Result<void, std::string> PersistenceService::openNewArchive(int64_t t_now) {
+Result<void, std::string> PersistenceService::openNewArchive(int64_t t_now) {
     if (current_archive_)
         return {};
 
@@ -406,7 +441,7 @@ sgrn::Result<void, std::string> PersistenceService::openNewArchive(int64_t t_now
     return {};
 }
 
-sgrn::Result<void> PersistenceService::writeDeltaLine(const std::string& t_record_json) {
+Result<void> PersistenceService::writeDeltaLine(const std::string& t_record_json) {
     if (!current_archive_) {
         if (auto res = openNewArchive(sgrn::utils::time::nowMilliseconds()); res.hasError())
             return res.error();
@@ -420,11 +455,16 @@ sgrn::Result<void> PersistenceService::writeDeltaLine(const std::string& t_recor
     return {};
 }
 
-sgrn::Result<void> PersistenceService::writeAnchorLine(const std::string& t_full_tree_json, int64_t t_ts) {
+Result<void> PersistenceService::writeAnchorLine(const std::string& t_json, int64_t t_ts) {
     if (!current_archive_) {
         if (auto res = openNewArchive(sgrn::utils::time::nowMilliseconds()); res.hasError())
             return res.error();
     }
+
+    // Parse the JSON. If it's already flat (numeric keys), we just write it.
+    // Otherwise, flatten it.
+    rapidjson::Document doc;
+    doc.Parse(t_json.c_str());
 
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> w(sb);
@@ -434,7 +474,30 @@ sgrn::Result<void> PersistenceService::writeAnchorLine(const std::string& t_full
     w.Key("ts");
     w.Int64(t_ts);
     w.Key("data");
-    w.RawValue(t_full_tree_json.c_str(), t_full_tree_json.size(), rapidjson::kObjectType);
+
+    bool is_flat = false;
+    if (!doc.HasParseError() && doc.IsObject() && doc.MemberCount() > 0) {
+        const char* first_key = doc.MemberBegin()->name.GetString();
+        is_flat = std::all_of(first_key, first_key + strlen(first_key), ::isdigit);
+    }
+
+    if (is_flat) {
+        w.RawValue(t_json.c_str(), t_json.size(), rapidjson::kObjectType);
+    } else if (!doc.HasParseError() && doc.IsObject() && !dict_.path_to_id.empty()) {
+        rapidjson::Document flat_doc;
+        if (twin::flattenNestedTreeFiltered(doc, dict_.path_to_id, allowed_by_id_, flat_doc.GetAllocator(), flat_doc).hasError()) {
+            // Fallback: write the raw nested tree if flattening fails.
+            w.RawValue(t_json.c_str(), t_json.size(), rapidjson::kObjectType);
+        } else {
+            rapidjson::StringBuffer flat_sb;
+            rapidjson::Writer<rapidjson::StringBuffer> flat_w(flat_sb);
+            flat_doc.Accept(flat_w);
+            w.RawValue(flat_sb.GetString(), flat_sb.GetSize(), rapidjson::kObjectType);
+        }
+    } else {
+        w.RawValue(t_json.c_str(), t_json.size(), rapidjson::kObjectType);
+    }
+
     w.EndObject();
 
     auto res = current_archive_->writeLine(sb.GetString());
@@ -512,8 +575,7 @@ void PersistenceService::finalizeArchive(int64_t t_ts_end) {
 }
 
 void PersistenceService::maybeFlushBatch(int64_t t_now) {
-    if (!current_archive_)
-        return;
+    SGRN_RETURN_IF(!current_archive_, ;);
 
     const bool size_triggered = current_line_counter_ >= 2 + static_cast<size_t>(cfg_.batch_size);
     const bool time_triggered = (t_now - current_archive_start_ts_) >= static_cast<int64_t>(cfg_.batch_interval_s) * 1000;
@@ -539,10 +601,9 @@ void PersistenceService::maybeFlushBatch(int64_t t_now) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 bool PersistenceService::anchorDue(int64_t t_now) const {
-    if (cfg_.mode != "full_tree_with_anchor")
-        return false;
-    if (needs_first_anchor_)
-        return false; // we're already waiting for the first anchor
+
+    SGRN_RETURN_IF(cfg_.mode != "full_tree_with_anchor", false);
+    SGRN_RETURN_IF(needs_first_anchor_, false); // we're already waiting for the first anchor
 
     const bool time_due = cfg_.anchor_interval_s > 0 && (t_now - last_anchor_ts_) >= static_cast<int64_t>(cfg_.anchor_interval_s) * 1000;
 

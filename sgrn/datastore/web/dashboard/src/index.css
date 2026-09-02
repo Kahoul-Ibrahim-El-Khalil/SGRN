@@ -2464,14 +2464,14 @@
    ===================================================================== */
 @media (max-width: 768px) {
     .desktop-sidebar {
-        width: 4rem;
+        width: 3rem;
         max-width: 4rem;
     }
     .desktop-content {
         padding: 1rem;
     }
     .desktop-header {
-        padding-inline: 1rem;
+        padding-inline: 0.5rem;
     }
     .auth-container {
         padding: 1rem;
@@ -3530,7 +3530,7 @@
        ---------------------------------------------------------------------- */
 
     .admin-shell {
-        max-width: 1440px;
+        max-width: 1080px;
         margin: 0 auto;
     }
 

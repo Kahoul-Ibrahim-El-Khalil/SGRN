@@ -214,20 +214,52 @@ std::string PlcState::getFullSnapshot() const {
     return buffer.GetString();
 }
 
-std::string PlcState::getDeltaSnapshot(const std::vector<std::string>& t_filter) const {
+std::string PlcState::getFullSnapshotFlat(
+    const std::unordered_map<std::string, uint32_t>& t_path_to_id, const std::vector<bool>& t_allowed_by_id) const {
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+
+    writer.StartObject();
+    std::vector<uint32_t> top_nums;
+    for (auto t_n : topLevelNumbers())
+        top_nums.push_back(t_n);
+    auto lock = const_cast<::sgrn::ArenaTree&>(tree()).lockSegments(top_nums, LockMode::Shared);
+
+    bool logged_missing = false;
+
+    for (const auto& [path, id] : t_path_to_id) {
+        if (!t_allowed_by_id.empty()) {
+            if (id >= t_allowed_by_id.size() || !t_allowed_by_id[id])
+                continue;
+        }
+        auto it = nodes_.find(path);
+        if (it != nodes_.end()) {
+            std::string id_str = std::to_string(id);
+            writer.Key(id_str.c_str(), static_cast<rapidjson::SizeType>(id_str.length()));
+            it->second.serialize(writer, tree(), 0, 0);
+        } else {
+            if (!logged_missing) {
+                fmt::print("[PlcState] Warning: some paths from dictionary are missing in PlcState (e.g. {})\n", path);
+                logged_missing = true;
+            }
+        }
+    }
+    writer.EndObject();
+    return buffer.GetString();
+}
+
+std::string PlcState::getDeltaSnapshot(const std::vector<uint16_t>& t_filter) const {
     rapidjson::StringBuffer buffer;
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
 
     writer.StartObject();
 
-    for (const auto& name : top_level_names_) {
-        if (!t_filter.empty() && std::find(t_filter.begin(), t_filter.end(), name) == t_filter.end())
+    // Iterate segments by numeric ID — no string comparison for filtering.
+    for (const auto& [db_id, p_entry_raw] : tree().segments_by_id()) {
+        if (!t_filter.empty() && std::find(t_filter.begin(), t_filter.end(), static_cast<uint16_t>(db_id)) == t_filter.end())
             continue;
 
-        const auto* t_node = find(name);
-        if (!t_node)
-            continue;
-        auto* p_entry = const_cast<DbEntry*>(t_node->cached_slot_);
+        auto* p_entry = const_cast<DbEntry*>(p_entry_raw);
         if (!p_entry)
             continue;
 
@@ -236,14 +268,8 @@ std::string PlcState::getDeltaSnapshot(const std::vector<std::string>& t_filter)
         bool dirty = false;
         {
             std::shared_lock<std::shared_mutex> lk(p_entry->mutex_);
-            // LOW-1: Take the snapshot copy first, clear dirty flag second.
-            // This ensures we never clear the flag before the data is safely
-            // captured — if something throws between copy and clear, the event
-            // will be re-delivered on the next poll cycle (safe duplication).
             const bool is_dirty = p_entry->is_dirty_.load(std::memory_order_acquire);
             if (is_dirty) {
-                // MED-1: Build the padded arena copy directly to avoid double allocation.
-                // We must pad up to entry->offset because serialization uses absolute pointers.
                 seg_copy.resize(p_entry->offset + p_entry->size, 0);
                 std::memcpy(seg_copy.data() + p_entry->offset, tree().data() + p_entry->offset, p_entry->size);
                 p_entry->getAndClearDirty();
@@ -254,11 +280,25 @@ std::string PlcState::getDeltaSnapshot(const std::vector<std::string>& t_filter)
         if (!dirty)
             continue;
 
-        writer.Key(name.c_str(), static_cast<rapidjson::SizeType>(name.length()));
+        // Find the segment name for the JSON key (reverse lookup — small N).
+        std::string seg_name;
+        for (const auto& [name, seg] : tree().segments()) {
+            if (seg.get() == p_entry) {
+                seg_name = name;
+                break;
+            }
+        }
+        if (seg_name.empty())
+            continue;
+
+        const auto* t_node = find(seg_name);
+        if (!t_node)
+            continue;
+
+        writer.Key(seg_name.c_str(), static_cast<rapidjson::SizeType>(seg_name.length()));
         rapidjson::StringBuffer db_buffer;
         rapidjson::Writer<rapidjson::StringBuffer> db_writer(db_buffer);
 
-        // Use seg_copy as a temporary arena view for serialization.
         struct SegmentArenaView : public ::sgrn::ArenaTree {
             SegmentArenaView(std::vector<uint8_t> data) {
                 arena_ = std::move(data);

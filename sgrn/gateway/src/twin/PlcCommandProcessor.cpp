@@ -1,3 +1,4 @@
+#include <sgrn/debug.hpp>
 #include <sgrn/gateway/twin/PlcCommand.hpp>
 #include <sgrn/gateway/twin/PlcCommandProcessor.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
@@ -12,6 +13,17 @@
 namespace sgrn::gateway::twin
 {
 
+enum class PlcCommandProcessorError : uint8_t { MEMORY_STATE_NOT_INITIALIZED, COMMANDS_QUEUE_EMPTY };
+
+inline std::string_view toString(PlcCommandProcessorError t_err) {
+    switch (t_err) {
+        case PlcCommandProcessorError::MEMORY_STATE_NOT_INITIALIZED:
+            return "Memory State Not Initialized";
+        case PlcCommandProcessorError::COMMANDS_QUEUE_EMPTY:
+            return "Commands queue emptu";
+    }
+}
+
 bool PlcCommandProcessor::hasPendingCommands() const {
     if (!memory_.state())
         return false;
@@ -19,12 +31,10 @@ bool PlcCommandProcessor::hasPendingCommands() const {
 }
 
 void PlcCommandProcessor::processCommands() {
-    if (!memory_.state())
-        return;
+    SGRN_RETURN_IF(!memory_.state(), ;);
 
     auto commands = memory_.state()->drainCommands();
-    if (commands.empty())
-        return;
+    SGRN_RETURN_IF(commands.empty(), ;);
 
     // WriteBinary no longer exists as a queued command type — OPC UA now
     // commits synchronously via PlcMemory::writeDbMemory() in writeValue.cpp.
@@ -155,19 +165,47 @@ void PlcCommandProcessor::processDirty() {
     processCommands();
 
     if (!memory_.checkDirty()) {
+        dirty_scheduled_.store(false, std::memory_order_release);
         return;
     }
 
-    std::vector<std::string> dirty_paths = memory_.getDirtyPaths();
+    // Capture dirty batch: collect DB numbers while flags are still set.
+    std::vector<uint16_t> dirty_dbs = memory_.getDirtyDbNumbers();
 
+    // Schedule the heavy work. The completion handler re-checks dirty state
+    // and reschedules if writes arrived during processing.
     if (heavy_pool_ && dirty_callback_) {
-        asio::post(*heavy_pool_, [cb = dirty_callback_, paths = std::move(dirty_paths)]() { cb(std::move(paths)); });
+        asio::post(*heavy_pool_, [this, cb = dirty_callback_, dbs = std::move(dirty_dbs)]() mutable {
+            cb(std::move(dbs));
+
+            // After processing, check if new writes arrived. If so, schedule
+            // another pass on the light context so those writes are captured.
+            if (dirty_recheck_.exchange(false, std::memory_order_acq_rel)) {
+                if (light_ctx_) {
+                    asio::post(*light_ctx_, [this]() { processDirty(); });
+                    return;
+                }
+            }
+            dirty_scheduled_.store(false, std::memory_order_release);
+        });
+    } else {
+        dirty_scheduled_.store(false, std::memory_order_release);
     }
 }
 
 void PlcCommandProcessor::signalDirty() {
-    if (light_ctx_) {
-        asio::post(*light_ctx_, [this]() { this->processDirty(); });
+    // Mark that new dirty state arrived (used by the heavy_pool completion
+    // handler to decide whether to reschedule).
+    dirty_recheck_.store(true, std::memory_order_release);
+
+    // Single-flight: only one processDirty() task is ever outstanding on
+    // the light context. If one is already running/queued, the recheck
+    // flag ensures it will reschedule after completion.
+    bool expected = false;
+    if (dirty_scheduled_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        if (light_ctx_) {
+            asio::post(*light_ctx_, [this]() { this->processDirty(); });
+        }
     }
 }
 

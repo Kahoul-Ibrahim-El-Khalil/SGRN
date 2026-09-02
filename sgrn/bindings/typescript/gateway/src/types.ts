@@ -2,7 +2,7 @@ export interface DbField {
   name: string;
   type: string;
   offset: number;
-  bit_index: number;
+  bit: number;
   count: number;
   udt_name?: string;
   unit?: string;
@@ -13,8 +13,8 @@ export interface DbField {
 }
 
 export interface DbSchema {
-  db_number: number;
-  db_name: string;
+  number: number;
+  name: string;
   size_bytes: number;
   endianness?: string;
   trigger_events?: boolean;
@@ -62,7 +62,7 @@ export interface ModbusRegister {
   start?: number;
   count?: number;
   address?: number;
-  bit_index?: number;
+  bit?: number;
   source: string;
   type: string;
   access: string;

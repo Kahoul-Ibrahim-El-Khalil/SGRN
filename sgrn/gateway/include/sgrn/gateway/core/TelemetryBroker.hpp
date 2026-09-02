@@ -109,17 +109,27 @@ public:
             for (const auto& [t_id, t_cb] : subs_)
                 snapshot.push_back(t_cb);
         }
-        asio::post(sgrn::gateway::core::GlobalContext::instance().io_context(), [snapshot = std::move(snapshot), shared_event]() {
+
+        // By posting the batch to a single strand_ instead of the raw io_context, we guarantee that:
+        // 1. All events are dequeued and processed in the EXACT order they were published.
+        // 2. We preserve strict determinism even if the underlying io_context runs on a thread pool.
+        // 3. We avoid thread-contention (no mutex needed in subscribers like PersistenceService).
+        // 4. The fast, non-blocking subscribers (like WebSocket queues and Zstd memory buffers)
+        //    execute sequentially without blocking the S7 polling thread that calls publish().
+        asio::post(strand_, [snapshot = std::move(snapshot), shared_event]() {
             for (const auto& t_cb : snapshot)
                 t_cb(*shared_event);
         });
     }
 
 private:
-    TelemetryBroker() = default;
+    TelemetryBroker()
+        : strand_(asio::make_strand(sgrn::gateway::core::GlobalContext::instance().io_context())) {
+    }
     std::unordered_map<SubscriberId, Callback> subs_;
     std::shared_mutex mutex_;
     std::atomic<SubscriberId> next_id_{0};
+    asio::strand<asio::io_context::executor_type> strand_;
 };
 
 } // namespace sgrn::gateway::core

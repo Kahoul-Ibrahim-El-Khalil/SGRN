@@ -142,7 +142,8 @@ sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
     if (root.HasMember("nodes") && root["nodes"].IsObject()) {
         for (auto it = root["nodes"].MemberBegin(); it != root["nodes"].MemberEnd(); ++it) {
             const auto& node = it->value;
-            const int db_val = node.HasMember("db_number") ? node["db_number"].GetInt() : -1;
+            const int db_val =
+                node.HasMember("number") ? node["number"].GetInt() : (node.HasMember("db_number") ? node["db_number"].GetInt() : -1);
             if (db_val > 0 && sgrn::scl::isInRange<uint16_t>(db_val)) {
                 const uint16_t db = static_cast<uint16_t>(db_val);
                 cfg.declared_db_numbers.insert(db);

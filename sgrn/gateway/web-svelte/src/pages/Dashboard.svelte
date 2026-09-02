@@ -518,10 +518,10 @@
                   <td class="cell-center" on:click|stopPropagation>
                     <input
                       type="checkbox"
-                      checked={isRegDbFullySubscribed(db.db_name)}
+                      checked={isRegDbFullySubscribed(db.name)}
                       on:change={(e) =>
                         toggleRegDbSubscription(
-                          db.db_name,
+                          db.name,
                           e.currentTarget.checked,
                         )}
                       class="dash-check"
@@ -534,8 +534,8 @@
                         class:collapsed={!expanded_reg_groups.has(group_id)}
                         >▼</span
                       >
-                      <span class="db-badge mr-6">DB{db.db_number}</span>
-                      <strong>{db.db_name}</strong>
+                       <span class="db-badge mr-6">DB{db.number}</span>
+                      <strong>{db.name}</strong>
                       <span class="meta-muted">{db.size_bytes} B</span>
                       {#if db.endianness}
                         <span class="btn-sm active ml-8"
@@ -545,7 +545,7 @@
                       {#if db.trigger_events}
                         <span class="btn-sm active warn ml-4">EVENTS</span>
                       {/if}
-                      {#if isRegDbFullySubscribed(db.db_name)}
+                      {#if isRegDbFullySubscribed(db.name)}
                         <span class="sub-badge sub-badge-active"
                           >SUBSCRIBED</span
                         >
@@ -576,12 +576,12 @@
                             <input
                               type="checkbox"
                               checked={isRegFieldSubscribed(
-                                db.db_name,
+                                db.name,
                                 f.full_path,
                               )}
                               on:change={(e) =>
                                 toggleRegFieldSubscription(
-                                  db.db_name,
+                                  db.name,
                                   f.full_path,
                                   e.currentTarget.checked,
                                 )}
@@ -630,7 +630,7 @@
                             >{f.count > 1 ? f.count : ""}</td
                           >
                           <td>
-                            {#if isRegFieldSubscribed(db.db_name, f.full_path)}
+                            {#if isRegFieldSubscribed(db.name, f.full_path)}
                               <span class="sub-dot"></span>
                             {/if}
                           </td>

@@ -74,7 +74,7 @@ inline void serializeToWriter(Writer& t_writer, const sgrn::scl::DbField& t_fiel
     t_writer.String(t_field.name.c_str());
     t_writer.Key("offset");
     t_writer.Int(t_field.offset);
-    t_writer.Key("bit_index");
+    t_writer.Key("bit");
     t_writer.Int(t_field.bit_index);
     t_writer.Key("type");
     t_writer.String(s7codec::s7TypeToString(t_field.type));

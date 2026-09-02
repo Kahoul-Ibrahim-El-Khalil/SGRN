@@ -212,7 +212,7 @@ static void writeBitEntry(rapidjson::PrettyWriter<rapidjson::StringBuffer>& t_w,
     t_w.StartObject();
     t_w.Key("address");
     t_w.Int(t_e.reg_start);
-    t_w.Key("bit_index");
+    t_w.Key("bit");
     t_w.Int(t_e.bit_index);
     t_w.Key("type");
     t_w.String("BOOL");

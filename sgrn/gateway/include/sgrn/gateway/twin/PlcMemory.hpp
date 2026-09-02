@@ -158,9 +158,9 @@ public:
     std::vector<uint8_t> getFullPlantSnapshot() const;
 
     bool checkDirty();
-    std::string getDeltaSnapshot(const std::vector<std::string>& t_filter = {});
-    std::vector<FieldUpdateNotification> collectTypedDirtyLeaves(const std::string& t_segment_name);
-    std::vector<std::string> getDirtyPaths() const;
+    std::string getDeltaSnapshot(const std::vector<uint16_t>& t_filter = {});
+    std::vector<FieldUpdateNotification> collectTypedDirtyLeaves(uint16_t t_db_number);
+    std::vector<uint16_t> getDirtyDbNumbers() const;
     bool waitForDirty(int t_timeout_ms);
     void signalDirty();
 

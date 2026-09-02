@@ -53,4 +53,25 @@ struct LeafDictionary {
 sgrn::Result<void, std::string> expandRecordKeys(const rapidjson::Value& t_record,
     const std::unordered_map<LeafId, std::string>& t_id_to_path, rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out);
 
+/**
+ * @brief Flattens a nested JSON tree into a flat id-keyed map using path_to_id.
+ *
+ * Walks a nested object like {"ReactorCore": {"thermal_power_mw": 100.0}} and
+ * produces {"0": 100.0} where 0 is the leaf ID for "ReactorCore.thermal_power_mw".
+ * Array elements are flattened with "[i]" suffix in the path lookup.
+ * Leaves whose path is not in path_to_id are skipped.
+ */
+sgrn::Result<void, std::string> flattenNestedTree(const rapidjson::Value& t_nested,
+    const std::unordered_map<std::string, LeafId>& t_path_to_id, rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out);
+
+/**
+ * @brief Like flattenNestedTree, but also applies a leaf-ID filter.
+ *
+ * Only leaves with t_allowed[id] == true are emitted. t_allowed must be
+ * pre-built to cover all IDs in the dictionary.
+ */
+sgrn::Result<void, std::string> flattenNestedTreeFiltered(const rapidjson::Value& t_nested,
+    const std::unordered_map<std::string, LeafId>& t_path_to_id, const std::vector<bool>& t_allowed,
+    rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out);
+
 } // namespace sgrn::gateway::twin

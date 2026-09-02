@@ -27,4 +27,6 @@ FieldUpdateNotification makeFieldUpdateNotification(PlcState& t_state, const Plc
 std::vector<FieldUpdateNotification> gatherTypedDirtyLeaves(
     PlcState& t_state, const std::string& t_segment_name, bool t_include_json = false);
 
+std::vector<FieldUpdateNotification> gatherTypedDirtyLeavesByDb(PlcState& t_state, uint16_t t_db_number, bool t_include_json = false);
+
 } // namespace sgrn::gateway::twin
