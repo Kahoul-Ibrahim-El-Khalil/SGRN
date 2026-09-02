@@ -316,6 +316,81 @@ std::string PlcState::getDeltaSnapshot(const std::vector<uint16_t>& t_filter) co
     return buffer.GetString();
 }
 
+std::string PlcState::getDeltaSnapshotFlat(
+    const std::unordered_map<std::string, uint32_t>& t_path_to_id, const std::vector<uint16_t>& t_filter) const {
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+
+    writer.StartObject();
+
+    // Mirror the same dirty-segment sweep as getDeltaSnapshot().
+    for (const auto& [db_id, p_entry_raw] : tree().segments_by_id()) {
+        if (!t_filter.empty() && std::find(t_filter.begin(), t_filter.end(), static_cast<uint16_t>(db_id)) == t_filter.end())
+            continue;
+
+        auto* p_entry = const_cast<DbEntry*>(p_entry_raw);
+        if (!p_entry)
+            continue;
+
+        // Atomic dirty check + snapshot copy (same as getDeltaSnapshot).
+        std::vector<uint8_t> seg_copy;
+        bool dirty = false;
+        {
+            std::shared_lock<std::shared_mutex> lk(p_entry->mutex_);
+            if (p_entry->is_dirty_.load(std::memory_order_acquire)) {
+                seg_copy.resize(p_entry->offset + p_entry->size, 0);
+                std::memcpy(seg_copy.data() + p_entry->offset, tree().data() + p_entry->offset, p_entry->size);
+                p_entry->getAndClearDirty();
+                dirty = true;
+            }
+        }
+        if (!dirty)
+            continue;
+
+        // Find segment name for path prefix (reverse lookup — small N).
+        std::string seg_name;
+        for (const auto& [name, seg] : tree().segments()) {
+            if (seg.get() == p_entry) {
+                seg_name = name;
+                break;
+            }
+        }
+        if (seg_name.empty())
+            continue;
+
+        // Build a temporary arena view so leaf nodes can serialize from the snapshot copy.
+        struct SegmentArenaView : public ::sgrn::ArenaTree {
+            SegmentArenaView(std::vector<uint8_t> data) {
+                arena_ = std::move(data);
+            }
+        };
+        SegmentArenaView temp_tree(std::move(seg_copy));
+
+        // Walk every leaf in the dictionary that belongs to this segment.
+        // Dictionary paths are "SegName.field[.subfield...]".
+        const std::string prefix = seg_name + ".";
+        for (const auto& [path, id] : t_path_to_id) {
+            if (path.compare(0, prefix.size(), prefix) != 0)
+                continue;
+
+            auto it = nodes_.find(path);
+            if (it == nodes_.end())
+                continue;
+
+            // Only emit scalar/array leaves — skip intermediate STRUCT nodes.
+            if (!it->second.children_.empty())
+                continue;
+
+            const std::string id_str = std::to_string(id);
+            writer.Key(id_str.c_str(), static_cast<rapidjson::SizeType>(id_str.size()));
+            it->second.serialize(writer, temp_tree, 0, 0);
+        }
+    }
+
+    writer.EndObject();
+    return buffer.GetString();
+}
+
 void PlcState::clear() {
     nodes_.clear();
     top_level_names_.clear();

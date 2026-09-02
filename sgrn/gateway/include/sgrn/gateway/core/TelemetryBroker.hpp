@@ -36,6 +36,10 @@ struct TelemetryEvent {
     // Tier 1: Include specific dirty paths
     std::vector<sgrn::gateway::twin::TreePath> dirty_paths;
 
+    // When true, json_value is already a flat numeric-keyed JSON object
+    // {"<leaf_id>": value, ...} — WebSocket adapter must skip flattenNestedTree.
+    bool is_flat = false;
+
     bool is_valid() const {
         return json_value != nullptr || (typed_leaf.bytes && typed_leaf.meta.valid);
     }

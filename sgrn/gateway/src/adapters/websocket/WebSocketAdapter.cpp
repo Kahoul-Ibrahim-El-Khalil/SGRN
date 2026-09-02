@@ -181,33 +181,34 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
         }
     }
 
-    // Send to each client — either full JSON (zero overhead) or filtered
+    // Send to each client — either full JSON (zero overhead) or filtered.
     for (auto& target : targets) {
         if (target.dictionary_mode && dict_ && !dict_->path_to_id.empty()) {
-            // Dictionary-mode client: flatten the nested delta snapshot into
-            // a flat {"<leaf_id>": value} map, filtering by pre-resolved ranges.
-            if (!parsed_doc) {
-                parsed_doc = std::make_unique<rapidjson::Document>();
-                parsed_doc->Parse(t_event.json_value->c_str());
-                if (parsed_doc->HasParseError() || !parsed_doc->IsObject()) {
-                    parsed_doc.reset();
-                }
-            }
-            if (parsed_doc) {
-                // Flatten the full snapshot once
-                rapidjson::Document flat_doc;
-                if (!twin::flattenNestedTree(*parsed_doc, dict_->path_to_id, flat_doc.GetAllocator(), flat_doc).hasError()) {
-                    // If the client has specific subscriptions, filter by ranges
-                    if (!target.leaf_ranges.empty()) {
+            // ── Fast path: event is already a flat {"<id>": value} blob ────────
+            // getDeltaSnapshotFlat() ran on the server side, so there is nothing
+            // to parse or re-serialize for firehose dictionary clients.
+            // For range-filtered clients we must parse once and filter by id.
+            if (t_event.is_flat) {
+                if (target.leaf_ranges.empty()) {
+                    // Firehose dictionary mode: zero-copy send of the flat blob.
+                    target.sp_ws->send(*t_event.json_value);
+                } else {
+                    // Subscription-filtered: parse once and emit only matching ids.
+                    if (!parsed_doc) {
+                        parsed_doc = std::make_unique<rapidjson::Document>();
+                        parsed_doc->Parse(t_event.json_value->c_str());
+                        if (parsed_doc->HasParseError() || !parsed_doc->IsObject())
+                            parsed_doc.reset();
+                    }
+                    if (parsed_doc) {
                         rapidjson::Document filtered_doc;
                         filtered_doc.SetObject();
-                        for (auto it = flat_doc.MemberBegin(); it != flat_doc.MemberEnd(); ++it) {
+                        for (auto it = parsed_doc->MemberBegin(); it != parsed_doc->MemberEnd(); ++it) {
                             twin::LeafId id = static_cast<twin::LeafId>(std::stoul(it->name.GetString()));
                             for (const auto& range : target.leaf_ranges) {
                                 if (id >= range.start && id <= range.end) {
-                                    rapidjson::Value key;
+                                    rapidjson::Value key, val;
                                     key.CopyFrom(it->name, filtered_doc.GetAllocator());
-                                    rapidjson::Value val;
                                     val.CopyFrom(it->value, filtered_doc.GetAllocator());
                                     filtered_doc.AddMember(key, val, filtered_doc.GetAllocator());
                                     break;
@@ -220,16 +221,54 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
                         if (!filtered_doc.ObjectEmpty())
                             target.sp_ws->send(filtered_sb.GetString());
                     } else {
-                        rapidjson::StringBuffer flat_sb;
-                        rapidjson::Writer<rapidjson::StringBuffer> flat_w(flat_sb);
-                        flat_doc.Accept(flat_w);
-                        target.sp_ws->send(flat_sb.GetString());
+                        target.sp_ws->send(*t_event.json_value);
+                    }
+                }
+            } else {
+                // ── Legacy path: nested blob — parse + flatten on demand ─────
+                // This executes only when the gateway has no LeafDictionary
+                // configured (pre-Phase-4 deployment or non-schema mode).
+                if (!parsed_doc) {
+                    parsed_doc = std::make_unique<rapidjson::Document>();
+                    parsed_doc->Parse(t_event.json_value->c_str());
+                    if (parsed_doc->HasParseError() || !parsed_doc->IsObject())
+                        parsed_doc.reset();
+                }
+                if (parsed_doc) {
+                    rapidjson::Document flat_doc;
+                    if (!twin::flattenNestedTree(*parsed_doc, dict_->path_to_id, flat_doc.GetAllocator(), flat_doc).hasError()) {
+                        if (!target.leaf_ranges.empty()) {
+                            rapidjson::Document filtered_doc;
+                            filtered_doc.SetObject();
+                            for (auto it = flat_doc.MemberBegin(); it != flat_doc.MemberEnd(); ++it) {
+                                twin::LeafId id = static_cast<twin::LeafId>(std::stoul(it->name.GetString()));
+                                for (const auto& range : target.leaf_ranges) {
+                                    if (id >= range.start && id <= range.end) {
+                                        rapidjson::Value key, val;
+                                        key.CopyFrom(it->name, filtered_doc.GetAllocator());
+                                        val.CopyFrom(it->value, filtered_doc.GetAllocator());
+                                        filtered_doc.AddMember(key, val, filtered_doc.GetAllocator());
+                                        break;
+                                    }
+                                }
+                            }
+                            rapidjson::StringBuffer filtered_sb;
+                            rapidjson::Writer<rapidjson::StringBuffer> filtered_w(filtered_sb);
+                            filtered_doc.Accept(filtered_w);
+                            if (!filtered_doc.ObjectEmpty())
+                                target.sp_ws->send(filtered_sb.GetString());
+                        } else {
+                            rapidjson::StringBuffer flat_sb;
+                            rapidjson::Writer<rapidjson::StringBuffer> flat_w(flat_sb);
+                            flat_doc.Accept(flat_w);
+                            target.sp_ws->send(flat_sb.GetString());
+                        }
+                    } else {
+                        target.sp_ws->send(*t_event.json_value);
                     }
                 } else {
                     target.sp_ws->send(*t_event.json_value);
                 }
-            } else {
-                target.sp_ws->send(*t_event.json_value);
             }
         } else if (target.needs_filter && parsed_doc) {
             // Non-dictionary filtered client: legacy path-based filtering

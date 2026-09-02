@@ -20,6 +20,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace asio
@@ -158,7 +159,11 @@ public:
     std::vector<uint8_t> getFullPlantSnapshot() const;
 
     bool checkDirty();
+    /// Nested JSON delta (legacy / firehose mode): {"ReactorCore": {"field": val}}
     std::string getDeltaSnapshot(const std::vector<uint16_t>& t_filter = {});
+    /// Flat numeric-keyed delta (dictionary / Phase-4 mode): {"<id>": val, ...}
+    std::string getDeltaSnapshotFlat(
+        const std::unordered_map<std::string, uint32_t>& t_path_to_id, const std::vector<uint16_t>& t_filter = {});
     std::vector<FieldUpdateNotification> collectTypedDirtyLeaves(uint16_t t_db_number);
     std::vector<uint16_t> getDirtyDbNumbers() const;
     bool waitForDirty(int t_timeout_ms);

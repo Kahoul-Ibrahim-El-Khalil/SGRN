@@ -571,6 +571,11 @@ std::string PlcMemory::getDeltaSnapshot(const std::vector<uint16_t>& t_filter) {
     return p_plc_state_ ? p_plc_state_->getDeltaSnapshot(t_filter) : "{}";
 }
 
+std::string PlcMemory::getDeltaSnapshotFlat(
+    const std::unordered_map<std::string, uint32_t>& t_path_to_id, const std::vector<uint16_t>& t_filter) {
+    return p_plc_state_ ? p_plc_state_->getDeltaSnapshotFlat(t_path_to_id, t_filter) : "{}";
+}
+
 std::vector<FieldUpdateNotification> PlcMemory::collectTypedDirtyLeaves(uint16_t t_db_number) {
     return p_plc_state_ ? gatherTypedDirtyLeavesByDb(*p_plc_state_, t_db_number) : std::vector<FieldUpdateNotification>{};
 }

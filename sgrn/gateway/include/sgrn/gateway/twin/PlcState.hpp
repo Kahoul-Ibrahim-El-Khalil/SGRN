@@ -481,8 +481,21 @@ public:
 
     /**
      * @brief Delta snapshot — serializes only dirty DB ranges, clears dirty marks.
+     * Produces a nested JSON: {"ReactorCore": {"field": value, ...}}
      */
     std::string getDeltaSnapshot(const std::vector<uint16_t>& t_filter = {}) const;
+
+    /**
+     * @brief Flat numeric-keyed delta snapshot (dictionary / Phase-4 mode).
+     *
+     * Like getDeltaSnapshot() but uses @p t_path_to_id to emit leaf IDs as
+     * keys instead of nested DB-object names. Produces {"<id>": value, ...}.
+     * Only leaves whose path exists in t_path_to_id are emitted; leaves not
+     * present in the dictionary (e.g. STRUCT nodes) are skipped silently.
+     * Dirty flags are cleared identically to getDeltaSnapshot().
+     */
+    std::string getDeltaSnapshotFlat(
+        const std::unordered_map<std::string, uint32_t>& t_path_to_id, const std::vector<uint16_t>& t_filter = {}) const;
 
     // ── Cache control ─────────────────────────────────────────────────────────
 

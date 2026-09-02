@@ -211,10 +211,14 @@ Result<void, std::string> GatewayApplication::wireTelemetry() {
         }
 
         // Generate ONE DeltaSnapshot for all dirty DBs.
-        // getDeltaSnapshot copies the dirty segments and clears their dirty flags
-        // atomically via getAndClearDirty(). Calling it once with the full set
-        // ensures no dirty DB is missed between separate calls.
-        std::string snapshot = server_.getDeltaSnapshot(dirty_dbs);
+        // When a LeafDictionary is available (dictionary mode active), emit a
+        // flat numeric-keyed snapshot directly: {"<leaf_id>": value, ...}.
+        // This removes flattenNestedTree() from the WebSocket hot path entirely.
+        // When no dictionary is configured (legacy/firehose mode), fall back to
+        // the nested form: {"ReactorCore": {"field": value}}.
+        const bool dict_ready = !leaf_dict_.path_to_id.empty();
+        std::string snapshot =
+            dict_ready ? server_.getDeltaSnapshotFlat(leaf_dict_.path_to_id, dirty_dbs) : server_.getDeltaSnapshot(dirty_dbs);
         if (snapshot.empty() || snapshot == "{}") {
             return;
         }
@@ -223,6 +227,7 @@ Result<void, std::string> GatewayApplication::wireTelemetry() {
         ev.type = sgrn::gateway::core::EventType::DeltaSnapshot;
         ev.json_value = std::make_shared<std::string>(std::move(snapshot));
         ev.timestamp = sgrn::utils::time::nowMilliseconds();
+        ev.is_flat = dict_ready; // tells WebSocket adapter to skip flattenNestedTree
 
         // Build dirty_paths from DB numbers (reverse lookup to names for TreePath).
         for (const auto& db_num : dirty_dbs) {
