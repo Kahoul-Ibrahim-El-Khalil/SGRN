@@ -418,22 +418,24 @@ Result<void> ZstdLineWriter::close() {
 
     Result<void> res;
 
-    // Finish the ZSTD frame (drains any data buffered inside the compressor).
-    size_t remaining = 1;
-    while (remaining != 0) {
-        ZSTD_outBuffer output{out_buf_.data(), out_buf_.size(), 0};
-        remaining = ZSTD_endStream(p_cstream_, &output);
-        if (ZSTD_isError(remaining)) {
-            res = Error(fmt::format("ZstdLineWriter: end-stream error: {}", ZSTD_getErrorName(remaining)));
-            poisoned_ = true;
-            break;
+    if (p_cstream_ && p_file_) {
+        // Finish the ZSTD frame (drains any data buffered inside the compressor).
+        size_t remaining = 1;
+        while (remaining != 0) {
+            ZSTD_outBuffer output{out_buf_.data(), out_buf_.size(), 0};
+            remaining = ZSTD_endStream(p_cstream_, &output);
+            if (ZSTD_isError(remaining)) {
+                res = Error(fmt::format("ZstdLineWriter: end-stream error: {}", ZSTD_getErrorName(remaining)));
+                poisoned_ = true;
+                break;
+            }
+            if (output.pos > 0 && fwrite(out_buf_.data(), 1, output.pos, p_file_) != output.pos) {
+                res = Error("ZstdLineWriter: failed to flush compressed output to file");
+                poisoned_ = true;
+                break;
+            }
+            bytes_out_ += output.pos;
         }
-        if (output.pos > 0 && fwrite(out_buf_.data(), 1, output.pos, p_file_) != output.pos) {
-            res = Error("ZstdLineWriter: failed to flush compressed output to file");
-            poisoned_ = true;
-            break;
-        }
-        bytes_out_ += output.pos;
     }
 
     if (p_cstream_) {

@@ -110,11 +110,9 @@ void DeltaPushHandler::onTelemetryEvent(const core::TelemetryEvent& t_event) {
     if (t_event.type != core::EventType::LeafUpdate)
         return;
 
-    char key_buf[256];
-    auto fmt_res = fmt::format_to_n(key_buf, sizeof(key_buf) - 1, "{}:{}", t_event.db, t_event.path);
-    std::string_view map_key_view(key_buf, fmt_res.size);
+    const std::string map_key = fmt::format("{}:{}", t_event.db, t_event.path);
 
-    auto node_it = nodes_.find(map_key_view);
+    auto node_it = nodes_.find(map_key);
     if (node_it == nodes_.end())
         return;
 

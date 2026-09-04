@@ -626,6 +626,31 @@ target_include_directories(sgrn_wal_dump PRIVATE
 sgrn_target(sgrn_wal_dump)
 sgrn_install_component_executable(TARGET sgrn_wal_dump COMPONENT gateway)
 
+# 4.4 sgrn-dataset
+sgrn_add_component_executable(
+    TARGET      sgrn_dataset
+    SOURCES     
+        ${CMAKE_SOURCE_DIR}/sgrn/tools/dataset_main.cpp
+        src/tools/sgrn_dataset.cpp
+    ENABLE_ORIGIN_RPATH
+    PRIVATE_LIBS
+        sgrn_gateway_twin
+        sgrn::scl
+        sgrn_utils
+        sgrn::zstd
+        sgrn::cxxopts
+        sgrn::rapidjson
+        fmt::fmt
+    WIN_LIBS
+        ${WIN_LIBS_LIST}
+)
+target_include_directories(sgrn_dataset PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/sgrn/scl/include
+)
+sgrn_target(sgrn_dataset)
+sgrn_install_component_executable(TARGET sgrn_dataset COMPONENT gateway)
+
 # 4.4 Documentation
 # Documentation is now embedded in the binary instead of installed as man pages.
 

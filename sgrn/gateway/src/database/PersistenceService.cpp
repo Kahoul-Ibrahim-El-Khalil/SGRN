@@ -378,8 +378,11 @@ Result<void, std::string> PersistenceService::openNewArchive(int64_t t_now) {
     w.EndObject();
 
     auto schema_res = current_archive_->writeLine(sb.GetString());
-    if (schema_res.hasError())
+    if (schema_res.hasError()) {
+        current_archive_.reset();
+        current_archive_path_.clear();
         return fmt::format("PersistenceService: schema line write failed: {}", schema_res.error());
+    }
     ++current_line_counter_;
 
     // ── Line 2: dictionary ───────────────────────────────────────────────────
@@ -403,8 +406,11 @@ Result<void, std::string> PersistenceService::openNewArchive(int64_t t_now) {
     dw.EndObject();
 
     auto dict_res = current_archive_->writeLine(dsb.GetString());
-    if (dict_res.hasError())
+    if (dict_res.hasError()) {
+        current_archive_.reset();
+        current_archive_path_.clear();
         return fmt::format("PersistenceService: dictionary line write failed: {}", dict_res.error());
+    }
     ++current_line_counter_;
 
     // ── Line 3: manifest ─────────────────────────────────────────────────────
@@ -427,8 +433,11 @@ Result<void, std::string> PersistenceService::openNewArchive(int64_t t_now) {
     mw.EndObject();
 
     auto manifest_res = current_archive_->writeLine(msb.GetString());
-    if (manifest_res.hasError())
+    if (manifest_res.hasError()) {
+        current_archive_.reset();
+        current_archive_path_.clear();
         return fmt::format("PersistenceService: manifest line write failed: {}", manifest_res.error());
+    }
     ++current_line_counter_;
 
     return {};

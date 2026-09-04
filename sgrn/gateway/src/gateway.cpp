@@ -14,6 +14,8 @@ Result<void, std::string> GatewayApplication::loadConfig(int t_argc, char** tp_a
         std::string arg = tp_argv[i];
         if (arg == "--generate-config") {
             gen_config = true;
+        } else if (arg == "--gui") {
+            gui_mode_ = true;
         } else if (arg == "-o" && i + 1 < t_argc) {
             config_out = tp_argv[i + 1];
             i++;
@@ -400,6 +402,60 @@ void GatewayApplication::run() {
     };
     hup_signals->async_wait(hup_handler);
 #endif
+
+    if (gui_mode_ && config_.http.has_value()) {
+        std::string http_url = fmt::format("http://127.0.0.1:{}/", config_.http->port);
+        SGRN_INFO_LOG("Launching Native Desktop GUI Window for Gateway at {}", http_url);
+
+#if defined(_WIN32)
+        // Windows Desktop GUI launch (msedge app mode, chrome app mode, or default browser)
+        std::string win_cmd =
+            fmt::format("start msedge --app=\"{}\" || start chrome --app=\"{}\" || start \"\" \"{}\"", http_url, http_url, http_url);
+        ::system(win_cmd.c_str());
+#elif defined(__APPLE__)
+        // macOS Desktop GUI launch
+        std::string mac_cmd =
+            fmt::format("open -n -a \"Google Chrome\" --args --app=\"{}\" 2>/dev/null || open \"{}\"", http_url, http_url);
+        ::system(mac_cmd.c_str());
+#else
+        // Linux Desktop GUI launch
+        std::string gui_cmd;
+        const bool is_root = (::geteuid() == 0);
+        const char* sudo_user = ::getenv("SUDO_USER");
+        const char* display_env = ::getenv("DISPLAY");
+        const char* xauth_env = ::getenv("XAUTHORITY");
+
+        std::string env_prefix;
+        if (display_env)
+            env_prefix += fmt::format("DISPLAY=\"{}\" ", display_env);
+        if (xauth_env)
+            env_prefix += fmt::format("XAUTHORITY=\"{}\" ", xauth_env);
+
+        std::string profile_dir = fmt::format("/tmp/sgrn_gui_{}_{}", config_.http->port, is_root && sudo_user ? sudo_user : "user");
+
+        if (is_root && sudo_user) {
+            ::system(fmt::format("chown -R {}:{} {} 2>/dev/null || true", sudo_user, sudo_user, profile_dir).c_str());
+            if (::system("which chromium > /dev/null 2>&1") == 0) {
+                gui_cmd = fmt::format("sudo -u {} {}chromium --app=\"{}\" --user-data-dir=\"{}\" --disable-infobars --no-default-browser-check --test-type > /dev/null 2>&1 &", sudo_user, env_prefix,
+                    http_url, profile_dir);
+            } else if (::system("which firefox > /dev/null 2>&1") == 0) {
+                gui_cmd = fmt::format("sudo -u {} {}firefox --new-window \"{}\" > /dev/null 2>&1 &", sudo_user, env_prefix, http_url);
+            } else {
+                gui_cmd = fmt::format("sudo -u {} {}xdg-open \"{}\" > /dev/null 2>&1 &", sudo_user, env_prefix, http_url);
+            }
+        } else {
+            if (::system("which chromium > /dev/null 2>&1") == 0) {
+                gui_cmd =
+                    fmt::format("{}chromium --app=\"{}\" --user-data-dir=\"{}\" --disable-infobars --no-default-browser-check --test-type > /dev/null 2>&1 &", env_prefix, http_url, profile_dir);
+            } else if (::system("which firefox > /dev/null 2>&1") == 0) {
+                gui_cmd = fmt::format("{}firefox --new-window \"{}\" > /dev/null 2>&1 &", env_prefix, http_url);
+            } else {
+                gui_cmd = fmt::format("{}xdg-open \"{}\" > /dev/null 2>&1 &", env_prefix, http_url);
+            }
+        }
+        ::system(gui_cmd.c_str());
+#endif
+    }
 
     shutdown_future.wait();
 }

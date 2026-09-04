@@ -85,29 +85,29 @@ DATA_BLOCK "ReactorCore" DB 1
 #MODBUS_HOLDING
 VAR
     // ── Neutron flux & power ──
-    thermal_power_mw    : LReal;    // current thermal output (0 – 3400 MW)
-    thermal_power_pct   : Real;     // percentage of rated power
-    neutron_flux        : LReal;    // neutron flux (n/cm²·s)
-    avg_linear_heat_kw  : Real;     // average linear heat rate (kW/m)
-    reactivity_pcm      : Real;     // excess reactivity (pcm)
-    period_s            : Real;     // reactor period (s), negative = subcritical
+    thermal_power       : LReal #UNIT("MW");    // current thermal output (0 – 3400 MW)
+    thermal_power_ratio : Real #UNIT("%");     // percentage of rated power
+    neutron_flux        : LReal #UNIT("n/cm²·s");    // neutron flux (n/cm²·s)
+    avg_linear_heat     : Real #UNIT("kW/m");     // average linear heat rate (kW/m)
+    reactivity          : Real #UNIT("pcm");     // excess reactivity (pcm)
+    period              : Real #UNIT("s");     // reactor period (s), negative = subcritical
 
     // ── Control rods — 4 banks ──
     rods                : ARRAY [0..3] OF "ControlRod";
-    rod_bank_demand_pct : Real;     // overall bank demand position
+    rod_bank_demand     : Real #UNIT("%");     // overall bank demand position
 
     // ── Core temperatures ──
-    core_inlet_temp_c   : Real;     // cold leg entry
-    core_outlet_temp_c  : Real;     // hot leg exit
-    peak_fuel_temp_c    : Real;     // hottest fuel centerline
-    peak_clad_temp_c    : Real;     // hottest cladding
-    core_delta_t_c      : Real;     // outlet - inlet
+    core_inlet_temp     : Real #UNIT("°C");     // cold leg entry
+    core_outlet_temp    : Real #UNIT("°C");     // hot leg exit
+    peak_fuel_temp      : Real #UNIT("°C");     // hottest fuel centerline
+    peak_clad_temp      : Real #UNIT("°C");     // hottest cladding
+    core_delta_t        : Real #UNIT("°C");     // outlet - inlet
 
     // ── Core thermocouple map (8 radial × 2 axial) ──
     thermocouples       : ARRAY [0..15] OF "TemperatureSensor";
 
     // ── Boron & chemistry ──
-    boron_ppm           : Real;     // boric acid concentration
+    boron               : Real #UNIT("ppm");     // boric acid concentration
     ph_primary          : Real;     // primary coolant pH
 
     // ── Operating state ──
@@ -115,7 +115,7 @@ VAR
     reactor_tripped     : Bool;
     startup_mode        : Bool;
     power_ascension     : Bool;
-    xenon_buildup_pct   : Real;     // Xe-135 reactivity penalty
+    xenon_buildup       : Real #UNIT("%");     // Xe-135 reactivity penalty
 
     timestamp           : DTL;
 END_VAR
@@ -125,15 +125,15 @@ END_DATA_BLOCK
 DATA_BLOCK "PrimaryCoolant" DB 2
 VAR
     // ── Hot leg / Cold leg ──
-    hot_leg_temp_c      : Real;
-    cold_leg_temp_c     : Real;
-    hot_leg_pressure_bar: Real;
-    cold_leg_press_bar  : Real;
+    hot_leg_temp        : Real #UNIT("°C");
+    cold_leg_temp       : Real #UNIT("°C");
+    hot_leg_pressure    : Real #UNIT("bar");
+    cold_leg_press      : Real #UNIT("bar");
 
     // ── Pressurizer ──
-    przr_pressure_bar   : Real;     // target: 155 bar
-    przr_level_pct      : Real;     // water level in pressurizer
-    przr_temp_c         : Real;
+    przr_pressure       : Real #UNIT("bar");     // target: 155 bar
+    przr_level          : Real #UNIT("%");     // water level in pressurizer
+    przr_temp           : Real #UNIT("°C");
     przr_heater_on      : Bool;
     przr_spray_on       : Bool;
     przr_relief_open    : Bool;     // PORV status

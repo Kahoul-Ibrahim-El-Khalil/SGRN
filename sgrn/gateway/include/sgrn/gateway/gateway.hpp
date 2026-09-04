@@ -114,6 +114,7 @@ private:
     }
 
     GatewayConfig config_;
+    bool gui_mode_{false};
     std::string schema_override_;
     std::string policy_script_;
 

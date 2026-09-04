@@ -66,15 +66,15 @@ private:
 
     wrappers::opcua::Server* server_{nullptr};
     std::atomic<bool> running_{false};
-    ankerl::unordered_dense::map<std::string, RegisteredNode, ankerl::unordered_dense::string_hash, std::equal_to<>> nodes_;
+    ankerl::unordered_dense::map<std::string, RegisteredNode> nodes_;
     AlarmCallback alarm_callback_;
     PendingWriteCallback pending_write_;
     ActiveClientsCheck active_clients_check_;
 
-    ankerl::unordered_dense::map<std::string, uint32_t, ankerl::unordered_dense::string_hash, std::equal_to<>> subscription_counts_;
+    ankerl::unordered_dense::map<std::string, uint32_t> subscription_counts_;
     mutable std::mutex subscription_mutex_;
 
-    ankerl::unordered_dense::set<std::string, ankerl::unordered_dense::string_hash, std::equal_to<>> dirty_aggregates_;
+    ankerl::unordered_dense::set<std::string> dirty_aggregates_;
     std::mutex dirty_mutex_;
 };
 

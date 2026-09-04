@@ -67,7 +67,8 @@ void HttpAdapter::registerWebAssets() {
         auto flag = std::make_shared<std::once_flag>();
         auto has_error = std::make_shared<bool>(false);
 
-        auto handler = [i, cached, flag, has_error](const httplib::Request& t_req, httplib::Response& t_res) {
+        const uint16_t ws_port = ws_port_;
+        auto handler = [i, cached, flag, has_error, ws_port](const httplib::Request& t_req, httplib::Response& t_res) {
             const auto& asset = web::ASSETS[i];
 
             t_res.set_header("Vary", "Accept-Encoding");
@@ -85,7 +86,7 @@ void HttpAdapter::registerWebAssets() {
                 return;
             }
 
-            std::call_once(*flag, [&]() {
+            std::call_once(*flag, [&, ws_port]() {
                 auto decompressed = sgrn::utils::compression::decompressStringZstd(asset.compressedView());
 
                 if (decompressed.hasError()) {
@@ -97,7 +98,13 @@ void HttpAdapter::registerWebAssets() {
                 *cached = std::move(decompressed.value());
 
                 if (asset.virtual_path == "/index.html") {
-                    replaceAll(*cached, "<!-- SGRN_RUNTIME_HEAD -->", std::string(kInjectedRuntimeForHtmlOverProxy));
+                    std::string standalone_runtime = fmt::format(R"(<base href="/">
+<script>
+window.__SGRN_BASE__="";
+window.__SGRN_WS_PORT__={};
+</script>)",
+                        ws_port);
+                    replaceAll(*cached, "<!-- SGRN_RUNTIME_HEAD -->", standalone_runtime);
                 }
             });
 

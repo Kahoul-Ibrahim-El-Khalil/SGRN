@@ -44,6 +44,7 @@ The stack is organized into highly cohesive, decoupled C++ modules.
 | **`datastore`** | Persistence & REST API | A scalable, HTTP REST-like API orchestrating local data buffering and forwarding to time-series databases (PostgreSQL/TimescaleDB) or object storage (MinIO), ensuring high-frequency data survives network partitions. |
 | **`scripting`** | VM Integration Layer | The reusable AngelScript sandbox binding C++ to the embedded scripting runtime. |
 | **`core` & `utils`** | Foundational Libraries | Thread pools, logging, custom memory allocators, and basic data structures used universally across the SGRN stack. |
+| **`sgrn_dataset` & `sgrn.ml`** | Telemetry Data & ML Pipeline | Streaming Zstd WAL feature extraction into CSV + Manifest, scikit-learn/XGBoost AutoML tournament training, ONNX export, and Digital Twin side-by-side replay. See [`documentation/PIPELINE_AND_TOOLS.md`](./documentation/PIPELINE_AND_TOOLS.md). |
 | **`sdk`** | Client Libraries | C++ SDK for interacting with the SGRN gateway from external IT applications. |
 
 ## Getting Started

@@ -1,0 +1,26 @@
+// ============================================================================
+// schema.scl — "SimpleSkid" — Minimal Tank & Pump Skid with SCL #UNIT directives
+// ============================================================================
+
+TYPE "SkidStatus"
+  VAR
+    mode_code     : Int;     // 0=OFF, 1=FILLING, 2=HEATING, 3=DISCHARGING, 4=ALARM
+    fault_active  : Bool;
+  END_VAR
+END_TYPE
+
+DATA_BLOCK "TankSkid" DB 1
+
+#MODBUS_HOLDING
+VAR
+    tank_level         : Real #UNIT("%");    // 0.0 – 100.0
+    fluid_temp         : Real #UNIT("°C");   // 15.0 – 95.0
+    pump_running       : Bool;
+    pump_speed         : Int #UNIT("RPM");   // 0 – 1800
+    inlet_valve        : Real #UNIT("%");    // 0.0 – 100.0
+    outlet_valve       : Real #UNIT("%");    // 0.0 – 100.0
+    heater_on          : Bool;
+    high_level_alarm   : Bool;
+    status             : "SkidStatus";
+END_VAR
+END_DATA_BLOCK

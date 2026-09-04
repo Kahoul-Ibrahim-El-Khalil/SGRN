@@ -136,7 +136,13 @@
         if (show_only_subscribed) {
           const target_path: string =
             node.type === "db" ? node.db_name : `${node.db_name}/${node.path}`;
-          matches_subscribed = subscribed_paths.has(target_path);
+          matches_subscribed = false;
+          for (const p of subscribed_paths) {
+            if (p === target_path || p === node.db_name || p.startsWith(target_path + "/")) {
+              matches_subscribed = true;
+              break;
+            }
+          }
         }
 
         if (matches_search && matches_subscribed) {

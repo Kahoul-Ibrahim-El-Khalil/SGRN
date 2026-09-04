@@ -79,9 +79,9 @@ def start_simulation(
 ) -> DemoRun:
     schema_file, as_scripts, sim_config = prepare_simulation(selected_sim)
 
-    print(f"[demo] Starting SGRN Gateway with config {sim_config}...")
+    print(f"[demo] Starting SGRN Gateway with embedded GUI mode ({sim_config})...")
     gateway_proc = subprocess.Popen(
-        [str(GATEWAY_BIN), str(sim_config)],
+        [str(GATEWAY_BIN), str(sim_config), "--gui"],
         cwd=str(BASE_DIR),
         stdout=gateway_stdout,
         stderr=gateway_stderr,
@@ -99,14 +99,6 @@ def start_simulation(
         stdout=shell_stdout,
         stderr=shell_stderr,
     )
-
-    time.sleep(2)
-    if open_dashboard:
-        print(f"[demo] Opening web dashboard: {DASHBOARD_URL}")
-        try:
-            webbrowser.open(DASHBOARD_URL)
-        except Exception as e:
-            print(f"[demo] Could not open browser automatically: {e}")
 
     return DemoRun(
         simulation=selected_sim,

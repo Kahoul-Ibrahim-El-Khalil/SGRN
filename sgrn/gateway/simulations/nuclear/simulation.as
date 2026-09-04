@@ -229,14 +229,14 @@ void simulatePhysics() {
 // ─── DataBlock Writers ───────────────────────────────────────────────────────
 
 void writeReactorCore(ReactorCore@ db, DTL@ ts) {
-    db.thermal_power_mw = reactor_power_mw;
-    db.thermal_power_pct = float((reactor_power_mw / 3400.0) * 100.0);
+    db.thermal_power = reactor_power_mw;
+    db.thermal_power_ratio = float((reactor_power_mw / 3400.0) * 100.0);
     db.neutron_flux = neutron_flux;
-    db.reactivity_pcm = float(reactivity);
-    db.period_s = float(period);
-    db.core_inlet_temp_c = float(t_inlet);
-    db.core_outlet_temp_c = float(t_outlet);
-    db.core_delta_t_c = float(t_outlet - t_inlet);
+    db.reactivity = float(reactivity);
+    db.period = float(period);
+    db.core_inlet_temp = float(t_inlet);
+    db.core_outlet_temp = float(t_outlet);
+    db.core_delta_t = float(t_outlet - t_inlet);
 
     for (int i = 0; i < 4; i++) {
         db.rods[i].position_pct = float(rod_bank_pos);
@@ -254,7 +254,7 @@ void writeReactorCore(ReactorCore@ db, DTL@ ts) {
         db.thermocouples[i].sensor_fault = false;
     }
 
-    db.boron_ppm = float(boron_ppm);
+    db.boron = float(boron_ppm);
     db.reactor_critical = reactor_power_mw > 10.0;
     db.reactor_tripped = scrammed;
     db.write("timestamp", ts);
@@ -262,10 +262,10 @@ void writeReactorCore(ReactorCore@ db, DTL@ ts) {
 }
 
 void writePrimaryCoolant(PrimaryCoolant@ db, DTL@ ts) {
-    db.hot_leg_temp_c = float(t_outlet);
-    db.cold_leg_temp_c = float(t_inlet);
-    db.przr_pressure_bar = float(przr_press);
-    db.przr_level_pct = float(przr_level);
+    db.hot_leg_temp = float(t_outlet);
+    db.cold_leg_temp = float(t_inlet);
+    db.przr_pressure = float(przr_press);
+    db.przr_level = float(przr_level);
 
     for (int i = 0; i < 4; i++) {
         db.rcp[i].running = rcp_speed_rpm > 100.0;
