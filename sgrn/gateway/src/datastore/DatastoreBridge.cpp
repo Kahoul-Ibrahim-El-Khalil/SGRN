@@ -203,6 +203,33 @@ void DatastoreBridge::processPendingBatches() {
             markSynced(t_id, t_file_path);
         }
     }
+
+    cleanOldSyncedFiles();
+}
+
+void DatastoreBridge::cleanOldSyncedFiles() {
+    if (node_db_) {
+        (void)node_db_->purgeSyncedBatches();
+    }
+
+    if (synced_dir_.empty() || !std::filesystem::exists(synced_dir_))
+        return;
+
+    try {
+        const auto now = std::filesystem::file_time_type::clock::now();
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(synced_dir_)) {
+            if (entry.is_regular_file()) {
+                auto age = std::chrono::duration_cast<std::chrono::minutes>(now - entry.last_write_time());
+                // Remove synced files older than 5 minutes to free disk space
+                if (age.count() >= 5) {
+                    std::error_code ec;
+                    std::filesystem::remove(entry.path(), ec);
+                }
+            }
+        }
+    } catch (...) {
+        // Ignore filesystem iteration errors during pruning
+    }
 }
 
 bool DatastoreBridge::uploadRaw(const std::string& t_file_path) {

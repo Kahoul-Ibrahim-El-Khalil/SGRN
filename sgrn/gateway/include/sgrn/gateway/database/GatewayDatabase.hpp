@@ -61,6 +61,7 @@ public:
     sgrn::Result<void> recordPendingBatch(const std::string& t_file_path, int64_t t_ts_start, int64_t t_ts_end);
     sgrn::Result<void> markBatchSynced(int t_id);
     sgrn::Result<void> deleteBatch(int t_id);
+    sgrn::Result<void> purgeSyncedBatches(int64_t t_older_than_ms = 0);
     sgrn::Result<std::vector<BackendBatchRecord>> getPendingBatches(int t_limit = 10);
 
     // Client Tracking

@@ -234,6 +234,22 @@ sgrn::Result<void> GatewayDatabase::deleteBatch(int t_id) {
     }
 }
 
+sgrn::Result<void> GatewayDatabase::purgeSyncedBatches(int64_t t_older_than_ms) {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (!db_)
+        return "Database not initialized";
+    try {
+        if (t_older_than_ms > 0) {
+            *db_ << "DELETE FROM pending_batches WHERE status = 'synced' AND ts_end < ?;" << t_older_than_ms;
+        } else {
+            *db_ << "DELETE FROM pending_batches WHERE status = 'synced';";
+        }
+        return {};
+    } catch (const std::exception& e) {
+        return fmt::format("purgeSyncedBatches failed: {}", e.what());
+    }
+}
+
 sgrn::Result<std::vector<BackendBatchRecord>> GatewayDatabase::getPendingBatches(int t_limit) {
     std::vector<BackendBatchRecord> batches;
     std::lock_guard<std::mutex> lock(mu_);

@@ -110,9 +110,11 @@ void DeltaPushHandler::onTelemetryEvent(const core::TelemetryEvent& t_event) {
     if (t_event.type != core::EventType::LeafUpdate)
         return;
 
-    const std::string map_key = fmt::format("{}:{}", t_event.db, t_event.path);
+    char key_buf[256];
+    auto fmt_res = fmt::format_to_n(key_buf, sizeof(key_buf) - 1, "{}:{}", t_event.db, t_event.path);
+    std::string_view map_key_view(key_buf, fmt_res.size);
 
-    auto node_it = nodes_.find(map_key);
+    auto node_it = nodes_.find(map_key_view);
     if (node_it == nodes_.end())
         return;
 
@@ -134,24 +136,20 @@ void DeltaPushHandler::notifyAggregateAncestors(uint16_t t_db_number, const std:
 
     std::lock_guard lock(dirty_mutex_);
 
-    std::string prefix;
+    std::string_view leaf_view(t_leaf_path);
     size_t start = 0;
+    char key_buf[256];
 
-    // Only PROPER ancestors of the leaf carry an aggregate ".Value" node.
-    // Marking the leaf itself would make pushSubtreeSnapshot() fall into the
-    // JSON-string fallback and write a String variant into a strictly typed
-    // variable node, which open62541 rejects with BADTYPEMISMATCH.
-    while (start < t_leaf_path.size()) {
-        const size_t dot = t_leaf_path.find('.', start);
+    while (start < leaf_view.size()) {
+        const size_t dot = leaf_view.find('.', start);
 
-        if (dot == std::string::npos)
+        if (dot == std::string_view::npos)
             break;
 
-        const std::string segment(t_leaf_path.substr(start, dot - start));
+        const std::string_view segment = leaf_view.substr(0, dot);
+        auto fmt_res = fmt::format_to_n(key_buf, sizeof(key_buf) - 1, "{}:{}", t_db_number, segment);
 
-        prefix = prefix.empty() ? segment : prefix + "." + segment;
-
-        dirty_aggregates_.insert(fmt::format("{}:{}", t_db_number, prefix));
+        dirty_aggregates_.insert(std::string(key_buf, fmt_res.size));
 
         start = dot + 1;
     }

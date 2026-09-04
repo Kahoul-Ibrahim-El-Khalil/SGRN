@@ -77,6 +77,7 @@ private:
 
     void moveToSynced(const std::string& t_file_path);
     void markSynced(int t_id, const std::string& t_file_path);
+    void cleanOldSyncedFiles();
 
     [[maybe_unused]] asio::thread_pool* heavy_pool_ = nullptr;
     DatastoreConnectionConfig cfg_;
