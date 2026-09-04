@@ -31,6 +31,7 @@ export class GatewayClient {
 
       this.socket.onclose = () => {
         this.connected = false;
+        this.socket = null;
         this.notifyStatus("DISCONNECTED");
         setTimeout(() => this.connect(), this.reconnectInterval);
       };

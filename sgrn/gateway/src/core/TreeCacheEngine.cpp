@@ -6,11 +6,11 @@ namespace sgrn::gateway::core
 std::shared_ptr<const std::string> TreeCacheEngine::get(const twin::TreePath& t_path, twin::PlcState& t_state) {
     auto path_str = t_path.toDotted();
     auto it = t_state.nodes().find(path_str);
-    if (it == t_state.nodes().end()) {
+    if (it == t_state.nodes().end() || !it->second) {
         return std::make_shared<const std::string>("null");
     }
 
-    uint64_t current_version = it->second.version_.load(std::memory_order_acquire);
+    uint64_t current_version = it->second->state_ ? it->second->state_->version_.load(std::memory_order_acquire) : 0;
 
     {
         std::shared_lock<std::shared_mutex> lock(mutex_);
@@ -24,7 +24,7 @@ std::shared_ptr<const std::string> TreeCacheEngine::get(const twin::TreePath& t_
 
     // Cache miss or stale
     std::string new_json;
-    if (it->second.children_.empty()) {
+    if (it->second->children_.empty()) {
         new_json = t_state.getScalarString(path_str);
     } else {
         new_json = t_state.getJsonString(path_str);

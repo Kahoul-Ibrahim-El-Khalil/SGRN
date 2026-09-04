@@ -33,8 +33,13 @@ static void as_message_callback(const asSMessageInfo* tp_msg, void* tp_param) {
 
 ScriptHost::ScriptHost() {
     p_engine_ = asCreateScriptEngine();
+    if (!p_engine_) {
+        fmt::print(stderr, "[ScriptHost] ERROR: asCreateScriptEngine() returned nullptr (version mismatch or init failure)\n");
+        return;
+    }
     owns_engine_ = true;
     p_engine_->SetMessageCallback(asFUNCTION(as_message_callback), this, asCALL_CDECL);
+    p_engine_->SetEngineProperty(asEP_PROPERTY_ACCESSOR_MODE, 2);
 
     // Register basic types
     RegisterStdString(p_engine_);
@@ -54,6 +59,9 @@ ScriptHost::~ScriptHost() {
 }
 
 Result<void> ScriptHost::loadFile(const std::string& t_path) {
+    if (!p_engine_) {
+        return Result<void>::Error("AngelScript engine is null");
+    }
     fs::path path = normalizePath(t_path);
     if (!fs::exists(path)) {
         return Result<void>::Error("Path does not exist: " + path.string());
@@ -92,29 +100,41 @@ Result<void> ScriptHost::reload() {
 }
 
 void ScriptHost::registerType(const std::string& t_declaration, int t_flags) {
+    if (!p_engine_)
+        return;
     p_engine_->RegisterObjectType(t_declaration.c_str(), 0, t_flags);
 }
 
 void ScriptHost::registerObjectMethod(
     const std::string& t_obj, const std::string& t_declaration, const asSFuncPtr& t_func_pointer, asDWORD t_call_conv, void* tp_auxiliary) {
+    if (!p_engine_)
+        return;
     p_engine_->RegisterObjectMethod(t_obj.c_str(), t_declaration.c_str(), t_func_pointer, t_call_conv, tp_auxiliary);
 }
 
 void ScriptHost::registerObjectBehaviour(const std::string& t_obj, asEBehaviours t_behaviour, const std::string& t_declaration,
     const asSFuncPtr& t_func_pointer, asDWORD t_call_conv, void* tp_auxiliary) {
+    if (!p_engine_)
+        return;
     p_engine_->RegisterObjectBehaviour(t_obj.c_str(), t_behaviour, t_declaration.c_str(), t_func_pointer, t_call_conv, tp_auxiliary);
 }
 
 void ScriptHost::registerObjectProperty(const std::string& t_obj, const std::string& t_declaration, int t_byte_offset) {
+    if (!p_engine_)
+        return;
     p_engine_->RegisterObjectProperty(t_obj.c_str(), t_declaration.c_str(), t_byte_offset);
 }
 
 asITypeInfo* ScriptHost::getTypeInfoByDecl(const std::string& t_decl) const {
+    if (!p_engine_)
+        return nullptr;
     return p_engine_->GetTypeInfoByDecl(t_decl.c_str());
 }
 
 void ScriptHost::registerGlobalFunction(
     const std::string& t_declaration, const asSFuncPtr& t_func_pointer, asDWORD t_call_conv, void* tp_obj_for_thiscall) {
+    if (!p_engine_)
+        return;
     p_engine_->RegisterGlobalFunction(t_declaration.c_str(), t_func_pointer, t_call_conv, tp_obj_for_thiscall);
 }
 

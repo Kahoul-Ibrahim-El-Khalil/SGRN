@@ -346,6 +346,8 @@ Result<void, PlcMemoryError> PlcMemory::loadRegistry(const PlcSchemaStore& t_sto
         applyDbFieldInits(*this, num, schema->fields);
     }
 
+    p_plc_state_->rebuildFieldIndex();
+
     return {};
 }
 
@@ -374,6 +376,8 @@ Result<void, PlcMemoryError> PlcMemory::registerDb(uint16_t t_db_number, size_t 
     node.db_number_ = t_db_number;
 
     p_plc_state_->add(std::move(node), "");
+
+    p_plc_state_->rebuildFieldIndex();
 
     return {};
 }
@@ -616,65 +620,38 @@ void PlcMemory::signalDirty() {
 void PlcMemory::bumpFieldVersions(
     uint16_t t_db_number, size_t t_offset, size_t t_size, const uint8_t* t_old_base, const uint8_t* t_new_base) {
 
-    for (const auto& [path, node] : p_plc_state_->nodes()) {
-        if (node.db_number_ != t_db_number || !node.children_.empty()) {
-            continue;
-        }
-
+    p_plc_state_->forEachIntersectingLeaf(t_db_number, t_offset, t_size, [&](PlcNode& node) {
         size_t node_span = node.size_;
-
         if (node.type_ != s7codec::Type::Struct && node.type_ != s7codec::Type::String && node.type_ != s7codec::Type::WString) {
-
-            node_span = s7codec::primitiveSize(node.type_).value_or(0) * std::max(1u, node.count_);
+            node_span = static_cast<size_t>(s7codec::primitiveSize(node.type_).value_or(0)) * std::max(1u, node.count_);
         }
 
-        if (node.offset_ < t_offset + t_size && node.offset_ + node_span > t_offset) {
+        const size_t intersect_start = std::max(static_cast<size_t>(node.offset_), t_offset);
+        const size_t intersect_end = std::min(static_cast<size_t>(node.offset_ + node_span), t_offset + t_size);
+        if (intersect_end <= intersect_start)
+            return; // forEachIntersectingLeaf's bound is conservative; stay defensive
 
-            const size_t intersect_start = std::max(static_cast<size_t>(node.offset_), t_offset);
+        const size_t rel = intersect_start - t_offset;
+        const size_t len = intersect_end - intersect_start;
 
-            const size_t intersect_end = std::min(static_cast<size_t>(node.offset_ + node_span), t_offset + t_size);
-
-            const size_t rel = intersect_start - t_offset;
-
-            const size_t len = intersect_end - intersect_start;
-
-            if (std::memcmp(t_old_base + rel, t_new_base + rel, len) != 0) {
-
-                auto tp = TreePath::fromDotted(path);
-
-                p_plc_state_->incrementNodeVersion(tp);
-
-                // Field-level dirty: mark this leaf so collectTypedDirtyLeaves
-                // can skip unchanged fields without scanning the full prefix.
-                node.field_dirty_.store(true, std::memory_order_release);
-
-                for (auto parent = tp.parent(); parent.has_value(); parent = parent->parent()) {
-
-                    p_plc_state_->incrementNodeVersion(*parent);
-                }
-            }
+        if (std::memcmp(t_old_base + rel, t_new_base + rel, len) != 0) {
+            node.bumpVersionChain();
+            if (node.state_)
+                node.state_->field_dirty_.store(true, std::memory_order_release);
         }
-    }
+    });
 }
-
 PlcMemory::SegmentLookup PlcMemory::findContainingSegment(size_t t_abs_offset, size_t t_size) const {
 
-    for (const auto& [name_, seg] : p_plc_state_->segments()) {
+    auto lookup = p_plc_state_->findSegmentByAbsOffset(t_abs_offset, t_size);
 
-        DbEntry* p_entry = seg.get();
+    if (!lookup.p_entry)
+        return {nullptr, 0, PlcMemoryError::UNMAPPED_ARENA_REGION};
 
-        if (t_abs_offset >= p_entry->offset && t_abs_offset < p_entry->offset + p_entry->size) {
+    if (!lookup.fits)
+        return {nullptr, 0, PlcMemoryError::RANGE_CROSSES_SEGMENT_BOUNDARY};
 
-            if (t_size > p_entry->size - (t_abs_offset - p_entry->offset)) {
-
-                return {nullptr, 0, PlcMemoryError::RANGE_CROSSES_SEGMENT_BOUNDARY};
-            }
-
-            return {p_entry, t_abs_offset - p_entry->offset, PlcMemoryError::UNMAPPED_ARENA_REGION};
-        }
-    }
-
-    return {nullptr, 0, PlcMemoryError::UNMAPPED_ARENA_REGION};
+    return {lookup.p_entry, t_abs_offset - lookup.p_entry->offset, PlcMemoryError::UNMAPPED_ARENA_REGION};
 }
 
 // ── Tier 1: whole arena ──────────────────────────────────────────────────────
@@ -863,6 +840,15 @@ Result<void, PlcMemoryError> PlcMemory::write(std::span<const MemorySpan> t_span
         for (auto* e : touched)
             locks.emplace_back(e->mutex_);
 
+        // Allocation-free index: touched is 1-3 entries typical, linear scan
+        // is faster than hash map and avoids per-batch alloc.
+        auto findTouchedIdx = [&](DbEntry* e) -> size_t {
+            for (size_t i = 0; i < touched.size(); ++i)
+                if (touched[i] == e)
+                    return i;
+            return 0; // never reached - e is always in touched
+        };
+
         for (auto& r : resolved) {
             uint8_t* target = p_arena + r.p_entry->offset + r.rel_offset;
 
@@ -874,9 +860,7 @@ Result<void, PlcMemoryError> PlcMemory::write(std::span<const MemorySpan> t_span
 
             std::memcpy(target, r.p_span->p_buffer, r.p_span->size);
 
-            auto idx = static_cast<size_t>(std::distance(touched.begin(), std::find(touched.begin(), touched.end(), r.p_entry)));
-
-            segment_changed[idx] = 1;
+            segment_changed[findTouchedIdx(r.p_entry)] = 1;
         }
     }
 
@@ -1047,8 +1031,12 @@ Result<void, PlcMemoryError> PlcMemory::readDbMemory(std::span<const DbMemorySpa
 Result<void, PlcMemoryError> PlcMemory::writeDbMemory(std::span<const DbMemorySpan> t_spans) {
 
     SGRN_RETURN_IF(!p_plc_state_, PlcMemoryError::PLC_STATE_NOT_INITIALIZED);
-
     SGRN_RETURN_IF(t_spans.empty(), {});
+
+    struct ResolvedDbSpan {
+        DbEntry* p_entry;
+        const DbMemorySpan* span;
+    };
 
     std::vector<ResolvedDbSpan> resolved;
     resolved.reserve(t_spans.size());
@@ -1060,7 +1048,6 @@ Result<void, PlcMemoryError> PlcMemory::writeDbMemory(std::span<const DbMemorySp
         SGRN_RETURN_IF_NULL(s.p_buffer, PlcMemoryError::NULL_BUFFER);
 
         DbEntry* p_entry = p_plc_state_->findSegmentById(s.db);
-
         SGRN_RETURN_IF_NULL(p_entry, PlcMemoryError::DB_SEGMENT_NOT_FOUND);
 
         SGRN_RETURN_IF(s.offset > p_entry->size || s.size > p_entry->size - s.offset, PlcMemoryError::RANGE_EXCEEDS_ALLOWED_SPACE);
@@ -1070,66 +1057,62 @@ Result<void, PlcMemoryError> PlcMemory::writeDbMemory(std::span<const DbMemorySp
 
     std::vector<DbEntry*> touched;
     touched.reserve(resolved.size());
-
     for (auto& r : resolved)
         touched.push_back(r.p_entry);
 
-    std::sort(touched.begin(), touched.end(), [](DbEntry* tp_a, DbEntry* tp_b) { return tp_a->offset < tp_b->offset; });
-
+    std::sort(touched.begin(), touched.end(), [](DbEntry* a, DbEntry* b) { return a->offset < b->offset; });
     touched.erase(std::unique(touched.begin(), touched.end()), touched.end());
 
     uint8_t* p_arena = p_plc_state_->getArenaTree().data();
-
     std::vector<uint8_t> segment_changed(touched.size(), 0);
 
     {
         std::vector<std::unique_lock<std::shared_mutex>> locks;
         locks.reserve(touched.size());
-
         for (auto* e : touched)
             locks.emplace_back(e->mutex_);
+
+        auto findTouchedIdx = [&](DbEntry* e) -> size_t {
+            for (size_t i = 0; i < touched.size(); ++i)
+                if (touched[i] == e)
+                    return i;
+            return 0;
+        };
 
         for (auto& r : resolved) {
             uint8_t* target = p_arena + r.p_entry->offset + r.span->offset;
 
-            if (std::memcmp(target, r.span->p_buffer, r.span->size) == 0) {
+            if (std::memcmp(target, r.span->p_buffer, r.span->size) == 0)
                 continue;
-            }
 
             bumpFieldVersions(static_cast<uint16_t>(r.p_entry->id), r.span->offset, r.span->size, target, r.span->p_buffer);
 
             std::memcpy(target, r.span->p_buffer, r.span->size);
 
-            auto idx = static_cast<size_t>(std::distance(touched.begin(), std::find(touched.begin(), touched.end(), r.p_entry)));
-
-            segment_changed[idx] = 1;
-
-            // MED-2: Patch SnapshotRegistry while the segment lock is still held.
-            snapshot_registry_->patchSnapshotRegion(static_cast<uint16_t>(r.p_entry->id), r.span->offset, r.span->p_buffer, r.span->size);
+            segment_changed[findTouchedIdx(r.p_entry)] = 1;
         }
     }
 
     bool any_changed = false;
-
     for (size_t i = 0; i < touched.size(); ++i) {
         if (!segment_changed[i])
             continue;
-
         any_changed = true;
-
         touched[i]->markDirty();
-
         p_plc_state_->incrementNodeVersion(TreePath::fromDotted(touched[i]->name));
-
         touched[i]->last_write_ms.store(sgrn::utils::time::nowMilliseconds(), std::memory_order_release);
     }
 
-    if (any_changed)
+    if (any_changed) {
         signalDirty();
+
+        for (auto& r : resolved) {
+            snapshot_registry_->patchSnapshotRegion(static_cast<uint16_t>(r.p_entry->id), r.span->offset, r.span->p_buffer, r.span->size);
+        }
+    }
 
     return {};
 }
-
 Result<void, PlcMemoryError> PlcMemory::writeBit(uint16_t t_db_number, size_t t_byte_offset, int t_bit_index, bool t_value) {
 
     SGRN_RETURN_IF_NULL(p_plc_state_, PlcMemoryError::PLC_STATE_NOT_INITIALIZED);
@@ -1159,24 +1142,15 @@ Result<void, PlcMemoryError> PlcMemory::writeBit(uint16_t t_db_number, size_t t_
 
         *target = new_val;
 
-        for (const auto& [path, node] : p_plc_state_->nodes()) {
-
-            if (node.db_number_ != t_db_number || !node.children_.empty()) {
-                continue;
-            }
-
-            if (node.offset_ <= t_byte_offset && node.offset_ + node.size_ > t_byte_offset) {
-
-                if (node.type_ == s7codec::Type::Bool) {
-                    if (node.offset_ == t_byte_offset && node.bit_index_ == t_bit_index) {
-
-                        p_plc_state_->incrementNodeVersion(TreePath::fromDotted(path));
-                    }
-                } else {
-                    p_plc_state_->incrementNodeVersion(TreePath::fromDotted(path));
+        p_plc_state_->forEachIntersectingLeaf(t_db_number, t_byte_offset, 1, [&](PlcNode& node) {
+            if (node.type_ == s7codec::Type::Bool) {
+                if (node.offset_ == t_byte_offset && node.bit_index_ == t_bit_index) {
+                    node.bumpVersionChain();
                 }
+            } else {
+                node.bumpVersionChain();
             }
-        }
+        });
 
         p_plc_state_->incrementNodeVersion(TreePath::fromDotted(p_entry->name));
     }
@@ -1189,5 +1163,30 @@ Result<void, PlcMemoryError> PlcMemory::writeBit(uint16_t t_db_number, size_t t_
 
     return {};
 }
+void PlcMemory::buildRangeIndex() {
+    std::unique_lock lock(index_mutex_);
+    range_index_.clear();
+    if (!p_plc_state_)
+        return;
 
+    for (const auto& [path, node_ptr] : p_plc_state_->nodes()) {
+        if (!node_ptr || !node_ptr->children_.empty())
+            continue; // only leaves
+        if (!node_ptr->cached_slot_)
+            continue;
+        RangeEntry entry;
+        entry.db = node_ptr->db_number_;
+        entry.offset = node_ptr->offset_;
+        entry.size = node_ptr->size_;
+        entry.node = node_ptr.get();
+        entry.node_span = node_ptr->size_; // or compute properly for arrays
+        range_index_.push_back(entry);
+    }
+
+    std::sort(range_index_.begin(), range_index_.end(), [](const RangeEntry& a, const RangeEntry& b) {
+        if (a.db != b.db)
+            return a.db < b.db;
+        return a.offset < b.offset;
+    });
+}
 } // namespace sgrn::gateway::twin

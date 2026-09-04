@@ -142,13 +142,16 @@ std::vector<FieldUpdateNotification> gatherTypedDirtyLeaves(PlcState& t_state, c
     std::memcpy(arena_snapshot.data(), t_state.arenaData() + p_entry->offset, p_entry->size);
     lk.unlock();
 
-    for (auto& [path, t_node] : t_state.nodes()) {
+    for (auto& [path, t_node_ptr] : t_state.nodes()) {
+        if (!t_node_ptr || !t_node_ptr->state_)
+            continue;
+        auto& t_node = *t_node_ptr;
         if (path.size() <= prefix.size() || path.compare(0, prefix.size(), prefix) != 0)
             continue;
         if (!t_node.children_.empty() || !t_node.cached_slot_)
             continue;
         // Field-level: only emit nodes whose byte range was actually touched.
-        if (!t_node.field_dirty_.exchange(false, std::memory_order_acq_rel))
+        if (!t_node.state_->field_dirty_.exchange(false, std::memory_order_acq_rel))
             continue;
         out.push_back(makeFieldUpdateNotification(t_state, t_node, *p_entry, path, t_timestamp, t_include_json));
     }
@@ -165,32 +168,14 @@ std::vector<FieldUpdateNotification> gatherTypedDirtyLeavesByDb(PlcState& t_stat
     if (!p_entry->is_dirty_.load(std::memory_order_acquire))
         return out;
 
-    std::string db_name;
-    for (const auto& [name, seg] : t_state.segments()) {
-        if (seg.get() == p_entry) {
-            db_name = name;
-            break;
-        }
-    }
-    if (db_name.empty())
-        return out;
-
-    const std::string prefix = db_name + ".";
     const uint64_t t_timestamp = sgrn::utils::time::nowMilliseconds();
 
-    std::shared_lock<std::shared_mutex> lk(p_entry->mutex_);
-    lk.unlock();
-
-    for (auto& [path, t_node] : t_state.nodes()) {
-        if (path.size() <= prefix.size() || path.compare(0, prefix.size(), prefix) != 0)
-            continue;
-        if (!t_node.children_.empty() || !t_node.cached_slot_)
-            continue;
-        // Field-level: only emit nodes whose byte range was actually touched.
-        if (!t_node.field_dirty_.exchange(false, std::memory_order_acq_rel))
-            continue;
-        out.push_back(makeFieldUpdateNotification(t_state, t_node, *p_entry, path, t_timestamp, t_include_json));
-    }
+    t_state.forEachLeaf(t_db_number, [&](PlcNode& node) {
+        if (!node.state_ || !node.state_->field_dirty_.exchange(false, std::memory_order_acq_rel))
+            return;
+        // full_path_ is recorded once, at registration (PlcState::add()).
+        out.push_back(makeFieldUpdateNotification(t_state, node, *p_entry, node.full_path_, t_timestamp, t_include_json));
+    });
     return out;
 }
 

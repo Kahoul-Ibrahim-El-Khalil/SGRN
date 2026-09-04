@@ -38,6 +38,19 @@ namespace sgrn::gateway::adapters
 namespace
 {
 
+inline UA_StatusCode sgrn_UA_Server_write_attribute(
+    UA_Server* server, const UA_NodeId* nodeId, UA_AttributeId attributeId, const UA_DataType* type, void* data) {
+    UA_WriteValue wv;
+    UA_WriteValue_init(&wv);
+    wv.nodeId = *nodeId;
+    wv.attributeId = attributeId;
+    wv.value.hasValue = true;
+    wv.value.value.type = type;
+    wv.value.value.data = data;
+    wv.value.value.storageType = UA_VARIANT_DATA;
+    return UA_Server_write(server, &wv);
+}
+
 // Writes the DataTypeDefinition attribute (UA_EnumDefinition) for an enum
 // DataType node — the machine-readable field/value list consumed by clients
 // that support DataTypeDefinition browsing (OPC UA Part 3 §8.51).
@@ -56,8 +69,8 @@ Result<void, std::string> writeEnumDefinitionAttribute(UA_Server* tp_raw, const 
             enum_def.fields[idx].name = UA_STRING_ALLOC(v.c_str());
             ++idx;
         }
-        UA_StatusCode code =
-            __UA_Server_write(tp_raw, &t_type.typeId, UA_ATTRIBUTEID_DATATYPEDEFINITION, &UA_TYPES[UA_TYPES_ENUMDEFINITION], &enum_def);
+        UA_StatusCode code = sgrn_UA_Server_write_attribute(
+            tp_raw, &t_type.typeId, UA_ATTRIBUTEID_DATATYPEDEFINITION, &UA_TYPES[UA_TYPES_ENUMDEFINITION], &enum_def);
         if (code != UA_STATUSCODE_GOOD) {
 
             UA_EnumDefinition_clear(&enum_def);
@@ -182,7 +195,7 @@ void registerStructureDataType(UA_Server* p_raw, const UA_DataType& ut) {
         UA_NODEID_NUMERIC(0, UA_NS0ID_HASSUBTYPE), UA_QUALIFIEDNAME_ALLOC(1, ut.typeName), attr, nullptr, nullptr);
 
     if (res == UA_STATUSCODE_GOOD) {
-        __UA_Server_write(p_raw, &ut.typeId, UA_ATTRIBUTEID_DATATYPEDEFINITION, &UA_TYPES[UA_TYPES_STRUCTUREDEFINITION], &sd);
+        sgrn_UA_Server_write_attribute(p_raw, &ut.typeId, UA_ATTRIBUTEID_DATATYPEDEFINITION, &UA_TYPES[UA_TYPES_STRUCTUREDEFINITION], &sd);
     }
 
     UA_ObjectAttributes enc_attr = UA_ObjectAttributes_default;
@@ -383,20 +396,16 @@ void triggerAlarmEvent(Server& t_server, const NodeId& t_alarm_event_type_id, ui
     if (!t_alarm_obj.HasMember("active") || !t_alarm_obj["active"].IsBool() || !t_alarm_obj["active"].GetBool())
         return;
 
+    (void)t_timestamp_ms;
     UA_Server* p_raw = t_server.raw();
-    UA_NodeId event_node_id;
-    UA_StatusCode res = UA_Server_createEvent(p_raw, t_alarm_event_type_id.get(), &event_node_id);
-    if (res != UA_STATUSCODE_GOOD)
-        return;
-
     const int priority = t_alarm_obj.HasMember("priority") ? t_alarm_obj["priority"].GetInt() : 0;
-    const std::string msg = fmt::format(
+    const std::string msg_str = fmt::format(
         "Alarm {} triggered on DB{}.{}", t_alarm_obj.HasMember("code") ? t_alarm_obj["code"].GetUint() : 0, t_db_number, t_path);
 
-    writeBaseEventProperties(p_raw, event_node_id, t_timestamp_ms, severityForPriority(priority), msg);
-    writeAlarmSpecificProperties(p_raw, event_node_id, t_alarm_obj, priority);
+    UA_LocalizedText msg = UA_LOCALIZEDTEXT(const_cast<char*>("en-US"), const_cast<char*>(msg_str.c_str()));
+    UA_NodeId source_node = UA_NODEID_NUMERIC(0, UA_NS0ID_SERVER);
 
-    UA_Server_triggerEvent(p_raw, event_node_id, UA_NODEID_NUMERIC(0, UA_NS0ID_SERVER), nullptr, UA_TRUE);
+    UA_Server_createEvent(p_raw, source_node, t_alarm_event_type_id.get(), severityForPriority(priority), msg, nullptr, nullptr, nullptr);
 }
 
 } // namespace sgrn::gateway::adapters

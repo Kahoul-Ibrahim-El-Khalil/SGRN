@@ -233,8 +233,10 @@ static void scanSchemaLoads(const std::string& t_content, const std::string& t_a
             } else {
                 auto store_res = loadScannedSchema(method, literal.value(), script_dir, t_loaded_schemas);
                 if (store_res.hasError()) {
-                    fmt::print(stderr, fg(fmt::color::red), "[s7shell] Schema compilation failed for {}('{}'): {}\n", method,
-                        literal.value(), toString(store_res.error()));
+                    if (store_res.error() != SclError::DuplicateDefinition) {
+                        fmt::print(stderr, fg(fmt::color::red), "[s7shell] Schema compilation failed for {}('{}'): {}\n", method,
+                            literal.value(), toString(store_res.error()));
+                    }
                 } else {
                     const auto& [store, schema_key] = store_res.value();
                     t_loaded_schemas.insert(schema_key);
@@ -270,8 +272,10 @@ static void scanPlcRuntimeConstructors(const std::string& t_content, const std::
             } else {
                 auto store_res = loadScannedSchema("loadSclSchema", *literal, script_dir, t_loaded_schemas);
                 if (store_res.hasError()) {
-                    fmt::print(stderr, fg(fmt::color::red), "[s7shell] Schema compilation failed for PlcRuntime('{}'): {}\n", *literal,
-                        toString(store_res.error()));
+                    if (store_res.error() != SclError::DuplicateDefinition) {
+                        fmt::print(stderr, fg(fmt::color::red), "[s7shell] Schema compilation failed for PlcRuntime('{}'): {}\n", *literal,
+                            toString(store_res.error()));
+                    }
                 } else {
                     const auto& [store, schema_key] = store_res.value();
                     t_loaded_schemas.insert(schema_key);
@@ -320,15 +324,15 @@ void S7Shell::runScript(const std::string& t_filename) {
         fmt::print(stderr, fg(fmt::color::red), "[s7shell] Failed to create module for '{}'\n", t_filename);
         return;
     }
-    // Preamble: auto-generated DataBlock@ handles + init script content
-    if (!db_preamble_.empty())
-        builder.AddSectionFromMemory("<db_refs>", db_preamble_.c_str());
-
     // Add the modified content from memory to support our rewritten imports
     if (builder.AddSectionFromMemory(t_filename.c_str(), t_content.c_str()) < 0) {
         fmt::print(stderr, fg(fmt::color::red), "[s7shell] Failed to add script section: '{}'\n", t_filename);
         return;
     }
+
+    // Preamble: auto-generated DataBlock@ handles (must be after script sections so plc global var is declared)
+    if (!db_preamble_.empty())
+        builder.AddSectionFromMemory("<db_refs>", db_preamble_.c_str());
     if (builder.BuildModule() < 0) {
         fmt::print(stderr, fg(fmt::color::red), "[s7shell] Compilation failed: '{}'\n", t_filename);
         return;
@@ -409,8 +413,6 @@ void S7Shell::runScripts(const std::vector<std::string>& t_filenames) {
         fmt::print(stderr, fg(fmt::color::red), "[s7shell] Failed to create merged module\n");
         return;
     }
-    if (!db_preamble_.empty())
-        builder.AddSectionFromMemory("<db_refs>", db_preamble_.c_str());
     for (size_t i = 0; i < t_filenames.size(); ++i) {
         // Write to a temp file so CScriptBuilder can add it by memory
         const std::string section_name = fs::path(t_filenames[i]).filename().string();
@@ -419,6 +421,8 @@ void S7Shell::runScripts(const std::vector<std::string>& t_filenames) {
             return;
         }
     }
+    if (!db_preamble_.empty())
+        builder.AddSectionFromMemory("<db_refs>", db_preamble_.c_str());
     if (builder.BuildModule() < 0) {
         fmt::print(stderr, fg(fmt::color::red), "[s7shell] Compilation failed for merged scripts\n");
         return;

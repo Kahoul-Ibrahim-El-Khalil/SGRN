@@ -4,12 +4,11 @@
 #include <sgrn/gateway/core/TelemetryBroker.hpp>
 #include <sgrn/gateway/wrappers/opcua/DataValue.hpp>
 #include <sgrn/gateway/wrappers/opcua/NodeId.hpp>
+#include <ankerl/unordered_dense.h>
 #include <atomic>
 #include <functional>
 #include <mutex>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
 
 namespace sgrn::gateway::wrappers::opcua
 {
@@ -45,6 +44,14 @@ public:
         alarm_callback_ = std::move(t_cb);
     }
 
+    using ActiveClientsCheck = std::function<bool()>;
+    void setActiveClientsCheck(ActiveClientsCheck t_cb) {
+        active_clients_check_ = std::move(t_cb);
+    }
+
+    void setNodeSubscribed(const std::string& t_map_key, bool t_subscribed);
+    bool isNodeSubscribed(const std::string& t_map_key) const;
+
 private:
     struct RegisteredNode {
         wrappers::opcua::NodeId node_id;
@@ -59,11 +66,15 @@ private:
 
     wrappers::opcua::Server* server_{nullptr};
     std::atomic<bool> running_{false};
-    std::unordered_map<std::string, RegisteredNode> nodes_;
+    ankerl::unordered_dense::map<std::string, RegisteredNode> nodes_;
     AlarmCallback alarm_callback_;
     PendingWriteCallback pending_write_;
+    ActiveClientsCheck active_clients_check_;
 
-    std::unordered_set<std::string> dirty_aggregates_;
+    ankerl::unordered_dense::map<std::string, uint32_t> subscription_counts_;
+    mutable std::mutex subscription_mutex_;
+
+    ankerl::unordered_dense::set<std::string> dirty_aggregates_;
     std::mutex dirty_mutex_;
 };
 

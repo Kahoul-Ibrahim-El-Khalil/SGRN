@@ -83,13 +83,12 @@ std::string buildDbPreamble(const sgrn::scl::PlcSchemaStore& t_store, const std:
         const std::string snake = sgrn::utils::strings::toSnakeCase(db.db_name.empty() ? fmt::format("db{}", db.db_number) : db.db_name);
         const std::string as_type = db.db_name.empty() ? fmt::format("Db{}", db.db_number) : db.db_name;
 
-        // Generate a getter for the snake_case name (e.g., get_reactor_core)
-        // AngelScript translates this to a virtual property so `reactor_core` just works.
-        out += fmt::format("{}@ get_{}{}() {{ return ({} !is null) ? cast<{}>({}.db({})) : null; }}\n", as_type, prefix, snake,
+        // Global virtual property for snake_case name (e.g. reactor_core)
+        out += fmt::format("{}@ {}{} {{ get {{ return ({} !is null) ? cast<{}>({}.db({})) : null; }} }}\n", as_type, prefix, snake,
             t_client_var, as_type, t_client_var, db.db_number);
 
-        // Generate a getter for the generic dbXX name for compatibility
-        out += fmt::format("{}@ get_{}db{}() {{ return ({} !is null) ? cast<{}>({}.db({})) : null; }}\n", as_type, prefix, db.db_number,
+        // Global virtual property for generic dbXX name (e.g. db1)
+        out += fmt::format("{}@ {}db{} {{ get {{ return ({} !is null) ? cast<{}>({}.db({})) : null; }} }}\n", as_type, prefix, db.db_number,
             t_client_var, as_type, t_client_var, db.db_number);
     }
     return out;

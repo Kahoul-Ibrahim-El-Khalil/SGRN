@@ -80,9 +80,31 @@ bool DeltaPushHandler::buildDataValueFromEvent(const core::TelemetryEvent& t_eve
     return true;
 }
 
+void DeltaPushHandler::setNodeSubscribed(const std::string& t_map_key, bool t_subscribed) {
+    std::lock_guard lock(subscription_mutex_);
+    if (t_subscribed) {
+        subscription_counts_[t_map_key]++;
+    } else {
+        auto it = subscription_counts_.find(t_map_key);
+        if (it != subscription_counts_.end()) {
+            if (--it->second == 0) {
+                subscription_counts_.erase(it);
+            }
+        }
+    }
+}
+
+bool DeltaPushHandler::isNodeSubscribed(const std::string& t_map_key) const {
+    std::lock_guard lock(subscription_mutex_);
+    return subscription_counts_.find(t_map_key) != subscription_counts_.end();
+}
+
 void DeltaPushHandler::onTelemetryEvent(const core::TelemetryEvent& t_event) {
 
     if (!running_.load(std::memory_order_acquire))
+        return;
+
+    if (active_clients_check_ && !active_clients_check_())
         return;
 
     if (t_event.type != core::EventType::LeafUpdate)
@@ -137,7 +159,7 @@ void DeltaPushHandler::notifyAggregateAncestors(uint16_t t_db_number, const std:
 
 void DeltaPushHandler::flushDirtyAggregates(uint64_t t_timestamp_ms) {
 
-    std::unordered_set<std::string> to_flush;
+    ankerl::unordered_dense::set<std::string> to_flush;
 
     {
         std::lock_guard lock(dirty_mutex_);
@@ -170,7 +192,6 @@ void DeltaPushHandler::pushSubtreeSnapshot(uint16_t t_db_number, const std::stri
 
     if (!p_ctx || !p_ctx->server)
         return;
-
     // Prefer the native OPC UA UDT representation when possible.
     if (!p_ctx->udt_name.empty() && p_ctx->type_registry) {
         const UA_DataType* p_udt_type = p_ctx->type_registry->find(p_ctx->udt_name);
@@ -178,7 +199,6 @@ void DeltaPushHandler::pushSubtreeSnapshot(uint16_t t_db_number, const std::stri
         const PlcNode* p_node = p_ctx->resolveSymbol();
 
         if (p_udt_type && p_node && p_ctx->server->state()) {
-
             auto result = decodeStructObjectToExtensionObjectVariant(*p_node, *p_udt_type, p_ctx->server->state()->tree());
 
             if (result.hasValue()) {

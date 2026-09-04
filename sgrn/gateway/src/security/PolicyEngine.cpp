@@ -377,6 +377,9 @@ sgrn::Result<void> PolicyEngine::loadScript(const std::string& t_path) {
     auto staging = std::make_shared<RuleTable>();
 
     sgrn::scripting::ScriptHost t_host;
+    if (!t_host.getEngine()) {
+        return sgrn::Result<void>::Error("Failed to initialize AngelScript engine");
+    }
     registerPolicyBindings(t_host, staging.get());
 
     if (auto t_r = t_host.loadFile(t_path); t_r.hasError())

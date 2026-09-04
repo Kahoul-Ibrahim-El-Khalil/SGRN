@@ -351,6 +351,12 @@ void addLeafVariableNode(const OpcUaAdapterContext& t_adapter_ctx, const OpcUaNo
     UA_VariableAttributes t_v_attr = UA_VariableAttributes_default;
     t_v_attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", t_field.name.c_str());
     configureVariableAttributes(t_v_attr, t_field, is_array, is_custom_udt, t_ua_type_idx, p_custom_type, p_enum_type);
+    if (t_path.path == "przr_pid" || t_path.path.find("przr_pid") != std::string::npos) {
+        fmt::print("[node_reg] path={} is_array={} is_custom_udt={} udt_name={} p_custom_type={} count={} size={} dataType=ns={};i={} "
+                   "valueRank={}\n",
+            t_path.path, is_array, is_custom_udt, t_field.udt_name, p_custom_type ? p_custom_type->typeName : "null", t_field.count,
+            t_field_size, t_v_attr.dataType.namespaceIndex, t_v_attr.dataType.identifier.numeric, t_v_attr.valueRank);
+    }
 
     UA_Server_addVariableNode(p_raw, t_var_id, parent, UA_NODEID_NUMERIC(0, UA_NS0ID_HASCOMPONENT),
         UA_QUALIFIEDNAME_ALLOC(1, t_field.name.c_str()), UA_NODEID_NUMERIC(0, UA_NS0ID_BASEDATAVARIABLETYPE), t_v_attr, p_ctx, nullptr);

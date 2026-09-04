@@ -14,8 +14,12 @@
     "websocket": {
       "ip": "0.0.0.0",
       "port": 8001
+    },
+    "opcua": {
+      "ip" : "0.0.0.0",
+      "port": 4840
     }
-  },
+      },
   "schema": "./sgrn/gateway/simulations/nuclear/schema.scl",
   "state_dir": "/tmp/sgrn-gateway-state",
   

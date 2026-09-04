@@ -1143,39 +1143,37 @@ static ScriptFieldProxy* IdentityProxyCast(ScriptFieldProxy* tp_proxy) {
 }
 
 void registerSchemaTypes(sgrn::scripting::ScriptHost& t_host, const PlcSchemaStore& t_store, SchemaVMRegistry& t_registry) {
+    asIScriptEngine* p_engine = t_host.getEngine();
+    if (!p_engine)
+        return;
+
     // 1. Register all UDT types first
     for (const auto& udt : t_store.udts()) {
         std::string tn = sanitizeFieldName(udt.name);
-        if (t_registry.registered_schema_types.count(tn))
+        if (p_engine->GetTypeInfoByName(tn.c_str()) != nullptr)
             continue;
         t_registry.registered_schema_types.insert(tn);
 
-        if (t_host.getEngine()->RegisterObjectType(tn.c_str(), 0, asOBJ_REF) < 0)
+        if (p_engine->RegisterObjectType(tn.c_str(), 0, asOBJ_REF) < 0)
             continue;
 
-        t_host.getEngine()->RegisterObjectBehaviour(
-            tn.c_str(), asBEHAVE_ADDREF, "void f()", asMETHOD(ScriptFieldProxy, addRef), asCALL_THISCALL);
-        t_host.getEngine()->RegisterObjectBehaviour(
-            tn.c_str(), asBEHAVE_RELEASE, "void f()", asMETHOD(ScriptFieldProxy, release), asCALL_THISCALL);
+        p_engine->RegisterObjectBehaviour(tn.c_str(), asBEHAVE_ADDREF, "void f()", asMETHOD(ScriptFieldProxy, addRef), asCALL_THISCALL);
+        p_engine->RegisterObjectBehaviour(tn.c_str(), asBEHAVE_RELEASE, "void f()", asMETHOD(ScriptFieldProxy, release), asCALL_THISCALL);
 
         // Cast to/from FieldProxy
-        t_host.getEngine()->RegisterObjectMethod(tn.c_str(), "FieldProxy@ opCast()", asFUNCTION(IdentityProxyCast), asCALL_CDECL_OBJFIRST);
-        t_host.getEngine()->RegisterObjectMethod(
+        p_engine->RegisterObjectMethod(tn.c_str(), "FieldProxy@ opCast()", asFUNCTION(IdentityProxyCast), asCALL_CDECL_OBJFIRST);
+        p_engine->RegisterObjectMethod(
             tn.c_str(), "const FieldProxy@ opCast() const", asFUNCTION(IdentityProxyCast), asCALL_CDECL_OBJFIRST);
 
         std::string cast_sig = fmt::format("{}@ opCast()", tn);
-        t_host.getEngine()->RegisterObjectMethod("FieldProxy", cast_sig.c_str(), asFUNCTION(IdentityProxyCast), asCALL_CDECL_OBJFIRST);
+        p_engine->RegisterObjectMethod("FieldProxy", cast_sig.c_str(), asFUNCTION(IdentityProxyCast), asCALL_CDECL_OBJFIRST);
         std::string const_cast_sig = fmt::format("const {}@ opCast() const", tn);
-        t_host.getEngine()->RegisterObjectMethod(
-            "FieldProxy", const_cast_sig.c_str(), asFUNCTION(IdentityProxyCast), asCALL_CDECL_OBJFIRST);
+        p_engine->RegisterObjectMethod("FieldProxy", const_cast_sig.c_str(), asFUNCTION(IdentityProxyCast), asCALL_CDECL_OBJFIRST);
     }
 
     // 2. Register fields for all UDT types
     for (const auto& udt : t_store.udts()) {
         std::string tn = sanitizeFieldName(udt.name);
-        if (t_registry.registered_udt_properties.count(tn))
-            continue;
-        t_registry.registered_udt_properties.insert(tn);
         registerUdtFieldProperties(t_host, tn, udt.fields, t_registry);
     }
 
@@ -1183,7 +1181,7 @@ void registerSchemaTypes(sgrn::scripting::ScriptHost& t_host, const PlcSchemaSto
     for (const auto& [db_num, tp_db] : t_store.dbs()) {
         std::string tn = sanitizeFieldName(tp_db.db_name.empty() ? fmt::format("DB{}", db_num) : tp_db.db_name);
 
-        if (t_registry.registered_schema_types.count(tn))
+        if (p_engine->GetTypeInfoByName(tn.c_str()) != nullptr)
             continue;
         t_registry.registered_schema_types.insert(tn);
 

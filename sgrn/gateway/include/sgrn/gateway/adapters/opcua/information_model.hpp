@@ -6,6 +6,8 @@
 #include <sgrn/gateway/wrappers/opcua/TypeRegistry.hpp>
 #include <sgrn/scl/types.hpp>
 
+#include <open62541/server.h>
+
 #include <map>
 #include <memory>
 #include <optional>

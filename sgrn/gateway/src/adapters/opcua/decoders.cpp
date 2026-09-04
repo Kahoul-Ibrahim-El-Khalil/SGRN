@@ -4,7 +4,6 @@
 
 #include <sgrn/Result.hpp>
 #include <sgrn/gateway/adapters/opcua/TypeTranslation.hpp>
-#include <sgrn/gateway/adapters/opcua/s7_to_ua.hpp>
 #include <sgrn/gateway/twin/PlcState.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <opcua_codec_table.hpp>
@@ -429,6 +428,46 @@ Result<UA_Variant, OpcUaAdapterError> decodeStructObjectToExtensionObjectVariant
     const twin::PlcNode& t_node, const UA_DataType& t_type, const ::sgrn::ArenaTree& t_arena) {
 
     SGRN_RETURN_IF_NULL(t_node.cached_slot_, OpcUaAdapterError::INVALID_DB_ENTRY);
+
+    // Array of UDT (e.g. ReactorCore.thermocouples[16] -> 16 x TemperatureSensor):
+    // t_node.count_ >1 and t_node.type==Struct, t_type is the element UDT.
+    // Return an array Variant of ExtensionObjects, one per element.
+    if (t_node.count_ > 1) {
+        const size_t count = static_cast<size_t>(t_node.count_);
+        const size_t elem_size = static_cast<size_t>(t_node.size_); // per-element
+        const uint8_t* p_s7_base = t_arena.data() + t_node.cached_slot_->offset + t_node.offset_;
+        UA_ExtensionObject* p_arr = static_cast<UA_ExtensionObject*>(UA_Array_new(count, &UA_TYPES[UA_TYPES_EXTENSIONOBJECT]));
+        SGRN_RETURN_IF_NULL(p_arr, OpcUaAdapterError::ALLOC_FAILED);
+        for (size_t i = 0; i < count; ++i) {
+            void* p_buf = UA_calloc(1, t_type.memSize);
+            if (!p_buf) {
+                for (size_t j = 0; j < i; ++j) {
+                    if (p_arr[j].content.decoded.data)
+                        UA_free((void*)p_arr[j].content.decoded.data);
+                }
+                UA_Array_delete(p_arr, count, &UA_TYPES[UA_TYPES_EXTENSIONOBJECT]);
+                return Error(OpcUaAdapterError::ALLOC_FAILED);
+            }
+            const uint8_t* p_s7_elem = p_s7_base + (i * elem_size);
+            auto res = decodeToOpcUa(t_type, p_s7_elem, static_cast<uint8_t*>(p_buf), t_node);
+            if (res.hasError()) {
+                UA_free(p_buf);
+                for (size_t j = 0; j < i; ++j) {
+                    if (p_arr[j].content.decoded.data)
+                        UA_free((void*)p_arr[j].content.decoded.data);
+                }
+                UA_Array_delete(p_arr, count, &UA_TYPES[UA_TYPES_EXTENSIONOBJECT]);
+                return res.error();
+            }
+            p_arr[i].encoding = UA_EXTENSIONOBJECT_DECODED;
+            p_arr[i].content.decoded.type = &t_type;
+            p_arr[i].content.decoded.data = p_buf;
+        }
+        UA_Variant out;
+        UA_Variant_init(&out);
+        UA_Variant_setArray(&out, p_arr, count, &UA_TYPES[UA_TYPES_EXTENSIONOBJECT]);
+        return out;
+    }
 
     void* p_buf = UA_calloc(1, t_type.memSize);
 

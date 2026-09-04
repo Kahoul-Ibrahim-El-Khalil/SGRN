@@ -11,7 +11,11 @@ endif()
 
 sgrn_fetch_source(opener)
 
-set(OPENER_SRC_DIR ${opener_SOURCE_DIR}/source/src)
+if(EXISTS "${opener_SOURCE_DIR}/source/src")
+    set(OPENER_SRC_DIR "${opener_SOURCE_DIR}/source/src")
+else()
+    set(OPENER_SRC_DIR "${opener_SOURCE_DIR}/src")
+endif()
 
 set(OPENER_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/opener_gen)
 file(MAKE_DIRECTORY ${OPENER_GEN_DIR})
@@ -23,6 +27,8 @@ set(OpENer_Device_Config_Product_Code 65001)
 set(OpENer_Device_Config_Device_Name "SGRN EtherNet/IP Adapter")
 set(OpENer_Device_Major_Version 2)
 set(OpENer_Device_Minor_Version 3)
+set(OpENer_VERSION_MAJOR 2)
+set(OpENer_VERSION_MINOR 3)
 
 configure_file(
     "${OPENER_SRC_DIR}/ports/devicedata.h.in"
@@ -51,6 +57,7 @@ file(WRITE "${OPENER_GEN_DIR}/opener_user_conf.h" [=[
 
 #include <assert.h>
 #include "typedefs.h"
+#include "devicedata.h"
 
 #ifndef CIP_FILE_OBJECT
   #define CIP_FILE_OBJECT 0
@@ -84,6 +91,10 @@ file(WRITE "${OPENER_GEN_DIR}/opener_user_conf.h" [=[
   #define OPENER_ETHLINK_IFACE_CTRL_ENABLE 0
 #endif
 
+#ifndef OPENER_MESSAGE_DATA_REPLY_BUFFER
+  #define OPENER_MESSAGE_DATA_REPLY_BUFFER 500
+#endif
+
 #define OPENER_CIP_NUM_APPLICATION_SPECIFIC_CONNECTABLE_OBJECTS 1
 #define OPENER_CIP_NUM_EXPLICIT_CONNS 6
 #define OPENER_CIP_NUM_EXLUSIVE_OWNER_CONNS 1
@@ -96,7 +107,7 @@ file(WRITE "${OPENER_GEN_DIR}/opener_user_conf.h" [=[
 static const MilliSeconds kOpenerTimerTickInMilliSeconds = 10;
 
 #ifndef OPENER_UNIT_TEST
-  #define OPENER_ASSERT(assertion) assert(assertion)
+  #define OPENER_ASSERT(assertion) assert(assertion);
 #endif
 
 #endif /* OPENER_USER_CONF_H_ */
@@ -106,53 +117,30 @@ static const MilliSeconds kOpenerTimerTickInMilliSeconds = 10;
 file(WRITE "${OPENER_GEN_DIR}/Ws2tcpip.h" "#include <ws2tcpip.h>\n")
 
 
-# Common sources
-set(OPENER_SOURCES
-    ${OPENER_SRC_DIR}/cip/appcontype.c
-    ${OPENER_SRC_DIR}/cip/cipassembly.c
-    ${OPENER_SRC_DIR}/cip/cipclass3connection.c
-    ${OPENER_SRC_DIR}/cip/cipcommon.c
-    ${OPENER_SRC_DIR}/cip/cipconnectionobject.c
-    ${OPENER_SRC_DIR}/cip/cipconnectionmanager.c
-    ${OPENER_SRC_DIR}/cip/cipdlr.c
-    ${OPENER_SRC_DIR}/cip/cipethernetlink.c
-    ${OPENER_SRC_DIR}/cip/cipidentity.c
-    ${OPENER_SRC_DIR}/cip/cipioconnection.c
-    ${OPENER_SRC_DIR}/cip/cipmessagerouter.c
-    ${OPENER_SRC_DIR}/cip/ciptcpipinterface.c
-    ${OPENER_SRC_DIR}/cip/cipepath.c
-    ${OPENER_SRC_DIR}/cip/cipelectronickey.c
-    ${OPENER_SRC_DIR}/cip/cipstring.c
-    ${OPENER_SRC_DIR}/cip/cipstringi.c
-    ${OPENER_SRC_DIR}/cip/cipqos.c
-    ${OPENER_SRC_DIR}/cip/ciptypes.c
-    ${OPENER_SRC_DIR}/enet_encap/cpf.c
-    ${OPENER_SRC_DIR}/enet_encap/encap.c
-    ${OPENER_SRC_DIR}/enet_encap/endianconv.c
-    ${OPENER_SRC_DIR}/utils/random.c
-    ${OPENER_SRC_DIR}/utils/xorshiftrandom.c
-    ${OPENER_SRC_DIR}/utils/doublylinkedlist.c
-    ${OPENER_SRC_DIR}/utils/enipmessage.c
-    ${OPENER_SRC_DIR}/ports/generic_networkhandler.c
-    ${OPENER_SRC_DIR}/ports/socket_timer.c
-)
-
-# Platform-specific sources and includes
+# Platform port selection
 if(WIN32)
     set(OPENER_PORT_DIR ${OPENER_SRC_DIR}/ports/WIN32)
-    list(APPEND OPENER_SOURCES
-        ${OPENER_PORT_DIR}/networkhandler.c
-        ${OPENER_PORT_DIR}/opener_error.c
-        ${OPENER_PORT_DIR}/networkconfig.c
-    )
 else()
     set(OPENER_PORT_DIR ${OPENER_SRC_DIR}/ports/POSIX)
-    list(APPEND OPENER_SOURCES
-        ${OPENER_PORT_DIR}/networkhandler.c
-        ${OPENER_PORT_DIR}/opener_error.c
-        ${OPENER_PORT_DIR}/networkconfig.c
-    )
 endif()
+
+# Dynamically gather all source files
+file(GLOB OPENER_CIP_SOURCES "${OPENER_SRC_DIR}/cip/*.c")
+file(GLOB OPENER_ENCAP_SOURCES "${OPENER_SRC_DIR}/enet_encap/*.c")
+file(GLOB OPENER_UTILS_SOURCES "${OPENER_SRC_DIR}/utils/*.c")
+file(GLOB OPENER_PORT_GENERIC_SOURCES "${OPENER_SRC_DIR}/ports/*.c")
+file(GLOB OPENER_PORT_SOURCES "${OPENER_PORT_DIR}/*.c")
+
+# Exclude sample application main entrypoint
+list(REMOVE_ITEM OPENER_PORT_SOURCES "${OPENER_PORT_DIR}/main.c")
+
+set(OPENER_SOURCES
+    ${OPENER_CIP_SOURCES}
+    ${OPENER_ENCAP_SOURCES}
+    ${OPENER_UTILS_SOURCES}
+    ${OPENER_PORT_GENERIC_SOURCES}
+    ${OPENER_PORT_SOURCES}
+)
 
 add_library(opener STATIC ${OPENER_SOURCES})
 add_library(extern::opener ALIAS opener)
@@ -188,10 +176,14 @@ if(WIN32)
     )
 else()
     target_link_libraries(opener PUBLIC pthread)
+    target_compile_options(opener PRIVATE
+        $<$<COMPILE_LANGUAGE:C>:-include> $<$<COMPILE_LANGUAGE:C>:net/if.h>
+    )
     target_compile_definitions(opener PRIVATE
         _GNU_SOURCE
         _DEFAULT_SOURCE
         _POSIX_C_SOURCE=200112L
+        OPENER_POSIX
     )
     target_compile_definitions(opener PUBLIC
         $<$<COMPILE_LANGUAGE:C>:RESTRICT=restrict>

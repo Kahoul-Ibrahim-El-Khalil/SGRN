@@ -180,6 +180,10 @@ function flush(): void {
     });
 
     client.onStatusChange((status: string) => {
+      if (status === "CONNECTED") {
+        dictionaryMode = false;
+        idToPath.clear();
+      }
       const msg: WorkerMessage = { type: "status", status };
       self.postMessage(msg);
     });

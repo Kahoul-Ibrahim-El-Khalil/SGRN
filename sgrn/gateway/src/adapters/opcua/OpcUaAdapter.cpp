@@ -86,6 +86,7 @@ sgrn::Result<void> OpcUaAdapter::start(const std::string& /*ip*/, uint16_t t_por
         std::lock_guard lock(impl_->pending_mutex);
         impl_->pending_writes.push(PendingWrite{std::move(node_id), std::move(value)});
     });
+    impl_->delta_push.setActiveClientsCheck([this]() { return impl_->session_registry.clientsCount() > 0; });
     impl_->delta_push.setAlarmCallback([this](uint16_t db, const std::string& path, const rapidjson::Value& alarm, uint64_t ts) {
         triggerAlarmEvent(*impl_->server, impl_->alarm_event_type_id, db, path, alarm, ts);
     });
@@ -138,7 +139,9 @@ sgrn::Result<void> OpcUaAdapter::start(const std::string& /*ip*/, uint16_t t_por
                     }
                     g_is_internal_opcua_write = false;
                 }
-                self->impl_->delta_push.flushDirtyAggregates(now_ms);
+                if (self->impl_->session_registry.clientsCount() > 0) {
+                    self->impl_->delta_push.flushDirtyAggregates(now_ms);
+                }
                 if (self->impl_->p_plc_memory && self->impl_->p_plc_memory->processor()->hasPendingCommands())
                     self->impl_->p_plc_memory->processor()->processCommands();
             },

@@ -65,6 +65,7 @@ public:
     AngelScriptEngine() {
         p_script_engine_ = asCreateScriptEngine();
         p_script_engine_->SetMessageCallback(asFUNCTION(as_message_callback), this, asCALL_CDECL);
+        p_script_engine_->SetEngineProperty(asEP_PROPERTY_ACCESSOR_MODE, 2);
 
         RegisterStdString(p_script_engine_);
         RegisterScriptArray(p_script_engine_, true);

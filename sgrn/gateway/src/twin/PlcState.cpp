@@ -22,9 +22,9 @@ PlcState::PlcState() {
 const PlcNode* PlcState::find(const std::string& t_path) const {
     // Case-insensitive lookup handled by CaseInsensitiveHash/CaseInsensitiveEqual
     auto it = nodes_.find(t_path);
-    if (it == nodes_.end())
+    if (it == nodes_.end() || !it->second)
         return nullptr;
-    return &it->second;
+    return it->second.get();
 }
 
 void PlcState::add(PlcNode t_node, const std::string& t_parent_path, std::optional<size_t> /*fixed_offset*/) {
@@ -56,8 +56,13 @@ void PlcState::add(PlcNode t_node, const std::string& t_parent_path, std::option
             t_self(t_self, child, f_path, my_abs_offset);
         }
         // Store with absolute offset so processCommands can use it directly.
-        PlcNode to_store = t_n;
-        to_store.offset_ = my_abs_offset;
+        // Stable heap allocation: map rehash moves unique_ptr, not the PlcNode itself.
+        auto to_store = std::make_unique<PlcNode>(t_n);
+        to_store->offset_ = my_abs_offset;
+        // Allocate fresh state for this flat entry (descriptor copy is state-free).
+        auto st = std::make_unique<PlcNodeState>();
+        to_store->state_ = st.get();
+        state_storage_.push_back(std::move(st));
         nodes_[f_path] = std::move(to_store);
     };
 
@@ -177,7 +182,8 @@ std::vector<std::string> PlcState::names() const {
     // If we need all names, we'd need another index or store names in PlcNode.
     std::vector<std::string> r;
     for (const auto& [_, t_node] : nodes_)
-        r.push_back(t_node.name_); // This only returns the leaf name, not full path
+        if (t_node)
+            r.push_back(t_node->name_); // This only returns the leaf name, not full path
     return r;
 }
 
@@ -233,10 +239,10 @@ std::string PlcState::getFullSnapshotFlat(
                 continue;
         }
         auto it = nodes_.find(path);
-        if (it != nodes_.end()) {
+        if (it != nodes_.end() && it->second) {
             std::string id_str = std::to_string(id);
             writer.Key(id_str.c_str(), static_cast<rapidjson::SizeType>(id_str.length()));
-            it->second.serialize(writer, tree(), 0, 0);
+            it->second->serialize(writer, tree(), 0, 0);
         } else {
             if (!logged_missing) {
                 fmt::print("[PlcState] Warning: some paths from dictionary are missing in PlcState (e.g. {})\n", path);
@@ -263,24 +269,9 @@ std::string PlcState::getDeltaSnapshot(const std::vector<uint16_t>& t_filter) co
         if (!p_entry)
             continue;
 
-        // Atomic exchange: if dirty, copy only this segment's data
-        std::vector<uint8_t> seg_copy;
-        bool dirty = false;
-        {
-            std::shared_lock<std::shared_mutex> lk(p_entry->mutex_);
-            const bool is_dirty = p_entry->is_dirty_.load(std::memory_order_acquire);
-            if (is_dirty) {
-                seg_copy.resize(p_entry->offset + p_entry->size, 0);
-                std::memcpy(seg_copy.data() + p_entry->offset, tree().data() + p_entry->offset, p_entry->size);
-                p_entry->getAndClearDirty();
-                dirty = true;
-            }
-        }
-
-        if (!dirty)
-            continue;
-
-        // Find the segment name for the JSON key (reverse lookup — small N).
+        // Zero-copy: serialize directly from arena while holding shared lock,
+        // no seg_copy allocation/memcpy. Dirty is cleared while still holding
+        // the lock so no write is lost between snapshot and clear.
         std::string seg_name;
         for (const auto& [name, seg] : tree().segments()) {
             if (seg.get() == p_entry) {
@@ -295,20 +286,19 @@ std::string PlcState::getDeltaSnapshot(const std::vector<uint16_t>& t_filter) co
         if (!t_node)
             continue;
 
+        std::string db_json;
+        {
+            std::shared_lock<std::shared_mutex> lk(p_entry->mutex_);
+            if (!p_entry->is_dirty_.load(std::memory_order_acquire))
+                continue;
+            rapidjson::StringBuffer db_buffer;
+            rapidjson::Writer<rapidjson::StringBuffer> db_writer(db_buffer);
+            t_node->serialize(db_writer, tree());
+            db_json = db_buffer.GetString();
+            p_entry->getAndClearDirty();
+        }
+
         writer.Key(seg_name.c_str(), static_cast<rapidjson::SizeType>(seg_name.length()));
-        rapidjson::StringBuffer db_buffer;
-        rapidjson::Writer<rapidjson::StringBuffer> db_writer(db_buffer);
-
-        struct SegmentArenaView : public ::sgrn::ArenaTree {
-            SegmentArenaView(std::vector<uint8_t> data) {
-                arena_ = std::move(data);
-            }
-        };
-        SegmentArenaView temp_tree(std::move(seg_copy));
-
-        t_node->serialize(db_writer, temp_tree);
-
-        std::string db_json = db_buffer.GetString();
         writer.RawValue(db_json.c_str(), db_json.length(), rapidjson::kObjectType);
     }
 
@@ -323,7 +313,7 @@ std::string PlcState::getDeltaSnapshotFlat(
 
     writer.StartObject();
 
-    // Mirror the same dirty-segment sweep as getDeltaSnapshot().
+    // Mirror the same dirty-segment sweep as getDeltaSnapshot() — zero-copy.
     for (const auto& [db_id, p_entry_raw] : tree().segments_by_id()) {
         if (!t_filter.empty() && std::find(t_filter.begin(), t_filter.end(), static_cast<uint16_t>(db_id)) == t_filter.end())
             continue;
@@ -332,22 +322,6 @@ std::string PlcState::getDeltaSnapshotFlat(
         if (!p_entry)
             continue;
 
-        // Atomic dirty check + snapshot copy (same as getDeltaSnapshot).
-        std::vector<uint8_t> seg_copy;
-        bool dirty = false;
-        {
-            std::shared_lock<std::shared_mutex> lk(p_entry->mutex_);
-            if (p_entry->is_dirty_.load(std::memory_order_acquire)) {
-                seg_copy.resize(p_entry->offset + p_entry->size, 0);
-                std::memcpy(seg_copy.data() + p_entry->offset, tree().data() + p_entry->offset, p_entry->size);
-                p_entry->getAndClearDirty();
-                dirty = true;
-            }
-        }
-        if (!dirty)
-            continue;
-
-        // Find segment name for path prefix (reverse lookup — small N).
         std::string seg_name;
         for (const auto& [name, seg] : tree().segments()) {
             if (seg.get() == p_entry) {
@@ -358,33 +332,30 @@ std::string PlcState::getDeltaSnapshotFlat(
         if (seg_name.empty())
             continue;
 
-        // Build a temporary arena view so leaf nodes can serialize from the snapshot copy.
-        struct SegmentArenaView : public ::sgrn::ArenaTree {
-            SegmentArenaView(std::vector<uint8_t> data) {
-                arena_ = std::move(data);
-            }
-        };
-        SegmentArenaView temp_tree(std::move(seg_copy));
+        // Zero-copy: hold shared lock while walking dictionary leaves for this DB.
+        // No seg_copy, no temp_tree — serialize directly from arena.
+        std::shared_lock<std::shared_mutex> lk(p_entry->mutex_);
+        if (!p_entry->is_dirty_.load(std::memory_order_acquire))
+            continue;
 
-        // Walk every leaf in the dictionary that belongs to this segment.
-        // Dictionary paths are "SegName.field[.subfield...]".
         const std::string prefix = seg_name + ".";
         for (const auto& [path, id] : t_path_to_id) {
             if (path.compare(0, prefix.size(), prefix) != 0)
                 continue;
 
             auto it = nodes_.find(path);
-            if (it == nodes_.end())
+            if (it == nodes_.end() || !it->second)
                 continue;
 
             // Only emit scalar/array leaves — skip intermediate STRUCT nodes.
-            if (!it->second.children_.empty())
+            if (!it->second->children_.empty())
                 continue;
 
             const std::string id_str = std::to_string(id);
             writer.Key(id_str.c_str(), static_cast<rapidjson::SizeType>(id_str.size()));
-            it->second.serialize(writer, temp_tree, 0, 0);
+            it->second->serialize(writer, tree(), 0, 0);
         }
+        p_entry->getAndClearDirty();
     }
 
     writer.EndObject();
@@ -393,16 +364,22 @@ std::string PlcState::getDeltaSnapshotFlat(
 
 void PlcState::clear() {
     nodes_.clear();
+    state_storage_.clear();
     top_level_names_.clear();
     tree().clear();
+    db_arena_ranges_.clear();
+    {
+        std::unique_lock<std::shared_mutex> lk(field_index_mutex_);
+        field_index_by_db_.clear();
+    }
 }
 
 void PlcState::incrementNodeVersion(const TreePath& t_path) {
     std::optional<TreePath> current = t_path;
     while (current) {
         auto it = nodes_.find(current->toDotted());
-        if (it != nodes_.end()) {
-            it->second.version_.fetch_add(1, std::memory_order_release);
+        if (it != nodes_.end() && it->second && it->second->state_) {
+            it->second->state_->version_.fetch_add(1, std::memory_order_release);
         }
         current = current->parent();
     }
@@ -413,15 +390,15 @@ std::vector<TreePath> PlcState::dirtyPathsSince(const TreePath& t_scope, uint64_
 
     auto scope_str = t_scope.toDotted();
     auto it = nodes_.find(scope_str);
-    if (it == nodes_.end())
+    if (it == nodes_.end() || !it->second)
         return result;
 
-    if (it->second.version_.load(std::memory_order_acquire) <= t_last_seen_version) {
+    if (!it->second->state_ || it->second->state_->version_.load(std::memory_order_acquire) <= t_last_seen_version) {
         return result; // whole subtree is clean
     }
 
     auto recurse = [&](auto& t_self, const PlcNode& t_current_node, const TreePath& t_current_path) -> void {
-        if (t_current_node.version_.load(std::memory_order_acquire) <= t_last_seen_version) {
+        if (!t_current_node.state_ || t_current_node.state_->version_.load(std::memory_order_acquire) <= t_last_seen_version) {
             return;
         }
 
@@ -433,14 +410,87 @@ std::vector<TreePath> PlcState::dirtyPathsSince(const TreePath& t_scope, uint64_
         for (const auto& child : t_current_node.children_) {
             std::string child_dotted = t_current_path.empty() ? child.name_ : t_current_path.toDotted() + "." + child.name_;
             auto child_it = nodes_.find(child_dotted);
-            if (child_it != nodes_.end()) {
-                t_self(t_self, child_it->second, TreePath::fromDotted(child_dotted));
+            if (child_it != nodes_.end() && child_it->second) {
+                t_self(t_self, *child_it->second, TreePath::fromDotted(child_dotted));
             }
         }
     };
 
-    recurse(recurse, it->second, t_scope);
+    recurse(recurse, *it->second, t_scope);
     return result;
+}
+
+void PlcState::insertArenaRange(DbEntry* p_entry) {
+    // Every DB PlcState registers gets a distinct name, so ArenaTree always
+    // allocates a brand-new Segment (see the id-0 "default" in-place-resize
+    // special case in ArenaTree::registerSegment, which PlcState never
+    // triggers) — a plain sorted insert is safe; there's no existing entry
+    // to reconcile.
+    ArenaRangeEntry entry{p_entry->offset, p_entry->offset + p_entry->size, p_entry};
+    auto it = std::lower_bound(db_arena_ranges_.begin(), db_arena_ranges_.end(), entry.start,
+        [](const ArenaRangeEntry& t_r, size_t t_v) { return t_r.start < t_v; });
+    db_arena_ranges_.insert(it, entry);
+}
+
+PlcState::ArenaLookupResult PlcState::findSegmentByAbsOffset(size_t t_abs_offset, size_t t_size) const {
+    auto it = std::upper_bound(db_arena_ranges_.begin(), db_arena_ranges_.end(), t_abs_offset,
+        [](size_t t_v, const ArenaRangeEntry& t_r) { return t_v < t_r.start; });
+    if (it == db_arena_ranges_.begin())
+        return {};
+    --it;
+    if (t_abs_offset >= it->end)
+        return {}; // falls in a gap between segments (padding, or nothing registered there)
+    const bool fits = t_size <= it->end - t_abs_offset;
+    return {it->p_entry, fits};
+}
+
+void PlcState::rebuildFieldIndex() {
+    // Pass 1: group leaves by DB and record each one's byte span, using the
+    // exact same span rule bumpFieldVersions() used to recompute inline on
+    // every single write. Computed once per registration call now.
+    ankerl::unordered_dense::map<uint16_t, std::vector<FieldRange>> by_db;
+    ankerl::unordered_dense::map<uint16_t, uint32_t> max_span_by_db;
+
+    for (auto& [path, node] : nodes_) {
+        if (!node || !node->children_.empty())
+            continue; // only leaves are write targets / index entries
+
+        size_t span = node->size_;
+        if (node->type_ != s7codec::Type::Struct && node->type_ != s7codec::Type::String && node->type_ != s7codec::Type::WString) {
+            span = static_cast<size_t>(s7codec::primitiveSize(node->type_).value_or(0)) * std::max(1u, node->count_);
+        }
+        if (span == 0)
+            continue;
+
+        by_db[node->db_number_].push_back({node->offset_, static_cast<uint32_t>(node->offset_ + span), node.get()});
+        auto& mx = max_span_by_db[node->db_number_];
+        mx = std::max<uint32_t>(mx, static_cast<uint32_t>(span));
+    }
+
+    // Pass 2: wire up parent_ pointers for bumpVersionChain(). Derived from
+    // full_path_ (set by add() for every stored node) — one extra hash
+    // lookup per node, paid once here, never on the hot path.
+    for (auto& [path, node] : nodes_) {
+        if (!node)
+            continue;
+        node->parent_ = nullptr;
+        auto pos = path.find_last_of('.');
+        if (pos == std::string::npos)
+            continue;
+        auto pit = nodes_.find(path.substr(0, pos));
+        if (pit != nodes_.end() && pit->second)
+            node->parent_ = pit->second.get();
+    }
+
+    std::unique_lock<std::shared_mutex> lk(field_index_mutex_);
+    field_index_by_db_.clear();
+    for (auto& [db, vec] : by_db) {
+        std::sort(vec.begin(), vec.end(), [](const FieldRange& t_a, const FieldRange& t_b) { return t_a.start < t_b.start; });
+        auto idx = std::make_shared<DbFieldIndex>();
+        idx->ranges = std::move(vec);
+        idx->max_leaf_span = max_span_by_db[db];
+        field_index_by_db_[db] = std::move(idx);
+    }
 }
 
 } // namespace sgrn::gateway::twin

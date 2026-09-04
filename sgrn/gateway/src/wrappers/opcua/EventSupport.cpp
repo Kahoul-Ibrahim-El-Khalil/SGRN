@@ -32,31 +32,13 @@ sgrn::Result<NodeId> registerAlarmEventType(Server& t_server) {
 
 void triggerAlarm(Server& t_server, const NodeId& t_event_type, uint16_t t_db, std::string_view t_path, const rapidjson::Value& t_alarm_obj,
     uint64_t t_timestamp_ms) {
+    (void)t_timestamp_ms;
     UA_Server* p_raw = t_server.raw();
-
-    // Create a new event instance of our custom type
-    UA_NodeId event_node_id = UA_NODEID_NULL;
-    UA_StatusCode sc = UA_Server_createEvent(p_raw, t_event_type.get(), &event_node_id);
-    if (sc != UA_STATUSCODE_GOOD)
-        return;
-
-    // ── SourceName: "DB<n>/<path>" ───────────────────────────────────────────
-    std::string source_name = fmt::format("DB{}/{}", t_db, t_path);
-    UA_String ua_source = UA_STRING(const_cast<char*>(source_name.c_str()));
-    UA_Server_writeObjectProperty_scalar(
-        p_raw, event_node_id, UA_QUALIFIEDNAME(0, const_cast<char*>("SourceName")), &ua_source, &UA_TYPES[UA_TYPES_STRING]);
-
-    // ── Time ─────────────────────────────────────────────────────────────────
-    UA_DateTime event_time = millisToUaDateTime(t_timestamp_ms);
-    UA_Server_writeObjectProperty_scalar(
-        p_raw, event_node_id, UA_QUALIFIEDNAME(0, const_cast<char*>("Time")), &event_time, &UA_TYPES[UA_TYPES_DATETIME]);
 
     // ── Severity (default 500 / medium) ─────────────────────────────────────
     UA_UInt16 severity = 500;
     if (t_alarm_obj.IsObject() && t_alarm_obj.HasMember("severity") && t_alarm_obj["severity"].IsUint())
         severity = static_cast<UA_UInt16>(t_alarm_obj["severity"].GetUint());
-    UA_Server_writeObjectProperty_scalar(
-        p_raw, event_node_id, UA_QUALIFIEDNAME(0, const_cast<char*>("Severity")), &severity, &UA_TYPES[UA_TYPES_UINT16]);
 
     // ── Message ──────────────────────────────────────────────────────────────
     std::string msg_str;
@@ -66,11 +48,9 @@ void triggerAlarm(Server& t_server, const NodeId& t_event_type, uint16_t t_db, s
         msg_str = fmt::format("Alarm at DB{}/{}", t_db, t_path);
 
     UA_LocalizedText msg = UA_LOCALIZEDTEXT(const_cast<char*>("en"), const_cast<char*>(msg_str.c_str()));
-    UA_Server_writeObjectProperty_scalar(
-        p_raw, event_node_id, UA_QUALIFIEDNAME(0, const_cast<char*>("Message")), &msg, &UA_TYPES[UA_TYPES_LOCALIZEDTEXT]);
+    UA_NodeId source_node = UA_NODEID_NUMERIC(0, UA_NS0ID_SERVER);
 
-    // ── Fire ─────────────────────────────────────────────────────────────────
-    UA_Server_triggerEvent(p_raw, event_node_id, UA_NODEID_NUMERIC(0, UA_NS0ID_SERVER), nullptr, UA_TRUE);
+    UA_Server_createEvent(p_raw, source_node, t_event_type.get(), severity, msg, nullptr, nullptr, nullptr);
 }
 
 } // namespace sgrn::gateway::wrappers::opcua

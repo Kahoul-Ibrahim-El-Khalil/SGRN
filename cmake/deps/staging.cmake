@@ -149,30 +149,47 @@ if(TARGET open62541)
     )
     # aa_tree.h — was removed from open62541 ≥1.4 (private nodestore header).
     # Do NOT install it here; the open62541 v1.4.x tree no longer ships it.
-    # All generated headers (config.h, statuscodes.h, types_generated.h, nodeids.h, …)
-    install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/open62541/src_generated/open62541/"
-        DESTINATION "${_INC}/open62541/open62541"
-        FILES_MATCHING PATTERN "*.h"
-    )
+    # All generated headers (config.h, statuscodes.h, types_generated.h, types_generated_handling.h, nodeids.h, …)
+    if(EXISTS "${CMAKE_CURRENT_BINARY_DIR}/open62541/src_generated/")
+        install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/open62541/src_generated/"
+            DESTINATION "${_INC}/open62541/open62541"
+            FILES_MATCHING PATTERN "*.h"
+        )
+    endif()
+    if(EXISTS "${CMAKE_CURRENT_BINARY_DIR}/open62541/src_generated/open62541/")
+        install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/open62541/src_generated/open62541/"
+            DESTINATION "${_INC}/open62541/open62541"
+            FILES_MATCHING PATTERN "*.h"
+        )
+    endif()
     # Patch config.h to be architecture-neutral for the shared sysroot
     install(CODE "
-        set(_cfg \"\${CMAKE_INSTALL_PREFIX}/${_INC_REL}/open62541/open62541/config.h\")
+        set(_cfg \"${_INC}/open62541/open62541/config.h\")
         if(EXISTS \"\${_cfg}\")
             file(READ \"\${_cfg}\" _content)
             string(REGEX REPLACE \"#include \\\"[a-zA-Z0-9_]+/ua_architecture\\\\.h\\\"\" \"#if defined(UA_ARCHITECTURE_WIN32)\\n# include \\\"win32/ua_architecture.h\\\"\\n#elif defined(UA_ARCHITECTURE_POSIX)\\n# include \\\"posix/ua_architecture.h\\\"\\n#endif\" _content \"\${_content}\")
             file(WRITE \"\${_cfg}\" \"\${_content}\")
         endif()
     ")
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/open62541_stub/types_generated_handling.h"
+        "#ifndef OPEN62541_TYPES_GENERATED_HANDLING_H_\n#define OPEN62541_TYPES_GENERATED_HANDLING_H_\n#include <open62541/types_generated.h>\n#include <open62541/types.h>\n#endif\n"
+    )
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/open62541_stub/types_generated_handling.h"
+        DESTINATION "${_INC}/open62541/open62541"
+    )
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/open62541_stub/types_generated_handling.h"
+        DESTINATION "${_INC}/open62541"
+    )
 endif()
 
 # 2e. AngelScript core
-install(DIRECTORY "${angelscript_SOURCE_DIR}/sdk/angelscript/include/"
+install(DIRECTORY "${CPM_PACKAGE_angelscript_SOURCE_DIR}/sdk/angelscript/include/"
     DESTINATION "${_INC}/angelscript"
     FILES_MATCHING PATTERN "*.h"
 )
 
 # 2f. AngelScript add-ons
-install(DIRECTORY "${angelscript_SOURCE_DIR}/sdk/add_on/"
+install(DIRECTORY "${CPM_PACKAGE_angelscript_SOURCE_DIR}/sdk/add_on/"
     DESTINATION "${_INC}/angelscript_addons"
     FILES_MATCHING PATTERN "*.h" PATTERN "*.cpp"
     # .cpp files are intentionally included because add-ons are header-implementation units
@@ -200,7 +217,11 @@ install(FILES
 )
 
 # 2i. OpENer (EtherNet/IP) — source headers + generated headers
-set(_opener_src "${opener_SOURCE_DIR}/source/src")
+if(EXISTS "${opener_SOURCE_DIR}/source/src")
+    set(_opener_src "${opener_SOURCE_DIR}/source/src")
+else()
+    set(_opener_src "${opener_SOURCE_DIR}/src")
+endif()
 foreach(_sub IN ITEMS "" "/cip" "/enet_encap" "/utils" "/ports")
     install(DIRECTORY "${_opener_src}${_sub}/"
         DESTINATION "${_INC}/opener${_sub}"

@@ -223,6 +223,20 @@ public:
     void setCacheEnabled(bool t_is_cache__enabled) {
         is_cache_enabled_ = t_is_cache__enabled;
     }
+    struct RangeEntry {
+        uint16_t db;
+        size_t offset;
+        size_t size;
+        const PlcNode* node; // leaf node that covers this range
+        size_t node_span;    // cached node size (bytes)
+    };
+
+    // Sorted by (db, offset) – built at schema registration
+    std::vector<RangeEntry> range_index_;
+    mutable std::shared_mutex index_mutex_;
+
+    // Build index from PlcState nodes (called in loadRegistry)
+    void buildRangeIndex();
 
 private:
     /// Result of resolving an arena-relative [offset, offset+size) range to
