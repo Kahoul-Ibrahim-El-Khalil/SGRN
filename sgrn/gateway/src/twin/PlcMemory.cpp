@@ -309,6 +309,15 @@ Result<void, PlcMemoryError> PlcMemory::loadRegistry(const PlcSchemaStore& t_sto
         return n;
     };
 
+    uint16_t max_db_num = 0;
+    for (uint16_t num : t_store.availableDbs()) {
+        if (num > max_db_num)
+            max_db_num = num;
+    }
+    if (snapshot_registry_) {
+        snapshot_registry_->ensureCapacity(max_db_num);
+    }
+
     for (uint16_t num : t_store.availableDbs()) {
         auto res = t_store.getDb(num);
 

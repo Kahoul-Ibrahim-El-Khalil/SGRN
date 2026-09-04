@@ -451,19 +451,33 @@ public:
         return tree();
     }
 
+    static inline constexpr std::array<uint8_t, 256> k_uppercase_table = []() {
+        std::array<uint8_t, 256> table{};
+        for (size_t i = 0; i < 256; ++i) {
+            table[i] = (i >= 'a' && i <= 'z') ? static_cast<uint8_t>(i - 'a' + 'A') : static_cast<uint8_t>(i);
+        }
+        return table;
+    }();
+
     struct CaseInsensitiveHash {
-        size_t operator()(const std::string& t_s) const {
-            size_t h = 0;
-            for (char c : t_s)
-                h = h * 31 + static_cast<size_t>(std::toupper(static_cast<unsigned char>(c)));
+        size_t operator()(const std::string& t_s) const noexcept {
+            size_t h = 14695981039346656037ULL;
+            for (char c : t_s) {
+                const uint8_t uc = k_uppercase_table[static_cast<uint8_t>(c)];
+                h = (h ^ uc) * 1099511628211ULL;
+            }
             return h;
         }
     };
     struct CaseInsensitiveEqual {
-        bool operator()(const std::string& t_a, const std::string& t_b) const {
-            return t_a.size() == t_b.size() && std::equal(t_a.begin(), t_a.end(), t_b.begin(), [](char t_x, char t_y) {
-                return std::toupper(static_cast<unsigned char>(t_x)) == std::toupper(static_cast<unsigned char>(t_y));
-            });
+        bool operator()(const std::string& t_a, const std::string& t_b) const noexcept {
+            if (t_a.size() != t_b.size())
+                return false;
+            for (size_t i = 0; i < t_a.size(); ++i) {
+                if (k_uppercase_table[static_cast<uint8_t>(t_a[i])] != k_uppercase_table[static_cast<uint8_t>(t_b[i])])
+                    return false;
+            }
+            return true;
         }
     };
 
@@ -677,11 +691,20 @@ private:
     std::vector<ArenaRangeEntry> db_arena_ranges_; // kept sorted by start
     void insertArenaRange(DbEntry* p_entry);
 
-    // REVAMP-PERF: field index, protected independently of the above since
-    // rebuildFieldIndex() can genuinely race with forEachIntersectingLeaf()/
-    // forEachLeaf() if a DB is (re-)registered while traffic is flowing.
+    // REVAMP-PERF: string pool for symbol deduplication
+    std::shared_ptr<const std::string> internString(const std::string& t_str) {
+        auto it = string_pool_.find(t_str);
+        if (it != string_pool_.end()) {
+            return it->second;
+        }
+        auto sp = std::make_shared<const std::string>(t_str);
+        string_pool_[t_str] = sp;
+        return sp;
+    }
+
     mutable std::shared_mutex field_index_mutex_;
     ankerl::unordered_dense::map<uint16_t, std::shared_ptr<const DbFieldIndex>> field_index_by_db_;
+    ankerl::unordered_dense::map<std::string, std::shared_ptr<const std::string>> string_pool_;
 };
 
 } // namespace sgrn::gateway::twin

@@ -35,9 +35,30 @@ std::shared_ptr<const std::string> TreeCacheEngine::get(const twin::TreePath& t_
     {
         std::unique_lock<std::shared_mutex> lock(mutex_);
         cache_[t_path] = CacheEntry{current_version, new_shared_json};
+        evictIfOverCapacity();
     }
 
     return new_shared_json;
+}
+
+void TreeCacheEngine::evictIfOverCapacity() {
+    while (cache_.size() > max_cache_entries_) {
+        auto it = cache_.begin();
+        while (it != cache_.end() && pinned_.count(it->first) > 0) {
+            ++it;
+        }
+        if (it != cache_.end()) {
+            cache_.erase(it);
+        } else {
+            break;
+        }
+    }
+}
+
+void TreeCacheEngine::setMaxCacheEntries(size_t t_max) {
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    max_cache_entries_ = t_max;
+    evictIfOverCapacity();
 }
 
 void TreeCacheEngine::pin(const twin::TreePath& t_path) {

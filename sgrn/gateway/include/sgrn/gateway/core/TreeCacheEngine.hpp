@@ -43,17 +43,19 @@ public:
     void pin(const twin::TreePath& t_path);
     void unpin(const twin::TreePath& t_path);
 
+    void setMaxCacheEntries(size_t t_max);
+
     void clear();
 
 private:
     TreeCacheEngine() = default;
 
+    void evictIfOverCapacity();
+
     std::shared_mutex mutex_;
     std::unordered_map<twin::TreePath, CacheEntry, twin::TreePathHash, twin::TreePathEqual> cache_;
     std::unordered_set<twin::TreePath, twin::TreePathHash, twin::TreePathEqual> pinned_;
-
-    // Simplistic bounded LRU or max size logic can go here.
-    // Currently unbounded for typical PLC topologies.
+    size_t max_cache_entries_{256};
 };
 
 } // namespace sgrn::gateway::core

@@ -41,14 +41,14 @@ Mental model, boot sequence, digital twin internals, the registry/schema system,
 
 ### Digital Twin Internals
 
-Each Data Block has two buffers — **front** (read-visible) and **back** (write-staging). On every PLC PUT:
+Each Data Block segment manages two buffers — **front** (read-visible) and **back** (write-staging) — via `DoubleBuffer`. On every PLC write:
 
-1. Snap7 callback delivers raw bytes to `writeDbMemory()`
-2. Back buffer receives the write atomically under a per-DB mutex
+1. Protocol callback (e.g. Snap7 `PUT`) delivers raw bytes to `writeDbMemory()`
+2. Back buffer receives the written bytes under the segment's `DbSnapshot::state_mutex_`
 3. Version counter increments; dirty flag is set
-4. A `PlcCommandProcessor` swap task exchanges front/back and notifies all northbound adapters
+4. `DoubleBuffer::swap()` atomically exchanges front/back buffers using release-acquire memory ordering (`std::memory_order_release`) and notifies all northbound adapters
 
-This double-buffer design ensures zero-copy snapshot delivery to readers while the PLC writes. For the physical arena layout, the `PlcNode` tree, extended types and locking, see [memory_model.md](memory_model.md).
+This double-buffer design provides **DB-level snapshot atomicity** (preventing torn reads across multi-byte fields and struct variables) while ensuring wait-free snapshot reads for northbound consumers without global lock contention. DB lookups themselves use a **lock-free** direct-index table ([`SnapshotRegistry`](file:///home/odahim/Studies/Software/SGRN/sgrn/gateway/include/sgrn/gateway/twin/SnapshotRegistry.hpp#L22-L25)). For physical arena layout, extended types, and complete concurrency rules, see [memory_model.md](memory_model.md#concurrency--performance-model).
 
 > **Endianness Note:** Siemens PLCs use Big Endian byte order. When the S7 protocol adapter is used, the Twin naturally expects Big Endian data. If S7 is disabled and the Twin is fed by generic HTTP/northbound writers, SGRN defaults to `little_endian = true` — see [memory_model.md](memory_model.md#endianness) for the full rules and per-DB overrides.
 

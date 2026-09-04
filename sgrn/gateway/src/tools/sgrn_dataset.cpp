@@ -147,7 +147,8 @@ sgrn::Result<DatasetSummary> DatasetProcessor::process(const DatasetConfig& t_co
                 ts = doc["timestamp"].GetInt64();
             }
 
-            if (ts == 0) continue;
+            if (ts == 0)
+                continue;
 
             if (summary.start_timestamp_ms == 0 || ts < summary.start_timestamp_ms) {
                 summary.start_timestamp_ms = ts;
@@ -162,9 +163,12 @@ sgrn::Result<DatasetSummary> DatasetProcessor::process(const DatasetConfig& t_co
                 for (auto it = changes.MemberBegin(); it != changes.MemberEnd(); ++it) {
                     std::string key = it->name.GetString();
                     std::string val_str;
-                    if (it->value.IsString()) val_str = it->value.GetString();
-                    else if (it->value.IsNumber()) val_str = std::to_string(it->value.GetDouble());
-                    else if (it->value.IsBool()) val_str = it->value.GetBool() ? "1" : "0";
+                    if (it->value.IsString())
+                        val_str = it->value.GetString();
+                    else if (it->value.IsNumber())
+                        val_str = std::to_string(it->value.GetDouble());
+                    else if (it->value.IsBool())
+                        val_str = it->value.GetBool() ? "1" : "0";
                     current_state_[key] = val_str;
                 }
             }
@@ -177,9 +181,12 @@ sgrn::Result<DatasetSummary> DatasetProcessor::process(const DatasetConfig& t_co
                         for (auto f_it = db_it->value.MemberBegin(); f_it != db_it->value.MemberEnd(); ++f_it) {
                             std::string full_key = fmt::format("{}.{}", db_name, f_it->name.GetString());
                             std::string val_str;
-                            if (f_it->value.IsString()) val_str = f_it->value.GetString();
-                            else if (f_it->value.IsNumber()) val_str = std::to_string(f_it->value.GetDouble());
-                            else if (f_it->value.IsBool()) val_str = f_it->value.GetBool() ? "1" : "0";
+                            if (f_it->value.IsString())
+                                val_str = f_it->value.GetString();
+                            else if (f_it->value.IsNumber())
+                                val_str = std::to_string(f_it->value.GetDouble());
+                            else if (f_it->value.IsBool())
+                                val_str = f_it->value.GetBool() ? "1" : "0";
                             current_state_[full_key] = val_str;
                         }
                     }
@@ -191,9 +198,12 @@ sgrn::Result<DatasetSummary> DatasetProcessor::process(const DatasetConfig& t_co
                 std::string path = doc["path"].GetString();
                 std::string full_key = fmt::format("{}.{}", db, path);
                 std::string val_str;
-                if (doc["val"].IsString()) val_str = doc["val"].GetString();
-                else if (doc["val"].IsNumber()) val_str = std::to_string(doc["val"].GetDouble());
-                else if (doc["val"].IsBool()) val_str = doc["val"].GetBool() ? "1" : "0";
+                if (doc["val"].IsString())
+                    val_str = doc["val"].GetString();
+                else if (doc["val"].IsNumber())
+                    val_str = std::to_string(doc["val"].GetDouble());
+                else if (doc["val"].IsBool())
+                    val_str = doc["val"].GetBool() ? "1" : "0";
                 current_state_[full_key] = val_str;
             }
 
@@ -206,12 +216,18 @@ sgrn::Result<DatasetSummary> DatasetProcessor::process(const DatasetConfig& t_co
                     if (st_it != current_state_.end()) {
                         csv_out << "," << st_it->second;
                         feat.total_samples++;
-                        
+
                         double dval = 0.0;
-                        if (st_it->second == "true" || st_it->second == "TRUE") dval = 1.0;
-                        else if (st_it->second == "false" || st_it->second == "FALSE") dval = 0.0;
+                        if (st_it->second == "true" || st_it->second == "TRUE")
+                            dval = 1.0;
+                        else if (st_it->second == "false" || st_it->second == "FALSE")
+                            dval = 0.0;
                         else {
-                            try { dval = std::stod(st_it->second); } catch (...) { dval = 0.0; }
+                            try {
+                                dval = std::stod(st_it->second);
+                            } catch (...) {
+                                dval = 0.0;
+                            }
                         }
 
                         if (feat.total_samples == 1 || dval < feat.min_val)

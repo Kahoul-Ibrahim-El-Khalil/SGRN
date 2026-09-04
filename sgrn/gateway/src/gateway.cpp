@@ -436,8 +436,9 @@ void GatewayApplication::run() {
         if (is_root && sudo_user) {
             ::system(fmt::format("chown -R {}:{} {} 2>/dev/null || true", sudo_user, sudo_user, profile_dir).c_str());
             if (::system("which chromium > /dev/null 2>&1") == 0) {
-                gui_cmd = fmt::format("sudo -u {} {}chromium --app=\"{}\" --user-data-dir=\"{}\" --disable-infobars --no-default-browser-check --test-type > /dev/null 2>&1 &", sudo_user, env_prefix,
-                    http_url, profile_dir);
+                gui_cmd = fmt::format("sudo -u {} {}chromium --app=\"{}\" --user-data-dir=\"{}\" --disable-infobars "
+                                      "--no-default-browser-check --test-type > /dev/null 2>&1 &",
+                    sudo_user, env_prefix, http_url, profile_dir);
             } else if (::system("which firefox > /dev/null 2>&1") == 0) {
                 gui_cmd = fmt::format("sudo -u {} {}firefox --new-window \"{}\" > /dev/null 2>&1 &", sudo_user, env_prefix, http_url);
             } else {
@@ -445,8 +446,9 @@ void GatewayApplication::run() {
             }
         } else {
             if (::system("which chromium > /dev/null 2>&1") == 0) {
-                gui_cmd =
-                    fmt::format("{}chromium --app=\"{}\" --user-data-dir=\"{}\" --disable-infobars --no-default-browser-check --test-type > /dev/null 2>&1 &", env_prefix, http_url, profile_dir);
+                gui_cmd = fmt::format("{}chromium --app=\"{}\" --user-data-dir=\"{}\" --disable-infobars --no-default-browser-check "
+                                      "--test-type > /dev/null 2>&1 &",
+                    env_prefix, http_url, profile_dir);
             } else if (::system("which firefox > /dev/null 2>&1") == 0) {
                 gui_cmd = fmt::format("{}firefox --new-window \"{}\" > /dev/null 2>&1 &", env_prefix, http_url);
             } else {

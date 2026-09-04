@@ -9,9 +9,9 @@ int main(int argc, char** argv) {
     cxxopts::Options options("sgrn_dataset", "SGRN Industrial Telemetry Dataset Processor & ML Manifest Generator");
 
     options.add_options()("i,input", "Input directory containing .jsonl / .jsonl.zst state files", cxxopts::value<std::string>())(
-        "s,scl", "Path to SCL schema file (.scl)", cxxopts::value<std::string>())(
-        "c,csv", "Output CSV file path", cxxopts::value<std::string>()->default_value("dataset.csv"))("m,manifest",
-        "Output ML manifest JSON file path", cxxopts::value<std::string>()->default_value("manifest.json"))("man", "Display detailed manual page")("h,help", "Print usage help");
+        "s,scl", "Path to SCL schema file (.scl)", cxxopts::value<std::string>())("c,csv", "Output CSV file path",
+        cxxopts::value<std::string>()->default_value("dataset.csv"))("m,manifest", "Output ML manifest JSON file path",
+        cxxopts::value<std::string>()->default_value("manifest.json"))("man", "Display detailed manual page")("h,help", "Print usage help");
 
     auto result = options.parse(argc, argv);
 

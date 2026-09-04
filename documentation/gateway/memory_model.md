@@ -40,15 +40,32 @@ This tree is built once at `loadRegistry` and is not the same as the old “Aren
 
 ---
 
-## Concurrency
+## Concurrency & Performance Model
 
-| Mechanism | Scope |
-|-----------|--------|
-| `DbEntry::mutex` | Read/write **one DB’s** bytes |
-| `cache_mutex` | `cached_full_json` string |
-| `PlcMemory::dirty_cv_mutex` | Dirty signaling |
+The gateway is built for high-throughput, low-latency industrial execution through deterministic memory management and fine-grained concurrency:
 
-Different DBs can be read/written concurrently. Two writers on the same DB serialize on the DB mutex.
+### 1. Deterministic Runtime (Zero GC Pauses)
+Implemented in C++ using RAII and pre-allocated memory arenas. Unlike managed runtimes (Java, Go, Node.js), execution never suffers from unpredictable Garbage Collector ("Stop-The-World") pauses, ensuring microsecond-predictable response times for physical machine telemetry.
+
+### 2. Lock-Free Registry Lookups (`SnapshotRegistry`)
+DB snapshot lookups on hot data paths avoid global mutex contention entirely. The `SnapshotRegistry` uses a direct-indexed, lock-free array (`std::array<std::atomic<DbSnapshot*>, 65536>`) with atomic load/store operations.
+
+### 3. Segment-Level Mutex Isolation
+Concurrency control is scoped per Data Block segment rather than across global memory:
+
+| Mechanism | Scope & Description |
+|-----------|---------------------|
+| `SnapshotRegistry` | **Lock-free O(1)** DB lookup via atomic slots (`std::atomic<DbSnapshot*>`) |
+| `DbSnapshot::state_mutex_` | Protects raw byte buffer state for **one specific DB** |
+| `cache_mutex` | Protects `cached_full_json` string cache |
+| `PlcMemory::dirty_cv_mutex` | Coordinates dirty state notification signals |
+
+Operations targeting different Data Blocks (e.g., S7 poller updating DB1 while WebSocket/OPC-UA threads read DB5) execute in parallel with **zero cross-DB lock contention**.
+
+### 4. DB-Level Snapshot Atomicity (`DoubleBuffer`)
+Within each Data Block segment (`DbSnapshot`), byte buffers are managed via a `DoubleBuffer` pattern consisting of a read-only **front buffer** and write-only **back buffer**:
+- **Torn-Read Prevention**: Ingested raw bytes are written to the back buffer and committed atomically using `DoubleBuffer::swap()` with release-acquire memory semantics (`std::memory_order_release`).
+- **Atomicity Scope**: Readers reading from the front buffer always observe a **100% complete snapshot** of the Data Block (either the full previous DB state or the full new DB state). Readers never observe torn reads or partially-written primitive fields (e.g. 32-bit floats, 64-bit timestamps, or multi-field structs).
 
 ---
 

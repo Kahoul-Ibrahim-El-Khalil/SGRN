@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <rapidjson/document.h>
+#include <rapidjson/stringbuffer.h>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
@@ -124,6 +125,13 @@ public:
             for (const auto& t_cb : snapshot)
                 t_cb(*shared_event);
         });
+    }
+
+    /// Thread-local RapidJSON buffer stream to eliminate malloc/free churn on telemetry ticks
+    static rapidjson::StringBuffer& threadLocalStringBuffer() {
+        thread_local rapidjson::StringBuffer sb;
+        sb.Clear();
+        return sb;
     }
 
 private:
