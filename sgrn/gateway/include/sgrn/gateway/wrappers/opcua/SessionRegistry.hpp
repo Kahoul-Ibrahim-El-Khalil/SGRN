@@ -33,6 +33,15 @@ public:
     /// open/close events in the registry.
     void installAccessControl(UA_Server* tp_server);
 
+    /// Restore the accessControl hooks captured by installAccessControl().
+    ///
+    /// open62541's default clear callback frees ac->context as its own
+    /// AccessControlContext. Since installAccessControl() points context at
+    /// this registry, the original hooks MUST be restored before
+    /// UA_Server_delete or teardown aborts in free(). Safe to call when
+    /// install was never called, or more than once.
+    void uninstallAccessControl(UA_Server* tp_server);
+
     /// Number of currently tracked sessions (live connections).
     std::size_t clientsCount() const;
 
@@ -51,6 +60,7 @@ private:
     ActivateSessionFn original_activate_session_{nullptr};
     CloseSessionFn original_close_session_{nullptr};
     void* original_context_{nullptr};
+    bool installed_{false};
 };
 
 } // namespace sgrn::gateway::wrappers::opcua

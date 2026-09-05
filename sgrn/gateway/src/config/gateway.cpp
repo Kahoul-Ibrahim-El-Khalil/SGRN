@@ -16,11 +16,16 @@ sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
     const rapidjson::Value& root = parsed.value();
     GatewayConfig cfg;
 
-    if (root.HasMember("listen") && root["listen"].IsObject()) {
-        const auto& listen = root["listen"];
-        if (listen.HasMember("s7") && listen["s7"].IsObject()) {
+    // ── Southbound Protocols ──────────────────────────────────────────────────
+    const rapidjson::Value* p_south = root.HasMember("southbound") && root["southbound"].IsObject()
+                                          ? &root["southbound"]
+                                          : (root.HasMember("listen") && root["listen"].IsObject() ? &root["listen"] : nullptr);
+
+    if (p_south) {
+        const auto& south = *p_south;
+        if (south.HasMember("s7") && south["s7"].IsObject()) {
             S7Config s7;
-            const auto& s7_node = listen["s7"];
+            const auto& s7_node = south["s7"];
             if (s7_node.HasMember("ip") && s7_node["ip"].IsString())
                 s7.ip = s7_node["ip"].GetString();
             if (s7_node.HasMember("port"))
@@ -33,46 +38,54 @@ sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
                 s7.little_endian = s7_node["little_endian"].GetBool();
             cfg.s7 = s7;
         }
-        if (listen.HasMember("opcua") && listen["opcua"].IsObject()) {
+    }
+
+    // ── Northbound Protocols ──────────────────────────────────────────────────
+    const rapidjson::Value* p_north = root.HasMember("northbound") && root["northbound"].IsObject()
+                                          ? &root["northbound"]
+                                          : (root.HasMember("listen") && root["listen"].IsObject() ? &root["listen"] : nullptr);
+
+    if (p_north) {
+        const auto& north = *p_north;
+        if (north.HasMember("opcua") && north["opcua"].IsObject()) {
             OpcUaConfig opcua;
-            const auto& opc = listen["opcua"];
+            const auto& opc = north["opcua"];
             if (opc.HasMember("ip") && opc["ip"].IsString())
                 opcua.ip = opc["ip"].GetString();
             if (opc.HasMember("port"))
                 opcua.port = static_cast<uint16_t>(opc["port"].GetUint());
             cfg.opcua = opcua;
         }
-        if (listen.HasMember("http") && listen["http"].IsObject()) {
+        if (north.HasMember("http") && north["http"].IsObject()) {
             HttpConfig http;
-            const auto& ht = listen["http"];
+            const auto& ht = north["http"];
             if (ht.HasMember("ip") && ht["ip"].IsString())
                 http.ip = ht["ip"].GetString();
             if (ht.HasMember("port"))
                 http.port = static_cast<uint16_t>(ht["port"].GetUint());
             cfg.http = http;
         }
-        if (listen.HasMember("websocket") && listen["websocket"].IsObject()) {
+        if (north.HasMember("websocket") && north["websocket"].IsObject()) {
             WebSocketConfig websocket;
-            const auto& ws = listen["websocket"];
+            const auto& ws = north["websocket"];
             if (ws.HasMember("ip") && ws["ip"].IsString())
                 websocket.ip = ws["ip"].GetString();
             if (ws.HasMember("port"))
                 websocket.port = static_cast<uint16_t>(ws["port"].GetUint());
             cfg.websocket = websocket;
         }
-        if (listen.HasMember("modbus") && listen["modbus"].IsObject()) {
+        if (north.HasMember("modbus") && north["modbus"].IsObject()) {
             ModbusConfig modbus;
-            const auto& mb = listen["modbus"];
+            const auto& mb = north["modbus"];
             if (mb.HasMember("ip") && mb["ip"].IsString())
                 modbus.ip = mb["ip"].GetString();
             if (mb.HasMember("port"))
                 modbus.port = static_cast<uint16_t>(mb["port"].GetUint());
             cfg.modbus = modbus;
         }
-
-        if (listen.HasMember("ethernetip") && listen["ethernetip"].IsObject()) {
+        if (north.HasMember("ethernetip") && north["ethernetip"].IsObject()) {
             EthernetIpConfig eip;
-            const auto& ep = listen["ethernetip"];
+            const auto& ep = north["ethernetip"];
             if (ep.HasMember("ip") && ep["ip"].IsString())
                 eip.ip = ep["ip"].GetString();
             if (ep.HasMember("port") && ep["port"].IsUint())
@@ -110,13 +123,15 @@ sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
     if (root.HasMember("database_rotation_interval_s"))
         cfg.database_rotation_interval_s = root["database_rotation_interval_s"].GetUint();
 
-    // ── Persistence (historian / local archiver) ─────────────────────────────
+    // ── Persistence & Local Historian ─────────────────────────────────────────
     if (root.HasMember("persistence") && root["persistence"].IsObject()) {
         const auto& p = root["persistence"];
         if (p.HasMember("enabled"))
             cfg.persistence.enabled = p["enabled"].GetBool();
         if (p.HasMember("mode") && p["mode"].IsString())
             cfg.persistence.mode = p["mode"].GetString();
+        if (p.HasMember("format") && p["format"].IsString())
+            cfg.persistence.format = p["format"].GetString();
         if (p.HasMember("namespaces") && p["namespaces"].IsArray()) {
             for (const auto& ns : p["namespaces"].GetArray()) {
                 if (ns.IsString())
@@ -125,18 +140,44 @@ sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
         }
         if (p.HasMember("atomic_window_ms"))
             cfg.persistence.atomic_window_ms = p["atomic_window_ms"].GetUint();
+
+        // Flexible batching: batch_size (event count threshold) or batch_interval_s (time threshold)
         if (p.HasMember("batch_size"))
             cfg.persistence.batch_size = p["batch_size"].GetUint();
+        if (p.HasMember("max_events"))
+            cfg.persistence.batch_size = p["max_events"].GetUint();
         if (p.HasMember("batch_interval_s"))
             cfg.persistence.batch_interval_s = p["batch_interval_s"].GetUint();
+
         if (p.HasMember("anchor_interval_s"))
             cfg.persistence.anchor_interval_s = p["anchor_interval_s"].GetUint();
         if (p.HasMember("anchor_change_count"))
             cfg.persistence.anchor_change_count = p["anchor_change_count"].GetUint();
-        if (p.HasMember("zstd_level"))
-            cfg.persistence.zstd_level = static_cast<uint8_t>(p["zstd_level"].GetUint());
-        if (p.HasMember("anchor_zstd_level"))
+        if (p.HasMember("zstd_level")) {
+            uint8_t lvl = static_cast<uint8_t>(p["zstd_level"].GetUint());
+            cfg.persistence.zstd_level = lvl;
+            cfg.persistence.anchor_zstd_level = lvl;
+        }
+        if (p.HasMember("anchor_zstd_level")) {
             cfg.persistence.anchor_zstd_level = static_cast<uint8_t>(p["anchor_zstd_level"].GetUint());
+        }
+
+        // Nested cloud_sync block support
+        if (p.HasMember("cloud_sync") && p["cloud_sync"].IsObject()) {
+            const auto& cs = p["cloud_sync"];
+            DatastoreConnectionConfig ds;
+            if (cs.HasMember("enabled"))
+                ds.telemetry_enabled = cs["enabled"].GetBool();
+            if (cs.HasMember("url") && cs["url"].IsString())
+                ds.url = cs["url"].GetString();
+            if (cs.HasMember("public_token") && cs["public_token"].IsString())
+                ds.public_token = cs["public_token"].GetString();
+            if (cs.HasMember("private_token") && cs["private_token"].IsString())
+                ds.private_token = cs["private_token"].GetString();
+            if (cs.HasMember("sync_interval_s"))
+                ds.sync_interval_s = cs["sync_interval_s"].GetUint();
+            cfg.datastore = ds;
+        }
     }
 
     if (root.HasMember("nodes") && root["nodes"].IsObject()) {
@@ -155,7 +196,7 @@ sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
         }
     }
     DatastoreConnectionConfig datastore;
-    bool has_datastore_or_buffer = false;
+    bool has_datastore_or_buffer = cfg.datastore.has_value();
 
     if (root.HasMember("datastore") && root["datastore"].IsObject()) {
         has_datastore_or_buffer = true;
@@ -177,7 +218,6 @@ sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
         if (b.HasMember("vfs_remote_dir") && b["vfs_remote_dir"].IsString())
             datastore.vfs_remote_dir = b["vfs_remote_dir"].GetString();
 
-        // Also check if local buffer settings are in datastore block for backward compatibility
         if (b.HasMember("batch_size"))
             datastore.batch_size = b["batch_size"].GetUint();
         if (b.HasMember("batch_interval_s"))
@@ -192,25 +232,6 @@ sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
             datastore.enable_aggressive_compression = b["enable_aggressive_compression"].GetBool();
         if (b.HasMember("offline_persistence"))
             datastore.offline_persistence = b["offline_persistence"].GetBool();
-    }
-
-    if (root.HasMember("telemetry_buffer") && root["telemetry_buffer"].IsObject()) {
-        has_datastore_or_buffer = true;
-        const auto& buf = root["telemetry_buffer"];
-        if (buf.HasMember("batch_size"))
-            datastore.batch_size = buf["batch_size"].GetUint();
-        if (buf.HasMember("batch_interval_s"))
-            datastore.batch_interval_s = buf["batch_interval_s"].GetUint();
-        if (buf.HasMember("snapshot_mode") && buf["snapshot_mode"].IsString())
-            datastore.snapshot_mode = buf["snapshot_mode"].GetString();
-        if (buf.HasMember("zstd_level"))
-            datastore.zstd_level = static_cast<uint8_t>(buf["zstd_level"].GetUint());
-        if (buf.HasMember("aggressive_zstd_level"))
-            datastore.aggressive_zstd_level = static_cast<uint8_t>(buf["aggressive_zstd_level"].GetUint());
-        if (buf.HasMember("enable_aggressive_compression"))
-            datastore.enable_aggressive_compression = buf["enable_aggressive_compression"].GetBool();
-        if (buf.HasMember("offline_persistence"))
-            datastore.offline_persistence = buf["offline_persistence"].GetBool();
     }
 
     if (has_datastore_or_buffer) {

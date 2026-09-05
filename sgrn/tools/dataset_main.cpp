@@ -3,15 +3,26 @@
 #include <fmt/color.h>
 #include <fmt/core.h>
 #include <cxxopts.hpp>
+#include <filesystem>
 #include <iostream>
+#include <string>
+#include <vector>
 
 int main(int argc, char** argv) {
-    cxxopts::Options options("sgrn_dataset", "SGRN Industrial Telemetry Dataset Processor & ML Manifest Generator");
+    cxxopts::Options options("sgrn_dataset", "SGRN Industrial Telemetry Dataset Processor & Format Converter");
 
-    options.add_options()("i,input", "Input directory containing .jsonl / .jsonl.zst state files", cxxopts::value<std::string>())(
-        "s,scl", "Path to SCL schema file (.scl)", cxxopts::value<std::string>())("c,csv", "Output CSV file path",
-        cxxopts::value<std::string>()->default_value("dataset.csv"))("m,manifest", "Output ML manifest JSON file path",
-        cxxopts::value<std::string>()->default_value("manifest.json"))("man", "Display detailed manual page")("h,help", "Print usage help");
+    options.add_options()("i,input", "Input file(s) or directorie(s) containing telemetry state archives (repeatable)",
+        cxxopts::value<std::vector<std::string>>())("o,output", "Output file path (default: stdout or infer based on conversion)",
+        cxxopts::value<std::string>())("s,scl", "Path to SCL schema file (.scl)", cxxopts::value<std::string>())(
+        "c,convert", "Convert file to target format (-f jsonl|binary)", cxxopts::value<std::string>())(
+        "f,format", "Target format for conversion ('binary', 'jsonl', 'csv')", cxxopts::value<std::string>()->default_value("auto"))(
+        "d,decompress", "Decompress target file to raw uncompressed stdout/file")("z,compress", "Compress target file with Zstd")(
+        "csv", "Output CSV file path for dataset processing", cxxopts::value<std::string>()->default_value("dataset.csv"))(
+        "m,manifest", "Output ML manifest JSON file path", cxxopts::value<std::string>()->default_value("manifest.json"))("merge",
+        "Merge all archives under the input path into a single archive file",
+        cxxopts::value<std::string>())("man", "Display detailed manual page")("h,help", "Print usage help");
+
+    options.parse_positional({"input"});
 
     auto result = options.parse(argc, argv);
 
@@ -22,66 +33,111 @@ NAME
        sgrn_dataset - SGRN Industrial Telemetry Dataset Processor & Data Canonicalizer
 
 SYNOPSIS
-       sgrn_dataset -i DIR -s SCHEMA.scl [-c DATASET.csv] [-m MANIFEST.json]
+       sgrn_dataset -i FILE_OR_DIR [-o OUT_FILE] [-f FORMAT] [-s SCHEMA.scl]
 
 DESCRIPTION
-       sgrn_dataset is the C++ data canonicalization engine for the SGRN platform.
-       It reads Zstd-compressed JSON Lines (.jsonl.zst) telemetry archives generated
-       by the SGRN Gateway persistence service, reconciles state deltas, applies SCL
-       schema rules (including #UNIT directives and categorical enum mappings), and
-       exports a normalized CSV dataset alongside a structured Machine Learning
-       manifest JSON file.
+       sgrn_dataset is the C++ data canonicalization and conversion engine for SGRN.
+       It processes, converts, compresses/decompresses, and canonicalizes telemetry archives.
 
 OPTIONS
-       -i, --input DIR
-              Path to input directory containing Zstd historian archives (.jsonl.zst). Required.
+       -i, --input FILE|DIR
+              Input archive or directory. Can also be passed positionally.
+
+       -o, --output FILE
+              Output destination file path. If omitted for conversion, infers format extension.
+
+       -f, --format FORMAT
+              Target format for conversion: binary, jsonl, or csv. Default: auto.
+
+       -c, --convert FILE
+              Shortcut to convert specified file.
 
        -s, --scl FILE.scl
-              Path to SCL schema file (.scl) defining PLC data blocks and #UNIT annotations. Required.
-
-       -c, --csv FILE.csv
-              Path to output CSV file for aligned time-series feature rows. Default: dataset.csv.
-
-       -m, --manifest FILE.json
-              Path to output ML Manifest JSON file containing feature taxonomy & stats. Default: manifest.json.
-
-       --man
-              Display this manual page and exit.
-
-       -h, --help
-              Display short command usage help and exit.
-
-SCHEMA ANNOTATIONS & #UNIT CONVENTIONS
-       Tag names in SCL schemas must be unit-agnostic. Physical units are annotated
-       directly on variables using the #UNIT("...") directive:
-
-       DATA_BLOCK "Reactor"
-       {
-           VERSION: '0.1'
-       }
-       STRUCT
-           thermal_power   #UNIT("MW")   : REAL := 3400.0;
-           przr_pressure   #UNIT("bar")  : REAL := 155.0;
-       END_STRUCT
-       END_DATA_BLOCK
-
-SYSTEM ARCHITECTURE ROLES
-       * SGRN Gateway: Live operational state twin executing protocol translation.
-       * sgrn_dataset: C++ data canonicalizer producing row-aligned datasets.
-       * SGRN Datastore: Persistent cloud substrate storing manifests, weights, & schemas.
+              Path to SCL schema file (.scl) for processing datasets.
 )" << std::endl;
         return 0;
     }
 
-    if (result.count("help") || !result.count("input") || !result.count("scl")) {
+    if (result.count("help")) {
+        std::cout << options.help() << std::endl;
+        return 0;
+    }
+
+    std::vector<std::string> input_paths;
+    if (result.count("input")) {
+        input_paths = result["input"].as<std::vector<std::string>>();
+    } else if (result.count("convert")) {
+        input_paths.push_back(result["convert"].as<std::string>());
+    }
+
+    // Merge mode: concatenate archives into one (takes precedence over convert).
+    // Accepts any mix of files and directories, in the order given.
+    if (result.count("merge")) {
+        if (input_paths.empty()) {
+            std::cerr << "Error: Input file(s) or directorie(s) required for merging (-i <path> [-i <path>...])\n";
+            return 1;
+        }
+        std::string target_fmt;
+        if (result.count("format") && result["format"].as<std::string>() != "auto") {
+            target_fmt = result["format"].as<std::string>();
+        }
+        sgrn::gateway::tools::DatasetProcessor processor;
+        const std::vector<std::filesystem::path> merge_inputs(input_paths.begin(), input_paths.end());
+        auto res = processor.mergeArchives(merge_inputs, result["merge"].as<std::string>(), target_fmt);
+        if (res.hasError()) {
+            fmt::print(fg(fmt::color::red), "Merge error: {}\n", res.error());
+            return 1;
+        }
+        return 0;
+    }
+
+    if (input_paths.size() > 1) {
+        std::cerr << "Error: convert/process modes take a single input; pass a directory, or merge inputs first (--merge).\n";
+        return 1;
+    }
+    const std::string input_path = input_paths.empty() ? std::string{} : input_paths.front();
+
+    // Conversion or Decompression mode
+    if (result.count("convert") || (result.count("format") && result["format"].as<std::string>() != "auto") || result.count("decompress") ||
+        result.count("compress")) {
+        if (input_path.empty()) {
+            std::cerr << "Error: Input file required for conversion/compression (-i <file>)\n";
+            return 1;
+        }
+
+        std::string target_fmt = result.count("format") ? result["format"].as<std::string>() : "auto";
+        std::string out_path = result.count("output") ? result["output"].as<std::string>() : "";
+
+        if (out_path.empty()) {
+            if (target_fmt == "jsonl") {
+                out_path = input_path + ".converted.jsonl.zst";
+            } else if (target_fmt == "binary" || target_fmt == "bin") {
+                out_path = input_path + ".converted.bin.zst";
+            } else {
+                out_path = input_path + ".out";
+            }
+        }
+
+        sgrn::gateway::tools::DatasetProcessor processor;
+        auto res = processor.convertFormat(input_path, out_path, target_fmt);
+        if (res.hasError()) {
+            fmt::print(fg(fmt::color::red), "Conversion error: {}\n", res.error());
+            return 1;
+        }
+        fmt::print(fg(fmt::color::green), "[sgrn_dataset] Processed {} -> {}\n", input_path, out_path);
+        return 0;
+    }
+
+    // Dataset processing mode
+    if (input_path.empty() || !result.count("scl")) {
         std::cout << options.help() << std::endl;
         return 0;
     }
 
     sgrn::gateway::tools::DatasetConfig config;
-    config.input_dir = result["input"].as<std::string>();
+    config.input_dir = input_path;
     config.scl_schema_path = result["scl"].as<std::string>();
-    config.output_csv_path = result["csv"].as<std::string>();
+    config.output_csv_path = result.count("output") ? result["output"].as<std::string>() : result["csv"].as<std::string>();
     config.manifest_path = result["manifest"].as<std::string>();
 
     fmt::print(fg(fmt::color::cyan), "==================================================\n");

@@ -1,12 +1,20 @@
 {
-  "listen": {
+  "schema": "./sgrn/gateway/simulations/motor/schema.scl",
+  "state_dir": "/tmp/sgrn-gateway-state",
+  "reconnect_ms": 5000,
+  "security_policy": "strict",
+  "security_script": "./sgrn/gateway/simulations/motor/security.as",
+
+  "southbound": {
     "s7": {
       "ip": "0.0.0.0",
       "port": 102,
       "max_clients": 12,
       "pdu_size": 960
-    },
+    }
+  },
 
+  "northbound": {
     "http": {
       "ip": "0.0.0.0",
       "port": 8000
@@ -15,10 +23,10 @@
       "ip": "0.0.0.0",
       "port": 8001
     }
-  }  ,
-  "schema": "./sgrn/gateway/simulations/motor/schema.scl",
-  "state_dir": "/tmp/sgrn-motor--gateway-state",
-  "reconnect_ms": 5000,
-    "security_policy": "strict",
-    "security_script": "./sgrn/gateway/simulations/motor/security.as"
+  },
+
+  "persistence": {
+    "enabled": false,
+    "format": "binary"
+  }
 }

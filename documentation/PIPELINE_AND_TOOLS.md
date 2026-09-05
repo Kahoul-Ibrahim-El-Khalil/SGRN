@@ -80,9 +80,40 @@ END_DATA_BLOCK
 |---|---|---|
 | **`gateway`** | `.prefix/bin/gateway` | Passive multi-protocol aggregator & Digital Twin server (S7, Modbus, EtherNet/IP, OPC UA, HTTP, WebSocket). |
 | **`s7shell`** | `.prefix/bin/s7shell` | Soft-PLC simulator & active control engine executing AngelScript logic (`plc_logic.as`). |
-| **`sgrn_dataset`** | `.prefix/bin/sgrn_dataset` | High-performance C++ dataset generator. Decompresses Zstd WAL files into `dataset.csv` & `manifest.json`. |
+| **`sgrn_dataset`** | `.prefix/bin/sgrn_dataset` | High-performance C++ dataset generator and archive converter (`.bin.zst` <-> `.jsonl.zst` <-> `dataset.csv`). |
+| **`sgrn_replay`** | `.prefix/bin/sgrn_replay` | Gateway history archive replayer; initializes protocol interfaces for Northbound subscribers and streams archive frames. |
 | **`demo_datapipeline.py`** | `./demo_datapipeline.py` | End-to-end test harness: records live history, extracts datasets, trains AutoML models, and runs twin predictions. |
 | **`demo.py`** | `./demo.py` | Interactive post-compilation simulation harness launcher. |
+
+---
+
+## 3.1 `sgrn_dataset` CLI Utility Guide
+
+`sgrn_dataset` provides standard Unix CLI syntax for dataset processing, binary conversion, and decompression.
+
+### Synopsis
+```bash
+# Dataset processing (extract feature CSV and ML manifest)
+sgrn_dataset -i <INPUT_DIR> -s <SCHEMA.scl> [-o <DATASET.csv>] [-m <MANIFEST.json>]
+
+# Archive conversion (.bin.zst -> .jsonl.zst; jsonl -> binary is not implemented)
+sgrn_dataset -i <ARCHIVE.bin.zst> -f jsonl [-o <OUTPUT.jsonl.zst>]
+
+# Archive merge (directories, files, or mixed; order preserved for explicit files)
+sgrn_dataset --merge <MERGED.zst> -i <DIR> [-i <FILE>...]
+
+# Positional usage
+sgrn_dataset archive.bin.zst -f jsonl
+```
+
+### Options & Flags
+- `-i, --input <FILE|DIR>`: Path to input telemetry file or archive directory. Supports positional argument.
+- `-o, --output <FILE>`: Path to output destination file (CSV or converted archive).
+- `-f, --format <FORMAT>`: Target conversion format (`jsonl`, `binary`, `csv`).
+- `-s, --scl <FILE>`: Path to SCL schema file (`.scl`).
+- `-c, --convert <FILE>`: Shortcut flag to convert target archive file.
+- `-d, --decompress` / `-z, --compress`: Explicit decompression or compression flags.
+- `-m, --manifest <FILE>`: Target ML manifest JSON file output path. Default: `manifest.json`.
 
 ---
 

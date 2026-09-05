@@ -57,6 +57,9 @@ public:
     /// considered poisoned after an error and must not be reused.
     ::sgrn::Result<void> writeLine(std::string_view t_line);
 
+    /// Feeds raw binary bytes through the open compression stream without adding a newline.
+    ::sgrn::Result<void> writeRaw(const void* t_data, size_t t_size);
+
     /// Flushes the ZSTD frame end and closes the file. Safe to call once;
     /// the destructor calls this if the caller didn't.
     ::sgrn::Result<void> close();

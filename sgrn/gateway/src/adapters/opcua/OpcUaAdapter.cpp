@@ -186,6 +186,7 @@ void OpcUaAdapter::stop() {
         impl_->server_thread.join();
 
     if (impl_->server) {
+        impl_->session_registry.uninstallAccessControl(impl_->server->raw());
         impl_->server->destroy();
         impl_->server.reset();
     }

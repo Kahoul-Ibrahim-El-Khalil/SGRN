@@ -1,5 +1,18 @@
 {
-  "listen": {
+  "schema": "./sgrn/gateway/simulations/types/schema.scl",
+  "state_dir": "/tmp/sgrn-gateway-state",
+  "reconnect_ms": 5000,
+  "security_policy": "strict",
+  "security_script": "./sgrn/gateway/simulations/types/security.as",
+
+  "southbound": {
+    "s7": {
+      "ip": "0.0.0.0",
+      "port": 102
+    }
+  },
+
+  "northbound": {
     "http": {
       "ip": "0.0.0.0",
       "port": 8000
@@ -7,16 +20,11 @@
     "websocket": {
       "ip": "0.0.0.0",
       "port": 8001
-    },
-      "s7":
-      {
-        "ip": "0.0.0.0",
-        "port": 102
     }
   },
-  "schema": "./sgrn/gateway/simulations/types/schema.scl",
-  "state_dir": "/tmp/sgrn-types-gateway-state",
-  "reconnect_ms": 5000,
-  "security_policy": "strict",
-  "security_script": "./sgrn/gateway/simulations/types/security.as"
+
+  "persistence": {
+    "enabled": false,
+    "format": "binary"
+  }
 }

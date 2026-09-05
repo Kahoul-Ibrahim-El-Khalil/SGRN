@@ -412,6 +412,43 @@ Result<void> ZstdLineWriter::writeLine(std::string_view t_line) {
     return {};
 }
 
+Result<void> ZstdLineWriter::writeRaw(const void* t_data, size_t t_size) {
+    if (closed_) {
+        return Error("ZstdLineWriter: write failed — writer already closed");
+    }
+    if (!init_error_.empty()) {
+        return Error(init_error_);
+    }
+    if (poisoned_) {
+        return Error("ZstdLineWriter: write failed — writer in poisoned state");
+    }
+    if (!t_data || t_size == 0) {
+        return {};
+    }
+
+    const char* ptr = static_cast<const char*>(t_data);
+    size_t processed = 0;
+    while (processed < t_size) {
+        const size_t chunk = std::min(t_size - processed, in_buf_.size());
+        ZSTD_inBuffer input{ptr + processed, chunk, 0};
+        while (input.pos < input.size) {
+            ZSTD_outBuffer output{out_buf_.data(), out_buf_.size(), 0};
+            size_t const ret = ZSTD_compressStream(p_cstream_, &output, &input);
+            if (ZSTD_isError(ret)) {
+                poisoned_ = true;
+                return Error(fmt::format("ZstdLineWriter: zstd error: {}", ZSTD_getErrorName(ret)));
+            }
+            if (output.pos > 0 && fwrite(out_buf_.data(), 1, output.pos, p_file_) != output.pos) {
+                poisoned_ = true;
+                return Error("ZstdLineWriter: failed to write compressed output to file");
+            }
+            bytes_out_ += output.pos;
+        }
+        processed += chunk;
+    }
+    return {};
+}
+
 Result<void> ZstdLineWriter::close() {
     if (closed_)
         return {};

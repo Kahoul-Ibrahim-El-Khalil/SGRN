@@ -1081,8 +1081,10 @@ static void registerUdtFieldProperties(sgrn::scripting::ScriptHost& t_host, cons
         findTypeDispatch(ast, getter, setter);
 
         std::string getter_sig = fmt::format("{} get_{}() const", as_field_type, safe_name);
+        sgrn::scripting::g_suppress_errors = true;
         int r1 = t_host.getEngine()->RegisterObjectMethod(t_as_type_name.c_str(), getter_sig.c_str(), getter, asCALL_GENERIC, raw_name);
-        if (r1 < 0) {
+        sgrn::scripting::g_suppress_errors = false;
+        if (r1 < 0 && r1 != asALREADY_REGISTERED) {
             fmt::print(stderr, "[Error] Failed to register getter '{}' for type {}: code {}\n", getter_sig, t_as_type_name, r1);
         }
 
@@ -1096,8 +1098,10 @@ static void registerUdtFieldProperties(sgrn::scripting::ScriptHost& t_host, cons
         } else {
             setter_sig = fmt::format("void set_{}({} val)", safe_name, as_field_type);
         }
+        sgrn::scripting::g_suppress_errors = true;
         int r2 = t_host.getEngine()->RegisterObjectMethod(t_as_type_name.c_str(), setter_sig.c_str(), setter, asCALL_GENERIC, raw_name);
-        if (r2 < 0) {
+        sgrn::scripting::g_suppress_errors = false;
+        if (r2 < 0 && r2 != asALREADY_REGISTERED) {
             fmt::print(stderr, "[Error] Failed to register setter '{}' for type {}: code {}\n", setter_sig, t_as_type_name, r2);
         }
     }

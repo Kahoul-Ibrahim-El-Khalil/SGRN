@@ -53,6 +53,10 @@ Result<void, std::string> GatewayApplication::loadConfig(int t_argc, char** tp_a
     return {};
 }
 
+void GatewayApplication::enablePassiveReplayMode() {
+    passive_replay_mode_ = true;
+}
+
 Result<void, std::string> GatewayApplication::loadSchema() {
     std::string reg_arg;
     if (!schema_override_.empty()) {
@@ -263,16 +267,31 @@ Result<void, std::string> GatewayApplication::initInfrastructure() {
     leaf_dict_ = sgrn::gateway::twin::LeafDictionary::buildFrom(symbolic_store_);
 
     persistence_service_ = std::make_unique<sgrn::gateway::database::PersistenceService>(heavy_pool_.get());
-    if (config_.persistence.enabled) {
+    // In passive replay mode the twin is driven from an archive: never write
+    // new WAL files for replayed data.
+    if (config_.persistence.enabled && !passive_replay_mode_) {
         persistence_service_->setLeafDictionary(leaf_dict_);
+        // Full-DB pull reader: binary frames are whole-segment snapshots
+        // (see FullDbReadFn) — event typed payloads are per-leaf slices.
+        auto read_db = [this](uint16_t t_db) -> sgrn::Result<std::vector<uint8_t>, std::string> {
+            const auto* p_seg = plc_state_.findSegmentById(t_db);
+            if (!p_seg)
+                return fmt::format("PersistenceService: DB{} not in twin memory", t_db);
+            std::vector<uint8_t> buf(p_seg->size);
+            if (auto r = server_.readDbMemory(t_db, 0, p_seg->size, buf.data()); !r)
+                return std::string(sgrn::gateway::twin::toString(r.error()));
+            return buf;
+        };
         if (auto res = persistence_service_->configure(
-                config_.persistence, config_.state_dir, node_db_, symbolic_store_.toJson(), &symbolic_store_);
+                config_.persistence, config_.state_dir, node_db_, symbolic_store_.toJson(), &symbolic_store_, std::move(read_db));
             res.hasError()) {
             return fmt::format("PersistenceService configuration failed: {}", res.error());
         }
     }
 
-    if (config_.datastore.has_value()) {
+    // The bridge uploads persistence WAL files to the cloud backend. With no
+    // persistence in passive replay mode there is nothing to upload.
+    if (config_.datastore.has_value() && !passive_replay_mode_) {
         bridge_.emplace(heavy_pool_.get());
         bridge_->setReconnectBase(config_.reconnect_ms);
         std::string reg_arg = fs::is_directory(config_.symbols_dir) ? config_.symbols_dir : config_.schema_file;
@@ -285,6 +304,15 @@ Result<void, std::string> GatewayApplication::initInfrastructure() {
 }
 
 Result<void, std::string> GatewayApplication::startAdapters() {
+    if (passive_replay_mode_) {
+        // Replay drives the twin from an archive via PlcMemory::writeDbMemory.
+        // Every adapter below is a northbound server (bind/listen only — none
+        // polls real hardware), so they all start normally and serve reads and
+        // streams from the replay-driven twin. Persistence and the cloud
+        // uploader stay off (see initInfrastructure()).
+        SGRN_INFO_LOG("Passive replay mode: northbound servers on, persistence/uploader off.");
+    }
+
     if (config_.s7.has_value()) {
         s7_adapter_.emplace(server_, security_manager_);
         s7_adapter_->setMaxClientsConfig(config_.s7->max_clients);
@@ -463,6 +491,8 @@ void GatewayApplication::run() {
 }
 
 void GatewayApplication::shutdown() {
+    if (shutdown_done_.exchange(true, std::memory_order_acq_rel))
+        return;
     SGRN_WARN_LOG("Shutting down...");
     if (modbus_adapter_.has_value()) {
         modbus_adapter_->stop();
@@ -483,6 +513,13 @@ void GatewayApplication::shutdown() {
         heavy_pool_->join();
     }
     SGRN_INFO_LOG("Done.");
+}
+
+GatewayApplication::~GatewayApplication() {
+    // shutdown() is idempotent: this only takes effect when the application
+    // never got that far (e.g. an initialize() failure after initThreading()
+    // left light_thread_ joinable, which would otherwise terminate()).
+    shutdown();
 }
 
 } // namespace sgrn::gateway

@@ -148,6 +148,12 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
     if (t_event.type != EventType::DeltaSnapshot)
         return;
 
+    // Feed the last-value cache so late subscribers get current state even
+    // when no further deltas arrive (quiet twin, finished replay).
+    if (t_event.is_flat && t_event.json_value && !t_event.json_value->empty() && *t_event.json_value != "{}") {
+        rememberFlatValues(*t_event.json_value);
+    }
+
     // Collect target clients and determine if any needs field-level filtering
     bool t_any_needs_filter = false;
     auto targets = collectTargets(t_event, t_any_needs_filter);
@@ -526,6 +532,10 @@ void WebSocketAdapter::handleClientMessage(std::shared_ptr<ix::WebSocket> tsp_ws
         std::string cmd = doc["command"].GetString();
         if (cmd == "subscribe" && doc.HasMember("path") && doc["path"].IsString()) {
             std::string path = doc["path"].GetString();
+            // Catch-up target: subscriptions resolved below; the current
+            // values are pushed after the lock is released.
+            std::shared_ptr<ix::WebSocket> catchup_ws;
+            std::vector<ClientContext::LeafRange> catchup_ranges;
             if (security_manager_ && registry_) {
                 // Common schema_resolver — resolve path to schema info
                 auto resolution = schema_resolver::resolve(path, *registry_);
@@ -543,12 +553,21 @@ void WebSocketAdapter::handleClientMessage(std::shared_ptr<ix::WebSocket> tsp_ws
                     }
                     it->second.subscriptions.insert(path);
                     resolveLeafRanges(it->second);
+                    if (it->second.dictionary_mode) {
+                        catchup_ws = tsp_ws;
+                        catchup_ranges = it->second.leaf_ranges;
+                    }
                 }
             } else {
                 std::lock_guard<std::mutex> lk(clients_mutex_);
                 clients_[tsp_ws].subscriptions.insert(path);
                 resolveLeafRanges(clients_[tsp_ws]);
+                if (clients_[tsp_ws].dictionary_mode) {
+                    catchup_ws = tsp_ws;
+                    catchup_ranges = clients_[tsp_ws].leaf_ranges;
+                }
             }
+            sendCatchUp(catchup_ws, catchup_ranges);
         } else if (cmd == "subscribe_binary" && doc.HasMember("db")) {
             if (!registry_) {
                 SGRN_WARN_LOG("WebSocket binary subscribe rejected: registry not available");
@@ -702,12 +721,23 @@ void WebSocketAdapter::handleClientMessage(std::shared_ptr<ix::WebSocket> tsp_ws
             }
         } else if (cmd == "setDictionaryMode") {
             const bool enabled = doc.HasMember("enabled") && doc["enabled"].IsBool() && doc["enabled"].GetBool();
-            std::lock_guard<std::mutex> lk(clients_mutex_);
-            auto it = clients_.find(tsp_ws);
-            if (it != clients_.end()) {
-                it->second.dictionary_mode = enabled;
-                resolveLeafRanges(it->second);
+            std::shared_ptr<ix::WebSocket> catchup_ws;
+            std::vector<ClientContext::LeafRange> catchup_ranges;
+            {
+                std::lock_guard<std::mutex> lk(clients_mutex_);
+                auto it = clients_.find(tsp_ws);
+                if (it != clients_.end()) {
+                    it->second.dictionary_mode = enabled;
+                    resolveLeafRanges(it->second);
+                    if (enabled) {
+                        catchup_ws = tsp_ws;
+                        catchup_ranges = it->second.leaf_ranges;
+                    }
+                }
             }
+            // A client that subscribed first (legacy) and opts into
+            // dictionary mode afterwards gets current values right away.
+            sendCatchUp(catchup_ws, catchup_ranges);
         }
     }
 }
@@ -721,6 +751,73 @@ void WebSocketAdapter::stop() {
         server_->stop();
     }
     running_.store(false, std::memory_order_release);
+}
+
+void WebSocketAdapter::rememberFlatValues(const std::string& t_flat_json) {
+    rapidjson::Document doc;
+    doc.Parse(t_flat_json.c_str());
+    if (doc.HasParseError() || !doc.IsObject())
+        return;
+
+    std::lock_guard<std::mutex> lk(last_values_mutex_);
+    for (auto it = doc.MemberBegin(); it != doc.MemberEnd(); ++it) {
+        const char* name = it->name.GetString();
+        size_t len = it->name.GetStringLength();
+        if (len == 0 || len > 10)
+            continue;
+        bool numeric = true;
+        for (size_t i = 0; i < len; ++i) {
+            if (name[i] < '0' || name[i] > '9') {
+                numeric = false;
+                break;
+            }
+        }
+        if (!numeric)
+            continue;
+        rapidjson::StringBuffer sb;
+        rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+        it->value.Accept(w);
+        last_flat_values_[static_cast<twin::LeafId>(std::stoul(name))] = sb.GetString();
+    }
+}
+
+void WebSocketAdapter::sendCatchUp(const std::shared_ptr<ix::WebSocket>& tsp_ws, const std::vector<ClientContext::LeafRange>& t_ranges) {
+    if (!tsp_ws || t_ranges.empty())
+        return;
+
+    rapidjson::Document out;
+    out.SetObject();
+    {
+        std::lock_guard<std::mutex> lk(last_values_mutex_);
+        if (last_flat_values_.empty())
+            return;
+        for (const auto& [id, value_json] : last_flat_values_) {
+            bool covered = false;
+            for (const auto& range : t_ranges) {
+                if (id >= range.start && id <= range.end) {
+                    covered = true;
+                    break;
+                }
+            }
+            if (!covered)
+                continue;
+            rapidjson::Document value_doc;
+            value_doc.Parse(value_json.c_str());
+            if (value_doc.HasParseError())
+                continue;
+            rapidjson::Value key(std::to_string(id).c_str(), out.GetAllocator());
+            rapidjson::Value val;
+            val.CopyFrom(value_doc, out.GetAllocator());
+            out.AddMember(key, val, out.GetAllocator());
+        }
+    }
+
+    if (out.ObjectEmpty())
+        return;
+    rapidjson::StringBuffer sb;
+    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+    out.Accept(w);
+    tsp_ws->send(sb.GetString());
 }
 
 void WebSocketAdapter::resolveLeafRanges(ClientContext& t_ctx) {

@@ -23,15 +23,23 @@ struct FeatureMeta {
     double max_val = 0.0;
     uint64_t null_count = 0;
     uint64_t total_samples = 0;
+
+    // Added for binary decoding
+    uint16_t db_num = 0;
+    size_t offset = 0;
+    int bit_index = 0; ///< for Bool: bit within the byte (S7 packs consecutive bools)
+    sgrn::scl::DataType raw_type = sgrn::scl::DataType::Real;
 };
 
 struct DatasetConfig {
-    std::string input_dir;       // /tmp/sgrn-gateway-state/
-    std::string scl_schema_path; // ./sgrn/gateway/simulations/nuclear/schema.scl
-    std::string output_csv_path; // dataset.csv or dataset.csv.zst
-    std::string manifest_path;   // manifest.json
-    std::string start_time;      // Optional ISO timestamp filter
-    std::string end_time;        // Optional ISO timestamp filter
+    std::string input_dir;        // /tmp/sgrn-gateway-state/
+    std::string scl_schema_path;  // ./sgrn/gateway/simulations/nuclear/schema.scl
+    std::string output_csv_path;  // dataset.csv or dataset.csv.zst
+    std::string manifest_path;    // manifest.json
+    std::string convert_out_path; // Output path for archive conversion (.bin.zst or .jsonl.zst)
+    std::string target_format;    // "binary" or "jsonl"
+    std::string start_time;       // Optional ISO timestamp filter
+    std::string end_time;         // Optional ISO timestamp filter
     int zstd_compression_level = 5;
 };
 
@@ -49,9 +57,30 @@ public:
     DatasetProcessor() = default;
 
     /**
-     * @brief Executes the dataset extraction, delta reconciliation, CSV export, and ML manifest creation.
+     * @brief Executes dataset extraction, delta reconciliation, CSV export, and ML manifest creation.
      */
     sgrn::Result<DatasetSummary> process(const DatasetConfig& t_config);
+
+    /**
+     * @brief Converts an archive file between binary (.bin.zst) and JSONL (.jsonl.zst) formats.
+     */
+    sgrn::Result<void> convertFormat(
+        const std::filesystem::path& t_input_file, const std::filesystem::path& t_output_file, const std::string& t_target_format);
+
+    /**
+     * @brief Concatenates archives into a single archive at t_output_file.
+     *
+     * Each entry of t_inputs may be a file or a directory (directories
+     * expand in sorted filename order; explicit entries keep CLI order).
+     * Same-format inputs merge verbatim (frame/line order preserved); binary
+     * inputs merge into a jsonl target via the convertFormat transcoding.
+     * jsonl->binary is refused (transcoding unimplemented). Per-file headers
+     * collapse to the first file's (schema drift warns; a changed dictionary
+     * is kept inline so IDs keep resolving); footers are dropped and one
+     * recomputed footer is appended for jsonl output.
+     */
+    sgrn::Result<void> mergeArchives(const std::vector<std::filesystem::path>& t_inputs, const std::filesystem::path& t_output_file,
+        const std::string& t_target_format = "", int t_zstd_level = 5);
 
 private:
     sgrn::Result<void> loadSchema(const std::string& t_scl_path);

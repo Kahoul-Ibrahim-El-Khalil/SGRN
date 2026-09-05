@@ -651,7 +651,34 @@ target_include_directories(sgrn_dataset PRIVATE
 sgrn_target(sgrn_dataset)
 sgrn_install_component_executable(TARGET sgrn_dataset COMPONENT gateway)
 
-# 4.4 Documentation
+# 4.5 sgrn-replay
+sgrn_add_component_executable(
+    TARGET      sgrn_replay
+    SOURCES     
+        ${CMAKE_SOURCE_DIR}/sgrn/tools/replay_main.cpp
+        src/tools/sgrn_replay.cpp
+        src/gateway.cpp
+    ENABLE_ORIGIN_RPATH
+    PRIVATE_LIBS
+        sgrn_gateway
+        sgrn_gateway_twin
+        sgrn::scl
+        sgrn_utils
+        sgrn::zstd
+        sgrn::cxxopts
+        sgrn::rapidjson
+        fmt::fmt
+    WIN_LIBS
+        ${WIN_LIBS_LIST}
+)
+target_include_directories(sgrn_replay PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/sgrn/scl/include
+)
+sgrn_target(sgrn_replay)
+sgrn_install_component_executable(TARGET sgrn_replay COMPONENT gateway)
+
+# 4.6 Documentation
 # Documentation is now embedded in the binary instead of installed as man pages.
 
 # Packaging
@@ -659,7 +686,10 @@ sgrn_package_runtime_dependencies(
     APPS
         gateway
         mbproxy
+        sgrn_dataset
+        sgrn_replay
     LIBS
         sgrn_gateway
     COMPONENT gateway
 )
+

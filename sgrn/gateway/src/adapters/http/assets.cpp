@@ -7,6 +7,10 @@
 #include <httplib.h>
 #include <web_assets.hpp>
 
+#include <map>
+#include <mutex>
+#include <string>
+
 namespace sgrn::gateway::adapters
 {
 
@@ -48,15 +52,55 @@ static const std::string kEndpointsMessage = R"({
  */
 using sgrn::utils::strings::replaceAll;
 
-// The gateway assumes it always runs behind the nginx reverse proxy (see
-// sites-enabled/sgrn.conf). index.html is served with a single, fixed
-// runtime head: <base href="/gateway/"> plus __SGRN_BASE__, so the SPA's
-// asset/API/WS requests all resolve through nginx on the page's own
-// origin. There is no unproxied variant and no WS-port injection.
-constexpr std::string_view kInjectedRuntimeForHtmlOverProxy = R"(<base href="/gateway/">
+namespace
+{
+
+/// Normalize the X-Forwarded-Prefix header nginx sends (see
+/// sites-enabled/sgrn.conf, "/gateway"). Returns "" for direct access.
+/// Strict allow-list: anything outside [A-Za-z0-9_.\-/~] (or a missing
+/// leading '/') falls back to standalone so a forged header can never
+/// inject markup into index.html.
+std::string forwardedPrefix(const httplib::Request& t_req) {
+    if (!t_req.has_header("X-Forwarded-Prefix"))
+        return "";
+    std::string prefix = t_req.get_header_value("X-Forwarded-Prefix");
+    if (prefix.size() > 64 || prefix.empty() || prefix[0] != '/')
+        return "";
+    for (char c : prefix) {
+        const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '/' || c == '_' || c == '.' ||
+                        c == '-' || c == '~';
+        if (!ok)
+            return "";
+    }
+    while (prefix.size() > 1 && prefix.back() == '/')
+        prefix.pop_back();
+    if (prefix == "/")
+        return "";
+    return prefix;
+}
+
+/// Runtime head patched into index.html's <!-- SGRN_RUNTIME_HEAD --> slot.
+/// Behind the proxy the SPA must resolve API/asset/WS URLs against the page's
+/// own origin + prefix (no WS-port injection: ws() then builds
+/// wss://host<prefix>/ws, which nginx proxies). Direct access keeps the
+/// standalone head with the explicit WS port.
+std::string runtimeHead(const std::string& t_prefix, uint16_t t_ws_port) {
+    if (t_prefix.empty()) {
+        return fmt::format(R"(<base href="/">
 <script>
-window.__SGRN_BASE__="/gateway";
-</script>)";
+window.__SGRN_BASE__="";
+window.__SGRN_WS_PORT__={};
+</script>)",
+            t_ws_port);
+    }
+    return fmt::format(R"(<base href="{0}/">
+<script>
+window.__SGRN_BASE__="{0}";
+</script>)",
+        t_prefix);
+}
+
+} // namespace
 
 void HttpAdapter::registerWebAssets() {
     namespace web = sgrn::gateway::assets::web;
@@ -66,19 +110,27 @@ void HttpAdapter::registerWebAssets() {
         auto cached = std::make_shared<std::string>();
         auto flag = std::make_shared<std::once_flag>();
         auto has_error = std::make_shared<bool>(false);
+        // index.html only: patched variants keyed by forwarded prefix, since
+        // direct (:8000) and proxied (https://host/gateway/) clients need
+        // different <base>/__SGRN_BASE__ heads. Handlers run on the httplib
+        // pool, so the map is mutex-guarded.
+        auto variants = std::make_shared<std::map<std::string, std::string>>();
+        auto variants_mutex = std::make_shared<std::mutex>();
 
         const uint16_t ws_port = ws_port_;
-        auto handler = [i, cached, flag, has_error, ws_port](const httplib::Request& t_req, httplib::Response& t_res) {
+        auto handler = [i, cached, flag, has_error, variants, variants_mutex, ws_port](
+                           const httplib::Request& t_req, httplib::Response& t_res) {
             const auto& asset = web::ASSETS[i];
+            const bool is_index = (asset.virtual_path == "/index.html");
 
-            t_res.set_header("Vary", "Accept-Encoding");
+            t_res.set_header("Vary", is_index ? "Accept-Encoding, X-Forwarded-Prefix" : "Accept-Encoding");
 
             const bool client_supports_zstd =
                 t_req.has_header("Accept-Encoding") && t_req.get_header_value("Accept-Encoding").find("zstd") != std::string::npos;
 
             // index.html carries the runtime <base>/__SGRN_BASE__ placeholder
             // that must be patched in — never serve the pre-baked zstd blob for it.
-            bool serve_precompressed = client_supports_zstd && asset.virtual_path != "/index.html";
+            bool serve_precompressed = client_supports_zstd && !is_index;
 
             if (serve_precompressed) {
                 t_res.set_header("Content-Encoding", "zstd");
@@ -86,7 +138,7 @@ void HttpAdapter::registerWebAssets() {
                 return;
             }
 
-            std::call_once(*flag, [&, ws_port]() {
+            std::call_once(*flag, [&]() {
                 auto decompressed = sgrn::utils::compression::decompressStringZstd(asset.compressedView());
 
                 if (decompressed.hasError()) {
@@ -96,16 +148,6 @@ void HttpAdapter::registerWebAssets() {
                 }
 
                 *cached = std::move(decompressed.value());
-
-                if (asset.virtual_path == "/index.html") {
-                    std::string standalone_runtime = fmt::format(R"(<base href="/">
-<script>
-window.__SGRN_BASE__="";
-window.__SGRN_WS_PORT__={};
-</script>)",
-                        ws_port);
-                    replaceAll(*cached, "<!-- SGRN_RUNTIME_HEAD -->", standalone_runtime);
-                }
             });
 
             if (*has_error || (cached->empty() && asset.original_size > 0)) {
@@ -114,7 +156,20 @@ window.__SGRN_WS_PORT__={};
                 return;
             }
 
-            t_res.set_content(cached->data(), cached->size(), asset.content_type.data());
+            if (!is_index) {
+                t_res.set_content(cached->data(), cached->size(), asset.content_type.data());
+                return;
+            }
+
+            const std::string prefix = forwardedPrefix(t_req);
+            std::lock_guard<std::mutex> lock(*variants_mutex);
+            auto it = variants->find(prefix);
+            if (it == variants->end()) {
+                std::string patched = *cached;
+                replaceAll(patched, "<!-- SGRN_RUNTIME_HEAD -->", runtimeHead(prefix, ws_port));
+                it = variants->emplace(prefix, std::move(patched)).first;
+            }
+            t_res.set_content(it->second.data(), it->second.size(), asset.content_type.data());
         };
 
         const auto& asset = web::ASSETS[i];

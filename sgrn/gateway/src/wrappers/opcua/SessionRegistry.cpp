@@ -71,6 +71,31 @@ void SessionRegistry::installAccessControl(UA_Server* tp_server) {
     ac.context = this;
     ac.activateSession = &SessionRegistry::onActivateSession;
     ac.closeSession = &SessionRegistry::onCloseSession;
+    installed_ = true;
+}
+
+void SessionRegistry::uninstallAccessControl(UA_Server* tp_server) {
+    if (!installed_)
+        return;
+    installed_ = false;
+    if (!tp_server)
+        return;
+    UA_ServerConfig* p_config = UA_Server_getConfig(tp_server);
+    if (!p_config)
+        return;
+    UA_AccessControl& ac = p_config->accessControl;
+
+    // Restore the hooks captured at install time. In particular ac->context
+    // must point at open62541's own AccessControlContext again: its default
+    // clear callback frees the context, and freeing this registry with free()
+    // aborts teardown. Call before UA_Server_delete, after the server thread
+    // is joined (no session callbacks in flight).
+    ac.activateSession = original_activate_session_;
+    ac.closeSession = original_close_session_;
+    ac.context = original_context_;
+    original_activate_session_ = nullptr;
+    original_close_session_ = nullptr;
+    original_context_ = nullptr;
 }
 
 UA_StatusCode SessionRegistry::onActivateSession(UA_Server* tp_server, UA_AccessControl* tp_ac, const UA_EndpointDescription* t_endpoint,

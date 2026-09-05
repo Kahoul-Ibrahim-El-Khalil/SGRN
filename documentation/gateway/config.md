@@ -12,70 +12,42 @@ The configuration is organized into nested blocks. At least one protocol under `
 
 ```json
 {
-  "listen": {
+  "schema": "./simulations/nuclear/schema.scl",
+  "state_dir": "/tmp/sgrn-gateway-state",
+  "reconnect_ms": 5000,
+  "security_policy": "strict",
+  "security_script": "./configs/security.as",
+
+  "southbound": {
     "s7": {
       "ip": "0.0.0.0",
       "port": 102,
       "max_clients": 12,
-      "pdu_size": 960,
-      "little_endian": true
-    },
-    "opcua": {
-      "ip": "127.0.0.1",
-      "port": 4840
-    },
-    "http": {
-      "ip": "127.0.0.1",
-      "port": 8000
-    },
-    "websocket": {
-      "ip": "127.0.0.1",
-      "port": 8001
-    },
-    "modbus": {
-      "ip": "0.0.0.0",
-      "port": 502
-    },
-    "ethernetip": {
-      "ip": "0.0.0.0",
-      "port": 44818
+      "pdu_size": 960
     }
   },
-  "schema": "./registry.json",
-  "cache_json_north": true,
-  "reconnect_ms": 5000,
+
+  "northbound": {
+    "http": { "ip": "0.0.0.0", "port": 8000 },
+    "websocket": { "ip": "0.0.0.0", "port": 8001 },
+    "opcua": { "ip": "0.0.0.0", "port": 4840 }
+  },
 
   "persistence": {
-    "enabled": false,
+    "enabled": true,
     "mode": "changes_with_timestamp",
-    "namespaces": [],
-    "atomic_window_ms": 10,
-    "batch_size": 1000,
-    "batch_interval_s": 300,
-    "anchor_interval_s": 86400,
-    "anchor_change_count": 10000,
-    "zstd_level": 5,
-    "anchor_zstd_level": 12
-  },
+    "format": "binary",
+    "namespaces": ["DB1", "DB2"],
+    "max_events": 500,
+    "batch_interval_s": 40,
+    "zstd_level": 10,
 
-  "datastore": {
-    "url": "https://localhost:8443",
-    "public_token": "1e78dbe3-1f5b-404f-89c1-ae0c07e98c5c",
-    "private_token": "FEcPKSxEuJzpst-MYcR8OlQWzFYxPoVDK9Sk3qmGn6A",
-    "object_name": "gateway-simulation",
-    "upload_mode": "telemetry",
-    "telemetry_enabled": true,
-    "vfs_remote_dir": "/gateway/snapshots",
-    "sync_interval_s": 30
-  },
-
-  "security_policy": "strict",
-  "security_script": "./configs/security.as",
-
-  "nodes": {
-    "1": {
-      "db_number": 1,
-      "allowed_ip": "10.0.0.5"
+    "cloud_sync": {
+      "enabled": true,
+      "url": "https://localhost/datastore",
+      "public_token": "1e78dbe3-1f5b-404f-89c1-ae0c07e98c5c",
+      "private_token": "FEcPKSxEuJzpst-MYcR8OlQWzFYxPoVDK9Sk3qmGn6A",
+      "sync_interval_s": 30
     }
   }
 }

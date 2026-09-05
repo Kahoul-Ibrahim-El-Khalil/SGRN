@@ -66,8 +66,12 @@ constexpr int kHeavyPoolThreads = 2; // worker threads for compression/disk I/O
 class GatewayApplication {
 public:
     GatewayApplication() = default;
+    /// Never throws-terminate: joins the light thread even if shutdown() was
+    /// never called (e.g. initialize() failed after initThreading()).
+    ~GatewayApplication();
 
     sgrn::Result<void, std::string> loadConfig(int t_argc, char** tp_argv);
+    void enablePassiveReplayMode();
     sgrn::Result<void, std::string> loadSchema();
     sgrn::Result<void, std::string> initSecurity();
     sgrn::Result<void, std::string> initTwin();
@@ -79,6 +83,26 @@ public:
     void feedInitialAnchor();
     void run();
     void shutdown();
+
+    /// Direct access to the digital-twin memory (e.g. sgrn_replay writes
+    /// decoded archive frames straight into the twin).
+    PlcMemory& memory() {
+        return server_;
+    }
+    const PlcMemory& memory() const {
+        return server_;
+    }
+
+    /// Read-only access to the compiled schema (e.g. sgrn_replay resolves
+    /// archived leaf paths to fields for raw-memory writes).
+    const sgrn::scl::PlcSchemaStore& schema() const {
+        return symbolic_store_;
+    }
+
+    /// Configured HTTP (dashboard) port, or 0 when the HTTP adapter is off.
+    uint16_t httpPort() const {
+        return config_.http.has_value() ? config_.http->port : 0;
+    }
 
 private:
     template <typename StarterFunc>
@@ -115,6 +139,16 @@ private:
 
     GatewayConfig config_;
     bool gui_mode_{false};
+    /// When set via enablePassiveReplayMode(), the gateway serves replayed
+    /// state but never touches the persistence pipeline: initInfrastructure()
+    /// skips PersistenceService and the DatastoreBridge, while startAdapters()
+    /// still brings up the northbound servers (HTTP/GUI, WebSocket, OPC-UA,
+    /// S7, Modbus, EtherNet/IP) so clients can read/stream the replayed twin.
+    /// Used by sgrn_replay, which drives the twin from an archive.
+    bool passive_replay_mode_{false};
+    /// Makes shutdown() idempotent: the destructor also calls it, so an
+    /// initialize() failure after initThreading() still joins threads.
+    std::atomic<bool> shutdown_done_{false};
     std::string schema_override_;
     std::string policy_script_;
 

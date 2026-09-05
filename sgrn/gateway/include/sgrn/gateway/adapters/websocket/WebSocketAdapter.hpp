@@ -173,6 +173,19 @@ private:
     BinaryReadFn binary_read_fn_;
 
     const twin::LeafDictionary* dict_{nullptr}; ///< shared dictionary for dictionary-mode
+
+    /// Last known value (serialized JSON) per leaf id, fed from flat
+    /// DeltaSnapshot events. Served as catch-up to dictionary-mode clients
+    /// that subscribe after the fact — e.g. a dashboard opened when the twin
+    /// is quiet (replay, idle plant). Bounded by the schema's leaf count.
+    std::mutex last_values_mutex_;
+    std::unordered_map<twin::LeafId, std::string> last_flat_values_;
+
+    /// Record a flat {"<id>": value} payload into the last-value cache.
+    void rememberFlatValues(const std::string& t_flat_json);
+    /// Send cached values covered by t_ranges to one client (flat form).
+    /// No-op when the cache holds nothing in those ranges.
+    void sendCatchUp(const std::shared_ptr<ix::WebSocket>& tsp_ws, const std::vector<ClientContext::LeafRange>& t_ranges);
 };
 
 } // namespace sgrn::gateway::adapters::websocket

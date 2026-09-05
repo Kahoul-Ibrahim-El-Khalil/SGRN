@@ -40,6 +40,15 @@ struct PersistenceConfig {
     std::string mode{"changes_with_timestamp"};
 
     /**
+     * @brief Storage serialization format. One of:
+     *   "jsonl"  — Line-delimited JSON inside Zstd (.jsonl.zst) [Default]
+     *   "binary" — Compact binary frame sequence inside Zstd (.bin.zst)
+     *              [Canonical: new archival features target this format first.
+     *              RecoveryEngine restores both formats.]
+     */
+    std::string format{"jsonl"};
+
+    /**
      * @brief Field-level namespace filter.
      *
      * If empty, all fields of all DBs are persisted.

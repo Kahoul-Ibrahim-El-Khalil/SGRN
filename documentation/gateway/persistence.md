@@ -1,5 +1,13 @@
 ## Persistence & Historian
 
+> **Format status.** The binary WAL (`.bin.zst`) is the canonical on-disk
+> format; the JSONL WAL (`.jsonl.zst`) is legacy-compatible, still the
+> default, and still the only format `RecoveryEngine` restores from at boot.
+> Authoritative contracts: [`binary-format.md`](./binary-format.md) and
+> [`jsonl-format.md`](./jsonl-format.md). (Envelope examples further below
+> predate the LeafDictionary ID-keyed payloads — trust the two format docs
+> over them.)
+
 The **PersistenceService** is SGRN's independent local historian. It archives PLC telemetry to Zstd-compressed JSON files on disk, regardless of whether a cloud backend is configured.
 
 The **DatastoreBridge** is then a simple uploader — it reads the list of locally-archived files from the `pending_batches` SQLite table and pushes them to the cloud when connectivity is available.
@@ -66,8 +74,9 @@ Add a `persistence` block to your `gateway.json`:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | bool | `false` | Master on/off switch |
-| `mode` | string | `"changes_with_timestamp"` | Archive mode (see below) |
-| `namespaces` | array | `[]` | Path prefixes to filter. Empty = all fields |
+| `mode` | string | `"changes_with_timestamp"` | Archive mode (`changes_with_timestamp`, `full_tree_with_anchor`) |
+| `format` | string | `"jsonl"` | Archive format: `"jsonl"` (`.jsonl.zst`) or `"binary"` (`.bin.zst` high-density raw WAL) |
+| `namespaces` | array | `[]` | Path prefixes to filter. Empty or `["*"]` / `["all"]` = all fields |
 | `atomic_window_ms` | number | `10` | Merge window (ms) for PLC scan-cycle atomicity. `0` = disabled |
 | `batch_size` | number | `1000` | Number of merged records that trigger a disk flush |
 | `batch_interval_s` | number | `300` | Seconds between forced flushes (even if batch is not full) |
@@ -75,6 +84,35 @@ Add a `persistence` block to your `gateway.json`:
 | `anchor_change_count` | number | `10000` | Re-issue anchor after N accumulated changes (`full_tree_with_anchor` only, `0` = disabled) |
 | `zstd_level` | number | `5` | Zstd compression level for delta batches (1–22) |
 | `anchor_zstd_level` | number | `12` | Zstd compression level for anchor snapshots |
+
+---
+
+### Binary Storage Format (`.bin.zst`)
+
+When `"format": "binary"` (or `"bin.zst"`) is configured in `gateway.json`, the `PersistenceService` writes direct binary memory snapshots into Zstd-compressed files instead of JSON lines.
+
+#### Archive Header (First 10 Bytes + Schema JSON)
+Every `.bin.zst` file starts with an uncompressed header block:
+- **Magic Header** (4 bytes): `"SGRN"` ASCII magic identifier.
+- **Version** (2 bytes): `uint16_t` format version (currently `1`).
+- **Schema Length** (4 bytes): `uint32_t` length of embedded SCL schema JSON.
+- **Schema Payload**: Raw UTF-8 JSON string containing full schema definitions.
+
+#### Binary Data Frames
+Following the header, telemetry frames are packed sequentially:
+```
+┌─────────────────────────┬──────────────────────┬─────────────────────────┬────────────────────────┐
+│ Timestamp MS (8 bytes)  │ DB Number (2 bytes)  │ Payload Bytes (4 bytes) │ Raw Memory Bytes       │
+│ uint64_t                │ uint16_t             │ uint32_t                │ (size = Payload Bytes) │
+└─────────────────────────┴──────────────────────┴─────────────────────────┴────────────────────────┘
+```
+- **Coalesced Dirty Dumping**: Only dirty DB memory ranges are emitted per telemetry tick, avoiding full memory arena waste.
+- **Decoding**: The `sgrn_dataset` tool decodes `.bin.zst` archives back to `.jsonl.zst` or CSV natively using embedded SCL schemas.
+
+> Full specification lives in [`binary-format.md`](./binary-format.md) (frames,
+> control records, schema-drift policy) and [`jsonl-format.md`](./jsonl-format.md)
+> (line types, ID-keyed payloads). Note: binary frames are whole-DB snapshots
+> (one frame per changed DB image), not per-range slices.
 
 ---
 

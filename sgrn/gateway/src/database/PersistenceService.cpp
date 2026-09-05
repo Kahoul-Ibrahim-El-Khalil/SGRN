@@ -1,19 +1,31 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // PersistenceService.cpp
 //
-// Independent local historian / JSONL-WAL archiver service.
+// Independent local historian / WAL archiver service.
 // See PersistenceService.hpp for full architectural documentation.
 //
-// JSONL WAL LINE CONTRACT (one JSON object per line inside a single Zstd frame):
+// JSONL WAL LINE CONTRACT (one JSON object per line inside a single Zstd
+// frame; see documentation/gateway/jsonl-format.md):
 //   Line 1      {"type":"schema","schema":{<serialized PlcSchemaStore>}|null}
-//   Line 2      {"type":"manifest","start_time":"<iso8601>","mode":"...",
-//                 "namespaces":[...]}
-//   Lines 3..N-1 {"type":"anchor","ts":<ms>,"data":{<full tree>}}  (sync points)
-//                {"type":"delta","ts":<ms>,"changes":{<path>:<value>, ...}}
-//   Line N      {"type":"footer","last_anchor_line":<line>,"record_count":<line>}
+//   Line 2      {"type":"dictionary","leaves":[{"id":<uint>,"path":"Db.field"}]}
+//   Line 3      {"type":"manifest","start_time":"<iso8601>","mode":"...",
+//                 "namespaces":[...], ...}
+//   Lines 4..N-1 {"type":"anchor","ts":<ms>,"data":{"<leaf-id>":<value>}}
+//                {"type":"delta","ts":<ms>,"changes":{"<leaf-id>":<value>}}
+//   Line N      {"type":"footer","last_anchor_line":<line>,"record_count":<line>,
+//                 "anchor_count":<n>,"delta_count":<n>}
 //
-// RecoveryEngine reads this file at boot: the footer's last_anchor_line points
-// at the most recent anchor, so recovery never re-reads the whole file.
+// Anchor data and delta changes are flat LeafDictionary-ID-keyed objects,
+// never nested trees. RecoveryEngine reads this file at boot: the footer's
+// last_anchor_line points at the most recent anchor, so recovery never
+// re-reads the whole file.
+//
+// BINARY WAL CONTRACT (canonical format; see
+// documentation/gateway/binary-format.md): after the 10-byte header
+// ("SGRN"+version+schema_len+schema JSON), an uninterrupted run of
+// (ts:8)(db_num:2)(payload_len:4)(payload) frames, where db_num selects the
+// kind: real DB id = full image (v1 legacy), 0xFFFE = delta runs (v2+),
+// 0xFFFD = CRC-verified anchor image (v3+), 0xFFFF = JSON control record.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include <sgrn/gateway/core/GlobalContext.hpp>
@@ -30,6 +42,7 @@
 #include <rapidjson/writer.h>
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -41,6 +54,39 @@ using namespace sgrn::gateway::config;
 
 using sgrn::Result;
 
+namespace
+{
+
+/// Binary delta policy: emit a delta frame when its runs are cheaper than
+/// this fraction of a full image. The keyframe interval itself comes from
+/// configuration (anchor_interval_s, else the default) — see configure().
+constexpr double kBinaryDeltaMaxRatio = 0.5;
+
+struct DeltaRun {
+    uint32_t offset;
+    uint32_t len;
+};
+
+/// Maximal changed-byte runs of t_new versus t_old (same size).
+std::vector<DeltaRun> diffRuns(const std::vector<uint8_t>& t_old, const std::vector<uint8_t>& t_new) {
+    std::vector<DeltaRun> runs;
+    size_t i = 0;
+    const size_t n = t_new.size();
+    while (i < n) {
+        if (t_old[i] == t_new[i]) {
+            ++i;
+            continue;
+        }
+        size_t start = i;
+        while (i < n && t_old[i] != t_new[i])
+            ++i;
+        runs.push_back(DeltaRun{static_cast<uint32_t>(start), static_cast<uint32_t>(i - start)});
+    }
+    return runs;
+}
+
+} // namespace
+
 PersistenceService::PersistenceService(asio::thread_pool* tp_heavy_pool)
     : heavy_pool_(tp_heavy_pool) {
 }
@@ -50,7 +96,8 @@ PersistenceService::~PersistenceService() {
 }
 
 Result<void> PersistenceService::configure(const PersistenceConfig& t_cfg, const std::string& t_state_dir,
-    std::shared_ptr<GatewayDatabase> tsp_db, const std::string& t_schema_json, const scl::PlcSchemaStore* t_schema_store) {
+    std::shared_ptr<GatewayDatabase> tsp_db, const std::string& t_schema_json, const scl::PlcSchemaStore* t_schema_store,
+    FullDbReadFn t_read_db) {
     if (!t_cfg.enabled) {
         fmt::print(fg(fmt::color::yellow), "[persist] Persistence disabled — skipping.\n");
         return {};
@@ -80,6 +127,14 @@ Result<void> PersistenceService::configure(const PersistenceConfig& t_cfg, const
     unsynced_dir_ = t_state_dir + "/unsynced";
     db_ = std::move(tsp_db);
     schema_json_ = t_schema_json;
+    read_db_fn_ = std::move(t_read_db);
+
+    // One anchor cadence for both formats: binary keyframes follow
+    // anchor_interval_s when set, otherwise the default. (Binary deltas
+    // require restart points for resync, so unlike JSONL anchors this never
+    // disables entirely.)
+    binary_keyframe_interval_ms_ =
+        cfg_.anchor_interval_s > 0 ? static_cast<int64_t>(cfg_.anchor_interval_s) * 1000 : kDefaultBinaryKeyframeIntervalMs;
 
     try {
         std::filesystem::create_directories(unsynced_dir_);
@@ -144,23 +199,90 @@ void PersistenceService::onTelemetryEvent(const TelemetryEvent& t_event) {
         return;
     }
 
-    // ── DeltaSnapshot ────────────────────────────────────────────────────────
-    if (t_event.type != EventType::DeltaSnapshot)
-        return;
-    if (!t_event.json_value || t_event.json_value->empty() || *t_event.json_value == "{}")
-        return;
+    // ── Binary Mode: Full DB Raw Memory Snapshot Writing ───────────────────
+    // Frames are full-DB images: readers decode fields at schema offsets and
+    // replay writes buffers at offset 0. TelemetryEvent typed payloads are
+    // per-leaf slices with no offset, so the full image is pulled through
+    // read_db_fn_ (PlcMemory) instead of using the event bytes directly.
+    const bool is_binary = (cfg_.format == "binary" || cfg_.format == "bin.zst");
+    if (is_binary) {
+        if (!current_archive_) {
+            (void)openNewArchive(t_now);
+        }
+        if (current_archive_ && t_event.db > 0) {
+            const uint64_t ts = t_event.timestamp > 0 ? t_event.timestamp : static_cast<uint64_t>(t_now);
+            if (read_db_fn_) {
+                auto full_res = read_db_fn_(t_event.db);
+                if (full_res.hasValue() && !full_res.value().empty()) {
+                    auto& last = last_db_bytes_[t_event.db];
+                    if (last != full_res.value()) {
+                        const auto& full = full_res.value();
+                        const uint16_t db_num = t_event.db;
+                        const auto key_it = last_keyframe_ts_.find(t_event.db);
+                        const bool need_keyframe =
+                            last.empty() || key_it == last_keyframe_ts_.end() || (t_now - key_it->second) >= binary_keyframe_interval_ms_;
 
-    // In full_tree mode every delta is treated as a full tree snapshot.
-    if (cfg_.mode == "full_tree") {
-        ingestFullTree(*t_event.json_value);
+                        bool wrote_delta = false;
+                        if (!need_keyframe && last.size() == full.size()) {
+                            const auto runs = diffRuns(last, full);
+                            uint64_t delta_bytes = 2; // embedded db_num
+                            for (const auto& run : runs)
+                                delta_bytes += 8 + run.len;
+                            if (!runs.empty() && delta_bytes <= 0xFFFFFFFFu &&
+                                delta_bytes < static_cast<double>(full.size()) * kBinaryDeltaMaxRatio) {
+                                const uint16_t marker = kDeltaFrameDbNum;
+                                const uint32_t total = static_cast<uint32_t>(delta_bytes);
+                                (void)current_archive_->writeRaw(&ts, sizeof(ts));
+                                (void)current_archive_->writeRaw(&marker, sizeof(marker));
+                                (void)current_archive_->writeRaw(&total, sizeof(total));
+                                (void)current_archive_->writeRaw(&db_num, sizeof(db_num));
+                                for (const auto& run : runs) {
+                                    (void)current_archive_->writeRaw(&run.offset, sizeof(run.offset));
+                                    (void)current_archive_->writeRaw(&run.len, sizeof(run.len));
+                                    (void)current_archive_->writeRaw(full.data() + run.offset, run.len);
+                                }
+                                wrote_delta = true;
+                                ++delta_frames_;
+                            }
+                        }
+                        if (!wrote_delta) {
+                            writeBinaryAnchor(t_event.db, full, static_cast<int64_t>(ts));
+                            // Wall clock on both sides: the frame carries the
+                            // event timestamp, but keyframe ageing is measured
+                            // in wall time (event clocks may lag).
+                            last_keyframe_ts_[t_event.db] = t_now;
+                        }
+                        last = full;
+                        ++current_line_counter_;
+                        maybeFlushBatch(t_now);
+                    }
+                }
+            } else if (t_event.typed_leaf.bytes && !t_event.typed_leaf.bytes->empty()) {
+                // Degraded fallback (no full-DB reader wired): anchors the
+                // per-leaf slice as-is, CRC'd over the stored bytes. Every
+                // data frame self-identifies as delta or anchor; this one is
+                // verifiable but only exact for offset-0 leaves (slices carry
+                // no offset), and it bypasses dedup/keyframe tracking.
+                writeBinaryAnchor(t_event.db, *t_event.typed_leaf.bytes, static_cast<int64_t>(ts));
+                ++current_line_counter_;
+                maybeFlushBatch(t_now);
+            }
+        }
         return;
     }
+
+    // LeafUpdate events carry typed payloads with no JSON attached — the
+    // DeltaSnapshot event from the same dirty batch carries the JSON snapshot
+    // the WAL path below consumes. Dereferencing json_value here segfaults.
+    if (t_event.type != EventType::DeltaSnapshot)
+        return;
+    if (!t_event.json_value || t_event.json_value->empty())
+        return;
 
     // ── PERFORMANCE NOTE: JSON Parsing and Filtering ─────────────────────────
     // The TelemetryBroker broadcasts the SAME shared_ptr<string> to all subscribers.
     // This JSON was already serialized once by PlcState::getDeltaSnapshot().
-    // PersistenceService must:
-    //   1. Parse the JSON (RapidJSON DOM construction)
+    // PersistenceService must:    //   1. Parse the JSON (RapidJSON DOM construction)
     //   2. Extract individual field paths and values
     //   3. Apply namespace filtering per field
     //   4. Re-serialize each field individually as a JSONL delta line
@@ -177,33 +299,61 @@ void PersistenceService::onTelemetryEvent(const TelemetryEvent& t_event) {
         return;
 
     // Iterate top-level keys (DB names) → fields recursively.
+    // Delta payloads come in three shapes, all of which must land in the
+    // merge buffer keyed by LeafId:
+    //   nested       {"DbName": {"field": v, "struct": {"sub": v}}}
+    //   flat numeric {"<leaf_id>": v}  (dictionary mode — the common case)
+    //   flat dotted  {"DbName.field": v} (legacy)
+    auto processLeaf = [&](const std::string& t_path, const rapidjson::Value& t_value) {
+        auto id_it = dict_.path_to_id.find(t_path);
+        if (id_it == dict_.path_to_id.end()) {
+            return;
+        }
+        twin::LeafId id = id_it->second;
+        if (!passesFilter(id))
+            return;
+
+        rapidjson::StringBuffer sb;
+        rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+        t_value.Accept(w);
+
+        mergeOrFlushEvent(id, sb.GetString(), t_now);
+    };
+
     // getDeltaSnapshot() may contain nested leaves (e.g. ReactorCore.rods.position_pct),
     // so we walk the full JSON tree and emit one delta per leaf.
     std::function<void(const std::string&, const rapidjson::Value&)> walkFields;
     walkFields = [&](const std::string& t_prefix, const rapidjson::Value& t_obj) {
         for (auto f_it = t_obj.MemberBegin(); f_it != t_obj.MemberEnd(); ++f_it) {
             const std::string t_path = t_prefix.empty() ? f_it->name.GetString() : t_prefix + "." + f_it->name.GetString();
-            auto id_it = dict_.path_to_id.find(t_path);
-            if (id_it == dict_.path_to_id.end()) {
+            if (f_it->value.IsObject()) {
+                walkFields(t_path, f_it->value);
                 continue;
             }
-            twin::LeafId id = id_it->second;
-            if (!passesFilter(id))
-                continue;
-
-            rapidjson::StringBuffer sb;
-            rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-            f_it->value.Accept(w);
-
-            mergeOrFlushEvent(id, sb.GetString(), t_now);
+            processLeaf(t_path, f_it->value);
         }
     };
 
+    auto isDigits = [](const std::string& t_s) {
+        return !t_s.empty() && t_s.size() <= 10 &&
+               std::all_of(t_s.begin(), t_s.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+    };
+
     for (auto db_it = doc.MemberBegin(); db_it != doc.MemberEnd(); ++db_it) {
-        const std::string db_name = db_it->name.GetString();
-        if (!db_it->value.IsObject())
+        if (db_it->value.IsObject()) {
+            const std::string db_name = db_it->name.GetString();
+            walkFields(db_name, db_it->value);
             continue;
-        walkFields(db_name, db_it->value);
+        }
+        // Flat leaf straight at top level: numeric id or dotted path.
+        const std::string key = db_it->name.GetString();
+        if (isDigits(key)) {
+            const size_t id = std::stoul(key);
+            if (id < dict_.path_by_id.size() && !dict_.path_by_id[id].empty())
+                processLeaf(dict_.path_by_id[id], db_it->value);
+        } else {
+            processLeaf(key, db_it->value);
+        }
     }
 
     maybeFlushBatch(t_now);
@@ -230,6 +380,22 @@ void PersistenceService::ingestFullTree(const std::string& t_full_tree_json, con
         return;
     }
 
+    // Binary archives additionally anchor every known DB as a verifiable
+    // image frame, so a snapshot always leaves verifiable baselines behind
+    // (the JSON control above is kept for transcode compatibility).
+    if ((cfg_.format == "binary" || cfg_.format == "bin.zst") && read_db_fn_ && current_archive_) {
+        for (auto& [db_num, last] : last_db_bytes_) {
+            auto full_res = read_db_fn_(db_num);
+            if (full_res.hasError() || full_res.value().empty())
+                continue;
+            writeBinaryAnchor(db_num, full_res.value(), t_now);
+            last = full_res.value();
+            last_keyframe_ts_[db_num] = t_now;
+            ++current_line_counter_;
+        }
+        maybeFlushBatch(t_now);
+    }
+
     if (cfg_.mode == "full_tree_with_anchor")
         resetAnchor(t_now);
 }
@@ -251,11 +417,19 @@ void PersistenceService::rebuildAllowedByIndex() {
     if (dict_.path_by_id.empty())
         return;
     allowed_by_id_.resize(dict_.path_by_id.size(), false);
+
+    bool match_all = cfg_.namespaces.empty();
+    for (const auto& ns : cfg_.namespaces) {
+        if (ns == "*" || ns == "all") {
+            match_all = true;
+            break;
+        }
+    }
+
     for (size_t id = 0; id < dict_.path_by_id.size(); ++id) {
         const std::string& path = dict_.path_by_id[id];
-        bool passes = true;
-        if (!cfg_.namespaces.empty()) {
-            passes = false;
+        bool passes = match_all;
+        if (!match_all) {
             for (const auto& ns : cfg_.namespaces) {
                 if (path.rfind(ns, 0) == 0) {
                     passes = true;
@@ -352,38 +526,60 @@ Result<void, std::string> PersistenceService::openNewArchive(int64_t t_now) {
         return fmt::format("PersistenceService: cannot create archive directory: {}", e.what());
     }
 
-    // Provisional path — renamed to <start>-<end>.jsonl.zst on finalize.
-    const std::string tmp_path = target_dir + "/" + start_file + ".jsonl.zst.tmp";
+    const bool is_binary = (cfg_.format == "binary" || cfg_.format == "bin.zst");
+    const std::string ext = is_binary ? ".bin.zst" : ".jsonl.zst";
+    const std::string tmp_path = target_dir + "/" + start_file + ext + ".tmp";
 
     current_archive_ = std::make_unique<sgrn::utils::compression::ZstdLineWriter>(tmp_path, cfg_.zstd_level);
     current_archive_path_ = tmp_path;
     current_archive_start_ts_ = t_now;
     current_line_counter_ = 0;
     last_anchor_line_index_ = 0;
+    // A new file must re-establish state from its first frame, even if the
+    // image is identical to the previous file's last frame.
+    last_db_bytes_.clear();
+    last_keyframe_ts_.clear();
+    anchor_frames_ = 0;
+    delta_frames_ = 0;
+    anchor_lines_ = 0;
+    delta_lines_ = 0;
 
-    // ── Line 1: schema ───────────────────────────────────────────────────────
-    // A null schema (no schema JSON provided at configure time) instructs
-    // RecoveryEngine to skip schema validation for this archive.
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-    w.StartObject();
-    w.Key("type");
-    w.String("schema");
-    w.Key("schema");
-    if (schema_json_.empty()) {
-        w.Null();
+    if (is_binary) {
+        // Binary Header Frame: "SGRN" (4B) + Version (2B) + Schema Length (4B) + Schema JSON
+        char magic[4] = {'S', 'G', 'R', 'N'};
+        uint16_t ver = kBinaryWalVersion;
+        uint32_t schema_len = static_cast<uint32_t>(schema_json_.size());
+
+        (void)current_archive_->writeRaw(magic, 4);
+        (void)current_archive_->writeRaw(&ver, sizeof(ver));
+        (void)current_archive_->writeRaw(&schema_len, sizeof(schema_len));
+        if (schema_len > 0) {
+            (void)current_archive_->writeRaw(schema_json_.data(), schema_len);
+        }
+        ++current_line_counter_;
     } else {
-        w.RawValue(schema_json_.c_str(), schema_json_.size(), rapidjson::kObjectType);
-    }
-    w.EndObject();
+        // ── Line 1: schema ───────────────────────────────────────────────────────
+        rapidjson::StringBuffer sb;
+        rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+        w.StartObject();
+        w.Key("type");
+        w.String("schema");
+        w.Key("schema");
+        if (schema_json_.empty()) {
+            w.Null();
+        } else {
+            w.RawValue(schema_json_.c_str(), schema_json_.size(), rapidjson::kObjectType);
+        }
+        w.EndObject();
 
-    auto schema_res = current_archive_->writeLine(sb.GetString());
-    if (schema_res.hasError()) {
-        current_archive_.reset();
-        current_archive_path_.clear();
-        return fmt::format("PersistenceService: schema line write failed: {}", schema_res.error());
+        auto schema_res = current_archive_->writeLine(sb.GetString());
+        if (schema_res.hasError()) {
+            current_archive_.reset();
+            current_archive_path_.clear();
+            return fmt::format("PersistenceService: schema line write failed: {}", schema_res.error());
+        }
+        ++current_line_counter_;
     }
-    ++current_line_counter_;
 
     // ── Line 2: dictionary ───────────────────────────────────────────────────
     rapidjson::StringBuffer dsb;
@@ -405,7 +601,12 @@ Result<void, std::string> PersistenceService::openNewArchive(int64_t t_now) {
     dw.EndArray();
     dw.EndObject();
 
-    auto dict_res = current_archive_->writeLine(dsb.GetString());
+    auto dict_res = [&]() -> Result<void> {
+        if (is_binary) {
+            return writeBinaryControlLine(dsb.GetString(), t_now);
+        }
+        return current_archive_->writeLine(dsb.GetString());
+    }();
     if (dict_res.hasError()) {
         current_archive_.reset();
         current_archive_path_.clear();
@@ -430,9 +631,29 @@ Result<void, std::string> PersistenceService::openNewArchive(int64_t t_now) {
         mw.String(ns.c_str(), static_cast<rapidjson::SizeType>(ns.size()));
     }
     mw.EndArray();
+    // Encoding policy for this file, so readers know the restart-point
+    // cadence without consulting gateway.json. Binary keyframes follow
+    // anchor_interval_s when set (see configure()), JSONL anchors follow
+    // the mode's own anchor triggers.
+    if (is_binary) {
+        mw.Key("keyframe_interval_s");
+        mw.Int64(binary_keyframe_interval_ms_ / 1000);
+        mw.Key("delta_ratio");
+        mw.Double(kBinaryDeltaMaxRatio);
+    } else {
+        mw.Key("anchor_interval_s");
+        mw.Uint(cfg_.anchor_interval_s);
+        mw.Key("anchor_change_count");
+        mw.Uint(cfg_.anchor_change_count);
+    }
     mw.EndObject();
 
-    auto manifest_res = current_archive_->writeLine(msb.GetString());
+    auto manifest_res = [&]() -> Result<void> {
+        if (is_binary) {
+            return writeBinaryControlLine(msb.GetString(), t_now);
+        }
+        return current_archive_->writeLine(msb.GetString());
+    }();
     if (manifest_res.hasError()) {
         current_archive_.reset();
         current_archive_path_.clear();
@@ -449,12 +670,50 @@ Result<void> PersistenceService::writeDeltaLine(const std::string& t_record_json
             return res.error();
     }
 
-    auto res = current_archive_->writeLine(t_record_json);
+    Result<void> res;
+    if (cfg_.format == "binary" || cfg_.format == "bin.zst") {
+        // Defensive: the binary onTelemetryEvent() path never fills the merge
+        // buffer, so this should be unreachable — but a raw JSON line would
+        // corrupt the frame stream, so frame it as a control record anyway.
+        res = writeBinaryControlLine(t_record_json, sgrn::utils::time::nowMilliseconds());
+    } else {
+        res = current_archive_->writeLine(t_record_json);
+        ++delta_lines_;
+    }
     if (res.hasError())
         return res;
     ++current_line_counter_;
     ++changes_since_anchor_;
     return {};
+}
+
+Result<void> PersistenceService::writeBinaryControlLine(const std::string& t_json, int64_t t_ts) {
+    uint64_t ts = static_cast<uint64_t>(t_ts);
+    uint16_t db_num = kControlFrameDbNum;
+    uint32_t len = static_cast<uint32_t>(t_json.size());
+    SGRN_IF_ERROR_PROPAGATE(current_archive_->writeRaw(&ts, sizeof(ts)));
+    SGRN_IF_ERROR_PROPAGATE(current_archive_->writeRaw(&db_num, sizeof(db_num)));
+    SGRN_IF_ERROR_PROPAGATE(current_archive_->writeRaw(&len, sizeof(len)));
+    if (len > 0) {
+        SGRN_IF_ERROR_PROPAGATE(current_archive_->writeRaw(t_json.data(), len));
+    }
+    return {};
+}
+
+void PersistenceService::writeBinaryAnchor(uint16_t t_db, const std::vector<uint8_t>& t_image, int64_t t_ts) {
+    if (!current_archive_ || t_image.empty() || t_image.size() > static_cast<size_t>(0xFFFFFFFFu) - 6)
+        return;
+    const uint64_t ts = static_cast<uint64_t>(t_ts);
+    const uint16_t marker = kAnchorFrameDbNum;
+    const uint32_t total = static_cast<uint32_t>(2 + 4 + t_image.size());
+    const uint32_t crc = binaryWalCrc32(t_image.data(), t_image.size());
+    (void)current_archive_->writeRaw(&ts, sizeof(ts));
+    (void)current_archive_->writeRaw(&marker, sizeof(marker));
+    (void)current_archive_->writeRaw(&total, sizeof(total));
+    (void)current_archive_->writeRaw(&t_db, sizeof(t_db));
+    (void)current_archive_->writeRaw(&crc, sizeof(crc));
+    (void)current_archive_->writeRaw(t_image.data(), t_image.size());
+    ++anchor_frames_;
 }
 
 Result<void> PersistenceService::writeAnchorLine(const std::string& t_json, int64_t t_ts) {
@@ -502,7 +761,16 @@ Result<void> PersistenceService::writeAnchorLine(const std::string& t_json, int6
 
     w.EndObject();
 
-    auto res = current_archive_->writeLine(sb.GetString());
+    // In binary mode a raw JSON line would corrupt the frame stream, so the
+    // anchor is wrapped in a control frame (db_num 0xFFFF) instead. The
+    // JSON control is a transcode shim and doesn't count as an anchor line.
+    Result<void> res;
+    if (cfg_.format == "binary" || cfg_.format == "bin.zst") {
+        res = writeBinaryControlLine(sb.GetString(), t_ts);
+    } else {
+        res = current_archive_->writeLine(sb.GetString());
+        ++anchor_lines_;
+    }
     if (res.hasError())
         return res;
     ++current_line_counter_;
@@ -530,9 +798,27 @@ void PersistenceService::finalizeArchive(int64_t t_ts_end) {
     w.Int64(last_anchor_line_index_);
     w.Key("record_count");
     w.Uint64(static_cast<uint64_t>(current_line_counter_));
+    // Restart-point inventory, counted per format so units never mix:
+    // binary files report frames, JSONL files report lines.
+    if (cfg_.format == "binary" || cfg_.format == "bin.zst") {
+        w.Key("anchor_count");
+        w.Uint64(anchor_frames_);
+        w.Key("delta_count");
+        w.Uint64(delta_frames_);
+    } else {
+        w.Key("anchor_count");
+        w.Uint64(anchor_lines_);
+        w.Key("delta_count");
+        w.Uint64(delta_lines_);
+    }
     w.EndObject();
 
-    auto footer_res = current_archive_->writeLine(sb.GetString());
+    auto footer_res = [&]() -> Result<void> {
+        if (cfg_.format == "binary" || cfg_.format == "bin.zst") {
+            return writeBinaryControlLine(sb.GetString(), t_ts_end);
+        }
+        return current_archive_->writeLine(sb.GetString());
+    }();
     if (footer_res.hasError())
         fmt::print(fg(fmt::color::red), "[persist] Footer write failed: {}\n", footer_res.error());
 
@@ -547,11 +833,12 @@ void PersistenceService::finalizeArchive(int64_t t_ts_end) {
     current_line_counter_ = 0;
     last_anchor_line_index_ = 0;
 
-    // Final name: unsynced/<YYYY-MM-DD>/<start_time>-<end_time>.jsonl.zst
     const std::string start_file = sgrn::utils::time::timePath(t_ts_start);
     const std::string end_file = sgrn::utils::time::timePath(t_ts_end);
+    const bool is_binary = (cfg_.format == "binary" || cfg_.format == "bin.zst");
+    const std::string ext = is_binary ? ".bin.zst" : ".jsonl.zst";
     const std::string final_path =
-        unsynced_dir_ + "/" + sgrn::utils::time::datePath(t_ts_start) + "/" + fmt::format("{}-{}.jsonl.zst", start_file, end_file);
+        unsynced_dir_ + "/" + sgrn::utils::time::datePath(t_ts_start) + "/" + fmt::format("{}-{}{}", start_file, end_file, ext);
 
     // The stream is already closed (bounded flush). The remaining work — rename
     // into place + DB bookkeeping — is the only part that needs the heavy pool.

@@ -1,5 +1,6 @@
 #include <sgrn/debug.hpp>
 #include <sgrn/gateway/core/RecoveryEngine.hpp>
+#include <sgrn/gateway/database/PersistenceService.hpp>
 #include <sgrn/gateway/twin/LeafDictionary.hpp>
 #include <sgrn/gateway/twin/PlcState.hpp>
 #include <sgrn/gateway/twin/TreePath.hpp>
@@ -15,9 +16,14 @@
 #include <rapidjson/writer.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <shared_mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace sgrn::gateway::core
@@ -42,23 +48,31 @@ struct ArchiveCandidate {
 
 bool isWALArchive(const fs::path& t_path) {
     const std::string name = t_path.filename().string();
-    return name.size() > 9 && (name.ends_with(".jsonl.zst") || name.ends_with(".jsonl.zst.tmp"));
+    if (name.size() <= 8)
+        return false;
+    return name.ends_with(".jsonl.zst") || name.ends_with(".jsonl.zst.tmp") || name.ends_with(".bin.zst") || name.ends_with(".bin.zst.tmp");
 }
 
-// Filename shape: <start_time>-<end_time>.jsonl.zst[.tmp], both time parts use
-// ':' (never '-'), so the basename splits on exactly one '-'
-// (the <start>-<end> separator).
+// Filename shape: <start_time>-<end_time>.jsonl.zst[.tmp] (or .bin.zst[.tmp]),
+// both time parts use ':' (never '-'), so the basename splits on exactly one
+// '-' (the <start>-<end> separator).
 std::string archiveSortKey(const fs::path& t_path) {
     std::string name = t_path.filename().string();
     if (name.ends_with(".tmp"))
         name.resize(name.size() - 4);
     if (name.ends_with(".jsonl.zst"))
         name.resize(name.size() - 10);
+    else if (name.ends_with(".bin.zst"))
+        name.resize(name.size() - 8);
     const size_t dash = name.find('-');
-    if (dash == std::string::npos)
-        return name; // unparseable — still listed, sorts last
-    const std::string end_time = name.substr(dash + 1);
     const fs::path parent = t_path.parent_path();
+    if (dash == std::string::npos) {
+        // Single-timestamp provisional file (<start>.jsonl.zst.tmp): order by
+        // its start time under the date directory, not bare (which would
+        // misorder it against <date>/<end> keys from finalized files).
+        return parent.filename().string() + "/" + name;
+    }
+    const std::string end_time = name.substr(dash + 1);
     return parent.filename().string() + "/" + end_time;
 }
 
@@ -324,6 +338,154 @@ ReplayOutcome replayArchive(
     return out;
 }
 
+// Binary archive replay: single pass straight into per-DB images.
+//
+// Unlike the JSONL two-pass scan, no anchor search is needed: every full or
+// anchor frame is self-contained and deltas patch the running image, so
+// replaying the whole file in order yields the exact final state (boot only
+// cares about the endpoint, never the trajectory). Images commit to the
+// arena at the end, one segment lock each — mirroring applyLeaf()'s silence
+// (no dirty flags, no events; adapters haven't started yet).
+//
+// Frame policy: control frames carry no twin data; full frames replace the
+// image; anchors replace it after a CRC check (mismatch = corruption, never
+// adopted); deltas patch validated runs (unknown DB, missing keyframe, or
+// malformed runs skip the frame); a torn tail stops the walk with whatever
+// parsed so far. restored counts twin leaves committed; skipped counts
+// dropped DBs/corrupt frames (coarser than the JSONL leaf unit — see
+// RecoveryResult).
+//
+// Errors (unreadable file, bad header/version/schema, zero usable frames)
+// ask the caller to try an older archive; success always carries schema_ok.
+sgrn::Result<ReplayOutcome, std::string> replayBinaryArchive(
+    const fs::path& t_path, PlcState& t_state, const PlcSchemaStore& t_schema_store) {
+    using database::kAnchorFrameDbNum;
+    using database::kControlFrameDbNum;
+    using database::kDeltaFrameDbNum;
+
+    ReplayOutcome out;
+
+    std::ifstream file(t_path, std::ios::binary);
+    if (!file.is_open())
+        return Error("cannot open archive file");
+    const std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    file.close();
+
+    // Archives are .zst on disk; accept raw bytes too (whatever the suffix
+    // claims) by sniffing the magic.
+    std::string raw;
+    if (content.size() >= 4 && content[0] == 'S' && content[1] == 'G' && content[2] == 'R' && content[3] == 'N') {
+        raw = std::move(content);
+    } else {
+        auto dec_res = sgrn::utils::compression::decompressStringZstd(content);
+        if (dec_res.hasError())
+            return Error(std::string("decompress failed: ") + dec_res.error());
+        raw = std::move(dec_res).value();
+    }
+
+    if (raw.size() < 10 || raw[0] != 'S' || raw[1] != 'G' || raw[2] != 'R' || raw[3] != 'N')
+        return Error("not a binary WAL archive");
+    database::BinaryWalHeader header;
+    switch (database::checkBinaryWalHeader(raw, header)) {
+        case database::BinaryHeaderStatus::kTooShort:
+            return Error("corrupt binary header");
+        case database::BinaryHeaderStatus::kBadMagic:
+            return Error("not a binary WAL archive");
+        case database::BinaryHeaderStatus::kBadVersion: {
+            uint16_t ver = 0;
+            std::memcpy(&ver, raw.data() + 4, sizeof(ver));
+            return Error(fmt::format("unsupported binary version {}", ver));
+        }
+        case database::BinaryHeaderStatus::kOk:
+            break;
+    }
+    const uint32_t schema_len = header.schema_len;
+
+    // Schema check mirrors scanArchive(): empty schema accepts anything,
+    // otherwise the embedded JSON must match the live schema exactly.
+    if (schema_len > 0) {
+        rapidjson::Document schema_doc;
+        schema_doc.Parse(raw.substr(10, schema_len).c_str());
+        if (schema_doc.HasParseError() || !schema_doc.IsObject())
+            return Error("unparseable embedded schema");
+        if (serializeCompact(schema_doc) != t_schema_store.toJson())
+            return Error("schema mismatch");
+    }
+    out.schema_ok = true;
+
+    std::unordered_map<uint16_t, std::vector<uint8_t>> images;
+    size_t pos = header.frames_start;
+    database::BinaryFrame fr;
+    while (true) {
+        const auto status = database::decodeBinaryFrame(raw, pos, fr);
+        if (status == database::BinaryFrameStatus::kEnd)
+            break;
+        if (status == database::BinaryFrameStatus::kTruncated)
+            break; // torn tail — keep what parsed so far
+        const uint16_t db_num = fr.db;
+        const uint32_t payload_len = fr.payload_len;
+        const uint8_t* payload = fr.payload;
+
+        if (db_num == kControlFrameDbNum) {
+            // Schema/dictionary/manifest/footer carry no twin data here.
+        } else if (db_num == kAnchorFrameDbNum) {
+            uint16_t anchor_db = 0;
+            const uint8_t* anchor_image = nullptr;
+            size_t anchor_len = 0;
+            if (database::verifyAnchorFrame(payload, payload_len, anchor_db, anchor_image, anchor_len)) {
+                images[anchor_db].assign(anchor_image, anchor_image + anchor_len);
+            } else {
+                ++out.skipped;
+            }
+        } else if (db_num == kDeltaFrameDbNum) {
+            bool applied = false;
+            uint16_t delta_db = 0;
+            std::vector<database::BinaryDeltaRun> runs;
+            auto img_it = images.end();
+            if (payload_len >= 2) {
+                uint16_t candidate = 0;
+                std::memcpy(&candidate, payload, sizeof(candidate));
+                img_it = images.find(candidate);
+            }
+            if (img_it != images.end() && database::parseDeltaRuns(payload, payload_len, img_it->second.size(), delta_db, runs)) {
+                applied = true;
+                for (const auto& run : runs)
+                    std::memcpy(img_it->second.data() + run.offset, payload + run.data_pos, run.len);
+            }
+            if (!applied)
+                ++out.skipped;
+        } else {
+            images[db_num].assign(payload, payload + payload_len);
+        }
+    }
+
+    // Commit each DB's final image under its segment lock.
+    bool any_committed = false;
+    for (auto& [db_num, image] : images) {
+        DbEntry* p_entry = t_state.findSegmentById(db_num);
+        if (p_entry == nullptr) {
+            ++out.skipped;
+            continue;
+        }
+        if (image.size() != p_entry->size) {
+            SGRN_WARN_LOG("Recovery: DB{} image size {} != live segment {} — skipping DB", db_num, image.size(), p_entry->size);
+            ++out.skipped;
+            continue;
+        }
+        {
+            std::unique_lock<std::shared_mutex> lk(p_entry->mutex_);
+            std::memcpy(t_state.arenaData() + p_entry->offset, image.data(), image.size());
+        }
+        any_committed = true;
+        t_state.forEachLeaf(db_num, [&](PlcNode& /*t_node*/) { ++out.restored; });
+    }
+    // An archive with zero usable images must not shadow older archives that
+    // may hold real state — ask the caller to keep looking.
+    if (!any_committed)
+        return Error("no decodable frames");
+    return out;
+}
+
 } // anonymous namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -337,6 +499,27 @@ sgrn::Result<RecoveryResult, std::string> recoverStateFromArchives(
     const auto candidates = collectCandidates(t_state_dir);
 
     for (const auto& cand : candidates) {
+        const bool is_binary = cand.path.filename().string().find(".bin.zst") != std::string::npos;
+        if (is_binary) {
+            // Binary path: single pass straight into per-DB images, committed
+            // at EOF. No schema line to scan — the header carries it.
+            auto bin_res = replayBinaryArchive(cand.path, t_state, t_schema_store);
+            if (bin_res.hasError()) {
+                SGRN_WARN_LOG("Recovery: skipping archive {} ({}), trying older archive", cand.path.string(), bin_res.error());
+                continue;
+            }
+            ReplayOutcome replay = std::move(bin_res).value();
+            result.leaves_restored += replay.restored;
+            result.leaves_skipped += replay.skipped;
+            result.archive_used = cand.path.string();
+
+            // Same cache-invalidation tail as the JSONL path below.
+            for (const auto& name_ : t_state.getTopLevelNames()) {
+                t_state.incrementNodeVersion(TreePath::fromDotted(name_));
+            }
+            return result;
+        }
+
         sgrn::utils::compression::ZstdLineReader reader(cand.path);
         if (!reader.ok()) {
             SGRN_WARN_LOG("Recovery: skipping unreadable archive {}: {}", cand.path.string(), reader.errorMessage());
@@ -355,7 +538,13 @@ sgrn::Result<RecoveryResult, std::string> recoverStateFromArchives(
 
         // Second pass: seek forward (reader is forward-only) to the anchor line,
         // decode it as the base state, then replay the deltas after it.
+        // An archive that yields nothing must not shadow older archives that
+        // may hold real state (same rule as the binary path's empty check).
         ReplayOutcome replay = replayArchive(cand.path, t_state, scan.last_anchor_line, scan.path_by_id);
+        if (replay.restored == 0) {
+            SGRN_WARN_LOG("Recovery: archive {} restored nothing, trying older archive", cand.path.string());
+            continue;
+        }
         result.leaves_restored += replay.restored;
         result.leaves_skipped += replay.skipped;
         result.archive_used = cand.path.string();
@@ -371,7 +560,7 @@ sgrn::Result<RecoveryResult, std::string> recoverStateFromArchives(
     // No usable archive: leave the twin untouched and report it as file-not-found
     // so initTwin() can log "starting fresh".
     if (candidates.empty()) {
-        return Error("no .jsonl.zst archives found under " + t_state_dir);
+        return Error("no .jsonl.zst/.bin.zst archives found under " + t_state_dir);
     }
     return Error("no archive matched the current schema under " + t_state_dir);
 }
