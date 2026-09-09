@@ -94,6 +94,9 @@ public:
     // were members of ScriptS7Connection keep compiling unchanged once
     // ScriptS7Connection holds a reference into a PlcRuntime instead of
     // owning these directly. See ScriptS7Connection in S7Connection.hpp.
+    PlcState& getState() {
+        return state_;
+    }
     PlcMemory& getMemory() {
         return memory_;
     }

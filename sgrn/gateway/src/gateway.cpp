@@ -57,6 +57,21 @@ void GatewayApplication::enablePassiveReplayMode() {
     passive_replay_mode_ = true;
 }
 
+void GatewayApplication::setHeadlessReplayConfig(const std::string& t_schema_path, uint16_t t_http_port, uint16_t t_ws_port) {
+    // Build a minimal in-memory config: HTTP + WebSocket only.
+    // No S7, OPC-UA, Modbus, EIP, no persistence, no cloud bridge.
+    config_ = GatewayConfig{};
+    config_.http = config::HttpConfig{.ip = "0.0.0.0", .port = t_http_port};
+    config_.websocket = config::WebSocketConfig{.ip = "0.0.0.0", .port = t_ws_port};
+    config_.persistence.enabled = false;
+    config_.cache_json_north = true;
+    // Carry the schema path so loadSchema() can pick it up via schema_override_.
+    if (!t_schema_path.empty()) {
+        schema_override_ = t_schema_path;
+    }
+    SGRN_INFO_LOG("Headless replay mode: HTTP :{}, WebSocket :{}", t_http_port, t_ws_port);
+}
+
 Result<void, std::string> GatewayApplication::loadSchema() {
     std::string reg_arg;
     if (!schema_override_.empty()) {
@@ -65,7 +80,9 @@ Result<void, std::string> GatewayApplication::loadSchema() {
         const bool has_reg = !config_.schema_file.empty();
         const bool has_dir = !config_.symbols_dir.empty();
         if (!has_reg && !has_dir) {
-            return "SclError: 'schema' or 'symbols_dir' must be specified in gateway.json or passed via --schema";
+            return "No schema specified. "
+                   "Pass -s/--schema <file.scl> on the command line, "
+                   "or set \"schema\" / \"symbols_dir\" in gateway.json.";
         }
         reg_arg = expandUserPath(has_reg ? config_.schema_file : config_.symbols_dir);
     }

@@ -61,19 +61,24 @@ GatewayReplayer::~GatewayReplayer() {
 Result<void, std::string> GatewayReplayer::initialize() {
     gateway_app_ = std::make_unique<GatewayApplication>();
 
-    std::vector<std::string> args_vec = {"sgrn_replay", config_.gateway_config_path};
-    if (!config_.scl_schema_path.empty()) {
-        args_vec.push_back("--schema");
-        args_vec.push_back(config_.scl_schema_path);
-    }
+    if (config_.headless_mode) {
+        // No gateway.json: synthesize HTTP+WebSocket-only config in-memory.
+        gateway_app_->setHeadlessReplayConfig(config_.scl_schema_path, config_.headless_http_port, config_.headless_ws_port);
+    } else {
+        std::vector<std::string> args_vec = {"sgrn_replay", config_.gateway_config_path};
+        if (!config_.scl_schema_path.empty()) {
+            args_vec.push_back("--schema");
+            args_vec.push_back(config_.scl_schema_path);
+        }
 
-    std::vector<char*> argv;
-    for (auto& arg : args_vec) {
-        argv.push_back(arg.data());
-    }
+        std::vector<char*> argv;
+        for (auto& arg : args_vec) {
+            argv.push_back(arg.data());
+        }
 
-    SGRN_RETURN_IF(auto r = gateway_app_->loadConfig(static_cast<int>(argv.size()), argv.data());
-        r.hasError(), fmt::format(fg(fmt::color::red), "[sgrn_replay] Failed to load gateway config: {}\n", r.error()));
+        SGRN_RETURN_IF(auto r = gateway_app_->loadConfig(static_cast<int>(argv.size()), argv.data());
+            r.hasError(), fmt::format(fg(fmt::color::red), "[sgrn_replay] Failed to load gateway config: {}\n", r.error()));
+    }
 
     // Passive mode from the start: initInfrastructure() must already know that
     // persistence and the cloud uploader stay off, and no southbound traffic

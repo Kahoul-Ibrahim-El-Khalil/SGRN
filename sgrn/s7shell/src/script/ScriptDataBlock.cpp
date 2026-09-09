@@ -198,6 +198,17 @@ ScriptDataBlock* ScriptDataBlock::get(size_t t_total_size) {
         addRef();
         return this;
     }
+
+    // If a PlcRuntime is attached, compare the newly read snapshot against the previous
+    // baseline and fire markDirtyDiff for any changed byte regions.
+    // This makes db.get() drive the PersistenceBridge in live-polling scripts.
+    if (conn_->runtime_) {
+        auto it = conn_->db_snapshots_.find(db_num_);
+        if (it != conn_->db_snapshots_.end() && it->second.size() == t_total_size) {
+            markDirtyDiff(conn_->runtime_, db_num_, 0, it->second.data(), snapshot_buffer_.data(), t_total_size);
+        }
+    }
+
     snapshot_valid_ = true;
     // Persist as shared baseline: future db() instances for this DB number
     // start from confirmed PLC data, not a stale or zero-init buffer.

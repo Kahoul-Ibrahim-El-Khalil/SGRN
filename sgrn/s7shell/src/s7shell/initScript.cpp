@@ -32,25 +32,43 @@ void loadInitScript(asIScriptEngine* tp_engine, asIScriptModule* tp_repl_mod, co
         // strip trailing \r
         if (!line.empty() && line.back() == '\r')
             line.pop_back();
-        // Track brace depth for function bodies
+        // 1. Already inside a function body (or carrying one over from a
+        //    prior line)? Accumulate this line FIRST, before touching depth,
+        //    so the closing brace's own line is part of the buffered body.
+        if (depth > 0 || !fn_buf.empty())
+            fn_buf += line + '\n';
+        // 2. Track brace depth for function bodies.
         for (char c : line) {
             if (c == '{')
                 ++depth;
             else if (c == '}')
                 --depth;
         }
-        if (depth > 0 || (!fn_buf.empty() && depth == 0)) {
-            fn_buf += line + '\n';
-            continue;
-        }
-        // Flush completed function
-        if (!fn_buf.empty()) {
-            fn_buf += line + '\n';
+        // A single stray '}' at top level must not desync the rest of the
+        // file (otherwise every later function opener miscounts).
+        if (depth < 0)
+            depth = 0;
+        // 3. The buffered function just closed (depth back to 0 on the line
+        //    holding its closing brace): flush exactly once, then move on.
+        //    This branch must run BEFORE any "still inside" check — the
+        //    closing line itself satisfies both, and only the flush is
+        //    correct for it.
+        if (!fn_buf.empty() && depth == 0) {
             // Compile as function into repl_module
             sgrn::scripting::g_suppress_errors = true;
             tp_repl_mod->CompileGlobalVar("init", fn_buf.c_str(), 0);
             sgrn::scripting::g_suppress_errors = false;
             fn_buf.clear();
+            continue;
+        }
+        // 4. Still inside a multi-line function: keep accumulating.
+        if (!fn_buf.empty())
+            continue;
+        // 5. Top-level line that opens a function (e.g. `void foo() {`):
+        //    it was not buffered in step 1 (we were not inside yet), so
+        //    start the buffer here instead of compiling it as a global.
+        if (depth > 0) {
+            fn_buf += line + '\n';
             continue;
         }
         // Plain statement / global var
@@ -64,6 +82,21 @@ void loadInitScript(asIScriptEngine* tp_engine, asIScriptModule* tp_repl_mod, co
         sgrn::scripting::g_suppress_errors = true;
         tp_repl_mod->CompileGlobalVar("init", trimmed.c_str(), 0);
         sgrn::scripting::g_suppress_errors = false;
+    }
+    // The file must not end mid-function: a truncated/malformed script would
+    // otherwise discard the buffered body silently. Warn and attempt the
+    // buffered text once, matching the in-loop flush policy.
+    if (!fn_buf.empty() || depth != 0) {
+        fmt::print(stderr, fg(fmt::color::yellow),
+            "[s7shell] Warning: init script '{}' ends inside an unterminated block "
+            "(brace depth {}, {} buffered bytes); compiling buffered text anyway.\n",
+            t_path, depth, fn_buf.size());
+        if (!fn_buf.empty()) {
+            sgrn::scripting::g_suppress_errors = true;
+            tp_repl_mod->CompileGlobalVar("init", fn_buf.c_str(), 0);
+            sgrn::scripting::g_suppress_errors = false;
+            fn_buf.clear();
+        }
     }
     // Step 2 — also compile the whole file as a module so functions are callable
     CScriptBuilder builder;

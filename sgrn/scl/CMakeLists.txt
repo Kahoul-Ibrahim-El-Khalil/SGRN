@@ -12,6 +12,7 @@ set(SGRN_SCL_SOURCES
     src/schema/XmlTagTableImplementation.cpp
     src/schema/TagTable.cpp
     src/schema/ModbusMap.cpp
+    src/AsApiEmitter.cpp
 )
 
 

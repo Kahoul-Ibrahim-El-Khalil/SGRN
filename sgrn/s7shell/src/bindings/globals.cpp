@@ -17,23 +17,132 @@
 #include <sgrn/s7shell/script/ScriptTagTable.hpp>
 #include <sgrn/s7shell/utils/PlcSimClock.hpp>
 #include <angelscript.h>
+#include <chrono>
+#include <cmath>
 #include <ctime>
 #include <scriptarray/scriptarray.h>
 #include <scriptdictionary/scriptdictionary.h>
 #include <snap7.h>
+#include <thread>
 
 namespace sgrn::s7shell::shell
 {
 using sgrn::Result;
+
+/// sleep(ms) — block the calling script thread for t_ms milliseconds.
+/// Useful for timing loops in live PLC recording scripts.
+static void script_sleep(int t_ms) {
+    if (t_ms > 0)
+        std::this_thread::sleep_for(std::chrono::milliseconds(t_ms));
+}
+
 static std::string script_getenv(const std::string& t_name) {
     const char* p_val = std::getenv(t_name.c_str());
     return p_val ? std::string(p_val) : std::string();
 }
+
+// ── Scalar math (sin/cos/sqrt/pow/...) for physics & simulation scripts ─────
+// The stock scriptmath add-on is not part of extern::angelscript_addons, so
+// s7shell registers this core subset natively (float + double overloads).
+template <typename T>
+static T math_sin(T t_v) {
+    return std::sin(t_v);
+}
+template <typename T>
+static T math_cos(T t_v) {
+    return std::cos(t_v);
+}
+template <typename T>
+static T math_tan(T t_v) {
+    return std::tan(t_v);
+}
+template <typename T>
+static T math_asin(T t_v) {
+    return std::asin(t_v);
+}
+template <typename T>
+static T math_acos(T t_v) {
+    return std::acos(t_v);
+}
+template <typename T>
+static T math_atan(T t_v) {
+    return std::atan(t_v);
+}
+template <typename T>
+static T math_atan2(T t_y, T t_x) {
+    return std::atan2(t_y, t_x);
+}
+template <typename T>
+static T math_sqrt(T t_v) {
+    return std::sqrt(t_v);
+}
+template <typename T>
+static T math_pow(T t_base, T t_exp) {
+    return std::pow(t_base, t_exp);
+}
+template <typename T>
+static T math_exp(T t_v) {
+    return std::exp(t_v);
+}
+template <typename T>
+static T math_log(T t_v) {
+    return std::log(t_v);
+}
+template <typename T>
+static T math_log10(T t_v) {
+    return std::log10(t_v);
+}
+template <typename T>
+static T math_floor(T t_v) {
+    return std::floor(t_v);
+}
+template <typename T>
+static T math_ceil(T t_v) {
+    return std::ceil(t_v);
+}
+template <typename T>
+static T math_abs(T t_v) {
+    return std::abs(t_v);
+}
+
+/// Registers `double f(double)` + `float f(float)` overloads of one math fn.
+/// Uses `r` from the enclosing scope, like SGRN_AS_REG itself.
+#define SGRN_AS_MATH1(tp_engine, name)                                                                                                     \
+    SGRN_AS_REG((tp_engine)->RegisterGlobalFunction("double " #name "(double)", asFUNCTION(math_##name<double>), asCALL_CDECL));           \
+    SGRN_AS_REG((tp_engine)->RegisterGlobalFunction("float " #name "(float)", asFUNCTION(math_##name<float>), asCALL_CDECL))
+
+/// Registers two-argument `f(a, b)` overloads (pow, atan2).
+#define SGRN_AS_MATH2(tp_engine, name)                                                                                                     \
+    SGRN_AS_REG((tp_engine)->RegisterGlobalFunction("double " #name "(double, double)", asFUNCTION(math_##name<double>), asCALL_CDECL));   \
+    SGRN_AS_REG((tp_engine)->RegisterGlobalFunction("float " #name "(float, float)", asFUNCTION(math_##name<float>), asCALL_CDECL))
+
+static Result<void, std::string> registerScriptMath(asIScriptEngine* tp_engine) {
+    int r = 0;
+    SGRN_AS_MATH1(tp_engine, sin);
+    SGRN_AS_MATH1(tp_engine, cos);
+    SGRN_AS_MATH1(tp_engine, tan);
+    SGRN_AS_MATH1(tp_engine, asin);
+    SGRN_AS_MATH1(tp_engine, acos);
+    SGRN_AS_MATH1(tp_engine, atan);
+    SGRN_AS_MATH2(tp_engine, atan2);
+    SGRN_AS_MATH1(tp_engine, sqrt);
+    SGRN_AS_MATH2(tp_engine, pow);
+    SGRN_AS_MATH1(tp_engine, exp);
+    SGRN_AS_MATH1(tp_engine, log);
+    SGRN_AS_MATH1(tp_engine, log10);
+    SGRN_AS_MATH1(tp_engine, floor);
+    SGRN_AS_MATH1(tp_engine, ceil);
+    SGRN_AS_MATH1(tp_engine, abs);
+    SGRN_AS_REG(tp_engine->RegisterGlobalFunction("int abs(int)", asFUNCTION(math_abs<int>), asCALL_CDECL));
+    (void)r;
+    return {};
+}
 // registration, alongside get_dtl_now():
 Result<void, std::string> registerS7Globals(asIScriptEngine* tp_engine) {
     int r = 0;
+    // Scalar math for physics / simulation scripts (see registerScriptMath).
+    SGRN_REGISTER_MODULE(registerScriptMath(tp_engine));
     // Global Functions
-
     SGRN_AS_REG(tp_engine->RegisterGlobalFunction("string getEnv(const string &in)", asFUNCTION(script_getenv), asCALL_CDECL));
 
     SGRN_AS_REG(tp_engine->RegisterGlobalFunction("string get_dtl_now()", asFUNCTION(get_dtl_now), asCALL_CDECL));

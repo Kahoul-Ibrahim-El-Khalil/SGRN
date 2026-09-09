@@ -1,0 +1,33 @@
+TYPE "UdtValves"
+VERSION : 0.1
+   STRUCT
+      InletOpen : Bool;
+      OutletOpen : Bool;
+      BypassOpen : Bool;
+      FlowRateLPM : Real;
+   END_STRUCT;
+END_TYPE
+
+DATA_BLOCK "DbPipelineControl"
+TITLE = Pipeline Master Control
+#EVENT_TRIGGER
+VERSION : 0.1
+   STRUCT
+      AutoMode : Bool;
+      EmergencyStop : Bool;
+      SetPointFlow : Real;
+      Valves : "UdtValves";
+   END_STRUCT;
+BEGIN
+END_DATA_BLOCK
+
+DATA_BLOCK "DbHubMirror"
+TITLE = Mirrored Field Data Block
+VERSION : 0.1
+   STRUCT
+      FieldConnected : Bool;
+      LastSyncTime : DInt;
+      FieldValves : "UdtValves";
+   END_STRUCT;
+BEGIN
+END_DATA_BLOCK

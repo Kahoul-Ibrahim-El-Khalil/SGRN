@@ -72,6 +72,11 @@ public:
 
     sgrn::Result<void, std::string> loadConfig(int t_argc, char** tp_argv);
     void enablePassiveReplayMode();
+    /// Bypass loadConfig() entirely: build a minimal in-memory GatewayConfig
+    /// with HTTP (t_http_port) and WebSocket (t_ws_port) adapters only.
+    /// Persistence, cloud upload, and all southbound adapters stay disabled.
+    /// Must be called instead of loadConfig(), before loadSchema().
+    void setHeadlessReplayConfig(const std::string& t_schema_path, uint16_t t_http_port = 8080, uint16_t t_ws_port = 8081);
     sgrn::Result<void, std::string> loadSchema();
     sgrn::Result<void, std::string> initSecurity();
     sgrn::Result<void, std::string> initTwin();

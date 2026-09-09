@@ -21,6 +21,10 @@ set(SGRN_S7SHELL_LIB_SOURCES
     src/SchemaVM.cpp
     src/PlcTagTable.cpp
     src/runtime/PlcRuntime.cpp
+    src/runtime/PersistenceBridge.cpp
+    src/simulation/SimulationEngine.cpp
+    src/replay/WalReplayer.cpp
+    src/commands/cmd_emit_as.cpp
     src/script/ScriptDataBlock.cpp
     src/script/ScriptFieldProxy.cpp
     src/script/ScriptTagTable.cpp
@@ -38,9 +42,14 @@ set(SGRN_S7SHELL_LIB_SOURCES
     src/bindings/types.cpp
     src/bindings/globals.cpp
     src/bindings/PlcRuntime.cpp
+    src/bindings/Persistence.cpp
+    src/bindings/Simulation.cpp
+    src/bindings/Replay.cpp
     src/bindings/Proxy.cpp
     src/bindings/GatewaySync.cpp
     src/bindings/S7Server.cpp
+    src/bindings/HttpServer.cpp
+    src/bindings/WebSocketServer.cpp
     src/connection/ProxySession.cpp
     src/connection/GatewaySync.cpp
     src/connection/S7ShellServer.cpp
@@ -58,6 +67,7 @@ sgrn_add_component_library(
     SOURCES     ${SGRN_S7SHELL_LIB_SOURCES}
     INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
     PUBLIC_LIBS
+        sgrn_gateway
         sgrn_gateway_twin
         sgrn_gateway_s7
         sgrn_scl
@@ -119,6 +129,35 @@ sgrn_install_component_executable(TARGET s7shell COMPONENT s7)
 
 
 
+
+# =============================================================================
+# 3. Tests
+# =============================================================================
+
+if(SGRN_BUILD_TESTS)
+    sgrn_add_component_executable(
+        TARGET wal_replayer_test
+        SOURCES tests/wal_replayer_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn_s7shell_lib
+            sgrn_utils
+    )
+    add_test(NAME wal_replayer_test COMMAND wal_replayer_test)
+    target_compile_features(wal_replayer_test PRIVATE cxx_std_23)
+    sgrn_target(wal_replayer_test)
+
+    sgrn_add_component_executable(
+        TARGET init_script_test
+        SOURCES tests/init_script_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn_s7shell_lib
+    )
+    add_test(NAME init_script_test COMMAND init_script_test)
+    target_compile_features(init_script_test PRIVATE cxx_std_23)
+    sgrn_target(init_script_test)
+endif()
 
 # =============================================================================
 # Packaging

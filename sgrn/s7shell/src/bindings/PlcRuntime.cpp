@@ -114,6 +114,20 @@ Result<void, std::string> registerPlcRuntimeTypes(asIScriptEngine* tp_engine) {
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "PlcRuntime", "string getJson(uint16) const", asMETHOD(PlcRuntimeWrapper, getJson), asCALL_THISCALL));
 
+    // Dotted-path convenience API — "DbName.Field.Sub" resolved automatically.
+    // Primary API for simulation scripts that should not hard-code DB numbers.
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "PlcRuntime", "bool setReal(const string &in, double)", asMETHOD(PlcRuntimeWrapper, setReal), asCALL_THISCALL));
+
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "PlcRuntime", "bool setBool(const string &in, bool)", asMETHOD(PlcRuntimeWrapper, setBool), asCALL_THISCALL));
+
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "PlcRuntime", "bool setInt(const string &in, int64)", asMETHOD(PlcRuntimeWrapper, setInt), asCALL_THISCALL));
+
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "PlcRuntime", "string getReal(const string &in) const", asMETHOD(PlcRuntimeWrapper, getReal), asCALL_THISCALL));
+
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "PlcRuntime", "bool setBit(uint16, uint, int, bool)", asMETHOD(PlcRuntimeWrapper, setBit), asCALL_THISCALL));
 

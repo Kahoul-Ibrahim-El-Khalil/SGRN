@@ -60,12 +60,13 @@ The parser header documents `{ S7_Endianness := 'Little' | 'Big' }` — this **b
 `sclc` is the schema compiler CLI (`sgrn/scl/apps/sclcompiler.cpp`). Commands:
 
 ```bash
-sclc compile   --parse ./symbols/ -o registry.json   # aggregate .scl/.udt/.db/.xml/.json into a JSON registry
-sclc codegen   --parse ./symbols/ -o plc_schema.hpp  # generate s7codec-compatible C++ header
-sclc emit-scl  -i registry.json -o ./output/          # round-trip: JSON registry back to clean .scl
-sclc emit-dir  --parse ./symbols/ -o ./canonical/     # normalized directory layout (UDT##-name.udt, DB##-name.db, registry.json)
-sclc examples  -o ./examples/                         # sample .scl/.udt files
-sclc man                                            # SCL syntax reference manual
+sclc ./symbols/ -o registry.json                # compile symbols directory into JSON registry
+sclc gen ./symbols/ -o plc_schema.hpp            # generate s7codec C++ header (alias: codegen)
+sclc as ./symbols/ -o ./generated/               # generate AngelScript header files (alias: emit-as)
+sclc scl registry.json -o ./output/              # round-trip: JSON back to clean .scl (alias: emit-scl)
+sclc dir ./symbols/ -o ./canonical/              # normalized directory layout (alias: emit-dir)
+sclc examples -o ./examples/                     # sample .scl/.udt files
+sclc man                                         # SCL syntax reference manual
 ```
 
 Run `sclc man` for the full dialect reference.

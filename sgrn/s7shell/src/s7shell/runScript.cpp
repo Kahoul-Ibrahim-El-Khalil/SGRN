@@ -97,6 +97,54 @@ static Result<std::string, std::string> extractLiteralOrConstArg(const std::stri
     return "";
 }
 // ─────────────────────────────────────────────────────────────────────────────
+// stripScanComments — remove // and /* */ comments for PRE-SCAN purposes.
+//
+// The pre-scan regexes look for code patterns (PlcRuntime(...),
+// .loadSclSchema(...), #include ...). Matching those inside comments
+// produces bogus extractions — e.g. a documentation line mentioning the
+// constructor shape yields an unresolvable argument that then resolves
+// against the script directory itself and fails with a cryptic I/O error.
+// String literals are respected so URLs inside quotes survive. Newlines are
+// preserved so line-oriented patterns keep working. The compilation path
+// keeps using the original content; only scanning sees this copy.
+// ─────────────────────────────────────────────────────────────────────────────
+static std::string stripScanComments(const std::string& t_text) {
+    std::string out;
+    out.reserve(t_text.size());
+    bool in_str = false;
+    for (size_t i = 0; i < t_text.size(); ++i) {
+        const char c = t_text[i];
+        if (in_str) {
+            out += c;
+            if (c == '\\' && i + 1 < t_text.size())
+                out += t_text[++i];
+            else if (c == '"')
+                in_str = false;
+        } else if (c == '"') {
+            in_str = true;
+            out += c;
+        } else if (c == '/' && i + 1 < t_text.size() && t_text[i + 1] == '/') {
+            // Skip to end of line; the for-loop's ++i then lands on '\n',
+            // which the next iteration copies (line count preserved).
+            while (i + 1 < t_text.size() && t_text[i + 1] != '\n')
+                ++i;
+        } else if (c == '/' && i + 1 < t_text.size() && t_text[i + 1] == '*') {
+            ++i; // consume '*'
+            while (i + 1 < t_text.size() && !(t_text[i] == '*' && t_text[i + 1] == '/')) {
+                if (t_text[i] == '\n')
+                    out += '\n';
+                ++i;
+            }
+            if (i + 1 < t_text.size())
+                ++i; // consume '/'; the for-loop's ++i moves past it
+        } else {
+            out += c;
+        }
+    }
+    return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SchemaLoadResult — holds loaded schema and its deduplication key
 // ─────────────────────────────────────────────────────────────────────────────
 struct SchemaLoadResult {
@@ -117,6 +165,12 @@ struct SchemaLoadResult {
 // ─────────────────────────────────────────────────────────────────────────────
 static Result<SchemaLoadResult, SclError> loadScannedSchema(const std::string& t_method, const std::string& t_raw_arg,
     const fs::path& t_script_dir, const std::set<std::string>& t_loaded_schemas) {
+    // An empty argument (e.g. an unresolvable const identifier) must never
+    // be resolved: joining "" onto the script directory yields the directory
+    // itself, and attempting to load that as a schema file dies with a
+    // cryptic I/O error instead of a clean "not found".
+    if (t_raw_arg.empty())
+        return SclError::NotFound;
     const auto resolved = resolveAgainstBase(t_script_dir, t_raw_arg);
     std::string schema_key = resolved; // Use resolved path as deduplication key
 
@@ -251,22 +305,29 @@ static void scanSchemaLoads(const std::string& t_content, const std::string& t_a
 // ─────────────────────────────────────────────────────────────────────────────
 // scanPlcRuntimeConstructors — find `PlcRuntime(...)` constructor calls and
 // load the schema from the string argument (literal or const string).
+// Also extracts the LHS variable name (`PlcRuntime@ rt = PlcRuntime("...")`) so
+// the DB preamble is generated against the actual runtime variable, not the
+// hardcoded "plc" global. This is what enables:
+//   db_telemetry.Motor1.SpeedRPM = 1450.0;   // = operator proxy, no setReal()
 // ─────────────────────────────────────────────────────────────────────────────
 static void scanPlcRuntimeConstructors(const std::string& t_content, const std::string& t_abs_path, asIScriptEngine* tp_script_engine,
     asIScriptModule* tp_repl_module, std::string& t_db_preamble, std::set<std::string>& t_loaded_schemas) {
-    static const std::regex ctor_regex(R"(\bPlcRuntime\s*\(\s*([^)]+)\s*\))");
+
+    // Match optional LHS: `PlcRuntime@ varname = PlcRuntime("schema.scl")`
+    // Group 1: variable name (optional) — e.g. "g_rt", "rt", "plc"
+    // Group 2: constructor argument — e.g. "schema.scl"
+    static const std::regex ctor_regex(R"((?:PlcRuntime\s*@\s*(\w+)\s*=\s*)?\bPlcRuntime\s*\(\s*([^)]+)\s*\))");
 
     const fs::path script_dir = std::filesystem::path(t_abs_path).parent_path();
 
     std::smatch match;
     std::string::const_iterator search_start(t_content.cbegin());
     while (std::regex_search(search_start, t_content.cend(), match, ctor_regex)) {
-        const std::string raw_arg = sgrn::utils::strings::trim(match[1].str());
+        // If the assignment variable name is captured use it; fall back to "plc".
+        const std::string client_var = match[1].matched && !match[1].str().empty() ? match[1].str() : "plc";
+        const std::string raw_arg = sgrn::utils::strings::trim(match[2].str());
 
         if (auto literal = extractLiteralOrConstArg(t_content, raw_arg)) {
-            // Treat the constructor argument as an SCL schema (file path or inline text).
-            // loadScannedSchema will attempt to resolve it as a file relative to the script
-            // and fall back to inline content if no file exists.
             if (literal.hasError()) {
                 fmt::print(stderr, fg(fmt::color::red), "[s7shell] Literal extraction error: {}\n", literal.error());
             } else {
@@ -279,7 +340,7 @@ static void scanPlcRuntimeConstructors(const std::string& t_content, const std::
                 } else {
                     const auto& [store, schema_key] = store_res.value();
                     t_loaded_schemas.insert(schema_key);
-                    registerScannedSchema(tp_script_engine, tp_repl_module, store, "plc", t_db_preamble);
+                    registerScannedSchema(tp_script_engine, tp_repl_module, store, client_var, t_db_preamble);
                 }
             }
         }
@@ -299,9 +360,12 @@ static void preScanFile(const std::string& t_filename, const std::string& t_cont
         return;
     t_scanned_files.insert(abs_path);
 
-    scanIncludes(t_content, abs_path, tp_script_engine, tp_repl_module, t_db_preamble, t_scanned_files, t_loaded_schemas);
-    scanSchemaLoads(t_content, abs_path, tp_script_engine, tp_repl_module, t_db_preamble, t_loaded_schemas);
-    scanPlcRuntimeConstructors(t_content, abs_path, tp_script_engine, tp_repl_module, t_db_preamble, t_loaded_schemas);
+    // Scan a comment-free copy (see stripScanComments); compilation below
+    // still uses the original content.
+    const std::string scan_text = stripScanComments(t_content);
+    scanIncludes(scan_text, abs_path, tp_script_engine, tp_repl_module, t_db_preamble, t_scanned_files, t_loaded_schemas);
+    scanSchemaLoads(scan_text, abs_path, tp_script_engine, tp_repl_module, t_db_preamble, t_loaded_schemas);
+    scanPlcRuntimeConstructors(scan_text, abs_path, tp_script_engine, tp_repl_module, t_db_preamble, t_loaded_schemas);
 }
 void S7Shell::runScript(const std::string& t_filename) {
     std::ifstream ifs(t_filename);
@@ -330,7 +394,9 @@ void S7Shell::runScript(const std::string& t_filename) {
         return;
     }
 
-    // Preamble: auto-generated DataBlock@ handles (must be after script sections so plc global var is declared)
+    // Preamble: auto-generated DataBlock@ handles for every PlcRuntime variable
+    // found during pre-scan. The gate no longer checks for the literal word 'plc'
+    // — any PlcRuntime@ variable (rt, g_rt, plc, ...) enables the preamble.
     if (!db_preamble_.empty())
         builder.AddSectionFromMemory("<db_refs>", db_preamble_.c_str());
     if (builder.BuildModule() < 0) {
@@ -421,6 +487,9 @@ void S7Shell::runScripts(const std::vector<std::string>& t_filenames) {
             return;
         }
     }
+    std::string all_contents;
+    for (const auto& c : contents)
+        all_contents += c + "\n";
     if (!db_preamble_.empty())
         builder.AddSectionFromMemory("<db_refs>", db_preamble_.c_str());
     if (builder.BuildModule() < 0) {

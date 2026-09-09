@@ -1,0 +1,37 @@
+TYPE "UdtBearingMetrics"
+VERSION : 0.1
+   STRUCT
+      VibrationX : Real;
+      VibrationY : Real;
+      Temperature : Real;
+      AcousticNoise : Real;
+      HealthScore : Real;
+   END_STRUCT;
+END_TYPE
+
+TYPE "UdtMotorState"
+VERSION : 0.1
+   STRUCT
+      Running : Bool;
+      Fault : Bool;
+      SpeedRPM : Real;
+      CurrentAmps : Real;
+      TorqueNm : Real;
+      Bearing : "UdtBearingMetrics";
+   END_STRUCT;
+END_TYPE
+
+DATA_BLOCK "DbTelemetry"
+TITLE = Production Line Telemetry
+#EVENT_TRIGGER
+VERSION : 0.1
+   STRUCT
+      LineActive : Bool;
+      SystemFault : Bool;
+      TickCount : DInt;
+      Motor1 : "UdtMotorState";
+      Motor2 : "UdtMotorState";
+      Pump1 : "UdtMotorState";
+   END_STRUCT;
+BEGIN
+END_DATA_BLOCK

@@ -4,16 +4,18 @@
 // Standalone CLI tool for compiling PLC schematics into canonical registries.
 // Part of the sgrn::scl library — can be published independently.
 //
-// Subcommands:
-//   compile   — Parse .scl/.udt/.db/.xml/.json and emit JSON registry
-//   codegen   — Generate s7codec-compatible C++ headers from compiled schema
-//   emit-scl  — Generate clean .scl source files from a compiled registry
-//   emit-dir  — Emit canonical directory layout (UDT{idx}-{name}.udt, DB{idx}-{name}.db)
-//   examples  — Generate example .scl/.udt files
-//   man       — Print SCL syntax reference manual
+// Subcommands & Aliases:
+//   compile (cmp, c)            — Parse inputs and emit JSON registry [DEFAULT]
+//   codegen (gen, header, cpp)  — Generate s7codec-compatible C++ headers
+//   emit-scl (scl)              — Generate clean .scl source files
+//   emit-dir (dir, canonical)   — Emit normalized directory layout
+//   emit-angelscript (emit-as, as) — Generate AngelScript header declarations
+//   examples                    — Generate example .scl/.udt files
+//   man                         — Print SCL syntax reference manual
 // ============================================================================
 
 #include <fmt/core.h>
+#include <sgrn/scl/AsApiEmitter.hpp>
 #include <sgrn/scl/schema/DbSymbolsParser.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/scl/schema/SchemaSerializer.hpp>
@@ -23,6 +25,7 @@
 #include <algorithm>
 #include <cxxopts.hpp>
 #include <filesystem>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -53,45 +56,42 @@ void printBanner() {
 
 void printUsage() {
     printBanner();
-    fmt::print(R"(USAGE:
-    sclc <command> [options]
+    fmt::print("{}", R"(USAGE:
+    sclc [command] [inputs...] [options]
 
-COMMANDS:
-    compile       Parse .scl/.udt/.db/.xml/.json files and emit a JSON registry.
-                  Aggregates multiple source files into one canonical schema.
+COMMANDS & ALIASES:
+    compile (cmp, c)            Parse SCL/UDT/DB/XML/JSON inputs and emit JSON registry.
+                                [DEFAULT subcommand if omitted]
 
-    codegen       Generate s7codec-compatible C++ header from a compiled schema.
-                  Emits DATABLOCK() structs, S7_BIT_GROUP packing, arrays,
-                  S7RawString<N>, S7RawDTL, and UDT composition.
+    codegen (gen, header, cpp)  Generate s7codec-compatible C++ header from schema.
 
-    emit-scl      Generate clean .scl source files from a compiled registry.
-                  Round-trip safe — output can be fed back into sclc.
+    emit-scl (scl)              Generate clean .scl source files from schema.
 
-    emit-dir      Emit canonical directory layout with normalized filenames:
-                    UDT{{idx}}-{{name}}.udt, DB{{idx}}-{{name}}.db, registry.json
+    emit-dir (dir, canonical)   Emit normalized directory layout:
+                                  UDT{idx}-{name}.udt, DB{idx}-{name}.db, registry.json
 
-    examples      Generate example .scl and .udt files to get started.
+    emit-angelscript (emit-as, as)
+                                Generate declaration-only AngelScript .as headers.
 
-    man           Print the SCL syntax reference manual.
+    examples                    Generate starter .scl/.udt files.
+
+    man                         Print SCL syntax reference manual.
+
+OPTIONS:
+    -o, --output <path>         Output file or directory ('-' for stdout)
+    -f, --force                 Overwrite existing DB/UDT entries or files
+    -v, --verbose / --debug     Enable debug/verbose output
+    -h, --help                  Print help
 
 EXAMPLES:
-    sclc compile --parse ./symbols/ -o registry.json
-    sclc codegen --parse ./symbols/ -o plc_schema.hpp
-    sclc compile --file Motor.udt --file Motors.scl -o registry.json
-    sclc compile --parse ./symbols/ --debug
-    sclc emit-scl -i registry.json -o ./output/
-    sclc emit-dir --parse ./symbols/ -o ./canonical/
-    sclc examples -o ./examples/
-
-CANONICAL NAMING:
-    When emitting canonical directories, files follow the convention:
-      UDT1-MotorData.udt    (TYPE "MotorData", UDT number 1)
-      DB10-Motors.db         (DATA_BLOCK "Motors", DB number 10)
-      registry.json          (compiled canonical JSON schema)
-
-    Parsing canonical filenames:
-      UDT1-MotorData.udt  →  {{index: 1, name: "MotorData"}}
-      DB10-Motors.db       →  {{index: 10, name: "Motors"}}
+    sclc ./symbols/ -o registry.json
+    sclc Motor.udt Motors.scl -o registry.json
+    sclc Motor.scl                              # prints compiled JSON to stdout
+    cat Motor.scl | sclc -                      # read stdin, print JSON to stdout
+    sclc gen ./symbols/ -o plc_schema.hpp
+    sclc as ./symbols/ -o ./generated/
+    sclc scl registry.json -o ./scl-output/
+    sclc dir ./symbols/ -o ./canonical/
 
 For detailed SCL syntax reference, run:  sclc man
 )");
@@ -113,6 +113,7 @@ SIEMENS S7 SCL SYNTAX & INFORMATION MODEL MAPPING MANUAL
      .db   — Data block exports
      .xml  — TIA Portal tag table exports
      .json — Pre-compiled JSON registries (for merging)
+     -     — Standard input (stdin)
 
 2. SIEMENS SCL TYPE SYSTEM & DECLARATIONS
 
@@ -166,86 +167,117 @@ SIEMENS S7 SCL SYNTAX & INFORMATION MODEL MAPPING MANUAL
      DB{number}-{name}.db     (e.g., DB10-Motors.db)
      registry.json             (compiled JSON schema)
 
-   This convention allows round-tripping:
-     sclc compile --parse ./canonical/ -o registry.json
-     sclc emit-dir -i registry.json -o ./canonical-v2/
-
 ================================================================================
 )");
 }
 
-// ── Compile Command ─────────────────────────────────────────────────────────
+// ── Path Resolution Helper ──────────────────────────────────────────────────
+
+std::vector<std::string> resolveInputPaths(const cxxopts::ParseResult& res) {
+    std::vector<std::string> paths;
+
+    if (res.count("inputs")) {
+        auto vec = res["inputs"].as<std::vector<std::string>>();
+        for (const auto& p : vec)
+            paths.push_back(p == "-" ? "-" : sgrn::utils::filesystem::expandUserPath(p));
+    }
+
+    bool used_deprecated = false;
+
+    if (res.count("parse") || res.count("schema")) {
+        used_deprecated = true;
+        std::string p = res.count("schema") ? res["schema"].as<std::string>() : res["parse"].as<std::string>();
+        paths.push_back(p == "-" ? "-" : sgrn::utils::filesystem::expandUserPath(p));
+    }
+    if (res.count("file")) {
+        used_deprecated = true;
+        auto vec = res["file"].as<std::vector<std::string>>();
+        for (const auto& p : vec)
+            paths.push_back(p == "-" ? "-" : sgrn::utils::filesystem::expandUserPath(p));
+    }
+    if (res.count("input")) {
+        used_deprecated = true;
+        std::string p = res["input"].as<std::string>();
+        paths.push_back(p == "-" ? "-" : sgrn::utils::filesystem::expandUserPath(p));
+    }
+
+    if (used_deprecated) {
+        fmt::print(stderr, "\033[33mwarning:\033[0m option '--parse'/'--schema'/'--file'/'--input' is deprecated. "
+                           "Pass positional input arguments instead (e.g. 'sclc <inputs...>').\n");
+    }
+
+    return paths;
+}
+
+sgrn::Result<PlcSchemaStore, ::sgrn::scl::SclError> compileInputs(const std::vector<std::string>& paths, bool force) {
+
+    if (paths.empty()) {
+        return ::sgrn::scl::SclError::Generic;
+    }
+
+    if (paths.size() == 1) {
+        const std::string& path = paths[0];
+        if (path != "-" && fs::is_directory(path)) {
+            return SclCompiler::compileDirectory(path, {.force = force});
+        } else {
+            return SclCompiler::compileFile(path, {.force = force});
+        }
+    }
+
+    return SclCompiler::compileFiles(paths, {.force = force});
+}
+
+// ── Subcommand Handlers ─────────────────────────────────────────────────────
 
 int cmdCompile(int t_argc, char** tp_argv) {
     cxxopts::Options opts("sclc compile", "Parse symbol files and emit a JSON registry.");
-    opts.add_options()("p,parse", "Directory or file to parse", cxxopts::value<std::string>())("s,schema",
-        "Alias for --parse (Directory or file to parse)",
-        cxxopts::value<std::string>())("f,file", "One or more symbol files", cxxopts::value<std::vector<std::string>>())(
-        "o,output", "Output JSON registry file (stdout if omitted)", cxxopts::value<std::string>()->default_value(""))(
+    opts.add_options()("inputs", "Input files or directories ('-' for stdin)", cxxopts::value<std::vector<std::string>>())("p,parse",
+        "Directory or file to parse",
+        cxxopts::value<std::string>())("s,schema", "Alias for --parse", cxxopts::value<std::string>())("f,file", "One or more symbol files",
+        cxxopts::value<std::vector<std::string>>())("i,input", "Input JSON registry file or symbol path", cxxopts::value<std::string>())(
+        "o,output", "Output JSON file ('-' for stdout)", cxxopts::value<std::string>()->default_value(""))(
         "force", "Overwrite duplicate DB/UDT entries", cxxopts::value<bool>()->default_value("false"))(
         "debug", "Print parsed structure to stdout", cxxopts::value<bool>()->default_value("false"))("h,help", "Print help");
 
-    auto res = opts.parse(t_argc, tp_argv);
+    opts.parse_positional("inputs");
 
+    auto res = opts.parse(t_argc, tp_argv);
     if (res.count("help")) {
         fmt::print("{}\n", opts.help());
         return EXIT_SUCCESS;
     }
 
-    const bool force = res["force"].as<bool>();
-    const bool debug = res["debug"].as<bool>();
-
-    PlcSchemaStore registry;
-
-    if (res.count("parse") || res.count("schema")) {
-        std::string input_path =
-            sgrn::utils::filesystem::expandUserPath(res.count("schema") ? res["schema"].as<std::string>() : res["parse"].as<std::string>());
-
-        if (fs::is_directory(input_path)) {
-            auto store_res = SclCompiler::compileDirectory(input_path, {.force = force});
-            if (store_res.hasError()) {
-                fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
-                return EXIT_FAILURE;
-            }
-            registry = std::move(store_res.value());
-        } else {
-            auto store_res = SclCompiler::compileFile(input_path, {.force = force});
-            if (store_res.hasError()) {
-                fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
-                return EXIT_FAILURE;
-            }
-            registry = std::move(store_res.value());
-        }
-    } else if (res.count("file")) {
-        auto files = res["file"].as<std::vector<std::string>>();
-        for (auto& f : files)
-            f = sgrn::utils::filesystem::expandUserPath(f);
-        auto store_res = SclCompiler::compileFiles(files, {.force = force});
-        if (store_res.hasError()) {
-            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
-            return EXIT_FAILURE;
-        }
-        registry = std::move(store_res.value());
-    } else {
-        fmt::print(stderr, "\033[31merror:\033[0m provide --parse <dir|file> or --file <path>\n");
+    auto inputs = resolveInputPaths(res);
+    if (inputs.empty()) {
+        fmt::print(stderr, "\033[31merror:\033[0m no input files or directories specified\n");
         fmt::print("{}\n", opts.help());
         return EXIT_FAILURE;
     }
 
+    const bool force = res["force"].as<bool>();
+    const bool debug = res["debug"].as<bool>();
+
+    auto store_res = compileInputs(inputs, force);
+    if (store_res.hasError()) {
+        fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
+        return EXIT_FAILURE;
+    }
+
+    PlcSchemaStore registry = std::move(store_res.value());
     printWarnings(registry);
 
-    // Summary
+    // Summary output to stderr
     fmt::print(stderr, "\033[32mcompiled:\033[0m {} DBs, {} UDTs, {} tags\n", registry.availableDbs().size(), registry.udts().size(),
         registry.tags().size());
 
     std::string json = registry.toJson(std::nullopt, false, true);
 
-    if (debug || res["output"].as<std::string>().empty()) {
+    std::string output_str = res["output"].as<std::string>();
+    if (debug || output_str.empty() || output_str == "-") {
         fmt::print("{}\n", json);
         return EXIT_SUCCESS;
     }
 
-    const std::string output_str = res["output"].as<std::string>();
     if (!sgrn::utils::filesystem::writeStringToFile(output_str, json)) {
         fmt::print(stderr, "\033[31merror:\033[0m failed to write {}\n", output_str);
         return EXIT_FAILURE;
@@ -254,14 +286,16 @@ int cmdCompile(int t_argc, char** tp_argv) {
     return EXIT_SUCCESS;
 }
 
-// ── Emit SCL Command ────────────────────────────────────────────────────────
-
-int cmdEmitScl(int t_argc, char** tp_argv) {
-    cxxopts::Options opts("sclc emit-scl", "Generate clean .scl source files from a schema.");
-    opts.add_options()("p,parse", "Directory or file to compile first", cxxopts::value<std::string>())("s,schema", "Alias for --parse",
+int cmdCodegen(int t_argc, char** tp_argv) {
+    cxxopts::Options opts("sclc codegen", "Generate s7codec-compatible C++ header.");
+    opts.add_options()("inputs", "Input files, directories, or JSON registry ('-' for stdin)", cxxopts::value<std::vector<std::string>>())(
+        "p,parse", "Directory or file to compile", cxxopts::value<std::string>())("s,schema", "Alias for --parse",
         cxxopts::value<std::string>())("i,input", "Input JSON registry file", cxxopts::value<std::string>())(
-        "o,output", "Output directory for .scl files", cxxopts::value<std::string>()->default_value("./scl-output"))(
+        "o,output", "Output .hpp file ('-' for stdout)", cxxopts::value<std::string>()->default_value(""))(
+        "guard", "Header guard prefix", cxxopts::value<std::string>()->default_value("SCLC_GENERATED"))(
         "force", "Overwrite existing entries", cxxopts::value<bool>()->default_value("false"))("h,help", "Print help");
+
+    opts.parse_positional("inputs");
 
     auto res = opts.parse(t_argc, tp_argv);
     if (res.count("help")) {
@@ -269,31 +303,69 @@ int cmdEmitScl(int t_argc, char** tp_argv) {
         return EXIT_SUCCESS;
     }
 
-    PlcSchemaStore registry;
-    const bool force = res["force"].as<bool>();
-
-    if (res.count("input")) {
-        auto store_res = PlcSchemaStore::loadFromJsonFile(res["input"].as<std::string>());
-        if (store_res.hasError()) {
-            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
-            return EXIT_FAILURE;
-        }
-        registry = std::move(store_res.value());
-    } else if (res.count("parse") || res.count("schema")) {
-        std::string input =
-            sgrn::utils::filesystem::expandUserPath(res.count("schema") ? res["schema"].as<std::string>() : res["parse"].as<std::string>());
-        auto store_res = fs::is_directory(input) ? SclCompiler::compileDirectory(input, {.force = force})
-                                                 : SclCompiler::compileFile(input, {.force = force});
-        if (store_res.hasError()) {
-            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
-            return EXIT_FAILURE;
-        }
-        registry = std::move(store_res.value());
-    } else {
-        fmt::print(stderr, "\033[31merror:\033[0m provide --input <json> or --parse <dir|file>\n");
+    auto inputs = resolveInputPaths(res);
+    if (inputs.empty()) {
+        fmt::print(stderr, "\033[31merror:\033[0m no input files or directories specified\n");
         return EXIT_FAILURE;
     }
 
+    const bool force = res["force"].as<bool>();
+    auto store_res = compileInputs(inputs, force);
+    if (store_res.hasError()) {
+        fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
+        return EXIT_FAILURE;
+    }
+
+    PlcSchemaStore registry = std::move(store_res.value());
+    printWarnings(registry);
+
+    std::string guard_prefix = res["guard"].as<std::string>();
+    std::string output_path = res["output"].as<std::string>();
+
+    if (output_path.empty() || output_path == "-") {
+        fmt::print("{}", SclCompiler::emitCppHeader(registry, guard_prefix));
+        return EXIT_SUCCESS;
+    }
+
+    auto emit_res = SclCompiler::emitCpp(registry, output_path, guard_prefix);
+    if (emit_res.hasError()) {
+        fmt::print(stderr, "\033[31merror:\033[0m {}\n", emit_res.error());
+        return EXIT_FAILURE;
+    }
+    fmt::print(stderr, "\033[32mgenerated:\033[0m {}\n", output_path);
+    return EXIT_SUCCESS;
+}
+
+int cmdEmitScl(int t_argc, char** tp_argv) {
+    cxxopts::Options opts("sclc emit-scl", "Generate clean .scl source files from a schema.");
+    opts.add_options()("inputs", "Input files or directories ('-' for stdin)", cxxopts::value<std::vector<std::string>>())(
+        "p,parse", "Directory or file to compile first", cxxopts::value<std::string>())("s,schema", "Alias for --parse",
+        cxxopts::value<std::string>())("i,input", "Input JSON registry file", cxxopts::value<std::string>())(
+        "o,output", "Output directory for .scl files", cxxopts::value<std::string>()->default_value("./scl-output"))(
+        "force", "Overwrite existing entries", cxxopts::value<bool>()->default_value("false"))("h,help", "Print help");
+
+    opts.parse_positional("inputs");
+
+    auto res = opts.parse(t_argc, tp_argv);
+    if (res.count("help")) {
+        fmt::print("{}\n", opts.help());
+        return EXIT_SUCCESS;
+    }
+
+    auto inputs = resolveInputPaths(res);
+    if (inputs.empty()) {
+        fmt::print(stderr, "\033[31merror:\033[0m no input files or directories specified\n");
+        return EXIT_FAILURE;
+    }
+
+    const bool force = res["force"].as<bool>();
+    auto store_res = compileInputs(inputs, force);
+    if (store_res.hasError()) {
+        fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
+        return EXIT_FAILURE;
+    }
+
+    PlcSchemaStore registry = std::move(store_res.value());
     printWarnings(registry);
 
     auto emit_res = SclCompiler::emitScl(registry, res["output"].as<std::string>());
@@ -305,14 +377,15 @@ int cmdEmitScl(int t_argc, char** tp_argv) {
     return EXIT_SUCCESS;
 }
 
-// ── Emit Canonical Directory Command ────────────────────────────────────────
-
 int cmdEmitDir(int t_argc, char** tp_argv) {
     cxxopts::Options opts("sclc emit-dir", "Emit canonical directory layout.");
-    opts.add_options()("p,parse", "Directory or file to compile first", cxxopts::value<std::string>())("s,schema", "Alias for --parse",
+    opts.add_options()("inputs", "Input files or directories ('-' for stdin)", cxxopts::value<std::vector<std::string>>())(
+        "p,parse", "Directory or file to compile first", cxxopts::value<std::string>())("s,schema", "Alias for --parse",
         cxxopts::value<std::string>())("i,input", "Input JSON registry file", cxxopts::value<std::string>())(
         "o,output", "Output directory", cxxopts::value<std::string>()->default_value("./canonical"))(
         "force", "Overwrite existing entries", cxxopts::value<bool>()->default_value("false"))("h,help", "Print help");
+
+    opts.parse_positional("inputs");
 
     auto res = opts.parse(t_argc, tp_argv);
     if (res.count("help")) {
@@ -320,31 +393,20 @@ int cmdEmitDir(int t_argc, char** tp_argv) {
         return EXIT_SUCCESS;
     }
 
-    PlcSchemaStore registry;
-    const bool force = res["force"].as<bool>();
-
-    if (res.count("input")) {
-        auto store_res = PlcSchemaStore::loadFromJsonFile(res["input"].as<std::string>());
-        if (store_res.hasError()) {
-            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
-            return EXIT_FAILURE;
-        }
-        registry = std::move(store_res.value());
-    } else if (res.count("parse") || res.count("schema")) {
-        std::string input =
-            sgrn::utils::filesystem::expandUserPath(res.count("schema") ? res["schema"].as<std::string>() : res["parse"].as<std::string>());
-        auto store_res = fs::is_directory(input) ? SclCompiler::compileDirectory(input, {.force = force})
-                                                 : SclCompiler::compileFile(input, {.force = force});
-        if (store_res.hasError()) {
-            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
-            return EXIT_FAILURE;
-        }
-        registry = std::move(store_res.value());
-    } else {
-        fmt::print(stderr, "\033[31merror:\033[0m provide --input <json> or --parse <dir|file>\n");
+    auto inputs = resolveInputPaths(res);
+    if (inputs.empty()) {
+        fmt::print(stderr, "\033[31merror:\033[0m no input files or directories specified\n");
         return EXIT_FAILURE;
     }
 
+    const bool force = res["force"].as<bool>();
+    auto store_res = compileInputs(inputs, force);
+    if (store_res.hasError()) {
+        fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
+        return EXIT_FAILURE;
+    }
+
+    PlcSchemaStore registry = std::move(store_res.value());
     printWarnings(registry);
 
     auto emit_res = SclCompiler::emitCanonical(registry, res["output"].as<std::string>());
@@ -356,7 +418,51 @@ int cmdEmitDir(int t_argc, char** tp_argv) {
     return EXIT_SUCCESS;
 }
 
-// ── Examples Command ────────────────────────────────────────────────────────
+int cmdEmitAngelScript(int t_argc, char** tp_argv) {
+    cxxopts::Options opts("sclc emit-angelscript", "Generate declaration-only AngelScript .as files.");
+    opts.add_options()("inputs", "Input files or directories ('-' for stdin)", cxxopts::value<std::vector<std::string>>())(
+        "p,parse", "Directory or file to compile first", cxxopts::value<std::string>())("s,schema", "Alias for --parse",
+        cxxopts::value<std::string>())("i,input", "Input JSON registry file", cxxopts::value<std::string>())(
+        "o,output", "Output directory for .as files", cxxopts::value<std::string>()->default_value("./generated"))(
+        "include-shell-api", "Include s7shell built-in API surface", cxxopts::value<bool>()->default_value("false"))(
+        "force", "Overwrite existing entries", cxxopts::value<bool>()->default_value("false"))("h,help", "Print help");
+
+    opts.parse_positional("inputs");
+
+    auto res = opts.parse(t_argc, tp_argv);
+    if (res.count("help")) {
+        fmt::print("{}\n", opts.help());
+        return EXIT_SUCCESS;
+    }
+
+    auto inputs = resolveInputPaths(res);
+    if (inputs.empty()) {
+        fmt::print(stderr, "\033[31merror:\033[0m no input files or directories specified\n");
+        return EXIT_FAILURE;
+    }
+
+    const bool force = res["force"].as<bool>();
+    auto store_res = compileInputs(inputs, force);
+    if (store_res.hasError()) {
+        fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
+        return EXIT_FAILURE;
+    }
+
+    PlcSchemaStore registry = std::move(store_res.value());
+    printWarnings(registry);
+
+    sgrn::scl::AsEmitterOptions opts_as;
+    opts_as.output_dir = res["output"].as<std::string>();
+    opts_as.include_shell_api = res["include-shell-api"].as<bool>();
+
+    auto emit_res = sgrn::scl::AsApiEmitter::emit(registry, opts_as);
+    if (emit_res.hasError()) {
+        fmt::print(stderr, "\033[31merror:\033[0m {}\n", emit_res.error());
+        return EXIT_FAILURE;
+    }
+    fmt::print(stderr, "\033[32memitted:\033[0m AngelScript API surface to {}\n", opts_as.output_dir);
+    return EXIT_SUCCESS;
+}
 
 int cmdExamples(int t_argc, char** tp_argv) {
     cxxopts::Options opts("sclc examples", "Generate example .scl and .udt files.");
@@ -407,67 +513,6 @@ END_DATA_BLOCK
     return EXIT_FAILURE;
 }
 
-// ── Codegen Command ─────────────────────────────────────────────────────────
-
-int cmdCodegen(int t_argc, char** tp_argv) {
-    cxxopts::Options opts("sclc codegen", "Generate s7codec-compatible C++ header.");
-    opts.add_options()("p,parse", "Directory or file to compile", cxxopts::value<std::string>())("s,schema", "Alias for --parse",
-        cxxopts::value<std::string>())("i,input", "Input JSON registry file", cxxopts::value<std::string>())(
-        "o,output", "Output .hpp file (stdout if omitted)", cxxopts::value<std::string>()->default_value(""))(
-        "guard", "Header guard prefix", cxxopts::value<std::string>()->default_value("SCLC_GENERATED"))(
-        "force", "Overwrite existing entries", cxxopts::value<bool>()->default_value("false"))("h,help", "Print help");
-
-    auto res = opts.parse(t_argc, tp_argv);
-    if (res.count("help")) {
-        fmt::print("{}\n", opts.help());
-        return EXIT_SUCCESS;
-    }
-
-    PlcSchemaStore registry;
-    const bool force = res["force"].as<bool>();
-
-    if (res.count("input")) {
-        auto store_res = PlcSchemaStore::loadFromJsonFile(res["input"].as<std::string>());
-        if (store_res.hasError()) {
-            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
-            return EXIT_FAILURE;
-        }
-        registry = std::move(store_res.value());
-    } else if (res.count("parse") || res.count("schema")) {
-        std::string input =
-            sgrn::utils::filesystem::expandUserPath(res.count("schema") ? res["schema"].as<std::string>() : res["parse"].as<std::string>());
-        auto store_res = fs::is_directory(input) ? SclCompiler::compileDirectory(input, {.force = force})
-                                                 : SclCompiler::compileFile(input, {.force = force});
-        if (store_res.hasError()) {
-            fmt::print(stderr, "\033[31merror:\033[0m {}\n", store_res.error());
-            return EXIT_FAILURE;
-        }
-        registry = std::move(store_res.value());
-    } else {
-        fmt::print(stderr, "\033[31merror:\033[0m provide --input <json> or --parse <dir|file>\n");
-        return EXIT_FAILURE;
-    }
-
-    printWarnings(registry);
-
-    std::string guard_prefix = res["guard"].as<std::string>();
-    std::string output_path = res["output"].as<std::string>();
-
-    if (output_path.empty()) {
-        // Print to stdout
-        fmt::print("{}", SclCompiler::emitCppHeader(registry, guard_prefix));
-        return EXIT_SUCCESS;
-    }
-
-    auto emit_res = SclCompiler::emitCpp(registry, output_path, guard_prefix);
-    if (emit_res.hasError()) {
-        fmt::print(stderr, "\033[31merror:\033[0m {}\n", emit_res.error());
-        return EXIT_FAILURE;
-    }
-    fmt::print(stderr, "\033[32mgenerated:\033[0m {}\n", output_path);
-    return EXIT_SUCCESS;
-}
-
 } // namespace
 
 // ── Main dispatcher ─────────────────────────────────────────────────────────
@@ -480,30 +525,35 @@ int main_cb(int t_argc, char** tp_argv) {
 
     std::string command = tp_argv[1];
 
-    // Shift argv for subcommand parsing
-    int sub_argc = t_argc - 1;
-    char** p_sub_argv = tp_argv + 1;
-
-    if (command == "compile")
-        return cmdCompile(sub_argc, p_sub_argv);
-    if (command == "codegen")
-        return cmdCodegen(sub_argc, p_sub_argv);
-    if (command == "emit-scl")
-        return cmdEmitScl(sub_argc, p_sub_argv);
-    if (command == "emit-dir")
-        return cmdEmitDir(sub_argc, p_sub_argv);
-    if (command == "examples")
-        return cmdExamples(sub_argc, p_sub_argv);
-    if (command == "man") {
-        printManPage();
-        return EXIT_SUCCESS;
-    }
     if (command == "-h" || command == "--help") {
         printUsage();
         return EXIT_SUCCESS;
     }
+    if (command == "man") {
+        printManPage();
+        return EXIT_SUCCESS;
+    }
 
-    fmt::print(stderr, "\033[31merror:\033[0m unknown command '{}'\n\n", command);
+    // Explicit subcommand matching with aliases
+    if (command == "compile" || command == "cmp" || command == "c")
+        return cmdCompile(t_argc - 1, tp_argv + 1);
+    if (command == "codegen" || command == "gen" || command == "header" || command == "cpp")
+        return cmdCodegen(t_argc - 1, tp_argv + 1);
+    if (command == "emit-scl" || command == "scl")
+        return cmdEmitScl(t_argc - 1, tp_argv + 1);
+    if (command == "emit-dir" || command == "dir" || command == "canonical")
+        return cmdEmitDir(t_argc - 1, tp_argv + 1);
+    if (command == "emit-angelscript" || command == "emit-as" || command == "as")
+        return cmdEmitAngelScript(t_argc - 1, tp_argv + 1);
+    if (command == "examples")
+        return cmdExamples(t_argc - 1, tp_argv + 1);
+
+    // If first argument is an input path, default subcommand to 'compile'
+    if (!command.empty() && command[0] != '-') {
+        return cmdCompile(t_argc, tp_argv);
+    }
+
+    fmt::print(stderr, "\033[31merror:\033[0m unknown command or option '{}'\n\n", command);
     printUsage();
     return EXIT_FAILURE;
 }

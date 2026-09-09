@@ -51,24 +51,31 @@ void injectDbRefs(
         const std::string snake = sgrn::utils::strings::toSnakeCase(db.db_name.empty() ? fmt::format("db{}", db.db_number) : db.db_name);
         const std::string as_type = db.db_name.empty() ? fmt::format("Db{}", db.db_number) : db.db_name;
 
-        std::string prefix = (t_client_var == "plc") ? "" : t_client_var + "_";
+        // Always inject the bare snake_case name (db_telemetry) so scripts can write:
+        //   db_telemetry.Motor1.SpeedRPM = 1450.0;
+        // Also inject a prefixed variant for multi-client REPL disambiguation.
+        const std::string prefix = (t_client_var == "plc") ? "" : t_client_var + "_";
 
-        // Inject property getter for snake_case
-        const std::string stmt1 =
-            fmt::format("{}@ get_{}{}() {{ return cast<{}>({}.db({})); }}", as_type, prefix, snake, as_type, t_client_var, db.db_number);
-
-        // Inject property getter for generic dbXX
-        const std::string stmt2 = fmt::format(
-            "{}@ get_{}db{}() {{ return cast<{}>({}.db({})); }}", as_type, prefix, db.db_number, as_type, t_client_var, db.db_number);
+        // Bare name (always injected)
+        const std::string stmt_bare =
+            fmt::format("{}@ get_{}() {{ return cast<{}>({}.db({})); }}", as_type, snake, as_type, t_client_var, db.db_number);
+        // Prefixed name (for multi-client REPL)
+        const std::string stmt_pfx = prefix.empty() ? ""
+                                                    : fmt::format("{}@ get_{}{}() {{ return cast<{}>({}.db({})); }}", as_type, prefix,
+                                                          snake, as_type, t_client_var, db.db_number);
+        // Generic db-number accessor
+        const std::string stmt_num =
+            fmt::format("{}@ get_db{}() {{ return cast<{}>({}.db({})); }}", as_type, db.db_number, as_type, t_client_var, db.db_number);
 
         sgrn::scripting::g_suppress_errors = true;
-        int r = tp_mod->CompileGlobalVar("inject", stmt1.c_str(), 0);
-        r = std::max(r, tp_mod->CompileGlobalVar("inject", stmt2.c_str(), 0));
+        int r = tp_mod->CompileGlobalVar("inject", stmt_bare.c_str(), 0);
+        if (!stmt_pfx.empty())
+            tp_mod->CompileGlobalVar("inject", stmt_pfx.c_str(), 0);
+        tp_mod->CompileGlobalVar("inject", stmt_num.c_str(), 0);
         sgrn::scripting::g_suppress_errors = false;
 
         if (r >= 0)
             fmt::print(fg(fmt::color::gray), "  \u2713 DataBlock@ {} (DB{})\n", snake, db.db_number);
-        // Silently skip if `plc` doesn't exist yet
     }
 }
 
@@ -78,17 +85,26 @@ void injectDbRefs(
 // ─────────────────────────────────────────────────────────────────────────────
 std::string buildDbPreamble(const sgrn::scl::PlcSchemaStore& t_store, const std::string& t_client_var) {
     std::string out;
-    std::string prefix = (t_client_var == "plc") ? "" : t_client_var + "_";
+    // Always generate the bare snake_case property so scripts write:
+    //   db_telemetry.Motor1.SpeedRPM = 1450.0;
+    // Also generate a prefixed variant for multi-client REPL disambiguation.
+    const std::string prefix = (t_client_var == "plc") ? "" : t_client_var + "_";
     for (const auto& [num, db] : t_store.dbs()) {
         const std::string snake = sgrn::utils::strings::toSnakeCase(db.db_name.empty() ? fmt::format("db{}", db.db_number) : db.db_name);
         const std::string as_type = db.db_name.empty() ? fmt::format("Db{}", db.db_number) : db.db_name;
 
-        // Global virtual property for snake_case name (e.g. reactor_core)
-        out += fmt::format("{}@ {}{} {{ get {{ return ({} !is null) ? cast<{}>({}.db({})) : null; }} }}\n", as_type, prefix, snake,
-            t_client_var, as_type, t_client_var, db.db_number);
+        // Bare name — primary API: db_telemetry.Motor1.SpeedRPM = 1450.0
+        out += fmt::format("{}@ {} {{ get {{ return ({} !is null) ? cast<{}>({}.db({})) : null; }} }}\n", as_type, snake, t_client_var,
+            as_type, t_client_var, db.db_number);
 
-        // Global virtual property for generic dbXX name (e.g. db1)
-        out += fmt::format("{}@ {}db{} {{ get {{ return ({} !is null) ? cast<{}>({}.db({})) : null; }} }}\n", as_type, prefix, db.db_number,
+        // Prefixed name — multi-client disambiguation (g_rt_db_telemetry, etc.)
+        if (!prefix.empty()) {
+            out += fmt::format("{}@ {}{} {{ get {{ return ({} !is null) ? cast<{}>({}.db({})) : null; }} }}\n", as_type, prefix, snake,
+                t_client_var, as_type, t_client_var, db.db_number);
+        }
+
+        // Generic db-number accessor — db1, db2, ...
+        out += fmt::format("{}@ db{} {{ get {{ return ({} !is null) ? cast<{}>({}.db({})) : null; }} }}\n", as_type, db.db_number,
             t_client_var, as_type, t_client_var, db.db_number);
     }
     return out;

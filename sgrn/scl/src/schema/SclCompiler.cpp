@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <regex>
 #include <set>
 
@@ -249,16 +250,20 @@ Result<void, ::sgrn::scl::SclError> SclCompiler::loadFile(
         return {};
     }
 
-    std::ifstream file(t_filepath);
-    if (!file.is_open())
-        return SclError::FileNotFound;
-
-    std::string t_content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    std::string t_content;
+    if (t_filepath == "-") {
+        t_content.assign((std::istreambuf_iterator<char>(std::cin)), std::istreambuf_iterator<char>());
+    } else {
+        std::ifstream file(t_filepath);
+        if (!file.is_open())
+            return SclError::FileNotFound;
+        t_content.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    }
 
     SymbolFileInfo t_db_info = extractInfoFromFilename(t_filepath, kDbFilenameRe);
     SymbolFileInfo t_udt_info = extractInfoFromFilename(t_filepath, kUdtFilenameRe);
 
-    auto res = loadFromContent(t_registry, t_content, t_filepath, t_force, tp_global_udts);
+    auto res = loadFromContent(t_registry, t_content, t_filepath == "-" ? "<stdin>" : t_filepath, t_force, tp_global_udts);
     if (res.hasError())
         return res;
 

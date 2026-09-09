@@ -343,6 +343,28 @@ public:
         return true;
     }
 
+    // ── Dotted-path convenience setters ─────────────────────────────────────
+    // Accept "DbName.Field.SubField" — the DB name is resolved automatically
+    // via PlcSchemaStore::parseFieldTarget(). These are the primary API for
+    // simulation scripts which should not hard-code DB numbers.
+
+    bool setReal(const std::string& t_dotted, double t_val) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%.6g", t_val);
+        return setDotted(t_dotted, buf);
+    }
+    bool setBool(const std::string& t_dotted, bool t_val) {
+        return setDotted(t_dotted, t_val ? "true" : "false");
+    }
+    bool setInt(const std::string& t_dotted, int64_t t_val) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%lld", (long long)t_val);
+        return setDotted(t_dotted, buf);
+    }
+    std::string getReal(const std::string& t_dotted) const {
+        return getDotted(t_dotted);
+    }
+
     /// Read a field by symbolic path. Returns the JSON value as a string, or
     /// an empty string on error (with an error message printed to stderr).
     std::string get(uint16_t t_db, const std::string& t_path) const {
@@ -570,6 +592,25 @@ public:
     }
 
 private:
+    /// Resolve "DbName.Field.Sub" → (db_num, field_path) and call set().
+    bool setDotted(const std::string& t_dotted, const std::string& t_json_val) {
+        auto target = impl_->getSchema().parseFieldTarget(t_dotted);
+        if (!target) {
+            fmt::print(stderr, fg(fmt::color::red),
+                "[PlcRuntime] setReal/setBool/setInt: cannot resolve '{}' — check DB name and field path\n", t_dotted);
+            return false;
+        }
+        return set(target->db_number, target->field_path, t_json_val);
+    }
+    std::string getDotted(const std::string& t_dotted) const {
+        auto target = impl_->getSchema().parseFieldTarget(t_dotted);
+        if (!target) {
+            fmt::print(stderr, fg(fmt::color::red), "[PlcRuntime] getReal: cannot resolve '{}'\n", t_dotted);
+            return {};
+        }
+        return get(target->db_number, target->field_path);
+    }
+
     runtime::PlcRuntimeSPtr impl_;
     std::unique_ptr<ScriptS7Connection> loopback_conn_;
     int ref_count_{1};

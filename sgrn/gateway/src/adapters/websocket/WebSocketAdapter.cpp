@@ -875,4 +875,15 @@ void WebSocketAdapter::resolveLeafRanges(ClientContext& t_ctx) {
     }
 }
 
+void WebSocketAdapter::broadcastDelta(const std::string& t_json_snapshot, uint64_t t_timestamp_ms) {
+    (void)t_timestamp_ms;
+    if (!running_.load(std::memory_order_acquire) || !server_)
+        return;
+    for (auto& sp_ws : server_->getClients()) {
+        if (sp_ws) {
+            sp_ws->send(t_json_snapshot);
+        }
+    }
+}
+
 } // namespace sgrn::gateway::adapters::websocket

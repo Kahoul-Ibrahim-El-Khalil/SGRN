@@ -1,0 +1,194 @@
+// =============================================================================
+// AsApiEmitter.cpp — Generates declaration-only AngelScript .as files
+// =============================================================================
+
+#include <sgrn/scl/AsApiEmitter.hpp>
+
+#include <fmt/format.h>
+#include <filesystem>
+#include <fstream>
+
+namespace sgrn::scl
+{
+
+namespace fs = std::filesystem;
+
+static const char* dataTypeToAs(DataType type) {
+    switch (type) {
+        case DataType::Bool:
+            return "bool";
+        case DataType::Byte:
+        case DataType::USInt:
+            return "uint8";
+        case DataType::SInt:
+            return "int8";
+        case DataType::Word:
+        case DataType::UInt:
+            return "uint16";
+        case DataType::Int:
+            return "int16";
+        case DataType::DWord:
+        case DataType::UDInt:
+            return "uint32";
+        case DataType::DInt:
+            return "int32";
+        case DataType::LWord:
+        case DataType::ULInt:
+            return "uint64";
+        case DataType::LInt:
+            return "int64";
+        case DataType::Real:
+            return "float";
+        case DataType::LReal:
+            return "double";
+        case DataType::String:
+            return "string";
+        default:
+            return "int";
+    }
+}
+
+static const char* SHELL_API_TEMPLATE = R"(// s7shell_api.as — Built-in S7Shell API declarations for IDE / linting.
+// Tooling-only: DO NOT load into AngelScript engine at runtime.
+
+class PlcRuntime {
+    PlcRuntime();
+    PlcRuntime(const string &in schemaPath);
+    void loadSclSchema(const string &in path);
+    void loadJsonSchema(const string &in path);
+    bool set(uint16 db, const string &in path, const string &in value);
+    string get(uint16 db, const string &in path);
+}
+
+class S7Client {
+    S7Client(const string &in ip, int rack = 0, int slot = 1, uint16 port = 102);
+    S7Client(const string &in ip, int rack, int slot, uint16 port, PlcRuntime@ rt);
+    bool isConnected() const;
+    bool ping();
+    void disconnect();
+    bool reconnect();
+    string lastError() const;
+    int lastErrorCode() const;
+    bool lastOpOk() const;
+    void clearLastError();
+    string read(const string &in address);
+    bool write(const string &in address, const string &in hex);
+}
+
+class S7Server {
+    S7Server(PlcRuntime@ rt, const string &in bindIp = "0.0.0.0", uint16 port = 102);
+    void start();
+    void stop();
+    bool isRunning() const;
+    int clientsCount() const;
+    string getCpuStatus() const;
+}
+
+class HttpServer {
+    HttpServer(PlcRuntime@ rt);
+    void start(const string &in ip = "0.0.0.0", uint16 port = 8080);
+    void stop();
+    bool isRunning() const;
+    void loadPolicy(const string &in path);
+}
+
+class WebSocketServer {
+    WebSocketServer(PlcRuntime@ rt);
+    void start(const string &in ip = "0.0.0.0", uint16 port = 9001);
+    void stop();
+    bool isRunning() const;
+    void broadcast(const string &in json);
+    void loadPolicy(const string &in path);
+}
+
+class Persistence {
+    Persistence(PlcRuntime@ rt);
+    Persistence(PlcRuntime@ rt, const string &in outDir);
+    void configure(const string &in outDir);
+    void configure(const string &in outDir, const string &in format, const string &in mode);
+    void start();
+    void flush();
+    void stop();
+    bool isActive() const;
+    string outDir() const;
+}
+
+class SimParams {
+    uint64 seed;
+    uint timestep_ms;
+    uint duration_s;
+    double noise_level;
+    string fault;
+}
+
+class SimEngine {
+    SimEngine(PlcRuntime@ rt, SimParams@ params);
+    void run();
+    void step();
+}
+
+class WalReplayer {
+    WalReplayer(const string &in archivePath);
+    void speed(double s);
+    bool run();
+}
+
+class S7ProxySession {
+    S7ProxySession(S7Client@ src, S7Client@ dst);
+    void addMapping(uint16 srcDb, uint16 dstDb, uint intervalMs = 100, uint size = 0);
+    void start();
+    void stop();
+}
+
+class GatewaySync {
+    GatewaySync(PlcRuntime@ rt);
+    void subscribeDb(uint16 db);
+    void publishOnDirty(bool enable);
+    bool connect(const string &in url);
+}
+
+void print(const string &in str);
+void sleep(uint ms);
+)";
+
+Result<void, std::string> AsApiEmitter::emit(const PlcSchemaStore& store, const AsEmitterOptions& opts) {
+    std::error_code ec;
+    fs::create_directories(opts.output_dir, ec);
+    if (ec) {
+        return Result<void, std::string>::Error("Failed to create output directory: " + ec.message());
+    }
+
+    // Emit DBs
+    for (const auto& [num, db] : store.dbs()) {
+        std::string filename = fmt::format("DB{}_{}.as", num, db.db_name.empty() ? "Data" : db.db_name);
+        fs::path filepath = fs::path(opts.output_dir) / filename;
+
+        std::ofstream ofs(filepath);
+        if (!ofs.is_open())
+            return Result<void, std::string>::Error("Failed to open " + filepath.string());
+
+        ofs << "// AUTO-GENERATED by sclc emit-angelscript. Do not edit.\n\n";
+        ofs << fmt::format("namespace DB{}\n{{\n", num);
+        ofs << fmt::format("    class {}\n    {{\n", db.db_name.empty() ? "Data" : db.db_name);
+
+        for (const auto& field : db.fields) {
+            std::string type_str = field.udt_name.empty() ? dataTypeToAs(field.type) : field.udt_name;
+            ofs << fmt::format("        {} {};\n", type_str, field.name);
+        }
+
+        ofs << "    }\n}\n";
+    }
+
+    // Emit shell API surface if requested
+    if (opts.include_shell_api) {
+        fs::path api_path = fs::path(opts.output_dir) / "s7shell_api.as";
+        std::ofstream ofs(api_path);
+        if (ofs.is_open()) {
+            ofs << SHELL_API_TEMPLATE;
+        }
+    }
+
+    return {};
+}
+
+} // namespace sgrn::scl

@@ -25,6 +25,14 @@ struct ReplayConfig {
     double replay_speed = 1.0;
     bool loop = false;
     bool no_delay = false;
+    /// When true, skip gateway.json entirely and start with HTTP+WebSocket
+    /// adapters only (no S7/OPC-UA/Modbus/EIP, no persistence, no cloud).
+    /// Activated automatically when -c/--config is omitted on the CLI.
+    bool headless_mode = false;
+    /// HTTP port to bind in headless mode (default 8080).
+    uint16_t headless_http_port = 8080;
+    /// WebSocket port to bind in headless mode (default 8081).
+    uint16_t headless_ws_port = 8081;
 };
 
 class GatewayReplayer {
