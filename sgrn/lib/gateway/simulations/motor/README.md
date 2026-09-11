@@ -35,7 +35,7 @@ physical control terminals.
 - **S7 Adapter**: Enabled (port 102) — used internally by `simulation.as` to attach to its own
   schema; not the control channel.
 - **OPC-UA**: **Enabled — this is the control channel.** `opc.tcp://localhost:4840`.
-- **HTTP/WebSocket API**: Enabled (ports 8000/8001) for read-only dashboards.
+- **HTTP/WebSocket API**: Enabled (port 8000; WebSocket at `/ws`) for read-only dashboards.
 - **Modbus / EtherNet/IP**: Disabled — single motor, no I/O network here.
 - **Security**: Strict mode via `security.as`.
 - **Persistence**: Enabled.

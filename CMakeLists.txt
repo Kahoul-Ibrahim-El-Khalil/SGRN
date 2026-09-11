@@ -79,6 +79,7 @@ sgrn_alias(sgrn::cxxopts)
 sgrn_alias(sgrn::jsoncpp)
 sgrn_alias(sgrn::rapidjson)
 sgrn_alias(sgrn::httplib)
+sgrn_alias(sgrn::crow)
 sgrn_alias(sgrn::xml_h)
 sgrn_alias(sgrn::fmt)
 sgrn_alias(sgrn::snap7)
@@ -173,6 +174,7 @@ if(NOT SGRN_JSONCPP_FROM_ENV)
 endif()
 sgrn_link_dependency(sgrn::rapidjson rapidjson extern::rapidjson)
 sgrn_link_dependency(sgrn::httplib httplib extern::httplib)
+sgrn_link_dependency(sgrn::crow crow extern::crow)
 sgrn_link_dependency(sgrn::xml_h extern::xml_h extern::xml_h)
 sgrn_link_dependency(sgrn::sqlite_modern_cpp sqlite_modern_cpp extern::sqlite_modern_cpp)
 sgrn_link_dependency(sgrn::unordered_dense unordered_dense extern::unordered_dense)
@@ -197,7 +199,7 @@ set(SGRN_REQUIRED_DEPENDENCIES
     # NOTE: sgrn::cxxopts is intentionally NOT asserted — it is conditionally
     # wired (provider varies per platform; absent from the win64 target env) and
     # only consumed by the s7-shell/scl tools.
-    rapidjson httplib xml_h sqlite_modern_cpp
+    rapidjson httplib crow xml_h sqlite_modern_cpp
     snap7 open62541 angelscript angelscript_addons ixwebsocket modbus opener
     zlib zstd openssl sqlite
 )

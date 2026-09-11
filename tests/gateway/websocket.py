@@ -36,7 +36,7 @@ log = logging.getLogger("dual_test")
 async def main() -> None:
     # Use environment vars or default to standard test ports
     gateway_url = os.environ.get("SGRN_URL", "http://localhost:8000")
-    ws_url = os.environ.get("SGRN_WS_URL", "ws://localhost:8001")
+    ws_url = os.environ.get("SGRN_WS_URL", "ws://localhost:8000/ws")
 
     # 1. Setup the Gateway REST client to fetch the registry
     log.info(f"Connecting to Gateway REST API: {gateway_url}")

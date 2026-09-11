@@ -78,7 +78,7 @@ export default defineConfig({
       "/connections": "http://localhost:8000",
       "/db": "http://localhost:8000",
       "/endpoints": "http://localhost:8000",
-      "/ws": { target: "ws://localhost:8001", ws: true },
+      "/ws": { target: "ws://localhost:8000", ws: true },
     },
   },
 });

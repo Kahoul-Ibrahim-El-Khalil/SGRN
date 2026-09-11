@@ -46,6 +46,12 @@ struct GatewayConfig {
     std::string symbols_dir{""};
     int reconnect_ms{5000};
     bool cache_json_north{true};
+    /// Telemetry-dispatch threads (GlobalContext io_context: TelemetryBroker
+    /// fan-out to WebSocket/OPC-UA/persistence). Default 2.
+    int light_threads{2};
+    /// Compression/disk-I/O worker pool (PersistenceService, DatastoreBridge).
+    /// Default 2.
+    int heavy_threads{2};
     bool verbose{false};
     bool debug_incoming{false};
     bool debug_tree{false};
@@ -76,7 +82,7 @@ constexpr const char example[] = R"({
     },
     "websocket": {
       "ip": "127.0.0.1",
-      "port": 8001
+      "port": 8000
     },
     "modbus": {
       "ip": "0.0.0.0",
@@ -93,6 +99,10 @@ constexpr const char example[] = R"({
   },
   "cache_json_north": true,
   "reconnect_ms": 5000,
+  "threading": {
+    "light_threads": 2,
+    "heavy_threads": 2
+  },
   "persistence": {
     "enabled": false,
     "mode": "changes_with_timestamp",

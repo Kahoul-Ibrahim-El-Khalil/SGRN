@@ -61,11 +61,17 @@ public:
 
     /**
      * @brief Stop the adapter and join the serve thread
+     *
+     * Clears the running flag, then calls the derived onStopRequested()
+     * hook (default: no-op) BEFORE joining — the hook lets adapters wake a
+     * serve thread parked in a blocking syscall (e.g. shutdown sockets so a
+     * blocked recv/select errors out) so join() cannot hang.
      */
     void stop() {
         if (!running_.exchange(false)) {
             return;
         }
+        static_cast<Derived*>(this)->onStopRequested();
         if (thread_.joinable()) {
             thread_.join();
         }
@@ -88,6 +94,17 @@ protected:
     }
     std::atomic<bool>& runningFlag() {
         return running_;
+    }
+
+    /**
+     * @brief Pre-join wake-up hook, called by stop() after clearing the
+     * running flag and before joining the serve thread.
+     *
+     * Derived adapters override this (it hides the base no-op) to unblock a
+     * serve thread parked in a blocking syscall. Must be public on the
+     * derived class: stop() invokes it through the CRTP base context.
+     */
+    void onStopRequested() {
     }
 
 private:

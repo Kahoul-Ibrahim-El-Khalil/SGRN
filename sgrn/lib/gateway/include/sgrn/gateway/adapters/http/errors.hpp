@@ -15,7 +15,7 @@ namespace sgrn::gateway::adapters::http
  * Every fallible step inside the HTTP handlers returns this enum (via
  * sgrn::Result) so failures are machine-checkable and are translated to an
  * HTTP status code exactly once — at the wire boundary where the
- * httplib::Response is filled in. toString() is the single place mapping a
+ * HttpResponse is filled in. toString() is the single place mapping a
  * status back to a human-readable message, mirroring the OPC UA adapter's
  * errors.hpp pattern.
  */

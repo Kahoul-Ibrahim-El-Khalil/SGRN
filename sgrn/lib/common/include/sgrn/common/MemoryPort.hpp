@@ -58,6 +58,22 @@ struct IMemoryPort {
     /// Schema-checked field write from a JSON value (marks dirty/telemetry).
     virtual sgrn::Result<void, ErrorClass> updateField(
         uint16_t t_db_number, const std::string& t_field_path, const std::string& t_value_json) = 0;
+    /// Drain queued field writes so they become visible to reads. Backends
+    /// that queue updateField() (command-queue twin) apply them here; raw
+    /// writeDbMemory()/writeBit() apply synchronously and need no flush.
+    /// Call once after a batch of updateField() calls, not per field.
+    virtual void flushCommands() = 0;
+    /**
+     * @brief Monotonic per-DB write generation for pollers.
+     *
+     * Bumped on EVERY write to the DB (raw or field-level). Consumers keep
+     * the last-seen value per DB and skip re-reading while it matches —
+     * seqlock discipline: record the generation read BEFORE syncing, never
+     * after, so a write racing the sync only ever causes one redundant
+     * re-sync, never a permanently missed update. 0 means "unknown"
+     * (backend cannot track it): treat as always-dirty and sync.
+     */
+    virtual uint64_t dbVersion(uint16_t t_db_number) const = 0;
 };
 
 } // namespace sgrn::common

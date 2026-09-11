@@ -13,7 +13,7 @@ This scenario simulates a natural gas dehydration unit using a 3-tower molecular
 
 ## Enabled / Disabled Features
 - **S7 Adapter**: **Enabled** (Port 102).
-- **HTTP/WebSocket API**: **Enabled** (Ports 8000/8001).
+- **HTTP/WebSocket API**: **Enabled** (Port 8000; WebSocket at `/ws`).
 - **Modbus Adapter**: **Disabled** in demo via `demo.py` due to port 502 root binding restrictions (unless run with `sudo`).
 - **Security**: **Strict Mode**. AngelScript policy enforced via `security.as`.
 - **Persistence**: **Enabled**. Snapshots are flushed to `/tmp/sgrn-gateway-state`.

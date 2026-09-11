@@ -3,6 +3,7 @@
 #include <sgrn/gateway/adapters/ethernetip/EipAdapter.hpp>
 #include <sgrn/gateway/adapters/http.hpp>
 #include <sgrn/gateway/adapters/modbus/ModbusAdapter.hpp>
+#include <sgrn/gateway/adapters/northbound/NorthboundServer.hpp>
 #include <sgrn/gateway/adapters/opcua.hpp>
 #include <sgrn/gateway/adapters/ports/TwinPorts.hpp>
 #include <sgrn/gateway/adapters/s7/S7ProtocolAdapter.hpp>
@@ -63,8 +64,11 @@ using namespace sgrn::gateway::config;
 using namespace sgrn::gateway::backend;
 using namespace sgrn::gateway::core;
 
-constexpr int kLightThreads = 2;
-constexpr int kHeavyPoolThreads = 2; // worker threads for compression/disk I/O
+/// Thread-count bounds for the configurable pools (see GatewayConfig::
+/// light_threads/heavy_threads). Single-threaded floors keep every pipeline
+/// functional; the ceiling guards against absurd configs.
+constexpr int kMinThreads = 1;
+constexpr int kMaxThreads = 64;
 
 class GatewayApplication {
 public:
@@ -76,7 +80,9 @@ public:
     sgrn::Result<void, std::string> loadConfig(int t_argc, char** tp_argv);
     void enablePassiveReplayMode();
     /// Bypass loadConfig() entirely: build a minimal in-memory GatewayConfig
-    /// with HTTP (t_http_port) and WebSocket (t_ws_port) adapters only.
+    /// with HTTP (t_http_port) and WebSocket adapters only. The WebSocket
+    /// endpoint (`/ws`) shares the HTTP listener, so t_ws_port is recorded
+    /// but not bound separately.
     /// Persistence, cloud upload, and all southbound adapters stay disabled.
     /// Must be called instead of loadConfig(), before loadSchema().
     void setHeadlessReplayConfig(const std::string& t_schema_path, uint16_t t_http_port = 8080, uint16_t t_ws_port = 8081);
@@ -191,6 +197,11 @@ private:
     std::optional<sgrn::gateway::adapters::ethernetip::EipAdapter> eip_adapter_;
     std::optional<sgrn::gateway::adapters::HttpAdapter> http_adapter_;
     std::optional<sgrn::gateway::adapters::websocket::WebSocketAdapter> ws_facade_;
+    // Single northbound listener: HTTP routes and the WebSocket `/ws` route
+    // share one Crow app, one asio event loop, and one port. Declared last so
+    // it stops (and joins) before the adapters whose handlers it may still be
+    // running — those only hold references while registered.
+    sgrn::gateway::adapters::northbound::NorthboundServer northbound_server_;
 
     uint8_t active_protocols_{0};
 };

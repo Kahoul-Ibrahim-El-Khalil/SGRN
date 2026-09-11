@@ -97,8 +97,8 @@ class Gateway:
     >>> record["thermal_power_mw"]
     """
 
-    _DEFAULT_WS_PORT_SHIFT = 1  # sample config: http 8000 → websocket 8001
-
+    # WebSocket shares the HTTP listener at /ws (single northbound port) —
+    # so the default WS URL is derived from the HTTP base URL directly.
     def __init__(
         self,
         t_base_url: str = "http://localhost:8000",
@@ -128,10 +128,11 @@ class Gateway:
             port = parsed.port or 443
         else:
             try:
-                port = (parsed.port or 8000) + self._DEFAULT_WS_PORT_SHIFT
+                port = parsed.port or 8000
             except ValueError:
-                port = 8001
-        return urllib.parse.urlunsplit((scheme, f"{host}:{port}", parsed.path, "", ""))
+                port = 8000
+        base_path = (parsed.path or "").rstrip("/")
+        return urllib.parse.urlunsplit((scheme, f"{host}:{port}", f"{base_path}/ws", "", ""))
 
     def _build_ssl_ctx(self) -> Optional[ssl.SSLContext]:
         if self._verify is False:

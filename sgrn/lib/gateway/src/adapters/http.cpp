@@ -18,9 +18,7 @@ using sgrn::gateway::common::SecurityHelper;
 namespace sgrn::gateway::adapters
 {
 
-HttpAdapter::HttpAdapter()
-    : server_(std::make_unique<httplib::Server>()) {
-}
+HttpAdapter::HttpAdapter() = default;
 
 HttpAdapter::~HttpAdapter() {
     stop();
@@ -28,34 +26,39 @@ HttpAdapter::~HttpAdapter() {
 
 sgrn::Result<void> HttpAdapter::start(const std::string& t_ip, uint16_t t_port, const PlcSchemaStore& t_registry, PlcMemory& t_memory,
     std::shared_ptr<sgrn::gateway::database::GatewayDatabase> tsp_db, std::shared_ptr<::sgrn::gateway::SecurityManager> tsp_security,
-    const ::sgrn::scl::ModbusVirtualMap* tp_modbus_map, uint16_t t_ws_port) {
-    security_manager_ = std::move(tsp_security);
-    modbus_map_ = tp_modbus_map;
-    ws_port_ = t_ws_port;
+    const ::sgrn::scl::ModbusVirtualMap* tp_modbus_map, uint16_t /*t_ws_port*/) {
+    // NOTE: t_ws_port is accepted for source compatibility but ignored: since
+    // the Crow migration the WebSocket endpoint (`/ws`) shares this same HTTP
+    // listener instead of living on a separate port.
+    if (running_.load(std::memory_order_acquire))
+        return sgrn::Result<void>::Error("HttpAdapter: already running");
 
-    server_->set_pre_routing_handler([](const httplib::Request& t_req, httplib::Response& res) {
-        // HIGH-6: Reflect Origin only if it matches the allowed list.
-        // If allowed_origins_ is empty the server was started without an allowlist
-        // (dev mode) – fall back to wildcard. In production populate allowed_origins_.
-        const std::string origin = t_req.get_header_value("Origin");
-        if (origin.empty()) {
-            res.set_header("Access-Control-Allow-Origin", "*");
-        } else {
-            // For now: single-origin reflection; operator can add an allowlist
-            // via HttpAdapter::setAllowedOrigins() before calling start().
-            res.set_header("Access-Control-Allow-Origin", origin);
-            res.set_header("Vary", "Origin");
-        }
-        res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-        res.set_header("Access-Control-Allow-Headers", "Content-Type");
-        return httplib::Server::HandlerResponse::Unhandled;
-    });
+    configure(t_registry, t_memory, std::move(tsp_db), std::move(tsp_security), tp_modbus_map);
 
     // Tier 4: No longer subscribing to TelemetryBroker for REST.
     // TreeCacheEngine handles lazy caching of the semantic tree.
 
-    registerWebAssets();
+    server_ = std::make_unique<northbound::NorthboundServer>();
+    registerRoutes(server_->app());
+    if (auto r = server_->start(t_ip, t_port); r.hasError()) {
+        server_.reset();
+        return fmt::format("HttpAdapter: {}", r.error());
+    }
+    running_.store(true, std::memory_order_release);
+    return {};
+}
 
+void HttpAdapter::configure(const PlcSchemaStore& t_registry, PlcMemory& t_memory,
+    std::shared_ptr<sgrn::gateway::database::GatewayDatabase> tsp_db, std::shared_ptr<::sgrn::gateway::SecurityManager> tsp_security,
+    const ::sgrn::scl::ModbusVirtualMap* tp_modbus_map) {
+    security_manager_ = std::move(tsp_security);
+    modbus_map_ = tp_modbus_map;
+    refs_.registry = &t_registry;
+    refs_.memory = &t_memory;
+    refs_.db = std::move(tsp_db);
+}
+
+void HttpAdapter::registerRoutes(crow::SimpleApp& t_app) {
     /**
      * REST API Documentation
      * ──────────────────────
@@ -102,10 +105,6 @@ sgrn::Result<void> HttpAdapter::start(const std::string& t_ip, uint16_t t_port, 
      *   Writes raw bytes to a single DB (binary/octet-stream request+response).
      *   Response echoes written bytes (S7 confirmation semantics).
      *
-     * [GET] /memory/batch?db=<n>&offset=<o>&size=<s>&db=<n>&offset=<o>&size=<s>&...
-     *   Reads from multiple DBs in a single atomic batch (JSON array, base64url).
-     *   Response: [{"db":..., "offset":..., "size":..., "data":"<base64url>"},...]
-     *
      * [PUT] /memory/batch
      *   Writes to multiple DBs in a single atomic batch (JSON array, base64url).
      *   Request: [{"db":..., "offset":..., "size":..., "data":"<base64url>"},...]
@@ -119,97 +118,120 @@ sgrn::Result<void> HttpAdapter::start(const std::string& t_ip, uint16_t t_port, 
      * Historical & Diagnostic routes:
      * [GET] /connections, /db/history, /db/sessions, /db/logs
      */
-    server_->Get(
-        "/registry/types", [this](const httplib::Request& t_req, httplib::Response& res) { this->handleGetRegistryTypes(t_req, res); });
-    server_->Get(
-        "/registry/modbus", [this](const httplib::Request& t_req, httplib::Response& res) { this->handleGetModbusRegistry(t_req, res); });
-    server_->Get("/registry",
-        [this, &t_registry](const httplib::Request& t_req, httplib::Response& res) { this->handleGetRegistry(t_req, res, t_registry); });
-    server_->Get(R"(/data/(.*))", [this, &t_registry, &t_memory](const httplib::Request& t_req, httplib::Response& res) {
-        this->handleGetData(t_req, res, t_registry, t_memory);
+
+    // Small local helper: translate HttpRequest -> handler -> crow::response.
+    auto serve = [this](const crow::request& t_crow_req, std::string t_captured,
+                     void (HttpAdapter::*t_handler)(const http::HttpRequest&, http::HttpResponse&)) {
+        http::HttpRequest req = http::fromCrowRequest(t_crow_req, std::move(t_captured));
+        http::HttpResponse res;
+        (this->*t_handler)(req, res);
+        crow::response crow_res;
+        http::applyToCrowResponse(res, crow_res);
+        http::applyCors(crow_res, t_crow_req);
+        return crow_res;
+    };
+
+    // ── Registry ─────────────────────────────────────────────────────────────
+    CROW_ROUTE(t_app, "/registry/types").methods("GET"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
+        return serve(t_req, "", &HttpAdapter::handleGetRegistryTypes);
     });
-    server_->Put(R"(/data/(.*))", [this, &t_registry, &t_memory](const httplib::Request& t_req, httplib::Response& res) {
-        this->handlePut(t_req, res, t_registry, t_memory);
+    CROW_ROUTE(t_app, "/registry/modbus").methods("GET"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
+        return serve(t_req, "", &HttpAdapter::handleGetModbusRegistry);
     });
-    server_->Post(R"(/data/(.*))", [this, &t_registry, &t_memory](const httplib::Request& t_req, httplib::Response& res) {
-        this->handlePost(t_req, res, t_registry, t_memory);
-    });
-
-    // ── Raw Memory API: /memory/* endpoints ──────────────────────────────────
-    // Binary mode: single DB, raw bytes (application/octet-stream)
-    server_->Get(R"(/memory/db/(.*))",
-        [this, &t_memory](const httplib::Request& t_req, httplib::Response& res) { this->handleGetMemoryBinary(t_req, res, t_memory); });
-    server_->Put(R"(/memory/db/(.*))",
-        [this, &t_memory](const httplib::Request& t_req, httplib::Response& res) { this->handlePutMemoryBinary(t_req, res, t_memory); });
-
-    // Batch mode: multiple DBs, base64url JSON array (application/json)
-    // Only PUT supported for batch operations (all-or-nothing atomicity)
-    server_->Put("/memory/batch",
-        [this, &t_memory](const httplib::Request& t_req, httplib::Response& res) { this->handlePutMemoryBatch(t_req, res, t_memory); });
-
-    // ── Diagnostic endpoints ──────────────────────────────────────────────────
-    server_->Get("/connections",
-        [this, tsp_db](const httplib::Request& t_req, httplib::Response& res) { this->handleGetConnections(t_req, res, *tsp_db); });
-    server_->Get("/db/history",
-        [this, tsp_db](const httplib::Request& t_req, httplib::Response& res) { this->handleGetDbHistory(t_req, res, *tsp_db); });
-    server_->Get("/db/sessions",
-        [this, tsp_db](const httplib::Request& t_req, httplib::Response& res) { this->handleGetDbSessions(t_req, res, *tsp_db); });
-    server_->Get(
-        "/db/logs", [this, tsp_db](const httplib::Request& t_req, httplib::Response& res) { this->handleGetDbLogs(t_req, res, *tsp_db); });
-    server_->Get("/endpoints", [this](const httplib::Request& t_req, httplib::Response& res) { this->handleGetEndpoints(t_req, res); });
-
-    // ── Security policy introspection endpoint ────────────────────────────────
-    server_->Get("/api/policy", [this](const httplib::Request&, httplib::Response& res) {
-        if (security_manager_) {
-            res.set_content(security_manager_->policyToJson(), "application/json");
-        } else {
-            res.set_content(R"({"rules":[],"total":0,"mode":"relaxed"})", "application/json");
-        }
+    CROW_ROUTE(t_app, "/registry").methods("GET"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
+        return serve(t_req, "", &HttpAdapter::handleGetRegistry);
     });
 
-    running_ = true;
-    if (!server_->bind_to_port(t_ip.c_str(), t_port)) {
-        running_ = false;
-        return fmt::format("HttpAdapter: Failed to bind to {}:{}", t_ip, t_port);
-    }
-    server_thread_ = std::thread([this]() { server_->listen_after_bind(); });
-    return {};
+    // ── Semantic data API (Crow <path> captures the remainder incl. '/') ────
+    CROW_ROUTE(t_app, "/data/<path>")
+        .methods("GET"_method, "POST"_method, "PUT"_method, "OPTIONS"_method)([serve](const crow::request& t_req, std::string t_sub) {
+            if (t_req.method == "POST"_method)
+                return serve(t_req, std::move(t_sub), &HttpAdapter::handlePost);
+            if (t_req.method == "PUT"_method)
+                return serve(t_req, std::move(t_sub), &HttpAdapter::handlePut);
+            return serve(t_req, std::move(t_sub), &HttpAdapter::handleGetData);
+        });
+    // Bare /data and /data/ (full-twin read / multi-DB merge-write).
+    // NOTE: only /data/ is registered: Crow auto-serves the slashless form
+    // with a 301 redirect to /data/ (registering both collides in the trie).
+    auto data_root = [serve](const crow::request& t_req) {
+        if (t_req.method == "POST"_method)
+            return serve(t_req, "", &HttpAdapter::handlePost);
+        if (t_req.method == "PUT"_method)
+            return serve(t_req, "", &HttpAdapter::handlePut);
+        return serve(t_req, "", &HttpAdapter::handleGetData);
+    };
+    CROW_ROUTE(t_app, "/data/").methods("GET"_method, "POST"_method, "PUT"_method, "OPTIONS"_method)(data_root);
+
+    // ── Raw Memory API ───────────────────────────────────────────────────────
+    CROW_ROUTE(t_app, "/memory/db/<path>")
+        .methods("GET"_method, "PUT"_method, "OPTIONS"_method)([serve](const crow::request& t_req, std::string t_sub) {
+            if (t_req.method == "PUT"_method)
+                return serve(t_req, std::move(t_sub), &HttpAdapter::handlePutMemoryBinary);
+            return serve(t_req, std::move(t_sub), &HttpAdapter::handleGetMemoryBinary);
+        });
+    CROW_ROUTE(t_app, "/memory/batch").methods("PUT"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
+        return serve(t_req, "", &HttpAdapter::handlePutMemoryBatch);
+    });
+
+    // ── Diagnostics ──────────────────────────────────────────────────────────
+    CROW_ROUTE(t_app, "/connections").methods("GET"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
+        return serve(t_req, "", &HttpAdapter::handleGetConnections);
+    });
+    CROW_ROUTE(t_app, "/db/history").methods("GET"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
+        return serve(t_req, "", &HttpAdapter::handleGetDbHistory);
+    });
+    CROW_ROUTE(t_app, "/db/sessions").methods("GET"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
+        return serve(t_req, "", &HttpAdapter::handleGetDbSessions);
+    });
+    CROW_ROUTE(t_app, "/db/logs").methods("GET"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
+        return serve(t_req, "", &HttpAdapter::handleGetDbLogs);
+    });
+    CROW_ROUTE(t_app, "/endpoints").methods("GET"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
+        return serve(t_req, "", &HttpAdapter::handleGetEndpoints);
+    });
+
+    // ── Security policy introspection ────────────────────────────────────────
+    CROW_ROUTE(t_app, "/api/policy").methods("GET"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
+        return serve(t_req, "", &HttpAdapter::handleGetPolicy);
+    });
+
+    registerWebAssets(t_app);
 }
 
 void HttpAdapter::stop() {
+    if (!running_.exchange(false, std::memory_order_acq_rel))
+        return;
+    if (server_)
+        server_->stop();
+    server_.reset();
+}
 
-    running_ = false;
-    server_->stop();
-    if (server_thread_.joinable())
-        server_thread_.join();
+void HttpAdapter::handleGetPolicy(const http::HttpRequest&, http::HttpResponse& t_res) {
+    if (security_manager_) {
+        t_res.set_content(security_manager_->policyToJson(), "application/json");
+    } else {
+        t_res.set_content(R"({"rules":[],"total":0,"mode":"relaxed"})", "application/json");
+    }
 }
 
 // ── ACL helper — delegates to the shared SecurityHelper ─────────────────────
-bool HttpAdapter::isAuthorized(const httplib::Request& t_req, std::optional<uint16_t> t_db_number) const {
+bool HttpAdapter::isAuthorized(const http::HttpRequest& t_req, std::optional<uint16_t> t_db_number) const {
     if (!security_manager_)
         return true;
-
-    std::vector<std::string> header_names;
-    for (const auto& [k, v] : t_req.headers) {
-        header_names.push_back(k);
-    }
 
     // SecurityHelper does not forward headers for connection-auth; call the
     // manager directly to preserve the header-names parameter.
-    return security_manager_->authorizeHttp(t_req.remote_addr, t_req.get_header_value("Origin"), header_names, t_db_number);
+    return security_manager_->authorizeHttp(t_req.remote_ip, t_req.get_header_value("Origin"), t_req.headerNames(), t_db_number);
 }
 
 bool HttpAdapter::isAuthorizedField(
-    const httplib::Request& t_req, std::optional<uint16_t> t_db_number, const std::string& t_field_path, bool t_is_write) const {
+    const http::HttpRequest& t_req, std::optional<uint16_t> t_db_number, const std::string& t_field_path, bool t_is_write) const {
     if (!security_manager_)
         return true;
 
-    std::vector<std::string> header_names;
-    for (const auto& [k, v] : t_req.headers) {
-        header_names.push_back(k);
-    }
-
-    std::string client_ip = t_req.remote_addr;
+    std::vector<std::string> header_names = t_req.headerNames();
+    std::string client_ip = t_req.remote_ip;
     std::string origin = t_req.get_header_value("Origin");
 
     // Delegate to the shared SecurityHelper for field-level read/write auth.

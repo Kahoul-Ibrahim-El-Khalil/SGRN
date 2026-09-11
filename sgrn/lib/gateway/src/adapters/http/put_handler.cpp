@@ -19,8 +19,8 @@ std::string buildRawWriteResponse(uint16_t t_db, size_t t_offset, size_t t_size,
 }
 } // namespace
 
-void HttpAdapter::handlePut(
-    const httplib::Request& t_req, httplib::Response& t_res, const PlcSchemaStore& /*registry*/, PlcMemory& t_memory) {
+void HttpAdapter::handlePut(const http::HttpRequest& t_req, http::HttpResponse& t_res) {
+    PlcMemory& t_memory = *refs_.memory;
     // ── 1. Check if it's a multi-write request (JSON array) ──────────────
     if (!t_req.has_param("db") && !t_req.has_param("offset") && !t_req.has_param("size")) {
         const std::string& ct = t_req.get_header_value("Content-Type");
@@ -61,7 +61,7 @@ void HttpAdapter::handlePut(
             size_t item_size = item["size"].GetUint64();
             std::string data_b64 = item["data"].GetString();
 
-            const std::string& client_ip = t_req.remote_addr;
+            const std::string& client_ip = t_req.remote_ip;
             if (!isAuthorized(t_req, db_num)) {
                 t_res.status = 403;
                 t_res.set_content(
@@ -157,7 +157,7 @@ void HttpAdapter::handlePut(
     }
 
     // ── 2. IP / DB ACL ────────────────────────────────────────────────────
-    const std::string& client_ip = t_req.remote_addr;
+    const std::string& client_ip = t_req.remote_ip;
     if (!isAuthorized(t_req, db_num)) {
         t_res.status = 403;
         t_res.set_content(fmt::format(R"({{"error":"IP {} is not authorised to write DB{}"}})", client_ip, db_num), "application/json");

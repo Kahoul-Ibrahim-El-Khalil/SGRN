@@ -80,12 +80,12 @@ def run_pipeline_demo(gui_mode: bool = False):
     manifest_file = WORK_DIR / "manifest.json"
     scl_schema = SIM_DIR / "schema.scl"
 
-    # Create Primary Gateway config (Port 8080 HTTP / 8081 WS)
+    # Create Primary Gateway config (HTTP + WebSocket share port 8080, WS at /ws)
     primary_config = {
         "listen": {
             "s7": {"ip": "127.0.0.1", "port": 10102, "max_clients": 10, "pdu_size": 960},
             "http": {"ip": "127.0.0.1", "port": 8080},
-            "websocket": {"ip": "127.0.0.1", "port": 8081}
+            "websocket": {"ip": "127.0.0.1", "port": 8080}
         },
         "schema": str(scl_schema),
         "state_dir": str(primary_state_dir),
@@ -104,11 +104,11 @@ def run_pipeline_demo(gui_mode: bool = False):
     with open(primary_cfg_path, "w") as f:
         json.dump(primary_config, f, indent=2)
 
-    # Create Prediction Gateway config (Port 8082 HTTP / 8083 WS)
+    # Create Prediction Gateway config (HTTP + WebSocket share port 8082, WS at /ws)
     prediction_config = {
         "listen": {
             "http": {"ip": "127.0.0.1", "port": 8082},
-            "websocket": {"ip": "127.0.0.1", "port": 8083}
+            "websocket": {"ip": "127.0.0.1", "port": 8082}
         },
         "schema": str(scl_schema),
         "state_dir": str(prediction_state_dir),

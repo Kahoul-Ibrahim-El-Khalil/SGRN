@@ -42,6 +42,8 @@ public:
         uint16_t t_db_number, size_t t_byte_offset, int t_bit_index, bool t_value) override;
     sgrn::Result<void, ::sgrn::common::ErrorClass> updateField(
         uint16_t t_db_number, const std::string& t_field_path, const std::string& t_value_json) override;
+    void flushCommands() override;
+    uint64_t dbVersion(uint16_t t_db_number) const override;
 
 private:
     twin::PlcMemory& memory_;

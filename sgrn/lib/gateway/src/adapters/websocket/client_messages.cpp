@@ -13,7 +13,6 @@
 #include <sgrn/gateway/twin/LeafDictionary.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <sgrn/utils/time.hpp>
-#include <ixwebsocket/IXWebSocket.h>
 #include <optional>
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
@@ -42,6 +41,9 @@ namespace sgrn::gateway::adapters::websocket
  *
  * WebSocket API Documentation
  * ───────────────────────────
+ * Connect to ws://<host>:<http-port>/ws — the WebSocket endpoint shares the
+ * HTTP listener and port (single northbound server).
+ *
  * Clients can dynamically subscribe to specific PLC paths to filter the
  * telemetry stream. By default, clients receive nothing (or everything,
  * depending on integration). To control the stream, send JSON commands:
@@ -69,7 +71,7 @@ namespace sgrn::gateway::adapters::websocket
  * This is transparent to the frontend — the JSON structure is identical,
  * just pruned.
  */
-void WebSocketAdapter::handleClientMessage(std::shared_ptr<ix::WebSocket> tsp_ws, const std::string& t_message) {
+void WebSocketAdapter::handleClientMessage(crow::websocket::connection& t_conn, const std::string& t_message) {
     // MED-5: Reject oversized messages before parsing to prevent memory exhaustion.
     constexpr size_t kMaxMessageBytes = 4096;
     if (t_message.size() > kMaxMessageBytes)
@@ -99,7 +101,7 @@ void WebSocketAdapter::handleClientMessage(std::shared_ptr<ix::WebSocket> tsp_ws
             std::string path = doc["path"].GetString();
             // Catch-up target: subscriptions resolved below; the current
             // values are pushed after the lock is released.
-            std::shared_ptr<ix::WebSocket> catchup_ws;
+            crow::websocket::connection* catchup_conn = nullptr;
             std::vector<ClientContext::LeafRange> catchup_ranges;
             if (security_manager_ && registry_) {
                 // Common schema_resolver — resolve path to schema info
@@ -107,7 +109,7 @@ void WebSocketAdapter::handleClientMessage(std::shared_ptr<ix::WebSocket> tsp_ws
                 std::optional<uint16_t> db_num = resolution.schema ? std::optional<uint16_t>(resolution.schema->db_number) : std::nullopt;
 
                 std::lock_guard<std::mutex> lk(clients_mutex_);
-                auto it = clients_.find(tsp_ws);
+                auto it = clients_.find(&t_conn);
                 if (it != clients_.end()) {
                     // Common SecurityHelper for field-level read authorization
                     auto auth = SecurityHelper::authorizeRead(*security_manager_, security::Protocol::WebSocket, it->second.ip, db_num,
@@ -119,20 +121,24 @@ void WebSocketAdapter::handleClientMessage(std::shared_ptr<ix::WebSocket> tsp_ws
                     it->second.subscriptions.insert(path);
                     resolveLeafRanges(it->second);
                     if (it->second.dictionary_mode) {
-                        catchup_ws = tsp_ws;
+                        catchup_conn = &t_conn;
                         catchup_ranges = it->second.leaf_ranges;
                     }
                 }
             } else {
                 std::lock_guard<std::mutex> lk(clients_mutex_);
-                clients_[tsp_ws].subscriptions.insert(path);
-                resolveLeafRanges(clients_[tsp_ws]);
-                if (clients_[tsp_ws].dictionary_mode) {
-                    catchup_ws = tsp_ws;
-                    catchup_ranges = clients_[tsp_ws].leaf_ranges;
+                auto it = clients_.find(&t_conn);
+                if (it == clients_.end())
+                    return;
+                it->second.subscriptions.insert(path);
+                resolveLeafRanges(it->second);
+                if (it->second.dictionary_mode) {
+                    catchup_conn = &t_conn;
+                    catchup_ranges = it->second.leaf_ranges;
                 }
             }
-            sendCatchUp(catchup_ws, catchup_ranges);
+            if (catchup_conn)
+                sendCatchUp(*catchup_conn, catchup_ranges);
         } else if (cmd == "subscribe_binary" && doc.HasMember("db")) {
             if (!registry_) {
                 SGRN_WARN_LOG("WebSocket binary subscribe rejected: registry not available");
@@ -192,7 +198,7 @@ void WebSocketAdapter::handleClientMessage(std::shared_ptr<ix::WebSocket> tsp_ws
             std::vector<std::string> headers;
             {
                 std::lock_guard<std::mutex> lk(clients_mutex_);
-                auto it = clients_.find(tsp_ws);
+                auto it = clients_.find(&t_conn);
                 if (it == clients_.end())
                     return;
 
@@ -223,13 +229,13 @@ void WebSocketAdapter::handleClientMessage(std::shared_ptr<ix::WebSocket> tsp_ws
             }
 
             const double timestamp_seconds = static_cast<double>(sgrn::utils::time::nowMilliseconds()) / 1000.0;
-            if (!sendBinaryFrame(tsp_ws, *db_num, offset, size, timestamp_seconds)) {
+            if (!sendBinaryFrame(&t_conn, *db_num, offset, size, timestamp_seconds)) {
                 SGRN_WARN_LOG("WebSocket binary seed for DB{} offset {} size {} failed", *db_num, offset, size);
             }
         } else if (cmd == "unsubscribe" && doc.HasMember("path") && doc["path"].IsString()) {
             std::string path = doc["path"].GetString();
             std::lock_guard<std::mutex> lk(clients_mutex_);
-            auto it = clients_.find(tsp_ws);
+            auto it = clients_.find(&t_conn);
             if (it != clients_.end()) {
                 it->second.subscriptions.erase(path);
                 resolveLeafRanges(it->second);
@@ -247,7 +253,7 @@ void WebSocketAdapter::handleClientMessage(std::shared_ptr<ix::WebSocket> tsp_ws
             }
 
             std::lock_guard<std::mutex> lk(clients_mutex_);
-            auto it = clients_.find(tsp_ws);
+            auto it = clients_.find(&t_conn);
             if (it == clients_.end())
                 return;
 
@@ -279,30 +285,31 @@ void WebSocketAdapter::handleClientMessage(std::shared_ptr<ix::WebSocket> tsp_ws
             }
         } else if (cmd == "clear_subscriptions") {
             std::lock_guard<std::mutex> lk(clients_mutex_);
-            auto it = clients_.find(tsp_ws);
+            auto it = clients_.find(&t_conn);
             if (it != clients_.end()) {
                 it->second.subscriptions.clear();
                 it->second.binary_subscriptions.clear();
             }
         } else if (cmd == "setDictionaryMode") {
             const bool enabled = doc.HasMember("enabled") && doc["enabled"].IsBool() && doc["enabled"].GetBool();
-            std::shared_ptr<ix::WebSocket> catchup_ws;
+            crow::websocket::connection* catchup_conn = nullptr;
             std::vector<ClientContext::LeafRange> catchup_ranges;
             {
                 std::lock_guard<std::mutex> lk(clients_mutex_);
-                auto it = clients_.find(tsp_ws);
+                auto it = clients_.find(&t_conn);
                 if (it != clients_.end()) {
                     it->second.dictionary_mode = enabled;
                     resolveLeafRanges(it->second);
                     if (enabled) {
-                        catchup_ws = tsp_ws;
+                        catchup_conn = &t_conn;
                         catchup_ranges = it->second.leaf_ranges;
                     }
                 }
             }
             // A client that subscribed first (legacy) and opts into
             // dictionary mode afterwards gets current values right away.
-            sendCatchUp(catchup_ws, catchup_ranges);
+            if (catchup_conn)
+                sendCatchUp(*catchup_conn, catchup_ranges);
         }
     }
 }

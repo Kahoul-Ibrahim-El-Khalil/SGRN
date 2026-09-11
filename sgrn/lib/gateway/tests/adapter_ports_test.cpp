@@ -132,6 +132,12 @@ public:
         update_log_.push_back(std::to_string(t_db) + ":" + t_path + "=" + t_json);
         return {};
     }
+    void flushCommands() override {
+        // Fake applies updateField synchronously; nothing to drain.
+    }
+    uint64_t dbVersion(uint16_t) const override {
+        return 0; // unknown: pollers must sync unconditionally
+    }
 
     std::map<uint16_t, std::vector<uint8_t>> dbs_;
 };

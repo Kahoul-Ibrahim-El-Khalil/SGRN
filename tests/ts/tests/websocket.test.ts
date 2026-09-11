@@ -24,7 +24,7 @@ describe("WebSocket Telemetry Tests", () => {
   });
 
   test("WebSocket connection opens successfully", async () => {
-    const wsUrl = "ws://localhost:8081";
+    const wsUrl = "ws://localhost:8080/ws";
     ws = new WebSocket(wsUrl);
 
     const connected = await new Promise<boolean>((resolve) => {
@@ -37,7 +37,7 @@ describe("WebSocket Telemetry Tests", () => {
   });
 
   test("WebSocket receives telemetry data after subscription", async () => {
-    const wsUrl = "ws://localhost:8081";
+    const wsUrl = "ws://localhost:8080/ws";
     ws = new WebSocket(wsUrl);
 
     await new Promise<void>((resolve, reject) => {
@@ -76,7 +76,7 @@ describe("WebSocket Telemetry Tests", () => {
   });
 
   test("WebSocket subscription and unsubscription", async () => {
-    const wsUrl = "ws://localhost:8081";
+    const wsUrl = "ws://localhost:8080/ws";
     ws = new WebSocket(wsUrl);
 
     await new Promise<void>((resolve) => {
@@ -97,7 +97,7 @@ describe("WebSocket Telemetry Tests", () => {
   });
 
   test("WebSocket handles multiple subscriptions", async () => {
-    const wsUrl = "ws://localhost:8081";
+    const wsUrl = "ws://localhost:8080/ws";
     ws = new WebSocket(wsUrl);
 
     await new Promise<void>((resolve) => {
@@ -117,7 +117,7 @@ describe("WebSocket Telemetry Tests", () => {
   });
 
   test("WebSocket clear_subscriptions command", async () => {
-    const wsUrl = "ws://localhost:8081";
+    const wsUrl = "ws://localhost:8080/ws";
     ws = new WebSocket(wsUrl);
 
     await new Promise<void>((resolve) => {
@@ -138,7 +138,7 @@ describe("WebSocket Telemetry Tests", () => {
   });
 
   test("WebSocket receives ping/pong heartbeats", async () => {
-    const wsUrl = "ws://localhost:8081";
+    const wsUrl = "ws://localhost:8080/ws";
     ws = new WebSocket(wsUrl);
 
     await new Promise<void>((resolve) => {
@@ -154,7 +154,7 @@ describe("WebSocket Telemetry Tests", () => {
   });
 
   test("WebSocket handles invalid JSON gracefully", async () => {
-    const wsUrl = "ws://localhost:8081";
+    const wsUrl = "ws://localhost:8080/ws";
     ws = new WebSocket(wsUrl);
 
     await new Promise<void>((resolve) => {
@@ -171,7 +171,7 @@ describe("WebSocket Telemetry Tests", () => {
   });
 
   test("WebSocket handles unknown message types", async () => {
-    const wsUrl = "ws://localhost:8081";
+    const wsUrl = "ws://localhost:8080/ws";
     ws = new WebSocket(wsUrl);
 
     await new Promise<void>((resolve) => {
@@ -188,7 +188,7 @@ describe("WebSocket Telemetry Tests", () => {
   });
 
   test("WebSocket subscription with nested paths", async () => {
-    const wsUrl = "ws://localhost:8081";
+    const wsUrl = "ws://localhost:8080/ws";
     ws = new WebSocket(wsUrl);
 
     await new Promise<void>((resolve) => {
@@ -205,7 +205,7 @@ describe("WebSocket Telemetry Tests", () => {
   });
 
   test("WebSocket handles rapid subscription changes", async () => {
-    const wsUrl = "ws://localhost:8081";
+    const wsUrl = "ws://localhost:8080/ws";
     ws = new WebSocket(wsUrl);
 
     await new Promise<void>((resolve) => {
@@ -230,7 +230,7 @@ describe("WebSocket Telemetry Tests", () => {
   });
 
   test("WebSocket connection closes cleanly", async () => {
-    const wsUrl = "ws://localhost:8081";
+    const wsUrl = "ws://localhost:8080/ws";
     ws = new WebSocket(wsUrl);
 
     await new Promise<void>((resolve) => {
@@ -248,7 +248,7 @@ describe("WebSocket Telemetry Tests", () => {
   });
 
   test("WebSocket handles oversized messages", async () => {
-    const wsUrl = "ws://localhost:8081";
+    const wsUrl = "ws://localhost:8080/ws";
     ws = new WebSocket(wsUrl);
 
     await new Promise<void>((resolve) => {

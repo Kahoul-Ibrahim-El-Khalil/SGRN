@@ -44,6 +44,39 @@ struct TelemetryEvent {
     bool is_valid() const {
         return json_value != nullptr || (typed_leaf.bytes && typed_leaf.meta.valid);
     }
+
+    /**
+     * @brief Lazily-parsed shared DOM of json_value.
+     *
+     * Parsed at most once per event, on first use, and shared by every
+     * subscriber that inspects the payload (WebSocket filtering,
+     * persistence, ...). Paths that never inspect the DOM — e.g. the
+     * WebSocket firehose, which forwards the string untouched — pay nothing.
+     * All broker callbacks for one event run sequentially on the broker
+     * strand, so no locking is needed around the mutable cache.
+     *
+     * @return Pointer to the parsed object DOM, or nullptr when the event
+     * carries no usable JSON object. Callers fall back to their unfiltered
+     * behavior on null, exactly as on a local parse failure.
+     */
+    const rapidjson::Document* parsedJson() const {
+        if (!parsed_attempted_) {
+            parsed_attempted_ = true;
+            if (json_value && !json_value->empty()) {
+                auto doc = std::make_shared<rapidjson::Document>();
+                doc->Parse(json_value->c_str());
+                if (!doc->HasParseError() && doc->IsObject())
+                    parsed_cache_ = std::move(doc);
+            }
+        }
+        return parsed_cache_.get();
+    }
+
+    // Implementation detail for parsedJson() — do not touch directly.
+    // (Kept public: TelemetryEvent is constructed with designated
+    // initializers at publish sites, which requires an aggregate.)
+    mutable bool parsed_attempted_ = false;
+    mutable std::shared_ptr<rapidjson::Document> parsed_cache_;
 };
 
 /**
@@ -57,30 +90,27 @@ struct TelemetryEvent {
  *   1. PlcState::getDeltaSnapshot() serializes the delta ONCE to JSON
  *   2. TelemetryBroker::publish() broadcasts a shared_ptr<string> to all subscribers
  *   3. Each subscriber processes the JSON independently:
- *      - WebSocketAdapter: sends directly (zero-copy) or filters fields (parse + re-serialize)
- *      - PersistenceService: parses JSON, applies namespace filter, re-serializes fields, compresses
- *      - DatastoreBridge: parses JSON, batches, compresses
- *      - OPC-UA adapter: parses JSON, converts to OPC-UA types
+ *      - WebSocketAdapter: sends directly (zero-copy) or filters fields (shared DOM + re-serialize)
+ *      - PersistenceService: shared DOM, applies namespace filter, re-serializes fields, compresses
+ *      - DatastoreBridge: consumes WAL files, not telemetry (unaffected)
+ *      - OPC-UA adapter: typed_leaf payloads, not JSON (unaffected)
  *
- * This means the JSON may be parsed MULTIPLE TIMES per event (once per subscriber
- * that needs to inspect the content). This is an intentional architectural trade-off:
+ * The parsed DOM is built LAZILY and at most once per event
+ * (TelemetryEvent::parsedJson(), shared by all subscribers). Paths that
+ * never inspect the payload — e.g. the WebSocket firehose — pay nothing.
  *
- *   PRO: Loose coupling - subscribers are independent, can be added/removed without
- *        coordinating with each other. Each adapter runs on its own thread pool.
- *
- *   CON: Duplicate parsing work when multiple subscribers need to inspect the JSON.
- *        WebSocket (firehose mode) avoids this by sending the string directly.
+ * This keeps the loose-coupling PRO (subscribers stay independent) while
+ * removing the old CON (one full JSON parse per inspecting subscriber).
  *
  * PERFORMANCE IMPLICATIONS:
  *   - WebSocket firehose: ~0μs overhead (optimal)
- *   - WebSocket field-filtered: ~200μs (parse + filter + re-serialize)
- *   - Persistence: ~700μs (parse + filter + re-serialize + compress)
+ *   - WebSocket field-filtered: one shared parse + filter + re-serialize
+ *   - Persistence: shared parse + filter + re-serialize + compress
  *   - The compression step dominates; parsing overhead is ~25-30% of total cost.
  *
  * If you need to optimize, consider:
  *   - Increasing atomic_window_ms to reduce parse/compress frequency
  *   - Using namespaces filter aggressively to reduce persistence work
- *   - Accepting that this is a reasonable trade-off for architectural cleanliness
  */
 class TelemetryBroker {
 public:

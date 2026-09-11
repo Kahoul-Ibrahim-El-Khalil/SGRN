@@ -1,11 +1,23 @@
 ## WebSocket
 
-The gateway exposes a live telemetry stream over WebSocket on a dedicated port configured via `listen.websocket.port` (the sample config uses **8001**).
+The gateway exposes a live telemetry stream over WebSocket at **`/ws` on the
+same listener (and port) as the HTTP API** — one northbound server serves
+both, so there is no separate WebSocket port to configure. With the sample
+config below the stream lives at `ws://gateway:8000/ws`:
+
+```json
+{ "listen": { "http": { "ip": "0.0.0.0", "port": 8000 } } }
+```
+
+> Legacy note: older configs carried a `listen.websocket.port` (default
+> **8001**) for a dedicated WebSocket listener. That block is still parsed
+> but no longer bound when `http` is present — connect to `/ws` on the HTTP
+> port instead.
 
 ### Connecting
 
 ```js
-const ws = new WebSocket("ws://gateway:8001");
+const ws = new WebSocket("ws://gateway:8000/ws");
 ```
 
 ### Subscribe to a DB or Field

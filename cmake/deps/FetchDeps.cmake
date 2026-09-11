@@ -165,6 +165,13 @@ set(SGRN_DEP_cpp_httplib_URL
     "https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.54.1.tar.gz"
 )
 
+# Crow v1.3.3 — asio-based HTTP + WebSocket server (header-only).
+# Replaces cpp-httplib + IXWebSocket for the gateway northbound adapters so
+# HTTP and WebSocket share one asio event loop and one listener port.
+set(SGRN_DEP_crow_URL
+    "https://github.com/CrowCpp/Crow/archive/refs/tags/v1.3.3.tar.gz"
+)
+
 # xml.h 2.1
 set(SGRN_DEP_xml_h_REPO
     "https://github.com/mrvladus/xml.h.git"

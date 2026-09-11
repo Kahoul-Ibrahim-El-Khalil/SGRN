@@ -74,7 +74,9 @@ export class GatewayProcess {
         s7: { port: 8102 },
         opcua: { port: 8480 },
         http: { port: 8080 },
-        websocket: { port: 8081 },
+        // WebSocket shares the HTTP listener at /ws (same port); the block
+        // is kept so the websocket adapter is enabled.
+        websocket: { port: 8080 },
       },
       // Pin the gateway's own archive/state dir under /tmp: the product
       // default is CWD-relative ("./gateway-state") and must never land

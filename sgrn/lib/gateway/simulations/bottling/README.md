@@ -65,7 +65,7 @@ and broadcasts whatever `simulation.as` pushes to it.
 
 ## Enabled / Disabled Features
 - **S7 Adapter**: **Enabled** (Port 102). `simulation.as` connects here to push the runtime's state to the gateway.
-- **HTTP/WebSocket API**: **Enabled** (Ports 8000/8001).
+- **HTTP/WebSocket API**: **Enabled** (Port 8000; WebSocket at `/ws`).
 - **Modbus Adapter**: **Disabled** — commented out in `security.as`.
 - **EtherNet/IP**: **Disabled** — no rotating equipment on this network segment.
 - **OPC-UA**: **Enabled** (Port 4840, hosted inside `simulation.as`) — this is the setpoint/control interface; connect any OPC-UA client here to start/stop the plant, change speed, trigger CIP, or trip E-stops.

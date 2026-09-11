@@ -13,7 +13,6 @@
 #include <sgrn/gateway/twin/LeafDictionary.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <sgrn/utils/time.hpp>
-#include <ixwebsocket/IXWebSocket.h>
 #include <optional>
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
@@ -70,16 +69,17 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
     // ──────────────────────────────────────────────────────────────────────────
 
     // Parse the full JSON once if any client needs field-level filtering.
-    // The parsed document is reused for all filtered clients.
-    std::unique_ptr<rapidjson::Document> parsed_doc;
-    if (t_any_needs_filter) {
-        parsed_doc = std::make_unique<rapidjson::Document>();
-        parsed_doc->Parse(t_event.json_value->c_str());
-        if (parsed_doc->HasParseError() || !parsed_doc->IsObject()) {
-            // Parse failed — fall back to sending full JSON to all clients.
-            parsed_doc.reset();
-        }
-    }
+    // Shared lazy DOM: at most one parse per event across ALL subscribers
+    // (persistence shares it); null when the payload is not a JSON object,
+    // in which case every client below falls back to the unfiltered send.
+    const rapidjson::Document* parsed_doc = t_any_needs_filter ? t_event.parsedJson() : nullptr;
+
+    // Build (connection, payload) pairs first; payloads are shared — the
+    // firehose paths below alias the broker's own string (zero copies until
+    // Crow's send), filtered paths allocate once. The actual sends happen
+    // under clients_mutex_ with a membership re-check (see sendText notes in
+    // the header: a connection is only touched while registered).
+    std::vector<std::pair<crow::websocket::connection*, std::shared_ptr<const std::string>>> text_sends;
 
     // Send to each client — either full JSON (zero overhead) or filtered.
     for (auto& target : targets) {
@@ -91,15 +91,11 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
             if (t_event.is_flat) {
                 if (target.leaf_ranges.empty()) {
                     // Firehose dictionary mode: zero-copy send of the flat blob.
-                    target.sp_ws->send(*t_event.json_value);
+                    text_sends.emplace_back(target.conn, t_event.json_value);
                 } else {
                     // Subscription-filtered: parse once and emit only matching ids.
-                    if (!parsed_doc) {
-                        parsed_doc = std::make_unique<rapidjson::Document>();
-                        parsed_doc->Parse(t_event.json_value->c_str());
-                        if (parsed_doc->HasParseError() || !parsed_doc->IsObject())
-                            parsed_doc.reset();
-                    }
+                    if (!parsed_doc)
+                        parsed_doc = t_event.parsedJson();
                     if (parsed_doc) {
                         rapidjson::Document filtered_doc;
                         filtered_doc.SetObject();
@@ -119,21 +115,17 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
                         rapidjson::Writer<rapidjson::StringBuffer> filtered_w(filtered_sb);
                         filtered_doc.Accept(filtered_w);
                         if (!filtered_doc.ObjectEmpty())
-                            target.sp_ws->send(filtered_sb.GetString());
+                            text_sends.emplace_back(target.conn, std::make_shared<const std::string>(filtered_sb.GetString()));
                     } else {
-                        target.sp_ws->send(*t_event.json_value);
+                        text_sends.emplace_back(target.conn, t_event.json_value);
                     }
                 }
             } else {
                 // ── Legacy path: nested blob — parse + flatten on demand ─────
                 // This executes only when the gateway has no LeafDictionary
                 // configured (pre-Phase-4 deployment or non-schema mode).
-                if (!parsed_doc) {
-                    parsed_doc = std::make_unique<rapidjson::Document>();
-                    parsed_doc->Parse(t_event.json_value->c_str());
-                    if (parsed_doc->HasParseError() || !parsed_doc->IsObject())
-                        parsed_doc.reset();
-                }
+                if (!parsed_doc)
+                    parsed_doc = t_event.parsedJson();
                 if (parsed_doc) {
                     rapidjson::Document flat_doc;
                     if (!twin::flattenNestedTree(*parsed_doc, dict_->path_to_id, flat_doc.GetAllocator(), flat_doc).hasError()) {
@@ -156,18 +148,18 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
                             rapidjson::Writer<rapidjson::StringBuffer> filtered_w(filtered_sb);
                             filtered_doc.Accept(filtered_w);
                             if (!filtered_doc.ObjectEmpty())
-                                target.sp_ws->send(filtered_sb.GetString());
+                                text_sends.emplace_back(target.conn, std::make_shared<const std::string>(filtered_sb.GetString()));
                         } else {
                             rapidjson::StringBuffer flat_sb;
                             rapidjson::Writer<rapidjson::StringBuffer> flat_w(flat_sb);
                             flat_doc.Accept(flat_w);
-                            target.sp_ws->send(flat_sb.GetString());
+                            text_sends.emplace_back(target.conn, std::make_shared<const std::string>(flat_sb.GetString()));
                         }
                     } else {
-                        target.sp_ws->send(*t_event.json_value);
+                        text_sends.emplace_back(target.conn, t_event.json_value);
                     }
                 } else {
-                    target.sp_ws->send(*t_event.json_value);
+                    text_sends.emplace_back(target.conn, t_event.json_value);
                 }
             }
         } else if (target.needs_filter && parsed_doc) {
@@ -178,9 +170,18 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
             }
             auto payload = json_helper::filterFields(*parsed_doc, dotted_subs);
             if (!payload.empty() && payload != "{}")
-                target.sp_ws->send(payload);
+                text_sends.emplace_back(target.conn, std::make_shared<const std::string>(std::move(payload)));
         } else {
-            target.sp_ws->send(*t_event.json_value);
+            text_sends.emplace_back(target.conn, t_event.json_value);
+        }
+    }
+
+    if (!text_sends.empty()) {
+        std::lock_guard<std::mutex> lk(clients_mutex_);
+        for (auto& [conn, payload] : text_sends) {
+            if (!payload || clients_.find(conn) == clients_.end())
+                continue; // disconnected while we were filtering
+            sendText(*conn, *payload);
         }
     }
 
@@ -188,7 +189,12 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
         return;
 
     const double timestamp_seconds = static_cast<double>(t_event.timestamp) / 1000.0;
-    for (auto& [key, sockets] : binary_targets) {
+    struct BinarySend {
+        std::vector<uint8_t> frame;
+        std::vector<crow::websocket::connection*> conns;
+    };
+    std::vector<BinarySend> binary_sends;
+    for (auto& [key, conns] : binary_targets) {
         const auto& [db, offset, size] = key;
         if (!registry_) {
             SGRN_WARN_LOG("WebSocket binary broadcast rejected: registry not available");
@@ -221,14 +227,16 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
             SGRN_WARN_LOG("WebSocket binary read for DB{} offset {} size {} failed: {}", db, offset, size, read_res.error());
             continue;
         }
+        binary_sends.push_back({std::move(frame), std::move(conns)});
+    }
 
-        ix::IXWebSocketSendData payload(frame);
-        for (const auto& sp_ws : sockets) {
-            if (!sp_ws || sp_ws->getReadyState() != ix::ReadyState::Open)
-                continue;
-            auto send_info = sp_ws->sendBinary(payload);
-            if (!send_info.success) {
-                SGRN_WARN_LOG("WebSocket binary send to DB{} offset {} size {} failed", db, offset, size);
+    if (!binary_sends.empty()) {
+        std::lock_guard<std::mutex> lk(clients_mutex_);
+        for (auto& send : binary_sends) {
+            for (auto* conn : send.conns) {
+                if (!conn || clients_.find(conn) == clients_.end())
+                    continue; // disconnected while we were reading
+                sendBinary(*conn, send.frame.data(), send.frame.size());
             }
         }
     }
@@ -239,84 +247,72 @@ std::vector<WebSocketAdapter::TargetInfo> WebSocketAdapter::collectTargets(const
     std::vector<TargetInfo> targets;
     t_any_needs_filter = false;
 
+    // Map membership implies an open connection: entries are added in onopen
+    // and removed in onclose. Sends re-validate under the same mutex.
     std::lock_guard<std::mutex> lk(clients_mutex_);
-    for (auto it = clients_.begin(); it != clients_.end();) {
-        auto tsp_ws = it->first;
-        if (tsp_ws && tsp_ws->getReadyState() == ix::ReadyState::Open) {
-            const auto& subs = it->second.subscriptions;
+    for (auto& [conn, ctx] : clients_) {
+        const auto& subs = ctx.subscriptions;
 
-            // Common event_filter::shouldSend — firehose mode or path overlap
-            bool send = event_filter::shouldSend(t_event.dirty_paths, subs);
+        // Common event_filter::shouldSend — firehose mode or path overlap
+        bool send = event_filter::shouldSend(t_event.dirty_paths, subs);
 
-            if (send) {
-                // Common event_filter::needsFieldFiltering — DB-level wins over field-level
-                bool needs_filter = event_filter::needsFieldFiltering(t_event.dirty_paths, subs);
-                std::set<std::string> t_field_subs;
+        if (!send)
+            continue;
 
-                if (needs_filter) {
-                    // Collect the field-level subscriptions that overlap dirty paths
-                    for (const auto& sub : subs) {
-                        if (sub.find('/') == std::string::npos)
-                            continue; // DB-level subscription — not field-level
-                        std::string sub_dotted = path_utils::topicToPlcPath(sub);
-                        for (const auto& dirty : t_event.dirty_paths) {
-                            std::string dirty_str = dirty.toDotted();
-                            // MED-6: Require a dot boundary so "React" does not
-                            // accidentally match "ReactorCore".
-                            const bool exact_or_sub = dirty_str == sub_dotted || dirty_str.starts_with(sub_dotted + ".") ||
-                                                      sub_dotted.starts_with(dirty_str + ".");
-                            if (exact_or_sub) {
-                                t_field_subs.insert(sub);
-                                break;
-                            }
-                        }
+        // Common event_filter::needsFieldFiltering — DB-level wins over field-level
+        bool needs_filter = event_filter::needsFieldFiltering(t_event.dirty_paths, subs);
+        std::set<std::string> t_field_subs;
+
+        if (needs_filter) {
+            // Collect the field-level subscriptions that overlap dirty paths
+            for (const auto& sub : subs) {
+                if (sub.find('/') == std::string::npos)
+                    continue; // DB-level subscription — not field-level
+                std::string sub_dotted = path_utils::topicToPlcPath(sub);
+                for (const auto& dirty : t_event.dirty_paths) {
+                    std::string dirty_str = dirty.toDotted();
+                    // MED-6: Require a dot boundary so "React" does not
+                    // accidentally match "ReactorCore".
+                    const bool exact_or_sub =
+                        dirty_str == sub_dotted || dirty_str.starts_with(sub_dotted + ".") || sub_dotted.starts_with(dirty_str + ".");
+                    if (exact_or_sub) {
+                        t_field_subs.insert(sub);
+                        break;
                     }
                 }
-
-                if (needs_filter) {
-                    t_any_needs_filter = true;
-                    targets.push_back(
-                        {std::move(tsp_ws), true, it->second.dictionary_mode, std::move(t_field_subs), it->second.leaf_ranges});
-                } else {
-                    targets.push_back({std::move(tsp_ws), false, it->second.dictionary_mode, {}, it->second.leaf_ranges});
-                }
             }
-            ++it;
+        }
+
+        if (needs_filter) {
+            t_any_needs_filter = true;
+            targets.push_back({conn, true, ctx.dictionary_mode, std::move(t_field_subs), ctx.leaf_ranges});
         } else {
-            it = clients_.erase(it);
+            targets.push_back({conn, false, ctx.dictionary_mode, {}, ctx.leaf_ranges});
         }
     }
 
     return targets;
 }
 
-std::map<std::tuple<uint16_t, size_t, size_t>, std::vector<std::shared_ptr<ix::WebSocket>>> WebSocketAdapter::collectBinaryTargets(
+std::map<std::tuple<uint16_t, size_t, size_t>, std::vector<crow::websocket::connection*>> WebSocketAdapter::collectBinaryTargets(
     uint16_t t_db) {
-    std::map<std::tuple<uint16_t, size_t, size_t>, std::vector<std::shared_ptr<ix::WebSocket>>> targets;
+    std::map<std::tuple<uint16_t, size_t, size_t>, std::vector<crow::websocket::connection*>> targets;
 
     std::lock_guard<std::mutex> lk(clients_mutex_);
-    for (auto it = clients_.begin(); it != clients_.end();) {
-        auto tsp_ws = it->first;
-        if (!tsp_ws || tsp_ws->getReadyState() != ix::ReadyState::Open) {
-            it = clients_.erase(it);
-            continue;
-        }
-
-        for (const auto& sub : it->second.binary_subscriptions) {
+    for (auto& [conn, ctx] : clients_) {
+        for (const auto& sub : ctx.binary_subscriptions) {
             if (sub.db != t_db)
                 continue;
-            targets[{sub.db, sub.offset, sub.size}].push_back(tsp_ws);
+            targets[{sub.db, sub.offset, sub.size}].push_back(conn);
         }
-
-        ++it;
     }
 
     return targets;
 }
 
 bool WebSocketAdapter::sendBinaryFrame(
-    const std::shared_ptr<ix::WebSocket>& tsp_ws, uint16_t t_db, size_t t_offset, size_t t_size, double t_timestamp_seconds) {
-    if (tsp_ws && tsp_ws->getReadyState() != ix::ReadyState::Open)
+    crow::websocket::connection* tp_conn, uint16_t t_db, size_t t_offset, size_t t_size, double t_timestamp_seconds) {
+    if (!tp_conn)
         return false;
 
     if (!registry_) {
@@ -353,15 +349,10 @@ bool WebSocketAdapter::sendBinaryFrame(
         return false;
     }
 
-    if (!tsp_ws)
-        return true;
-
-    ix::IXWebSocketSendData payload(frame);
-    auto send_info = tsp_ws->sendBinary(payload);
-    if (!send_info.success) {
-        SGRN_WARN_LOG("WebSocket binary send for DB{} offset {} size {} failed", t_db, t_offset, t_size);
-        return false;
-    }
+    std::lock_guard<std::mutex> lk(clients_mutex_);
+    if (clients_.find(tp_conn) == clients_.end())
+        return true; // disconnected while we were reading; not an error
+    sendBinary(*tp_conn, frame.data(), frame.size());
     return true;
 }
 
@@ -393,8 +384,8 @@ void WebSocketAdapter::rememberFlatValues(const std::string& t_flat_json) {
     }
 }
 
-void WebSocketAdapter::sendCatchUp(const std::shared_ptr<ix::WebSocket>& tsp_ws, const std::vector<ClientContext::LeafRange>& t_ranges) {
-    if (!tsp_ws || t_ranges.empty())
+void WebSocketAdapter::sendCatchUp(crow::websocket::connection& t_conn, const std::vector<ClientContext::LeafRange>& t_ranges) {
+    if (t_ranges.empty())
         return;
 
     rapidjson::Document out;
@@ -429,7 +420,10 @@ void WebSocketAdapter::sendCatchUp(const std::shared_ptr<ix::WebSocket>& tsp_ws,
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> w(sb);
     out.Accept(w);
-    tsp_ws->send(sb.GetString());
+    std::lock_guard<std::mutex> lk(clients_mutex_);
+    if (clients_.find(&t_conn) == clients_.end())
+        return; // disconnected while we were assembling the catch-up
+    sendText(t_conn, sb.GetString());
 }
 
 void WebSocketAdapter::resolveLeafRanges(ClientContext& t_ctx) {
@@ -489,12 +483,15 @@ void WebSocketAdapter::resolveLeafRanges(ClientContext& t_ctx) {
 
 void WebSocketAdapter::broadcastDelta(const std::string& t_json_snapshot, uint64_t t_timestamp_ms) {
     (void)t_timestamp_ms;
-    if (!running_.load(std::memory_order_acquire) || !server_)
+    // Live while subscribed to the broker (set by start()/registerRoutes(),
+    // cleared by stop()) — independent of who owns the listener.
+    if (broker_sub_id_ == 0)
         return;
-    for (auto& sp_ws : server_->getClients()) {
-        if (sp_ws) {
-            sp_ws->send(t_json_snapshot);
-        }
+    std::lock_guard<std::mutex> lk(clients_mutex_);
+    for (auto& [conn, ctx] : clients_) {
+        (void)ctx;
+        if (conn)
+            sendText(*conn, t_json_snapshot);
     }
 }
 

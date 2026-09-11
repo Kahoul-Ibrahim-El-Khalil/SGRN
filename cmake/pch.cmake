@@ -148,6 +148,7 @@ function(sgrn_create_pch_third)
         sgrn::openssl 
         sgrn::rapidjson 
         sgrn::httplib
+        sgrn::crow
         sgrn::angelscript
         sgrn::ixwebsocket
         sgrn::sqlite_modern_cpp
@@ -163,6 +164,7 @@ function(sgrn_create_pch_third)
         <cxxopts.hpp> <sqlite_modern_cpp.h>
         <rapidjson/document.h> <rapidjson/writer.h> <rapidjson/stringbuffer.h> <rapidjson/prettywriter.h> <rapidjson/error/en.h>
         <httplib.h>
+        <crow.h>
         <angelscript.h>
         <ixwebsocket/IXWebSocketServer.h> <ixwebsocket/IXWebSocket.h>
         <s7codec/s7.hpp>

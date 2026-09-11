@@ -13,7 +13,7 @@ This scenario simulates a Pressurizer Water Reactor (PWR). It leverages the SGRN
 
 ## Enabled / Disabled Features
 - **S7 Adapter**: **Enabled** (Port 102).
-- **HTTP/WebSocket API**: **Enabled** (Ports 8000/8001).
+- **HTTP/WebSocket API**: **Enabled** (Port 8000; WebSocket at `/ws`).
 - **Modbus Adapter**: **Disabled** via `demo.py` due to root binding constraints.
 - **Security**: **Strict Mode**. AngelScript policy enforced via `security.as`.
 - **Persistence**: **Enabled**.

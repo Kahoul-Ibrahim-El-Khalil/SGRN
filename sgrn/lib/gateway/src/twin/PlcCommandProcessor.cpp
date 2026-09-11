@@ -137,12 +137,13 @@ void PlcCommandProcessor::processCommands() {
 
             fw.entry->markDirty();
 
-            // NOTE: still needs the same version-bump fix as bumpFieldVersions
-            // below — this path writes into the arena directly and never
-            // calls incrementNodeVersion, so it's worth routing through
-            // memory_.write() here too in a follow-up pass. Flagging it,
-            // not fixing it in this diff since you asked specifically for
-            // the OPC UA direct-write refactor.
+            // Version chain: semantic (field) writes must invalidate
+            // version-keyed caches exactly like raw writeDbMemory() does
+            // (TreeCache field/root entries, generation pollers). The arena
+            // write above bypasses writeDbMemory, so bump explicitly —
+            // otherwise cached JSON serves stale data after REST/Modbus
+            // writes until an unrelated raw write happens to bump.
+            const_cast<PlcNode*>(fw.node)->bumpVersionChain();
 
             auto note = makeFieldUpdateNotification(*memory_.state(), *fw.node, *fw.entry, cmd.path, cmd.timestamp);
 

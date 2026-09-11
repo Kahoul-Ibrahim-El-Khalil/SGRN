@@ -123,6 +123,18 @@ sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
     if (root.HasMember("database_rotation_interval_s"))
         cfg.database_rotation_interval_s = root["database_rotation_interval_s"].GetUint();
 
+    // ── Threading ─────────────────────────────────────────────────────────
+    // Optional: { "light_threads": 2, "heavy_threads": 4 }. Out-of-range
+    // values are clamped in initThreading(); defaults preserve the
+    // historical 2/2 sizing.
+    if (root.HasMember("threading") && root["threading"].IsObject()) {
+        const auto& t = root["threading"];
+        if (t.HasMember("light_threads") && t["light_threads"].IsInt())
+            cfg.light_threads = t["light_threads"].GetInt();
+        if (t.HasMember("heavy_threads") && t["heavy_threads"].IsInt())
+            cfg.heavy_threads = t["heavy_threads"].GetInt();
+    }
+
     // ── Persistence & Local Historian ─────────────────────────────────────────
     if (root.HasMember("persistence") && root["persistence"].IsObject()) {
         const auto& p = root["persistence"];

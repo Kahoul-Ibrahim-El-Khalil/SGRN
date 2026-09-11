@@ -10,6 +10,14 @@ All gateway configuration is read from a single JSON file passed at startup:
 
 The configuration is organized into nested blocks. At least one protocol under `listen` must be present and enabled for the gateway to start, and either `schema` or `symbols_dir` must point at the PLC schema.
 
+Thread pools are sized via the optional top-level `threading` block
+(`light_threads`: telemetry-dispatch threads, default 2; `heavy_threads`:
+compression/disk-I/O workers, default 2). Values are clamped to 1–64.
+Southbound adapters each run their own single serve thread (Modbus
+multiplexes masters on it; S7/OPC-UA/EIP own their loops inside their
+protocol libraries), and the northbound HTTP+WebSocket listener runs a
+fixed 4-thread asio pool — none of these are covered by `threading`.
+
 ```json
 {
   "schema": "./simulations/nuclear/schema.scl",
@@ -29,7 +37,7 @@ The configuration is organized into nested blocks. At least one protocol under `
 
   "northbound": {
     "http": { "ip": "0.0.0.0", "port": 8000 },
-    "websocket": { "ip": "0.0.0.0", "port": 8001 },
+    "websocket": { "ip": "0.0.0.0", "port": 8000 },
     "opcua": { "ip": "0.0.0.0", "port": 4840 }
   },
 
@@ -60,13 +68,13 @@ The configuration is organized into nested blocks. At least one protocol under `
 | `s7` | Southbound Snap7 listener. If absent, the gateway boots as a northbound-only proxy (requires an external poller or writer). `little_endian` defaults to `true`. | Yes |
 | `opcua` | Northbound OPC-UA server | Yes |
 | `http` | Northbound REST API (required for the Web UI) | Yes |
-| `websocket` | Northbound WebSocket streaming (required for the Web UI) | Yes |
+| `websocket` | Northbound WebSocket streaming (required for the Web UI). Served at `/ws` on the **HTTP** listener — no separate port is bound; the `port` here is only a fallback when `http` is absent. | Yes |
 | `modbus` | Northbound Modbus TCP server (register map comes from `#MODBUS_*` SCL directives — see [modbus.md](modbus.md)) | Yes |
 | `ethernetip` | Northbound EtherNet/IP adapter (CIP server) | Yes |
 
 > **Note:** S7 is entirely optional. If it is disabled, SGRN interprets twin memory using `little_endian = true` by default, since it assumes a generic (non-Siemens) source. Endianness is otherwise configured per the rules in [memory_model.md](memory_model.md#endianness).
 
-Defaults used when a block is omitted: `http` → `0.0.0.0:8080`, `websocket` → `0.0.0.0:8081`, `opcua` → `0.0.0.0:4840`, `s7` → `0.0.0.0:102`, `modbus` → `0.0.0.0:502`, `ethernetip` → `0.0.0.0:44818`.
+Defaults used when a block is omitted: `http` → `0.0.0.0:8080`, `websocket` → shares the HTTP listener (`/ws`; its own `port` only applies when `http` is absent), `opcua` → `0.0.0.0:4840`, `s7` → `0.0.0.0:102`, `modbus` → `0.0.0.0:502`, `ethernetip` → `0.0.0.0:44818`.
 
 #### Adapter Properties
 

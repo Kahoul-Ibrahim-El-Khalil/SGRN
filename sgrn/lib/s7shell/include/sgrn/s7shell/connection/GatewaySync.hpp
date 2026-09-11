@@ -27,7 +27,7 @@
 //   PlcRuntime@ rt = PlcRuntime("schema.scl");
 //   GatewaySync@ sync = GatewaySync(rt);
 //   sync.subscribeDb(1);   // optional: filter to DB 1
-//   sync.connect("ws://192.168.1.1:8080");
+//   sync.connect("ws://192.168.1.1:8080/ws");
 //   // GatewaySync runs in background until sync.disconnect()
 // =============================================================================
 

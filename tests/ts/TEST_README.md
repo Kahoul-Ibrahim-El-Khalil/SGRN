@@ -17,8 +17,7 @@ Comprehensive test suite for the SGRN Gateway covering HTTP API, WebSocket telem
   ```
 
 - **Test Configuration**: Tests automatically configure the gateway with:
-  - HTTP port: 8080
-  - WebSocket port: 8081
+  - HTTP + WebSocket port: 8080 (WebSocket at `/ws` — one shared listener)
   - S7 port: 8102
   - OPC-UA port: 8480
 
@@ -143,7 +142,7 @@ test("GET /api/new-endpoint returns valid data", async () => {
 ### Example: Testing WebSocket Messages
 ```typescript
 test("Custom WebSocket command", async () => {
-  const ws = new WebSocket("ws://localhost:8081");
+  const ws = new WebSocket("ws://localhost:8080/ws");
   await new Promise(r => ws.onopen = r);
   
   ws.send(JSON.stringify({ type: "custom_command", params: {} }));
@@ -160,7 +159,7 @@ test("Custom WebSocket command", async () => {
 ## Troubleshooting
 
 ### Gateway Fails to Start
-- Check if ports 8080, 8081, 8102, 8480 are available
+- Check if ports 8080, 8102, 8480 are available
 - Verify gateway binary exists at `.build/linux-static-release/sgrn/apps/gateway/gateway`
 - Check gateway logs in test output
 

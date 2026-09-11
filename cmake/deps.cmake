@@ -52,3 +52,9 @@ else()
         include(${CMAKE_CURRENT_LIST_DIR}/deps/aws.cmake)
     endif()
 endif()
+
+# ── Crow (header-only HTTP + WebSocket server) ───────────────────────────────
+# Included AFTER platform dispatch: crow needs the ASIO_INCLUDE_DIRS detected
+# above. Fetches via CPM even in installed-deps mode when the staged prefix
+# does not provide it yet (see crow.cmake).
+include(${CMAKE_CURRENT_LIST_DIR}/deps/crow.cmake)

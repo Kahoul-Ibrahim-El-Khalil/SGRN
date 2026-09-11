@@ -29,9 +29,11 @@ struct ReplayConfig {
     /// adapters only (no S7/OPC-UA/Modbus/EIP, no persistence, no cloud).
     /// Activated automatically when -c/--config is omitted on the CLI.
     bool headless_mode = false;
-    /// HTTP port to bind in headless mode (default 8080).
+    /// HTTP port to bind in headless mode (default 8080). The WebSocket
+    /// endpoint (`/ws`) shares this listener.
     uint16_t headless_http_port = 8080;
-    /// WebSocket port to bind in headless mode (default 8081).
+    /// Recorded WebSocket port (default 8081). Not bound: the WebSocket
+    /// endpoint shares the HTTP listener — kept for config compatibility.
     uint16_t headless_ws_port = 8081;
 };
 

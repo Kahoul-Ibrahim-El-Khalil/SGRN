@@ -19,7 +19,7 @@ using sgrn::common::json_helper::buildArrayResponse;
 namespace sgrn::gateway::adapters
 {
 
-void HttpAdapter::handleGetModbusRegistry(const httplib::Request&, httplib::Response& t_res) {
+void HttpAdapter::handleGetModbusRegistry(const http::HttpRequest&, http::HttpResponse& t_res) {
     if (!modbus_map_) {
         t_res.status = 404;
         t_res.set_content(R"({"error":"Modbus support not initialized or no virtual register map built"})", "application/json");
@@ -28,11 +28,12 @@ void HttpAdapter::handleGetModbusRegistry(const httplib::Request&, httplib::Resp
     t_res.set_content(::sgrn::scl::serializeModbusMapToJson(*modbus_map_), "application/json");
 }
 
-void HttpAdapter::handleGetRegistryTypes(const httplib::Request&, httplib::Response& t_res) {
+void HttpAdapter::handleGetRegistryTypes(const http::HttpRequest&, http::HttpResponse& t_res) {
     t_res.set_content(std::string(::sgrn::gateway::twin::kS7TypeDictionaryJson), "application/json");
 }
 
-void HttpAdapter::handleGetRegistry(const httplib::Request& t_req, httplib::Response& t_res, const PlcSchemaStore& t_registry) {
+void HttpAdapter::handleGetRegistry(const http::HttpRequest& t_req, http::HttpResponse& t_res) {
+    const PlcSchemaStore& t_registry = *refs_.registry;
     std::optional<uint16_t> db_num;
     bool headers_only = false;
     if (t_req.has_param("db")) {
@@ -53,9 +54,10 @@ void HttpAdapter::handleGetRegistry(const httplib::Request& t_req, httplib::Resp
     t_res.set_content(t_registry.toJson(db_num, headers_only), "application/json");
 }
 
-void HttpAdapter::handleGetData(
-    const httplib::Request& t_req, httplib::Response& t_res, const PlcSchemaStore& t_registry, twin::PlcMemory& t_memory) {
-    std::string path = t_req.matches[1];
+void HttpAdapter::handleGetData(const http::HttpRequest& t_req, http::HttpResponse& t_res) {
+    const PlcSchemaStore& t_registry = *refs_.registry;
+    twin::PlcMemory& t_memory = *refs_.memory;
+    std::string path = t_req.path;
     if (!path.empty() && path.back() == '/')
         path.pop_back();
 
@@ -63,6 +65,13 @@ void HttpAdapter::handleGetData(
         if (!isAuthorizedField(t_req, std::nullopt, "", false)) {
             t_res.status = 403;
             t_res.set_content(R"({"error":"Forbidden: Not authorised to read full twin"})", "application/json");
+            return;
+        }
+        // Tier 4 unified: full-twin JSON comes from the TreeCache root entry
+        // (per-DB version key) instead of re-serializing every request.
+        auto cached = sgrn::gateway::core::TreeCacheEngine::instance().getRoot(*t_memory.state());
+        if (cached && *cached != "null" && *cached != "{}") {
+            t_res.set_content(*cached, "application/json");
             return;
         }
         t_res.set_content(t_memory.getDigitalTwinJsonString(), "application/json");
@@ -75,7 +84,7 @@ void HttpAdapter::handleGetData(
     std::optional<uint16_t> db_num = schema ? std::optional<uint16_t>(schema->db_number) : std::nullopt;
     if (!isAuthorizedField(t_req, db_num, field_path, false)) {
         t_res.status = 403;
-        t_res.set_content(fmt::format(R"({{"error":"Forbidden: IP {} is not authorised to read path '{}'"}})", t_req.remote_addr, path),
+        t_res.set_content(fmt::format(R"({{"error":"Forbidden: IP {} is not authorised to read path '{}'"}})", t_req.remote_ip, path),
             "application/json");
         return;
     }
@@ -136,8 +145,13 @@ void HttpAdapter::handleGetData(
     t_res.set_content("Data not found: " + path, "text/plain");
 }
 
-void HttpAdapter::handleGetConnections(const httplib::Request&, httplib::Response& t_res, sgrn::gateway::database::GatewayDatabase& t_db) {
-    auto conns_res = t_db.getConnections();
+void HttpAdapter::handleGetConnections(const http::HttpRequest&, http::HttpResponse& t_res) {
+    if (!refs_.db) {
+        t_res.status = 500;
+        t_res.set_content(R"({"error":"Database not initialized"})", "application/json");
+        return;
+    }
+    auto conns_res = refs_.db->getConnections();
     if (conns_res.hasError()) {
         t_res.status = 500;
         t_res.set_content(fmt::format(R"({{"error":"{}"}})", conns_res.error()), "application/json");
@@ -157,8 +171,13 @@ void HttpAdapter::handleGetConnections(const httplib::Request&, httplib::Respons
         "application/json");
 }
 
-void HttpAdapter::handleGetDbHistory(const httplib::Request&, httplib::Response& t_res, sgrn::gateway::database::GatewayDatabase& t_db) {
-    auto hist_res = t_db.exportHistoricalDataToJson();
+void HttpAdapter::handleGetDbHistory(const http::HttpRequest&, http::HttpResponse& t_res) {
+    if (!refs_.db) {
+        t_res.status = 500;
+        t_res.set_content(R"({"error":"Database not initialized"})", "application/json");
+        return;
+    }
+    auto hist_res = refs_.db->exportHistoricalDataToJson();
     if (hist_res.hasError()) {
         t_res.status = 500;
         t_res.set_content(fmt::format(R"({{"error":"{}"}})", hist_res.error()), "application/json");
@@ -167,8 +186,13 @@ void HttpAdapter::handleGetDbHistory(const httplib::Request&, httplib::Response&
     t_res.set_content(std::move(hist_res.value()), "application/json");
 }
 
-void HttpAdapter::handleGetDbSessions(const httplib::Request&, httplib::Response& t_res, sgrn::gateway::database::GatewayDatabase& t_db) {
-    auto sessions_res = t_db.getActiveSessions();
+void HttpAdapter::handleGetDbSessions(const http::HttpRequest&, http::HttpResponse& t_res) {
+    if (!refs_.db) {
+        t_res.status = 500;
+        t_res.set_content(R"({"error":"Database not initialized"})", "application/json");
+        return;
+    }
+    auto sessions_res = refs_.db->getActiveSessions();
     if (sessions_res.hasError()) {
         t_res.status = 500;
         t_res.set_content(fmt::format(R"({{"error":"{}"}})", sessions_res.error()), "application/json");
@@ -187,7 +211,12 @@ void HttpAdapter::handleGetDbSessions(const httplib::Request&, httplib::Response
         "application/json");
 }
 
-void HttpAdapter::handleGetDbLogs(const httplib::Request& t_req, httplib::Response& t_res, sgrn::gateway::database::GatewayDatabase& t_db) {
+void HttpAdapter::handleGetDbLogs(const http::HttpRequest& t_req, http::HttpResponse& t_res) {
+    if (!refs_.db) {
+        t_res.status = 500;
+        t_res.set_content(R"({"error":"Database not initialized"})", "application/json");
+        return;
+    }
     int limit = 100;
     if (t_req.has_param("limit")) {
         try {
@@ -202,7 +231,7 @@ void HttpAdapter::handleGetDbLogs(const httplib::Request& t_req, httplib::Respon
             return;
         }
     }
-    auto logs_res = t_db.getLogs(limit);
+    auto logs_res = refs_.db->getLogs(limit);
     if (logs_res.hasError()) {
         t_res.status = 500;
         t_res.set_content(fmt::format(R"({{"error":"{}"}})", logs_res.error()), "application/json");

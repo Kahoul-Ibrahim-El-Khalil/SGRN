@@ -12,7 +12,8 @@ Two modes:
 - **Full** (`-c gateway.json -a ARCHIVE`): boots the configured gateway
   stack and replays frames into twin memory at real or scaled speed.
 - **Headless** (`-a ARCHIVE -s SCHEMA`, no config): starts HTTP
-  (default :8080) + WebSocket (default :8081) only — no S7/OPC-UA/Modbus,
+  (default :8080) with the WebSocket endpoint at `/ws` on the same
+  listener — no S7/OPC-UA/Modbus,
   no persistence — and auto-opens the embedded dashboard. This is the
   zero-config development path.
 
@@ -23,7 +24,7 @@ Supports `--speed` multiplier, `--loop`, `--no-delay` (max speed) and
 
 ```text
 sgrn_replay -c gateway.json -a ARCHIVE.bin.zst [-s SCHEMA.scl] [-r SPEED] [--loop]
-sgrn_replay -a ARCHIVE.bin.zst -s SCHEMA.scl [--http-port 8080] [--ws-port 8081]
+sgrn_replay -a ARCHIVE.bin.zst -s SCHEMA.scl [--http-port 8080]
 ```
 
 ```bash

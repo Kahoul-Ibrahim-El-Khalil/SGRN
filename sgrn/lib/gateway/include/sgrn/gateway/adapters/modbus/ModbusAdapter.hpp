@@ -39,8 +39,13 @@
  *
  * THREADING
  * ─────────
- * A single dedicated std::thread runs the accept/serve loop.  All calls
- * into the twin are thread-safe via the existing command queue.
+ * A single dedicated std::thread runs the accept/serve loop. That loop
+ * multiplexes the listen socket AND every connected master with one
+ * select() call and serves at most one request per ready socket per pass,
+ * so N concurrent masters are served round-robin on the one thread — no
+ * thread per connection, and no master can starve the others by holding a
+ * persistent/idle connection. All calls into the twin are thread-safe via
+ * the existing command queue.
  */
 
 #include <sgrn/common/AdapterBase.hpp>
@@ -52,9 +57,14 @@
 #include <sgrn/wrappers/modbus/Server.hpp>
 
 #include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <map>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace sgrn::gateway::adapters::modbus
 {
@@ -86,6 +96,13 @@ public:
     void stop();
 
     /**
+     * @brief AdapterBase pre-join hook: shut down the listen socket and every
+     * master socket so a serve thread parked in select()/recv() wakes up and
+     * stop() can join promptly. Public: stop() invokes it via CRTP.
+     */
+    void onStopRequested();
+
+    /**
      * @brief Returns the virtual register map for /registry/modbus.
      * Only valid after a successful start().
      */
@@ -101,7 +118,13 @@ private:
     void serveLoop();
 
     // ── Serve loop ────────────────────────────────────────────────────────
-    void handleClient(int t_client_fd);
+    // Single-threaded multiplex: one select() over the listen socket plus
+    // every connected master; at most one request per ready socket per pass.
+    bool serveOneRequest(int t_client_fd, const std::string& t_client_ip);
+    void addClient(int t_client_fd);
+    void dropClient(int t_client_fd);
+    void touchClient(int t_client_fd);
+    void sweepIdleClients();
 
     // ── Arena ↔ libmodbus mapping sync ───────────────────────────────────
     /// Populate mb_mapping_ from the current arena state (called before reads).
@@ -147,6 +170,27 @@ private:
     std::string config_ip_;
     uint16_t config_port_{0};
     const ::sgrn::scl::PlcSchemaStore* p_store_{nullptr};
+
+    // Connected masters, guarded by clients_mutex_. Only the serve thread
+    // mutates this vector while running; stop()/onStopRequested() only read
+    // it (to shutdown fds) before the join, then clear it after.
+    struct ClientSlot {
+        int fd{-1};
+        std::string ip;
+        std::chrono::steady_clock::time_point last_activity{};
+    };
+    /// select() caps descriptors at FD_SETSIZE (64 on WinSock) — stay clear.
+    static constexpr size_t kMaxMasters = 32;
+    /// Masters silent this long are disconnected (frees slots/fds).
+    static constexpr std::chrono::seconds kMasterIdleTimeout{300};
+    std::mutex clients_mutex_;
+    std::vector<ClientSlot> clients_;
+
+    // Last-seen per-DB write generations for incremental sync (see
+    // IMemoryPort::dbVersion contract). Serve-thread-only — no lock needed:
+    // every syncArenaToMapping() call runs on the single serve thread.
+    // Cleared in configure() so a restart never inherits stale generations.
+    std::map<uint16_t, uint64_t> db_sync_versions_;
 };
 
 } // namespace sgrn::gateway::adapters::modbus

@@ -176,7 +176,7 @@ PlcRuntime@ rt = PlcRuntime("plant.scl");
 GatewaySync@ sync = GatewaySync(rt);
 sync.subscribeDb(1);
 sync.subscribeDb(2);
-sync.connect("ws://192.168.1.1:8080");
+sync.connect("ws://192.168.1.1:8080/ws");
 
 // Live values update in rt as Gateway pushes deltas
 while (true) {
@@ -197,7 +197,7 @@ Read live state from the Gateway, apply a correction, and publish the delta back
 PlcRuntime@ rt = PlcRuntime("plant.scl");
 GatewaySync@ sync = GatewaySync(rt);
 sync.publishOnDirty(true);      // outbound dirty regions → Gateway HTTP API
-sync.connect("ws://192.168.1.1:8080");
+sync.connect("ws://192.168.1.1:8080/ws");
 
 sleep(500);   // allow initial sync frame to arrive
 
@@ -219,7 +219,7 @@ Monitor live telemetry and trigger protective actions if a threshold is breached
 PlcRuntime@ rt = PlcRuntime("plant.scl");
 GatewaySync@ sync = GatewaySync(rt);
 sync.publishOnDirty(true);
-sync.connect("ws://192.168.1.1:8080");
+sync.connect("ws://192.168.1.1:8080/ws");
 
 int trip_count = 0;
 
@@ -723,7 +723,7 @@ PlcRuntime@ rt = PlcRuntime("schema.scl");
 GatewaySync@ sync = GatewaySync(rt);
 sync.subscribeDb(1);
 sync.publishOnDirty(true);
-sync.connect("ws://192.168.1.1:8080");
+sync.connect("ws://192.168.1.1:8080/ws");
 ```
 
 ### HTTP REST Server (`HttpServer`)

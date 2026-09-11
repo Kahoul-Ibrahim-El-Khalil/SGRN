@@ -50,7 +50,7 @@ TEST_REGISTRY = {
         "type": "integration",
         "surface": "WebSocket API over the network",
         "description": "Tests dual WebSocket telemetry performance and subscriptions.",
-        "assumptions": "Requires a live gateway running with WebSocket enabled on port 8081."
+        "assumptions": "Requires a live gateway running with WebSocket enabled at /ws on the HTTP port (8080)."
     },
     "gateway-opcua": {
         "path": "gateway/opcua_discovery.py",
@@ -272,7 +272,8 @@ def GatewayFixture(simulation_name):
             "s7": {"port": 8102},
             "opcua": {"port": 4840},
             "http": {"port": 8080},
-            "websocket": {"port": 8081}
+            # WebSocket shares the HTTP listener at /ws (same port).
+            "websocket": {"port": 8080}
         },
         # Pin the gateway's own archive/state dir under /tmp: the product
         # default is CWD-relative ("./gateway-state") and must never land

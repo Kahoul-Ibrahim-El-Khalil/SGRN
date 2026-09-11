@@ -76,4 +76,31 @@ void TreeCacheEngine::clear() {
     cache_.clear();
 }
 
+std::shared_ptr<const std::string> TreeCacheEngine::getRoot(twin::PlcState& t_state) {
+    // Snapshot current per-DB versions with lock-free atomic loads. Versions
+    // only ever increase, so a snapshot torn by a racing write can at worst
+    // trigger one redundant rebuild — never a stale hit.
+    std::vector<std::pair<std::string, uint64_t>> current;
+    current.reserve(t_state.segments().size());
+    for (const auto& [name, seg] : t_state.segments()) {
+        (void)seg;
+        const twin::PlcNode* node = t_state.find(name);
+        const uint64_t v = (node && node->state_) ? node->state_->version_.load(std::memory_order_acquire) : 0;
+        current.emplace_back(name, v);
+    }
+    {
+        std::lock_guard<std::mutex> lock(root_mutex_);
+        if (root_cache_.json && root_cache_.db_versions == current)
+            return root_cache_.json;
+    }
+
+    auto fresh = std::make_shared<const std::string>(t_state.getFullSnapshot());
+    {
+        std::lock_guard<std::mutex> lock(root_mutex_);
+        root_cache_.db_versions = std::move(current);
+        root_cache_.json = fresh;
+    }
+    return fresh;
+}
+
 } // namespace sgrn::gateway::core

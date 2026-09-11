@@ -80,7 +80,7 @@ describe("OPC-UA Protocol Adapter", () => {
   describe("OPC-UA Protocol Adapter - Advanced", () => {
     test("OPC-UA subscription via WebSocket", async () => {
       // OPC-UA data can be subscribed to via WebSocket
-      const ws = new WebSocket("ws://localhost:8081");
+      const ws = new WebSocket("ws://localhost:8080/ws");
 
       await new Promise<void>((resolve, reject) => {
         ws.onopen = () => resolve();

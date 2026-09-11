@@ -3,10 +3,13 @@
 #include <sgrn/gateway/twin/PlcState.hpp>
 #include <sgrn/gateway/twin/TreePath.hpp>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace sgrn::gateway::core
 {
@@ -40,6 +43,20 @@ public:
 
     std::shared_ptr<const std::string> get(const twin::TreePath& t_path, twin::PlcState& t_state);
 
+    /**
+     * @brief Cached full-twin JSON (the `/data/` root document).
+     *
+     * There is no synthetic root node, so validity is derived: every twin
+     * write bumps versions up the whole ancestor chain (bumpVersionChain),
+     * hence a snapshot of per-DB (name, version) pairs fully determines
+     * freshness. A mismatch — or a changed DB set after a schema reload —
+     * rebuilds via PlcState::getFullSnapshot(). Lives outside the bounded
+     * path cache so the hot root neither evicts field entries nor is evicted
+     * by them. Thread-safe; concurrent rebuilds are benign (last wins, and
+     * any serialized state is a valid snapshot).
+     */
+    std::shared_ptr<const std::string> getRoot(twin::PlcState& t_state);
+
     void pin(const twin::TreePath& t_path);
     void unpin(const twin::TreePath& t_path);
 
@@ -56,6 +73,13 @@ private:
     std::unordered_map<twin::TreePath, CacheEntry, twin::TreePathHash, twin::TreePathEqual> cache_;
     std::unordered_set<twin::TreePath, twin::TreePathHash, twin::TreePathEqual> pinned_;
     size_t max_cache_entries_{256};
+
+    struct RootCache {
+        std::vector<std::pair<std::string, uint64_t>> db_versions;
+        std::shared_ptr<const std::string> json;
+    };
+    std::mutex root_mutex_;
+    RootCache root_cache_;
 };
 
 } // namespace sgrn::gateway::core

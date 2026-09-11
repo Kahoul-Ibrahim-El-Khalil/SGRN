@@ -372,7 +372,9 @@ set(GATEWAY_LIB_SOURCES
     src/config/gateway.cpp
     src/config/proxy.cpp
     src/config/mbproxy.cpp
+    src/adapters/northbound/NorthboundServer.cpp
     src/adapters/http.cpp
+    src/adapters/http/types.cpp
     src/adapters/http/path.cpp
     src/adapters/http/put_handler.cpp
     src/adapters/http/memory_handlers.cpp
@@ -399,7 +401,7 @@ sgrn_add_component_library(
     PUBLIC_LIBS
         sgrn_utils
         sgrn::sdk
-        ixwebsocket::ixwebsocket
+        extern::crow
         sgrn_gateway_s7
         sgrn_gateway_twin
         sgrn_gateway_opcua          # ← replaces inline OPC-UA sources
@@ -430,7 +432,6 @@ target_include_directories(sgrn_gateway PRIVATE
 )
 target_link_libraries(sgrn_gateway PRIVATE
     extern::sqlite_modern_cpp
-    extern::httplib
     extern::rapidjson
     sgrn::unordered_dense
 )

@@ -57,7 +57,7 @@ from sgrn.telemetry import GatewayTelemetry  # noqa: E402
 log = logging.getLogger("sgrn.live_binary")
 
 DEFAULT_HTTP_URL = os.environ.get("SGRN_LIVE_GATEWAY_URL", "http://localhost:8000")
-DEFAULT_WS_URL = os.environ.get("SGRN_LIVE_WS_URL", "ws://localhost:8001")
+DEFAULT_WS_URL = os.environ.get("SGRN_LIVE_WS_URL", "ws://localhost:8000/ws")
 SHOW_PAYLOADS = os.environ.get("SGRN_SHOW_PAYLOADS", "").strip().lower() in {"1", "true", "yes", "on"}
 CAPTURE_DIR = os.environ.get("SGRN_CAPTURE_DIR")
 LIVE_TIMEOUT = float(os.environ.get("SGRN_LIVE_TIMEOUT", "10"))

@@ -95,6 +95,11 @@ void Server::setClientSocket(int t_fd) noexcept {
         ::modbus_set_socket(ctx_, t_fd);
 }
 
+void Server::setIndicationTimeout(uint32_t t_sec, uint32_t t_usec) noexcept {
+    if (ctx_)
+        ::modbus_set_indication_timeout(ctx_, t_sec, t_usec);
+}
+
 sgrn::Result<int> Server::receive(uint8_t* tp_buffer, int t_max_len) {
     if (!ctx_)
         return "modbus server context is null";

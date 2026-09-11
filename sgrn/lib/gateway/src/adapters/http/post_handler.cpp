@@ -12,10 +12,11 @@
 namespace sgrn::gateway::adapters
 {
 
-void HttpAdapter::handlePost(
-    const httplib::Request& t_req, httplib::Response& t_res, const PlcSchemaStore& t_registry, PlcMemory& t_memory) {
+void HttpAdapter::handlePost(const http::HttpRequest& t_req, http::HttpResponse& t_res) {
+    const PlcSchemaStore& t_registry = *refs_.registry;
+    PlcMemory& t_memory = *refs_.memory;
     // ── 1. Resolve URL path → DB schema + relative field path ──────────────
-    std::string url_path = t_req.matches[1];
+    std::string url_path = t_req.path;
     if (!url_path.empty() && url_path.back() == '/')
         url_path.pop_back();
 
@@ -37,7 +38,7 @@ void HttpAdapter::handlePost(
         };
         std::vector<PendingLeaf> all_leaves;
 
-        const std::string& client_ip = t_req.remote_addr;
+        const std::string& client_ip = t_req.remote_ip;
 
         for (auto it = doc.MemberBegin(); it != doc.MemberEnd(); ++it) {
             std::string db_name = it->name.GetString();

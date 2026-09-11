@@ -110,7 +110,7 @@ describe("EtherNet/IP Protocol Adapter", () => {
 
     test("EtherNet/IP tag-based access", async () => {
       // EIP supports tag-based access similar to S7
-      const ws = new WebSocket("ws://localhost:8081");
+      const ws = new WebSocket("ws://localhost:8080/ws");
 
       await new Promise<void>((resolve, reject) => {
         ws.onopen = () => resolve();

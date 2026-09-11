@@ -50,6 +50,12 @@ public:
     sgrn::Result<int> receive(uint8_t* tp_buffer, int t_max_len);
     sgrn::Result<void> reply(const uint8_t* tp_query, int t_query_len, modbus_mapping_t* tp_mapping);
 
+    /// Bound how long a server-side receive may stall mid-PDU (seconds +
+    /// microseconds). Expiry surfaces as a receive error. Used as a backstop
+    /// so a master that goes silent after a partial write cannot park the
+    /// adapter's serve thread forever.
+    void setIndicationTimeout(uint32_t t_sec, uint32_t t_usec) noexcept;
+
     /// Send a Modbus exception response (function code | 0x80 + code) for an
     /// already-received query, e.g. when the backend cannot serve it.
     sgrn::Result<void> replyException(const uint8_t* tp_query, unsigned int t_exception_code);

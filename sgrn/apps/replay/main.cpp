@@ -23,11 +23,12 @@ int main(int argc, char** argv) {
     options.add_options()("c,config", "Path to gateway.json (optional — omit for headless HTTP+WebSocket mode)",
         cxxopts::value<std::string>())("a,archive", "Path to history archive (.bin.zst or .jsonl.zst)", cxxopts::value<std::string>())(
         "s,schema", "Path to SCL schema file (.scl) or symbols directory", cxxopts::value<std::string>())("r,speed",
-        "Replay speed multiplier (e.g. 1.0, 2.0, 0.5)", cxxopts::value<double>()->default_value("1.0"))("l,loop", "Loop replay infinitely",
-        cxxopts::value<bool>()->default_value("false"))("n,no-delay", "Replay as fast as possible without timestamp delays",
-        cxxopts::value<bool>()->default_value("false"))("g,gui", "Open the embedded dashboard in a browser once replay starts",
-        cxxopts::value<bool>()->default_value("false"))("http-port", "HTTP dashboard port in headless mode (default: 8080)",
-        cxxopts::value<uint16_t>()->default_value("8080"))("ws-port", "WebSocket port in headless mode (default: 8081)",
+        "Replay speed multiplier (e.g. 1.0, 2.0, 0.5)",
+        cxxopts::value<double>()->default_value("1.0"))("l,loop", "Loop replay infinitely", cxxopts::value<bool>()->default_value("false"))(
+        "n,no-delay", "Replay as fast as possible without timestamp delays", cxxopts::value<bool>()->default_value("false"))(
+        "g,gui", "Open the embedded dashboard in a browser once replay starts", cxxopts::value<bool>()->default_value("false"))(
+        "http-port", "HTTP dashboard port in headless mode (default: 8080)", cxxopts::value<uint16_t>()->default_value("8080"))("ws-port",
+        "Recorded WebSocket port (compat only — WS shares the HTTP listener at /ws)",
         cxxopts::value<uint16_t>()->default_value("8081"))("man", "Display detailed manual page")("h,help", "Print usage help");
 
     options.parse_positional({"archive"});
@@ -44,8 +45,8 @@ SYNOPSIS
        # Full mode (gateway.json required):
        sgrn_replay -c gateway.json -a ARCHIVE.bin.zst [-s SCHEMA.scl] [-r SPEED] [--loop]
 
-       # Headless mode (no gateway.json — HTTP+WebSocket only, auto-opens GUI):
-       sgrn_replay -a ARCHIVE.bin.zst -s SCHEMA.scl [--http-port 8080] [--ws-port 8081]
+        # Headless mode (no gateway.json — HTTP+WebSocket on one port, auto-opens GUI):
+        sgrn_replay -a ARCHIVE.bin.zst -s SCHEMA.scl [--http-port 8080]
 
 DESCRIPTION
        sgrn_replay initializes SGRN gateway Northbound protocol interfaces and
@@ -85,8 +86,10 @@ OPTIONS
        --http-port PORT
               HTTP port in headless mode (default: 8080).
 
-       --ws-port PORT
-              WebSocket port in headless mode (default: 8081).
+        --ws-port PORT
+              Recorded for compatibility only (default: 8081). The WebSocket
+              endpoint shares the HTTP listener at /ws — this port is not
+              bound separately.
 )" << std::endl;
         return 0;
     }
@@ -124,8 +127,8 @@ OPTIONS
     if (has_config) {
         fmt::print("Mode:           Full gateway ({})\n", config.gateway_config_path);
     } else {
-        fmt::print(fg(fmt::color::yellow), "Mode:           Headless (HTTP :{}, WebSocket :{})\n", config.headless_http_port,
-            config.headless_ws_port);
+        fmt::print(
+            fg(fmt::color::yellow), "Mode:           Headless (HTTP :{} + WebSocket /ws on the same port)\n", config.headless_http_port);
     }
     fmt::print("Archive Path:   {}\n", config.archive_path);
     if (!config.scl_schema_path.empty())

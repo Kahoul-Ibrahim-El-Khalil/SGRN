@@ -295,10 +295,12 @@ void PersistenceService::onTelemetryEvent(const TelemetryEvent& t_event) {
     // ─────────────────────────────────────────────────────────────────────────
 
     // For the other two modes we apply namespace filtering and atomic merging.
-    rapidjson::Document doc;
-    doc.Parse(t_event.json_value->c_str());
-    if (doc.HasParseError() || !doc.IsObject())
+    // Shared lazy DOM: at most one parse per event across all subscribers
+    // (WebSocket filtering shares it); null mirrors the old parse failure.
+    const rapidjson::Document* p_doc = t_event.parsedJson();
+    if (!p_doc)
         return;
+    const rapidjson::Document& doc = *p_doc;
 
     // Iterate top-level keys (DB names) → fields recursively.
     // Delta payloads come in three shapes, all of which must land in the

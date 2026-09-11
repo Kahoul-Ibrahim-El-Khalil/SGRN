@@ -1,7 +1,8 @@
 #include <sgrn/gateway/gateway.hpp>
 
-using sgrn::Result;
+#include <algorithm>
 
+using sgrn::Result;
 namespace fs = std::filesystem;
 using sgrn::utils::filesystem::expandUserPath;
 namespace sgrn::gateway
@@ -60,6 +61,8 @@ void GatewayApplication::enablePassiveReplayMode() {
 void GatewayApplication::setHeadlessReplayConfig(const std::string& t_schema_path, uint16_t t_http_port, uint16_t t_ws_port) {
     // Build a minimal in-memory config: HTTP + WebSocket only.
     // No S7, OPC-UA, Modbus, EIP, no persistence, no cloud bridge.
+    // HTTP and WebSocket share one listener on t_http_port (WS at /ws);
+    // t_ws_port is recorded in the config for compatibility but not bound.
     config_ = GatewayConfig{};
     config_.http = config::HttpConfig{.ip = "0.0.0.0", .port = t_http_port};
     config_.websocket = config::WebSocketConfig{.ip = "0.0.0.0", .port = t_ws_port};
@@ -69,7 +72,7 @@ void GatewayApplication::setHeadlessReplayConfig(const std::string& t_schema_pat
     if (!t_schema_path.empty()) {
         schema_override_ = t_schema_path;
     }
-    SGRN_INFO_LOG("Headless replay mode: HTTP :{}, WebSocket :{}", t_http_port, t_ws_port);
+    SGRN_INFO_LOG("Headless replay mode: HTTP :{} with WebSocket at /ws on the same port", t_http_port);
 }
 
 Result<void, std::string> GatewayApplication::loadSchema() {
@@ -175,9 +178,14 @@ Result<void, std::string> GatewayApplication::initTwin() {
 }
 
 Result<void, std::string> GatewayApplication::initThreading() {
-    sgrn::gateway::core::GlobalContext::instance().run(kLightThreads, kLightThreads);
+    const int light = std::clamp(config_.light_threads, kMinThreads, kMaxThreads);
+    const int heavy = std::clamp(config_.heavy_threads, kMinThreads, kMaxThreads);
+    if (light != config_.light_threads || heavy != config_.heavy_threads)
+        SGRN_WARN_LOG("Threading config out of range, clamped to light={} heavy={}", light, heavy);
 
-    heavy_pool_ = std::make_unique<asio::thread_pool>(kHeavyPoolThreads);
+    sgrn::gateway::core::GlobalContext::instance().run(light, light);
+
+    heavy_pool_ = std::make_unique<asio::thread_pool>(static_cast<size_t>(heavy));
     light_work_.emplace(asio::make_work_guard(light_ctx_));
     light_thread_ = std::thread([this]() { light_ctx_.run(); });
 
@@ -368,34 +376,47 @@ Result<void, std::string> GatewayApplication::startAdapters() {
             [this]() { return eip_adapter_->start(config_.ethernetip->ip, config_.ethernetip->port, symbolic_store_); });
     }
 
-    if (config_.http.has_value()) {
-        http_adapter_.emplace();
-        auto vmap = modbus_adapter_ ? &modbus_adapter_->virtualMap() : nullptr;
-        uint16_t ws_port = config_.websocket.has_value() ? config_.websocket->port : 0;
-        startAdapter("HTTP Adapter", config_.http->port, [this, vmap, ws_port]() {
-            return http_adapter_->start(
-                config_.http->ip, config_.http->port, symbolic_store_, server_, node_db_, security_manager_, vmap, ws_port);
-        });
-    }
+    if (config_.http.has_value() || config_.websocket.has_value()) {
+        // ── Unified northbound listener ──────────────────────────────────
+        // HTTP and WebSocket share one Crow app / asio loop / TCP port; the
+        // WebSocket endpoint lives at /ws on the HTTP listener. The listener
+        // binds the HTTP endpoint when present, else the WebSocket endpoint.
+        const std::string nb_ip = config_.http.has_value() ? config_.http->ip : config_.websocket->ip;
+        const uint16_t nb_port = config_.http.has_value() ? config_.http->port : config_.websocket->port;
+        if (config_.http.has_value() && config_.websocket.has_value() && config_.websocket->port != config_.http->port) {
+            SGRN_INFO_LOG("WebSocket shares the HTTP listener on {}:{} — the configured websocket port {} is not bound separately; "
+                          "connect to ws://{}:{}/ws.",
+                nb_ip, nb_port, config_.websocket->port, nb_ip, nb_port);
+        }
 
-    if (config_.websocket.has_value()) {
-        ws_facade_.emplace();
-        ws_facade_->setLeafDictionary(leaf_dict_);
-        startAdapter("WebSocket Facade", config_.websocket->port, [this]() {
+        if (config_.http.has_value()) {
+            http_adapter_.emplace();
+            auto vmap = modbus_adapter_ ? &modbus_adapter_->virtualMap() : nullptr;
+            http_adapter_->configure(symbolic_store_, server_, node_db_, security_manager_, vmap);
+            http_adapter_->registerRoutes(northbound_server_.app());
+        }
+
+        if (config_.websocket.has_value()) {
+            ws_facade_.emplace();
+            ws_facade_->setLeafDictionary(leaf_dict_);
             // Seed every connecting client with the current full plant state
             // (which includes the state recovered from disk at boot), so the
             // WebSocket stream reclaims the twin's initial state instead of
             // showing an empty image until the first PLC delta.
-            return ws_facade_->start(
-                config_.websocket->ip, config_.websocket->port, security_manager_, &symbolic_store_,
-                [this]() { return server_.getDigitalTwinJsonString(); },
+            ws_facade_->configure(
+                security_manager_, &symbolic_store_, [this]() { return server_.getDigitalTwinJsonString(); },
                 [this](uint16_t db, size_t offset, size_t size, uint8_t* out) -> Result<void, std::string> {
                     if (auto r = server_.readDbMemory(db, offset, size, out); !r) {
                         return std::string(toString(r.error()));
                     }
                     return {};
                 });
-        });
+            ws_facade_->registerRoutes(northbound_server_.app());
+        }
+
+        // One listener backs every enabled northbound protocol; a single
+        // increment keeps the "no protocols enabled" check below meaningful.
+        startAdapter("Northbound (HTTP+WebSocket)", nb_port, [this, nb_ip, nb_port]() { return northbound_server_.start(nb_ip, nb_port); });
     }
 
     if (active_protocols_ == 0) {
@@ -515,6 +536,9 @@ void GatewayApplication::shutdown() {
     if (shutdown_done_.exchange(true, std::memory_order_acq_rel))
         return;
     SGRN_WARN_LOG("Shutting down...");
+    // Stop the northbound listener first: in-flight HTTP/WS handlers borrow
+    // the adapters, which are destroyed after the server joins.
+    northbound_server_.stop();
     if (modbus_adapter_.has_value()) {
         modbus_adapter_->stop();
     }

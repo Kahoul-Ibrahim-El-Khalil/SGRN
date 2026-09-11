@@ -16,7 +16,7 @@ It demonstrates a **dual-client architecture**:
 
 ## Enabled / Disabled Features
 - **S7 Adapter**: **Enabled** (Port 102). *Both AngelScript clients connect via this port.*
-- **HTTP/WebSocket API**: **Enabled** (Ports 8000/8001).
+- **HTTP/WebSocket API**: **Enabled** (Port 8000; WebSocket at `/ws`).
 - **Modbus Adapter**: **Disabled** via `demo.py` due to root binding constraints.
 - **Security**: **Strict Mode**. AngelScript policy enforced via `security.as`.
 - **Persistence**: **Enabled**.

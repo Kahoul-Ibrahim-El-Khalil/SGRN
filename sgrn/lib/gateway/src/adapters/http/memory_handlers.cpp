@@ -182,7 +182,7 @@ namespace sgrn::gateway::adapters
 static std::tuple<int, size_t, size_t> parseMemoryPath(const std::string& t_path) {
     std::vector<std::string> parts = sgrn::utils::strings::tokenize(t_path, '/');
     // Accept both:
-    //   "1/offset/0/size/72"   (the current httplib capture from /memory/db/(.*))
+    //   "1/offset/0/size/72"   (the route "<path>" capture from /memory/db/<path>)
     //   "/db/1/offset/0/size/72" (legacy/internal callers)
     const bool has_db_prefix = parts.size() == 7 && parts[1] == "db" && parts[3] == "offset" && parts[5] == "size";
     const bool bare_path = parts.size() == 5 && parts[1] == "offset" && parts[3] == "size";
@@ -216,9 +216,10 @@ static std::tuple<int, size_t, size_t> parseMemoryPath(const std::string& t_path
  * not JSON — this enforces the constraint that single-DB operations work with direct
  * C++ struct semantics compatible with S7 memory layout.
  */
-void HttpAdapter::handleGetMemoryBinary(const httplib::Request& t_req, httplib::Response& t_res, PlcMemory& t_memory) {
-    // Extract path: req.matches[1] = the full matched path after /memory/
-    std::string t_path = t_req.matches[1];
+void HttpAdapter::handleGetMemoryBinary(const http::HttpRequest& t_req, http::HttpResponse& t_res) {
+    PlcMemory& t_memory = *refs_.memory;
+    // Extract path: the "<path>" capture after /memory/db/
+    std::string t_path = t_req.path;
     if (!t_path.empty() && t_path.back() == '/')
         t_path.pop_back();
 
@@ -231,7 +232,7 @@ void HttpAdapter::handleGetMemoryBinary(const httplib::Request& t_req, httplib::
     }
 
     // IP ACL check
-    const std::string& client_ip = t_req.remote_addr;
+    const std::string& client_ip = t_req.remote_ip;
     if (!isAuthorized(t_req, db_num)) {
         t_res.status = 403;
         t_res.set_content(fmt::format(R"({{"error":"IP {} is not authorised to read DB{}"}})", client_ip, db_num), "application/json");
@@ -256,8 +257,9 @@ void HttpAdapter::handleGetMemoryBinary(const httplib::Request& t_req, httplib::
  * Writes raw bytes to a single database. Request body must be exactly <sz> bytes
  * (no padding, no truncation). Response echoes the written bytes (S7 semantics).
  */
-void HttpAdapter::handlePutMemoryBinary(const httplib::Request& t_req, httplib::Response& t_res, PlcMemory& t_memory) {
-    std::string t_path = t_req.matches[1];
+void HttpAdapter::handlePutMemoryBinary(const http::HttpRequest& t_req, http::HttpResponse& t_res) {
+    PlcMemory& t_memory = *refs_.memory;
+    std::string t_path = t_req.path;
     if (!t_path.empty() && t_path.back() == '/')
         t_path.pop_back();
 
@@ -278,7 +280,7 @@ void HttpAdapter::handlePutMemoryBinary(const httplib::Request& t_req, httplib::
     }
 
     // IP ACL check
-    const std::string& client_ip = t_req.remote_addr;
+    const std::string& client_ip = t_req.remote_ip;
     if (!isAuthorized(t_req, db_num)) {
         t_res.status = 403;
         t_res.set_content(fmt::format(R"({{"error":"IP {} is not authorised to write DB{}"}})", client_ip, db_num), "application/json");
@@ -321,7 +323,8 @@ void HttpAdapter::handlePutMemoryBinary(const httplib::Request& t_req, httplib::
  *   - Releases locks
  * This dramatically reduces lock overhead vs. per-item writes.
  */
-void HttpAdapter::handlePutMemoryBatch(const httplib::Request& t_req, httplib::Response& t_res, PlcMemory& t_memory) {
+void HttpAdapter::handlePutMemoryBatch(const http::HttpRequest& t_req, http::HttpResponse& t_res) {
+    PlcMemory& t_memory = *refs_.memory;
     // Parse JSON request body
     rapidjson::Document doc;
     doc.Parse(t_req.body.c_str());
@@ -360,7 +363,7 @@ void HttpAdapter::handlePutMemoryBatch(const httplib::Request& t_req, httplib::R
         }
 
         // IP ACL check
-        const std::string& client_ip = t_req.remote_addr;
+        const std::string& client_ip = t_req.remote_ip;
         if (!isAuthorized(t_req, db_num)) {
             t_res.status = 403;
             t_res.set_content(fmt::format(R"({{"error":"IP {} is not authorised to write DB{}"}})", client_ip, db_num), "application/json");

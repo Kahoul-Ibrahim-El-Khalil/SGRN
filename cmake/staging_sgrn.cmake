@@ -511,7 +511,7 @@ if(NOT TARGET sgrn::gateway)
         IMPORTED_LOCATION "${_gw_lib}"
         IMPORTED_IMPLIB "${_gw_lib}"
         INTERFACE_INCLUDE_DIRECTORIES "${_inc}/sgrn/gateway"
-        INTERFACE_LINK_LIBRARIES "sgrn::utils;sgrn::sdk;ixwebsocket::ixwebsocket;sgrn::gateway::s7;sgrn::gateway::twin;sgrn::gateway::opcua;sgrn::scl;sqlite_modern_cpp"
+        INTERFACE_LINK_LIBRARIES "sgrn::utils;sgrn::sdk;extern::crow;sgrn::gateway::s7;sgrn::gateway::twin;sgrn::gateway::opcua;sgrn::scl;sqlite_modern_cpp"
     )
 endif()
 
