@@ -18,11 +18,11 @@ import os
 import sys
 
 # Ensure local sgrn package is loadable. The Python bindings live under
-# sgrn/bindings/python; the repo-root sgrn/ directory is the C++ tree and must
+# sgrn/python; the repo-root sgrn/ directory is the C++ tree and must
 # NOT shadow the bindings package, so put the bindings dir first.
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, _REPO_ROOT)
-sys.path.insert(0, os.path.join(_REPO_ROOT, "sgrn", "bindings", "python"))
+sys.path.insert(0, os.path.join(_REPO_ROOT, "sgrn", "python"))
 
 import numpy as np
 

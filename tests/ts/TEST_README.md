@@ -161,7 +161,7 @@ test("Custom WebSocket command", async () => {
 
 ### Gateway Fails to Start
 - Check if ports 8080, 8081, 8102, 8480 are available
-- Verify gateway binary exists at `.build/linux-static-release/sgrn/gateway/gateway`
+- Verify gateway binary exists at `.build/linux-static-release/sgrn/apps/gateway/gateway`
 - Check gateway logs in test output
 
 ### Tests Timeout
@@ -169,7 +169,7 @@ test("Custom WebSocket command", async () => {
 - Check if gateway is responding: `curl http://localhost:8080/endpoints`
 
 ### Permission Denied
-- Ensure gateway binary is executable: `chmod +x .build/linux-static-release/sgrn/gateway/gateway`
+- Ensure gateway binary is executable: `chmod +x .build/linux-static-release/sgrn/apps/gateway/gateway`
 
 ## CI/CD Integration
 

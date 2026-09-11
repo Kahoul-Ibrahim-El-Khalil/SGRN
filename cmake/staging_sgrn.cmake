@@ -87,38 +87,38 @@ endfunction()
 
 macro(sgrn_stage_to_prefix)
     # 1. Stage SGRN core headers
-    sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/core/include/sgrn" "sgrn")
+    sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/lib/core/include/sgrn" "sgrn")
 
     # 2. Stage SGRN utils library + headers
     if(TARGET sgrn_utils)
         sgrn_stage_library(sgrn_utils)
-        sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/utils/include/sgrn/utils" "sgrn/utils")
+        sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/lib/utils/include/sgrn/utils" "sgrn/utils")
     endif()
 
     # 3. Stage SGRN SDK library + headers
     if(TARGET sgrn_sdk)
         sgrn_stage_library(sgrn_sdk)
-        sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/sdk/include/sgrn/sdk" "sgrn/sdk")
+        sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/lib/sdk/include/sgrn/sdk" "sgrn/sdk")
     endif()
 
     # 4. Stage SGRN SCL library + headers
     if(TARGET sgrn_scl)
         sgrn_stage_library(sgrn_scl)
-        sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/scl/include/sgrn/scl" "sgrn/scl")
+        sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/lib/scl/include/sgrn/scl" "sgrn/scl")
     endif()
 
     # 5. Stage SGRN Gateway libraries + headers
     # Sub-libraries (STATIC) that compose the gateway
     foreach(_gt IN ITEMS
-        sgrn_gateway_s7_wrappers
+        sgrn_wrappers_s7
         sgrn_gateway_security
-        sgrn_gateway_modbus_wrappers
+        sgrn_wrappers_modbus
         sgrn_gateway_modbus
-        sgrn_gateway_ethernetip_wrappers
+        sgrn_wrappers_ethernetip
         sgrn_gateway_ethernetip
         sgrn_gateway_twin
         sgrn_gateway_s7
-        sgrn_gateway_opcua_wrappers
+        sgrn_gateway_ports
         sgrn_gateway_opcua
     )
         sgrn_stage_library(${_gt})
@@ -130,12 +130,24 @@ macro(sgrn_stage_to_prefix)
     endif()
 
     # Gateway headers (all sub-libs share the same include tree)
-    sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/gateway/include/sgrn/gateway" "sgrn/gateway")
+    sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/include/sgrn/gateway" "sgrn/gateway")
+
+    # Wrappers headers (sibling project sgrn/lib/wrappers/)
+    sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/lib/wrappers/include/sgrn/wrappers" "sgrn/wrappers")
+
+    # Common headers (sibling project sgrn/lib/common/, header-only INTERFACE lib)
+    sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/lib/common/include/sgrn/common" "sgrn/common")
 
     # 6. Stage SGRN S7Shell library + headers
-    if(TARGET sgrn_s7shell_lib)
-        sgrn_stage_library(sgrn_s7shell_lib)
-        sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/s7shell/include/sgrn/s7shell" "sgrn/s7shell")
+    if(TARGET sgrn_s7shell)
+        sgrn_stage_library(sgrn_s7shell)
+        sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/lib/s7shell/include/sgrn/s7shell" "sgrn/s7shell")
+    endif()
+
+    # 6b. Stage virtual-PLC data plane (sgrn_plcsim static lib + headers)
+    if(TARGET sgrn_plcsim)
+        sgrn_stage_library(sgrn_plcsim)
+        sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/lib/plcsim/include/sgrn/plcsim" "sgrn/plcsim")
     endif()
 
     # 7. Stage SGRN Datastore libraries + headers
@@ -147,7 +159,7 @@ macro(sgrn_stage_to_prefix)
         endif()
     endforeach()
     # Stage datastore public headers
-    sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/datastore/include/sgrn/datastore" "sgrn/datastore")
+    sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/lib/datastore/include/sgrn/datastore" "sgrn/datastore")
 
     # 8. Stage executables
     foreach(_exe IN ITEMS gateway s7proxy mbproxy s7shell sclc sgrn_datastore)
@@ -295,7 +307,7 @@ function(_sgrn_lib_path _var _stem)
     endforeach()
 endfunction()
 
-# ── sgrn_core_iface ──────────────────────────────────────────────────────────
+# ── sgrn_core ──────────────────────────────────────────────────────────────────
 if(NOT TARGET sgrn::core)
     add_library(sgrn::core INTERFACE IMPORTED GLOBAL)
     target_include_directories(sgrn::core INTERFACE "${_inc}")
@@ -342,13 +354,13 @@ if(NOT TARGET sgrn::scl)
     )
 endif()
 
-# ── sgrn_gateway_s7_wrappers ─────────────────────────────────────────────────
-if(NOT TARGET sgrn::gateway::s7::wrappers)
-    _sgrn_lib_path(_gw_s7w_lib sgrn_gateway_s7_wrappers)
-    add_library(sgrn::gateway::s7::wrappers STATIC IMPORTED GLOBAL)
-    set_target_properties(sgrn::gateway::s7::wrappers PROPERTIES
+# ── sgrn_wrappers_s7 ─────────────────────────────────────────────────────────
+if(NOT TARGET sgrn::wrappers::s7)
+    _sgrn_lib_path(_gw_s7w_lib sgrn_wrappers_s7)
+    add_library(sgrn::wrappers::s7 STATIC IMPORTED GLOBAL)
+    set_target_properties(sgrn::wrappers::s7 PROPERTIES
         IMPORTED_LOCATION "${_gw_s7w_lib}"
-        INTERFACE_INCLUDE_DIRECTORIES "${_inc}/sgrn/gateway"
+        INTERFACE_INCLUDE_DIRECTORIES "${_inc}/sgrn/wrappers"
         INTERFACE_LINK_LIBRARIES "sgrn::utils;extern::snap7cpp"
         INTERFACE_COMPILE_DEFINITIONS "SGRN_HAS_SNAP7"
     )
@@ -372,7 +384,7 @@ if(NOT TARGET sgrn::gateway::twin)
     set_target_properties(sgrn::gateway::twin PROPERTIES
         IMPORTED_LOCATION "${_gw_twin_lib}"
         INTERFACE_INCLUDE_DIRECTORIES "${_inc}/sgrn/gateway"
-        INTERFACE_LINK_LIBRARIES "sgrn::gateway::s7::wrappers;sgrn::scl;fmt::fmt"
+        INTERFACE_LINK_LIBRARIES "sgrn::wrappers::s7;sgrn::scl;fmt::fmt"
     )
 endif()
 
@@ -383,17 +395,17 @@ if(NOT TARGET sgrn::gateway::s7)
     set_target_properties(sgrn::gateway::s7 PROPERTIES
         IMPORTED_LOCATION "${_gw_s7_lib}"
         INTERFACE_INCLUDE_DIRECTORIES "${_inc}/sgrn/gateway"
-        INTERFACE_LINK_LIBRARIES "sgrn::gateway::s7::wrappers;sgrn::gateway::twin;sgrn::gateway::security;sgrn::scl"
+        INTERFACE_LINK_LIBRARIES "sgrn::wrappers::s7;sgrn::common;sgrn::scl"
     )
 endif()
 
-# ── sgrn_gateway_modbus_wrappers ─────────────────────────────────────────────
-if(NOT TARGET sgrn::gateway::modbus::wrappers)
-    _sgrn_lib_path(_gw_mbw_lib sgrn_gateway_modbus_wrappers)
-    add_library(sgrn::gateway::modbus::wrappers STATIC IMPORTED GLOBAL)
-    set_target_properties(sgrn::gateway::modbus::wrappers PROPERTIES
+# ── sgrn_wrappers_modbus ──────────────────────────────────────────────────────
+if(NOT TARGET sgrn::wrappers::modbus)
+    _sgrn_lib_path(_gw_mbw_lib sgrn_wrappers_modbus)
+    add_library(sgrn::wrappers::modbus STATIC IMPORTED GLOBAL)
+    set_target_properties(sgrn::wrappers::modbus PROPERTIES
         IMPORTED_LOCATION "${_gw_mbw_lib}"
-        INTERFACE_INCLUDE_DIRECTORIES "${_inc}/sgrn/gateway"
+        INTERFACE_INCLUDE_DIRECTORIES "${_inc}/sgrn/wrappers"
         INTERFACE_LINK_LIBRARIES "sgrn::utils;extern::modbus;fmt::fmt"
     )
 endif()
@@ -405,17 +417,17 @@ if(NOT TARGET sgrn::gateway::modbus)
     set_target_properties(sgrn::gateway::modbus PROPERTIES
         IMPORTED_LOCATION "${_gw_mb_lib}"
         INTERFACE_INCLUDE_DIRECTORIES "${_inc}/sgrn/gateway"
-        INTERFACE_LINK_LIBRARIES "sgrn::gateway::twin;sgrn::scl;sgrn::gateway::modbus::wrappers"
+        INTERFACE_LINK_LIBRARIES "sgrn::common;sgrn::scl;sgrn::wrappers::modbus"
     )
 endif()
 
-# ── sgrn_gateway_ethernetip_wrappers ─────────────────────────────────────────
-if(NOT TARGET sgrn::gateway::ethernetip::wrappers)
-    _sgrn_lib_path(_gw_eipw_lib sgrn_gateway_ethernetip_wrappers)
-    add_library(sgrn::gateway::ethernetip::wrappers STATIC IMPORTED GLOBAL)
-    set_target_properties(sgrn::gateway::ethernetip::wrappers PROPERTIES
+# ── sgrn_wrappers_ethernetip ─────────────────────────────────────────────────
+if(NOT TARGET sgrn::wrappers::ethernetip)
+    _sgrn_lib_path(_gw_eipw_lib sgrn_wrappers_ethernetip)
+    add_library(sgrn::wrappers::ethernetip STATIC IMPORTED GLOBAL)
+    set_target_properties(sgrn::wrappers::ethernetip PROPERTIES
         IMPORTED_LOCATION "${_gw_eipw_lib}"
-        INTERFACE_INCLUDE_DIRECTORIES "${_inc}/sgrn/gateway"
+        INTERFACE_INCLUDE_DIRECTORIES "${_inc}/sgrn/wrappers"
         INTERFACE_LINK_LIBRARIES "sgrn::utils;opener;fmt::fmt"
     )
 endif()
@@ -427,17 +439,17 @@ if(NOT TARGET sgrn::gateway::ethernetip)
     set_target_properties(sgrn::gateway::ethernetip PROPERTIES
         IMPORTED_LOCATION "${_gw_eip_lib}"
         INTERFACE_INCLUDE_DIRECTORIES "${_inc}/sgrn/gateway"
-        INTERFACE_LINK_LIBRARIES "sgrn::gateway::twin;sgrn::scl;sgrn::gateway::ethernetip::wrappers;s7codec"
+        INTERFACE_LINK_LIBRARIES "sgrn::common;sgrn::scl;sgrn::wrappers::ethernetip;s7codec"
     )
 endif()
 
-# ── sgrn_gateway_opcua_wrappers ──────────────────────────────────────────────
-if(NOT TARGET sgrn::gateway::opcua::wrappers)
-    _sgrn_lib_path(_gw_uaw_lib sgrn_gateway_opcua_wrappers)
-    add_library(sgrn::gateway::opcua::wrappers STATIC IMPORTED GLOBAL)
-    set_target_properties(sgrn::gateway::opcua::wrappers PROPERTIES
+# ── sgrn_wrappers_opcua ──────────────────────────────────────────────────────
+if(NOT TARGET sgrn::wrappers::opcua)
+    _sgrn_lib_path(_gw_uaw_lib sgrn_wrappers_opcua)
+    add_library(sgrn::wrappers::opcua STATIC IMPORTED GLOBAL)
+    set_target_properties(sgrn::wrappers::opcua PROPERTIES
         IMPORTED_LOCATION "${_gw_uaw_lib}"
-        INTERFACE_INCLUDE_DIRECTORIES "${_inc}/sgrn/gateway"
+        INTERFACE_INCLUDE_DIRECTORIES "${_inc}/sgrn/wrappers"
         INTERFACE_LINK_LIBRARIES "extern::open62541;sgrn::utils"
     )
 endif()
@@ -449,7 +461,7 @@ if(NOT TARGET sgrn::gateway::opcua)
     set_target_properties(sgrn::gateway::opcua PROPERTIES
         IMPORTED_LOCATION "${_gw_ua_lib}"
         INTERFACE_INCLUDE_DIRECTORIES "${_inc}/sgrn/gateway"
-        INTERFACE_LINK_LIBRARIES "sgrn::gateway::opcua::wrappers;sgrn::gateway::twin;sgrn::gateway::security;sgrn::scl"
+        INTERFACE_LINK_LIBRARIES "sgrn::wrappers::opcua;sgrn::gateway::twin;sgrn::gateway::security;sgrn::scl"
     )
 endif()
 
@@ -465,15 +477,26 @@ if(NOT TARGET sgrn::gateway)
     )
 endif()
 
-# ── sgrn_s7shell_lib ─────────────────────────────────────────────────────────
-if(NOT TARGET sgrn::s7shell::lib)
-    _sgrn_lib_path(_s7sh_lib sgrn_s7shell_lib)
-    add_library(sgrn::s7shell::lib SHARED IMPORTED GLOBAL)
-    set_target_properties(sgrn::s7shell::lib PROPERTIES
+# ── sgrn_plcsim ──────────────────────────────────────────────────────────────
+if(NOT TARGET sgrn::plcsim)
+    _sgrn_lib_path(_plcsim_lib sgrn_plcsim)
+    add_library(sgrn::plcsim STATIC IMPORTED GLOBAL)
+    set_target_properties(sgrn::plcsim PROPERTIES
+        IMPORTED_LOCATION "${_plcsim_lib}"
+        INTERFACE_INCLUDE_DIRECTORIES "${_inc}"
+        INTERFACE_LINK_LIBRARIES "sgrn::gateway::twin;sgrn::gateway;sgrn::scl"
+    )
+endif()
+
+# ── sgrn_s7shell ─────────────────────────────────────────────────────────────
+if(NOT TARGET sgrn::s7shell)
+    _sgrn_lib_path(_s7sh_lib sgrn_s7shell)
+    add_library(sgrn::s7shell SHARED IMPORTED GLOBAL)
+    set_target_properties(sgrn::s7shell PROPERTIES
         IMPORTED_LOCATION "${_s7sh_lib}"
         IMPORTED_IMPLIB "${_s7sh_lib}"
         INTERFACE_INCLUDE_DIRECTORIES "${_inc}"
-        INTERFACE_LINK_LIBRARIES "sgrn::gateway::twin;sgrn::gateway::s7;sgrn::scl;angelscript;extern::angelscript_addons"
+        INTERFACE_LINK_LIBRARIES "sgrn::plcsim;sgrn::gateway::twin;sgrn::gateway::s7;sgrn::scl;angelscript;extern::angelscript_addons"
     )
 endif()
 

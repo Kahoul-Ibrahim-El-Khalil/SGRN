@@ -6,7 +6,7 @@ import json
 import numpy as np
 
 # Ensure sgrn python bindings are in import path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'sgrn/bindings/python'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'sgrn/python'))
 
 try:
     from sgrn.ml.dataset import BinaryDatasetReader

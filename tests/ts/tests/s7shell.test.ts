@@ -34,13 +34,13 @@ describe("S7Shell CLI Tool Tests", () => {
     const possiblePaths = [
       path.join(
         import.meta.dir,
-        "../../../.build/linux-static-release/sgrn/s7shell/s7shell",
+        "../../../.build/linux-static-release/sgrn/apps/s7shell/s7shell",
       ),
       path.join(
         import.meta.dir,
-        "../../../.build/linux-static-release/sgrn/s7shell/s7shell.exe",
+        "../../../.build/linux-static-release/sgrn/apps/s7shell/s7shell.exe",
       ),
-      path.join(import.meta.dir, "../../../sgrn/s7shell/s7shell"),
+      path.join(import.meta.dir, "../../../sgrn/apps/s7shell/s7shell"),
     ];
 
     for (const p of possiblePaths) {

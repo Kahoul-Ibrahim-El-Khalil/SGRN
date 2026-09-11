@@ -56,7 +56,7 @@ function(sgrn_create_pch_std)
     endif()
 
     target_compile_features(sgrn_pch_std PUBLIC cxx_std_23)
-    target_include_directories(sgrn_pch_std PUBLIC "${CMAKE_SOURCE_DIR}/sgrn/core/include")
+    target_include_directories(sgrn_pch_std PUBLIC "${CMAKE_SOURCE_DIR}/sgrn/lib/core/include")
     target_precompile_headers(sgrn_pch_std PUBLIC
         <algorithm>
         <array>
@@ -230,8 +230,8 @@ function(sgrn_create_pch_s7)
     )
 
     target_include_directories(sgrn_pch_s7 PUBLIC
-        "${CMAKE_SOURCE_DIR}/sgrn/core/include"
-        "${CMAKE_SOURCE_DIR}/sgrn/utils/include"
+        "${CMAKE_SOURCE_DIR}/sgrn/lib/core/include"
+        "${CMAKE_SOURCE_DIR}/sgrn/lib/utils/include"
     )
 
     target_precompile_headers(sgrn_pch_s7 PUBLIC
@@ -262,8 +262,8 @@ function(sgrn_create_pch_s7_third_party)
     # Include search paths flow in transitively through sgrn::* target_link_libraries.
     # Only project-own headers need explicit injection here.
     target_include_directories(sgrn_pch_s7_third PUBLIC
-        "${CMAKE_SOURCE_DIR}/sgrn/core/include"
-        "${CMAKE_SOURCE_DIR}/sgrn/utils/include"
+        "${CMAKE_SOURCE_DIR}/sgrn/lib/core/include"
+        "${CMAKE_SOURCE_DIR}/sgrn/lib/utils/include"
     )
 
     target_link_libraries(sgrn_pch_s7_third PUBLIC 

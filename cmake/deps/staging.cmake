@@ -40,9 +40,9 @@ endif()
 # cmake file (via CPMAddPackage). They are in scope here since staging.cmake
 # is included after all dep cmake files have run.
 
-# s7codec is SGRN-internal: sgrn/codecs/s7codec/
+# s7codec is SGRN-internal: sgrn/lib/codecs/s7codec/
 get_filename_component(SGRN_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)
-set(_s7codec_src "${SGRN_ROOT}/sgrn/codecs/s7codec/include")
+set(_s7codec_src "${SGRN_ROOT}/sgrn/lib/codecs/s7codec/include")
 
 # ── 1. Install libraries ──────────────────────────────────────────────────────
 foreach(_t IN ITEMS
@@ -327,7 +327,7 @@ if(EXISTS "${unordered_dense_SOURCE_DIR}/include")
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
     )
 endif()
-# s7codec is SGRN-internal: install from sgrn/codecs/s7codec/include/
+# s7codec is SGRN-internal: install from sgrn/lib/codecs/s7codec/include/
 install(DIRECTORY "${_s7codec_src}/"
     DESTINATION "${_INC}"
     FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"

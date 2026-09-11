@@ -123,7 +123,7 @@ The `gateway` binary features a cross-platform desktop UI capability:
 
 ```bash
 # Launch Gateway with Native Desktop GUI Window
-.prefix/bin/gateway sgrn/gateway/simulations/nuclear/gateway.json --gui
+.prefix/bin/gateway sgrn/lib/gateway/simulations/nuclear/gateway.json --gui
 ```
 
 ### Key Behaviors:

@@ -33,13 +33,13 @@ export class GatewayProcess {
     this.pfeRoot = join(import.meta.dir, "../../..");
     this.gatewayPath = join(
       this.pfeRoot,
-      ".build/linux-static-release/sgrn/gateway/gateway",
+      ".build/linux-static-release/sgrn/apps/gateway/gateway",
     );
     this.s7shellPath = join(
       this.pfeRoot,
-      ".build/linux-static-release/sgrn/s7shell/s7shell",
+      ".build/linux-static-release/sgrn/apps/s7shell/s7shell",
     );
-    this.cwd = join(this.pfeRoot, "sgrn/gateway");
+    this.cwd = join(this.pfeRoot, "sgrn/lib/gateway");
 
     const simName = this.simulationScript
       ? basename(dirname(this.simulationScript))

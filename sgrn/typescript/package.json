@@ -1,0 +1,18 @@
+{
+  "name": "@sgrn/typescript-bindings",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./gateway": "./gateway/src/index.ts",
+    "./datastore": "./datastore/src/index.ts",
+    "./types": "./types/src/index.ts"
+  },
+  "workspaces": [
+    "gateway",
+    "datastore",
+    "types"
+  ],
+  "devDependencies": {
+    "@sgrn/datastore": "file:./datastore"
+  }
+}

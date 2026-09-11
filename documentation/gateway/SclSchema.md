@@ -4,7 +4,7 @@ Implementation note: the schema pipeline has moved from the legacy `s7registry` 
 
 ## Parser scope
 
-Implementation: `sgrn/scl/src/schema/DbSymbolsParser.cpp` (see also `PlcSchemaStore`, `SclCompiler` in `sgrn/scl/src/schema/`).
+Implementation: `sgrn/lib/scl/src/schema/DbSymbolsParser.cpp` (see also `PlcSchemaStore`, `SclCompiler` in `sgrn/lib/scl/src/schema/`).
 
 Supported constructs:
 
@@ -57,7 +57,7 @@ The parser header documents `{ S7_Endianness := 'Little' | 'Big' }` — this **b
 
 ## Compiling schemas with `sclc`
 
-`sclc` is the schema compiler CLI (`sgrn/scl/apps/sclcompiler.cpp`). Commands:
+`sclc` is the schema compiler CLI (`sgrn/apps/sclc/main.cpp`). Commands:
 
 ```bash
 sclc ./symbols/ -o registry.json                # compile symbols directory into JSON registry

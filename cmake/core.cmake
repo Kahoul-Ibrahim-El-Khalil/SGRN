@@ -1,6 +1,6 @@
 # cmake/core.cmake — Standard compile flags.
 # ─────────────────────────────────────────────────────────────────────────────
-# Included by: sgrn/gateway/CMakeLists.txt
+# Included by: sgrn/lib/gateway/CMakeLists.txt
 #
 # Provides sgrn_target(<target>) which applies:
 #   - C++23 language standard

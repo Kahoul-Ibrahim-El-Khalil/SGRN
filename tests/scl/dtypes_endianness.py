@@ -13,11 +13,11 @@ import sys
 
 import numpy as np
 
-# The Python bindings live under sgrn/bindings/python; put that on the path
+# The Python bindings live under sgrn/python; put that on the path
 # BEFORE the repo root so the C++ sgrn/ tree doesn't shadow the bindings pkg.
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, _REPO_ROOT)
-sys.path.insert(0, os.path.join(_REPO_ROOT, "sgrn", "bindings", "python"))
+sys.path.insert(0, os.path.join(_REPO_ROOT, "sgrn", "python"))
 
 from sgrn.dtypes import decode_record
 from sgrn.models import DbField, DbSchema, UdtSchema

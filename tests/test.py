@@ -14,8 +14,8 @@ from contextlib import contextmanager
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(TESTS_DIR)
 
-GATEWAY_BIN = os.path.join(REPO_ROOT, ".build", "linux-static-release", "sgrn", "gateway", "gateway")
-S7SHELL_BIN = os.path.join(REPO_ROOT, ".build", "linux-static-release", "sgrn", "s7shell", "s7shell")
+GATEWAY_BIN = os.path.join(REPO_ROOT, ".build", "linux-static-release", "sgrn", "apps", "gateway", "gateway")
+S7SHELL_BIN = os.path.join(REPO_ROOT, ".build", "linux-static-release", "sgrn", "apps", "s7shell", "s7shell")
 
 TEST_REGISTRY = {
     "gateway-rest": {
@@ -51,7 +51,7 @@ TEST_REGISTRY = {
         "category": "scl",
         "type": "offline",
         "description": "Validates SCL schema compilation into correct data types and endianness.",
-        "assumptions": "Offline test. Depends on the sgrn.bindings python package."
+        "assumptions": "Offline test. Depends on the sgrn/python package."
     },
     "scl-validation": {
         "path": "scl/schema_registry_validation.py",
@@ -89,7 +89,7 @@ def GatewayFixture(simulation_name):
     sim_name = simulation_name or "gas_processing"
     ts = int(time.time() * 1000)
     state_dir = f"/tmp/gateway-state-{sim_name}-{ts}"
-    repo_sim_dir = os.path.join(REPO_ROOT, "sgrn", "gateway", "simulations", sim_name)
+    repo_sim_dir = os.path.join(REPO_ROOT, "sgrn", "lib", "gateway", "simulations", sim_name)
     
     os.makedirs(state_dir, exist_ok=True)
     

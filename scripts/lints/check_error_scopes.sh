@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-BACKEND_FILE="sgrn/datastore/include/sgrn/datastore/BackendError.hpp"
-FRONTEND_FILE="sgrn/datastore/web/types/src/index.ts"
+BACKEND_FILE="sgrn/lib/datastore/include/sgrn/datastore/BackendError.hpp"
+FRONTEND_FILE="sgrn/typescript/types/src/index.ts"
 
 if [ ! -f "$BACKEND_FILE" ]; then
     echo "Error: $BACKEND_FILE not found"
