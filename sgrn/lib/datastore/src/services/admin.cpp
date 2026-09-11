@@ -179,7 +179,7 @@ Task<Json::Value> registerUser(
     } catch (const std::exception& e) {
         ERROR_LOG("Database error during user registration: {}", e.what());
         response["success"] = false;
-        response["error"] = "Registration failed: Database error";
+        response["error"] = std::string("Registration failed: ") + e.what();
     }
 
     co_return response;

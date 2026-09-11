@@ -6,6 +6,7 @@
 #include <optional>
 #include <s7codec/codec.hpp>
 #include <stdexcept>
+#include <string>
 namespace sgrn::scl
 {
 using DataType = s7codec::Type;

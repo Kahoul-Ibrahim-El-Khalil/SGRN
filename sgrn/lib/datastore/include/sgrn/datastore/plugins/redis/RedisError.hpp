@@ -14,6 +14,8 @@
 #include <string_view>
 
 #include <fmt/format.h>
+#include <stdexcept>
+#include <string>
 
 #include <sgrn/datastore/BackendError.hpp>
 

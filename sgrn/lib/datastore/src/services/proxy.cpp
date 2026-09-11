@@ -4,6 +4,8 @@
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/debug.hpp>
 #include <regex>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::datastore::services::proxy
 {

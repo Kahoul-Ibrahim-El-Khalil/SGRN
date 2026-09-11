@@ -4,6 +4,8 @@
 
 #include <fmt/format.h>
 #include <sgrn/utils/time.hpp>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::s7shell::shell
 {

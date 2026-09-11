@@ -1,3 +1,4 @@
+#include <sgrn/plcsim/utils/PlcSimClock.hpp>
 #include <sgrn/s7shell/SchemaVM.hpp>
 #include <sgrn/s7shell/connection/S7Connection.hpp>
 #include <sgrn/s7shell/facades/ScriptAsync.hpp>
@@ -9,7 +10,6 @@
 #include <sgrn/s7shell/script/ScriptDataBlock.hpp>
 #include <sgrn/s7shell/script/ScriptSchemaStore.hpp>
 #include <sgrn/s7shell/script/ScriptTagTable.hpp>
-#include <sgrn/plcsim/utils/PlcSimClock.hpp>
 #include <sgrn/s7shell/utils/json_helpers.hpp>
 
 #include <sgrn/gateway/twin/twin.hpp>
@@ -33,6 +33,7 @@
 #include <rapidjson/writer.h>
 #include <regex>
 #include <stdexcept>
+#include <string>
 #include <thread>
 
 namespace sgrn::s7shell::shell

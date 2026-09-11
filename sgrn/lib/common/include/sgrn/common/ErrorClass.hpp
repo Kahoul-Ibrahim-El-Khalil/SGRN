@@ -1,9 +1,11 @@
 #pragma once
 
-#include <fmt/format.h>
-
 #include <cstdint>
+#include <string>
 #include <string_view>
+
+#include <fmt/format.h>
+#include <stdexcept>
 
 namespace sgrn::common
 {

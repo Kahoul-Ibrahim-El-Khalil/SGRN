@@ -11,6 +11,8 @@
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/hashing.hpp>
 #include <sgrn/utils/strings.hpp>
+#include <stdexcept>
+#include <string>
 
 #ifdef DEBUG_AUTH_SERVICE
 #define DEBUG_LOG(msg, ...) SGRN_DEBUG("AuthService", msg __VA_OPT__(, ) __VA_ARGS__)

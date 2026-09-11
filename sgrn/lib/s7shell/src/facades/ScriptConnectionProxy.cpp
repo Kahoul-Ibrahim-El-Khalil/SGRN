@@ -3,6 +3,8 @@
 #include <sgrn/s7shell/utils/json_helpers.hpp>
 
 #include <fmt/format.h>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::s7shell::shell
 {

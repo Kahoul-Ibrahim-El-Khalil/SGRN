@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::scl
 {

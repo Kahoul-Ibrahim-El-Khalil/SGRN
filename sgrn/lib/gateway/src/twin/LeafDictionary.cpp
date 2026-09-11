@@ -3,6 +3,8 @@
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 
 #include <fmt/core.h>
+#include <stdexcept>
+#include <string>
 
 using sgrn::Result;
 namespace sgrn::gateway::twin

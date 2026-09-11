@@ -11,6 +11,7 @@
 #include <sgrn/types/HttpResponseCallback.hpp>
 #include <cctype>
 #include <json/json.h>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <trantor/utils/Date.h>

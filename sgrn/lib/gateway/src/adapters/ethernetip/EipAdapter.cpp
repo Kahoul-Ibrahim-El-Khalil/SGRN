@@ -8,6 +8,8 @@
 #include <s7codec/endian.hpp>
 
 #include <fmt/format.h>
+#include <stdexcept>
+#include <string>
 
 #include <algorithm>
 #include <chrono>

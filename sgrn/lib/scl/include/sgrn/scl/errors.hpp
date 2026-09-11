@@ -1,5 +1,8 @@
 #pragma once
 
+#include <stdexcept>
+#include <string>
+
 #include <fmt/format.h>
 
 #include <string_view>

@@ -12,6 +12,8 @@
 #include <sgrn/utils/jsoncpp.hpp>
 #include <array>
 #include <regex>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::datastore::handlers::query
 {

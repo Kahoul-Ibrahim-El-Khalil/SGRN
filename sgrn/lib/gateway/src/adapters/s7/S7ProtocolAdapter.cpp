@@ -1,5 +1,7 @@
 #include <fmt/core.h>
 #include <sgrn/gateway/adapters/s7/S7ProtocolAdapter.hpp>
+#include <stdexcept>
+#include <string>
 
 using ::sgrn::wrappers::s7::S7Error;
 

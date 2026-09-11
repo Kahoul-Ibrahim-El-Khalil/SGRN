@@ -76,6 +76,10 @@ export class GatewayProcess {
         http: { port: 8080 },
         websocket: { port: 8081 },
       },
+      // Pin the gateway's own archive/state dir under /tmp: the product
+      // default is CWD-relative ("./gateway-state") and must never land
+      // in the source tree during tests.
+      state_dir: join(this.stateDir, "gateway-state"),
       schema: join(this.repoSimDir, "schema.scl"),
       security_script: this.policyPath,
     };

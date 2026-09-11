@@ -1,4 +1,5 @@
 #include <sgrn/Result.hpp>
+#include <sgrn/datastore/client/Client.hpp>
 #include <sgrn/gateway/adapters/ethernetip/EipAdapter.hpp>
 #include <sgrn/gateway/adapters/http.hpp>
 #include <sgrn/gateway/adapters/modbus/ModbusAdapter.hpp>
@@ -24,7 +25,6 @@
 #include <sgrn/gateway/twin/utils.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/scl/schema/SchemaSerializer.hpp>
-#include <sgrn/sdk/SgrnClient.hpp>
 #include <sgrn/utils/app.hpp>
 #include <sgrn/utils/compression.hpp>
 #include <sgrn/utils/filesystem.hpp>
@@ -40,6 +40,8 @@
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
+#include <stdexcept>
+#include <string>
 
 #include <atomic>
 #include <chrono>

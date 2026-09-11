@@ -1,5 +1,7 @@
 #pragma once
 #include <fmt/core.h>
+#include <stdexcept>
+#include <string>
 namespace sgrn::datastore::bootstrap
 {
 

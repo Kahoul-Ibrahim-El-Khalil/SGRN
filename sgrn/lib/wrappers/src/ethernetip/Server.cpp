@@ -1,6 +1,8 @@
 #include <sgrn/wrappers/ethernetip/Server.hpp>
 
 #include <fmt/core.h>
+#include <stdexcept>
+#include <string>
 
 #ifdef _WIN32
 #include <winsock2.h>

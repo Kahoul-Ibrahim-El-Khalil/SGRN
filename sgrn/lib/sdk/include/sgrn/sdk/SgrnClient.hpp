@@ -6,6 +6,8 @@
 #include <sgrn/utils/threading.hpp>
 #include <httplib.h>
 #include <rapidjson/document.h>
+#include <stdexcept>
+#include <string>
 
 #include <atomic>
 #include <condition_variable>
@@ -76,6 +78,15 @@ inline std::string authModeToString(AuthMode t_mode) {
     }
 }
 
+/// Drive-API base path, routed by auth mode exactly like resolveStoragePath:
+/// user sessions speak /api/v1/storage/drive/*, service sessions the
+/// automated-service/* twins. SessionToken keeps the legacy service base.
+inline std::string resolveDriveBase(const AutomatedServiceConfig& t_config) {
+    if (t_config.auth_mode_ == AuthMode::UserPassword)
+        return "/api/v1/storage/drive";
+    return "/api/v1/storage/automated-service/drive";
+}
+
 inline std::string resolveStoragePath(const AutomatedServiceConfig& t_config) {
     if (!t_config.storage_path_.empty() && t_config.storage_path_ != "/api/v1/storage/automated-service/files") {
         return t_config.storage_path_;
@@ -133,6 +144,34 @@ public:
      */
     rapidjson::Document query(const std::string& t_table, const std::string& t_params = "");
 
+    /**
+     * @brief Account-level listings backing domain navigation (Synchronous).
+     * Mirror the dashboard's QueryList fetchers; empty on transport failure.
+     */
+    std::vector<IdNamePair> listOrganisations();
+    std::vector<IdNamePair> listDomains(const std::string& t_organisation);
+    /// Error-reporting variants (empty vector is ambiguous, see tryListDrive).
+    sgrn::Result<std::vector<IdNamePair>, std::string> tryListOrganisations();
+    sgrn::Result<std::vector<IdNamePair>, std::string> tryListDomains(const std::string& t_organisation);
+    /// Statuses valid for user registration, per organisation.
+    sgrn::Result<std::vector<IdNamePair>, std::string> tryListStatuses(const std::string& t_organisation);
+
+    /// Account admin (mirrors the dashboard admin page; all admin-gated).
+    sgrn::Result<std::vector<AdminUserEntry>, std::string> tryListUsers();
+    sgrn::Result<std::string, std::string> registerUser(const NewUser& t_user);
+    sgrn::Result<std::vector<ServiceEntry>, std::string> tryListServices();
+    sgrn::Result<ServiceCredentials, std::string> registerService(const NewService& t_service);
+    sgrn::Result<ServiceCredentials, std::string> rotateServiceToken(int64_t t_service_id);
+
+    /// Session: sign out (revokes server-side) and password change.
+    bool signOut();
+    sgrn::Result<std::string, std::string> updatePassword(const std::string& t_old_password, const std::string& t_new_password);
+
+    /// Raw JSON passthroughs for profile display (shapes stay server-owned).
+    sgrn::Result<std::string, std::string> userInfoJson();
+    sgrn::Result<std::string, std::string> storageStatsJson();
+    sgrn::Result<std::string, std::string> storageConstraintsJson();
+
     const SgrnClientConfig& config() const {
         return config_;
     }
@@ -154,7 +193,7 @@ public:
         std::string content_type;
         std::string message;
     };
-    DownloadResult doDownload(const std::string& t_remote_path);
+    DownloadResult doDownload(const std::string& t_remote_path, StorageScope t_scope = StorageScope::Auto);
     DownloadResult doDownloadDriveZip(const std::string& t_path, StorageScope t_scope);
 
     struct UploadResult {
@@ -164,9 +203,12 @@ public:
         std::optional<int64_t> file_id;
         std::optional<std::string> key;
     };
-    UploadResult doUpload(const std::string& t_remote_path, std::string t_bytes);
+    UploadResult doUpload(const std::string& t_remote_path, std::string t_bytes, StorageScope t_scope = StorageScope::Auto);
 
     DriveListing listDrive(const std::string& t_path = "/", StorageScope t_scope = StorageScope::Auto);
+    /// Same as listDrive(), but reports transport failures instead of
+    /// collapsing them onto an empty listing (needed by interactive tools).
+    sgrn::Result<DriveListing, std::string> tryListDrive(const std::string& t_path = "/", StorageScope t_scope = StorageScope::Auto);
     bool createDriveDirectory(const std::string& t_path, StorageScope t_scope = StorageScope::Auto);
     bool moveDriveItem(int64_t t_id, DriveItemType t_type, const std::string& t_new_name = "",
         std::optional<int64_t> t_target_parent_id = std::nullopt, StorageScope t_scope = StorageScope::Auto);

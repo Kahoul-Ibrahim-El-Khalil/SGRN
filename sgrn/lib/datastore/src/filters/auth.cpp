@@ -8,6 +8,7 @@
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe_access.hpp>
 #include <sgrn/debug.hpp>
+#include <stdexcept>
 #include <string>
 
 namespace sgrn::datastore::filters

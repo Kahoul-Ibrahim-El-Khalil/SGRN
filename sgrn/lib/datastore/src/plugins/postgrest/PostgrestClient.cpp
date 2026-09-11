@@ -8,6 +8,8 @@
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/jwt.hpp>
+#include <stdexcept>
+#include <string>
 
 #ifdef DEBUG_PLUGIN_POSTGREST
 #define DEBUG_LOG(msg, ...) SGRN_DEBUG("PostgREST", msg __VA_OPT__(, ) __VA_ARGS__)

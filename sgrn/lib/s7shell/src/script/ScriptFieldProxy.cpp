@@ -3,6 +3,8 @@
 #include <sgrn/s7shell/script/ScriptFieldProxy.hpp>
 
 #include <fmt/format.h>
+#include <stdexcept>
+#include <string>
 
 using ::sgrn::scl::DataType;
 

@@ -5,6 +5,8 @@
 #include <sgrn/scl/errors.hpp>
 #include <sgrn/wrappers/s7/error.hpp>
 #include <angelscript.h>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 
 namespace sgrn::s7shell

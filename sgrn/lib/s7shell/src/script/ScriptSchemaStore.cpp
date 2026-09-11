@@ -2,6 +2,8 @@
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 
 #include <fmt/format.h>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::s7shell::shell
 {

@@ -1,6 +1,6 @@
 #include <sgrn/gateway/twin/twin.hpp>
-#include <sgrn/s7shell/connection/S7Connection.hpp>
 #include <sgrn/plcsim/runtime/PlcRuntime.hpp>
+#include <sgrn/s7shell/connection/S7Connection.hpp>
 #include <sgrn/s7shell/script/ScriptDataBlock.hpp>
 #include <sgrn/s7shell/script/ScriptFieldProxy.hpp>
 #include <sgrn/s7shell/script/ScriptPathBatch.hpp>
@@ -21,6 +21,8 @@
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
+#include <stdexcept>
+#include <string>
 #include <thread>
 
 namespace sgrn::s7shell::shell
@@ -29,8 +31,8 @@ namespace sgrn::s7shell::shell
 using namespace sgrn::scl;
 using namespace ::sgrn::gateway::twin;
 
-static void markDirtyDiff(const ::sgrn::plcsim::runtime::PlcRuntimeSPtr& tsp_runtime, uint16_t t_db_num, size_t t_base_offset, const uint8_t* tp_before,
-    const uint8_t* tp_after, size_t t_len) {
+static void markDirtyDiff(const ::sgrn::plcsim::runtime::PlcRuntimeSPtr& tsp_runtime, uint16_t t_db_num, size_t t_base_offset,
+    const uint8_t* tp_before, const uint8_t* tp_after, size_t t_len) {
     if (!tsp_runtime || t_len == 0)
         return;
 

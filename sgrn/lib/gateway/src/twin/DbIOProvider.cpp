@@ -8,6 +8,8 @@
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/wrappers/s7/error.hpp>
 #include <snap7.h>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::gateway::twin
 {

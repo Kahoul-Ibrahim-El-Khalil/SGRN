@@ -5,6 +5,8 @@
 #include <sgrn/utils/encoding.hpp>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace sgrn::utils::jwt

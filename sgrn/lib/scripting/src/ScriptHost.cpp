@@ -8,6 +8,8 @@
 #include <scriptdictionary/scriptdictionary.h>
 #include <scripthelper/scripthelper.h>
 #include <scriptstdstring/scriptstdstring.h>
+#include <stdexcept>
+#include <string>
 namespace sgrn::scripting
 {
 

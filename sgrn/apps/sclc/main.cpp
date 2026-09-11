@@ -26,6 +26,7 @@
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 

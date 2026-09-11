@@ -7,6 +7,7 @@
 #include <cstring>
 #include <cxxopts.hpp>
 #include <stdexcept>
+#include <string>
 
 using namespace sgrn::s7shell::shell;
 using namespace sgrn::s7shell::commands;

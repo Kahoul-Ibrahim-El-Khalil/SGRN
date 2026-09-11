@@ -2,6 +2,8 @@
 #include <sgrn/common/S7SerializationUtils.hpp>
 #include <sgrn/gateway/twin/encoding.hpp>
 #include <sgrn/gateway/twin/serialization.hpp>
+#include <stdexcept>
+#include <string>
 
 using ::sgrn::scl::DataType;
 

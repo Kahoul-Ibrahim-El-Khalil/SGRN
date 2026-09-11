@@ -15,9 +15,9 @@
 // S7Client attached to it, to load one afterwards.
 // =============================================================================
 
+#include <sgrn/plcsim/runtime/PlcRuntime.hpp>
 #include <sgrn/s7shell/bindings/registration.hpp>
 #include <sgrn/s7shell/connection/S7Connection.hpp>
-#include <sgrn/plcsim/runtime/PlcRuntime.hpp>
 
 #include <angelscript.h>
 

@@ -16,6 +16,8 @@
 
 #include <fmt/core.h>
 #include <algorithm>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::scl
 {

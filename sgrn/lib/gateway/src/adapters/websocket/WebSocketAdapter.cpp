@@ -17,6 +17,8 @@
 #include <rapidjson/error/en.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
+#include <stdexcept>
+#include <string>
 
 #include <algorithm>
 #include <limits>

@@ -15,7 +15,7 @@ void main() {
     print("=================================================================");
 
     // 1. Core In-Memory Twin
-    PlcRuntime@ rt = PlcRuntime("sgrn/gateway/simulations/pipeline/schema.scl");
+    PlcRuntime@ rt = PlcRuntime("sgrn/lib/gateway/simulations/pipeline/schema.scl");
 
     // 2. Soft PLC Server — allows S7 clients/HMIs to read DB1 & DB2 over S7 protocol
     S7Server@ s7 = S7Server(rt, "0.0.0.0", 102);

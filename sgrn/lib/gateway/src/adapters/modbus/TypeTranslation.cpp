@@ -3,6 +3,8 @@
 #include <cmath>
 #include <cstring>
 #include <s7codec/codec.hpp>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::gateway::adapters::modbus::TypeTranslation
 {

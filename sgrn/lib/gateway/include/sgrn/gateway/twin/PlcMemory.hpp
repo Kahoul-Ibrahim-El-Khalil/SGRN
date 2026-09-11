@@ -19,6 +19,7 @@
 #include <set>
 #include <shared_mutex>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>

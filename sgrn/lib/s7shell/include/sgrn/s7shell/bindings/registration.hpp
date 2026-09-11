@@ -3,14 +3,15 @@
 #include <fmt/format.h>
 #include <sgrn/Result.hpp>
 #include <sgrn/gateway/twin/PlcCommandProcessor.hpp>
+#include <sgrn/plcsim/utils/PlcSimClock.hpp>
 #include <sgrn/s7shell/connection/S7Connection.hpp>
 #include <sgrn/s7shell/script/ScriptDataBlock.hpp>
-#include <sgrn/plcsim/utils/PlcSimClock.hpp>
 #include <sgrn/scl/types.hpp>
 #include <angelscript.h>
 #include <ctime>
 #include <s7codec/codec.hpp>
 #include <snap7.h>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 

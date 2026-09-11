@@ -57,6 +57,11 @@ function(sgrn_stage_library target)
         return()
     endif()
 
+    get_target_property(_alias ${target} ALIASED_TARGET)
+    if(_alias)
+        return()
+    endif()
+
     get_target_property(_type ${target} TYPE)
     if(_type STREQUAL "INTERFACE_LIBRARY" OR _type STREQUAL "OBJECT_LIBRARY")
         # Interface libraries have no binary, only headers.
@@ -95,7 +100,15 @@ macro(sgrn_stage_to_prefix)
         sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/lib/utils/include/sgrn/utils" "sgrn/utils")
     endif()
 
-    # 3. Stage SGRN SDK library + headers
+    # 3. Stage SGRN Datastore Client & Shell libraries + headers (formerly SDK)
+    if(TARGET sgrn_datastore_client)
+        sgrn_stage_library(sgrn_datastore_client)
+        sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/lib/datastore/client/include/sgrn/datastore/client" "sgrn/datastore/client")
+    endif()
+    if(TARGET sgrn_datastore_shell)
+        sgrn_stage_library(sgrn_datastore_shell)
+        sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/lib/datastore/shell/include/sgrn/datastore/shell" "sgrn/datastore/shell")
+    endif()
     if(TARGET sgrn_sdk)
         sgrn_stage_library(sgrn_sdk)
         sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/lib/sdk/include/sgrn/sdk" "sgrn/sdk")
@@ -330,8 +343,33 @@ if(NOT TARGET sgrn::utils)
     )
 endif()
 
+# ── sgrn_datastore_client & sgrn_datastore_shell ─────────────────────────────
+if(NOT TARGET sgrn::datastore_client AND NOT TARGET sgrn_datastore_client)
+    _sgrn_lib_path(_ds_client_lib sgrn_datastore_client)
+    add_library(sgrn::datastore_client STATIC IMPORTED GLOBAL)
+    set_target_properties(sgrn::datastore_client PROPERTIES
+        IMPORTED_LOCATION "${_ds_client_lib}"
+        IMPORTED_IMPLIB "${_ds_client_lib}"
+        INTERFACE_INCLUDE_DIRECTORIES "${_inc}"
+        INTERFACE_LINK_LIBRARIES "sgrn::core;sgrn::utils;fmt::fmt"
+    )
+    sgrn_alias(sgrn::sdk)
+    sgrn_link_dependency(sgrn::sdk SGRN_SDK sgrn::datastore_client)
+endif()
+
+if(NOT TARGET sgrn::datastore_shell AND NOT TARGET sgrn_datastore_shell)
+    _sgrn_lib_path(_ds_shell_lib sgrn_datastore_shell)
+    add_library(sgrn::datastore_shell STATIC IMPORTED GLOBAL)
+    set_target_properties(sgrn::datastore_shell PROPERTIES
+        IMPORTED_LOCATION "${_ds_shell_lib}"
+        IMPORTED_IMPLIB "${_ds_shell_lib}"
+        INTERFACE_INCLUDE_DIRECTORIES "${_inc}"
+        INTERFACE_LINK_LIBRARIES "sgrn::core;sgrn::datastore_client;sgrn::utils;fmt::fmt"
+    )
+endif()
+
 # ── sgrn_sdk ─────────────────────────────────────────────────────────────────
-if(NOT TARGET sgrn::sdk)
+if(NOT TARGET sgrn::sdk AND NOT TARGET sgrn_sdk)
     _sgrn_lib_path(_sdk_lib sgrn_sdk)
     add_library(sgrn::sdk SHARED IMPORTED GLOBAL)
     set_target_properties(sgrn::sdk PROPERTIES

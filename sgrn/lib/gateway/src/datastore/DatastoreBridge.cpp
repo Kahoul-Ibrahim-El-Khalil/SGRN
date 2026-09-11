@@ -1,5 +1,7 @@
 #include <fmt/color.h>
 #include <fmt/core.h>
+#include <stdexcept>
+#include <string>
 
 #include <sgrn/gateway/core/GlobalContext.hpp>
 #include <sgrn/gateway/datastore/DatastoreBridge.hpp>

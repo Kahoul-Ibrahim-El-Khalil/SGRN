@@ -4,6 +4,8 @@
 #include <sgrn/utils/strings.hpp>
 #include <scriptarray/scriptarray.h>
 #include <scriptbuilder/scriptbuilder.h>
+#include <stdexcept>
+#include <string>
 
 #include <sgrn/utils/network.hpp>
 #include <algorithm>

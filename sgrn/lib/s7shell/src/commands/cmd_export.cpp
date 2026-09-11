@@ -7,6 +7,8 @@
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <cxxopts.hpp>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::s7shell::commands
 {

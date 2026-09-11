@@ -12,6 +12,8 @@
 #include <iostream>
 #include <regex>
 #include <set>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::scl
 {

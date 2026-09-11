@@ -3,6 +3,8 @@
 #include <sgrn/scl/utils.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <sgrn/utils/xml.hpp>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::scl
 {

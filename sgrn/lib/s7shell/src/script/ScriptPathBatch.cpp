@@ -8,6 +8,8 @@
 #include <fmt/format.h>
 #include <scriptarray/scriptarray.h>
 #include <scriptdictionary/scriptdictionary.h>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::s7shell::shell
 {
@@ -25,8 +27,8 @@ S7PathBatch::S7PathBatch(ScriptTagTable* tp_tags)
     : conn_(tp_tags->conn_)
     , db_(nullptr)
     , tags_(tp_tags)
-    , engine_(conn_->tag_table_ ? std::make_unique<::sgrn::s7shell::S7BatchEngine<::sgrn::plcsim::PlcTagTable>>(*conn_->tag_table_)
-                                : nullptr) {
+    , engine_(
+          conn_->tag_table_ ? std::make_unique<::sgrn::s7shell::S7BatchEngine<::sgrn::plcsim::PlcTagTable>>(*conn_->tag_table_) : nullptr) {
     if (tags_)
         tags_->addRef();
 }

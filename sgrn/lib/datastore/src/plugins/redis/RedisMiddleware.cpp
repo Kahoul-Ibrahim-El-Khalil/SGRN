@@ -4,6 +4,8 @@
 #include <sgrn/datastore/plugins/redis/RedisMiddleware.hpp>
 #include <sgrn/debug.hpp>
 #include <sstream>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::datastore::plugins
 {

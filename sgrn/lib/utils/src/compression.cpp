@@ -1,6 +1,8 @@
 #include <fmt/format.h>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/compression.hpp>
+#include <stdexcept>
+#include <string>
 
 #include <algorithm>
 #include <cstdio> // FILE, fopen, fclose, fread, fwrite

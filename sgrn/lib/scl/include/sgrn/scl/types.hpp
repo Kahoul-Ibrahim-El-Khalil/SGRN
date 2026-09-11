@@ -5,6 +5,9 @@
 #include <sgrn/utils/strings.hpp>
 #include <s7codec/s7.hpp>
 
+#include <stdexcept>
+#include <string>
+
 #include <fmt/format.h>
 
 #include <rapidjson/document.h>

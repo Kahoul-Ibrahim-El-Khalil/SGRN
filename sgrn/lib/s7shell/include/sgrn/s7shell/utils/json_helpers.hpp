@@ -9,6 +9,7 @@
 #include <sgrn/wrappers/s7/error.hpp>
 #include <fstream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>

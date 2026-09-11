@@ -11,6 +11,8 @@
 #include <sgrn/utils/json.hpp>
 #include <sgrn/utils/rapidjson.hpp>
 #include <sgrn/utils/strings.hpp>
+#include <stdexcept>
+#include <string>
 
 #include <sgrn/scl/functions/modbus.hpp>
 using sgrn::common::json_helper::buildArrayResponse;

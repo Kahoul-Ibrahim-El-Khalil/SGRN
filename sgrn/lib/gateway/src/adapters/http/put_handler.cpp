@@ -5,6 +5,8 @@
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/utils/encoding.hpp>
 #include <sgrn/utils/json.hpp>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::gateway::adapters
 {

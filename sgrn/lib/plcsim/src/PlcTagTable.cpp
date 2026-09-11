@@ -10,6 +10,8 @@
 #include <cstring>
 #include <fstream>
 #include <rapidjson/document.h>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::plcsim
 {

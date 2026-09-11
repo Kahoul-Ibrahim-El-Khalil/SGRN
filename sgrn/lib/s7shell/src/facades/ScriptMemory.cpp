@@ -10,6 +10,8 @@
 #include <sgrn/utils/strings.hpp>
 #include <algorithm>
 #include <set>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::s7shell::shell
 {

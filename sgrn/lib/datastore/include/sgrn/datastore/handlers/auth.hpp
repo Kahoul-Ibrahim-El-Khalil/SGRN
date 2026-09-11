@@ -4,6 +4,7 @@
 #include <sgrn/datastore/utils/IHandler.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 #include <array>
+#include <stdexcept>
 #include <string>
 
 namespace sgrn::datastore::handlers::auth

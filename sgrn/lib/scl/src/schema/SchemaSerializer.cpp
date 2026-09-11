@@ -4,6 +4,8 @@
 #include <sgrn/scl/utils.hpp>
 #include <algorithm>
 #include <regex>
+#include <stdexcept>
+#include <string>
 
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>

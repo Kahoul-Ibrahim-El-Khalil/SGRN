@@ -21,6 +21,8 @@
 #include <fmt/core.h>
 #include <sgrn/s7shell/bindings/registration.hpp>
 #include <angelscript.h>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::s7shell::bindings
 {

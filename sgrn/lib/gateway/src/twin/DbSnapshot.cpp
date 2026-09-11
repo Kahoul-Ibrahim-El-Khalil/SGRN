@@ -10,6 +10,8 @@
 #include <filesystem>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
+#include <string>
 namespace
 {
 namespace fs = std::filesystem;

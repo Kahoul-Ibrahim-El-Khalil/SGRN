@@ -13,6 +13,7 @@
 #include <sgrn/debug.hpp>
 #include <cstdint>
 #include <regex>
+#include <stdexcept>
 #include <string>
 namespace sgrn::datastore::handlers::admin
 {

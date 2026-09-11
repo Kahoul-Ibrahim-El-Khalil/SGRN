@@ -3,6 +3,8 @@
 #include <fmt/color.h>
 #include <fmt/core.h>
 #include <algorithm> // for std::min
+#include <stdexcept>
+#include <string>
 
 inline void printHttpRequest(drogon::HttpRequestPtr tsp_req) {
     if (!t_req) {

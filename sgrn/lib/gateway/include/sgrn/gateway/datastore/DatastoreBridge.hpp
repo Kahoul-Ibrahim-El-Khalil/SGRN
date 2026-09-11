@@ -1,9 +1,9 @@
 #pragma once
 
+#include <sgrn/datastore/client/Client.hpp>
 #include <sgrn/gateway/config/datastore.hpp>
 #include <sgrn/gateway/core/snapshot.hpp>
 #include <sgrn/gateway/database/GatewayDatabase.hpp>
-#include <sgrn/sdk/SgrnClient.hpp>
 #include <rapidjson/document.h>
 
 #include <sgrn/Result.hpp>

@@ -14,6 +14,8 @@
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <angelscript.h>
+#include <stdexcept>
+#include <string>
 
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 

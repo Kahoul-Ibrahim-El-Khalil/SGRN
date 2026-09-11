@@ -7,6 +7,8 @@
 #include <open62541/types_generated_handling.h>
 
 #include <fmt/core.h>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::wrappers::opcua
 {

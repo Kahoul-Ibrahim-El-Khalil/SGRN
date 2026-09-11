@@ -3,6 +3,8 @@
 
 #include <fmt/format.h>
 #include <cctype>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::s7shell::shell
 {

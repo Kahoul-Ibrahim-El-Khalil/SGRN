@@ -8,6 +8,8 @@
 #include <sgrn/utils/filesystem.hpp>
 #include <cxxopts.hpp>
 #include <filesystem>
+#include <stdexcept>
+#include <string>
 
 namespace fs = std::filesystem;
 

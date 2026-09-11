@@ -28,6 +28,7 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 #include <s7codec/codec.hpp>
+#include <stdexcept>
 #include <vector>
 
 namespace sgrn::gateway::adapters

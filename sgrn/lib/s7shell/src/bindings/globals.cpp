@@ -1,5 +1,6 @@
 #include <fmt/color.h>
 #include <fmt/format.h>
+#include <sgrn/plcsim/utils/PlcSimClock.hpp>
 #include <sgrn/s7shell/SchemaVM.hpp>
 #include <sgrn/s7shell/bindings/registration.hpp>
 #include <sgrn/s7shell/connection/S7Connection.hpp>
@@ -15,7 +16,6 @@
 #include <sgrn/s7shell/script/ScriptPathBatch.hpp>
 #include <sgrn/s7shell/script/ScriptSchemaStore.hpp>
 #include <sgrn/s7shell/script/ScriptTagTable.hpp>
-#include <sgrn/plcsim/utils/PlcSimClock.hpp>
 #include <angelscript.h>
 #include <chrono>
 #include <cmath>
@@ -23,6 +23,8 @@
 #include <scriptarray/scriptarray.h>
 #include <scriptdictionary/scriptdictionary.h>
 #include <snap7.h>
+#include <stdexcept>
+#include <string>
 #include <thread>
 
 namespace sgrn::s7shell::shell

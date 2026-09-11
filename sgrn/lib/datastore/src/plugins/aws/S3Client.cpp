@@ -27,6 +27,8 @@
 #include <aws/s3/model/PutObjectRequest.h>
 #include <aws/s3/model/PutObjectTaggingRequest.h>
 #include <aws/s3/model/UploadPartRequest.h>
+#include <stdexcept>
+#include <string>
 
 #ifdef DEBUG_PLUGIN_AWS_S3
 #define DEBUG_LOG(msg, ...) SGRN_DEBUG("S3Client", msg __VA_OPT__(, ) __VA_ARGS__)

@@ -23,6 +23,8 @@
 #include <scripthelper/scripthelper.h>
 #include <set>
 #include <sstream>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 
 namespace sgrn::s7shell::shell

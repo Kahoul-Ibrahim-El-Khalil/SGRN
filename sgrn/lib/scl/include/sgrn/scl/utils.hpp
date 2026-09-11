@@ -9,6 +9,7 @@
 #include <map>
 #include <optional>
 #include <rapidjson/document.h>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>

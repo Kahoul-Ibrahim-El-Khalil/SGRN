@@ -11,6 +11,8 @@
 
 #include <fmt/chrono.h>
 #include <fmt/format.h>
+#include <stdexcept>
+#include <string>
 
 #include <filesystem>
 #include <fstream>
@@ -20,11 +22,6 @@ namespace sgrn::sdk
 
 static constexpr std::string_view kSignInServicePath = "/api/v1/auth/automated-service/signin";
 static constexpr std::string_view kSignInUserPath = "/api/v1/auth/user/signin";
-static constexpr std::string_view kDriveListPath = "/api/v1/storage/automated-service/drive/list";
-static constexpr std::string_view kDriveMkdirPath = "/api/v1/storage/automated-service/drive/mkdir";
-static constexpr std::string_view kDriveMovePath = "/api/v1/storage/automated-service/drive/move";
-static constexpr std::string_view kDriveDeletePath = "/api/v1/storage/automated-service/drive/delete";
-static constexpr std::string_view kDriveZipPath = "/api/v1/storage/automated-service/drive/zip";
 
 SgrnClient::SgrnClient(SgrnClientConfig t_config)
     : config_(std::move(t_config)) {
@@ -175,6 +172,284 @@ rapidjson::Document SgrnClient::query(const std::string& t_table, const std::str
     return makeRequest("GET", std::move(url));
 }
 
+namespace
+{
+
+// Minimal RFC 3986 query-value encoding (the SDK has no URL helper yet).
+std::string urlEncodeQueryValue(const std::string& t_in) {
+    std::string out;
+    out.reserve(t_in.size());
+    for (unsigned char c : t_in) {
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
+            out += static_cast<char>(c);
+        } else {
+            out += fmt::format("%{:02X}", c);
+        }
+    }
+    return out;
+}
+
+std::vector<IdNamePair> parseIdNamePairs(const rapidjson::Document& t_doc) {
+    std::vector<IdNamePair> out;
+    if (!t_doc.IsArray())
+        return out;
+    for (const auto& e : t_doc.GetArray()) {
+        if (!e.IsObject())
+            continue;
+        IdNamePair p;
+        if (e.HasMember("id")) {
+            const auto& id = e["id"];
+            if (id.IsString())
+                p.id_ = id.GetString();
+            else if (id.IsInt64())
+                p.id_ = std::to_string(id.GetInt64());
+            else if (id.IsUint64())
+                p.id_ = std::to_string(id.GetUint64());
+        }
+        if (e.HasMember("name") && e["name"].IsString())
+            p.name_ = e["name"].GetString();
+        out.push_back(std::move(p));
+    }
+    return out;
+}
+
+} // namespace
+
+std::vector<IdNamePair> SgrnClient::listOrganisations() {
+    auto r = tryListOrganisations();
+    return r.hasError() ? std::vector<IdNamePair>{} : r.value();
+}
+
+sgrn::Result<std::vector<IdNamePair>, std::string> SgrnClient::tryListOrganisations() {
+    auto doc = makeRequest("GET", "/api/v1/query/organisations");
+    if (doc.IsNull())
+        return sgrn::Result<std::vector<IdNamePair>, std::string>::Error("list organisations failed: empty response");
+    return parseIdNamePairs(doc);
+}
+
+std::vector<IdNamePair> SgrnClient::listDomains(const std::string& t_organisation) {
+    auto r = tryListDomains(t_organisation);
+    return r.hasError() ? std::vector<IdNamePair>{} : r.value();
+}
+
+sgrn::Result<std::vector<IdNamePair>, std::string> SgrnClient::tryListDomains(const std::string& t_organisation) {
+    auto doc = makeRequest("GET", "/api/v1/query/domains?organisation=" + urlEncodeQueryValue(t_organisation));
+    if (doc.IsNull())
+        return sgrn::Result<std::vector<IdNamePair>, std::string>::Error(
+            "list domains failed: empty response (check organisation and session)");
+    return parseIdNamePairs(doc);
+}
+
+namespace
+{
+
+std::string idToString(const rapidjson::Value& t_id) {
+    if (t_id.IsString())
+        return t_id.GetString();
+    if (t_id.IsInt64())
+        return std::to_string(t_id.GetInt64());
+    if (t_id.IsUint64())
+        return std::to_string(t_id.GetUint64());
+    if (t_id.IsInt())
+        return std::to_string(t_id.GetInt());
+    if (t_id.IsUint())
+        return std::to_string(t_id.GetUint());
+    return {};
+}
+
+std::string strField(const rapidjson::Value& t_obj, const char* t_key) {
+    return (t_obj.HasMember(t_key) && t_obj[t_key].IsString()) ? t_obj[t_key].GetString() : std::string{};
+}
+
+sgrn::Result<rapidjson::Document, std::string> postJson(SgrnClient& t_client, const std::string& t_endpoint, rapidjson::Document t_body) {
+    auto doc = t_client.makeRequest("POST", t_endpoint, sgrn::utils::json::serializeCompact(t_body));
+    if (doc.IsNull())
+        return sgrn::Result<rapidjson::Document, std::string>::Error("request failed: empty response from " + t_endpoint);
+    return std::move(doc);
+}
+
+bool responseOk(const rapidjson::Document& t_doc) {
+    return t_doc.IsObject() && ((!t_doc.HasMember("success")) || (t_doc["success"].IsBool() && t_doc["success"].GetBool())) &&
+           !t_doc.HasMember("error");
+}
+
+std::string responseMessage(const rapidjson::Document& t_doc, const std::string& t_fallback) {
+    if (t_doc.IsObject()) {
+        if (t_doc.HasMember("message") && t_doc["message"].IsString())
+            return t_doc["message"].GetString();
+        if (t_doc.HasMember("error") && t_doc["error"].IsString())
+            return t_doc["error"].GetString();
+    }
+    return t_fallback;
+}
+
+} // namespace
+
+sgrn::Result<std::vector<IdNamePair>, std::string> SgrnClient::tryListStatuses(const std::string& t_organisation) {
+    auto doc = makeRequest("GET", "/api/v1/query/statuses?organisation=" + urlEncodeQueryValue(t_organisation));
+    if (doc.IsNull())
+        return sgrn::Result<std::vector<IdNamePair>, std::string>::Error("list statuses failed: empty response");
+    return parseIdNamePairs(doc);
+}
+
+sgrn::Result<std::vector<AdminUserEntry>, std::string> SgrnClient::tryListUsers() {
+    auto doc = makeRequest("GET", "/api/v1/admin/users");
+    if (doc.IsNull())
+        return sgrn::Result<std::vector<AdminUserEntry>, std::string>::Error("list users failed: empty response (admin only?)");
+    if (!doc.IsArray())
+        return sgrn::Result<std::vector<AdminUserEntry>, std::string>::Error("list users failed: unexpected response shape");
+    std::vector<AdminUserEntry> out;
+    for (const auto& e : doc.GetArray()) {
+        if (!e.IsObject())
+            continue;
+        AdminUserEntry u;
+        u.id_ = e.HasMember("id") && e["id"].IsInt64() ? e["id"].GetInt64() : 0;
+        u.email_ = strField(e, "email");
+        u.first_name_ = strField(e, "first_name");
+        u.family_name_ = strField(e, "family_name");
+        u.domain_ = strField(e, "domain");
+        u.status_ = strField(e, "status");
+        out.push_back(std::move(u));
+    }
+    return out;
+}
+
+sgrn::Result<std::string, std::string> SgrnClient::registerUser(const NewUser& t_user) {
+    rapidjson::Document body;
+    auto& alloc = body.GetAllocator();
+    body.SetObject();
+    auto add = [&](const char* t_key, const std::string& t_val) {
+        body.AddMember(rapidjson::Value(t_key, alloc), rapidjson::Value(t_val.c_str(), alloc), alloc);
+    };
+    add("first_name", t_user.first_name_);
+    add("family_name", t_user.family_name_);
+    add("email", t_user.email_);
+    add("password", t_user.password_);
+    add("phone_number", t_user.phone_number_);
+    add("organisation", t_user.organisation_);
+    add("status", t_user.status_);
+    add("domain", t_user.domain_);
+    auto r = postJson(*this, "/api/v1/admin/users/register", std::move(body));
+    if (r.hasError())
+        return sgrn::Result<std::string, std::string>::Error(r.error());
+    if (!responseOk(r.value()))
+        return sgrn::Result<std::string, std::string>::Error(responseMessage(r.value(), "registration failed"));
+    return responseMessage(r.value(), "registered");
+}
+
+sgrn::Result<std::vector<ServiceEntry>, std::string> SgrnClient::tryListServices() {
+    auto doc = makeRequest("GET", "/api/v1/admin/automated-services");
+    if (doc.IsNull())
+        return sgrn::Result<std::vector<ServiceEntry>, std::string>::Error("list services failed: empty response (admin only?)");
+    if (!doc.IsArray())
+        return sgrn::Result<std::vector<ServiceEntry>, std::string>::Error("list services failed: unexpected response shape");
+    std::vector<ServiceEntry> out;
+    for (const auto& e : doc.GetArray()) {
+        if (!e.IsObject())
+            continue;
+        ServiceEntry s;
+        s.id_ = e.HasMember("id") && e["id"].IsInt64() ? e["id"].GetInt64() : 0;
+        s.name_ = strField(e, "name");
+        s.token_ = strField(e, "token");
+        s.is_active_ = e.HasMember("is_active") && e["is_active"].IsBool() && e["is_active"].GetBool();
+        s.domain_ = strField(e, "domain");
+        s.created_at_ = strField(e, "created_at");
+        out.push_back(std::move(s));
+    }
+    return out;
+}
+
+sgrn::Result<ServiceCredentials, std::string> SgrnClient::registerService(const NewService& t_service) {
+    rapidjson::Document body;
+    auto& alloc = body.GetAllocator();
+    body.SetObject();
+    auto add = [&](const char* t_key, const std::string& t_val) {
+        body.AddMember(rapidjson::Value(t_key, alloc), rapidjson::Value(t_val.c_str(), alloc), alloc);
+    };
+    add("name", t_service.name_);
+    add("organisation", t_service.organisation_);
+    add("domain", t_service.domain_);
+    if (!t_service.kind_.empty()) {
+        rapidjson::Value meta(rapidjson::kObjectType);
+        meta.AddMember("kind", rapidjson::Value(t_service.kind_.c_str(), alloc), alloc);
+        body.AddMember("metadata", meta, alloc);
+    } else {
+        body.AddMember("metadata", rapidjson::Value(rapidjson::kObjectType), alloc);
+    }
+    auto r = postJson(*this, "/api/v1/admin/automated-services/register", std::move(body));
+    if (r.hasError())
+        return sgrn::Result<ServiceCredentials, std::string>::Error(r.error());
+    if (!responseOk(r.value()))
+        return sgrn::Result<ServiceCredentials, std::string>::Error(responseMessage(r.value(), "registration failed"));
+    ServiceCredentials creds;
+    creds.message_ = responseMessage(r.value(), "registered");
+    creds.token_ = strField(r.value(), "token");
+    creds.token_secret_ = strField(r.value(), "token_secret");
+    return creds;
+}
+
+sgrn::Result<ServiceCredentials, std::string> SgrnClient::rotateServiceToken(int64_t t_service_id) {
+    rapidjson::Document body;
+    auto& alloc = body.GetAllocator();
+    body.SetObject();
+    body.AddMember("automated_service_id", t_service_id, alloc);
+    auto r = postJson(*this, "/api/v1/admin/automated-services/rotate-token", std::move(body));
+    if (r.hasError())
+        return sgrn::Result<ServiceCredentials, std::string>::Error(r.error());
+    if (!responseOk(r.value()))
+        return sgrn::Result<ServiceCredentials, std::string>::Error(responseMessage(r.value(), "rotation failed"));
+    ServiceCredentials creds;
+    creds.message_ = responseMessage(r.value(), "rotated");
+    creds.token_ = strField(r.value(), "token");
+    creds.token_secret_ = strField(r.value(), "token_secret");
+    return creds;
+}
+
+bool SgrnClient::signOut() {
+    const std::string path =
+        (config_.auth_mode_ == AuthMode::UserPassword) ? "/api/v1/auth/user/signout" : "/api/v1/auth/automated-service/signout";
+    auto doc = makeRequest("POST", path);
+    if (doc.IsNull())
+        return false;
+    clearSessionToken();
+    return true;
+}
+
+sgrn::Result<std::string, std::string> SgrnClient::updatePassword(const std::string& t_old_password, const std::string& t_new_password) {
+    rapidjson::Document body;
+    auto& alloc = body.GetAllocator();
+    body.SetObject();
+    body.AddMember("old_password", rapidjson::Value(t_old_password.c_str(), alloc), alloc);
+    body.AddMember("new_password", rapidjson::Value(t_new_password.c_str(), alloc), alloc);
+    auto r = postJson(*this, "/api/v1/auth/user/password", std::move(body));
+    if (r.hasError())
+        return sgrn::Result<std::string, std::string>::Error(r.error());
+    if (!responseOk(r.value()))
+        return sgrn::Result<std::string, std::string>::Error(responseMessage(r.value(), "password update failed"));
+    return responseMessage(r.value(), "password updated");
+}
+
+sgrn::Result<std::string, std::string> SgrnClient::userInfoJson() {
+    auto doc = makeRequest("GET", "/api/v1/query/user/info");
+    if (doc.IsNull())
+        return sgrn::Result<std::string, std::string>::Error("user info failed: empty response");
+    return sgrn::utils::json::serializeCompact(doc);
+}
+
+sgrn::Result<std::string, std::string> SgrnClient::storageStatsJson() {
+    auto doc = makeRequest("GET", "/api/v1/storage/stats");
+    if (doc.IsNull())
+        return sgrn::Result<std::string, std::string>::Error("stats failed: empty response");
+    return sgrn::utils::json::serializeCompact(doc);
+}
+
+sgrn::Result<std::string, std::string> SgrnClient::storageConstraintsJson() {
+    auto doc = makeRequest("GET", "/api/v1/storage/info");
+    if (doc.IsNull())
+        return sgrn::Result<std::string, std::string>::Error("constraints failed: empty response");
+    return sgrn::utils::json::serializeCompact(doc);
+}
+
 bool SgrnClient::signIn() {
     switch (config_.auth_mode_) {
         case AuthMode::AutomatedService:
@@ -317,13 +592,14 @@ rapidjson::Document SgrnClient::makeRequest(
         }
     }
 
-    if (res && res->status < 400) {
+    if (res) {
+        if (res->status >= 400) {
+            SGRN_ERROR("SgrnClient", "Request failed: {} {} -> status {}, body: {}", t_method, t_url, res->status, res->body);
+        }
         auto root_opt = sgrn::utils::json::deserialize(res->body);
         if (!root_opt.hasError()) {
             return std::move(root_opt.value());
         }
-    } else if (res) {
-        SGRN_ERROR("SgrnClient", "Request failed: {} {} -> status {}, body: {}", t_method, t_url, res->status, res->body);
     } else {
         SGRN_ERROR("SgrnClient", "Request failed: {} {} -> No response", t_method, t_url);
     }
@@ -332,15 +608,22 @@ rapidjson::Document SgrnClient::makeRequest(
     return null_doc;
 }
 
-SgrnClient::UploadResult SgrnClient::doUpload(const std::string& t_remote_path, std::string t_bytes) {
+SgrnClient::UploadResult SgrnClient::doUpload(const std::string& t_remote_path, std::string t_bytes, StorageScope t_scope) {
     UploadResult res;
     if (!hasSessionToken())
         signIn();
 
-    const std::string endpoint = sgrn::sdk::detail::resolveStoragePath(config_);
+    const auto actual_scope = (t_scope == StorageScope::Auto)
+                                  ? (config_.auth_mode_ == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
+                                  : t_scope;
+
+    const std::string scope_str = sgrn::sdk::detail::storageScopeToString(actual_scope);
+    const std::string endpoint =
+        sgrn::sdk::detail::resolveStoragePath(config_) + "?path=" + urlEncodeQueryValue(t_remote_path) + "&scope=" + scope_str;
     httplib::UploadFormDataItems items;
     items.push_back({"file", t_bytes, std::filesystem::path(t_remote_path).filename().string(), "application/octet-stream"});
     items.push_back({"path", t_remote_path, "", ""});
+    items.push_back({"scope", scope_str, "", ""});
 
     httplib::Headers headers;
     headers.emplace("Authorization", "Bearer " + getSessionToken());
@@ -353,7 +636,7 @@ SgrnClient::UploadResult SgrnClient::doUpload(const std::string& t_remote_path, 
         if (signIn() && hasSessionToken()) {
             headers.erase("Authorization");
             headers.emplace("Authorization", "Bearer " + getSessionToken());
-            res_http = http_client_->Get(endpoint, headers);
+            res_http = http_client_->Post(endpoint, headers, items);
         }
     }
 
@@ -385,12 +668,17 @@ SgrnClient::UploadResult SgrnClient::doUpload(const std::string& t_remote_path, 
     return res;
 }
 
-SgrnClient::DownloadResult SgrnClient::doDownload(const std::string& t_remote_path) {
+SgrnClient::DownloadResult SgrnClient::doDownload(const std::string& t_remote_path, StorageScope t_scope) {
     DownloadResult res;
     if (!hasSessionToken())
         signIn();
 
-    std::string endpoint = sgrn::sdk::detail::resolveStoragePath(config_) + "?path=" + t_remote_path;
+    const auto actual_scope = (t_scope == StorageScope::Auto)
+                                  ? (config_.auth_mode_ == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
+                                  : t_scope;
+
+    std::string endpoint = sgrn::sdk::detail::resolveStoragePath(config_) + "?path=" + urlEncodeQueryValue(t_remote_path) +
+                           "&scope=" + sgrn::sdk::detail::storageScopeToString(actual_scope);
     httplib::Headers headers;
     headers.emplace("Authorization", "Bearer " + getSessionToken());
 
@@ -409,9 +697,26 @@ SgrnClient::DownloadResult SgrnClient::doDownload(const std::string& t_remote_pa
     if (res_http) {
         res.ok = (res_http->status == 200);
         if (res.ok) {
-            res.bytes = res_http->body;
+            res.bytes = std::move(res_http->body);
             if (res_http->has_header("Content-Type"))
                 res.content_type = res_http->get_header_value("Content-Type");
+
+            const bool ends_with_zst = (t_remote_path.size() >= 4 && t_remote_path.rfind(".zst") == t_remote_path.size() - 4);
+            const bool is_zstd_payload =
+                (res.content_type == "application/zstd") ||
+                (res_http->has_header("X-Compressed") && res_http->get_header_value("X-Compressed") == "true") ||
+                (res.bytes.size() >= 4 && static_cast<unsigned char>(res.bytes[0]) == 0x28 &&
+                    static_cast<unsigned char>(res.bytes[1]) == 0xB5 && static_cast<unsigned char>(res.bytes[2]) == 0x2F &&
+                    static_cast<unsigned char>(res.bytes[3]) == 0xFD);
+
+            if (is_zstd_payload && !ends_with_zst) {
+                auto dec_res = sgrn::utils::decompressStringZstd(res.bytes);
+                if (!dec_res.hasError()) {
+                    res.bytes = std::move(dec_res.value());
+                } else {
+                    SGRN_WARN("SgrnClient", "Failed client-side transparent decompression for '{}': {}", t_remote_path, dec_res.error());
+                }
+            }
         }
     }
     return res;
@@ -425,8 +730,8 @@ SgrnClient::DownloadResult SgrnClient::doDownloadDriveZip(const std::string& t_p
     const auto actual_scope = (t_scope == StorageScope::Auto)
                                   ? (config_.auth_mode_ == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
                                   : t_scope;
-    std::string endpoint =
-        std::string(kDriveZipPath) + "?path=" + t_path + "&scope=" + sgrn::sdk::detail::storageScopeToString(actual_scope);
+    std::string endpoint = sgrn::sdk::detail::resolveDriveBase(config_) + "/zip?path=" + t_path +
+                           "&scope=" + sgrn::sdk::detail::storageScopeToString(actual_scope);
 
     httplib::Headers headers;
     headers.emplace("Authorization", "Bearer " + getSessionToken());
@@ -458,11 +763,24 @@ DriveListing SgrnClient::listDrive(const std::string& t_path, StorageScope t_sco
     const auto actual_scope = (t_scope == StorageScope::Auto)
                                   ? (config_.auth_mode_ == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
                                   : t_scope;
-    std::string endpoint =
-        std::string(kDriveListPath) + "?path=" + t_path + "&scope=" + sgrn::sdk::detail::storageScopeToString(actual_scope);
+    std::string endpoint = sgrn::sdk::detail::resolveDriveBase(config_) + "/list?path=" + t_path +
+                           "&scope=" + sgrn::sdk::detail::storageScopeToString(actual_scope);
     auto t_json = makeRequest("GET", endpoint);
     if (t_json.IsNull())
         return {};
+    return sgrn::sdk::detail::parseDriveListing(t_json);
+}
+
+sgrn::Result<DriveListing, std::string> SgrnClient::tryListDrive(const std::string& t_path, StorageScope t_scope) {
+    const auto actual_scope = (t_scope == StorageScope::Auto)
+                                  ? (config_.auth_mode_ == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
+                                  : t_scope;
+    std::string endpoint = sgrn::sdk::detail::resolveDriveBase(config_) + "/list?path=" + t_path +
+                           "&scope=" + sgrn::sdk::detail::storageScopeToString(actual_scope);
+    auto t_json = makeRequest("GET", endpoint);
+    if (t_json.IsNull())
+        return sgrn::Result<DriveListing, std::string>::Error(
+            fmt::format("list '{}' failed: empty response (check URL, network and session)", t_path));
     return sgrn::sdk::detail::parseDriveListing(t_json);
 }
 
@@ -470,8 +788,8 @@ bool SgrnClient::createDriveDirectory(const std::string& t_path, StorageScope t_
     const auto actual_scope = (t_scope == StorageScope::Auto)
                                   ? (config_.auth_mode_ == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
                                   : t_scope;
-    std::string endpoint =
-        std::string(kDriveMkdirPath) + "?path=" + t_path + "&scope=" + sgrn::sdk::detail::storageScopeToString(actual_scope);
+    std::string endpoint = sgrn::sdk::detail::resolveDriveBase(config_) + "/mkdir?path=" + t_path +
+                           "&scope=" + sgrn::sdk::detail::storageScopeToString(actual_scope);
     return !makeRequest("POST", endpoint).IsNull();
 }
 
@@ -490,7 +808,7 @@ bool SgrnClient::moveDriveItem(
     const auto actual_scope = (t_scope == StorageScope::Auto)
                                   ? (config_.auth_mode_ == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
                                   : t_scope;
-    std::string endpoint = std::string(kDriveMovePath) + "?type=" + sgrn::sdk::detail::driveItemTypeToString(t_type) +
+    std::string endpoint = sgrn::sdk::detail::resolveDriveBase(config_) + "/move?type=" + sgrn::sdk::detail::driveItemTypeToString(t_type) +
                            "&id=" + std::to_string(t_id) + "&scope=" + sgrn::sdk::detail::storageScopeToString(actual_scope);
     return !makeRequest("PATCH", endpoint, sgrn::utils::json::serializeCompact(body)).IsNull();
 }
@@ -499,8 +817,9 @@ bool SgrnClient::deleteDriveItem(int64_t t_id, DriveItemType t_type, StorageScop
     const auto actual_scope = (t_scope == StorageScope::Auto)
                                   ? (config_.auth_mode_ == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
                                   : t_scope;
-    std::string endpoint = std::string(kDriveDeletePath) + "?type=" + sgrn::sdk::detail::driveItemTypeToString(t_type) +
-                           "&id=" + std::to_string(t_id) + "&scope=" + sgrn::sdk::detail::storageScopeToString(actual_scope);
+    std::string endpoint = sgrn::sdk::detail::resolveDriveBase(config_) +
+                           "/delete?type=" + sgrn::sdk::detail::driveItemTypeToString(t_type) + "&id=" + std::to_string(t_id) +
+                           "&scope=" + sgrn::sdk::detail::storageScopeToString(actual_scope);
     return !makeRequest("DELETE", endpoint).IsNull();
 }
 

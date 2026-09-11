@@ -13,6 +13,8 @@
 
 #include <fmt/color.h>
 #include <fmt/format.h>
+#include <stdexcept>
+#include <string>
 
 #include <filesystem>
 #include <stdexcept>

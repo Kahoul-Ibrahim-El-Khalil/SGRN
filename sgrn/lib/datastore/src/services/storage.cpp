@@ -167,12 +167,7 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(Json::Value t_se
     }
 
     std::string download_name = record_res->name;
-    if (record_res->is_compressed_) {
-        std::string suffix = (record_res->compression_algorithm == "zstd") ? ".zst" : "";
-        if (!suffix.empty() && download_name.find(suffix) == std::string::npos) {
-            download_name += suffix;
-        }
-    }
+    std::string file_data = std::move(data_res.value());
 
     // SEC: Strip CR, LF, NUL, and double-quote to prevent HTTP header injection
     download_name.erase(std::remove_if(download_name.begin(), download_name.end(),
@@ -181,9 +176,14 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(Json::Value t_se
 
     HttpResponsePtr sp_resp = HttpResponse::newHttpResponse();
     sp_resp->setStatusCode(k200OK);
-    sp_resp->setContentTypeString(record_res->is_compressed_ ? "application/zstd" : helpers::inferMimeType(record_res->name));
+    if (record_res->is_compressed_) {
+        sp_resp->setContentTypeString("application/zstd");
+        sp_resp->addHeader("X-Compressed", "true");
+    } else {
+        sp_resp->setContentTypeString(helpers::inferMimeType(record_res->name));
+    }
     sp_resp->addHeader("Content-Disposition", fmt::format("attachment; filename=\"{}\"", download_name));
-    sp_resp->setBody(std::move(data_res.value()));
+    sp_resp->setBody(std::move(file_data));
     co_return sp_resp;
 }
 

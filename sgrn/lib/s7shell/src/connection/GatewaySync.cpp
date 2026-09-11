@@ -12,6 +12,8 @@
 #include <rapidjson/error/en.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::s7shell::connection
 {

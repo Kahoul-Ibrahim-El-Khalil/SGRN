@@ -9,6 +9,8 @@
 #include <sgrn/datastore/utils/helpers.hpp>
 #include <sgrn/debug.hpp>
 #include <regex>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::datastore::handlers::admin
 {

@@ -3,6 +3,8 @@
 #include <sgrn/gateway/core/snapshot.hpp>
 #include <sgrn/gateway/twin/utils.hpp>
 #include <algorithm>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::gateway::core
 {

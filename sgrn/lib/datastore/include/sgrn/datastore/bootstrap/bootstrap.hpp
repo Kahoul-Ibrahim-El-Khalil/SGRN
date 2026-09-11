@@ -14,6 +14,8 @@
 #include <functional>
 #include <pwd.h>
 #include <sql_assets.hpp>
+#include <stdexcept>
+#include <string>
 #include <sys/types.h>
 #include <trantor/net/EventLoopThread.h>
 #include <unistd.h>

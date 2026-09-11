@@ -3,6 +3,7 @@
 #include <sgrn/scl/types/DbSchema.hpp>
 #include <sgrn/scl/types/UdtDefinition.hpp>
 #include <rapidjson/document.h>
+#include <stdexcept>
 #include <string>
 #include <vector>
 

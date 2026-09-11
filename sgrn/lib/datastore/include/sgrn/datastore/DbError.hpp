@@ -19,6 +19,8 @@
 
 #include <drogon/orm/Exception.h>
 #include <fmt/format.h>
+#include <stdexcept>
+#include <string>
 
 #include <sgrn/datastore/BackendError.hpp>
 

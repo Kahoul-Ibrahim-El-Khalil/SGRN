@@ -3,6 +3,8 @@
 #include <modbus.h>
 
 #include <fmt/core.h>
+#include <stdexcept>
+#include <string>
 
 #include <utility>
 

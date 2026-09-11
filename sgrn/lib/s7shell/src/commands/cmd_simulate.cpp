@@ -2,13 +2,15 @@
 // cmd_simulate.cpp — s7shell simulate sub-command
 // =============================================================================
 
-#include <sgrn/s7shell/commands/commands.hpp>
 #include <sgrn/plcsim/runtime/PersistenceBridge.hpp>
 #include <sgrn/plcsim/simulation/SimulationEngine.hpp>
+#include <sgrn/s7shell/commands/commands.hpp>
 
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <cxxopts.hpp>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::s7shell::commands
 {

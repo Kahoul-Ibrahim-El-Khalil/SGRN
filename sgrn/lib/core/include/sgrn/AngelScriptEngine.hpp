@@ -3,6 +3,9 @@
 // AngelScriptEngine.hpp — Abstract base for interactive AngelScript REPL shells
 // =============================================================================
 
+#include <stdexcept>
+#include <string>
+
 #include <fmt/color.h>
 #include <fmt/core.h>
 #include <sgrn/FilesystemModule.hpp>

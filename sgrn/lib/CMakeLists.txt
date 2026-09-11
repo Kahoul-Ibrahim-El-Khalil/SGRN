@@ -10,8 +10,9 @@ if(SGRN_BUILD_UTILS)
     add_subdirectory(utils)
 endif()
 
-# 2. SDK
-sgrn_add_component(SGRN_BUILD_SDK sdk)
+# 2. Datastore Client & Shell (formerly SDK)
+sgrn_add_component(SGRN_BUILD_SDK datastore/client)
+sgrn_add_component(SGRN_BUILD_SDK datastore/shell)
 sgrn_add_component(SGRN_BUILD_CODECS codecs)
 
 # 3. SCL (Parsing layer)

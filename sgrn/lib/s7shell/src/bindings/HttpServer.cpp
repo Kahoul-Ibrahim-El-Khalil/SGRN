@@ -34,6 +34,8 @@
 #include <fmt/format.h>
 #include <angelscript.h>
 #include <memory>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::s7shell::bindings
 {

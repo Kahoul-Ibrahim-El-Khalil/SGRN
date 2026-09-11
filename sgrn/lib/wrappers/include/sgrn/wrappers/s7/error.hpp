@@ -12,6 +12,7 @@
 #include <sgrn/Result.hpp>
 #include <sgrn/scl/errors.hpp>
 #include <snap7.h>
+#include <stdexcept>
 #include <string>
 namespace sgrn::wrappers::s7
 {

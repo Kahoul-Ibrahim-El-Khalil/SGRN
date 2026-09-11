@@ -7,6 +7,7 @@
 #include <optional>
 #include <rapidjson/document.h>
 #include <s7codec/codec.hpp>
+#include <stdexcept>
 #include <string>
 #include <vector>
 

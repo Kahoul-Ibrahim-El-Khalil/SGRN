@@ -8,6 +8,8 @@
 #include <sgrn/s7shell/SchemaVM.hpp>
 #include <algorithm>
 #include <filesystem>
+#include <stdexcept>
+#include <string>
 #include <utility>
 namespace sgrn::plcsim::runtime
 {

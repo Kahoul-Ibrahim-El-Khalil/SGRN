@@ -1,9 +1,9 @@
 {
-  "schema": "./sgrn/gateway/simulations/pump/schema.scl",
+  "schema": "./sgrn/lib/gateway/simulations/pump/schema.scl",
   "state_dir": "/tmp/sgrn-gateway-state",
   "reconnect_ms": 5000,
   "security_policy": "strict",
-  "security_script": "./sgrn/gateway/simulations/pump/security.as",
+  "security_script": "./sgrn/lib/gateway/simulations/pump/security.as",
 
   "southbound": {
     "s7": {

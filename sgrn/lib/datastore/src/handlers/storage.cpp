@@ -119,48 +119,43 @@ static std::optional<std::string> normalizePath(std::string t_path) {
     }
     return t_path;
 }
-
 Task<HttpResponsePtr> StorageApiHandler::handleFileRequest(HttpRequestPtr tsp_req) {
     try {
-        // ── 1. Path Normalization & Security �────────────────────────
-        auto path_opt = tsp_req->getOptionalParameter<std::string>("path");
-        if (!path_opt.has_value()) {
-            co_return sgrn::createErrorResponse({"Application", "Missing path parameter"}, k400BadRequest);
-        }
-
-        auto norm = normalizePath(std::move(path_opt.value()));
-        if (!norm.has_value()) {
-            // This catches directory traversal attempts (e.g. "../")
-            co_return sgrn::createErrorResponse({"Application", "Invalid path"}, k400BadRequest);
-        }
-        std::string path_str = std::move(*norm);
-        DEBUG_LOG("[StorageApiHandler::handleFileRequest] Normalized path: '{}'", path_str);
-
         const drogon::HttpMethod method = tsp_req->getMethod();
         std::string scope = tsp_req->getOptionalParameter<std::string>("scope").value_or("personal");
 
-        // ── 2. Session Integrity ─────────────────────────────────────────────
+        // ── 1. Session Integrity ─────────────────────────────────────────────
         auto session = tsp_req->getAttributes()->get<Json::Value>("session_json");
         if (!session) {
             ERROR_LOG("User session not found");
-            co_return createJsonErrorResponse("No session found", k401Unauthorized);
+            co_return createJsonErrorResponse("No session found", k401Unauthorized, "StorageApi");
         }
 
+        std::string path_str;
+
         if (method == Get) {
-            // ── 3. Handle Download (GET) ─────────────────────────────────────
+            // ── 2. Handle Download (GET) ─────────────────────────────────────
+            auto path_opt = tsp_req->getOptionalParameter<std::string>("path");
+            if (!path_opt.has_value()) {
+                co_return createJsonErrorResponse("Missing path parameter", k400BadRequest, "StorageApi");
+            }
+
+            auto norm = normalizePath(std::move(path_opt.value()));
+            if (!norm.has_value()) {
+                co_return createJsonErrorResponse("Invalid path", k400BadRequest, "StorageApi");
+            }
+            path_str = std::move(*norm);
             DEBUG_LOG("[StorageApiHandler::handleFileRequest] GET - scope: {}, path: {}", scope, path_str);
             co_return co_await storage_service_.handleDownloadFileRequest(std::move(session), std::move(scope), std::move(path_str));
 
         } else if (method == Post) {
-            // ── 4. Handle Upload (POST) ──────────────────────────────────────
+            // ── 3. Handle Upload (POST) ──────────────────────────────────────
             drogon::MultiPartParser file_upload;
             if (file_upload.parse(tsp_req) == -1) {
                 const std::string& ct = tsp_req->getHeader("Content-Type");
                 size_t body_len = tsp_req->body().size();
-                ERROR_LOG("[handleFileRequest] Failed to parse multipart request body.");
-                ERROR_LOG(" - Content-Type: '{}'", ct);
-                ERROR_LOG(" - Body Size: {} bytes", body_len);
-                co_return createJsonErrorResponse("Failed to parse multipart request body", k400BadRequest);
+                ERROR_LOG("[handleFileRequest] Failed to parse multipart request body. CT: '{}', Size: {} bytes", ct, body_len);
+                co_return createJsonErrorResponse("Failed to parse multipart request body", k400BadRequest, "StorageApi");
             }
 
             // Extract metadata from form parameters if provided
@@ -170,7 +165,15 @@ Task<HttpResponsePtr> StorageApiHandler::handleFileRequest(HttpRequestPtr tsp_re
                     scope = it->second;
                 }
             }
-            if (file_upload.getParameters().contains("path")) {
+
+            auto path_opt = tsp_req->getOptionalParameter<std::string>("path");
+            if (path_opt.has_value() && !path_opt->empty()) {
+                auto norm = normalizePath(std::move(*path_opt));
+                if (norm.has_value()) {
+                    path_str = std::move(*norm);
+                }
+            }
+            if (path_str.empty() && file_upload.getParameters().contains("path")) {
                 auto it = file_upload.getParameters().find("path");
                 if (it != file_upload.getParameters().end()) {
                     auto norm2 = normalizePath(it->second);
@@ -180,9 +183,13 @@ Task<HttpResponsePtr> StorageApiHandler::handleFileRequest(HttpRequestPtr tsp_re
                 }
             }
 
+            if (path_str.empty()) {
+                co_return createJsonErrorResponse("Missing path parameter", k400BadRequest, "StorageApi");
+            }
+
             const std::vector<HttpFile>& files = file_upload.getFiles();
             if (files.empty()) {
-                co_return createJsonErrorResponse("No file parts found in multipart request", k400BadRequest);
+                co_return createJsonErrorResponse("No file parts found in multipart request", k400BadRequest, "StorageApi");
             }
 
             DEBUG_LOG("[StorageApiHandler::handleFileRequest] POST - scope: {}, path: {}, count: {}", scope, path_str, files.size());
@@ -783,7 +790,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleAutomatedServiceFileRequest(HttpR
     try {
         auto norm = normalizePath(tsp_req->getOptionalParameter<std::string>("path").value_or(""));
         if (!norm.has_value()) {
-            co_return sgrn::createErrorResponse({"Application", "Invalid path"}, k400BadRequest);
+            co_return createJsonErrorResponse("Invalid path", k400BadRequest, "StorageApi");
         }
         std::string path_str = std::move(*norm);
         const HttpMethod method = tsp_req->getMethod();

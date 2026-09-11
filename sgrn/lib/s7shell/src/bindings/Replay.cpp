@@ -2,8 +2,8 @@
 // Replay.cpp — AngelScript bindings for WalReplayer
 // =============================================================================
 
-#include <sgrn/s7shell/bindings/registration.hpp>
 #include <sgrn/plcsim/replay/WalReplayer.hpp>
+#include <sgrn/s7shell/bindings/registration.hpp>
 
 #include <angelscript.h>
 

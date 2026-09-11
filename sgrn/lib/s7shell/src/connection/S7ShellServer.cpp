@@ -1,6 +1,8 @@
 #include "sgrn/s7shell/connection/S7ShellServer.hpp"
 #include <fmt/core.h>
 #include <algorithm>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::s7shell::shell
 {

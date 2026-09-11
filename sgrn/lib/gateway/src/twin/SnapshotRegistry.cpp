@@ -1,6 +1,8 @@
 #include <fmt/core.h>
 #include <sgrn/gateway/twin/DbSnapshot.hpp>
 #include <sgrn/gateway/twin/SnapshotRegistry.hpp>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::gateway::twin
 {

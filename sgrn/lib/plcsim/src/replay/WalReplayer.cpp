@@ -28,6 +28,8 @@
 
 #include <fmt/color.h>
 #include <fmt/format.h>
+#include <stdexcept>
+#include <string>
 
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>

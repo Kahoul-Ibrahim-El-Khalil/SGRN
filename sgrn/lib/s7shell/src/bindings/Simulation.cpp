@@ -17,12 +17,14 @@
 // The C++ engine is a pure tick-loop driver. Physics live in the script.
 // =============================================================================
 
-#include <sgrn/s7shell/bindings/registration.hpp>
 #include <sgrn/plcsim/simulation/SimulationEngine.hpp>
+#include <sgrn/s7shell/bindings/registration.hpp>
 
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <angelscript.h>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::s7shell::bindings
 {

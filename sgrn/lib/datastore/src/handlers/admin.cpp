@@ -7,6 +7,8 @@
 #include <fmt/core.h>
 #include <sgrn/debug.hpp>
 #include <json/json.h>
+#include <stdexcept>
+#include <string>
 
 #ifdef DEBUG_ADMIN_HANDLER
 #define DEBUG_LOG(msg, ...) SGRN_DEBUG("AdminHandler", msg __VA_OPT__(, ) __VA_ARGS__)
@@ -116,7 +118,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleRegisterUser(HttpRequestPtr tsp_req
         }
     } catch (const std::exception& e) {
         ERROR_LOG("User registration error: {}", e.what());
-        co_return createErrorResponse(AdminApiError::DbError);
+        co_return createErrorResponse(std::string("User registration failed: ") + e.what(), k400BadRequest, "AdminApi");
     }
 }
 
@@ -192,10 +194,10 @@ Task<HttpResponsePtr> AdminApiHandler::handleRegisterAutomatedService(HttpReques
         co_return createJsonResponse(resp, k201Created);
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Automated service registration DB error: {}", e.base().what());
-        co_return createErrorResponse(AdminApiError::DbError);
+        co_return createErrorResponse(std::string("Automated service registration failed: ") + e.base().what(), k400BadRequest, "AdminApi");
     } catch (const std::exception& e) {
         ERROR_LOG("Automated service registration error: {}", e.what());
-        co_return createErrorResponse(AdminApiError::DbError);
+        co_return createErrorResponse(std::string("Automated service registration failed: ") + e.what(), k400BadRequest, "AdminApi");
     }
 }
 
@@ -244,7 +246,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleListAutomatedServices(HttpRequestPt
         co_return createJsonResponse(automated_services, k200OK);
     } catch (const std::exception& e) {
         ERROR_LOG("Failed to list automated services: {}", e.what());
-        co_return createErrorResponse(AdminApiError::DbError);
+        co_return createErrorResponse(std::string("Failed to list automated services: ") + e.what(), k500InternalServerError, "AdminApi");
     }
 }
 
@@ -286,7 +288,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleUpdateAutomatedServiceMetadata(Http
         co_return createJsonResponse("Automated service metadata updated successfully", k200OK);
     } catch (const std::exception& e) {
         ERROR_LOG("Failed to update automated service metadata: {}", e.what());
-        co_return createErrorResponse(AdminApiError::DbError);
+        co_return createErrorResponse(std::string("Failed to update automated service metadata: ") + e.what(), k400BadRequest, "AdminApi");
     }
 }
 
@@ -348,7 +350,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleRotateAutomatedServiceToken(HttpReq
         co_return createJsonResponse(resp, k200OK);
     } catch (const std::exception& e) {
         ERROR_LOG("Failed to rotate credentials: {}", e.what());
-        co_return createErrorResponse(AdminApiError::DbError);
+        co_return createErrorResponse(std::string("Failed to rotate credentials: ") + e.what(), k400BadRequest, "AdminApi");
     }
 }
 

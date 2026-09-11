@@ -4,6 +4,8 @@
 #include <fmt/core.h>
 #include <sgrn/s7shell/connection/S7Connection.hpp>
 #include <cstring>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::s7shell::connection
 {

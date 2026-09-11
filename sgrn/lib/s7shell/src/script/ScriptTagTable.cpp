@@ -14,6 +14,8 @@
 #include <rapidjson/writer.h>
 #include <scriptarray/scriptarray.h>
 #include <scriptdictionary/scriptdictionary.h>
+#include <stdexcept>
+#include <string>
 
 #include <chrono>
 #include <thread>
@@ -25,8 +27,8 @@ using sgrn::scl::SclError;
 using sgrn::wrappers::s7::S7Error;
 ScriptTagTable::ScriptTagTable(ScriptS7Connection* tp_conn)
     : conn_(tp_conn)
-    , engine_(conn_->tag_table_ ? std::make_unique<::sgrn::s7shell::S7BatchEngine<::sgrn::plcsim::PlcTagTable>>(*conn_->tag_table_)
-                                : nullptr) {
+    , engine_(
+          conn_->tag_table_ ? std::make_unique<::sgrn::s7shell::S7BatchEngine<::sgrn::plcsim::PlcTagTable>>(*conn_->tag_table_) : nullptr) {
 }
 
 ScriptTagTable::~ScriptTagTable() = default;

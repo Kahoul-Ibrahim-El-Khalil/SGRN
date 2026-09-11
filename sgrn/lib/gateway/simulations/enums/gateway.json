@@ -1,9 +1,9 @@
 {
-  "schema": "./sgrn/gateway/simulations/enums/schema.scl",
+  "schema": "./sgrn/lib/gateway/simulations/enums/schema.scl",
   "state_dir": "/tmp/sgrn-gateway-state",
   "reconnect_ms": 5000,
   "security_policy": "strict",
-  "security_script": "./sgrn/gateway/simulations/enums/security.as",
+  "security_script": "./sgrn/lib/gateway/simulations/enums/security.as",
 
   "northbound": {
     "http": {

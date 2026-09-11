@@ -5,6 +5,8 @@ extern "C" {
 #include <fmt/color.h>
 #include <fmt/core.h>
 #include <iostream>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::scl
 {

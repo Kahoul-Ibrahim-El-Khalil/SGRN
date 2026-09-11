@@ -6,6 +6,8 @@
 #include <sgrn/gateway/twin/PlcMemory.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/utils/time.hpp>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::gateway::adapters
 {

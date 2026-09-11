@@ -36,6 +36,7 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 #include <s7codec/s7.hpp>
+#include <stdexcept>
 #include <string>
 #include <variant>
 #include <vector>

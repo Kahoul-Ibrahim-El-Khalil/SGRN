@@ -5,6 +5,8 @@
 #include <csignal>
 #include <cxxopts.hpp>
 #include <iostream>
+#include <stdexcept>
+#include <string>
 
 static std::atomic<bool> g_shutdown_requested{false};
 

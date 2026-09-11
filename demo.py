@@ -13,8 +13,8 @@ from pathlib import Path
 
 # Paths relative to project root
 BASE_DIR = Path(__file__).resolve().parent
-SIMULATIONS_DIR = BASE_DIR / "sgrn" / "gateway" / "simulations"
-BASE_CONFIG_PATH = BASE_DIR / "sgrn" / "gateway" / "configs" / "gateway.json"
+SIMULATIONS_DIR = BASE_DIR / "sgrn" / "lib" / "gateway" / "simulations"
+BASE_CONFIG_PATH = BASE_DIR / "sgrn" / "lib" / "gateway" / "simulations" / "simple_skid" / "gateway.json"
 GATEWAY_BIN = BASE_DIR / ".dist" / "linux-static-release" / "gateway"
 S7SHELL_BIN = BASE_DIR / ".dist" / "linux-static-release" / "s7shell"
 DASHBOARD_URL : str = "http://localhost:8000/"

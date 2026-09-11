@@ -22,16 +22,16 @@ void StorageClient::downloadAsync([[maybe_unused]] const std::string& t_remote_p
     // client_.enqueueTask(TaskType::Download, ...);
 }
 
-bool StorageClient::upload(const std::string& t_remote_path, const std::string& t_local_path) {
+bool StorageClient::upload(const std::string& t_remote_path, const std::string& t_local_path, StorageScope t_scope) {
     std::ifstream ifs(t_local_path, std::ios::binary);
     if (!ifs)
         return false;
     std::string bytes((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-    return client_.doUpload(t_remote_path, std::move(bytes)).ok;
+    return client_.doUpload(t_remote_path, std::move(bytes), t_scope).ok;
 }
 
-bool StorageClient::download(const std::string& t_remote_path, const std::string& t_local_path) {
-    auto res = client_.doDownload(t_remote_path);
+bool StorageClient::download(const std::string& t_remote_path, const std::string& t_local_path, StorageScope t_scope) {
+    auto res = client_.doDownload(t_remote_path, t_scope);
     if (!res.ok)
         return false;
 
@@ -48,6 +48,10 @@ rapidjson::Document StorageClient::listFiles(const std::string& t_query_params) 
 
 DriveListing StorageClient::listDrive(const std::string& t_path, StorageScope t_scope) {
     return client_.listDrive(t_path, t_scope);
+}
+
+sgrn::Result<DriveListing, std::string> StorageClient::tryListDrive(const std::string& t_path, StorageScope t_scope) {
+    return client_.tryListDrive(t_path, t_scope);
 }
 
 bool StorageClient::createDirectory(const std::string& t_path, StorageScope t_scope) {

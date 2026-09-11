@@ -19,6 +19,8 @@
 #include <sgrn/gateway/adapters/s7/fromPlcMemoryErrorToS7MemoryError.hpp>
 
 #include <fmt/core.h>
+#include <stdexcept>
+#include <string>
 
 #include <cstdint>
 #include <cstdio>

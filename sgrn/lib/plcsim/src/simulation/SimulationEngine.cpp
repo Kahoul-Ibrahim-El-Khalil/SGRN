@@ -11,6 +11,8 @@
 
 #include <fmt/color.h>
 #include <fmt/format.h>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::plcsim::simulation
 {

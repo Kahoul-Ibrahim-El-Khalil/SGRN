@@ -28,6 +28,7 @@ endif()
 
 if(SGRN_BUILD_DATASTORE)
     add_subdirectory(datastore)
+    add_subdirectory(datastore_shell)
 endif()
 
 # =============================================================================
@@ -81,11 +82,13 @@ sgrn_package_runtime_dependencies(
 sgrn_package_runtime_dependencies(
     APPS
         sgrn_datastore
+        datastore_shell
     LIBS
         sgrn_datastore_lib
         sgrn_datastore_orm
         sgrn_utils
-        sgrn_sdk
+        sgrn_datastore_client
+        sgrn_datastore_shell
     EXTERNAL_DEPS
         sgrn::drogon
         sgrn::trantor

@@ -1,6 +1,8 @@
 // sgrn/gateway/src/adapters/opcua/information_model.cpp
 
 #include <fmt/core.h>
+#include <stdexcept>
+#include <string>
 
 #include <sgrn/gateway/adapters/opcua/TypeTranslation.hpp>
 #include <sgrn/gateway/adapters/opcua/information_model.hpp>

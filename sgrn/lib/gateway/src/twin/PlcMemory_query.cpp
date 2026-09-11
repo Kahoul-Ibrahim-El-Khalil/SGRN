@@ -13,6 +13,8 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 #include <shared_mutex>
+#include <stdexcept>
+#include <string>
 
 #include <sgrn/gateway/twin/PlcCommandProcessor.hpp>
 #include <sgrn/gateway/twin/SnapshotRegistry.hpp>

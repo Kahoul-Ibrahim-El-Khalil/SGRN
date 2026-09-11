@@ -4,6 +4,7 @@
 #include <sgrn/Result.hpp>
 #include <json/json.h>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 

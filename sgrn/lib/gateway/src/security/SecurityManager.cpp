@@ -1,6 +1,8 @@
 #include <sgrn/gateway/security/SecurityManager.hpp>
 
 #include <fmt/core.h>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::gateway
 {

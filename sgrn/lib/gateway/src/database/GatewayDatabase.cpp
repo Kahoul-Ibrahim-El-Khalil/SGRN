@@ -8,6 +8,8 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 #include <sqlite_modern_cpp.h>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 
 namespace sgrn::gateway::database

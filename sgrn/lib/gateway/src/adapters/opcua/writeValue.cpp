@@ -35,6 +35,8 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 #include <s7codec/codec.hpp>
+#include <stdexcept>
+#include <string>
 #include <vector>
 using namespace sgrn::gateway::twin;
 using ::sgrn::gateway::S7Area;

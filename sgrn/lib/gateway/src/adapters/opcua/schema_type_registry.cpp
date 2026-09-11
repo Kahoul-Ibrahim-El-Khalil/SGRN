@@ -9,6 +9,8 @@
 #include <sgrn/debug.hpp>
 #include <functional>
 #include <open62541/types_generated.h>
+#include <stdexcept>
+#include <string>
 #include <unordered_map>
 using ::sgrn::scl::DataType;
 using ::sgrn::scl::DbField;

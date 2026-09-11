@@ -13,6 +13,8 @@
 #include <fmt/core.h>
 #include <s7codec/endian.hpp>
 #include <s7codec/types.hpp>
+#include <stdexcept>
+#include <string>
 
 #include <cerrno>
 #include <cmath>

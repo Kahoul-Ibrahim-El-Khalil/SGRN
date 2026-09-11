@@ -4,6 +4,9 @@
 // execution capabilities to AngelScript scripts.
 // =============================================================================
 
+#include <stdexcept>
+#include <string>
+
 #include <fmt/core.h>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/filesystem.hpp>

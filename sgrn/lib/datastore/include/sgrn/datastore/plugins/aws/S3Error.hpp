@@ -18,6 +18,8 @@
 #include <fmt/format.h>
 #include <aws/core/client/AWSError.h>
 #include <aws/s3/S3Errors.h>
+#include <stdexcept>
+#include <string>
 
 #include <sgrn/datastore/BackendError.hpp>
 

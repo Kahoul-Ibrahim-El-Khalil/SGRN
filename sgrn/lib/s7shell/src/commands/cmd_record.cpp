@@ -2,14 +2,16 @@
 // cmd_record.cpp — s7shell record sub-command
 // =============================================================================
 
-#include <sgrn/s7shell/commands/commands.hpp>
 #include <sgrn/plcsim/runtime/PersistenceBridge.hpp>
 #include <sgrn/plcsim/runtime/PlcRuntime.hpp>
 #include <sgrn/plcsim/utils/PlcSimClock.hpp>
+#include <sgrn/s7shell/commands/commands.hpp>
 
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <cxxopts.hpp>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::s7shell::commands
 {

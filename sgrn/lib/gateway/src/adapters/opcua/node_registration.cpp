@@ -15,6 +15,8 @@
 #include <open62541/types_generated.h>
 #include <open62541/types_generated_handling.h>
 #include <s7codec/codec.hpp>
+#include <stdexcept>
+#include <string>
 using ::sgrn::scl::DataType;
 using ::sgrn::scl::DbField;
 

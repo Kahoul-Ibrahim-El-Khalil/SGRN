@@ -6,6 +6,8 @@
 #include <fmt/format.h>
 #include <sgrn/scl/utils.hpp>
 #include <algorithm>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::s7shell::shell
 {

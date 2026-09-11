@@ -2,12 +2,14 @@
 // cmd_replay.cpp — s7shell replay sub-command
 // =============================================================================
 
-#include <sgrn/s7shell/commands/commands.hpp>
 #include <sgrn/plcsim/replay/WalReplayer.hpp>
+#include <sgrn/s7shell/commands/commands.hpp>
 
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <cxxopts.hpp>
+#include <stdexcept>
+#include <string>
 
 namespace sgrn::s7shell::commands
 {

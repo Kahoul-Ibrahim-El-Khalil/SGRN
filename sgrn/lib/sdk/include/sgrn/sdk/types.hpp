@@ -3,6 +3,8 @@
 #include <fmt/format.h>
 #include <sgrn/utils/json.hpp>
 #include <rapidjson/document.h>
+#include <stdexcept>
+#include <string>
 
 #include <cstdint>
 #include <map>
@@ -23,6 +25,7 @@ enum class StorageScope {
     Personal,
     Users,
     AutomatedServices,
+    Domain,
 };
 
 enum class DriveItemType {
@@ -64,6 +67,62 @@ struct DriveListing {
     std::vector<DriveFileInfo> files{};
 };
 
+/// Id+name pair as returned by the /api/v1/query/* listing endpoints
+/// (organisations, domains). Numeric ids normalize to strings.
+struct IdNamePair {
+    std::string id_{};
+    std::string name_{};
+};
+
+/// Admin user roster entry (GET /api/v1/admin/users).
+struct AdminUserEntry {
+    int64_t id_{0};
+    std::string email_{};
+    std::string first_name_{};
+    std::string family_name_{};
+    std::string domain_{};
+    std::string status_{};
+};
+
+/// Automated-service roster entry (GET /api/v1/admin/automated-services).
+/// token_ holds the secret — callers must mask it for display.
+struct ServiceEntry {
+    int64_t id_{0};
+    std::string name_{};
+    std::string token_{};
+    bool is_active_{false};
+    std::string domain_{};
+    std::string created_at_{};
+};
+
+/// New-user fields for POST /api/v1/admin/users/register (mirrors the
+/// dashboard form: first/family/email/password/organisation/status required).
+struct NewUser {
+    std::string first_name_;
+    std::string family_name_;
+    std::string email_;
+    std::string password_;
+    std::string phone_number_;
+    std::string organisation_;
+    std::string status_;
+    std::string domain_;
+};
+
+/// New-service fields for POST /api/v1/admin/automated-services/register.
+struct NewService {
+    std::string name_;
+    std::string organisation_;
+    std::string kind_;
+    std::string domain_;
+};
+
+/// Credentials returned once at service registration/rotation.
+struct ServiceCredentials {
+    std::string message_{};
+    std::string token_{};
+    std::string token_secret_{};
+};
+
 struct ObjectInfo {
     int32_t id_{};
     std::string name_{};
@@ -82,6 +141,8 @@ inline std::string storageScopeToString(StorageScope t_scope) {
             return "users";
         case StorageScope::AutomatedServices:
             return "automated_services";
+        case StorageScope::Domain:
+            return "domain";
         case StorageScope::Auto:
         default:
             return "auto";

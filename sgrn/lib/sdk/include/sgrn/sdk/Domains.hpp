@@ -1,4 +1,5 @@
 #pragma once
+#include <sgrn/Result.hpp>
 #include <rapidjson/document.h>
 #include <string>
 
@@ -25,13 +26,15 @@ public:
     /**
      * @brief Synchronous file operations.
      */
-    bool upload(const std::string& t_remote_path, const std::string& t_local_path);
-    bool download(const std::string& t_remote_path, const std::string& t_local_path);
+    bool upload(const std::string& t_remote_path, const std::string& t_local_path, StorageScope t_scope = StorageScope::Auto);
+    bool download(const std::string& t_remote_path, const std::string& t_local_path, StorageScope t_scope = StorageScope::Auto);
 
     rapidjson::Document listFiles(const std::string& t_query_params = "");
 
     // Drive API: typed browsing and file-system style operations.
     DriveListing listDrive(const std::string& t_path = "/", StorageScope t_scope = StorageScope::Auto);
+    /// Error-reporting listDrive() variant (see SgrnClient::tryListDrive).
+    sgrn::Result<DriveListing, std::string> tryListDrive(const std::string& t_path = "/", StorageScope t_scope = StorageScope::Auto);
     bool createDirectory(const std::string& t_path, StorageScope t_scope = StorageScope::Auto);
     bool moveItem(int64_t t_id, DriveItemType t_type, const std::string& t_new_path,
         std::optional<int64_t> t_target_parent_id = std::nullopt, StorageScope t_scope = StorageScope::Auto);

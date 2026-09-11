@@ -25,7 +25,7 @@ S7SHELL_BIN = BUILD_BIN_DIR / "s7shell"
 SGRN_DATASET_BIN = BUILD_BIN_DIR / "sgrn_dataset"
 
 WORK_DIR = BASE_DIR / "scratch" / "ml_pipeline_demo"
-SIM_DIR = BASE_DIR / "sgrn" / "gateway" / "simulations" / "simple_skid"
+SIM_DIR = BASE_DIR / "sgrn" / "lib" / "gateway" / "simulations" / "simple_skid"
 
 def print_header(title: str):
     print(f"\n{'='*60}\n {title}\n{'='*60}")
