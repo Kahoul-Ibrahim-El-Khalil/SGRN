@@ -1,10 +1,29 @@
+#include <fmt/core.h>
 #include <sgrn/datastore/client/Client.hpp>
 #include <sgrn/datastore/client/StorageClient.hpp>
 #include <sgrn/utils/filesystem.hpp>
+#include <cerrno>
+#include <cstring>
+#include <filesystem>
 #include <fstream>
 
 namespace sgrn::datastore::client
 {
+
+namespace
+{
+
+// Precise local-filesystem failure text (parent missing vs permission vs …).
+std::string localWriteError(const std::string& t_local_path) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path parent = fs::path(t_local_path).parent_path();
+    if (!parent.empty() && !fs::exists(parent, ec))
+        return fmt::format("cannot write '{}': parent directory does not exist", t_local_path);
+    return fmt::format("cannot write '{}': {}", t_local_path, std::strerror(errno));
+}
+
+} // namespace
 
 // ─── Storage Client ──────────────────────────────────────────────────────────
 
@@ -19,24 +38,29 @@ void StorageClient::uploadAsync(const std::string& t_remote_path, const std::str
 void StorageClient::downloadAsync([[maybe_unused]] const std::string& t_remote_path, [[maybe_unused]] const std::string& t_local_path) {
 }
 
-bool StorageClient::upload(const std::string& t_remote_path, const std::string& t_local_path, StorageScope t_scope) {
+TransferOutcome StorageClient::upload(const std::string& t_remote_path, const std::string& t_local_path, StorageScope t_scope) {
     std::ifstream ifs(t_local_path, std::ios::binary);
     if (!ifs)
-        return false;
+        return {false, 0, fmt::format("cannot read '{}': {}", t_local_path, std::strerror(errno))};
     std::string bytes((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-    return client_.doUpload(t_remote_path, std::move(bytes), t_scope).ok;
+    auto res = client_.doUpload(t_remote_path, std::move(bytes), t_scope);
+    if (!res.ok)
+        return {false, res.http_status, res.message.empty() ? fmt::format("HTTP {}", res.http_status) : res.message};
+    return {true, res.http_status, t_remote_path};
 }
 
-bool StorageClient::download(const std::string& t_remote_path, const std::string& t_local_path, StorageScope t_scope) {
+TransferOutcome StorageClient::download(const std::string& t_remote_path, const std::string& t_local_path, StorageScope t_scope) {
     auto res = client_.doDownload(t_remote_path, t_scope);
     if (!res.ok)
-        return false;
+        return {false, res.http_status, res.message.empty() ? fmt::format("HTTP {}", res.http_status) : res.message};
 
     std::ofstream ofs(t_local_path, std::ios::binary);
     if (!ofs)
-        return false;
+        return {false, 0, localWriteError(t_local_path)};
     ofs.write(res.bytes.data(), static_cast<std::streamsize>(res.bytes.size()));
-    return true;
+    if (!ofs)
+        return {false, 0, fmt::format("cannot write '{}': {}", t_local_path, std::strerror(errno))};
+    return {true, res.http_status, t_local_path};
 }
 
 rapidjson::Document StorageClient::listFiles(const std::string& t_query_params) {
@@ -64,16 +88,18 @@ bool StorageClient::deleteItem(int64_t t_id, DriveItemType t_type, StorageScope 
     return client_.deleteDriveItem(t_id, t_type, t_scope);
 }
 
-bool StorageClient::downloadZip(const std::string& t_path, const std::string& t_local_path, StorageScope t_scope) {
+TransferOutcome StorageClient::downloadZip(const std::string& t_path, const std::string& t_local_path, StorageScope t_scope) {
     auto res = client_.doDownloadDriveZip(t_path, t_scope);
     if (!res.ok)
-        return false;
+        return {false, res.http_status, res.message.empty() ? fmt::format("HTTP {}", res.http_status) : res.message};
 
     std::ofstream ofs(t_local_path, std::ios::binary);
     if (!ofs)
-        return false;
+        return {false, 0, localWriteError(t_local_path)};
     ofs.write(res.bytes.data(), static_cast<std::streamsize>(res.bytes.size()));
-    return true;
+    if (!ofs)
+        return {false, 0, fmt::format("cannot write '{}': {}", t_local_path, std::strerror(errno))};
+    return {true, res.http_status, t_local_path};
 }
 
 // ─── Telemetry Client ────────────────────────────────────────────────────────

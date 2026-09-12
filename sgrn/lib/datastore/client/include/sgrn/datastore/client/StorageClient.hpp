@@ -10,6 +10,17 @@ namespace sgrn::datastore::client
 
 class DatastoreClient;
 
+/// Outcome of a synchronous file transfer. `ok` mirrors the old bool
+/// return; `detail` carries the local path written (downloads) or the
+/// remote path (uploads) on success, and a human-readable cause —
+/// `HTTP <status>: <server error>` for protocol failures, plain text for
+/// local failures — otherwise. `http_status` is 0 for local failures.
+struct TransferOutcome {
+    bool ok{false};
+    int http_status{0};
+    std::string detail;
+};
+
 /**
  * @brief Storage Client: Focuses on files, logs, and persistent objects.
  */
@@ -26,8 +37,8 @@ public:
     /**
      * @brief Synchronous file operations.
      */
-    bool upload(const std::string& t_remote_path, const std::string& t_local_path, StorageScope t_scope = StorageScope::Auto);
-    bool download(const std::string& t_remote_path, const std::string& t_local_path, StorageScope t_scope = StorageScope::Auto);
+    TransferOutcome upload(const std::string& t_remote_path, const std::string& t_local_path, StorageScope t_scope = StorageScope::Auto);
+    TransferOutcome download(const std::string& t_remote_path, const std::string& t_local_path, StorageScope t_scope = StorageScope::Auto);
 
     rapidjson::Document listFiles(const std::string& t_query_params = "");
 
@@ -39,7 +50,7 @@ public:
     bool moveItem(int64_t t_id, DriveItemType t_type, const std::string& t_new_path,
         std::optional<int64_t> t_target_parent_id = std::nullopt, StorageScope t_scope = StorageScope::Auto);
     bool deleteItem(int64_t t_id, DriveItemType t_type, StorageScope t_scope = StorageScope::Auto);
-    bool downloadZip(const std::string& t_path, const std::string& t_local_path, StorageScope t_scope = StorageScope::Auto);
+    TransferOutcome downloadZip(const std::string& t_path, const std::string& t_local_path, StorageScope t_scope = StorageScope::Auto);
 
 private:
     DatastoreClient& client_;

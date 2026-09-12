@@ -1,7 +1,8 @@
 #include <drogon/orm/Exception.h>
+#include <fmt/core.h>
+#include <sgrn/datastore/core/db.hpp>
 #include <sgrn/datastore/error/ApiErrors.hpp>
 #include <sgrn/datastore/handlers/storage.hpp>
-#include <sgrn/datastore/services/proxy.hpp>
 #include <sgrn/datastore/services/storage.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe_access.hpp>
@@ -9,7 +10,11 @@
 #include <sgrn/utils/encoding.hpp>
 #include <sgrn/utils/hashing.hpp>
 #include <sgrn/utils/strings.hpp>
+#include <algorithm>
+#include <charconv>
 #include <json/value.h>
+#include <unordered_map>
+#include <unordered_set>
 
 #ifdef DEBUG_STORAGE_HANDLER
 #define DEBUG_LOG(msg, ...) SGRN_DEBUG("StorageHandler", msg __VA_OPT__(, ) __VA_ARGS__)
@@ -29,7 +34,7 @@ using namespace drogon;
 
 using sgrn::datastore::services::storage::StorageScope;
 StorageApiHandler::StorageApiHandler()
-    : IHandler<StorageApiHandler>(this, kRoutes)
+    : IHandler<StorageApiHandler>(this, kRoutes, kItemRoutes)
     , storage_service_() {
 }
 
@@ -53,14 +58,17 @@ Task<HttpResponsePtr> StorageApiHandler::handleListObjects(HttpRequestPtr tsp_re
     co_return co_await storage_service_.handleListObjects(automated_service_id);
 }
 
-Task<HttpResponsePtr> StorageApiHandler::handleMoveObject(HttpRequestPtr tsp_req) {
+Task<HttpResponsePtr> StorageApiHandler::handleMoveObject(HttpRequestPtr tsp_req, std::string t_name) {
+    if (!tsp_req->attributes()->find("session_json") || !tsp_req->attributes()->find("automated_service_id")) {
+        co_return createJsonErrorResponse("No session found", k401Unauthorized);
+    }
     auto session = tsp_req->getAttributes()->get<Json::Value>("session_json");
     if (!session) {
         co_return createJsonErrorResponse("No session found", k401Unauthorized);
     }
 
     const int32_t automated_service_id = tsp_req->getAttributes()->get<int32_t>("automated_service_id");
-    const std::string name = tsp_req->getParameter("name");
+    const std::string name = std::move(t_name);
     auto json = tsp_req->getJsonObject();
     if (name.empty() || !json || !json->isMember("new_name") || !(*json)["new_name"].isString()) {
         co_return createJsonErrorResponse("name and new_name are required", k400BadRequest);
@@ -69,14 +77,17 @@ Task<HttpResponsePtr> StorageApiHandler::handleMoveObject(HttpRequestPtr tsp_req
     co_return co_await storage_service_.handleMoveObject(std::move(session), automated_service_id, name, (*json)["new_name"].asString());
 }
 
-Task<HttpResponsePtr> StorageApiHandler::handleDeleteObject(HttpRequestPtr tsp_req) {
+Task<HttpResponsePtr> StorageApiHandler::handleDeleteObject(HttpRequestPtr tsp_req, std::string t_name) {
+    if (!tsp_req->attributes()->find("session_json") || !tsp_req->attributes()->find("automated_service_id")) {
+        co_return createJsonErrorResponse("No session found", k401Unauthorized);
+    }
     auto session = tsp_req->getAttributes()->get<Json::Value>("session_json");
     if (!session) {
         co_return createJsonErrorResponse("No session found", k401Unauthorized);
     }
 
     const int32_t automated_service_id = tsp_req->getAttributes()->get<int32_t>("automated_service_id");
-    const std::string name = tsp_req->getParameter("name");
+    const std::string name = std::move(t_name);
     if (name.empty()) {
         co_return createJsonErrorResponse("name is required", k400BadRequest);
     }
@@ -85,15 +96,256 @@ Task<HttpResponsePtr> StorageApiHandler::handleDeleteObject(HttpRequestPtr tsp_r
 }
 
 // ============================================================================
-// Files Metadata  (proxied through PostgREST → storage.files)
+// Files Metadata (direct DB query over storage.file_details)
+//
+// Previously proxied through PostgREST (postgrest.files view). Now served
+// in-process: same tenant scoping (organisation bound server-side from the
+// session, never from the query string), same wire shape as the old
+// postgrest.files view (soft-deleted objects excluded). storage.files has
+// no direct tenant column, so this stays a hand-written handler rather
+// than a generated CRUD view.
 // ============================================================================
 
+namespace
+{
+// Columns exposed by the metadata endpoints, aliased to the historical
+// postgrest.files wire names so existing consumers keep working.
+constexpr std::string_view kFileMetadataColumns =
+    "file_id AS id, file_name AS name, file_path AS full_path, directory_path, directory_id, extension, created_at, "
+    "is_compressed, compression_algorithm, compression_level, session_id, user_id, automated_service_id, "
+    "domain_name AS domain, organisation_name AS organisation, object_id, bucket, key, object_size AS size, "
+    "object_created_at, mime_type";
+
+// Wire types mirror the old postgrest.files JSON: integers as numbers,
+// booleans as booleans, everything else as strings, SQL NULL as null.
+// (Output column names below are the SELECT aliases.)
+Json::Value fileFieldToJson(const drogon::orm::Field& t_field, bool t_as_int, bool t_as_bool) {
+    if (t_field.isNull()) {
+        return Json::Value::null;
+    }
+    try {
+        if (t_as_int) {
+            return Json::Int64(t_field.as<int64_t>());
+        }
+        if (t_as_bool) {
+            return Json::Value(t_field.as<bool>());
+        }
+    } catch (const std::exception&) {
+        // fall through to string rendering below
+    }
+    try {
+        return Json::Value(t_field.as<std::string>());
+    } catch (const std::exception&) {
+        return Json::Value::null;
+    }
+}
+
+Json::Value fileRowToJson(const drogon::orm::Row& t_row) {
+    static const std::unordered_set<std::string> kIntColumns = {
+        "id", "directory_id", "object_id", "session_id", "user_id", "automated_service_id", "size", "compression_level"};
+    Json::Value r(Json::objectValue);
+    for (std::size_t i = 0; i < t_row.size(); ++i) {
+        drogon::orm::Field f = t_row[i];
+        std::string col = f.name();
+        r[col] = fileFieldToJson(f, kIntColumns.contains(col), col == "is_compressed");
+    }
+    return r;
+}
+
+// Applies one whitelisted `?col=op.value` filter onto t_sql/t_binds.
+// Operators mirror the generated CRUD grammar; `*` in like/ilike patterns
+// is translated to SQL `%`, matching PostgREST wildcard semantics.
+// Anything not allowlisted is a client error (400), never silently ignored.
+bool appendFileFilter(
+    std::string& t_sql, std::vector<std::string>& t_binds, const std::string& t_key, const std::string& t_raw, std::string& t_out_error) {
+    auto dot = t_raw.find('.');
+    if (dot == std::string::npos) {
+        t_out_error = fmt::format("Unsupported filter: {}", t_key);
+        return false;
+    }
+    const std::string op = t_raw.substr(0, dot);
+    const std::string val = t_raw.substr(dot + 1);
+
+    auto bind_cmp = [&](std::string_view t_col, std::string_view t_sql_op) {
+        t_binds.push_back(val);
+        t_sql += fmt::format(" AND {} {} ${}", t_col, t_sql_op, t_binds.size());
+        return true;
+    };
+    auto bind_int = [&](std::string_view t_col) {
+        int64_t v = 0;
+        auto [ptr, ec] = std::from_chars(val.data(), val.data() + val.size(), v);
+        if (ec != std::errc() || ptr != val.data() + val.size()) {
+            t_out_error = fmt::format("Unsupported filter: {}", t_key);
+            return false;
+        }
+        return bind_cmp(t_col, "=");
+    };
+    auto bind_like = [&](std::string_view t_col, std::string_view t_keyword) {
+        std::string pattern = val;
+        std::replace(pattern.begin(), pattern.end(), '*', '%');
+        t_binds.push_back(pattern);
+        t_sql += fmt::format(" AND {} {} ${}", t_col, t_keyword, t_binds.size());
+        return true;
+    };
+
+    if (t_key == "user_id" && op == "eq") {
+        return bind_int("user_id");
+    }
+    if (t_key == "session_id" && op == "eq") {
+        return bind_int("session_id");
+    }
+    if (t_key == "directory_id" && op == "eq") {
+        if (val == "null") {
+            t_sql += " AND directory_id IS NULL";
+            return true;
+        }
+        return bind_int("directory_id");
+    }
+    if (t_key == "directory_id" && op == "is" && val == "null") {
+        t_sql += " AND directory_id IS NULL";
+        return true;
+    }
+    if (t_key == "domain" && op == "eq") {
+        return bind_cmp("domain_name", "=");
+    }
+    if (t_key == "extension" && op == "eq") {
+        return bind_cmp("extension", "=");
+    }
+    if (t_key == "bucket" && op == "eq") {
+        return bind_cmp("bucket", "=");
+    }
+    if (t_key == "name" && (op == "like" || op == "ilike")) {
+        return bind_like("file_name", op == "like" ? "LIKE" : "ILIKE");
+    }
+    if (t_key == "full_path" && (op == "like" || op == "ilike")) {
+        return bind_like("file_path", op == "like" ? "LIKE" : "ILIKE");
+    }
+    t_out_error = fmt::format("Unsupported filter: {}", t_key);
+    return false;
+}
+
+// Parses `?order=created_at.desc` (or `.asc`, or bare column = ASC).
+// Only allowlisted sort columns are accepted; anything else is a 400.
+bool parseFileOrder(const std::string& t_raw, std::string& t_out_sql) {
+    static const std::unordered_map<std::string, std::string> kAllowed = {
+        {"id", "file_id"},
+        {"name", "file_name"},
+        {"full_path", "file_path"},
+        {"created_at", "created_at"},
+    };
+    bool desc = false;
+    std::string col = t_raw;
+    if (t_raw.size() > 5 && t_raw.compare(t_raw.size() - 5, 5, ".desc") == 0) {
+        desc = true;
+        col = t_raw.substr(0, t_raw.size() - 5);
+    } else if (t_raw.size() > 4 && t_raw.compare(t_raw.size() - 4, 4, ".asc") == 0) {
+        col = t_raw.substr(0, t_raw.size() - 4);
+    }
+    auto it = kAllowed.find(col);
+    if (it == kAllowed.end()) {
+        return false;
+    }
+    t_out_sql = it->second + (desc ? " DESC" : " ASC");
+    return true;
+}
+
+std::size_t parseClampedSize(const drogon::HttpRequestPtr& tsp_req, const char* tp_key, std::size_t t_default, std::size_t t_max) {
+    auto opt = tsp_req->getOptionalParameter<std::string>(tp_key);
+    if (!opt.has_value()) {
+        return t_default;
+    }
+    std::size_t v = t_default;
+    auto [ptr, ec] = std::from_chars(opt->data(), opt->data() + opt->size(), v);
+    if (ec != std::errc()) {
+        return t_default;
+    }
+    return std::min(v, t_max);
+}
+
+// Shared tail of both metadata endpoints: applies whitelisted `?col=op.value`
+// filters, ordering and pagination onto t_sql/t_binds, then runs the query.
+// t_sql already contains the tenant/service base predicate with its binds.
+Task<HttpResponsePtr> runFileMetadataQuery(HttpRequestPtr tsp_req, std::string t_sql, std::vector<std::string> t_binds) {
+    for (const auto& [key, raw] : tsp_req->getParameters()) {
+        if (key == "order" || key == "limit" || key == "offset") {
+            continue;
+        }
+        std::string error;
+        if (!appendFileFilter(t_sql, t_binds, key, raw, error)) {
+            co_return createJsonErrorResponse(error, k400BadRequest);
+        }
+    }
+
+    std::string order_sql = "file_id ASC";
+    if (auto order_opt = tsp_req->getOptionalParameter<std::string>("order"); order_opt.has_value()) {
+        if (!parseFileOrder(*order_opt, order_sql)) {
+            co_return createJsonErrorResponse("Unsupported sort column", k400BadRequest);
+        }
+    }
+    const std::size_t limit = parseClampedSize(tsp_req, "limit", 500, 500);
+    const std::size_t offset = parseClampedSize(tsp_req, "offset", 0, 1000000);
+
+    auto db_res = sgrn::datastore::core::getDbClient();
+    if (!db_res.has_value()) {
+        co_return sgrn::createJsonResponse(db_res);
+    }
+    try {
+        auto res = co_await sgrn::datastore::core::execSqlCoroVec(
+            db_res.value(), fmt::format("{} ORDER BY {} LIMIT {} OFFSET {}", t_sql, order_sql, limit, offset), t_binds);
+        Json::Value arr(Json::arrayValue);
+        for (const auto& row : res) {
+            arr.append(fileRowToJson(row));
+        }
+        co_return drogon::HttpResponse::newHttpJsonResponse(std::move(arr));
+    } catch (const std::exception& e) {
+        ERROR_LOG("Files metadata DB error: {}", e.what());
+        co_return createJsonErrorResponse(fmt::format("Database error: {}", e.what()), k500InternalServerError);
+    }
+}
+} // namespace
+
 Task<HttpResponsePtr> StorageApiHandler::handleGetFilesMetadata(HttpRequestPtr tsp_req) {
-    co_return co_await sgrn::datastore::services::proxy::PostgrestProxyService::proxyToPostgrest(tsp_req, "files");
+    // find() first: attributes()->get() throws on a missing key, and an
+    // exception escaping a coroutine terminates the process. The auth
+    // filter always sets session_json, but never trust that blindly here.
+    if (!tsp_req->attributes()->find("session_json")) {
+        co_return createJsonErrorResponse("No session found", k401Unauthorized);
+    }
+    auto session = tsp_req->attributes()->get<Json::Value>("session_json");
+    if (!session || !session.isMember("user") || !session["user"].isMember("organisation") || !session["user"]["organisation"].isString()) {
+        co_return createJsonErrorResponse("No session found", k401Unauthorized);
+    }
+    const std::string org = session["user"]["organisation"].asString();
+
+    // Back-compat: `?session_id=eq.current` scopes to the caller's own
+    // session (previously expanded by the PostgREST proxy layer).
+    if (auto sid_opt = tsp_req->getOptionalParameter<std::string>("session_id"); sid_opt.has_value() && *sid_opt == "eq.current") {
+        const Json::Value& sid_node = session["session_id"];
+        if (!sid_node.isInt() && !sid_node.isInt64() && !sid_node.isUInt() && !sid_node.isUInt64()) {
+            co_return createJsonErrorResponse("Corrupted session: session_id missing", k500InternalServerError);
+        }
+        tsp_req->setParameter("session_id", fmt::format("eq.{}", sid_node.asInt64()));
+    }
+
+    // organisation_name is bound server-side from the session — the
+    // client cannot scope (or escape) to another tenant's files.
+    std::string sql =
+        fmt::format("SELECT {} FROM storage.file_details WHERE organisation_name = $1 AND object_deleted_at IS NULL", kFileMetadataColumns);
+    co_return co_await runFileMetadataQuery(tsp_req, std::move(sql), {org});
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handleAutomatedServiceGetFilesMetadata(HttpRequestPtr tsp_req) {
-    co_return co_await sgrn::datastore::services::proxy::PostgrestProxyService::proxyToPostgrest(tsp_req, "files");
+    // The filter has already validated the automated service and injected its ID into attributes.
+    int32_t automated_service_id = 0;
+    try {
+        automated_service_id = tsp_req->getAttributes()->get<int32_t>("automated_service_id");
+    } catch (const std::exception&) {
+        co_return createJsonErrorResponse("No session found", k401Unauthorized);
+    }
+
+    std::string sql = fmt::format(
+        "SELECT {} FROM storage.file_details WHERE automated_service_id = $1 AND object_deleted_at IS NULL", kFileMetadataColumns);
+    co_return co_await runFileMetadataQuery(tsp_req, std::move(sql), {std::to_string(automated_service_id)});
 }
 
 // ============================================================================
@@ -118,6 +370,46 @@ static std::optional<std::string> normalizePath(std::string t_path) {
         t_path.pop_back();
     }
     return t_path;
+}
+
+// Joins a sanitized multipart filename onto the target directory to form the
+// full virtual file path. Downstream (resolveDirectoryPath) derives the
+// parent directory from this path, so passing the bare directory here would
+// resolve to the session root and strand the file there — always join.
+static std::string joinUploadTargetPath(std::string t_base_dir, std::string t_rel_name) {
+    if (t_base_dir.empty()) {
+        t_base_dir = "/";
+    }
+    while (!t_rel_name.empty() && t_rel_name.front() == '/') {
+        t_rel_name.erase(t_rel_name.begin());
+    }
+    if (!t_rel_name.empty()) {
+        if (t_base_dir.back() != '/') {
+            t_base_dir += "/";
+        }
+        t_base_dir += t_rel_name;
+    }
+    return t_base_dir;
+}
+
+// Resolves the full virtual file path for a single-part upload.
+// Two client contracts exist:
+//  - SDK/object clients (doUpload) send the FULL remote file path twice:
+//    as ?path= AND as a multipart "path" field. Trust the field verbatim.
+//  - The drive UI sends the target DIRECTORY as ?path= with the bare (or
+//    hierarchical) filename in the file part; join them here.
+// Returns nullopt (with t_out_error set) when the resolved path is invalid.
+std::optional<std::string> resolveSingleUploadTarget(const drogon::SafeStringMap<std::string>& t_form_params,
+    const std::string& t_query_dir, const std::string& t_rel_name, std::string& t_out_error) {
+    if (auto it = t_form_params.find("path"); it != t_form_params.end() && !it->second.empty()) {
+        auto norm = normalizePath(it->second);
+        if (!norm) {
+            t_out_error = "Invalid path form field";
+            return std::nullopt;
+        }
+        return *norm;
+    }
+    return joinUploadTargetPath(t_query_dir, t_rel_name);
 }
 Task<HttpResponsePtr> StorageApiHandler::handleFileRequest(HttpRequestPtr tsp_req) {
     try {
@@ -196,8 +488,10 @@ Task<HttpResponsePtr> StorageApiHandler::handleFileRequest(HttpRequestPtr tsp_re
 
             // ── 5. Storage Service Delegation ────────────────────────────────
             if (files.size() == 1) {
-                // If the single file has a slash in its name (from webkitRelativePath),
-                // we join it with the path parameter to reconstruct the hierarchy.
+                // Single file: resolve the full target path — either the
+                // multipart "path" field verbatim (SDK full-path contract)
+                // or the query directory joined with the file part name
+                // (drive UI contract). See resolveSingleUploadTarget().
                 std::string file_rel_path = drogon::utils::urlDecode(files[0].getFileName());
 
                 // SEC: Sanitize the relative path segment before merging with the base path
@@ -207,14 +501,13 @@ Task<HttpResponsePtr> StorageApiHandler::handleFileRequest(HttpRequestPtr tsp_re
                 }
                 file_rel_path = std::move(*safe_rel);
 
-                std::string target_path = path_str;
-                if (file_rel_path.find('/') != std::string::npos) {
-                    if (target_path.back() != '/' && file_rel_path.front() != '/') {
-                        target_path += "/";
-                    }
-                    target_path += file_rel_path;
-                    DEBUG_LOG("[StorageApiHandler::handleFileRequest] Hierarchy detected, target path: '{}'", target_path);
+                std::string path_error;
+                auto target_opt = resolveSingleUploadTarget(file_upload.getParameters(), path_str, file_rel_path, path_error);
+                if (!target_opt) {
+                    co_return createJsonErrorResponse(path_error, k400BadRequest, "StorageApi");
                 }
+                std::string target_path = std::move(*target_opt);
+                DEBUG_LOG("[StorageApiHandler::handleFileRequest] Target path: '{}'", target_path);
 
                 co_return co_await storage_service_.handleUploadFileRequest(
                     std::move(session), std::move(scope), std::move(target_path), files[0]);
@@ -817,21 +1110,12 @@ Task<HttpResponsePtr> StorageApiHandler::handleAutomatedServiceFileRequest(HttpR
                 co_return createJsonErrorResponse("No file parts found in automated service multipart request", k400BadRequest);
             }
 
-            if (parser.getParameters().contains("path")) {
-                auto it = parser.getParameters().find("path");
-                if (it != parser.getParameters().end()) {
-                    auto norm2 = normalizePath(it->second);
-                    if (norm2.has_value()) {
-                        path_str = std::move(*norm2);
-                    }
-                }
-            }
-
             DEBUG_LOG("[StorageApiHandler::handleAutomatedServiceFileRequest] POST - path: {}, count: {}", path_str, files.size());
 
             if (files.size() == 1) {
-                // If the single file has a slash in its name (from webkitRelativePath),
-                // we should join it with the path parameter.
+                // Single file: the target is either the multipart "path"
+                // field verbatim (SDK full-path contract) or the query
+                // directory joined with the file part name (drive UI).
                 std::string file_rel_path = drogon::utils::urlDecode(files[0].getFileName());
 
                 // SEC: Sanitize the relative path segment before merging with the base path
@@ -841,13 +1125,12 @@ Task<HttpResponsePtr> StorageApiHandler::handleAutomatedServiceFileRequest(HttpR
                 }
                 file_rel_path = std::move(*safe_rel);
 
-                std::string target_path = path_str;
-                if (file_rel_path.find('/') != std::string::npos) {
-                    if (target_path.back() != '/' && file_rel_path.front() != '/') {
-                        target_path += "/";
-                    }
-                    target_path += file_rel_path;
+                std::string path_error;
+                auto target_opt = resolveSingleUploadTarget(parser.getParameters(), path_str, file_rel_path, path_error);
+                if (!target_opt) {
+                    co_return createJsonErrorResponse(path_error, k400BadRequest, "StorageApi");
                 }
+                std::string target_path = std::move(*target_opt);
                 co_return co_await storage_service_.handleUploadFileRequest(std::move(session), "personal", target_path, files[0]);
             } else {
                 co_return co_await storage_service_.handleUploadFilesBatchRequest(std::move(session), "personal", path_str, files);

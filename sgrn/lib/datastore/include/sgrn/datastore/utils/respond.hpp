@@ -66,8 +66,6 @@ inline drogon::HttpStatusCode kindToHttpStatusCode(::sgrn::datastore::BackendErr
             return drogon::k500InternalServerError;
         case ::sgrn::datastore::BackendErrorKind::Minio:
             return drogon::k500InternalServerError;
-        case ::sgrn::datastore::BackendErrorKind::Postgrest:
-            return drogon::k503ServiceUnavailable;
         case ::sgrn::datastore::BackendErrorKind::Auth:
             return drogon::k401Unauthorized;
         case ::sgrn::datastore::BackendErrorKind::Filesystem:

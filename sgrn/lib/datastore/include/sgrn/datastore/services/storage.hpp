@@ -63,7 +63,6 @@ public:
         Json::Value t_session, std::string t_scope, std::string t_base_path, const std::vector<drogon::HttpFile>& t_files);
 
     ::sgrn::datastore::BackendResult<sgrn::datastore::plugins::aws::S3Client*> S3Client() const;
-    ::sgrn::datastore::BackendResult<sgrn::datastore::plugins::PostgrestClient*> PostgrestClient() const;
     ::sgrn::datastore::BackendResult<drogon::orm::DbClientPtr> getDbClient() const;
 
 private:

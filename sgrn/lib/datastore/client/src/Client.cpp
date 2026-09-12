@@ -183,6 +183,22 @@ std::string urlEncodeQueryValue(const std::string& t_in) {
     return out;
 }
 
+// Renders a failed HTTP response as "HTTP <status>: <server error>".
+// Prefers the server's JSON {"error": ...} text; falls back to the raw
+// body (capped) so binary payloads can't flood the terminal.
+std::string httpErrorText(int t_status, const std::string& t_body) {
+    std::string detail;
+    auto parsed = sgrn::utils::json::deserialize(t_body);
+    if (!parsed.hasError() && parsed.value().IsObject() && parsed.value().HasMember("error") && parsed.value()["error"].IsString()) {
+        detail = parsed.value()["error"].GetString();
+    } else {
+        detail = t_body.size() > 300 ? t_body.substr(0, 300) + "…" : t_body;
+    }
+    if (detail.empty())
+        detail = "(empty response body)";
+    return fmt::format("HTTP {}: {}", t_status, detail);
+}
+
 std::vector<IdNamePair> parseIdNamePairs(const rapidjson::Document& t_doc) {
     std::vector<IdNamePair> out;
     if (!t_doc.IsArray())
@@ -221,38 +237,45 @@ sgrn::Result<std::vector<IdNamePair>, std::string> DatastoreClient::tryListOrgan
     return parseIdNamePairs(doc);
 }
 
-std::vector<IdNamePair> DatastoreClient::listDomains(const std::string& t_organisation) {
-    auto r = tryListDomains(t_organisation);
+std::vector<IdNamePair> DatastoreClient::listDomains() {
+    auto r = tryListDomains();
     return r.hasError() ? std::vector<IdNamePair>{} : r.value();
 }
 
-sgrn::Result<std::vector<IdNamePair>, std::string> DatastoreClient::tryListDomains(const std::string& t_organisation) {
-    auto doc = makeRequest("GET", "/api/v1/query/domains?organisation=" + urlEncodeQueryValue(t_organisation));
+sgrn::Result<std::vector<IdNamePair>, std::string> DatastoreClient::tryListDomains() {
+    auto doc = makeRequest("GET", "/api/v1/domains");
     if (doc.IsNull())
-        return sgrn::Result<std::vector<IdNamePair>, std::string>::Error(
-            "list domains failed: empty response (check organisation and session)");
+        return sgrn::Result<std::vector<IdNamePair>, std::string>::Error("list domains failed: empty response (check session)");
     return parseIdNamePairs(doc);
 }
 
 namespace
 {
 
-std::string idToString(const rapidjson::Value& t_id) {
-    if (t_id.IsString())
-        return t_id.GetString();
-    if (t_id.IsInt64())
-        return std::to_string(t_id.GetInt64());
-    if (t_id.IsUint64())
-        return std::to_string(t_id.GetUint64());
-    if (t_id.IsInt())
-        return std::to_string(t_id.GetInt());
-    if (t_id.IsUint())
-        return std::to_string(t_id.GetUint());
-    return {};
-}
-
 std::string strField(const rapidjson::Value& t_obj, const char* t_key) {
     return (t_obj.HasMember(t_key) && t_obj[t_key].IsString()) ? t_obj[t_key].GetString() : std::string{};
+}
+
+// Integer-or-string id tolerant parse (generated CRUD rows stringify ids).
+int64_t parseIntField(const rapidjson::Value& t_val) {
+    if (t_val.IsInt64())
+        return t_val.GetInt64();
+    if (t_val.IsUint64())
+        return static_cast<int64_t>(t_val.GetUint64());
+    if (t_val.IsInt())
+        return t_val.GetInt();
+    if (t_val.IsUint())
+        return t_val.GetUint();
+    if (t_val.IsString()) {
+        try {
+            size_t pos = 0;
+            const long long v = std::stoll(t_val.GetString(), &pos);
+            if (pos == std::string(t_val.GetString()).size())
+                return static_cast<int64_t>(v);
+        } catch (...) {
+        }
+    }
+    return 0;
 }
 
 sgrn::Result<rapidjson::Document, std::string> postJson(
@@ -333,7 +356,7 @@ sgrn::Result<std::string, std::string> DatastoreClient::registerUser(const NewUs
 }
 
 sgrn::Result<std::vector<ServiceEntry>, std::string> DatastoreClient::tryListServices() {
-    auto doc = makeRequest("GET", "/api/v1/admin/automated-services");
+    auto doc = makeRequest("GET", "/api/v1/automated-services");
     if (doc.IsNull())
         return sgrn::Result<std::vector<ServiceEntry>, std::string>::Error("list services failed: empty response (admin only?)");
     if (!doc.IsArray())
@@ -342,11 +365,14 @@ sgrn::Result<std::vector<ServiceEntry>, std::string> DatastoreClient::tryListSer
     for (const auto& e : doc.GetArray()) {
         if (!e.IsObject())
             continue;
+        // Generated CRUD rows carry every value as a string and expose no
+        // computed columns: accept numeric-or-string ids and derive
+        // is_active from status here.
         ServiceEntry s;
-        s.id_ = e.HasMember("id") && e["id"].IsInt64() ? e["id"].GetInt64() : 0;
+        s.id_ = e.HasMember("id") ? parseIntField(e["id"]) : 0;
         s.name_ = strField(e, "name");
         s.token_ = strField(e, "token");
-        s.is_active_ = e.HasMember("is_active") && e["is_active"].IsBool() && e["is_active"].GetBool();
+        s.is_active_ = strField(e, "status") == "active";
         s.domain_ = strField(e, "domain");
         s.created_at_ = strField(e, "created_at");
         out.push_back(std::move(s));
@@ -653,10 +679,11 @@ DatastoreClient::UploadResult DatastoreClient::doUpload(const std::string& t_rem
                 }
             }
         } else {
-            res.message = std::move(res_http->body);
+            res.message = httpErrorText(res_http->status, res_http->body);
             SGRN_ERROR("DatastoreClient", "Upload failed: {} -> status {}, body: {}", endpoint, res.http_status, res.message);
         }
     } else {
+        res.message = "no response from server";
         SGRN_ERROR("DatastoreClient", "Upload failed: {} -> No response", endpoint);
     }
     return res;
@@ -689,6 +716,7 @@ DatastoreClient::DownloadResult DatastoreClient::doDownload(const std::string& t
 
     if (res_http) {
         res.ok = (res_http->status == 200);
+        res.http_status = res_http->status;
         if (res.ok) {
             res.bytes = std::move(res_http->body);
             if (res_http->has_header("Content-Type"))
@@ -711,7 +739,11 @@ DatastoreClient::DownloadResult DatastoreClient::doDownload(const std::string& t
                         "DatastoreClient", "Failed client-side transparent decompression for '{}': {}", t_remote_path, dec_res.error());
                 }
             }
+        } else {
+            res.message = httpErrorText(res_http->status, res_http->body);
         }
+    } else {
+        res.message = "no response from server";
     }
     return res;
 }
@@ -743,11 +775,14 @@ DatastoreClient::DownloadResult DatastoreClient::doDownloadDriveZip(const std::s
 
     if (res_http) {
         res.ok = (res_http->status == 200);
+        res.http_status = res_http->status;
         if (res.ok) {
             res.bytes = res_http->body;
         } else {
-            res.message = res_http->body;
+            res.message = httpErrorText(res_http->status, res_http->body);
         }
+    } else {
+        res.message = "no response from server";
     }
     return res;
 }

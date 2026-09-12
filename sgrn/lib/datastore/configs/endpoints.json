@@ -40,11 +40,6 @@
     "url": "/sgrn/api/getEndpoints"
   },
   {
-    "label": "PostgREST Proxy",
-    "method": "ANY",
-    "url": "/sgrn/postgrest"
-  },
-  {
     "label": "Get Files Metadata",
     "method": "GET",
     "url": "/sgrn/storage/files/metadata"

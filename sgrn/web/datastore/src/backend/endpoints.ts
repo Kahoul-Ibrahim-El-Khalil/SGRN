@@ -2,7 +2,7 @@ export const AdminBackendApiEndpoints = {
     REGISTER_USER: "/api/v1/admin/users/register",
     LIST_USERS: "/api/v1/admin/users",
     REGISTER_AUTOMATED_SERVICE: "/api/v1/admin/automated-services/register",
-    LIST_AUTOMATED_SERVICES: "/api/v1/admin/automated-services",
+    LIST_AUTOMATED_SERVICES: "/api/v1/automated-services",
     UPDATE_AUTOMATED_SERVICE_METADATA: (id: number) => `/api/v1/admin/automated-services/${id}/metadata`,
     ROTATE_AUTOMATED_SERVICE_TOKEN: "/api/v1/admin/automated-services/rotate-token",
 } as const;
@@ -17,7 +17,7 @@ export type SessionBackendApiEndpoint = (typeof SessionBackendApiEndpoints)[keyo
 export const QueryListBackendApiEndpoints = {
     LIST_ORGANISATIONS: "/api/v1/query/organisations",
     LIST_STATUSES: "/api/v1/query/statuses",
-    LIST_DOMAINS: "/api/v1/query/domains",
+    LIST_DOMAINS: "/api/v1/domains",
     QUERY_USER_INFO: "/api/v1/query/user/info",
     UPDATE_USER_INFO: "/api/v1/query/user/info",
 } as const;
@@ -35,13 +35,9 @@ export const StorageBackendApiEndpoints = {
     CONSTRAINTS: "/api/v1/storage/info",
     GET_STATS: "/api/v1/storage/stats",
 
-    // File Listing Operations
-    FILES_BY_USER: "/api/v1/storage/files/byUser",
-    FILES_BY_DOMAIN: "/api/v1/storage/files/byDomain",
-    FILES_BY_PATH: "/api/v1/storage/files/byPath",
-    FILES_BY_EXTENSION: "/api/v1/storage/files/byExtension",
-    FILES_BY_SUBMISSION: "/api/v1/storage/files/bySubmission",
-    FILES_SEARCH: "/api/v1/storage/files/search",
+    // File Listing Operations (in-process metadata endpoint;
+    // supports ?col=op.value filters, ?order=, ?limit=, ?offset=)
+    FILES_METADATA: "/api/v1/storage/files/metadata",
 
     // Drive Operations
     DRIVE_LIST: "/api/v1/storage/drive/list",

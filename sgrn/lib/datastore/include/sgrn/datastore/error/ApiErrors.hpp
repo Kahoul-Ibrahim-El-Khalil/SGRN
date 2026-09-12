@@ -9,7 +9,7 @@
 // ApiErrors.hpp enums represent request/business-logic-level failures
 // (validation, "already exists", "not found by business rule") and
 // BackendErrorKind represents resource/infra-level failures (DB, Redis,
-// S3, Postgrest). They are two separate layers that are never merged.
+// S3). They are two separate layers that are never merged.
 // Both must always produce the SAME wire shape:
 //   { error, scope, code?, metadata? }
 // The createErrorResponse(EnumT) bridge maps each ApiErrors variant to

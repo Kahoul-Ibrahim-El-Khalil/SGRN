@@ -40,7 +40,7 @@ export default function DownloadPage() {
     const isAdmin = user?.role === "admin" || user?.role === "super_admin";
 
     /**
-     * Build PostgREST query parameters from current state
+     * Build file-listing filter parameters from current state
      */
     const buildQueryParams = useCallback((): ListFilesParams => {
         let mode: ListFilesParams["mode"];
@@ -100,7 +100,7 @@ export default function DownloadPage() {
             if (handleSgrnResult(result)) {
                 const data = result.data;
                 setFileMetadata(data);
-                setTotalCount(data.length); // PostgREST returns actual count in headers, but we use length for now
+                setTotalCount(data.length); // API returns the page; total comes from pagination metadata where available
             } else {
                 setFileMetadata([]);
             }

@@ -20,7 +20,7 @@ public:
     drogon::Task<drogon::HttpResponsePtr> handleGetConstraints(drogon::HttpRequestPtr tsp_req);
 
     // =========================================================================
-    // File metadata (PostgREST proxy)
+    // File metadata (direct DB query over storage.file_details)
     // =========================================================================
     drogon::Task<drogon::HttpResponsePtr> handleGetFilesMetadata(drogon::HttpRequestPtr tsp_req);
 
@@ -36,8 +36,8 @@ public:
     // =========================================================================
     drogon::Task<drogon::HttpResponsePtr> handleCreateObject(drogon::HttpRequestPtr tsp_req);
     drogon::Task<drogon::HttpResponsePtr> handleListObjects(drogon::HttpRequestPtr tsp_req);
-    drogon::Task<drogon::HttpResponsePtr> handleMoveObject(drogon::HttpRequestPtr tsp_req);
-    drogon::Task<drogon::HttpResponsePtr> handleDeleteObject(drogon::HttpRequestPtr tsp_req);
+    drogon::Task<drogon::HttpResponsePtr> handleMoveObject(drogon::HttpRequestPtr tsp_req, std::string t_name);
+    drogon::Task<drogon::HttpResponsePtr> handleDeleteObject(drogon::HttpRequestPtr tsp_req, std::string t_name);
 
     // =========================================================================
     // Drive directory listing
@@ -79,7 +79,7 @@ private:
     drogon::Task<drogon::HttpResponsePtr> deleteFolder(
         const drogon::orm::DbClientPtr& tsp_db_client, int64_t t_entity_id, int32_t t_user_id, bool t_is_admin);
 
-    inline static const std::array<IHandler<StorageApiHandler>::route_config, 16> kRoutes{{// 1. Static/Exact routes must come FIRST to
+    inline static const std::array<IHandler<StorageApiHandler>::route_config, 14> kRoutes{{// 1. Static/Exact routes must come FIRST to
                                                                                            // avoid
                                                                                            // being caught by wildcards
         {"/api/v1/storage/stats", &StorageApiHandler::handleGetStorageStats, {drogon::Get}, {"sgrn::datastore::filters::UserAuthFilter"}},
@@ -109,12 +109,6 @@ private:
         {"/api/v1/automated-service/objects", &StorageApiHandler::handleListObjects, {drogon::Get},
             {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}},
 
-        {"/api/v1/automated-service/objects/{name}", &StorageApiHandler::handleMoveObject, {drogon::Patch},
-            {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}},
-
-        {"/api/v1/automated-service/objects/{name}", &StorageApiHandler::handleDeleteObject, {drogon::Delete},
-            {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}},
-
         // 2. Wildcard/Greedy routes must come LAST
         {"/api/v1/storage/files", &StorageApiHandler::handleFileRequest, {drogon::Get, drogon::Post},
             {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::DecompressionFilter"}},
@@ -124,6 +118,15 @@ private:
 
         {"/api/v1/storage/automated-service/metadata", &StorageApiHandler::handleAutomatedServiceGetFilesMetadata, {drogon::Get},
             {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}}}};
+
+    // Item routes: `{name}` is mapped by Drogon onto the handler's second
+    // argument (see IHandler::item_route_config).
+    inline static const std::array<IHandler<StorageApiHandler>::item_route_config, 2> kItemRoutes{
+        {{"/api/v1/automated-service/objects/{name}", &StorageApiHandler::handleMoveObject, {drogon::Patch},
+             {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}},
+
+            {"/api/v1/automated-service/objects/{name}", &StorageApiHandler::handleDeleteObject, {drogon::Delete},
+                {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}}}};
 };
 
 } // namespace sgrn::datastore::handlers::storage

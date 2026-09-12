@@ -31,5 +31,4 @@ from
   public;
 
 grant
-execute on function core.authenticate_user (text, text) to sgrn_datastore,
-sgrn_postgrest;
+execute on function core.authenticate_user (text, text) to sgrn_datastore;

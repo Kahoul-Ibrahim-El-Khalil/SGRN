@@ -7,16 +7,21 @@
 #include <sgrn/utils/compression.hpp>
 #include <sgrn/utils/env.hpp>
 #include <sgrn/utils/filesystem.hpp>
+#include <algorithm>
+#include <chrono>
 #include <config_assets.hpp>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <pwd.h>
 #include <sql_assets.hpp>
 #include <stdexcept>
 #include <string>
 #include <sys/types.h>
+#include <thread>
 #include <trantor/net/EventLoopThread.h>
 #include <unistd.h>
 #include <vector>
@@ -43,6 +48,69 @@ inline sgrn::Result<void, std::string> loadEnvFile(const std::filesystem::path& 
 /// Delegates to sgrn::utils::env::get().
 inline std::string envOrDefault(const char* t_key, const std::string& t_default) {
     return sgrn::utils::env::get(t_key, t_default);
+}
+
+/// Directory containing the currently running binary (via /proc/self/exe).
+/// Empty when it cannot be resolved (non-Linux, confined environments).
+inline std::string currentExeDir() {
+    namespace fs = std::filesystem;
+    char exe_buf[4096] = {};
+    ssize_t exe_len = ::readlink("/proc/self/exe", exe_buf, sizeof(exe_buf) - 1);
+    if (exe_len <= 0)
+        return {};
+    return fs::path(std::string(exe_buf, static_cast<size_t>(exe_len))).parent_path().string();
+}
+
+/// Whether t_dir contains an executable sgrn_datastore binary.
+inline bool hasDatastoreBinary(const std::string& t_dir) {
+    namespace fs = std::filesystem;
+    if (t_dir.empty())
+        return false;
+    std::error_code ec;
+    auto st = fs::status(fs::path(t_dir) / "sgrn_datastore", ec);
+    if (ec)
+        return false;
+    return fs::is_regular_file(st) && (st.permissions() & fs::perms::owner_exec) != fs::perms::none;
+}
+
+/// Replace (or append) one KEY=VALUE line in an .env file, preserving every
+/// other byte. Returns true when the file was changed.
+inline bool upsertEnvVar(const std::filesystem::path& t_env_path, const std::string& t_key, const std::string& t_value) {
+    std::ifstream in(t_env_path);
+    if (!in)
+        return false;
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const std::string prefix = t_key + "=";
+    bool changed = false;
+    {
+        std::string out;
+        size_t pos = 0;
+        while (pos < content.size()) {
+            size_t eol = content.find('\n', pos);
+            std::string line = content.substr(pos, eol == std::string::npos ? std::string::npos : eol - pos);
+            if (!changed && line.rfind(prefix, 0) == 0) {
+                line = prefix + t_value;
+                changed = true;
+            }
+            out += line;
+            if (eol == std::string::npos)
+                break;
+            out += '\n';
+            pos = eol + 1;
+        }
+        if (!changed) {
+            if (!out.empty() && out.back() != '\n')
+                out += '\n';
+            out += prefix + t_value + "\n";
+            changed = true;
+        }
+        content = std::move(out);
+    }
+    std::ofstream out_file(t_env_path, std::ios::binary | std::ios::trunc);
+    if (!out_file)
+        return false;
+    out_file << content;
+    return changed;
 }
 
 inline std::string replaceTemplateVars(std::string t_text, const std::string& t_pg_db, const std::string& t_pg_pass,
@@ -88,9 +156,9 @@ inline void generateDefaultEnvFile(const std::filesystem::path& t_env_path, cons
     namespace fs = std::filesystem;
 
     // Resolve runtime paths so the .env is portable
-    char exe_buf[4096] = {};
-    ssize_t exe_len = ::readlink("/proc/self/exe", exe_buf, sizeof(exe_buf) - 1);
-    std::string bin_dir = (exe_len > 0) ? fs::path(exe_buf).parent_path().string() : "/usr/local/bin";
+    std::string bin_dir = currentExeDir();
+    if (bin_dir.empty())
+        bin_dir = "/usr/local/bin";
     std::string conda_prefix = envOrDefault("CONDA_PREFIX", "/home/" + t_user + "/micromamba/envs/SGRN");
 
     std::ofstream env_out(t_env_path);
@@ -111,7 +179,7 @@ inline void generateDefaultEnvFile(const std::filesystem::path& t_env_path, cons
     env_out << "POSTGRES_DB=sgrn\n";
     env_out << "# Superuser for bootstrapping (peer auth — must match your Linux username)\n";
     env_out << "POSTGRES_SUPERUSER=" << t_user << "\n";
-    env_out << "# App-level role created by the schema (used by datastore + postgrest)\n";
+    env_out << "# App-level role created by the schema (used by the datastore)\n";
     env_out << "POSTGRES_USER=sgrn_datastore\n";
     env_out << "POSTGRES_PASSWORD=change_me_secure_db_password\n\n";
 
@@ -179,8 +247,8 @@ inline void generateSystemdServices(const std::string& t_base_dir, const std::fu
     fs::path systemd_out_dir = fs::path(t_base_dir) / "systemd";
     fs::create_directories(systemd_out_dir);
 
-    static constexpr std::string_view kSystemdServices[] = {"SGRN-datastore.service", "SGRN-postgrest.service", "SGRN-minio.service",
-        "SGRN-postgres.service", "SGRN-redis.service", "SGRN-nginx.service", "sgrn.service"};
+    static constexpr std::string_view kSystemdServices[] = {"SGRN-datastore.service", "SGRN-minio.service", "SGRN-postgres.service",
+        "SGRN-redis.service", "SGRN-nginx.service", "sgrn.service"};
 
     for (auto svc : kSystemdServices) {
         std::string vp = std::string("/systemd/") + std::string(svc);
@@ -276,6 +344,9 @@ inline std::string resolveSudoUser() {
 
 inline void stopLegacyServices(const std::string& t_sudo_user, uid_t t_user_uid) {
     SGRN_INFO("DatastoreInit", "Cleaning up any legacy user-level services...");
+    // NOTE: SGRN-postgrest.service is intentionally still stopped here: it is
+    // obsolete (no longer deployed), so any lingering user-level instance
+    // must be torn down, never started.
     std::string cmd = fmt::format("sudo -u {} XDG_RUNTIME_DIR=/run/user/{} systemctl --user stop "
                                   "SGRN-nginx.service sgrn.service SGRN-datastore.service "
                                   "SGRN-minio.service SGRN-postgres.service SGRN-postgrest.service "
@@ -284,15 +355,51 @@ inline void stopLegacyServices(const std::string& t_sudo_user, uid_t t_user_uid)
     std::system(cmd.c_str());
 }
 
+// Units removed from the deployment. If a previous release installed them,
+// --config-systemd disables and deletes them so they can neither start at
+// boot nor linger as confusion. System-level paths need root (guaranteed by
+// the configureSystemd() euid check); every command tolerates absence.
+inline void removeObsoleteUnits(const std::filesystem::path& t_data_dir) {
+    namespace fs = std::filesystem;
+    static constexpr std::string_view kObsoleteUnits[] = {"SGRN-postgrest.service"};
+    static constexpr std::string_view kObsoleteDataFiles[] = {"systemd/SGRN-postgrest.service", "postgrest.conf"};
+
+    for (auto unit : kObsoleteUnits) {
+        SGRN_INFO("DatastoreInit", "Removing obsolete unit {} (if present)...", unit);
+        std::system(fmt::format("systemctl disable --now {} 2>/dev/null || true", unit).c_str());
+        std::error_code ec;
+        fs::remove(fs::path("/etc/systemd/system") / unit, ec);
+        if (!ec)
+            SGRN_INFO("DatastoreInit", "  -> Removed /etc/systemd/system/{}", unit);
+    }
+    for (auto rel : kObsoleteDataFiles) {
+        std::error_code ec;
+        fs::remove(fs::path(t_data_dir) / rel, ec);
+        if (!ec)
+            SGRN_INFO("DatastoreInit", "  -> Removed {}/{}", t_data_dir.string(), rel);
+    }
+}
+
 inline sgrn::Result<void, std::string> copyIfChanged(
     const std::filesystem::path& t_src, const std::filesystem::path& t_dst, bool t_is_nginx, uid_t t_uid, gid_t t_gid) {
     namespace fs = std::filesystem;
     if (!fs::exists(t_src)) {
         return sgrn::Result<void, std::string>::Error(fmt::format("Source file does not exist: {}", t_src.string()));
     }
+    // Compare content, not just size: template substitutions (hostnames,
+    // secrets, paths) routinely preserve file size while changing meaning.
     bool copy_needed = true;
     if (fs::exists(t_dst)) {
-        copy_needed = (fs::file_size(t_src) != fs::file_size(t_dst));
+        std::error_code ec1, ec2;
+        auto src_size = fs::file_size(t_src, ec1);
+        auto dst_size = fs::file_size(t_dst, ec2);
+        if (!ec1 && !ec2 && src_size == dst_size && src_size <= (1u << 24)) {
+            std::ifstream f_src(t_src, std::ios::binary), f_dst(t_dst, std::ios::binary);
+            if (f_src && f_dst) {
+                copy_needed = !std::equal(
+                    std::istreambuf_iterator<char>(f_src), std::istreambuf_iterator<char>(), std::istreambuf_iterator<char>(f_dst));
+            }
+        }
     }
     if (copy_needed) {
         SGRN_INFO("DatastoreInit", "  Copying {} to {}...", t_src.filename().string(), t_dst.string());
@@ -310,18 +417,150 @@ inline sgrn::Result<void, std::string> copyIfChanged(
     return {};
 }
 
-inline void restartChangedServices(const std::vector<std::string>& t_services) {
+// Dedupe (the nginx sync pushes one entry per changed file) and order by
+// dependency tier — infrastructure first, the sgrn.service umbrella last —
+// so a restart run never bounces dependents before their dependencies.
+inline std::vector<std::string> orderServicesForRestart(std::vector<std::string> t_services) {
+    std::vector<std::string> ordered;
+    for (auto& svc : t_services) {
+        if (std::find(ordered.begin(), ordered.end(), svc) == ordered.end())
+            ordered.push_back(std::move(svc));
+    }
+    auto tier = [](const std::string& t_svc) {
+        if (t_svc == "SGRN-postgres.service" || t_svc == "SGRN-redis.service")
+            return 0;
+        if (t_svc == "SGRN-minio.service")
+            return 1;
+        if (t_svc == "SGRN-nginx.service")
+            return 3;
+        if (t_svc == "sgrn.service")
+            return 4;
+        return 2; // SGRN-datastore.service and anything unknown
+    };
+    std::stable_sort(ordered.begin(), ordered.end(), [&](const std::string& t_a, const std::string& t_b) { return tier(t_a) < tier(t_b); });
+    return ordered;
+}
+
+// Best-effort query of a unit's Type (e.g. "oneshot", "simple").
+// Empty string when systemctl is unavailable.
+inline std::string unitType(const std::string& t_svc) {
+    std::string out;
+    FILE* pipe = ::popen(fmt::format("systemctl show -p Type --value {} 2>/dev/null", t_svc).c_str(), "r");
+    if (pipe == nullptr)
+        return out;
+    char buf[64];
+    if (std::fgets(buf, sizeof(buf), pipe) != nullptr)
+        out = buf;
+    ::pclose(pipe);
+    while (!out.empty() && (out.back() == '\n' || out.back() == '\r' || out.back() == ' '))
+        out.pop_back();
+    return out;
+}
+
+// Logs a `systemctl status` snapshot so a failed unit's cause is visible
+// inline in the deploy log instead of requiring a follow-up journalctl run.
+inline void logUnitStatus(const std::string& t_svc) {
+    FILE* pipe = ::popen(fmt::format("systemctl status {} --no-pager -l -n 15 2>&1", t_svc).c_str(), "r");
+    if (pipe == nullptr)
+        return;
+    std::string out;
+    char buf[512];
+    while (std::fgets(buf, sizeof(buf), pipe) != nullptr) {
+        out += buf;
+        if (out.size() > 4000)
+            break;
+    }
+    ::pclose(pipe);
+    SGRN_ERROR("DatastoreInit", "--- systemctl status {} ---\n{}", t_svc, out);
+}
+
+inline bool restartOneService(const std::string& t_svc) {
+    // Clear any latched failed / rate-limited state first: without this, a
+    // unit that crash-looped earlier refuses every new start ("start of the
+    // service was attempted too often") even after the cause is fixed.
+    std::system(fmt::format("systemctl reset-failed {} 2>/dev/null || true", t_svc).c_str());
+    SGRN_INFO("DatastoreInit", "Restarting service {}...", t_svc);
+    if (std::system(fmt::format("systemctl restart {}", t_svc).c_str()) == 0)
+        return true;
+    SGRN_ERROR("DatastoreInit", "systemctl restart {} failed.", t_svc);
+    // `reload` is never applicable to oneshot units (e.g. the sgrn.service
+    // umbrella) — attempting it only adds a confusing second error.
+    if (unitType(t_svc) == "oneshot") {
+        SGRN_INFO("DatastoreInit", "{} is oneshot: skipping reload fallback.", t_svc);
+    } else if (std::system(fmt::format("systemctl reload {}", t_svc).c_str()) == 0) {
+        SGRN_INFO("DatastoreInit", "{} reloaded as fallback.", t_svc);
+        return true;
+    }
+    logUnitStatus(t_svc);
+    return false;
+}
+
+inline bool restartChangedServices(const std::vector<std::string>& t_services) {
     if (t_services.empty()) {
         SGRN_INFO("DatastoreInit", "No changes detected. Systemd services are up to date.");
-        return;
+        return true;
     }
     SGRN_INFO("DatastoreInit", "Reloading systemd daemon...");
-    std::system("systemctl daemon-reload");
-    for (const auto& svc : t_services) {
-        SGRN_INFO("DatastoreInit", "Restarting service {}...", svc);
-        std::string cmd = fmt::format("systemctl restart {} || systemctl reload {}", svc, svc);
-        std::system(cmd.c_str());
+    if (std::system("systemctl daemon-reload") != 0) {
+        SGRN_ERROR("DatastoreInit", "systemctl daemon-reload failed; not restarting services against a stale systemd.");
+        return false;
     }
+    bool ok = true;
+    for (const auto& svc : t_services) {
+        ok = restartOneService(svc) && ok;
+    }
+    // Crash-loops report success to `restart` (the job queues while the
+    // process dies seconds later under Restart=on-failure). When systemd is
+    // actually running, verify liveness after a grace period instead of
+    // trusting the restart return code. Skipped in non-systemd environments
+    // (containers), where is-active can never succeed.
+    if (std::system("systemctl is-system-running --quiet 2>/dev/null") == 0) {
+        std::this_thread::sleep_for(std::chrono::seconds(3));
+        for (const auto& svc : t_services) {
+            if (std::system(fmt::format("systemctl is-active --quiet {}", svc).c_str()) != 0) {
+                SGRN_ERROR("DatastoreInit", "Service {} is not active after restart — it may be crash-looping.", svc);
+                logUnitStatus(svc);
+                ok = false;
+            }
+        }
+    } else {
+        SGRN_INFO("DatastoreInit", "systemd is not running here; skipping post-restart liveness check.");
+    }
+    return ok;
+}
+
+// Enables units for boot persistence. Best-effort: `enable` only writes
+// symlinks (works without a running systemd), but report failures loudly.
+inline bool enableServices(const std::vector<std::string>& t_services) {
+    bool ok = true;
+    for (const auto& svc : t_services) {
+        if (std::system(fmt::format("systemctl enable {} 2>/dev/null", svc).c_str()) != 0) {
+            SGRN_WARN("DatastoreInit", "Could not enable {} for boot (continuing).", svc);
+            ok = false;
+        } else {
+            SGRN_INFO("DatastoreInit", "  -> Enabled {} for boot.", svc);
+        }
+    }
+    return ok;
+}
+
+// Blocks until PostgreSQL accepts connections (or a ~60s timeout), so
+// dependents restarted right after postgres don't boot against a cold
+// server. Skipped with a warning when pg_isready is unavailable.
+inline void waitForPostgres(const std::string& t_host, const std::string& t_port, const std::string& t_pg_isready) {
+    if (t_pg_isready.empty() || !std::filesystem::exists(t_pg_isready)) {
+        SGRN_WARN("DatastoreInit", "pg_isready not found; skipping postgres readiness wait.");
+        return;
+    }
+    SGRN_INFO("DatastoreInit", "Waiting for PostgreSQL at {}:{} to accept connections...", t_host, t_port);
+    for (int i = 0; i < 30; ++i) {
+        if (std::system(fmt::format("{} -h {} -p {} -t 2 2>/dev/null", t_pg_isready, t_host, t_port).c_str()) == 0) {
+            SGRN_INFO("DatastoreInit", "PostgreSQL is accepting connections.");
+            return;
+        }
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+    }
+    SGRN_WARN("DatastoreInit", "PostgreSQL did not become ready in ~60s; continuing anyway.");
 }
 
 // ---------------------------------------------------------------------------
@@ -348,6 +587,24 @@ inline bool generateConfigOnly(const std::string& t_base_dir) {
     if (auto env_result = loadEnvFile(env_path); env_result.hasError()) {
         SGRN_ERROR("DatastoreInit", "Failed to load .env: {}", env_result.error());
         std::exit(EXIT_FAILURE);
+    }
+
+    // Heal a stale SGRN_BIN_DIR: it is captured once when .env is created,
+    // so moving the checkout (or rebuilding elsewhere) leaves deployed units
+    // pointing at a dead path (systemd 203/EXEC crash-loop). Only touch it
+    // when the recorded dir no longer holds the binary; a valid custom
+    // value is never overwritten.
+    {
+        std::string recorded = envOrDefault("SGRN_BIN_DIR", "");
+        std::string self_dir = currentExeDir();
+        if (!hasDatastoreBinary(recorded) && !self_dir.empty() && hasDatastoreBinary(self_dir)) {
+            SGRN_INFO("DatastoreInit", "SGRN_BIN_DIR '{}' no longer holds sgrn_datastore; updating it to '{}'.", recorded, self_dir);
+            if (upsertEnvVar(env_path, "SGRN_BIN_DIR", self_dir)) {
+                ::setenv("SGRN_BIN_DIR", self_dir.c_str(), 1);
+            } else {
+                SGRN_WARN("DatastoreInit", "Could not rewrite {}; deployed units may reference a stale binary path.", env_path.string());
+            }
+        }
     }
 
     // Read env vars for templating — each call returns the env value or
@@ -472,6 +729,18 @@ inline void configureSystemd() {
     std::string sgrn_data = envOrDefault("SGRN_DATA_DIR", base_dir.string());
     std::string sgrn_deployment_env = envOrDefault("SGRN_DEPLOYMENT_ENV", "/home/" + sudo_user + "/micromamba/envs/SGRN");
 
+    // Preflight: the units ExecStart ${SGRN_BIN_DIR}/sgrn_datastore. A stale
+    // path deploys units that die with systemd 203/EXEC and crash-loop the
+    // whole platform — refuse with remediation instead of deploying them.
+    {
+        std::string bin = (fs::path(envOrDefault("SGRN_BIN_DIR", "/usr/local/bin")) / "sgrn_datastore").string();
+        if (!hasDatastoreBinary(envOrDefault("SGRN_BIN_DIR", "/usr/local/bin"))) {
+            SGRN_ERROR("DatastoreInit", "Error: no sgrn_datastore binary at {}.", bin);
+            SGRN_ERROR("DatastoreInit", "Rebuild/reinstall the binary, then re-run --generate-config to refresh SGRN_BIN_DIR.");
+            std::exit(EXIT_FAILURE);
+        }
+    }
+
     stopLegacyServices(sudo_user, user_uid);
 
     fs::path systemd_src = fs::path(sgrn_data) / "systemd";
@@ -479,7 +748,29 @@ inline void configureSystemd() {
     fs::path systemd_dst = "/etc/systemd/system";
     fs::path nginx_dst = fs::path(sgrn_deployment_env) / "etc" / "nginx";
 
+    // Precondition: units are staged by `sgrn_datastore --generate-config`
+    // (step 1 of the deployment runbook). Refuse loudly instead of
+    // reporting a misleading "up to date".
+    bool has_units = false;
+    if (fs::exists(systemd_src)) {
+        for (const auto& entry : fs::directory_iterator(systemd_src)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".service") {
+                has_units = true;
+                break;
+            }
+        }
+    }
+    if (!has_units) {
+        SGRN_ERROR("DatastoreInit", "Error: no systemd units staged under {}. Run --generate-config first.", systemd_src.string());
+        std::exit(EXIT_FAILURE);
+    }
+
+    // Drop units/files of services that no longer exist (e.g. PostgREST),
+    // from both the data dir and the system, before syncing the current set.
+    removeObsoleteUnits(sgrn_data);
+
     std::vector<std::string> changed_services;
+    bool copy_failed = false;
 
     // Sync systemd unit files
     if (fs::exists(systemd_src)) {
@@ -490,6 +781,9 @@ inline void configureSystemd() {
                 fs::path dest = systemd_dst / entry.path().filename();
                 if (auto copy_result = copyIfChanged(entry.path(), dest, false, user_uid, user_gid); !copy_result.hasError()) {
                     changed_services.push_back(dest.filename().string());
+                } else {
+                    SGRN_ERROR("DatastoreInit", "{}", copy_result.error());
+                    copy_failed = true;
                 }
             }
         }
@@ -503,12 +797,34 @@ inline void configureSystemd() {
                 fs::path dest = nginx_dst / rel;
                 if (auto copy_result = copyIfChanged(entry.path(), dest, true, user_uid, user_gid); !copy_result.hasError()) {
                     changed_services.push_back("SGRN-nginx.service");
+                } else {
+                    SGRN_ERROR("DatastoreInit", "{}", copy_result.error());
+                    copy_failed = true;
                 }
             }
         }
     }
 
-    restartChangedServices(changed_services);
+    if (copy_failed) {
+        SGRN_ERROR("DatastoreInit", "Error: one or more service files could not be deployed. Nothing was restarted.");
+        std::exit(EXIT_FAILURE);
+    }
+
+    // Dedupe + tier order (infra first, sgrn.service umbrella last).
+    changed_services = orderServicesForRestart(std::move(changed_services));
+
+    enableServices(changed_services);
+
+    // If postgres itself was (re)deployed, wait for readiness before
+    // bouncing dependents against a cold server.
+    if (std::find(changed_services.begin(), changed_services.end(), "SGRN-postgres.service") != changed_services.end()) {
+        waitForPostgres(envOrDefault("POSTGRES_HOST", "127.0.0.1"), envOrDefault("POSTGRES_PORT", "5432"),
+            (fs::path(sgrn_deployment_env) / "bin" / "pg_isready").string());
+    }
+
+    if (!restartChangedServices(changed_services)) {
+        std::exit(EXIT_FAILURE);
+    }
 }
 
 inline void bootstrapDatabase() {

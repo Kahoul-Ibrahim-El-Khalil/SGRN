@@ -1,7 +1,7 @@
 [Unit]
 Description=SGRN Core Monolith (Micromamba)
-After=network.target SGRN-postgres.service SGRN-minio.service SGRN-redis.service SGRN-postgrest.service SGRN-nginx.service
-Requires=SGRN-postgres.service SGRN-minio.service SGRN-redis.service SGRN-postgrest.service SGRN-nginx.service
+After=network.target SGRN-postgres.service SGRN-minio.service SGRN-redis.service SGRN-nginx.service
+Requires=SGRN-postgres.service SGRN-minio.service SGRN-redis.service SGRN-nginx.service
 
 [Service]
 User=${SGRN_USER}

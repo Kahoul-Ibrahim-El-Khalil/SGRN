@@ -97,10 +97,6 @@ BackendResult<plugins::aws::S3Client*> StorageService::S3Client() const {
     return getPlugin<plugins::aws::S3Client>();
 }
 
-BackendResult<plugins::PostgrestClient*> StorageService::PostgrestClient() const {
-    return getPlugin<plugins::PostgrestClient>();
-}
-
 BackendResult<drogon::orm::DbClientPtr> StorageService::getDbClient() const {
     return drogon::app().getDbClient();
 }

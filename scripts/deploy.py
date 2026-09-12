@@ -9,8 +9,8 @@ from scripts.common import (
 )
 from scripts.config import (
     TEMPLATE_USER, TEMPLATE_HOME, SGRN_CONFIG_FILES, POSTGRES_CONFIG_FILES,
-    MINIO_SERVICE_NAME, POSTGREST_SERVICE_NAME, MINIO_DEFAULT_USER, MINIO_DEFAULT_PASS,
-    POSTGREST_VERSION, POSTGREST_URL_TEMPLATE, MINIO_GIT_URL,
+    MINIO_SERVICE_NAME, MINIO_DEFAULT_USER, MINIO_DEFAULT_PASS,
+    MINIO_GIT_URL,
     SGRN_USER_HOME, CONFIG_DIR, PG_DATA_DIR, POSTGRES_CONFIG_DIR, NGINX_CONFIG_DIR,
     SYSTEMD_CONFIG_DIR, EXTERN_DIR_NAME, BUILD_DIR_NAME, DESERTATION_FOLDERS,
     BACKEND_DIR
@@ -78,17 +78,6 @@ def buildMinio(root: Path, conda_prefix: str) -> bool:
             return False
     env = os.environ.copy(); env["GOBIN"] = str(Path(conda_prefix) / "bin"); env["CGO_ENABLED"] = "0"
     return run(["go", "install", "."], cwd=str(minio_dir), env=env, label="go install minio")
-
-def installPostgrest(root: Path, conda_prefix: str) -> bool:
-    print("[PostgREST] Installing PostgREST...")
-    target = Path(conda_prefix) / "bin" / "postgrest"
-    if target.exists(): return True
-    url = POSTGREST_URL_TEMPLATE.format(v=POSTGREST_VERSION)
-    tmp_tar = root / BUILD_DIR_NAME / "postgrest.tar.xz"; tmp_tar.parent.mkdir(parents=True, exist_ok=True)
-    if run(["curl", "-L", "-o", str(tmp_tar), url], label="download postgrest"):
-        if run(["tar", "-xJf", str(tmp_tar), "-C", str(Path(conda_prefix) / "bin")], label="extract postgrest"):
-            tmp_tar.unlink(); return target.exists()
-    return False
 
 def syncDesertations(root: Path, targets: list[str] = None):
     print("[Desers] Building Desertations...")

@@ -1,6 +1,6 @@
 # HTTP API (sgrn)
 
-This API is implemented natively in C++ using Drogon. All endpoints, filters, and serialization are custom-coded for high throughput and security. Endpoints are grouped by function: authentication, telemetry, storage, admin, query, GPAO, and PostgREST proxy. See the referenced files in this directory for details on each group.
+This API is implemented natively in C++ using Drogon. All endpoints, filters, and serialization are custom-coded for high throughput and security. Endpoints are grouped by function: authentication, telemetry, storage, admin, query, GPAO, and compile-time generated CRUD views. See the referenced files in this directory for details on each group.
 
 Base path: `/api/v1/`
 

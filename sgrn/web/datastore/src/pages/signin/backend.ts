@@ -20,10 +20,11 @@ export async function fetchOrganisations(): Promise<IdNamePair[]> {
     }
 }
 
-export async function fetchDomains(t_organisation: string): Promise<IdNamePair[]> {
+export async function fetchDomains(): Promise<IdNamePair[]> {
     try {
-        const url = `${QueryListBackendApiEndpoints.LIST_DOMAINS}?organisation=${encodeURIComponent(t_organisation)}`;
-        const res = await authenticatedFetch(url);
+        // Tenant-scoped server-side: the session's organisation determines
+        // the rows, so no organisation parameter is sent (or trusted).
+        const res = await authenticatedFetch(QueryListBackendApiEndpoints.LIST_DOMAINS);
         const data = await res.json();
         if (Array.isArray(data)) return data;
         return [];

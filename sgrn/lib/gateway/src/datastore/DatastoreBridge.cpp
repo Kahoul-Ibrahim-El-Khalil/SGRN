@@ -242,12 +242,13 @@ bool DatastoreBridge::uploadRaw(const std::string& t_file_path) {
         const std::string remote = remote_dir + "/" + relative;
         fmt::print(fg(fmt::color::cyan), "[backend] Raw upload → {}\n", remote);
 
-        bool ok = client_->storage().upload(remote, t_file_path);
+        const auto outcome = client_->storage().upload(remote, t_file_path);
+        bool ok = outcome.ok;
         if (!ok) {
-            // Upload returned false; could be server error or duplicate key constraint.
-            // Mark as ok to move on if upload failed cleanly with server response (e.g. duplicate file record already stored).
-            fmt::print(fg(fmt::color::yellow),
-                "[backend] Upload returned false for {} — marking as processed to avoid hammering backend.\n", remote);
+            // Upload failed cleanly with server response (e.g. duplicate file record already stored).
+            // Mark as ok to move on ... to avoid hammering backend.
+            fmt::print(fg(fmt::color::yellow), "[backend] Upload failed for {} ({}) — marking as processed to avoid hammering backend.\n",
+                remote, outcome.detail);
             ok = true;
         } else {
             fmt::print(fg(fmt::color::green), "[backend] Raw upload successful for {}\n", remote);
@@ -297,12 +298,12 @@ void DatastoreBridge::uploadLogArchive(const std::string& t_file_path) {
             const std::string remote = cfg_.getEffectiveVfsRemoteDir() + "/logs/" + p.filename().string();
             fmt::print(fg(fmt::color::cyan), "[backend] Log archival upload → {}\n", remote);
 
-            bool ok = client_->storage().upload(remote, t_file_path);
-            if (ok) {
+            const auto outcome = client_->storage().upload(remote, t_file_path);
+            if (outcome.ok) {
                 fmt::print(fg(fmt::color::green), "[backend] Log archival successful: {}\n", remote);
                 std::filesystem::remove(t_file_path);
             } else {
-                fmt::print(fg(fmt::color::red), "[backend] Log archival failed for {}\n", remote);
+                fmt::print(fg(fmt::color::red), "[backend] Log archival failed for {}: {}\n", remote, outcome.detail);
             }
         } catch (const std::exception& e) {
             fmt::print(fg(fmt::color::red), "[backend] Log archival exception: {}\n", e.what());

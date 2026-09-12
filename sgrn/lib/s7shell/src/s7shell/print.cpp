@@ -230,7 +230,14 @@ static constexpr std::string_view kHelpText =
     "  Loaded at shell startup. Define shared globals and helpers:\n"
     "    S7Client@ plc = S7Client(\"192.168.1.10\", 0, 1);\n"
     "    void cycle() { ... }\n"
-    "  All symbols are available in every REPL line and runScript().\n\n";
+    "  All symbols are available in every REPL line and runScript().\n\n"
+
+    "\033[1;36mShell Variables:\033[0m\n"
+    "  $NAME / ${NAME} in any REPL line expands a global of scalar type\n"
+    "  (string, bool, int/uint widths, float, double), e.g.:\n"
+    "    int retries = 3;  retryWrite(path, val, $retries);\n"
+    "    string tag = \"DB1.val\";  db.get($tag);\n"
+    "  $$ is a literal dollar; unknown names stay literal.\n\n";
 
 void S7Shell::showHelp() const {
     AngelScriptEngine::showHelp();

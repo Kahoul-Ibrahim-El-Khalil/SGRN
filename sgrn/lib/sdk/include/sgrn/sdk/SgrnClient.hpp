@@ -149,10 +149,10 @@ public:
      * Mirror the dashboard's QueryList fetchers; empty on transport failure.
      */
     std::vector<IdNamePair> listOrganisations();
-    std::vector<IdNamePair> listDomains(const std::string& t_organisation);
+    std::vector<IdNamePair> listDomains();
     /// Error-reporting variants (empty vector is ambiguous, see tryListDrive).
     sgrn::Result<std::vector<IdNamePair>, std::string> tryListOrganisations();
-    sgrn::Result<std::vector<IdNamePair>, std::string> tryListDomains(const std::string& t_organisation);
+    sgrn::Result<std::vector<IdNamePair>, std::string> tryListDomains();
     /// Statuses valid for user registration, per organisation.
     sgrn::Result<std::vector<IdNamePair>, std::string> tryListStatuses(const std::string& t_organisation);
 

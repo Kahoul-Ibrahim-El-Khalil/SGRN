@@ -20,10 +20,13 @@
 #include <readline/readline.h>
 #endif
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -162,6 +165,118 @@ protected:
 
     virtual bool handleMetaCommand(const std::string& t_line) {
         return false;
+    }
+
+    // Looks up a REPL global by name ("repl" module, then "main") and
+    // renders scalar values (string, bool, all int/uint widths, float,
+    // double) as text. Returns nullopt for unknown names or non-scalar
+    // types (handles, arrays, objects) — callers leave those literal, so
+    // text without variables passes through byte-identical.
+    std::optional<std::string> replGlobalToString(const std::string& t_name) {
+        if (!p_script_engine_ || t_name.empty())
+            return std::nullopt;
+        asIScriptModule* mods[2] = {p_repl_module_, p_script_engine_->GetModule("main")};
+        for (asIScriptModule* mod : mods) {
+            if (!mod)
+                continue;
+            const int idx = mod->GetGlobalVarIndexByName(t_name.c_str());
+            if (idx < 0)
+                continue;
+            const char* decl = mod->GetGlobalVarDeclaration(static_cast<asUINT>(idx));
+            if (!decl)
+                continue;
+            std::string type(decl);
+            if (const auto sp = type.find(' '); sp != std::string::npos)
+                type.erase(sp);
+            if (type == "const")
+                continue; // qualified decls are out of scope; try next module
+            void* p_var = mod->GetAddressOfGlobalVar(static_cast<asUINT>(idx));
+            if (!p_var)
+                continue;
+            if (type == "string")
+                return *static_cast<std::string*>(p_var);
+            if (type == "bool")
+                return *static_cast<bool*>(p_var) ? "true" : "false";
+            if (type == "int" || type == "int32")
+                return std::to_string(*static_cast<int32_t*>(p_var));
+            if (type == "int8")
+                return std::to_string(static_cast<int>(*static_cast<int8_t*>(p_var)));
+            if (type == "int16")
+                return std::to_string(static_cast<int>(*static_cast<int16_t*>(p_var)));
+            if (type == "int64")
+                return std::to_string(*static_cast<int64_t*>(p_var));
+            if (type == "uint" || type == "uint32")
+                return std::to_string(*static_cast<uint32_t*>(p_var));
+            if (type == "uint8")
+                return std::to_string(static_cast<unsigned>(*static_cast<uint8_t*>(p_var)));
+            if (type == "uint16")
+                return std::to_string(static_cast<unsigned>(*static_cast<uint16_t*>(p_var)));
+            if (type == "uint64")
+                return std::to_string(*static_cast<uint64_t*>(p_var));
+            if (type == "float")
+                return fmt::format("{}", *static_cast<float*>(p_var));
+            if (type == "double")
+                return fmt::format("{}", *static_cast<double*>(p_var));
+            return std::nullopt;
+        }
+        return std::nullopt;
+    }
+
+    // Expands $NAME / ${NAME} from AngelScript REPL globals (see above).
+    // `$$` yields a literal `$`; a `$` not followed by a name stays
+    // literal; unknown names stay literal. AngelScript has no `$` syntax,
+    // so previously-valid lines are unaffected. Single pass: values are
+    // inserted verbatim, never re-scanned.
+    std::string expandDollarVariables(const std::string& t_line) {
+        if (t_line.find('$') == std::string::npos)
+            return t_line;
+        auto is_name_start = [](char t_c) { return std::isalpha(static_cast<unsigned char>(t_c)) || t_c == '_'; };
+        auto is_name_char = [](char t_c) { return std::isalnum(static_cast<unsigned char>(t_c)) || t_c == '_'; };
+        std::string out;
+        out.reserve(t_line.size());
+        for (size_t i = 0; i < t_line.size();) {
+            if (t_line[i] != '$') {
+                out += t_line[i++];
+                continue;
+            }
+            if (i + 1 < t_line.size() && t_line[i + 1] == '$') {
+                out += '$';
+                i += 2;
+                continue;
+            }
+            const size_t start = i;
+            std::string name;
+            if (i + 1 < t_line.size() && t_line[i + 1] == '{') {
+                const size_t end = t_line.find('}', i + 2);
+                if (end == std::string::npos) {
+                    out += t_line[i++];
+                    continue;
+                }
+                name = t_line.substr(i + 2, end - i - 2);
+                if (name.empty() || !is_name_start(name[0]) || !std::all_of(name.begin() + 1, name.end(), is_name_char)) {
+                    out += t_line[i++];
+                    continue;
+                }
+                i = end + 1;
+            } else {
+                size_t k = i + 1;
+                if (k >= t_line.size() || !is_name_start(t_line[k])) {
+                    out += t_line[i++];
+                    continue;
+                }
+                ++k;
+                while (k < t_line.size() && is_name_char(t_line[k]))
+                    ++k;
+                name = t_line.substr(i + 1, k - i - 1);
+                i = k;
+            }
+            if (const auto value = replGlobalToString(name)) {
+                out += *value;
+            } else {
+                out += t_line.substr(start, i - start);
+            }
+        }
+        return out;
     }
 
 public:

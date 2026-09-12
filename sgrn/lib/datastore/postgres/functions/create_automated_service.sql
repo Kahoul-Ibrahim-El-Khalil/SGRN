@@ -20,8 +20,7 @@ from
   public;
 
 grant
-execute on function core.gen_token (int) to sgrn_datastore,
-sgrn_postgrest;
+execute on function core.gen_token (int) to sgrn_datastore;
 
 -- ============================================================
 -- core.create_automated_service(name, metadata[, organisation, storage_limit, domain])
@@ -114,8 +113,7 @@ from
   public;
 
 grant
-execute on function core.create_automated_service (varchar, jsonb, text, bigint, text) to sgrn_datastore,
-sgrn_postgrest;
+execute on function core.create_automated_service (varchar, jsonb, text, bigint, text) to sgrn_datastore;
 
 -- ============================================================
 -- Backwards-compatible 2-argument wrapper
@@ -152,5 +150,4 @@ from
   public;
 
 grant
-execute on function core.create_automated_service (varchar, jsonb) to sgrn_datastore,
-sgrn_postgrest;
+execute on function core.create_automated_service (varchar, jsonb) to sgrn_datastore;

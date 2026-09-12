@@ -23,7 +23,7 @@ SGRN_DIR       = ROOT_DIR / "sgrn"
 BACKEND_DIR    = SGRN_DIR / "datastore"
 CONFIG_DIR     = BACKEND_DIR / "configs"
 POSTGRES_DIR   = BACKEND_DIR / "postgres"
-ORM_GEN_SCRIPT = BACKEND_DIR / "generate_orm.py"
+ORM_GEN_SCRIPT = BACKEND_DIR / "scripts" / "generators" / "generate_orm.py"
 
 # Config Subsets
 NGINX_CONFIG_DIR   = CONFIG_DIR / "nginx"
@@ -75,11 +75,6 @@ USE_PCH       = py_platform.system() != "Windows"
 DROGON_GIT_URL  = "https://github.com/drogonframework/drogon.git"
 DROGON_GIT_TAG  = "v1.9.10"
 
-POSTGREST_VERSION      = "v12.2.0"
-POSTGREST_URL_TEMPLATE = (
-    "https://github.com/PostgREST/postgrest/releases/download"
-    "/{v}/postgrest-{v}-linux-static-x64.tar.xz"
-)
 MINIO_GIT_URL       = "https://github.com/minio/minio.git"
 TIMESCALEDB_GIT_URL = "https://github.com/timescale/timescaledb.git"
 
@@ -124,7 +119,6 @@ MINGW_RUNTIME_DLLS = [
 # 7. System Services & Credentials
 # ===========================================================================
 MINIO_SERVICE_NAME     = "SGRN-minio.service"
-POSTGREST_SERVICE_NAME = "SGRN-postgrest.service"
 MINIO_DEFAULT_USER     = "minioadmin"
 MINIO_DEFAULT_PASS     = "minioadmin"
 
@@ -133,7 +127,7 @@ POSTGRES_PORT              = 5432
 POSTGRES_HOST              = "127.0.0.1"
 POSTGRES_STARTUP_TIMEOUT   = 30
 
-SGRN_CONFIG_FILES      = ["sgrn.json", "postgrest.conf"]
+SGRN_CONFIG_FILES      = ["sgrn.json"]
 POSTGRES_CONFIG_FILES  = ["postgresql.conf", "pg_hba.conf"]
 
 # ===========================================================================

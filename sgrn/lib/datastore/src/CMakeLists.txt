@@ -8,12 +8,12 @@ set(BACKEND_SOURCES "")
 set(ORM_SOURCES "")
 
 # 1. Plugins discovery
-file(GLOB_RECURSE PLUGIN_SOURCES plugins/*.cpp)
+file(GLOB_RECURSE PLUGIN_SOURCES CONFIGURE_DEPENDS plugins/*.cpp)
 list(APPEND BACKEND_SOURCES ${PLUGIN_SOURCES})
 
 # 2. ORM MODELS (Independent Shared Library)
 if(BUILD_ORM)
-    file(GLOB_RECURSE ORM_SOURCES orm/models/*.cc)
+    file(GLOB_RECURSE ORM_SOURCES CONFIGURE_DEPENDS orm/models/*.cc)
     # Apply warning suppression to ORM files
     foreach(f ${ORM_SOURCES})
         set_source_files_properties(${f} PROPERTIES COMPILE_FLAGS "-w")
@@ -65,15 +65,15 @@ if(BUILD_ORM)
 endif()
 
 # 3. SERVICES
-file(GLOB_RECURSE SERVICES_SOURCES services/*.cpp)
+file(GLOB_RECURSE SERVICES_SOURCES CONFIGURE_DEPENDS services/*.cpp)
 list(APPEND BACKEND_SOURCES ${SERVICES_SOURCES})
 
 # 4. FILTERS
-file(GLOB_RECURSE FILTERS_SOURCES filters/*.cpp)
+file(GLOB_RECURSE FILTERS_SOURCES CONFIGURE_DEPENDS filters/*.cpp)
 list(APPEND BACKEND_SOURCES ${FILTERS_SOURCES})
 
 # 5. HANDLERS
-file(GLOB_RECURSE HANDLERS_SOURCES handlers/*.cpp)
+file(GLOB_RECURSE HANDLERS_SOURCES CONFIGURE_DEPENDS handlers/*.cpp)
 list(APPEND BACKEND_SOURCES ${HANDLERS_SOURCES})
 
 # ── The Fat Backend Library ──────────────────────────────────────────────────
@@ -145,6 +145,11 @@ add_library(sgrn_datastore_services ALIAS sgrn_datastore_lib)
 add_library(sgrn_datastore_handlers ALIAS sgrn_datastore_lib)
 add_library(sgrn_datastore_filters ALIAS sgrn_datastore_lib)
 
+# ── Compile-time CRUD views (replaces PostgREST) ─────────────────────────────
+# Generated `.gen.hpp` outputs are checked in and compiled normally; the
+# `sgrn_generate_views` manual target regenerates them from a live schema.
+include(${PROJECT_SOURCE_DIR}/cmake/sgrn_views_codegen.cmake)
+
 # ── Dashboard Web Assets ─────────────────────────────────────────────────────
 set(DASHBOARD_SRC_DIR "${CMAKE_SOURCE_DIR}/sgrn/web/datastore")
 set(DASHBOARD_BUILD_DIR "${DASHBOARD_SRC_DIR}/build")
@@ -171,6 +176,16 @@ add_custom_command(
 )
 
 # Step 1b: bun vite build → produces dashboard/build/
+# Track every source under the datastore UI tree's src/ (React .tsx/.ts/.css,
+# assets and any future files). CONFIGURE_DEPENDS picks up new or moved files
+# on every build without a manual reconfigure. Root Vite/TS config files are
+# explicit literals in the DEPENDS below — GLOB_RECURSE must NOT walk build/,
+# dist/ or node_modules/: the pattern would then match this command's own
+# OUTPUT (build/index.html) and create a ninja dependency cycle.
+file(GLOB_RECURSE DASHBOARD_SOURCES CONFIGURE_DEPENDS
+    "${DASHBOARD_SRC_DIR}/src/*"
+)
+
 file(GLOB_RECURSE DASHBOARD_BINDINGS_SOURCES CONFIGURE_DEPENDS
     "${DASHBOARD_BINDINGS_DIR}/src/*.ts"
     "${DASHBOARD_BINDINGS_DIR}/README.md"
@@ -190,8 +205,13 @@ add_custom_command(
     WORKING_DIRECTORY "${DASHBOARD_SRC_DIR}"
     DEPENDS
         "${DASHBOARD_INSTALL_STAMP}"
+        "${DASHBOARD_SRC_DIR}/index.html"
         "${DASHBOARD_SRC_DIR}/vite.config.ts"
         "${DASHBOARD_SRC_DIR}/package.json"
+        "${DASHBOARD_SRC_DIR}/tsconfig.json"
+        "${DASHBOARD_SRC_DIR}/tsconfig.app.json"
+        "${DASHBOARD_SRC_DIR}/tsconfig.node.json"
+        ${DASHBOARD_SOURCES}
         ${DASHBOARD_BINDINGS_SOURCES}
         ${DASHBOARD_TYPES_SOURCES}
     COMMENT "[Dashboard] Building React app via bun vite build..."
@@ -223,7 +243,7 @@ add_custom_target(sgrn_dashboard_assets
 set(SQL_SRC_DIR "${PROJECT_SOURCE_DIR}/postgres")
 set(SQL_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/sql_generated" CACHE INTERNAL "Datastore SQL generated headers (shared with sgrn/apps/datastore)")
 
-file(GLOB_RECURSE SQL_DEPS "${SQL_SRC_DIR}/*.sql")
+file(GLOB_RECURSE SQL_DEPS CONFIGURE_DEPENDS "${SQL_SRC_DIR}/*.sql")
 
 add_custom_command(
     OUTPUT "${SQL_GEN_DIR}/sql_assets.hpp"
@@ -251,7 +271,7 @@ add_custom_target(sgrn_sql_assets
 set(CONFIG_SRC_DIR "${PROJECT_SOURCE_DIR}/configs")
 set(CONFIG_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/config_generated" CACHE INTERNAL "Datastore config generated headers (shared with sgrn/apps/datastore)")
 
-file(GLOB_RECURSE CONFIG_DEPS "${CONFIG_SRC_DIR}/*")
+file(GLOB_RECURSE CONFIG_DEPS CONFIGURE_DEPENDS "${CONFIG_SRC_DIR}/*")
 
 add_custom_command(
     OUTPUT "${CONFIG_GEN_DIR}/config_assets.hpp"

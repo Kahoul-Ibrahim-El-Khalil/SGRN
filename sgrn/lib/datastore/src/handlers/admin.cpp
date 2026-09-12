@@ -21,7 +21,6 @@
 #define ERROR_LOG(msg, ...) SGRN_ERROR("AdminHandler", msg __VA_OPT__(, ) __VA_ARGS__)
 #include <sgrn/datastore/error/ApiErrors.hpp>
 #include <sgrn/datastore/handlers/admin.hpp>
-#include <sgrn/datastore/plugins/postgrest/PostgrestClient.hpp>
 #include <sgrn/datastore/services/admin.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
@@ -50,14 +49,6 @@ Json::Value parseMetadataValue(const std::string& t_raw) {
 namespace sgrn::datastore::handlers::admin
 {
 using namespace drogon;
-
-Task<HttpResponsePtr> AdminApiHandler::handlePostgrestProxyRequest(HttpRequestPtr tsp_req) {
-    auto p_proxy_res = sgrn::datastore::core::getPlugin<::sgrn::datastore::plugins::PostgrestClient>();
-    if (p_proxy_res.hasError()) {
-        co_return sgrn::createJsonResponse(p_proxy_res);
-    }
-    co_return co_await p_proxy_res.value()->sendRequest(tsp_req);
-}
 
 Task<HttpResponsePtr> AdminApiHandler::handleGetStatus(HttpRequestPtr tsp_req) {
     Json::Value status;
@@ -201,57 +192,8 @@ Task<HttpResponsePtr> AdminApiHandler::handleRegisterAutomatedService(HttpReques
     }
 }
 
-Task<HttpResponsePtr> AdminApiHandler::handleListAutomatedServices(HttpRequestPtr tsp_req) {
-    const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
-    if (!session.isMember("user") || !session["user"].isMember("organisation") || !session["user"]["organisation"].isString()) {
-        co_return createErrorResponse(AdminApiError::InvalidSession);
-    }
-    const std::string org = session["user"]["organisation"].asString();
-
-    auto db_res = sgrn::datastore::core::getDbClient();
-    if (db_res.hasError()) {
-        co_return sgrn::createJsonResponse(db_res);
-    }
-    auto db = db_res.value();
-
-    std::string domain;
-    if (session.isMember("user") && session["user"].isMember("domain")) {
-        domain = session["user"]["domain"].asString();
-    }
-
-    try {
-        auto res = co_await db->execSqlCoro("SELECT id, name, token, metadata, status, domain, created_at FROM core.automated_services "
-                                            "WHERE organisation = $1 AND (domain = $2 OR $2 IS NULL OR $2 = '') ORDER BY id",
-            org, domain);
-
-        Json::Value automated_services = Json::arrayValue;
-        for (const auto& row : res) {
-            Json::Value svc = Json::objectValue;
-            svc["id"] = row["id"].as<int32_t>();
-            svc["name"] = row["name"].as<std::string>();
-            svc["token"] = row["token"].as<std::string>();
-            svc["is_active"] = (row["status"].as<std::string>() == "active");
-            svc["status"] = row["status"].as<std::string>();
-            svc["domain"] = row["domain"].isNull() ? "" : row["domain"].as<std::string>();
-            svc["created_at"] = row["created_at"].as<std::string>();
-            const std::string metadata_str = row["metadata"].as<std::string>();
-            const Json::Value metadata = parseMetadataValue(metadata_str);
-            svc["metadata"] = metadata;
-            if (metadata.isObject() && metadata.isMember("kind") && !metadata["kind"].isNull()) {
-                svc["kind"] = metadata["kind"];
-            }
-            automated_services.append(svc);
-        }
-
-        co_return createJsonResponse(automated_services, k200OK);
-    } catch (const std::exception& e) {
-        ERROR_LOG("Failed to list automated services: {}", e.what());
-        co_return createErrorResponse(std::string("Failed to list automated services: ") + e.what(), k500InternalServerError, "AdminApi");
-    }
-}
-
-Task<HttpResponsePtr> AdminApiHandler::handleUpdateAutomatedServiceMetadata(HttpRequestPtr tsp_req) {
-    const std::string id_str = tsp_req->getParameter("id");
+Task<HttpResponsePtr> AdminApiHandler::handleUpdateAutomatedServiceMetadata(HttpRequestPtr tsp_req, std::string t_id) {
+    const std::string id_str = std::move(t_id);
     auto json = tsp_req->getJsonObject();
     if (id_str.empty() || !json || !json->isMember("metadata")) {
         co_return createErrorResponse(AdminApiError::InvalidPayload);

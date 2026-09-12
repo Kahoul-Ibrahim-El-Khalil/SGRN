@@ -15,7 +15,6 @@ create extension if not exists pgcrypto;
 \i roles.sql
 \i views/init.sql
 \i functions/init.sql
-\i postgrest.sql
 \i seeding.sql
 \i seed_test_automated_service.sql
 \i seed_dev_service.sql

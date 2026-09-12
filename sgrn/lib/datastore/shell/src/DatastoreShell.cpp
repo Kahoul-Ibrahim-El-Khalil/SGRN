@@ -1,8 +1,13 @@
 // DatastoreShell.cpp — Implementation of AngelScript-powered datastore shell
 #include <sgrn/datastore/shell/DatastoreShell.hpp>
 
+#include <fmt/color.h>
 #include <fmt/core.h>
+#include <algorithm>
+#include <json/json.h>
+#include <memory>
 #include <scriptbuilder/scriptbuilder.h>
+#include <set>
 #include <stdexcept>
 #include <string>
 
@@ -17,6 +22,135 @@
 #include <thread>
 #include <unistd.h>
 #endif
+
+namespace
+{
+
+// ── terminal rendering kit ─────────────────────────────────────────────────
+// fmt does NOT gate colors on TTY itself, so styles below are explicit:
+// plain text unless stdout is a terminal (with NO_COLOR unset and a sane
+// TERM). Pipes, redirects and scripts always see clean output. Tables
+// measure UTF-8 code points (not bytes) so multibyte names stay aligned.
+inline bool useColor() {
+#ifndef _WIN32
+    if (!isatty(STDOUT_FILENO))
+        return false;
+#endif
+    if (std::getenv("NO_COLOR") != nullptr)
+        return false;
+    const char* term = std::getenv("TERM");
+    return term == nullptr || std::string(term) != "dumb";
+}
+
+inline fmt::text_style styleHeader() {
+    return useColor() ? (fg(fmt::color::white) | fmt::emphasis::bold) : fmt::text_style{};
+}
+
+inline fmt::text_style styleDir() {
+    return useColor() ? fg(fmt::color::cyan) : fmt::text_style{};
+}
+
+inline fmt::text_style styleOk() {
+    return useColor() ? fg(fmt::color::green) : fmt::text_style{};
+}
+
+inline fmt::text_style styleWarn() {
+    return useColor() ? fg(fmt::color::yellow) : fmt::text_style{};
+}
+
+// Visible width of a string in terminal columns (approximate: one column
+// per Unicode code point; CJK wide chars will be one short, which is
+// acceptable for a debug shell).
+size_t displayWidth(std::string_view t_text) {
+    size_t width = 0;
+    for (unsigned char c : t_text) {
+        if ((c & 0xC0) != 0x80)
+            ++width;
+    }
+    return width;
+}
+
+std::string padCell(std::string_view t_text, size_t t_width, bool t_right) {
+    const size_t pad = t_width > displayWidth(t_text) ? t_width - displayWidth(t_text) : 0;
+    if (t_right)
+        return std::string(pad, ' ') + std::string(t_text);
+    return std::string(t_text) + std::string(pad, ' ');
+}
+
+// Aligned columnar output with a bold header and a rule line.
+// t_right lists column indices to right-align (ids, sizes).
+// Prints nothing when there are no rows (same contract as before).
+void printTable(std::vector<std::string> t_headers, std::vector<std::vector<std::string>> t_rows, std::vector<size_t> t_right = {}) {
+    if (t_rows.empty())
+        return;
+    const size_t cols = t_headers.size();
+    std::vector<size_t> widths(cols, 0);
+    for (size_t i = 0; i < cols; ++i)
+        widths[i] = displayWidth(t_headers[i]);
+    for (const auto& row : t_rows) {
+        for (size_t i = 0; i < cols && i < row.size(); ++i)
+            widths[i] = std::max(widths[i], displayWidth(row[i]));
+    }
+    auto is_right = [&](size_t t_i) { return std::find(t_right.begin(), t_right.end(), t_i) != t_right.end(); };
+    std::string header_line, rule_line;
+    for (size_t i = 0; i < cols; ++i) {
+        if (i > 0) {
+            header_line += "  ";
+            rule_line += "  ";
+        }
+        header_line += padCell(t_headers[i], widths[i], is_right(i));
+        rule_line += std::string(widths[i], '-');
+    }
+    fmt::print(styleHeader(), "{}\n", header_line);
+    fmt::print("{}\n", rule_line);
+    for (const auto& row : t_rows) {
+        std::string line;
+        for (size_t i = 0; i < cols; ++i) {
+            if (i > 0)
+                line += "  ";
+            line += padCell(i < row.size() ? row[i] : "", widths[i], is_right(i));
+        }
+        fmt::print("{}\n", line);
+    }
+}
+
+// Re-indents a JSON document for humans; prints raw text when unparsable.
+void printJsonPretty(const std::string& t_raw) {
+    Json::CharReaderBuilder builder;
+    std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+    Json::Value value;
+    std::string errors;
+    if (reader->parse(t_raw.data(), t_raw.data() + t_raw.size(), &value, &errors)) {
+        std::string pretty = Json::StyledWriter().write(value);
+        if (!pretty.empty() && pretty.back() != '\n')
+            pretty += '\n';
+        fmt::print("{}", pretty);
+    } else {
+        fmt::print("{}\n", t_raw);
+    }
+}
+
+// One-time credentials: aligned keys plus an unmissable reminder.
+void printCredentialsOnce(const std::string& t_token, const std::string& t_secret) {
+    fmt::print("token:        {}\n", t_token);
+    fmt::print("token_secret: {}\n", t_secret);
+    fmt::print(styleWarn(), "(shown once — store them now)\n");
+}
+
+// Expands a leading `~` to $HOME for local filesystem paths (readline
+// does not do it for us). Remote datastore paths are never passed here.
+std::string expandLocalPath(const std::string& t_path) {
+#ifndef _WIN32
+    if (t_path == "~" || t_path.rfind("~/", 0) == 0) {
+        if (const char* home = std::getenv("HOME"); home != nullptr && home[0] != '\0') {
+            return std::string(home) + t_path.substr(1);
+        }
+    }
+#endif
+    return t_path;
+}
+
+} // namespace
 
 namespace sgrn::datastore::shell
 {
@@ -87,6 +221,15 @@ void DatastoreShell::onStart() {
 #ifndef _WIN32
     g_active_shell_for_completion = this;
     rl_attempted_completion_function = &DatastoreShell::completionDispatch;
+    // Welcome banner on interactive terminals only — piped sessions keep
+    // machine-readable output.
+    if (isatty(STDIN_FILENO)) {
+        fmt::print(styleHeader(), "SGRN datastore shell\n");
+        fmt::print("Type 'help' for commands, 'quit' to leave.\n");
+        if (!connected()) {
+            fmt::print("Not connected — 'connect' or 'login' to begin.\n");
+        }
+    }
 #endif
 }
 
@@ -97,9 +240,9 @@ std::vector<std::string> DatastoreShell::generateCompletions(const std::string& 
     auto words = splitWords(before);
 
     if (words.empty()) {
-        static constexpr std::array<std::string_view, 32> builtins = {"connect", "login", "logout", "orgs", "domains", "statuses", "users",
+        static constexpr std::array<std::string_view, 33> builtins = {"connect", "login", "logout", "orgs", "domains", "statuses", "users",
             "useradd", "services", "service-add", "service-token-rotate", "passwd", "whoami", "stats", "info", "constraints", "ls", "cd",
-            "cat", "get", "put", "mkdir", "mv", "rm", "tree", "du", "session", "scope", "zip", "help", "quit", "exit"};
+            "cat", "get", "put", "mkdir", "mv", "rm", "tree", "du", "session", "scope", "switch", "zip", "help", "quit", "exit"};
         for (const auto& cmd : builtins) {
             if (cmd.rfind(t_text, 0) == 0)
                 matches.insert(std::string(cmd));
@@ -120,7 +263,22 @@ std::vector<std::string> DatastoreShell::generateCompletions(const std::string& 
 
     const std::string& cmd = words[0];
 
-    if (cmd == "scope") {
+    if (cmd == "switch") {
+        if (words.size() == 1) {
+            matches.insert("scope");
+            return {matches.begin(), matches.end()};
+        }
+        if (words.size() == 2 && words[1] != "scope") {
+            if (std::string("scope").rfind(t_text, 0) == 0)
+                matches.insert("scope");
+            return {matches.begin(), matches.end()};
+        }
+        if (words.size() < 2 || words[1] != "scope")
+            return {};
+        // fall through to scope-name completion below
+    }
+
+    if (cmd == "scope" || cmd == "switch") {
         static constexpr std::array<std::string_view, 5> scopes = {"auto", "personal", "users", "automated-services", "domain"};
         for (const auto& sc : scopes) {
             if (sc.rfind(t_text, 0) == 0)
@@ -182,29 +340,14 @@ void DatastoreShell::showHelp() const {
 }
 
 bool DatastoreShell::handleMetaCommand(const std::string& t_line) {
-    if (t_line.empty()) {
-        return true;
-    }
-    // Shell escape: !cmd
-    if (t_line[0] == '!') {
-        runShellCommand(t_line.substr(1));
-        return true;
-    }
-
-    auto words = splitWords(t_line);
-    if (words.empty()) {
-        return true;
-    }
-
-    // Try executing as a shell command first
-    const int rc = dispatch(words);
-    if (rc != 127) {
-        last_exit_code_ = rc;
-        return true;
-    }
-
-    // If dispatch returned 127 (command not recognized), fall through to AngelScript evaluation
-    return false;
+    // Single funnel for every interactive line (base run() -> execute() ->
+    // here): expansion, shell escapes, pipelines, builtins. Returns false
+    // only for AngelScript fallback, which base execute() then evaluates.
+    const int rc = dispatchLine(t_line);
+    if (rc == 127)
+        return false;
+    last_exit_code_ = rc;
+    return true;
 }
 
 std::string DatastoreShell::pipeToProcess(const std::string& t_input, const std::string& t_cmd) {
@@ -327,8 +470,8 @@ int DatastoreShell::executePipeline(const std::string& t_line) {
             if (is_ident && target_var.empty()) {
                 target_var = token;
                 line = line.substr(0, last_gt);
-            } else if (token.find('.') != std::string::npos || token.find('/') != std::string::npos) {
-                target_file = token;
+            } else if (token.find('.') != std::string::npos || token.find('/') != std::string::npos || token[0] == '~') {
+                target_file = expandLocalPath(token);
                 line = line.substr(0, last_gt);
             }
         }
@@ -419,29 +562,89 @@ int DatastoreShell::executePipeline(const std::string& t_line) {
     return 0;
 }
 
+// True when the line carries top-level pipeline syntax: a single `|` or a
+// `>` redirection outside quotes and parentheses, excluding the AngelScript
+// operators `||`, `>=`, `>>` and anything inside a `<...>` template bracket
+// pair. This keeps one-liners like `a || b`, `x >= 1` or `array<int> v` on
+// the AngelScript path while `cat f | grep x` / `ls > out.txt` run as
+// pipelines. Wrap an expression in extra parens to force script evaluation.
+bool hasTopLevelPipe(const std::string& t_line) {
+    int depth = 0;
+    bool in_single = false;
+    bool in_double = false;
+    bool angle_open = false;
+    for (size_t i = 0; i < t_line.size(); ++i) {
+        const char c = t_line[i];
+        if (c == '\'' && !in_double) {
+            in_single = !in_single;
+            continue;
+        }
+        if (c == '"' && !in_single) {
+            in_double = !in_double;
+            continue;
+        }
+        if (in_single || in_double)
+            continue;
+        if (c == '(') {
+            ++depth;
+            continue;
+        }
+        if (c == ')') {
+            if (depth > 0)
+                --depth;
+            continue;
+        }
+        if (depth != 0)
+            continue;
+        if (c == '<') {
+            angle_open = true;
+            continue;
+        }
+        if (c == '|') {
+            if (i + 1 < t_line.size() && t_line[i + 1] == '|') {
+                ++i; // logical-or → AngelScript (skip both bars)
+                continue;
+            }
+            return true;
+        }
+        if (c == '>') {
+            if (angle_open)
+                continue; // template bracket close (array<int>) → AngelScript
+            if (i + 1 < t_line.size() && (t_line[i + 1] == '=' || t_line[i + 1] == '>'))
+                continue; // >=, >> → AngelScript
+            return true;
+        }
+    }
+    return false;
+}
+
 int DatastoreShell::dispatchLine(const std::string& t_text) {
     if (t_text.empty())
         return 0;
-    if (t_text[0] == '!') {
-        runShellCommand(t_text.substr(1));
+    // Expand $NAME / ${NAME} from REPL globals first (numeric + string).
+    // Unknown names stay literal; use $$ for a literal dollar.
+    const std::string line = expandDollarVariables(t_text);
+    if (line[0] == '!') {
+        runShellCommand(line.substr(1));
         return 0;
     }
 
-    if ((t_text.find('|') != std::string::npos || t_text.find('>') != std::string::npos || t_text.find("!(") != std::string::npos) &&
-        t_text.find("()") == std::string::npos) {
-        return executePipeline(t_text);
+    if (hasTopLevelPipe(line)) {
+        const int pipeline_rc = executePipeline(line);
+        last_exit_code_ = pipeline_rc;
+        return pipeline_rc;
     }
 
-    auto words = splitWords(t_text);
+    auto words = splitWords(line);
     if (words.empty())
         return 0;
 
+    // Returns 127 for AngelScript fallback; the caller (handleMetaCommand)
+    // maps that back to base execute(). Never calls base execute() here —
+    // that would recurse through handleMetaCommand.
     int rc = dispatch(words);
-    if (rc == 127) {
-        // Fall back to AngelScript string execution
-        execute(t_text);
-        return 0;
-    }
+    if (rc == 127)
+        return 127;
     last_exit_code_ = rc;
     return rc;
 }
@@ -472,13 +675,14 @@ int DatastoreShell::runOneShot(const std::vector<std::string>& t_words) {
 void DatastoreShell::runScript(const std::string& t_filename) {
     if (!p_script_engine_)
         return;
+    const std::string filename = expandLocalPath(t_filename);
     CScriptBuilder builder;
     if (builder.StartNewModule(p_script_engine_, "main") < 0) {
-        fmt::print(stderr, "Failed to create script module for '{}'\n", t_filename);
+        fmt::print(stderr, "Failed to create script module for '{}'\n", filename);
         return;
     }
-    if (builder.AddSectionFromFile(t_filename.c_str()) < 0) {
-        fmt::print(stderr, "Failed to load script section: '{}'\n", t_filename);
+    if (builder.AddSectionFromFile(filename.c_str()) < 0) {
+        fmt::print(stderr, "Failed to load script section: '{}'\n", filename);
         return;
     }
     if (builder.BuildModule() < 0) {
@@ -651,7 +855,10 @@ void DatastoreShell::treeRecursive(const std::string& t_abs, const std::string& 
         const bool last = (i + 1 == folders.size() + files.size());
         const bool is_dir = i < folders.size();
         const std::string& name = is_dir ? folders[i].name_ : files[i - folders.size()].name_;
-        fmt::print("{}{}── {}\n", t_prefix, last ? "└" : "├", is_dir ? name + "/" : name);
+        if (is_dir)
+            fmt::print(styleDir(), "{}{}── {}/\n", t_prefix, last ? "└" : "├", name);
+        else
+            fmt::print("{}{}── {}\n", t_prefix, last ? "└" : "├", name);
         if (is_dir) {
             const std::string child = t_abs == "/" ? "/" + name : t_abs + "/" + name;
             treeRecursive(child, t_prefix + (last ? "    " : "│   "), t_ok);
@@ -670,7 +877,7 @@ int DatastoreShell::establish(sgrn::datastore::client::DatastoreClientConfig t_c
     client_ = std::move(client);
     cwd_ = "/";
     auth_desc_ = t_desc;
-    fmt::print("Connected to {} as {}.\n", url_, t_desc);
+    fmt::print(styleOk(), "Connected to {} as {}.\n", url_, t_desc);
     return 0;
 }
 
@@ -945,25 +1152,29 @@ int DatastoreShell::cmdOrgs() {
         fmt::print(stderr, "orgs: {}\n", res.error());
         return 1;
     }
+    std::vector<std::vector<std::string>> rows;
     for (const auto& o : res.value())
-        fmt::print("{}  {}\n", o.id_, o.name_);
+        rows.push_back({o.id_, o.name_});
+    printTable({"ID", "NAME"}, std::move(rows), {0});
     return 0;
 }
 
 int DatastoreShell::cmdDomains(const std::vector<std::string>& t_args) {
-    if (t_args.empty()) {
-        fmt::print(stderr, "domains: missing organisation (domains <org>)\n");
+    if (!t_args.empty()) {
+        fmt::print(stderr, "domains: takes no arguments (scope comes from your session)\n");
         return 1;
     }
     if (!client_)
         return 1;
-    auto res = client_->tryListDomains(t_args[0]);
+    auto res = client_->tryListDomains();
     if (res.hasError()) {
         fmt::print(stderr, "domains: {}\n", res.error());
         return 1;
     }
+    std::vector<std::vector<std::string>> rows;
     for (const auto& d : res.value())
-        fmt::print("{}  {}\n", d.id_, d.name_);
+        rows.push_back({d.id_, d.name_});
+    printTable({"ID", "NAME"}, std::move(rows), {0});
     return 0;
 }
 
@@ -979,8 +1190,10 @@ int DatastoreShell::cmdStatuses(const std::vector<std::string>& t_args) {
         fmt::print(stderr, "statuses: {}\n", res.error());
         return 1;
     }
+    std::vector<std::vector<std::string>> rows;
     for (const auto& s : res.value())
-        fmt::print("{}  {}\n", s.id_, s.name_);
+        rows.push_back({s.id_, s.name_});
+    printTable({"ID", "NAME"}, std::move(rows), {0});
     return 0;
 }
 
@@ -992,8 +1205,10 @@ int DatastoreShell::cmdUsers() {
         fmt::print(stderr, "users: {}\n", res.error());
         return 1;
     }
+    std::vector<std::vector<std::string>> rows;
     for (const auto& u : res.value())
-        fmt::print("{}  {}  {} {}  [{}] {}\n", u.id_, u.email_, u.first_name_, u.family_name_, u.status_, u.domain_);
+        rows.push_back({std::to_string(u.id_), u.email_, u.first_name_ + " " + u.family_name_, u.status_, u.domain_});
+    printTable({"ID", "EMAIL", "NAME", "STATUS", "DOMAIN"}, std::move(rows), {0});
     return 0;
 }
 
@@ -1070,9 +1285,12 @@ int DatastoreShell::cmdServices() {
         fmt::print(stderr, "services: {}\n", res.error());
         return 1;
     }
-    for (const auto& s : res.value())
-        fmt::print("{}  {}  [{}] {}  {}  token={}\n", s.id_, s.name_, s.is_active_ ? "active" : "inactive", s.domain_, s.created_at_,
-            maskSecret(s.token_));
+    std::vector<std::vector<std::string>> rows;
+    for (const auto& s : res.value()) {
+        std::string created = s.created_at_.size() > 10 ? s.created_at_.substr(0, 10) : s.created_at_;
+        rows.push_back({std::to_string(s.id_), s.name_, s.is_active_ ? "active" : "inactive", s.domain_, created, maskSecret(s.token_)});
+    }
+    printTable({"ID", "NAME", "STATUS", "DOMAIN", "CREATED", "TOKEN"}, std::move(rows), {0});
     return 0;
 }
 
@@ -1128,7 +1346,7 @@ int DatastoreShell::cmdServiceAdd(const std::vector<std::string>& t_args) {
     }
     fmt::print("{}\n", r.value().message_);
     if (!r.value().token_.empty() || !r.value().token_secret_.empty()) {
-        fmt::print("token: {}\ntoken_secret: {}\n(shown once — store them now)\n", r.value().token_, r.value().token_secret_);
+        printCredentialsOnce(r.value().token_, r.value().token_secret_);
     }
     return 0;
 }
@@ -1154,7 +1372,7 @@ int DatastoreShell::cmdServiceRotate(const std::vector<std::string>& t_args) {
     }
     fmt::print("{}\n", r.value().message_);
     if (!r.value().token_.empty() || !r.value().token_secret_.empty()) {
-        fmt::print("token: {}\ntoken_secret: {}\n(shown once — store them now)\n", r.value().token_, r.value().token_secret_);
+        printCredentialsOnce(r.value().token_, r.value().token_secret_);
     }
     return 0;
 }
@@ -1209,7 +1427,7 @@ int DatastoreShell::cmdWhoami() {
         fmt::print(stderr, "whoami: {}\n", r.error());
         return 1;
     }
-    fmt::print("{}\n", r.value());
+    printJsonPretty(r.value());
     return 0;
 }
 
@@ -1221,7 +1439,7 @@ int DatastoreShell::cmdStats() {
         fmt::print(stderr, "stats: {}\n", r.error());
         return 1;
     }
-    fmt::print("{}\n", r.value());
+    printJsonPretty(r.value());
     return 0;
 }
 
@@ -1233,7 +1451,7 @@ int DatastoreShell::cmdInfo() {
         fmt::print(stderr, "info: {}\n", r.error());
         return 1;
     }
-    fmt::print("{}\n", r.value());
+    printJsonPretty(r.value());
     return 0;
 }
 
@@ -1246,10 +1464,16 @@ int DatastoreShell::cmdLs(const std::vector<std::string>& t_args) {
         fmt::print(stderr, "ls: {}: {}\n", path, r.error());
         return 1;
     }
+    // Align the size column; directories render cyan with a trailing slash.
+    size_t name_width = 0;
     for (const auto& d : r.value().folders)
-        fmt::print("{}/\n", d.name_);
+        name_width = std::max(name_width, displayWidth(d.name_));
     for (const auto& f : r.value().files)
-        fmt::print("{} ({})\n", f.name_, humanBytes(f.size));
+        name_width = std::max(name_width, displayWidth(f.name_));
+    for (const auto& d : r.value().folders)
+        fmt::print(styleDir(), "{}/\n", padCell(d.name_, name_width, false));
+    for (const auto& f : r.value().files)
+        fmt::print("{}  {}\n", padCell(f.name_, name_width, false), humanBytes(f.size));
     return 0;
 }
 
@@ -1295,12 +1519,17 @@ int DatastoreShell::cmdGet(const std::vector<std::string>& t_args) {
         return 1;
     }
     const std::string remote = normalizePath(t_args[0]);
-    std::string local = (t_args.size() > 1) ? t_args[1] : baseName(remote);
+    std::string local = (t_args.size() > 1) ? expandLocalPath(t_args[1]) : baseName(remote);
     if (std::filesystem::is_directory(local)) {
         local = (std::filesystem::path(local) / baseName(remote)).string();
     }
-    if (!storage_ || !storage_->download(remote, local, scope_)) {
-        fmt::print(stderr, "get: {}: download failed\n", remote);
+    if (!storage_) {
+        fmt::print(stderr, "get: not connected\n");
+        return 1;
+    }
+    const auto outcome = storage_->download(remote, local, scope_);
+    if (!outcome.ok) {
+        fmt::print(stderr, "get: {}: {}\n", remote, outcome.detail);
         return 1;
     }
     return 0;
@@ -1311,7 +1540,7 @@ int DatastoreShell::cmdPut(const std::vector<std::string>& t_args) {
         fmt::print(stderr, "put: missing local path (put <local> [remote])\n");
         return 1;
     }
-    const std::string local = t_args[0];
+    const std::string local = expandLocalPath(t_args[0]);
     std::string remote = (t_args.size() > 1) ? normalizePath(t_args[1]) : normalizePath(baseName(local));
     if (remote == "/" || (t_args.size() > 1 && (t_args[1] == "." || t_args[1] == ".." || t_args[1].back() == '/'))) {
         remote = normalizePath(remote + "/" + baseName(local));
@@ -1321,8 +1550,13 @@ int DatastoreShell::cmdPut(const std::vector<std::string>& t_args) {
             remote = normalizePath(remote + "/" + baseName(local));
         }
     }
-    if (!storage_ || !storage_->upload(remote, local, scope_)) {
-        fmt::print(stderr, "put: {} -> {}: upload failed\n", local, remote);
+    if (!storage_) {
+        fmt::print(stderr, "put: not connected\n");
+        return 1;
+    }
+    const auto outcome = storage_->upload(remote, local, scope_);
+    if (!outcome.ok) {
+        fmt::print(stderr, "put: {} -> {}: {}\n", local, remote, outcome.detail);
         return 1;
     }
     return 0;
@@ -1441,11 +1675,11 @@ int DatastoreShell::cmdDu(const std::vector<std::string>& t_args) {
 }
 
 int DatastoreShell::cmdSession() {
-    fmt::print("url: {}\n", url_.empty() ? "(not connected)" : url_);
-    fmt::print("auth: {}\n", connected() ? auth_desc_ : "-");
-    fmt::print("session: {}\n", connected() && client_->hasSessionToken() ? "active" : "none");
-    fmt::print("scope: {}\n", sgrn::datastore::client::detail::storageScopeToString(scope_));
-    fmt::print("cwd: {}\n", cwd_);
+    fmt::print("{:<8} {}\n", "url:", url_.empty() ? "(not connected)" : url_);
+    fmt::print("{:<8} {}\n", "auth:", connected() ? auth_desc_ : "-");
+    fmt::print("{:<8} {}\n", "session:", connected() && client_->hasSessionToken() ? "active" : "none");
+    fmt::print("{:<8} {}\n", "scope:", sgrn::datastore::client::detail::storageScopeToString(scope_));
+    fmt::print("{:<8} {}\n", "cwd:", cwd_);
     return 0;
 }
 
@@ -1463,29 +1697,49 @@ int DatastoreShell::cmdScope(const std::vector<std::string>& t_args) {
     return 0;
 }
 
+int DatastoreShell::cmdSwitch(const std::vector<std::string>& t_args) {
+    // `switch scope [NAME]` — switch the namespace scope; a missing or
+    // empty NAME resets to the default (auto). Only `scope` is switchable
+    // today; the subcommand slot keeps room for future targets.
+    if (t_args.empty() || (t_args.size() == 1 && t_args[0] == "scope")) {
+        scope_ = sgrn::datastore::client::StorageScope::Auto;
+        fmt::print("scope: {}\n", sgrn::datastore::client::detail::storageScopeToString(scope_));
+        return 0;
+    }
+    if (t_args.size() != 2 || t_args[0] != "scope") {
+        fmt::print(stderr, "switch: usage: switch scope [personal|users|automated-services|domain|auto]\n");
+        return 1;
+    }
+    return cmdScope({t_args[1]});
+}
+
 int DatastoreShell::cmdZip(const std::vector<std::string>& t_args) {
     if (t_args.empty()) {
         fmt::print(stderr, "zip: missing remote path (zip <remote-dir> [local.zip])\n");
         return 1;
     }
     const std::string remote = normalizePath(t_args[0]);
-    const std::string local = (t_args.size() > 1) ? t_args[1] : baseName(remote) + ".zip";
-    if (!storage_ || !storage_->downloadZip(remote, local, scope_)) {
-        fmt::print(stderr, "zip: {}: failed\n", remote);
+    const std::string local = (t_args.size() > 1) ? expandLocalPath(t_args[1]) : baseName(remote) + ".zip";
+    if (!storage_) {
+        fmt::print(stderr, "zip: not connected\n");
+        return 1;
+    }
+    const auto outcome = storage_->downloadZip(remote, local, scope_);
+    if (!outcome.ok) {
+        fmt::print(stderr, "zip: {}: {}\n", remote, outcome.detail);
         return 1;
     }
     return 0;
 }
 
 void DatastoreShell::printHelp() {
-    fmt::print("datastore-shell — navigate the SGRN datastore API like a filesystem & AngelScript REPL.\n"
-               "\n"
-               "Unix-style Commands:\n"
-               "  connect [--url URL] [--token T --secret S | --email E [--password P] | --session-token S] [URL]\n"
+    fmt::print("datastore-shell — navigate the SGRN datastore API like a filesystem & AngelScript REPL.\n");
+    fmt::print(styleHeader(), "\nUnix-style Commands:\n");
+    fmt::print("  connect [--url URL] [--token T --secret S | --email E [--password P] | --session-token S] [URL]\n"
                "                                               sign in (mode picked from credentials)\n"
                "  login [--email E]                            interactive user sign-in (prompts, password hidden)\n"
                "  orgs                                           list organisations\n"
-               "  domains <ORG>                                  list an organisation's domains\n"
+               "  domains                                          list your organisation's domains\n"
                "  pwd                                                print remote working directory\n"
                "  ls [PATH]                                          list folders/ and files\n"
                "  cd <PATH>                                          change directory (.. and . work, never above /)\n"
@@ -1513,12 +1767,14 @@ void DatastoreShell::printHelp() {
                "  zip <REMOTE-DIR> [LOCAL.zip]                       download a folder as zip\n"
                "  scope [personal|users|automated-services|domain|auto]\n"
                "                                               show/switch namespace scope\n"
+               "  switch scope [NAME]                              reset/switch namespace scope (empty = auto)\n"
                "  !<cmd>                                             execute local shell command\n"
+               "  <cmd> | <cmd> [> FILE|VAR]                           pipe shell commands (cat <REMOTE> injects remote bytes)\n"
+               "  $VAR / ${{VAR}}                                    expand REPL variable (string/numeric; $$ escapes)\n"
                "  help                                               this text\n"
-               "  quit | exit                                        leave the shell\n"
-               "\n"
-               "AngelScript Functions & Admin API:\n"
-               "  connectService(url, token, secret)\n"
+               "  quit | exit                                        leave the shell\n");
+    fmt::print(styleHeader(), "\nAngelScript Functions & Admin API:\n");
+    fmt::print("  connectService(url, token, secret)\n"
                "  loginUser(url, email, password)\n"
                "  logout()\n"
                "  createUser(first, family, email, password, org, status) -> string\n"
@@ -1527,7 +1783,7 @@ void DatastoreShell::printHelp() {
                "  listServices()\n"
                "  rotateServiceToken(nameOrId) -> string\n"
                "  listOrgs()\n"
-               "  listDomains(org)\n"
+               "  listDomains()\n"
                "  listStatuses(org)\n"
                "  whoami() -> string\n"
                "  storageStats() -> string\n"
@@ -1553,7 +1809,7 @@ int DatastoreShell::dispatch(const std::vector<std::string>& t_words) {
     if (t_words.empty())
         return 0;
 
-    static const std::array<CommandDispatchEntry, 36> kCommandTable = {{{"help", false,
+    static const std::array<CommandDispatchEntry, 37> kCommandTable = {{{"help", false,
                                                                             [](DatastoreShell* shell, const std::vector<std::string>&) {
                                                                                 shell->printHelp();
                                                                                 return 0;
@@ -1580,6 +1836,7 @@ int DatastoreShell::dispatch(const std::vector<std::string>& t_words) {
             }},
         {"session", false, [](DatastoreShell* shell, const std::vector<std::string>&) { return shell->cmdSession(); }},
         {"scope", false, [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdScope(args); }},
+        {"switch", false, [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdSwitch(args); }},
         {"ls", true, [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdLs(args); }},
         {"cd", true, [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdCd(args); }},
         {"cat", true, [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdCat(args); }},
@@ -1652,8 +1909,7 @@ void DatastoreShell::registerBindings() {
     engine->RegisterGlobalFunction(
         "string rotateServiceToken(const string &in)", asMETHOD(DatastoreShell, as_rotateServiceToken), asCALL_THISCALL_ASGLOBAL, this);
     engine->RegisterGlobalFunction("void listOrgs()", asMETHOD(DatastoreShell, as_listOrgs), asCALL_THISCALL_ASGLOBAL, this);
-    engine->RegisterGlobalFunction(
-        "void listDomains(const string &in)", asMETHOD(DatastoreShell, as_listDomains), asCALL_THISCALL_ASGLOBAL, this);
+    engine->RegisterGlobalFunction("void listDomains()", asMETHOD(DatastoreShell, as_listDomains), asCALL_THISCALL_ASGLOBAL, this);
     engine->RegisterGlobalFunction(
         "void listStatuses(const string &in)", asMETHOD(DatastoreShell, as_listStatuses), asCALL_THISCALL_ASGLOBAL, this);
     engine->RegisterGlobalFunction("string whoami()", asMETHOD(DatastoreShell, as_whoami), asCALL_THISCALL_ASGLOBAL, this);
@@ -1742,8 +1998,8 @@ void DatastoreShell::as_listOrgs() {
     cmdOrgs();
 }
 
-void DatastoreShell::as_listDomains(const std::string& t_org) {
-    cmdDomains({t_org});
+void DatastoreShell::as_listDomains() {
+    cmdDomains({});
 }
 
 void DatastoreShell::as_listStatuses(const std::string& t_org) {

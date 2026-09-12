@@ -35,6 +35,11 @@ inline void init() {
 }
 
 int main(int t_argc, char** tp_argv) {
+    // Deployment runbook — atomic steps, run in order (see --help):
+    //   1. --generate-config  (user, no sudo, no DB)
+    //   2. --init-db          (user, needs PostgreSQL; secrets edited first)
+    //   3. --config-systemd   (root only; installs + enables units)
+    // --init is the step 1+2 convenience alias.
     if (t_argc > 1) {
         std::string_view arg(tp_argv[1]);
         if (arg == "--help" || arg == "-h") {

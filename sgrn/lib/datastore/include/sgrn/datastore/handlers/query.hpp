@@ -27,7 +27,6 @@ public:
     }
 
     // Coroutine Signatures: Return Task<HttpResponsePtr>
-    drogon::Task<drogon::HttpResponsePtr> handleQueryListOfDomains(drogon::HttpRequestPtr tsp_http_req);
     drogon::Task<drogon::HttpResponsePtr> handleQueryListOfUserStatus(drogon::HttpRequestPtr tsp_http_req);
     drogon::Task<drogon::HttpResponsePtr> handleQueryListOfOrganisations(drogon::HttpRequestPtr tsp_http_req);
     drogon::Task<drogon::HttpResponsePtr> handleQueryUserInfo(drogon::HttpRequestPtr tsp_http_req);
@@ -42,15 +41,9 @@ public:
         return kIdNameColumns;
     }
 
-    static constexpr const std::array<Column, 2>& domainColumns() noexcept {
-        return kIdNameColumns;
-    }
-
 private:
-    inline static const std::array<sgrn::IHandler<QueryApiHandler>::route_config, 5> kRoutes = {
+    inline static const std::array<sgrn::IHandler<QueryApiHandler>::route_config, 4> kRoutes = {
         {{"/api/v1/query/organisations", &QueryApiHandler::handleQueryListOfOrganisations, {drogon::Get}, {}},
-            {"/api/v1/query/domains", &QueryApiHandler::handleQueryListOfDomains, {drogon::Get}, {}},
-
             {"/api/v1/query/statuses", &QueryApiHandler::handleQueryListOfUserStatus, {drogon::Get}, {}},
             {"/api/v1/query/user/info", &QueryApiHandler::handleQueryUserInfo, {drogon::Get}, {"sgrn::datastore::filters::UserAuthFilter"}},
             {"/api/v1/query/user/info", &QueryApiHandler::handleUpdateUserInfo, {drogon::Post},

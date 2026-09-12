@@ -4,7 +4,6 @@
 #include <drogon/utils/coroutine.h>
 #include <sgrn/datastore/BackendError.hpp>
 #include <sgrn/datastore/plugins/aws/S3Client.hpp>
-#include <sgrn/datastore/plugins/postgrest/PostgrestClient.hpp>
 #include <sgrn/utils/hashing.hpp>
 #include <filesystem>
 #include <optional>

@@ -227,16 +227,15 @@ sgrn::Result<std::vector<IdNamePair>, std::string> SgrnClient::tryListOrganisati
     return parseIdNamePairs(doc);
 }
 
-std::vector<IdNamePair> SgrnClient::listDomains(const std::string& t_organisation) {
-    auto r = tryListDomains(t_organisation);
+std::vector<IdNamePair> SgrnClient::listDomains() {
+    auto r = tryListDomains();
     return r.hasError() ? std::vector<IdNamePair>{} : r.value();
 }
 
-sgrn::Result<std::vector<IdNamePair>, std::string> SgrnClient::tryListDomains(const std::string& t_organisation) {
-    auto doc = makeRequest("GET", "/api/v1/query/domains?organisation=" + urlEncodeQueryValue(t_organisation));
+sgrn::Result<std::vector<IdNamePair>, std::string> SgrnClient::tryListDomains() {
+    auto doc = makeRequest("GET", "/api/v1/domains");
     if (doc.IsNull())
-        return sgrn::Result<std::vector<IdNamePair>, std::string>::Error(
-            "list domains failed: empty response (check organisation and session)");
+        return sgrn::Result<std::vector<IdNamePair>, std::string>::Error("list domains failed: empty response (check session)");
     return parseIdNamePairs(doc);
 }
 
@@ -259,6 +258,28 @@ std::string idToString(const rapidjson::Value& t_id) {
 
 std::string strField(const rapidjson::Value& t_obj, const char* t_key) {
     return (t_obj.HasMember(t_key) && t_obj[t_key].IsString()) ? t_obj[t_key].GetString() : std::string{};
+}
+
+// Integer-or-string id tolerant parse (generated CRUD rows stringify ids).
+int64_t parseServiceId(const rapidjson::Value& t_val) {
+    if (t_val.IsInt64())
+        return t_val.GetInt64();
+    if (t_val.IsUint64())
+        return static_cast<int64_t>(t_val.GetUint64());
+    if (t_val.IsInt())
+        return t_val.GetInt();
+    if (t_val.IsUint())
+        return t_val.GetUint();
+    if (t_val.IsString()) {
+        try {
+            size_t pos = 0;
+            const long long v = std::stoll(t_val.GetString(), &pos);
+            if (pos == std::string(t_val.GetString()).size())
+                return static_cast<int64_t>(v);
+        } catch (...) {
+        }
+    }
+    return 0;
 }
 
 sgrn::Result<rapidjson::Document, std::string> postJson(SgrnClient& t_client, const std::string& t_endpoint, rapidjson::Document t_body) {
@@ -338,7 +359,7 @@ sgrn::Result<std::string, std::string> SgrnClient::registerUser(const NewUser& t
 }
 
 sgrn::Result<std::vector<ServiceEntry>, std::string> SgrnClient::tryListServices() {
-    auto doc = makeRequest("GET", "/api/v1/admin/automated-services");
+    auto doc = makeRequest("GET", "/api/v1/automated-services");
     if (doc.IsNull())
         return sgrn::Result<std::vector<ServiceEntry>, std::string>::Error("list services failed: empty response (admin only?)");
     if (!doc.IsArray())
@@ -347,11 +368,14 @@ sgrn::Result<std::vector<ServiceEntry>, std::string> SgrnClient::tryListServices
     for (const auto& e : doc.GetArray()) {
         if (!e.IsObject())
             continue;
+        // Generated CRUD rows carry every value as a string and expose no
+        // computed columns: accept numeric-or-string ids and derive
+        // is_active from status here.
         ServiceEntry s;
-        s.id_ = e.HasMember("id") && e["id"].IsInt64() ? e["id"].GetInt64() : 0;
+        s.id_ = e.HasMember("id") ? parseServiceId(e["id"]) : 0;
         s.name_ = strField(e, "name");
         s.token_ = strField(e, "token");
-        s.is_active_ = e.HasMember("is_active") && e["is_active"].IsBool() && e["is_active"].GetBool();
+        s.is_active_ = strField(e, "status") == "active";
         s.domain_ = strField(e, "domain");
         s.created_at_ = strField(e, "created_at");
         out.push_back(std::move(s));

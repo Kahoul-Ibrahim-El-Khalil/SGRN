@@ -1232,3 +1232,15 @@ begin
 end;
 $$;
 
+
+-- ============================================================
+-- sgrn: CRUD view annotations (consumed by generate_views.py)
+-- ============================================================
+-- storage.* tables carry no `organisation` tenant column (ownership is via
+-- user_id / automated_service_id / session_id / domain), so the generator
+-- skips them with "no tenant column detected — write a manual handler".
+-- That is intentional: the hand-authored StorageApiHandler owns file,
+-- directory, object, and format access (quota checks, S3 fan-out, scope
+-- resolution). No per-column annotations are needed here; if a future
+-- storage table gains a direct tenant column, annotate it like core.sql.
+-- ============================================================

@@ -34,6 +34,11 @@ void S7Shell::execute(std::string t_line) {
     if (!t_line.empty() && t_line.back() == ';')
         t_line.pop_back();
 
+    // Expand $NAME / ${NAME} from REPL globals (numeric + string) before
+    // anything else sees the line. AngelScript has no `$` syntax, so
+    // previously-valid lines are unaffected; unknown names stay literal.
+    t_line = expandDollarVariables(t_line);
+
     if (handleMetaCommand(t_line))
         return;
 

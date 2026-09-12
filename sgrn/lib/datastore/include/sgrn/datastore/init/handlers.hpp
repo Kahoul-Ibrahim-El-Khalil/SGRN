@@ -1,10 +1,14 @@
 #pragma once
 
-#include <sgrn/datastore/handlers/PostgrestProxy.hpp>
 #include <sgrn/datastore/handlers/admin.hpp>
 #include <sgrn/datastore/handlers/auth.hpp>
 #include <sgrn/datastore/handlers/query.hpp>
 #include <sgrn/datastore/handlers/storage.hpp>
+
+// Generated CRUD views (compile-time REST-over-Postgres). The header only
+// declares initGeneratedViews(); the per-table instances live in the
+// generated RegisteredViews.cpp, compiled once into sgrn_datastore_lib.
+#include <handlers/generated/RegisteredViews.hpp>
 
 namespace sgrn::datastore::handlers
 {
@@ -18,7 +22,9 @@ inline void initHandlers() {
     static query::QueryApiHandler query_api_handler;
     static storage::StorageApiHandler storage_api_handler;
 
-    static query::PostgrestProxyHandler postgrest_proxy_handler;
+    // Compile-time generated CRUD views (one static instance per table;
+    // see src/handlers/generated/RegisteredViews.cpp).
+    query::initGeneratedViews();
 }
 
 } // namespace sgrn::datastore::handlers

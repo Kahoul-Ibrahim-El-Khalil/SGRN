@@ -143,11 +143,13 @@ public:
 
     /**
      * @brief Account-level listings backing domain navigation (Synchronous).
+     * Tenant-scoped server-side from the session; no organisation parameter
+     * is sent (or trusted) anymore.
      */
     std::vector<IdNamePair> listOrganisations();
-    std::vector<IdNamePair> listDomains(const std::string& t_organisation);
+    std::vector<IdNamePair> listDomains();
     sgrn::Result<std::vector<IdNamePair>, std::string> tryListOrganisations();
-    sgrn::Result<std::vector<IdNamePair>, std::string> tryListDomains(const std::string& t_organisation);
+    sgrn::Result<std::vector<IdNamePair>, std::string> tryListDomains();
     sgrn::Result<std::vector<IdNamePair>, std::string> tryListStatuses(const std::string& t_organisation);
 
     /// Account admin.
@@ -183,6 +185,7 @@ public:
 
     struct DownloadResult {
         bool ok{false};
+        int http_status{0};
         std::string bytes;
         std::string content_type;
         std::string message;

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { UserPlus, Users, Settings, Shield, Check, Copy, Database, Play, Terminal, Loader2, Search, RefreshCw } from "lucide-react";
+import { UserPlus, Users, Settings, Shield, Check, Copy, Play, Terminal, Loader2, Search, RefreshCw } from "lucide-react";
 import { PageLayout } from "@/components/PageLayout";
 import { fetchOrganisations, fetchDomains, fetchStatuses } from "@/pages/signin/backend";
 
@@ -21,9 +21,11 @@ function useOrgDependencies(t_selected_org: string | null) {
             setStatuses([]);
             return;
         }
-        // Narrowing
-        const t_id: string = t_selected_org;
-        Promise.all([fetchDomains(t_id).then(setDomains), fetchStatuses(t_id).then(setStatuses)]).catch(() => {
+        // NOTE: domains are tenant-scoped server-side (session organisation);
+        // the picker value only drives statuses here. Picking an organisation
+        // outside your session shows your own domains; registration into it
+        // then fails loudly at the server FK check.
+        Promise.all([fetchDomains().then(setDomains), fetchStatuses(t_selected_org).then(setStatuses)]).catch(() => {
             setDomains([]);
             setStatuses([]);
         });
@@ -78,7 +80,7 @@ export default function AdminTab() {
     const [submitting, setSubmitting] = useState(false);
 
     // Query Builder State
-    const [queryTable, setQueryTable] = useState<string>("automated_services");
+    const [queryTable, setQueryTable] = useState<string>("automated-services");
     const [queryParams, setQueryParams] = useState<string>("");
     const [queryResult, setQueryResult] = useState<any>(null);
     const [queryLoading, setQueryLoading] = useState(false);
@@ -103,15 +105,33 @@ export default function AdminTab() {
             if (!Array.isArray(payload)) {
                 throw new Error("Unexpected automated service list format");
             }
-            const parsed: AutomatedServiceListEntry[] = payload.map((entry) => ({
-                id: Number(entry.id) || 0,
-                name: String(entry.name || "Unknown"),
-                token: String(entry.token || ""),
-                metadata: typeof entry.metadata === "object" && entry.metadata !== null ? entry.metadata : {},
-                is_active: Boolean(entry.is_active),
-                domain: String(entry.domain || ""),
-                created_at: String(entry.created_at || ""),
-            }));
+            const parsed: AutomatedServiceListEntry[] = payload.map((entry) => {
+                // Generated CRUD rows carry every value as a string and have
+                // no computed columns: derive is_active from status and parse
+                // the metadata JSON text back into an object here.
+                let metadata: Record<string, unknown> = {};
+                if (typeof entry.metadata === "object" && entry.metadata !== null) {
+                    metadata = entry.metadata as Record<string, unknown>;
+                } else if (typeof entry.metadata === "string" && entry.metadata) {
+                    try {
+                        const parsed_meta: unknown = JSON.parse(entry.metadata);
+                        if (typeof parsed_meta === "object" && parsed_meta !== null) {
+                            metadata = parsed_meta as Record<string, unknown>;
+                        }
+                    } catch {
+                        metadata = {};
+                    }
+                }
+                return {
+                    id: Number(entry.id) || 0,
+                    name: String(entry.name || "Unknown"),
+                    token: String(entry.token || ""),
+                    metadata,
+                    is_active: String(entry.status || "") === "active",
+                    domain: String(entry.domain || ""),
+                    created_at: String(entry.created_at || ""),
+                };
+            });
             setAutomatedServices(parsed);
         } catch (error) {
             console.error("Failed to fetch automated services:", error);
@@ -298,7 +318,16 @@ export default function AdminTab() {
         setQueryLoading(true);
         setQueryResult(null);
         try {
-            const endpoint = `/api/v1/postgrest/${queryTable}`;
+            // In-process CRUD routes (generated at compile time) plus the
+            // hand-written read endpoints. Same `column=op.value` grammar
+            // everywhere; `organisations` is served by the query API and
+            // `files` by the storage metadata endpoint.
+            const endpoint =
+                queryTable === "organisations"
+                    ? `/api/v1/query/organisations`
+                    : queryTable === "files"
+                      ? `/api/v1/storage/files/metadata`
+                      : `/api/v1/${queryTable}`;
             const url = queryParams ? `${endpoint}?${queryParams.startsWith("?") ? queryParams.slice(1) : queryParams}` : endpoint;
 
             const response = await authenticatedFetch(url);
@@ -347,12 +376,6 @@ export default function AdminTab() {
                         >
                             <Settings size={16} /> <span>Service Provisioning</span>
                         </button>
-                        <button
-                            className={`admin-mode-btn ${mode === "query_builder" ? "admin-mode-btn-active" : ""}`}
-                            onClick={() => setMode("query_builder")}
-                        >
-                            <Database size={16} /> <span>Industrial Data Plane</span>
-                        </button>
                     </div>
 
                     <div className="reg-header">
@@ -362,7 +385,7 @@ export default function AdminTab() {
                         <h2 className="reg-title">
                             {mode === "user" && "Register User"}
                             {mode === "automated_service" && "Register Service"}
-                            {mode === "query_builder" && "PostgREST Explorer"}
+                            {mode === "query_builder" && "Data Explorer"}
                         </h2>
                     </div>
 
@@ -589,15 +612,16 @@ export default function AdminTab() {
                                         value={queryTable}
                                         onChange={(e) => setQueryTable(e.target.value)}
                                     >
-                                        <option value="automated_services">AUTOMATED SERVICES</option>
+                                        <option value="automated-services">AUTOMATED SERVICES</option>
                                         <option value="users">USER ROSTER</option>
                                         <option value="organisations">ORGANISATIONS</option>
                                         <option value="domains">DOMAINS</option>
+                                        <option value="user-domain-permissions">DOMAIN PERMISSIONS</option>
                                         <option value="files">STORAGE FILES</option>
                                     </select>
                                     <input
                                         className="input-desktop flex-1"
-                                        placeholder="DATA FILTER (e.g. select=*,id=eq.1)"
+                                        placeholder="DATA FILTER (e.g. id=eq.1)"
                                         value={queryParams}
                                         onChange={(e) => setQueryParams(e.target.value)}
                                     />
@@ -632,7 +656,8 @@ export default function AdminTab() {
                             </div>
 
                             <div className="query-help">
-                                <strong>Syntax:</strong> column=eq.val | select=id,name | order=created_at.desc | limit=10
+                                <strong>Syntax:</strong> column=op.value, op in eq,neq,gt,gte,lt,lte,like,in |
+                                order=created_at.desc | limit=10 | offset=0
                             </div>
                         </div>
                     )}

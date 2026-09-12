@@ -88,8 +88,7 @@ from
   public;
 
 grant
-execute on function core.rotate_automated_service_credentials (int, boolean) to sgrn_datastore,
-sgrn_postgrest;
+execute on function core.rotate_automated_service_credentials (int, boolean) to sgrn_datastore;
 
 -- Convenience wrapper when you know only the public token.
 create or replace function core.rotate_automated_service_credentials_by_token (
@@ -130,5 +129,4 @@ from
   public;
 
 grant
-execute on function core.rotate_automated_service_credentials_by_token (uuid, boolean) to sgrn_datastore,
-sgrn_postgrest;
+execute on function core.rotate_automated_service_credentials_by_token (uuid, boolean) to sgrn_datastore;

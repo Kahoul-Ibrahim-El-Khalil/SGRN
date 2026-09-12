@@ -133,7 +133,6 @@ export const ErrorScope = {
     Database: "Database",
     Redis: "Redis",
     Minio: "Minio",
-    Postgrest: "Postgrest",
     Compression: "Compression",
     Hashing: "Hashing",
     ApplicationLogic: "ApplicationLogic",

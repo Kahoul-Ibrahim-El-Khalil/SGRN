@@ -24,24 +24,27 @@ export interface ListFilesParams {
 }
 
 /**
- * File metadata from api.files view
- * Matches the PostgreSQL view structure (storage.file_paths view)
+ * File metadata from GET /api/v1/storage/files/metadata
+ * (served from the storage.file_details view)
  */
 export type { FileMetadata } from "@sgrn/types";
 
 /**
- * PostgREST query parameters
+ * File-metadata filter parameters for GET /api/v1/storage/files/metadata.
+ * Grammar is `field=op.value` (op in eq/like/ilike; `*` in like/ilike
+ * patterns is a `%` wildcard), plus `order=`, `limit=` and `offset=`.
+ * Served in-process by the datastore, tenant-scoped server-side.
  */
-export interface PostgRESTParams {
-    // Filters (PostgREST format: field=operator.value)
+export interface FileMetadataFilterParams {
+    // Filters (field=operator.value)
     user_id?: string; // e.g., "eq.42"
     domain?: string; // e.g., "eq.HR"
     session_id?: string; // e.g., "eq.10"
-    extension?: string; // e.g., "eq.pdf" or "in.(pdf,docx)"
+    extension?: string; // e.g., "eq.pdf"
+    bucket?: string; // e.g., "eq.sgrn-uploads"
     name?: string; // e.g., "ilike.*invoice*"
     full_path?: string; // e.g., "like./documents/2024/%"
-    directory_id?: string; // e.g., "eq.null" for root files, "eq.42" for specific directory
-    is_compressed?: string; // e.g., "eq.true" or "eq.false"
+    directory_id?: string; // e.g., "eq.null" for root files, "eq.42" for a specific directory
 
     // Ordering
     order?: string; // e.g., "created_at.desc" or "name.asc"
@@ -49,9 +52,6 @@ export interface PostgRESTParams {
     // Pagination
     limit?: number;
     offset?: number;
-
-    // Range (alternative to limit/offset)
-    range?: string; // e.g., "0-49" for first 50 results
 }
 
 /**

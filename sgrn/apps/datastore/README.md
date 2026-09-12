@@ -20,7 +20,7 @@ MinIO plugin):
 | `--init` | Config generation followed by DB init |
 | `--config-systemd` | Systemd unit setup |
 
-First-time deployment needs PostgreSQL 15+, PostgREST 11+, MinIO, Redis 7+
+First-time deployment needs PostgreSQL 15+, MinIO, Redis 7+
 and Nginx 1.24+ (all in the SGRN Micromamba env); run `--help` for the full
 printed guide.
 

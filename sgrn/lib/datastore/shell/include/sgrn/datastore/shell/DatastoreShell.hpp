@@ -36,7 +36,9 @@ public:
     /// Auto-connect using current defaults (for one-shot mode).
     bool autoConnect();
 
-    /// Dispatch a single line of input.  Returns exit status; -1 means quit.
+    /// Dispatch a single line of input: expansion, shell escapes, pipelines,
+    /// then builtins. Returns exit status; -1 means quit, 127 means "not a
+    /// shell line" (caller falls through to AngelScript evaluation).
     int dispatchLine(const std::string& t_text);
 
     /// Run a one-shot command from pre-parsed words.  Returns exit status.
@@ -132,6 +134,7 @@ private:
     int cmdDu(const std::vector<std::string>& t_args);
     int cmdSession();
     int cmdScope(const std::vector<std::string>& t_args);
+    int cmdSwitch(const std::vector<std::string>& t_args);
     int cmdZip(const std::vector<std::string>& t_args);
     int dispatch(const std::vector<std::string>& t_words);
 
@@ -155,7 +158,7 @@ private:
     void as_listServices();
     std::string as_rotateServiceToken(const std::string& t_name_or_id);
     void as_listOrgs();
-    void as_listDomains(const std::string& t_org);
+    void as_listDomains();
     void as_listStatuses(const std::string& t_org);
     std::string as_whoami();
     std::string as_storageStats();

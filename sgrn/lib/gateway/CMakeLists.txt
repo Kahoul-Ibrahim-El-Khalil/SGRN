@@ -285,15 +285,22 @@ set(WEB_SRC_DIR  "${CMAKE_SOURCE_DIR}/sgrn/web/gateway")
 set(WEB_DIST_DIR "${WEB_SRC_DIR}/dist")
 set(WEB_GEN_DIR  "${CMAKE_CURRENT_BINARY_DIR}/web_generated")
 
-# ── Svelte source files tracked for rebuild ───────────────────────────────────
+# ── Web UI source files tracked for rebuild ───────────────────────────────────
+# Track the whole src/ tree at the new sgrn/web/gateway location (Svelte, TS,
+# CSS and any future sources). CONFIGURE_DEPENDS re-globs on every build, so
+# newly added or moved files are picked up automatically. Root config files are
+# listed as explicit literals below: GLOB_RECURSE must NOT walk dist/ or
+# node_modules/ (build artifacts would become rebuild inputs here).
 file(GLOB_RECURSE WEB_SVELTE_SOURCES CONFIGURE_DEPENDS
-    "${WEB_SRC_DIR}/src/*.svelte"
-    "${WEB_SRC_DIR}/src/*.ts"
-    "${WEB_SRC_DIR}/src/*.md"
+    "${WEB_SRC_DIR}/src/*"
+)
+
+set(WEB_CONFIG_FILES
     "${WEB_SRC_DIR}/index.html"
     "${WEB_SRC_DIR}/vite.config.ts"
     "${WEB_SRC_DIR}/svelte.config.js"
     "${WEB_SRC_DIR}/package.json"
+    "${WEB_SRC_DIR}/bun.lock"
 )
 
 # Shared TypeScript bindings used by the web app. Any change here must
@@ -316,6 +323,7 @@ add_custom_command(
     WORKING_DIRECTORY "${WEB_SRC_DIR}"
     DEPENDS
         ${WEB_SVELTE_SOURCES}
+        ${WEB_CONFIG_FILES}
         ${WEB_GATEWAY_BINDINGS_SOURCES}
     COMMENT "[Web] Building Svelte SPA → dist/ via bun + Vite..."
     VERBATIM

@@ -42,14 +42,6 @@
       }
     },
     {
-      "name": "sgrn::datastore::plugins::PostgrestClient",
-      "config": {
-        "host": "127.0.0.1",
-        "port": 3000,
-        "jwt_secret": "${JWT_SECRET}"
-      }
-    },
-    {
       "name": "sgrn::datastore::plugins::Threadpool",
       "config": {
         "worker_threads": 4,

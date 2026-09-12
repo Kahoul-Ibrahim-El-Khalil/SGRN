@@ -49,5 +49,4 @@ from
   public;
 
 grant
-execute on function core.authenticate_automated_service (uuid, text) to sgrn_datastore,
-sgrn_postgrest;
+execute on function core.authenticate_automated_service (uuid, text) to sgrn_datastore;

@@ -172,12 +172,16 @@ export async function downloadFile(t_path: string, t_filename: string, t_is_comp
 
 /**
  * List files with various filters
+ *
+ * Served in-process by the datastore (`GET /api/v1/storage/files/metadata`,
+ * tenant-scoped server-side). Filter grammar is `column=op.value` with
+ * op in eq/like/ilike; `*` in like/ilike patterns acts as a `%` wildcard.
  */
 export async function listFiles(t_params: ListFilesParams): Promise<SgrnResult<FileMetadata[]>> {
     try {
         const { mode, identifier, limit = 20, offset = 0, bucket } = t_params;
         let url = "";
-        const base_url = "/api/v1/postgrest/storage/files";
+        const base_url = StorageBackendApiEndpoints.FILES_METADATA;
         const query_params = new URLSearchParams();
         query_params.append("limit", limit.toString());
         query_params.append("offset", offset.toString());

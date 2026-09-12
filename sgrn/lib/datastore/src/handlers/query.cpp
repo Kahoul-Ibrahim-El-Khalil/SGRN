@@ -55,35 +55,6 @@ Json::Value modelsToJson(const std::vector<T>& t_models) {
     return arr;
 }
 
-Task<HttpResponsePtr> QueryApiHandler::handleQueryListOfDomains(HttpRequestPtr tsp_http_req) {
-    auto org_name = tsp_http_req->getParameter("organisation");
-    if (org_name.empty()) {
-        co_return sgrn::createJsonErrorResponse("Organisation parameter is required", k400BadRequest);
-    }
-
-    auto db_res = sgrn::datastore::core::getDbClient();
-    if (db_res.hasError()) {
-        co_return sgrn::createErrorResponse(QueryApiError::DbUnavailable);
-    }
-    auto client = db_res.value();
-    try {
-        auto results =
-            co_await client->execSqlCoro("SELECT id, name FROM core.domains WHERE organisation = $1 ORDER BY name ASC", org_name);
-
-        Json::Value arr(Json::arrayValue);
-        for (const auto& row : results) {
-            Json::Value obj;
-            obj["id"] = row["id"].as<int32_t>();
-            obj["name"] = row["name"].as<std::string>();
-            arr.append(std::move(obj));
-        }
-        co_return HttpResponse::newHttpJsonResponse(arr);
-    } catch (const std::exception& e) {
-        ERROR_LOG("DB Error: {}", e.what());
-        co_return sgrn::createErrorResponse(QueryApiError::DbError);
-    }
-}
-
 Task<HttpResponsePtr> QueryApiHandler::handleQueryListOfUserStatus(HttpRequestPtr tsp_http_req) {
     // Since core.status table is removed, we return the hardcoded list
     // allowed by the CHECK constraint on core.users.status

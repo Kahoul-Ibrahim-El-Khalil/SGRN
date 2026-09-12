@@ -55,90 +55,12 @@ from
   left join storage.formats f on f.extension = fp.extension;
 
 -- ============================================================
--- api.files
--- postgrest-facing view. excludes soft-deleted objects.
---
--- supported filter examples (postgrest query params):
---   ?session_id=eq.10
---   ?user_id=eq.5
---   ?agent_id=eq.2
---   ?directory_id=eq.7
---   ?extension=eq.pdf
---   ?full_path=like./documents/%
---   ?name=ilike.*invoice*&limit=20&offset=0
---   ?is_compressed=eq.true
---   ?compression_algorithm=eq.zstd
--- ============================================================
-create or replace view postgrest.files as
-select
-  fp.id,
-  fp.name,
-  fp.full_path,
-  fp.directory_path,
-  fp.directory_id,
-  fp.extension,
-  fp.created_at,
-  -- compression info
-  fp.is_compressed,
-  fp.compression_algorithm,
-  fp.compression_level,
-  -- ownership linkage
-  fp.session_id,
-  fp.user_id,
-  fp.automated_service_id,
-  u.domain,
-  coalesce(u.organisation, a.organisation) as organisation,
-  -- storage object details
-  so.id as object_id,
-  so.bucket,
-  so.key,
-  so.size,
-  so.created_at as object_created_at,
-  -- format metadata
-  f.mime_type
-from
-  storage.file_paths fp
-  join storage.objects so on so.id = fp.object_id
-  left join core.users u on u.id = fp.user_id
-  left join core.automated_services a on a.id = fp.automated_service_id
-  left join storage.formats f on f.extension = fp.extension
-where
-  so.deleted_at is null;
-
--- ============================================================
--- postgrest.formats
--- exposes allowed file formats for upload-constraint checks.
--- ============================================================
-create or replace view postgrest.formats as
-select
-  extension,
-  mime_type,
-  is_compressed,
-  description
-from
-  storage.formats
-where
-  is_allowed = true;
-
--- ============================================================
 -- grants — select only; writes go through the service layer
 -- ============================================================
 grant
 select
-  on storage.file_details to sgrn_datastore,
-  sgrn_postgrest;
+  on storage.file_details to sgrn_datastore;
 
 grant
 select
-  on storage.directory_tree to sgrn_datastore,
-  sgrn_postgrest;
-
-grant
-select
-  on postgrest.files to sgrn_datastore,
-  sgrn_postgrest;
-
-grant
-select
-  on postgrest.formats to sgrn_datastore,
-  sgrn_postgrest;
+  on storage.directory_tree to sgrn_datastore;

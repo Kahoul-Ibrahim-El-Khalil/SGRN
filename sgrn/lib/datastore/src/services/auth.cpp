@@ -2,7 +2,6 @@
 #include <fmt/core.h>
 #include <sgrn/datastore/BackendError.hpp>
 #include <sgrn/datastore/DbError.hpp>
-#include <sgrn/datastore/plugins/postgrest/PostgrestClient.hpp>
 #include <sgrn/datastore/plugins/redis/RedisError.hpp>
 #include <sgrn/datastore/plugins/redis/RedisMiddleware.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
