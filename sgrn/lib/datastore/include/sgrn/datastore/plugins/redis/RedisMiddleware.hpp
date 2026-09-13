@@ -114,8 +114,6 @@ public:
      */
     drogon::Task<void> invalidatePresignedUrl(const std::string& t_object_key);
 
-    // --- GPAO Cache Management ---
-
     std::string prefix(const std::string& t_key) {
         return "sgrn:service:" + t_key;
     }

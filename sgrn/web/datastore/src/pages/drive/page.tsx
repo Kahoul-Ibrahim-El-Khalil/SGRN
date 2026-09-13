@@ -16,7 +16,7 @@
 //     PaginationControls   – prev/next page row
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Loader2, Upload, FolderPlus, Shield, LayoutGrid, List, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, Upload, FolderPlus, Folder, Shield, LayoutGrid, List, Search, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { PageLayout } from "@/components/PageLayout";
 import { Breadcrumb } from "@/pages/drive/components/Breadcrumb";
 import { FileGrid } from "@/pages/drive/components/FileGrid";
@@ -645,102 +645,116 @@ function DriveToolbar({
     const canWrite = capabilities?.can_write !== false;
     return (
         <div className="drive-toolbar">
-            <div className="drive-view-toggle">
-                <button
-                    onClick={() => onSetViewMode("grid")}
-                    className={`drive-view-btn${viewMode === "grid" ? " drive-view-btn-active" : ""}`}
-                    title="Grid View"
-                >
-                    <LayoutGrid size={16} />
-                </button>
-                <button
-                    onClick={() => onSetViewMode("list")}
-                    className={`drive-view-btn${viewMode === "list" ? " drive-view-btn-active" : ""}`}
-                    title="List View"
-                >
-                    <List size={16} />
-                </button>
+            <div className="drive-toolbar-row">
+                <div className="drive-scope-tabs">
+                    {(["personal", "automated_services", ...(checkAdmin ? ["users", "domains"] : [])] as StorageScope[]).map((scope) => (
+                        <button
+                            key={scope}
+                            type="button"
+                            onClick={() => onSwitchScope(scope)}
+                            className={`drive-scope-btn ${currentScope === scope ? "drive-scope-btn-active" : ""}`}
+                        >
+                            {scope !== "personal" && <Shield size={14} />}
+                            <span>
+                                {scope === "automated_services"
+                                    ? "Services"
+                                    : scope === "users"
+                                      ? "Users"
+                                      : scope === "domains"
+                                        ? "Domains"
+                                        : "Personal"}
+                            </span>
+                        </button>
+                    ))}
+                </div>
+
+                <div className="drive-search-wrapper">
+                    <Search size={16} className="drive-search-icon" />
+                    <input
+                        type="search"
+                        placeholder="Search files and folders"
+                        className="drive-search-input"
+                        value={searchQuery}
+                        onChange={(e) => onSearch(e.target.value)}
+                        aria-label="Search files and folders"
+                    />
+                </div>
             </div>
 
-            <div className="drive-toolbar-sep" />
-
-            <div className="drive-scope-tabs" style={{ flexShrink: 0 }}>
-                {(["personal", "automated_services", ...(checkAdmin ? ["users", "domains"] : [])] as StorageScope[]).map((scope) => (
+            <div className="drive-toolbar-row drive-toolbar-row--actions">
+                <div className="drive-view-toggle" role="group" aria-label="View mode">
                     <button
-                        key={scope}
-                        onClick={() => onSwitchScope(scope)}
-                        className={`drive-scope-btn ${currentScope === scope ? "drive-scope-btn-active" : ""}`}
+                        type="button"
+                        onClick={() => onSetViewMode("grid")}
+                        className={`drive-view-btn${viewMode === "grid" ? " drive-view-btn-active" : ""}`}
+                        title="Grid view"
+                        aria-pressed={viewMode === "grid"}
                     >
-                        {scope !== "personal" && <Shield size={12} />}
-                        <span>
-                            {scope === "automated_services"
-                                ? "Services"
-                                : scope === "users"
-                                  ? "Users"
-                                  : scope === "domains"
-                                    ? "Domains"
-                                    : "Personal"}
-                        </span>
+                        <LayoutGrid size={16} />
                     </button>
-                ))}
-            </div>
+                    <button
+                        type="button"
+                        onClick={() => onSetViewMode("list")}
+                        className={`drive-view-btn${viewMode === "list" ? " drive-view-btn-active" : ""}`}
+                        title="List view"
+                        aria-pressed={viewMode === "list"}
+                    >
+                        <List size={16} />
+                    </button>
+                </div>
 
-            <div className="drive-toolbar-sep" />
+                <div className="drive-toolbar-actions">
+                    <button
+                        type="button"
+                        onClick={onNewFolder}
+                        disabled={!canWrite}
+                        className="btn-industrial-secondary drive-toolbar-btn"
+                        title={!canWrite ? "Write permission denied in this workspace" : "Create folder"}
+                    >
+                        <FolderPlus size={16} />
+                        <span>New folder</span>
+                    </button>
 
-            <div className="drive-search-wrapper">
-                <Search size={14} className="drive-search-icon" />
-                <input
-                    type="text"
-                    placeholder="SEARCH..."
-                    className="drive-search-input"
-                    value={searchQuery}
-                    onChange={(e) => onSearch(e.target.value)}
-                />
-            </div>
+                    <button
+                        type="button"
+                        onClick={() => folderInputRef.current?.click()}
+                        disabled={uploading || !canWrite}
+                        className="btn-industrial-secondary drive-toolbar-btn"
+                        title={!canWrite ? "Write permission denied in this workspace" : "Upload folder"}
+                    >
+                        <Folder size={16} />
+                        <span>Upload folder</span>
+                    </button>
+                    <input
+                        ref={folderInputRef}
+                        type="file"
+                        {...({ webkitdirectory: "" } as any)}
+                        style={{ display: "none" }}
+                        onChange={onFolderChange}
+                    />
 
-            <div className="drive-toolbar-sep" />
+                    <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploading || !canWrite}
+                        className="btn-industrial-primary drive-toolbar-btn"
+                        title={!canWrite ? "Write permission denied in this workspace" : "Upload files"}
+                    >
+                        <Upload size={16} />
+                        <span>Upload files</span>
+                    </button>
+                    <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={onFileChange} />
 
-            <div className="drive-toolbar-actions">
-                <button
-                    onClick={onNewFolder}
-                    disabled={!canWrite}
-                    className="btn-industrial-secondary drive-toolbar-btn"
-                    title={!canWrite ? "Write permission denied in this workspace" : ""}
-                >
-                    <FolderPlus size={14} /> NEW FOLDER
-                </button>
-
-                {/* Folder upload */}
-                <button
-                    onClick={() => folderInputRef.current?.click()}
-                    disabled={uploading || !canWrite}
-                    className="btn-industrial-secondary drive-toolbar-btn"
-                    title={!canWrite ? "Write permission denied in this workspace" : ""}
-                >
-                    <FolderPlus size={14} /> UPLOAD FOLDER
-                </button>
-                <input
-                    ref={folderInputRef}
-                    type="file"
-                    {...({ webkitdirectory: "" } as any)}
-                    style={{ display: "none" }}
-                    onChange={onFolderChange}
-                />
-
-                {/* File upload */}
-                <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploading || !canWrite}
-                    className="btn-industrial-primary drive-toolbar-btn"
-                    title={!canWrite ? "Write permission denied in this workspace" : ""}
-                >
-                    <Upload size={14} /> UPLOAD FILE
-                </button>
-                <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={onFileChange} />
-
-                <button onClick={onRefresh} className="btn-industrial-secondary drive-toolbar-btn drive-refresh-btn" title="Refresh">
-                    <Upload size={14} className={loading ? "drive-spin" : ""} style={{ transform: "rotate(180deg)" }} />
-                </button>
+                    <button
+                        type="button"
+                        onClick={onRefresh}
+                        className="btn-industrial-secondary drive-toolbar-btn drive-refresh-btn"
+                        title="Refresh"
+                        aria-label="Refresh listing"
+                    >
+                        <RefreshCw size={16} className={loading ? "drive-spin" : ""} />
+                    </button>
+                </div>
             </div>
         </div>
     );
@@ -757,23 +771,23 @@ interface NewFolderPromptProps {
 
 function NewFolderPrompt({ inputRef, name, creating, onChange, onSubmit, onCancel }: NewFolderPromptProps) {
     return (
-        <div className="mb-4 flex items-center gap-2 bg-muted/10 p-3 border border-border">
-            <FolderPlus size={18} className="text-primary" />
+        <div className="drive-new-folder-prompt">
+            <FolderPlus size={16} />
             <input
                 ref={inputRef}
                 type="text"
-                className="input-desktop flex-1"
+                className="input-desktop"
                 placeholder="New folder name..."
                 value={name}
                 onChange={(e) => onChange(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && onSubmit()}
                 disabled={creating}
             />
-            <button className="btn-desktop-primary px-4 py-2" onClick={onSubmit} disabled={creating || !name.trim()}>
-                {creating ? <Loader2 size={16} className="animate-spin" /> : "CREATE"}
+            <button type="button" className="btn-desktop-primary" onClick={onSubmit} disabled={creating || !name.trim()}>
+                {creating ? <Loader2 size={14} className="drive-spin" /> : "Create"}
             </button>
-            <button className="btn-desktop-secondary px-4 py-2" onClick={onCancel}>
-                CANCEL
+            <button type="button" className="btn-desktop-secondary" onClick={onCancel}>
+                Cancel
             </button>
         </div>
     );
@@ -788,23 +802,12 @@ interface PaginationControlsProps {
 
 function PaginationControls({ currentPage, totalPages, onPrev, onNext }: PaginationControlsProps) {
     return (
-        <div
-            className="drive-pagination"
-            style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "1rem",
-                marginTop: "2rem",
-                padding: "1rem 0",
-                borderTop: "1px solid rgba(255,255,255,0.05)",
-            }}
-        >
+        <div className="drive-pagination">
             <button onClick={onPrev} disabled={currentPage === 1} className="btn-desktop px-3">
                 <ChevronLeft size={16} />
             </button>
             <div className="drive-pagination-info">
-                PAGE <span className="text-foreground">{currentPage}</span> OF <span className="text-foreground">{totalPages}</span>
+                Page <span className="text-foreground">{currentPage}</span> of <span className="text-foreground">{totalPages}</span>
             </div>
             <button onClick={onNext} disabled={currentPage === totalPages} className="btn-desktop px-3">
                 <ChevronRight size={16} />
@@ -988,7 +991,7 @@ export default function DrivePage() {
                     <div className="drive-drag-overlay" onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
                         <div className="drive-drag-overlay-card">
                             <Upload size={40} className="drive-drag-overlay-icon" />
-                            <h3 className="drive-drag-overlay-title">DROP TO UPLOAD TO SGRN</h3>
+                            <h3 className="drive-drag-overlay-title">Drop files to upload</h3>
                             <p className="drive-drag-overlay-subtitle">
                                 Your files will be preserved within <span className="drive-drag-overlay-path">{scope.currentPath}</span>
                             </p>

@@ -3,6 +3,7 @@
 #include <sgrn/Result.hpp>
 #include <sgrn/gateway/adapters/http/types.hpp>
 #include <sgrn/gateway/adapters/northbound/NorthboundServer.hpp>
+#include <sgrn/gateway/adapters/rate_limit.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
 #include <atomic>
 #include <crow.h>
@@ -83,7 +84,7 @@ public:
      * one port. The referenced objects (registry/memory/db/...) must outlive
      * the server. Must be called before the app starts listening.
      */
-    void registerRoutes(crow::SimpleApp& t_app);
+    void registerRoutes(GatewayApp& t_app);
 
     void stop();
 
@@ -126,7 +127,7 @@ private:
     void handleGetDbLogs(const http::HttpRequest& t_req, http::HttpResponse& t_res);
     void handleGetEndpoints(const http::HttpRequest& t_req, http::HttpResponse& t_res);
     void handleGetPolicy(const http::HttpRequest& t_req, http::HttpResponse& t_res);
-    void registerWebAssets(crow::SimpleApp& t_app);
+    void registerWebAssets(GatewayApp& t_app);
 
     // ── Server internals ─────────────────────────────────────────────────────
     // Standalone listener, used only by start(). The unified gateway path

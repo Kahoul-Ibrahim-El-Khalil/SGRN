@@ -19,6 +19,7 @@
 // and is thread-safe.
 
 #include <sgrn/Result.hpp>
+#include <sgrn/gateway/adapters/rate_limit.hpp>
 #include <atomic>
 #include <crow.h>
 #include <cstdint>
@@ -40,7 +41,7 @@ public:
 
     /// The Crow application. Register every HTTP route and the `/ws`
     /// WebSocket route here before calling start().
-    crow::SimpleApp& app() {
+    GatewayApp& app() {
         return app_;
     }
 
@@ -56,7 +57,7 @@ public:
     }
 
 private:
-    crow::SimpleApp app_;
+    GatewayApp app_;
     std::future<void> run_future_;
     std::atomic<bool> running_{false};
 };

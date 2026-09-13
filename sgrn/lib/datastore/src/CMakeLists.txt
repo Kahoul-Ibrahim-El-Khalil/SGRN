@@ -76,6 +76,10 @@ list(APPEND BACKEND_SOURCES ${FILTERS_SOURCES})
 file(GLOB_RECURSE HANDLERS_SOURCES CONFIGURE_DEPENDS handlers/*.cpp)
 list(APPEND BACKEND_SOURCES ${HANDLERS_SOURCES})
 
+# 5b. UTILS (rate limiting and other shared request-path helpers)
+file(GLOB_RECURSE UTILS_SOURCES CONFIGURE_DEPENDS utils/*.cpp)
+list(APPEND BACKEND_SOURCES ${UTILS_SOURCES})
+
 # ── The Fat Backend Library ──────────────────────────────────────────────────
 if(SGRN_BUILD_STATIC)
     add_library(sgrn_datastore_lib STATIC ${BACKEND_SOURCES})

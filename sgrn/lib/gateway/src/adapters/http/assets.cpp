@@ -2,6 +2,7 @@
 #include <sgrn/assets/EmbeddedAsset.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/gateway/adapters/http.hpp>
+#include <sgrn/gateway/adapters/rate_limit.hpp>
 #include <sgrn/utils/compression.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <web_assets.hpp>
@@ -101,7 +102,7 @@ bool isApiPath(const std::string& t_path) {
 
 } // namespace
 
-void HttpAdapter::registerWebAssets(crow::SimpleApp& t_app) {
+void HttpAdapter::registerWebAssets(GatewayApp& t_app) {
     namespace web = sgrn::gateway::assets::web;
 
     // Shared SPA-fallback responder for "/" and unknown non-API paths.
@@ -124,6 +125,12 @@ void HttpAdapter::registerWebAssets(crow::SimpleApp& t_app) {
 
         const bool is_index = (route_path == "/index.html");
         auto handler = [i, cached, flag, has_error, variants, variants_mutex, is_index](const crow::request& t_crow_req) {
+            crow::response crow_res;
+            // Dynamic rules cannot carry middleware — enforce manually.
+            if (!RateLimitMiddleware::checkRequest(t_crow_req, crow_res)) {
+                http::applyCors(crow_res, t_crow_req);
+                return crow_res;
+            }
             const auto& asset = web::ASSETS[i];
             http::HttpRequest t_req = http::fromCrowRequest(t_crow_req);
             http::HttpResponse t_res;
@@ -172,7 +179,6 @@ void HttpAdapter::registerWebAssets(crow::SimpleApp& t_app) {
                 }
             }
 
-            crow::response crow_res;
             http::applyToCrowResponse(t_res, crow_res);
             http::applyCors(crow_res, t_crow_req);
             return crow_res;
@@ -181,6 +187,9 @@ void HttpAdapter::registerWebAssets(crow::SimpleApp& t_app) {
         // NOTE: asset paths are runtime strings, so route_dynamic() is used
         // instead of CROW_ROUTE() (whose parameter tag needs a literal).
         // Dynamic rules match every method — harmless for static assets.
+        // (Rate limiting is enforced manually at the top of `handler` above:
+        // dynamic rules ignore .middlewares(), and global middleware only
+        // runs for routes with explicit per-route middleware indices.)
         t_app.route_dynamic(route_path)(handler);
 
         if (is_index) {
@@ -193,6 +202,11 @@ void HttpAdapter::registerWebAssets(crow::SimpleApp& t_app) {
     // routing). Registered once after all assets so /index.html exists.
     *spa_handler = [index_handler](const crow::request& t_crow_req) {
         crow::response crow_res;
+        // The catchall carries no middleware indices either — enforce here.
+        if (!RateLimitMiddleware::checkRequest(t_crow_req, crow_res)) {
+            http::applyCors(crow_res, t_crow_req);
+            return crow_res;
+        }
         const std::string path = t_crow_req.url;
         if (isApiPath(path)) {
             crow_res.code = 404;

@@ -67,9 +67,9 @@ export default function SignInPage() {
                             <Shield size={40} />
                         </div>
                         <h1 className="signin-brand-title">SGRN</h1>
-                        <p className="signin-brand-sub">Industrial Gateway Platform</p>
+                        <p className="signin-brand-sub">Resource Management Platform</p>
                         <p className="signin-brand-desc">
-                            Secure, real-time access to industrial data streams, telemetry objects and storage namespaces.
+                            Secure access to storage, domains, and platform administration from one dashboard.
                         </p>
                     </div>
 
@@ -87,13 +87,13 @@ export default function SignInPage() {
                 <div className="signin-right">
                     <div className="signin-form-card">
                         <div className="signin-form-header">
-                            <h2 className="signin-form-title">AUTHENTICATE</h2>
-                            <p className="signin-form-subtitle">Enter your credentials to access the platform</p>
+                            <h2 className="signin-form-title">Sign in</h2>
+                            <p className="signin-form-subtitle">Use your operator credentials to continue</p>
                         </div>
 
                         <form onSubmit={handleSubmit} className="signin-form">
                             <div className="signin-field">
-                                <label className="signin-label">EMAIL ADDRESS</label>
+                                <label className="signin-label">Email</label>
                                 <input
                                     className="input-desktop"
                                     type="email"
@@ -106,7 +106,7 @@ export default function SignInPage() {
                                 />
                             </div>
                             <div className="signin-field">
-                                <label className="signin-label">ACCESS KEY</label>
+                                <label className="signin-label">Password</label>
                                 <input
                                     className="input-desktop"
                                     type="password"
@@ -119,7 +119,7 @@ export default function SignInPage() {
                                 />
                             </div>
                             <button type="submit" className="btn-desktop-primary signin-submit" disabled={loading}>
-                                {loading ? "INITIALIZING SESSION..." : "AUTHENTICATE →"}
+                                {loading ? "Signing in…" : "Sign in"}
                             </button>
                         </form>
                     </div>

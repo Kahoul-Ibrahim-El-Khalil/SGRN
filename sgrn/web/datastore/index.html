@@ -3,10 +3,21 @@
     <head>
         <meta charset="UTF-8" />
         <link rel="icon" type="image/png" href="./src/assets/Logo-ENSTI-final1-1024x1024.png" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
         <title>Système de Gestion de Ressources Numériques</title>
 
-        <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded" rel="stylesheet" />
+        <script>
+            (function () {
+                var key = "theme";
+                var themes = ["light", "dark", "jet-black"];
+                var saved = localStorage.getItem(key);
+                var theme = themes.indexOf(saved) >= 0 ? saved : "light";
+                var root = document.documentElement;
+                root.classList.add(theme);
+                root.dataset.theme = theme;
+                root.style.colorScheme = theme === "light" ? "light" : "dark";
+            })();
+        </script>
     </head>
     <body>
         <div id="root"></div>

@@ -47,8 +47,8 @@ inline void initMinio() {
                         exists_res.error().message_);
                     co_return;
                 }
-                SGRN_WARN("SGRN-Datastore", "Could not check bucket '{}' (attempt {}/{}): {} — retrying", bucket, attempt,
-                    kAttempts, exists_res.error().message_);
+                SGRN_WARN("SGRN-Datastore", "Could not check bucket '{}' (attempt {}/{}): {} — retrying", bucket, attempt, kAttempts,
+                    exists_res.error().message_);
                 co_await drogon::sleepCoro(drogon::app().getLoop(), std::chrono::seconds(1 << (attempt - 1)));
             }
         });

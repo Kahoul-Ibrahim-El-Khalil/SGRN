@@ -27,6 +27,11 @@ if(SGRN_BUILD_TESTS)
     add_executable(crud_binds_test tests/crud_binds_test.cpp)
     target_link_libraries(crud_binds_test PRIVATE sgrn_datastore_lib)
     add_test(NAME crud_binds_test COMMAND crud_binds_test)
+    # Rate limiter pure-logic tests (classification, config, key building):
+    # no Redis, no app singleton, no live database required.
+    add_executable(rate_limit_test tests/rate_limit_test.cpp)
+    target_link_libraries(rate_limit_test PRIVATE sgrn_datastore_lib)
+    add_test(NAME rate_limit_test COMMAND rate_limit_test)
 endif()
 
 # ==================== Summary ====================

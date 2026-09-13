@@ -107,7 +107,7 @@ public:
      * Bound references must be configured first via configure(). They must
      * outlive the server. Must be called before the app starts listening.
      */
-    void registerRoutes(crow::SimpleApp& t_app);
+    void registerRoutes(GatewayApp& t_app);
 
     /**
      * @brief Store the bound references used by registerRoutes().

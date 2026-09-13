@@ -30,6 +30,7 @@ inline void init() {
     filters::createAndRegisterFilters();
     handlers::initHandlers();
     plugins::initMinio();
+    ratelimit::initRateLimiting();
 
     drogon::app().run();
 }

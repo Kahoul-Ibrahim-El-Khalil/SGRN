@@ -92,6 +92,8 @@
       "general_endpoint_window_s": 60,
       "storage_endpoint_limit": 30,
       "storage_endpoint_window_s": 60,
+      "page_endpoint_limit": 120,
+      "page_endpoint_window_s": 60,
       "burst_allowance": 10
     },
     "telemetry": {

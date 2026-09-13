@@ -1,3 +1,4 @@
+#include <sgrn/gateway/adapters/rate_limit.hpp>
 #include <sgrn/gateway/gateway.hpp>
 
 #include <algorithm>
@@ -395,6 +396,8 @@ Result<void, std::string> GatewayApplication::startAdapters() {
 
         if (config_.http.has_value()) {
             http_adapter_.emplace();
+            sgrn::gateway::adapters::RateLimitMiddleware::configure(
+                config_.http->rate_limit_max_requests, config_.http->rate_limit_window_s);
             auto vmap = modbus_adapter_ ? &modbus_adapter_->virtualMap() : nullptr;
             http_adapter_->configure(symbolic_store_, server_, node_db_, security_manager_, vmap);
             http_adapter_->registerRoutes(northbound_server_.app());

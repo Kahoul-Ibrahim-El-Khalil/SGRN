@@ -1,12 +1,7 @@
 import { useNavigate, useLocation } from "react-router-dom";
-import { HardDrive, UserCog, Shield, LayoutDashboard } from "lucide-react";
+import { LayoutDashboard } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-
-const NAV_ITEMS = [
-    { path: "/drive", label: "Drive", icon: HardDrive },
-    { path: "/profile", label: "Profile", icon: UserCog },
-    { path: "/admin", label: "Admin", icon: Shield, adminOnly: true },
-];
+import { APP_NAV_ITEMS } from "@/config/navigation";
 
 export const Sidebar = () => {
     const navigate = useNavigate();
@@ -14,7 +9,7 @@ export const Sidebar = () => {
     const { user } = useAuth();
 
     const isAdmin = user ? (typeof user.role === "string" ? user.role === "admin" : user.role?.name === "admin") : false;
-    const visibleItems = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
+    const visibleItems = APP_NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
 
     return (
         <aside className="desktop-sidebar">
@@ -23,7 +18,8 @@ export const Sidebar = () => {
                     <LayoutDashboard className="sidebar-logo-icon" size={32} />
                 </div>
 
-                <nav className="sidebar-nav">
+                <nav className="sidebar-nav" aria-label="Main navigation">
+                    <div className="sidebar-section-label">Navigation</div>
                     {visibleItems.map((item) => {
                         const Icon = item.icon;
                         const isActive = location.pathname === item.path;

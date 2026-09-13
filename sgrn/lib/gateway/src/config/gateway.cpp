@@ -63,6 +63,10 @@ sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
                 http.ip = ht["ip"].GetString();
             if (ht.HasMember("port"))
                 http.port = static_cast<uint16_t>(ht["port"].GetUint());
+            if (ht.HasMember("rate_limit_max_requests") && ht["rate_limit_max_requests"].IsUint())
+                http.rate_limit_max_requests = ht["rate_limit_max_requests"].GetUint();
+            if (ht.HasMember("rate_limit_window_s") && ht["rate_limit_window_s"].IsUint64())
+                http.rate_limit_window_s = ht["rate_limit_window_s"].GetUint64();
             cfg.http = http;
         }
         if (north.HasMember("websocket") && north["websocket"].IsObject()) {

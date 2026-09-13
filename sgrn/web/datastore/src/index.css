@@ -7,7 +7,6 @@
         box-sizing: border-box;
         margin: 0;
         padding: 0;
-        border-radius: 0 !important;
     }
 
     html,
@@ -50,94 +49,108 @@
    ===================================================================== */
 @layer base {
     :root {
-        /* INDUSTRIAL DARK (Default) */
-        --background: 222 47% 4%;
-        --foreground: 210 40% 98%;
-        --card: 222 47% 7%;
-        --card-foreground: 210 40% 98%;
-        --popover: 222 47% 7%;
-        --popover-foreground: 210 40% 98%;
-        --primary: 142 70% 45%;
+        /* Fallback tokens — TIA Portal Classic (SGRN Gateway) */
+        --background: 210 6% 92%;
+        --foreground: 210 5% 8%;
+        --card: 0 0% 100%;
+        --card-foreground: 210 5% 8%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 210 5% 8%;
+        --primary: 197 100% 29%;
         --primary-foreground: 0 0% 100%;
-        --secondary: 217 32% 12%;
-        --secondary-foreground: 210 40% 98%;
-        --muted: 217 32% 10%;
-        --muted-foreground: 215 20% 65%;
-        --accent: 142 70% 45%;
-        --accent-foreground: 210 40% 98%;
-        --destructive: 0 84.2% 60.2%;
-        --destructive-foreground: 210 40% 98%;
-        --border: 217 32% 20%;
-        --input: 217 32% 20%;
-        --ring: 142 70% 45%;
-        --radius: 0px;
+        --secondary: 210 5% 95%;
+        --secondary-foreground: 210 5% 8%;
+        --muted: 210 5% 95%;
+        --muted-foreground: 210 3% 40%;
+        --accent: 197 100% 29%;
+        --accent-foreground: 0 0% 100%;
+        --destructive: 0 72% 46%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 210 3% 70%;
+        --input: 0 0% 100%;
+        --ring: 197 100% 29%;
+        --radius: 0.1875rem;
+        --toolbar-bg: 210 5% 84%;
+        --toolbar-border: 210 3% 65%;
+        --th-bg: 210 5% 84%;
+        --row-hover: 197 50% 92%;
     }
 
-    /* THEMES */
+    /* THEMES — government / enterprise palette (blue primary throughout) */
     .light {
-        --background: 210 20% 98%;
-        --foreground: 222 47% 8%;
-        --card: 210 20% 92%;
-        --card-foreground: 222 47% 8%;
-        --popover: 210 20% 98%;
-        --popover-foreground: 222 47% 8%;
-        --primary: 221 83% 45%;
-        --primary-foreground: 210 40% 98%;
-        --secondary: 210 20% 88%;
-        --secondary-foreground: 222 47% 8%;
-        --muted: 210 20% 86%;
-        --muted-foreground: 222 47% 35%;
-        --accent: 221 83% 45%;
-        --accent-foreground: 210 40% 98%;
-        --destructive: 0 84.2% 50%;
-        --destructive-foreground: 210 40% 98%;
-        --border: 214.3 31.8% 75%;
-        --input: 214.3 31.8% 80%;
-        --ring: 221 83% 45%;
+        /* TIA Portal Classic — aligned with SGRN Gateway */
+        --background: 210 6% 92%;
+        --foreground: 210 5% 8%;
+        --card: 0 0% 100%;
+        --card-foreground: 210 5% 8%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 210 5% 8%;
+        --primary: 197 100% 29%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 210 5% 95%;
+        --secondary-foreground: 210 5% 8%;
+        --muted: 210 5% 95%;
+        --muted-foreground: 210 3% 40%;
+        --accent: 197 100% 29%;
+        --accent-foreground: 0 0% 100%;
+        --destructive: 0 72% 46%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 210 3% 70%;
+        --input: 0 0% 100%;
+        --ring: 197 100% 29%;
+        --toolbar-bg: 210 5% 84%;
+        --toolbar-border: 210 3% 65%;
+        --th-bg: 210 5% 84%;
+        --row-hover: 197 50% 92%;
     }
 
     .jet-black {
-        --background: 0 0% 2%;
-        --foreground: 0 0% 96%;
-        --card: 0 0% 5%;
-        --card-foreground: 0 0% 96%;
-        --popover: 0 0% 5%;
-        --popover-foreground: 0 0% 96%;
-        --primary: 38 92% 55%;
-        --primary-foreground: 0 0% 5%;
-        --secondary: 0 0% 10%;
-        --secondary-foreground: 0 0% 96%;
-        --muted: 0 0% 8%;
-        --muted-foreground: 0 0% 50%;
-        --accent: 38 92% 55%;
-        --accent-foreground: 0 0% 5%;
-        --destructive: 0 84% 60%;
+        --background: 222 47% 7%;
+        --foreground: 210 25% 96%;
+        --card: 222 40% 10%;
+        --card-foreground: 210 25% 96%;
+        --popover: 222 40% 11%;
+        --popover-foreground: 210 25% 96%;
+        --primary: 213 94% 58%;
+        --primary-foreground: 222 47% 7%;
+        --secondary: 222 32% 14%;
+        --secondary-foreground: 210 25% 96%;
+        --muted: 222 28% 13%;
+        --muted-foreground: 215 14% 62%;
+        --accent: 213 94% 58%;
+        --accent-foreground: 222 47% 7%;
+        --destructive: 0 72% 55%;
         --destructive-foreground: 0 0% 100%;
-        --border: 0 0% 14%;
-        --input: 0 0% 14%;
-        --ring: 38 92% 55%;
+        --border: 222 22% 20%;
+        --input: 222 22% 22%;
+        --ring: 213 94% 58%;
     }
 
     .dark {
-        --background: 222 47% 4%;
-        --foreground: 210 40% 98%;
-        --card: 222 47% 7%;
-        --card-foreground: 210 40% 98%;
-        --popover: 222 47% 7%;
-        --popover-foreground: 210 40% 98%;
-        --primary: 142 70% 45%;
+        /* TIA Portal Dark — aligned with SGRN Gateway */
+        --background: 0 0% 11%;
+        --foreground: 0 0% 86%;
+        --card: 0 0% 15%;
+        --card-foreground: 0 0% 86%;
+        --popover: 0 0% 15%;
+        --popover-foreground: 0 0% 86%;
+        --primary: 196 100% 38%;
         --primary-foreground: 0 0% 100%;
-        --secondary: 217 32% 12%;
-        --secondary-foreground: 210 40% 98%;
-        --muted: 217 32% 10%;
-        --muted-foreground: 215 20% 55%;
-        --accent: 142 70% 45%;
+        --secondary: 0 0% 18%;
+        --secondary-foreground: 0 0% 86%;
+        --muted: 0 0% 17%;
+        --muted-foreground: 0 0% 42%;
+        --accent: 196 100% 38%;
         --accent-foreground: 0 0% 100%;
-        --destructive: 0 84.2% 60.2%;
-        --destructive-foreground: 210 40% 98%;
-        --border: 217 32% 20%;
-        --input: 217 32% 20%;
-        --ring: 142 70% 45%;
+        --destructive: 0 72% 55%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 0 0% 28%;
+        --input: 0 0% 11%;
+        --ring: 196 100% 38%;
+        --toolbar-bg: 0 0% 16%;
+        --toolbar-border: 0 0% 27%;
+        --th-bg: 0 0% 20%;
+        --row-hover: 200 18% 22%;
     }
 
     .ayu-dark {
@@ -875,8 +888,7 @@
     .input-field,
     .reg-input,
     .reg-select,
-    .debug-input,
-    .gpao-form-input {
+    .debug-input {
         width: 100%;
         padding: 0.75rem 1rem;
         background-color: hsl(var(--background));
@@ -1153,9 +1165,9 @@
         letter-spacing: 0.15em;
     }
     .badge-status--active {
-        background-color: hsl(142 70% 45% / 0.15);
-        color: hsl(142 70% 45%);
-        border: 1px solid hsl(142 70% 45% / 0.3);
+        background-color: hsl(var(--primary) / 0.1);
+        color: hsl(var(--primary));
+        border: 1px solid hsl(var(--primary) / 0.22);
     }
     .badge-active {
         display: inline-block;
@@ -1164,9 +1176,9 @@
         font-weight: 900;
         text-transform: uppercase;
         letter-spacing: 0.15em;
-        background-color: hsl(142 70% 45% / 0.15);
-        color: hsl(142 70% 45%);
-        border: 1px solid hsl(142 70% 45% / 0.3);
+        background-color: hsl(var(--primary) / 0.1);
+        color: hsl(var(--primary));
+        border: 1px solid hsl(var(--primary) / 0.22);
     }
     .credentials-card {
         margin-top: 1.5rem;
@@ -1712,28 +1724,16 @@
         color: hsl(var(--primary));
     }
     .file-grid-icon--service {
-        color: #f59e0b;
+        color: hsl(var(--primary) / 0.85);
     }
-    .file-grid-icon--image {
-        color: #ec4899;
-    }
-    .file-grid-icon--code {
-        color: #22d3ee;
-    }
-    .file-grid-icon--sheet {
-        color: #4ade80;
-    }
-    .file-grid-icon--audio {
-        color: #a78bfa;
-    }
-    .file-grid-icon--video {
-        color: #fb923c;
-    }
-    .file-grid-icon--archive {
-        color: #facc15;
-    }
+    .file-grid-icon--image,
+    .file-grid-icon--code,
+    .file-grid-icon--sheet,
+    .file-grid-icon--audio,
+    .file-grid-icon--video,
+    .file-grid-icon--archive,
     .file-grid-icon--pdf {
-        color: #f87171;
+        color: hsl(var(--muted-foreground));
     }
     .file-grid-icon--generic {
         color: hsl(var(--muted-foreground));
@@ -1953,47 +1953,6 @@
         justify-content: space-between;
         padding-inline: 1.5rem;
         border-bottom: 1px solid hsl(var(--border));
-    }
-
-    /* ALIASES */
-    .card,
-    .reg-card,
-    .auth-card {
-        border-radius: 0 !important;
-    }
-    .btn-primary,
-    .btn-secondary,
-    .reg-submit-btn,
-    .debug-btn-run {
-        border-radius: 0 !important;
-    }
-    .input-field,
-    .reg-input,
-    .reg-select,
-    .debug-input,
-    .gpao-form-input {
-        border-radius: 0 !important;
-    }
-
-    /* SHARP EDGES OVERRIDE */
-    *,
-    *::before,
-    *::after {
-        border-radius: 0px !important;
-    }
-    .rounded-lg,
-    .rounded-md,
-    .rounded-sm,
-    .rounded-full {
-        border-radius: 0px !important;
-    }
-    .shadow-sm,
-    .shadow-md,
-    .shadow-lg,
-    .shadow-xl,
-    .shadow-2xl {
-        box-shadow: none !important;
-        border: 1px solid hsl(var(--border));
     }
 
     /* INDUSTRIAL DATAGRID (TABLE) */
@@ -2719,7 +2678,7 @@
 
    Design direction:
    - premium industrial SaaS
-   - restrained green/teal accent
+   - restrained blue accent (government / enterprise)
    - layered surfaces instead of heavy borders
    - 8/10/12px geometry
    - readable typography
@@ -2766,45 +2725,30 @@
         --motion-slow: 240ms cubic-bezier(0.16, 1, 0.3, 1);
     }
 
-    :root {
-        --primary: 151 61% 43%;
-        --accent: 151 61% 43%;
-        --ring: 151 61% 43%;
-        --background: 220 24% 6%;
-        --foreground: 213 24% 96%;
-        --card: 220 22% 9%;
-        --card-foreground: 213 24% 96%;
-        --popover: 220 22% 10%;
-        --popover-foreground: 213 24% 96%;
-        --secondary: 220 18% 13%;
-        --secondary-foreground: 213 24% 96%;
-        --muted: 220 18% 12%;
-        --muted-foreground: 217 12% 65%;
-        --border: 219 16% 20%;
-        --input: 219 16% 22%;
-    }
-
     .light {
-        --background: 220 20% 97%;
-        --foreground: 222 30% 12%;
+        --background: 210 6% 92%;
+        --foreground: 210 5% 8%;
         --card: 0 0% 100%;
-        --card-foreground: 222 30% 12%;
+        --card-foreground: 210 5% 8%;
         --popover: 0 0% 100%;
-        --popover-foreground: 222 30% 12%;
-        --secondary: 220 17% 93%;
-        --secondary-foreground: 222 30% 12%;
-        --muted: 220 16% 94%;
-        --muted-foreground: 220 10% 45%;
-        --border: 220 13% 86%;
-        --input: 220 13% 82%;
-        --primary: 151 57% 36%;
-        --accent: 151 57% 36%;
-        --ring: 151 57% 36%;
+        --popover-foreground: 210 5% 8%;
+        --secondary: 210 5% 95%;
+        --secondary-foreground: 210 5% 8%;
+        --muted: 210 5% 95%;
+        --muted-foreground: 210 3% 40%;
+        --border: 210 3% 70%;
+        --input: 0 0% 100%;
+        --primary: 197 100% 29%;
+        --accent: 197 100% 29%;
+        --ring: 197 100% 29%;
+        --toolbar-bg: 210 5% 84%;
+        --toolbar-border: 210 3% 65%;
     }
 
     /* Keep alternate themes colorful, but make their geometry and UI
        behavior consistent with the main product. */
     .jet-black,
+    .dark,
     .ayu-dark,
     .nord,
     .dracula,
@@ -2816,16 +2760,6 @@
         --radius-sm: 8px;
         --radius-md: 10px;
         --radius-lg: 14px;
-    }
-
-    /* ----------------------------------------------------------------------
-       GLOBAL RESET OVERRIDE
-       ---------------------------------------------------------------------- */
-
-    *,
-    *::before,
-    *::after {
-        border-radius: initial;
     }
 
     html {
@@ -2896,18 +2830,29 @@
        ---------------------------------------------------------------------- */
 
     .desktop-shell {
+        display: flex;
+        width: 100%;
+        height: 100%;
         min-height: 100%;
+        overflow: hidden;
         background: hsl(var(--background));
     }
 
     .desktop-main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
         min-width: 0;
+        overflow: hidden;
         background: hsl(var(--background));
     }
 
     .desktop-content {
+        flex: 1;
         min-width: 0;
-        padding: 24px 28px 32px;
+        min-height: 0;
+        overflow: auto;
+        padding: 12px 14px 16px;
     }
 
     /* ----------------------------------------------------------------------
@@ -2915,21 +2860,21 @@
        ---------------------------------------------------------------------- */
 
     .desktop-sidebar {
-        width: 228px;
-        flex: 0 0 228px;
+        width: 196px;
+        flex: 0 0 196px;
         background: linear-gradient(180deg, hsl(var(--card)), hsl(var(--background)));
         border-right: 1px solid hsl(var(--border) / 0.85);
         box-shadow: inset -1px 0 hsl(var(--foreground) / 0.015);
     }
 
     .sidebar-container {
-        padding: 16px 12px;
+        padding: 10px 8px;
     }
 
     .sidebar-logo-area {
         justify-content: flex-start;
-        padding: 8px 12px 20px;
-        margin-bottom: 12px;
+        padding: 4px 4px 12px;
+        margin-bottom: 8px;
         border-bottom: 1px solid hsl(var(--border) / 0.6);
     }
 
@@ -2962,11 +2907,11 @@
     .desktop-sidebar-link {
         justify-content: flex-start;
         width: 100%;
-        min-height: 42px;
-        padding: 10px 12px;
-        gap: 11px;
+        min-height: 40px;
+        padding: 8px 8px;
+        gap: 9px;
         border: 1px solid transparent !important;
-        border-left: 1px solid transparent !important;
+        border-left: 3px solid transparent !important;
         border-radius: var(--radius-sm) !important;
         color: hsl(var(--muted-foreground));
         background: transparent;
@@ -2986,10 +2931,9 @@
     .desktop-sidebar-link.active {
         background: hsl(var(--primary) / 0.1);
         border-color: hsl(var(--primary) / 0.16) !important;
+        border-left-color: hsl(var(--primary)) !important;
         color: hsl(var(--foreground));
-        box-shadow:
-            inset 3px 0 hsl(var(--primary)),
-            0 4px 14px hsl(var(--primary) / 0.06);
+        box-shadow: none;
     }
 
     .desktop-sidebar-link.active svg {
@@ -3000,13 +2944,17 @@
         transform: translateY(1px);
     }
 
+    .mobile-nav {
+        display: none;
+    }
+
     /* ----------------------------------------------------------------------
        HEADER
        ---------------------------------------------------------------------- */
 
     .desktop-header {
         height: 64px;
-        padding-inline: 22px;
+        padding-inline: 18px;
         background: hsl(var(--background) / 0.8);
         border-bottom: 1px solid hsl(var(--border) / 0.82);
         backdrop-filter: blur(18px);
@@ -3022,7 +2970,12 @@
         font-weight: 600;
         letter-spacing: -0.01em;
         text-transform: none;
-        color: hsl(var(--muted-foreground));
+        color: hsl(var(--foreground));
+    }
+
+    .header-logo-subtitle {
+        color: hsl(var(--primary));
+        font-weight: 600;
     }
 
     .header-actions {
@@ -3240,7 +3193,6 @@
     .reg-input,
     .reg-select,
     .debug-input,
-    .gpao-form-input,
     input,
     select,
     textarea {
@@ -3270,7 +3222,6 @@
     .reg-input:focus,
     .reg-select:focus,
     .debug-input:focus,
-    .gpao-form-input:focus,
     input:focus,
     select:focus,
     textarea:focus {
@@ -3307,9 +3258,9 @@
 
     .badge-status--active,
     .badge-active {
-        background: hsl(151 61% 43% / 0.12);
-        color: hsl(151 61% 53%);
-        border: 1px solid hsl(151 61% 43% / 0.22);
+        background: hsl(var(--primary) / 0.1);
+        color: hsl(var(--primary));
+        border: 1px solid hsl(var(--primary) / 0.22);
     }
 
     /* ----------------------------------------------------------------------
@@ -3658,6 +3609,46 @@
         gap: 12px;
     }
 
+    .drive-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding: 12px 14px;
+        border: 1px solid hsl(var(--border) / 0.85);
+        border-radius: var(--radius-md) !important;
+        background: hsl(var(--card));
+        box-shadow: var(--shadow-sm);
+        margin-bottom: 14px;
+    }
+
+    .drive-toolbar-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+    }
+
+    .drive-toolbar-row--actions {
+        justify-content: space-between;
+    }
+
+    .drive-toolbar-actions {
+        margin-left: auto;
+        flex-wrap: wrap;
+    }
+
+    .drive-toolbar-btn {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0;
+        text-transform: none;
+    }
+
+    .drive-toolbar-btn span {
+        white-space: nowrap;
+    }
+
     .drive-view-toggle,
     .drive-scope-tabs {
         gap: 2px;
@@ -3665,15 +3656,68 @@
         height: auto;
         border: 1px solid hsl(var(--border));
         border-radius: var(--radius-sm) !important;
-        background: hsl(var(--card));
+        background: hsl(var(--muted) / 0.35);
     }
 
     .drive-scope-btn {
         min-height: 34px;
         padding: 7px 11px;
         border-radius: 6px !important;
+        border-right: none;
         font-size: 12px;
         font-weight: 550;
+        letter-spacing: 0;
+        text-transform: none;
+    }
+
+    .drive-scope-btn-active {
+        background: hsl(var(--primary));
+        color: hsl(var(--primary-foreground));
+        box-shadow: 0 1px 2px hsl(var(--primary) / 0.25);
+    }
+
+    .drive-search-wrapper {
+        flex: 1 1 200px;
+        min-width: min(100%, 220px);
+        max-width: 420px;
+        margin-left: auto;
+    }
+
+    .drive-search-input {
+        height: 34px;
+        font-size: 13px;
+        letter-spacing: 0;
+        text-transform: none;
+        border-radius: var(--radius-sm) !important;
+        border: 1px solid hsl(var(--border));
+        background: hsl(var(--background));
+    }
+
+    .drive-breadcrumb {
+        height: auto;
+        min-height: 36px;
+        padding: 6px 10px;
+        border: 1px solid hsl(var(--border) / 0.75);
+        border-radius: var(--radius-sm) !important;
+        background: hsl(var(--card));
+    }
+
+    .drive-breadcrumb-item {
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 0;
+        text-transform: none;
+        max-width: 220px;
+    }
+
+    .drive-breadcrumb-current {
+        color: hsl(var(--primary));
+        font-weight: 600;
+    }
+
+    .drive-breadcrumb-root::before {
+        font-weight: 600;
+        font-size: 13px;
     }
 
     .file-card {
@@ -3925,21 +3969,102 @@
     }
 
     @media (max-width: 760px) {
+        body {
+            overflow: auto;
+        }
+
+        .desktop-shell {
+            min-height: 100dvh;
+            flex-direction: column;
+        }
+
         .desktop-sidebar {
             display: none;
         }
 
+        .desktop-main {
+            flex: 1;
+            min-height: 0;
+        }
+
         .desktop-header {
-            height: 58px;
-            padding-inline: 14px;
+            height: 56px;
+            padding-inline: 12px;
         }
 
         .desktop-content {
-            padding: 16px;
+            padding: 16px 16px calc(76px + env(safe-area-inset-bottom, 0px));
+            overflow: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .header-logo-subtitle {
+            display: none;
         }
 
         .header-user-info {
             display: none;
+        }
+
+        .theme-toggle-label-group {
+            display: none;
+        }
+
+        .theme-toggle-trigger {
+            width: 36px;
+            min-width: 36px;
+            padding-inline: 0;
+            justify-content: center;
+        }
+
+        .mobile-nav {
+            display: flex;
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 60;
+            align-items: stretch;
+            justify-content: space-around;
+            gap: 4px;
+            min-height: calc(60px + env(safe-area-inset-bottom, 0px));
+            padding: 6px 8px env(safe-area-inset-bottom, 0px);
+            background: hsl(var(--card) / 0.92);
+            border-top: 1px solid hsl(var(--border) / 0.85);
+            backdrop-filter: blur(16px);
+            box-shadow: 0 -8px 24px hsl(var(--background) / 0.35);
+        }
+
+        .mobile-nav-link {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            min-height: 48px;
+            padding: 6px 4px;
+            border: 1px solid transparent;
+            border-radius: var(--radius-sm) !important;
+            color: hsl(var(--muted-foreground));
+            font-size: 11px;
+            font-weight: 550;
+            line-height: 1.1;
+            transition:
+                background-color var(--motion-fast),
+                color var(--motion-fast),
+                border-color var(--motion-fast);
+        }
+
+        .mobile-nav-link:hover {
+            color: hsl(var(--foreground));
+            background: hsl(var(--foreground) / 0.04);
+        }
+
+        .mobile-nav-link.active {
+            color: hsl(var(--primary));
+            background: hsl(var(--primary) / 0.1);
+            border-color: hsl(var(--primary) / 0.22);
         }
 
         .signin-body {
@@ -4102,17 +4227,6 @@
    ties (shadcn faithful: a custom className prop beats base variants).
    ========================================================================== */
 @layer shims {
-    The ui/* primitives and several pages emit Tailwind-style utility
-       class names, but this project ships hand-written CSS instead of
-       Tailwind. Every rule below backs a utility that is actually emitted
-       in tsx yet previously had no definition — which left buttons
-       unpadded/unsized, menus unboxed and spacing collapsed. Values follow
-       the Tailwind scale; themeable colors map onto the CSS variables so
-       all ten themes keep working. Deliberately NOT shimmed: motion
-       keyframe utilities (menus appear instantly — acceptable),
-       structural arbitrary variants ([&...]) and svg-size resets.
-       ================================================================== */
-
     /* --- layout / display --- */
     .relative {
         position: relative;
@@ -5120,12 +5234,30 @@
 @layer components {
     /* ---------- global density ---------- */
     .desktop-content {
-        padding: 20px 24px 28px !important;
+        padding: 14px 18px 22px !important;
+    }
+
+    .desktop-sidebar {
+        width: 196px !important;
+        flex: 0 0 196px !important;
+    }
+
+    .sidebar-container {
+        padding: 10px 8px !important;
+    }
+
+    .sidebar-logo-area {
+        padding: 4px 4px 12px !important;
+        margin-bottom: 8px !important;
+    }
+
+    .desktop-sidebar-link {
+        padding: 8px !important;
     }
 
     .desktop-header {
         height: 56px !important;
-        padding-inline: 18px !important;
+        padding-inline: 14px !important;
     }
 
     .header-user-name {
@@ -5178,7 +5310,6 @@
     .reg-input,
     .reg-select,
     .debug-input,
-    .gpao-form-input,
     input,
     select,
     textarea {
@@ -5334,8 +5465,40 @@
     }
 
     .drive-toolbar {
-        padding: 8px 12px !important;
-        gap: 6px !important;
+        padding: 10px 12px !important;
+        gap: 8px !important;
+    }
+
+    .drive-toolbar-row {
+        gap: 8px !important;
+    }
+
+    @media (max-width: 760px) {
+        .drive-toolbar-row--actions {
+            flex-direction: column;
+            align-items: stretch !important;
+        }
+
+        .drive-toolbar-actions {
+            width: 100%;
+            margin-left: 0 !important;
+        }
+
+        .drive-toolbar-btn span {
+            display: none;
+        }
+
+        .drive-scope-tabs {
+            flex: 1 1 100%;
+            overflow-x: auto;
+        }
+
+        .drive-search-wrapper {
+            flex: 1 1 100% !important;
+            width: 100% !important;
+            max-width: none !important;
+            margin-left: 0 !important;
+        }
     }
 
     .drive-scope-tabs,
@@ -5349,14 +5512,14 @@
         padding: 6px 10px !important;
         font-size: 11.5px !important;
         border-radius: 6px !important;
+        white-space: nowrap;
+        text-transform: none !important;
+        letter-spacing: 0 !important;
+        font-weight: 550 !important;
     }
 
     .drive-search-input {
-        height: 30px !important;
-    }
-
-    .drive-search-wrapper {
-        width: 200px !important;
+        height: 34px !important;
     }
 
     .grid-industrial-drive {
@@ -5394,5 +5557,694 @@
         font-size: 11px !important;
         letter-spacing: 0.16em !important;
         opacity: 0.7;
+    }
+}
+
+/* ==========================================================================
+   GATEWAY-INSPIRED SHELL — unlayered, wins cascade
+   Matches SGRN Gateway TIA Portal industrial aesthetic.
+   ========================================================================== */
+
+:root,
+.light,
+.dark,
+.jet-black {
+    --toolbar-bg: var(--toolbar-bg, 210 5% 84%);
+    --toolbar-border: var(--toolbar-border, 210 3% 65%);
+    --mono: "Consolas", "JetBrains Mono", "Courier New", monospace;
+    --font-sans: "Segoe UI", system-ui, Arial, sans-serif;
+}
+
+.dark,
+.jet-black {
+    --toolbar-bg: 0 0% 16%;
+    --toolbar-border: 0 0% 27%;
+}
+
+body {
+    font-family: var(--font-sans) !important;
+    font-size: 12px !important;
+    line-height: 1.45 !important;
+    background: hsl(var(--background)) !important;
+}
+
+/* App shell */
+.desktop-shell {
+    display: flex !important;
+    width: 100% !important;
+    height: 100% !important;
+    overflow: hidden !important;
+    background: hsl(var(--background)) !important;
+}
+
+.desktop-main {
+    flex: 1 1 0% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+}
+
+.desktop-content {
+    flex: 1 1 0% !important;
+    min-height: 0 !important;
+    overflow: auto !important;
+    padding: 10px 12px 14px !important;
+}
+
+/* Sidebar — gateway docs-sidebar style */
+.desktop-sidebar {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 200px !important;
+    flex: 0 0 200px !important;
+    background: hsl(var(--muted)) !important;
+    border-right: 1px solid hsl(var(--border)) !important;
+    box-shadow: none !important;
+    z-index: 50;
+}
+
+.sidebar-container {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100% !important;
+    padding: 10px 0 16px !important;
+}
+
+.sidebar-logo-area {
+    display: flex !important;
+    align-items: center !important;
+    padding: 4px 14px 12px !important;
+    margin-bottom: 4px !important;
+    border-bottom: 1px solid hsl(var(--border)) !important;
+}
+
+.sidebar-logo-icon {
+    width: 28px !important;
+    height: 28px !important;
+    padding: 5px !important;
+    border-radius: 2px !important;
+    background: hsl(var(--primary) / 0.12) !important;
+    color: hsl(var(--primary)) !important;
+    filter: none !important;
+}
+
+.sidebar-nav {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0 !important;
+    padding: 4px 0 !important;
+}
+
+.sidebar-section-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
+    padding: 10px 16px 4px;
+}
+
+.desktop-sidebar-link {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 8px !important;
+    width: 100% !important;
+    min-height: 32px !important;
+    padding: 5px 16px !important;
+    margin: 0 !important;
+    border: none !important;
+    border-left: 3px solid transparent !important;
+    border-radius: 0 !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    color: hsl(var(--muted-foreground)) !important;
+    background: transparent !important;
+    cursor: pointer;
+    transition:
+        background 0.15s,
+        color 0.15s,
+        border-color 0.15s;
+}
+
+.desktop-sidebar-link:hover {
+    background: hsl(var(--primary) / 0.08) !important;
+    color: hsl(var(--primary)) !important;
+    border-color: transparent !important;
+}
+
+.desktop-sidebar-link.active {
+    background: hsl(var(--primary) / 0.1) !important;
+    color: hsl(var(--primary)) !important;
+    border-left-color: hsl(var(--primary)) !important;
+    box-shadow: none !important;
+}
+
+.desktop-sidebar-link.active svg {
+    color: hsl(var(--primary)) !important;
+}
+
+.sidebar-label {
+    display: inline !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0 !important;
+}
+
+/* Header — gateway toolbar band */
+.desktop-header {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    flex-shrink: 0 !important;
+    height: 32px !important;
+    padding: 0 10px !important;
+    background: hsl(var(--toolbar-bg)) !important;
+    border-bottom: 1px solid hsl(var(--toolbar-border)) !important;
+    backdrop-filter: none !important;
+    box-shadow: none !important;
+    z-index: 100;
+}
+
+.header-logo-container {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+}
+
+.header-logo-orb {
+    width: 8px;
+    height: 8px;
+    background: hsl(var(--primary));
+    border-radius: 1px;
+    flex-shrink: 0;
+}
+
+.header-logo-text {
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    letter-spacing: 1.5px !important;
+    text-transform: uppercase !important;
+    color: hsl(var(--foreground)) !important;
+    white-space: nowrap;
+}
+
+.header-logo-subtitle {
+    font-weight: 400 !important;
+    opacity: 0.55;
+    letter-spacing: 0.5px !important;
+    text-transform: none !important;
+    color: hsl(var(--foreground)) !important;
+}
+
+.header-actions {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+}
+
+.header-utility-group {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    padding-right: 10px !important;
+    border-right: 1px solid hsl(var(--toolbar-border)) !important;
+}
+
+.header-toolbar-sep {
+    width: 1px;
+    height: 16px;
+    background: hsl(var(--toolbar-border));
+    flex-shrink: 0;
+}
+
+.header-icon-btn,
+.header-signout-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 28px !important;
+    height: 28px !important;
+    padding: 0 !important;
+    border-radius: 2px !important;
+    color: hsl(var(--muted-foreground)) !important;
+    background: transparent !important;
+    cursor: pointer;
+}
+
+.header-icon-btn:hover,
+.header-signout-btn:hover {
+    background: hsl(var(--primary) / 0.1) !important;
+    color: hsl(var(--primary)) !important;
+}
+
+.header-user-area {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+}
+
+.header-user-info {
+    display: flex !important;
+    flex-direction: column !important;
+    text-align: right !important;
+    gap: 0 !important;
+}
+
+.header-user-name {
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    line-height: 1.2 !important;
+    color: hsl(var(--foreground)) !important;
+}
+
+.header-user-role {
+    font-size: 9px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.5px !important;
+    text-transform: uppercase !important;
+    color: hsl(var(--muted-foreground)) !important;
+}
+
+/* Theme toggle — compact */
+.theme-toggle-trigger {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    height: 26px !important;
+    min-height: 26px !important;
+    padding: 0 8px !important;
+    font-size: 11px !important;
+    border: 1px solid hsl(var(--border)) !important;
+    border-radius: 3px !important;
+    background: hsl(var(--card)) !important;
+    box-shadow: none !important;
+}
+
+.theme-toggle-top-label {
+    display: none !important;
+}
+
+.theme-toggle-value {
+    font-size: 10px !important;
+    font-weight: 600 !important;
+    text-transform: none !important;
+    letter-spacing: 0 !important;
+}
+
+/* Drive — gateway tab-bar + toolbar */
+.drive-page {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+}
+
+.drive-toolbar {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+    padding: 0 !important;
+    margin-bottom: 8px !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.drive-toolbar-row {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    gap: 8px !important;
+    min-height: 32px;
+    padding: 0 8px;
+    background: hsl(var(--muted));
+    border-bottom: 1px solid hsl(var(--border));
+}
+
+.drive-toolbar-row--actions {
+    background: hsl(var(--toolbar-bg)) !important;
+    border: 1px solid hsl(var(--border)) !important;
+    border-radius: 3px !important;
+    padding: 4px 8px !important;
+    justify-content: space-between !important;
+    flex-direction: row !important;
+}
+
+.drive-scope-tabs,
+.drive-view-toggle {
+    display: flex !important;
+    align-items: center !important;
+    gap: 2px !important;
+    height: auto !important;
+    padding: 0 !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+}
+
+.drive-scope-btn,
+.drive-view-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    min-height: 24px !important;
+    padding: 2px 10px !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+    color: hsl(var(--muted-foreground)) !important;
+    background: transparent !important;
+    border: none !important;
+    border-bottom: 2px solid transparent !important;
+    border-radius: 0 !important;
+    cursor: pointer;
+    transition:
+        color 0.15s,
+        border-color 0.15s,
+        background 0.15s;
+}
+
+.drive-scope-btn:hover,
+.drive-view-btn:hover {
+    color: hsl(var(--primary)) !important;
+    background: transparent !important;
+}
+
+.drive-scope-btn-active,
+.drive-view-btn-active {
+    color: hsl(var(--primary)) !important;
+    background: transparent !important;
+    border-bottom-color: hsl(var(--primary)) !important;
+    box-shadow: none !important;
+}
+
+.drive-view-btn-active {
+    background: hsl(var(--primary)) !important;
+    color: hsl(var(--primary-foreground)) !important;
+    border-bottom-color: hsl(var(--primary)) !important;
+    border-radius: 2px !important;
+    padding: 2px 6px !important;
+}
+
+.drive-search-wrapper {
+    flex: 1 1 180px !important;
+    max-width: 240px !important;
+    margin-left: auto !important;
+}
+
+.drive-search-input {
+    height: 26px !important;
+    padding-left: 28px !important;
+    font-size: 11px !important;
+    border: 1px solid hsl(var(--border)) !important;
+    border-radius: 3px !important;
+    background: hsl(var(--card)) !important;
+}
+
+.drive-search-input:focus {
+    border-color: hsl(var(--primary)) !important;
+    outline: none;
+}
+
+.drive-search-icon {
+    left: 8px !important;
+    width: 14px !important;
+    height: 14px !important;
+}
+
+.drive-breadcrumb {
+    display: flex !important;
+    align-items: center !important;
+    flex-wrap: wrap !important;
+    gap: 2px !important;
+    min-height: 28px !important;
+    padding: 2px 8px !important;
+    margin-bottom: 6px !important;
+    background: hsl(var(--card)) !important;
+    border: 1px solid hsl(var(--border)) !important;
+    border-radius: 3px !important;
+}
+
+.drive-breadcrumb-item {
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    color: hsl(var(--muted-foreground)) !important;
+    padding: 2px 4px !important;
+    border-radius: 2px !important;
+    cursor: pointer;
+}
+
+.drive-breadcrumb-item:hover:not(:disabled) {
+    background: hsl(var(--primary) / 0.08) !important;
+    color: hsl(var(--primary)) !important;
+}
+
+.drive-breadcrumb-current {
+    color: hsl(var(--primary)) !important;
+}
+
+.drive-new-folder-prompt {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding: 6px 10px;
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: 3px;
+}
+
+.drive-new-folder-prompt svg {
+    flex-shrink: 0;
+    color: hsl(var(--primary));
+}
+
+.drive-new-folder-prompt .input-desktop {
+    flex: 1;
+    min-width: 0;
+}
+
+.drive-toolbar-actions {
+    display: flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    margin-left: auto !important;
+    flex-wrap: wrap !important;
+}
+
+.drive-toolbar-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    min-height: 26px !important;
+    padding: 2px 10px !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+    border-radius: 3px !important;
+}
+
+.drive-toolbar-btn span {
+    display: inline !important;
+}
+
+.btn-industrial-primary,
+.btn-desktop-primary {
+    background: hsl(var(--primary)) !important;
+    color: hsl(var(--primary-foreground)) !important;
+    border: 1px solid hsl(var(--primary)) !important;
+    box-shadow: none !important;
+}
+
+.btn-industrial-primary:hover,
+.btn-desktop-primary:hover {
+    opacity: 0.88;
+}
+
+.btn-industrial-secondary,
+.btn-desktop-secondary,
+.btn-desktop {
+    background: hsl(var(--card)) !important;
+    color: hsl(var(--foreground)) !important;
+    border: 1px solid hsl(var(--border)) !important;
+    box-shadow: none !important;
+}
+
+.btn-industrial-secondary:hover,
+.btn-desktop-secondary:hover,
+.btn-desktop:hover {
+    background: hsl(var(--primary) / 0.08) !important;
+    border-color: hsl(var(--primary)) !important;
+    color: hsl(var(--primary)) !important;
+}
+
+/* Tables — gateway style */
+.datagrid-industrial th,
+table th {
+    background: hsl(var(--th-bg, var(--muted))) !important;
+    color: hsl(var(--muted-foreground)) !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.6px !important;
+    text-transform: uppercase !important;
+    padding: 6px 12px !important;
+    border-bottom: 1px solid hsl(var(--border)) !important;
+}
+
+.datagrid-industrial td,
+table td {
+    padding: 5px 12px !important;
+    font-size: 11px !important;
+    border-bottom: 1px solid hsl(var(--border) / 0.35) !important;
+}
+
+.datagrid-industrial tr:hover td,
+table tbody tr:hover td {
+    background: hsl(var(--row-hover, var(--primary) / 0.06)) !important;
+}
+
+/* Cards / panels */
+.panel,
+.card,
+.profile-card,
+.reg-card,
+.file-card {
+    border: 1px solid hsl(var(--border)) !important;
+    border-radius: 3px !important;
+    box-shadow: none !important;
+    background: hsl(var(--card)) !important;
+}
+
+.panel-header,
+.stats-header {
+    min-height: 32px !important;
+    padding: 6px 12px !important;
+    background: hsl(var(--toolbar-bg)) !important;
+    border-bottom: 1px solid hsl(var(--border)) !important;
+}
+
+.panel-title,
+.stats-title {
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.3px !important;
+    text-transform: uppercase !important;
+}
+
+/* Sign-in — cleaner industrial */
+.signin-topbar {
+    height: 32px !important;
+    padding: 0 12px !important;
+    background: hsl(var(--toolbar-bg)) !important;
+    border-bottom: 1px solid hsl(var(--toolbar-border)) !important;
+}
+
+.signin-brand-title {
+    font-size: 2rem !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.02em !important;
+}
+
+.signin-form-title {
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    text-transform: none !important;
+    letter-spacing: 0 !important;
+}
+
+.signin-label {
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.5px !important;
+}
+
+.input-desktop,
+.input-field {
+    min-height: 32px !important;
+    padding: 4px 8px !important;
+    font-size: 12px !important;
+    border: 1px solid hsl(var(--border)) !important;
+    border-radius: 3px !important;
+    background: hsl(var(--input)) !important;
+}
+
+.input-desktop:focus,
+.input-field:focus {
+    border-color: hsl(var(--primary)) !important;
+    outline: none;
+}
+
+/* Page headers */
+.page-header {
+    margin-bottom: 12px !important;
+}
+
+.page-title {
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.3px !important;
+    text-transform: uppercase !important;
+}
+
+.page-header-line {
+    height: 1px !important;
+    background: hsl(var(--border)) !important;
+}
+
+@media (max-width: 1024px) {
+    .desktop-sidebar {
+        width: 68px !important;
+        flex: 0 0 68px !important;
+    }
+
+    .sidebar-label,
+    .sidebar-section-label {
+        display: none !important;
+    }
+
+    .desktop-sidebar-link {
+        justify-content: center !important;
+        padding-inline: 0 !important;
+    }
+}
+
+@media (max-width: 760px) {
+    .desktop-sidebar {
+        display: none !important;
+    }
+
+    .header-logo-subtitle,
+    .header-user-info {
+        display: none !important;
+    }
+
+    .theme-toggle-value {
+        display: none !important;
+    }
+
+    .drive-toolbar-row--actions {
+        flex-direction: column !important;
+        align-items: stretch !important;
+    }
+
+    .drive-toolbar-actions {
+        width: 100% !important;
+        margin-left: 0 !important;
+    }
+
+    .drive-toolbar-btn span {
+        display: none !important;
+    }
+
+    .drive-search-wrapper {
+        flex: 1 1 100% !important;
+        max-width: none !important;
+        margin-left: 0 !important;
     }
 }

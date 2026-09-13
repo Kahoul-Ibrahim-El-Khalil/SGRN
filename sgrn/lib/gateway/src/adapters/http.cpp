@@ -2,6 +2,7 @@
 #include <sgrn/common/json_helper.hpp>
 #include <sgrn/common/path_utils.hpp>
 #include <sgrn/gateway/adapters/http.hpp>
+#include <sgrn/gateway/adapters/rate_limit.hpp>
 #include <sgrn/gateway/common/SecurityHelper.hpp>
 #include <sgrn/gateway/core/TelemetryBroker.hpp>
 #include <sgrn/gateway/core/snapshot.hpp>
@@ -58,7 +59,7 @@ void HttpAdapter::configure(const PlcSchemaStore& t_registry, PlcMemory& t_memor
     refs_.db = std::move(tsp_db);
 }
 
-void HttpAdapter::registerRoutes(crow::SimpleApp& t_app) {
+void HttpAdapter::registerRoutes(GatewayApp& t_app) {
     /**
      * REST API Documentation
      * ──────────────────────
@@ -132,18 +133,22 @@ void HttpAdapter::registerRoutes(crow::SimpleApp& t_app) {
     };
 
     // ── Registry ─────────────────────────────────────────────────────────────
-    CROW_ROUTE(t_app, "/registry/types").methods("GET"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
-        return serve(t_req, "", &HttpAdapter::handleGetRegistryTypes);
-    });
-    CROW_ROUTE(t_app, "/registry/modbus").methods("GET"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
-        return serve(t_req, "", &HttpAdapter::handleGetModbusRegistry);
-    });
-    CROW_ROUTE(t_app, "/registry").methods("GET"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
-        return serve(t_req, "", &HttpAdapter::handleGetRegistry);
-    });
+    CROW_ROUTE(t_app, "/registry/types")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
+        .methods("GET"_method, "OPTIONS"_method)(
+            [serve](const crow::request& t_req) { return serve(t_req, "", &HttpAdapter::handleGetRegistryTypes); });
+    CROW_ROUTE(t_app, "/registry/modbus")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
+        .methods("GET"_method, "OPTIONS"_method)(
+            [serve](const crow::request& t_req) { return serve(t_req, "", &HttpAdapter::handleGetModbusRegistry); });
+    CROW_ROUTE(t_app, "/registry")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
+        .methods("GET"_method, "OPTIONS"_method)(
+            [serve](const crow::request& t_req) { return serve(t_req, "", &HttpAdapter::handleGetRegistry); });
 
     // ── Semantic data API (Crow <path> captures the remainder incl. '/') ────
     CROW_ROUTE(t_app, "/data/<path>")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
         .methods("GET"_method, "POST"_method, "PUT"_method, "OPTIONS"_method)([serve](const crow::request& t_req, std::string t_sub) {
             if (t_req.method == "POST"_method)
                 return serve(t_req, std::move(t_sub), &HttpAdapter::handlePost);
@@ -161,40 +166,50 @@ void HttpAdapter::registerRoutes(crow::SimpleApp& t_app) {
             return serve(t_req, "", &HttpAdapter::handlePut);
         return serve(t_req, "", &HttpAdapter::handleGetData);
     };
-    CROW_ROUTE(t_app, "/data/").methods("GET"_method, "POST"_method, "PUT"_method, "OPTIONS"_method)(data_root);
+    CROW_ROUTE(t_app, "/data/")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
+        .methods("GET"_method, "POST"_method, "PUT"_method, "OPTIONS"_method)(data_root);
 
     // ── Raw Memory API ───────────────────────────────────────────────────────
     CROW_ROUTE(t_app, "/memory/db/<path>")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
         .methods("GET"_method, "PUT"_method, "OPTIONS"_method)([serve](const crow::request& t_req, std::string t_sub) {
             if (t_req.method == "PUT"_method)
                 return serve(t_req, std::move(t_sub), &HttpAdapter::handlePutMemoryBinary);
             return serve(t_req, std::move(t_sub), &HttpAdapter::handleGetMemoryBinary);
         });
-    CROW_ROUTE(t_app, "/memory/batch").methods("PUT"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
-        return serve(t_req, "", &HttpAdapter::handlePutMemoryBatch);
-    });
+    CROW_ROUTE(t_app, "/memory/batch")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
+        .methods("PUT"_method, "OPTIONS"_method)(
+            [serve](const crow::request& t_req) { return serve(t_req, "", &HttpAdapter::handlePutMemoryBatch); });
 
     // ── Diagnostics ──────────────────────────────────────────────────────────
-    CROW_ROUTE(t_app, "/connections").methods("GET"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
-        return serve(t_req, "", &HttpAdapter::handleGetConnections);
-    });
-    CROW_ROUTE(t_app, "/db/history").methods("GET"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
-        return serve(t_req, "", &HttpAdapter::handleGetDbHistory);
-    });
-    CROW_ROUTE(t_app, "/db/sessions").methods("GET"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
-        return serve(t_req, "", &HttpAdapter::handleGetDbSessions);
-    });
-    CROW_ROUTE(t_app, "/db/logs").methods("GET"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
-        return serve(t_req, "", &HttpAdapter::handleGetDbLogs);
-    });
-    CROW_ROUTE(t_app, "/endpoints").methods("GET"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
-        return serve(t_req, "", &HttpAdapter::handleGetEndpoints);
-    });
+    CROW_ROUTE(t_app, "/connections")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
+        .methods("GET"_method, "OPTIONS"_method)(
+            [serve](const crow::request& t_req) { return serve(t_req, "", &HttpAdapter::handleGetConnections); });
+    CROW_ROUTE(t_app, "/db/history")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
+        .methods("GET"_method, "OPTIONS"_method)(
+            [serve](const crow::request& t_req) { return serve(t_req, "", &HttpAdapter::handleGetDbHistory); });
+    CROW_ROUTE(t_app, "/db/sessions")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
+        .methods("GET"_method, "OPTIONS"_method)(
+            [serve](const crow::request& t_req) { return serve(t_req, "", &HttpAdapter::handleGetDbSessions); });
+    CROW_ROUTE(t_app, "/db/logs")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
+        .methods("GET"_method, "OPTIONS"_method)(
+            [serve](const crow::request& t_req) { return serve(t_req, "", &HttpAdapter::handleGetDbLogs); });
+    CROW_ROUTE(t_app, "/endpoints")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
+        .methods("GET"_method, "OPTIONS"_method)(
+            [serve](const crow::request& t_req) { return serve(t_req, "", &HttpAdapter::handleGetEndpoints); });
 
     // ── Security policy introspection ────────────────────────────────────────
-    CROW_ROUTE(t_app, "/api/policy").methods("GET"_method, "OPTIONS"_method)([serve](const crow::request& t_req) {
-        return serve(t_req, "", &HttpAdapter::handleGetPolicy);
-    });
+    CROW_ROUTE(t_app, "/api/policy")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
+        .methods("GET"_method, "OPTIONS"_method)(
+            [serve](const crow::request& t_req) { return serve(t_req, "", &HttpAdapter::handleGetPolicy); });
 
     registerWebAssets(t_app);
 }

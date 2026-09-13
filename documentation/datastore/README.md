@@ -1,6 +1,6 @@
 # HTTP API (sgrn)
 
-This API is implemented natively in C++ using Drogon. All endpoints, filters, and serialization are custom-coded for high throughput and security. Endpoints are grouped by function: authentication, telemetry, storage, admin, query, GPAO, and compile-time generated CRUD views. See the referenced files in this directory for details on each group.
+This API is implemented natively in C++ using Drogon. All endpoints, filters, and serialization are custom-coded for high throughput and security. Endpoints are grouped by function: authentication, telemetry, storage, admin, query, and compile-time generated CRUD views. See the referenced files in this directory for details on each group.
 
 Base path: `/api/v1/`
 
@@ -21,6 +21,10 @@ Session propagation:
 - Strictly uses standard `Authorization: Bearer <jwt>`, ensuring stateless validation scaled securely across node distributions.
 - *Some legacy OT clients may fall back to the `SGRN-TOKEN` header, but modern tooling heavily prefers `Authorization`.*
 
+## Development
+
+- [development.md](development.md): end-to-end checklist (SQL → manifest → codegen → React → embedded web assets), out-of-scope boundaries (joins, storage, admin), and why **Bun** is required at build time.
+
 ## Endpoint Index
 
 - [auth.md](auth.md): user sign-in/out, agent (automated service) sign-in/out and sessions.
@@ -28,4 +32,4 @@ Session propagation:
 - [storage.md](storage.md): storage VFS, upload/download and drive operations.
 - [admin.md](admin.md): admin endpoints (users, agents, endpoint list).
 - [query.md](query.md): query endpoints for organisations/departments/statuses/user info.
-- [gpao.md](gpao.md): production management (GPAO) CRUD endpoints.
+- [crud_views.md](crud_views.md): compile-time generated table CRUD (`/api/v1/domains`, `/api/v1/users`, …) — filters, pagination, JSON bodies, and error shapes.

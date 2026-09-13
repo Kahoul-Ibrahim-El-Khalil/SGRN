@@ -65,7 +65,7 @@ sgrn::Result<void> WebSocketAdapter::start(const std::string& t_ip, uint16_t t_p
     return {};
 }
 
-void WebSocketAdapter::registerRoutes(crow::SimpleApp& t_app) {
+void WebSocketAdapter::registerRoutes(GatewayApp& t_app) {
     // Subscribe to the broker on first registration so telemetry flows even
     // on the unified path (which never calls start()). Idempotent.
     if (broker_sub_id_ == 0) {

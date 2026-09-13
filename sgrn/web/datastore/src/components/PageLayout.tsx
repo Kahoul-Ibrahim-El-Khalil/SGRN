@@ -1,6 +1,7 @@
 // @/components/PageLayout.tsx
 import { NavigationBar } from "@/components/NavigationBar";
 import { Sidebar } from "@/components/Sidebar";
+import { MobileNav } from "@/components/MobileNav";
 
 interface PageLayoutProps {
     children: React.ReactNode;
@@ -25,6 +26,7 @@ export const PageLayout = ({ children: t_children, className: t_class_name = "",
                     )}
                     {t_children}
                 </div>
+                <MobileNav />
             </main>
         </div>
     );

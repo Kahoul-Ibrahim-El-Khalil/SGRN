@@ -1,18 +1,27 @@
-# Datastore code generators
+# SGRN code generators
 
-This directory holds every code generator for `sgrn_datastore`. The core
-principle for both scripts is the same:
+This document is the exhaustive reference for **every code generator** in
+the SGRN tree: datastore DB codegen (this directory), embedded VFS assets
+(`scripts/generate_embedded_assets.py`), and how each maps its inputs into
+C++ source.
 
-- The **live database is the source of truth for structure** — generators
-  introspect it for column existence, Postgres types, and primary keys.
-- API **intent** (which tables are exposed, which operations, which filters,
-  which columns are searchable/writable) lives in the checked-in
-  **`crud/manifest.json`** allow-list, read at generation time only.
-- Generated output is **checked into the repo** and compiled like any other
-  source file. The ordinary CMake build **never talks to a database**.
-- After a schema change you re-run the generator(s) by hand, review the
-  `git diff`, then recompile. The build does not do this for you, on purpose:
-  generated code must always be reviewable before it ships.
+Two different philosophies coexist on purpose:
+
+| Category | When it runs | Source of truth | Output checked in? |
+|---|---|---|---|
+| **Datastore DB codegen** (`generate_orm.py`, `generate_views.py`) | Manual, after schema/API changes | Live Postgres + `crud/manifest.json` | **Yes** — review the `git diff` before commit |
+| **Embedded VFS assets** (`generate_embedded_assets.py`) | **Automatic** during `cmake --build` | Frontend build dirs / `postgres/` / `configs/` on disk | **No** — headers land in the build dir (`*_generated/`) |
+
+### Generator catalog
+
+| Script | Location | Primary input | Primary output | Mapping |
+|---|---|---|---|---|
+| `generate_views.py` | here | `crud/manifest.json` + live DB | `src/handlers/generated/*.gen.hpp` | [Manifest → C++ views](#manifest-table-entry--c-output-reference) |
+| `generate_orm.py` | here | live DB (`core`, `storage`) | `src/orm/models/<schema>/*.{h,cc}` | [Live table → ORM](#live-table--c-orm-output-reference) |
+| `migrate_comments_to_manifest.py` | here | legacy `sgrn:` SQL comments | `crud/manifest.json` | one-off; see script header |
+| `generate_embedded_assets.py` | `scripts/` | any directory tree | per-file `*.hpp` + master `*_assets.hpp` | [Source file → VFS entry](#source-file--c-vfs-output-reference) |
+| `generate_web_headers.py` | `scripts/` | (shim) | same as `--kind web` | [Web shim](#generate_web_headerspy--compatibility-shim) |
+| `embded_web.py` | `scripts/` | explicit file list | single `web.hpp` | [Legacy one-off embedder](#embded_webpy--legacy-manual-embedder) |
 
 ## Where am I? (repository orientation for newcomers)
 
@@ -24,26 +33,40 @@ read in this order — each step narrows the scope:
    presets and `documentation/MODULES.md` for component boundaries.
 2. **Datastore overview** — `sgrn/lib/datastore/README.md` (ingestion /
    persistence architecture, embedded dashboard).
-3. **This directory** — you are here: the two scripts that generate
-   datastore C++ from the live database (details below).
+3. **HTTP contract for generated CRUD** —
+   [`documentation/datastore/crud_views.md`](../../../../../documentation/datastore/crud_views.md)
+   (what each operation expects on the wire: auth, query filters, JSON
+   bodies, responses, errors).
+4. **Future development checklist** —
+   [`documentation/datastore/development.md`](../../../../../documentation/datastore/development.md)
+   (SQL → manifest → frontend → embedded web assets; joins and complex
+   queries out of scope).
+5. **This file** — exhaustive generator reference (datastore DB codegen +
+   embedded VFS assets).
 
-The datastore subtree, and where this directory fits in it:
+Where generators live and what they feed:
 
 ```
+scripts/
+  generate_embedded_assets.py   unified Zstd VFS generator (web/sql/config/…)
+  generate_web_headers.py       thin shim → embedded_assets --kind web
+  embded_web.py                 legacy manual embedder (not wired into CMake)
+
 sgrn/lib/datastore/
-  postgres/      DDL + migrations (schemas/, views/, functions/) — EDIT HERE FIRST
-  crud/manifest.json   API-intent allow-list (exposed tables, operations, filters) — EDIT HERE SECOND
-  scripts/generators/   <-- you are here: generate_orm.py, generate_views.py, migrate_comments_to_manifest.py
-  src/orm/models/       ORM output (per-table Drogon Mapper classes)
-  src/handlers/generated/  CRUD-view output (.gen.hpp + registry)
-  src/{handlers,services,filters,plugins,query}/  hand-written C++
-  include/sgrn/datastore/  public headers (query/, handlers/, ...)
-  configs/           sgrn.json, nginx, systemd units, postgres configs
-  client/ shell/     C++ client library + interactive shell (API consumers)
-sgrn/apps/datastore/          the `sgrn_datastore` server entry point (main.cpp)
-sgrn/apps/datastore_shell/    the shell entry point
-sgrn/web/datastore/           React dashboard (separate TS world, same HTTP API)
+  postgres/                     SQL source  ──► sql_assets.hpp (build-time)
+  configs/                      defaults    ──► config_assets.hpp (build-time)
+  crud/manifest.json            API intent  ──► *.gen.hpp (manual regen)
+  scripts/generators/           generate_orm.py, generate_views.py
+  src/orm/models/               ORM output (checked in, manual regen)
+  src/handlers/generated/       CRUD views (checked in, manual regen)
+sgrn/web/datastore/             React SPA   ──► web_assets.hpp (build-time)
+sgrn/web/gateway/               Svelte SPA  ──► web_assets.hpp (build-time)
+documentation/gateway/          man pages   ──► doc_assets.hpp (build-time)
 ```
+
+Runtime types shared by every VFS bundle:
+`sgrn/lib/core/include/sgrn/assets/EmbeddedAsset.hpp` (`EmbeddedAsset`,
+`AssetRegistry`, `AssetKind`).
 
 Rule of thumb: schema truth flows one way —
 `postgres/` → live dev DB (`sgrn_datastore --init-db`) → this directory's
@@ -101,24 +124,55 @@ cmake --build <build-dir> --target sgrn_datastore
 
 ## `generate_orm.py` — Drogon ORM models
 
-### How it works
+Unlike `generate_views.py`, this script does **not** read
+`crud/manifest.json`. It has no allow-list: every table in the configured
+Postgres schemas is modeled.
 
-For each schema in `DEFAULT_SCHEMAS = ["core", "storage"]`, `generate_model_orm()`
-does four things:
+### What each input controls
+
+| Input | Read when | Controls in generated C++ |
+|---|---|---|
+| Live Postgres (`information_schema`) | Generation only | Every table/column in the schema, PKs, FKs, Postgres types |
+| `DEFAULT_SCHEMAS` (`core`, `storage`) in the script | Generation time | Which schema subdirectories are emitted under `src/orm/models/` |
+| `DB_CONFIG_TEMPLATE` + CLI `--host`/`--port`/`--password` | Generation time | Connection file written to `<schema>/model.json` (dbname/user hardcoded to `sgrn`/`sgrn_datastore`) |
+
+There is **no manifest mapping** for ORM output — the live schema is the
+only intent input.
+
+### Generation behavior (exact algorithm)
+
+For each schema in `DEFAULT_SCHEMAS = ["core", "storage"]`,
+`generate_model_orm()`:
 
 1. `mkdir -p src/orm/models/<schema>/`
 2. Writes `<schema>/model.json`: a `drogon_ctl` connection file from
    `DB_CONFIG_TEMPLATE` — `rdbms`/`host`/`port`/`dbname`/`user`/`passwd`
    (overridable via `--host`/`--port`/`--password`; note there are **no**
    `--dbname`/`--user` flags, they are hardcoded to `sgrn`/`sgrn_datastore`),
-   plus `"tables": []` (empty = auto-discover every table) and the schema.
+   plus `"tables": []` (empty = auto-discover **every** table in the schema)
+   and `"schema": "<schema>"`.
 3. Flushes/closes the file, then shells out to
    `drogon_ctl create model <dir>`, piping `y` to answer its
    "files will be overwritten, continue?" prompt.
 4. `drogon_ctl` introspects `information_schema` (tables, columns, primary
    keys, foreign keys) and emits one Mapper-based ActiveRecord class per
-   table: `<Table>.h` / `<Table>.cc` in namespace
-   `drogon_model::sgrn::<schema>` (e.g. `core::Users`, `storage::Files`).
+   table.
+
+### Live table → C++ ORM output (reference)
+
+| Live Postgres object | Generated files | C++ type |
+|---|---|---|
+| `core.users` table | `src/orm/models/core/Users.h`, `Users.cc` | `drogon_model::sgrn::core::Users` |
+| `storage.files` table | `src/orm/models/storage/Files.h`, `Files.cc` | `drogon_model::sgrn::storage::Files` |
+| each column on the table | `Users::Cols::_<column>`, getter/setter members, SQL bind helpers | column name preserved (`first_name` → `_first_name`, `getFirstName()`, …) |
+| primary key | `getPrimaryKey()`, `insert()`/`update()` WHERE clause | from live constraint, not configurable |
+| foreign keys | relation helpers on the Mapper | from live FK metadata |
+
+Naming rule: table name → PascalCase class name (`user_domain_permissions`
+→ `UserDomainPermissions`). **All columns** on the table are included,
+including sensitive ones (`password`, …) — ORM models are for internal
+server code, not the public HTTP API. The HTTP surface is separately
+gated by `generate_views.py` + `crud/manifest.json`.
 
 Hand-written code consumes these via `drogon::orm::CoroMapper<T>`
 (e.g. `CoroMapper<drogon_model::sgrn::core::Users>` in
@@ -173,73 +227,272 @@ replaced the external PostgREST process: per-table HTTP handlers are
 *generated at compile time* from the live schema instead of being
 interpreted from query strings at runtime.
 
-### How it works
+### What each input controls
 
-1. **Load `crud/manifest.json`** (`--manifest`, default `crud/manifest.json`
-   relative to `sgrn/lib/datastore`) and validate it: unknown
-   top-level/table/column keys, unknown operation names, unknown filter-op
-   names, and any filter string with no matching `class *Filter : public
-   drogon::HttpFilter<…>` declaration under `src/filters/` or
-   `include/**/filters/` (scanned, never hardcoded) are all hard errors
-   naming the offending manifest path. Filters are defined in C++ source;
-   the manifest only *references* them.
-2. **Connect** via `psycopg2` (`--host/--port/--dbname/--user`, password
-   from `--password` or the `PGPASSWORD` env var, defaulting to the same
-   dev credentials as `generate_orm.py`).
-3. **Iterate the manifest allow-list** (`manifest["schemas"][…]["tables"]`,
-   optionally narrowed with `--schemas`). A table absent from the manifest
-   is NOT generated — there is no "generate everything except …" mode.
-   `operations: []` (e.g. `core.sessions`; auth/session state is owned by
-   hand-written code, never raw CRUD) generates nothing for that table.
-4. **Build one view spec per table** (`build_view_spec()`). The live DB
-   supplies structure only — column existence, `udt_name` → `FieldType`
-   via `PG_TYPE_MAP` (unknown types warn and fall back to `Text`, which is
-   always safe since every bind travels as text and Postgres casts
-   implicitly), and the primary key. Everything else comes from the
-   manifest. Anything inconsistent with the live DB is a hard error, never
-   a silent skip:
-   - manifest table/schema missing from the DB → error (fail the run);
-   - manifest column missing from the live table → error (fail the run);
-   - explicit `tenant_column` missing from the live table → error;
-   - no primary key, or no tenant column (explicit `tenant_column`, else a
-     column literally named `organisation`/`organisation_id`, else a column
-     with a foreign key referencing `core.organisations`) → error. Tables
-     that cannot satisfy this (`core.organisations` itself, all of
-     `storage.*` whose ownership is `user_id`/`automated_service_id`-based
-     and served by the hand-written `StorageApiHandler`, keyless views such
-     as `core.user_details`) simply stay absent from the manifest.
-   - columns named like `password`, `token_secret_hash`, … (see
-     `SENSITIVE_COLUMNS`) are **omitted from the API surface entirely** —
-     not readable, not filterable, not writable — even though they exist
-     on the table, and listing one in the manifest is a hard error so a
-     manifest edit can never accidentally expose a password hash. The
-     engine's explicit column list enforces the omission.
-5. **Map each kept column** from its manifest entry: `filter_ops` bitmask
-   (`["eq", "like"]` → `Op::Eq | Op::Like`); **an omitted column entry
-   means `filter_ops = 0`: the column is not searchable at all**
-   (default-closed, deliberately stricter than PostgREST);
-   `insertable`/`updatable` default to `true`, `false` closes the column
-   for writes (the manifest spelling of the old per-column `readonly`).
-6. **Emit** `<ClassName>View.gen.hpp` from `HEADER_TEMPLATE`: a
-   `static constexpr std::array<Field, N> kFields` whitelist, a
-   `static constexpr CrudViewSpec kSpec` (read/write relations, tenant
-   column, PK + type, `default_order`, `max_limit`), and two route tables
-   sized to the table's enabled `operations` — collection routes (`GET`
-   list / `POST` create) plus item routes (`GET`/`PATCH`/`DELETE …/{id}`),
-   each guarded by its resolved per-operation filter chain
-   (`operation_filters` override, else `default_filters`). Routes use
-   kebab-case (`user_domain_permissions` →
-   `/api/v1/user-domain-permissions`). (`op_expr()` wraps single-operator
-   columns in `static_cast<uint8_t>(…)` because a bare `Op::X` does not
-   implicitly convert to the `uint8_t` bitmask field.)
-7. **Rewrite `AllViews.gen.hpp`** (one `#include` per view, sorted to match
-   `clang-format`'s `SortIncludes` so regen is diff-stable).
-8. **Append-only registration**: `update_registration_file()` inserts
-60.    `static <View> s_<table>;` lines *inside* `initGeneratedViews()` and
-61.    **never removes a line**. To take a table out of the API, delete its
-62.    line in `RegisteredViews.cpp` — re-running the generator will not
-63.    resurrect it. If a table is later dropped from the DB, its stale line
-64.    fails to compile, which is the signal to delete it.
+| Input | Read when | Controls in generated C++ |
+|---|---|---|
+| `crud/manifest.json` | Generation only (never at server runtime) | Which tables exist as views, which CRUD operations are routed, filter chains per operation, per-column filter/write flags, structural overrides (`read_relation`, `tenant_column`, …) |
+| Live Postgres (`information_schema`, `pg_catalog`) | Generation only | Table/column existence, column order, `udt_name` → `FieldType`, primary key column name |
+| C++ filter sources (`src/filters/`, `include/**/filters/`) | Generation only (scanned, not compiled) | Allow-list of filter class names the manifest may reference |
+
+The generator is a **pure function of (manifest + live DB structure)**.
+If regen produces a surprise diff, one of those inputs drifted.
+
+### Generation behavior (exact algorithm)
+
+For every `manifest["schemas"][schema]["tables"][table]` entry (optionally
+filtered by `--schemas`):
+
+1. **Validate manifest shape** (before any DB work): unknown keys, bad
+   types, duplicate operations, filter names with no matching
+   `class *Filter : public drogon::HttpFilter<…>` in source, and
+   `operation_filters` keys for operations not listed in `operations` are
+   all hard errors with a manifest path in the message.
+2. **Resolve operations**: `operations` defaults to all five CRUD ops when
+   omitted. `operations: []` prints `skip (no operations enabled in
+   manifest): schema.table` and emits **nothing** for that table (no
+   `.gen.hpp`, no registration line).
+3. **Introspect live table** (hard error if any check fails):
+   - table must exist;
+   - must have exactly one primary-key column (composite PKs are unsupported);
+   - tenant column must resolve (see [Tenant column resolution](#tenant-column-resolution));
+   - every column named under `columns` in the manifest must exist on the
+     live table and must not be in `SENSITIVE_COLUMNS`.
+4. **Build the field whitelist** (`kFields`): iterate live columns in
+   `ordinal_position` order, **excluding** PK, tenant column, and
+   `SENSITIVE_COLUMNS`. For each remaining column, merge DB type with
+   manifest column config (see [Column defaults](#column-defaults-and-kfields-membership)).
+5. **Build route tables** (`kRoutes`, `kItemRoutes`): one entry per enabled
+   operation, always in canonical order (`list`, `create`, then `get`,
+   `update`, `delete`) regardless of how the manifest lists them.
+6. **Emit** `src/handlers/generated/<ClassName>.gen.hpp` from
+   `HEADER_TEMPLATE`.
+7. After all tables: **rewrite** `AllViews.gen.hpp` (sorted `#include`s)
+   and **append** any missing `static <ClassName> s_<table>;` lines to
+   `RegisteredViews.cpp` (never remove existing lines).
+
+Tables **absent from the manifest are never generated**. There is no
+"generate everything except …" mode.
+
+### Manifest table entry → C++ output (reference)
+
+One manifest table object under `schemas.<schema>.tables.<table>` produces
+**one** generated handler class and **at most one** registration line.
+
+#### Naming and file layout
+
+| Manifest path | Generated artifact |
+|---|---|
+| `schemas.core.tables.domains` | `DomainsView.gen.hpp` — class `DomainsView` in namespace `sgrn::datastore::handlers::query` |
+| (same) | HTTP prefix `/api/v1/domains` (table name, `_` → `-`, prefixed with `/api/v1/`) |
+| (same) | `RegisteredViews.cpp`: `static DomainsView s_domains;` (appended on first generation only) |
+| (aggregate) | `AllViews.gen.hpp`: `#include "DomainsView.gen.hpp"` (rewritten every run, sorted) |
+
+Class name rule: split table name on `_`, capitalize each segment, append
+`View` — `user_domain_permissions` → `UserDomainPermissionsView`.
+
+#### Table-level keys → `CrudViewSpec` and routes
+
+| Manifest key | Default when omitted | Generated C++ |
+|---|---|---|
+| `operations` | all five: `list`, `get`, `create`, `update`, `delete` | Which entries appear in `kRoutes` / `kItemRoutes`. Empty list → skip table entirely. |
+| `tenant_column` | auto-detected (see below) | `kSpec.tenant_column = "…"` — bound server-side on every query, never client-settable |
+| `read_relation` | `"<schema>.<table>"` | `kSpec.read_relation = "…"` — relation `SELECT` reads from (may be a view) |
+| `write_table` | `"<schema>.<table>"` | `kSpec.write_table = "…"` — relation `INSERT`/`UPDATE`/`DELETE` target |
+| `default_order` | primary key column name | `kSpec.default_order = "…"` |
+| `max_limit` | `500` | `kSpec.max_limit = …` |
+| `operation_filters.<op>` | `default_filters.<op>` (top-level manifest) | Filter string array on each route entry, e.g. `{"sgrn::datastore::filters::UserAuthFilter"}` |
+| `default_filters.<op>` (top-level) | `UserAuthFilter` for every op | Fallback filter chain when a table has no `operation_filters` override for that op |
+
+`default_filters` is manifest-only; it is **not** copied into the
+`.gen.hpp`. Its effect is fully expanded into each route's filter list at
+generation time.
+
+#### Operations → HTTP routes and handler methods
+
+| Manifest `operations` value | Route table | HTTP | Path | Handler member |
+|---|---|---|---|---|
+| `list` | `kRoutes` | `GET` | `/api/v1/<kebab-table>` | `handleList` |
+| `create` | `kRoutes` | `POST` | `/api/v1/<kebab-table>` | `handleCreate` |
+| `get` | `kItemRoutes` | `GET` | `/api/v1/<kebab-table>/{id}` | `handleGet` |
+| `update` | `kItemRoutes` | `PATCH` | `/api/v1/<kebab-table>/{id}` | `handleUpdate` |
+| `delete` | `kItemRoutes` | `DELETE` | `/api/v1/<kebab-table>/{id}` | `handleDelete` |
+
+**Wire contract (explicit):** each row above is a Drogon route registered at
+startup from the generated `kRoutes` / `kItemRoutes` arrays. Runtime behavior
+(live in `CrudViewEngine.cpp`, not regenerated) is documented in
+[`documentation/datastore/crud_views.md`](../../../../../documentation/datastore/crud_views.md).
+Summary:
+
+| Op | Client sends | Server returns |
+|---|---|---|
+| `list` | `Authorization` + optional query: `column=op.value` filters, `order`, `limit`, `offset` | `200` JSON **array** of rows (PK + tenant + whitelisted columns) |
+| `get` | `Authorization`; path `{id}` = PK | `200` JSON object, or `404 NotFound` |
+| `create` | `Authorization` + JSON body (insertable whitelist columns only) | `201` JSON object of inserted row; tenant from session |
+| `update` | `Authorization` + JSON body (updatable fields only) + path `{id}` | `200` JSON object, or `404` / `400` if body empty |
+| `delete` | `Authorization` + path `{id}` | `204 No Content` (always, even when zero rows matched) |
+
+Filter query syntax: **`name=eq.acme`**, **`status=in.a,b`**, **`title=like.%25foo%25`**
+(PostgREST-style `operator.value`; unsupported column/op → `400` scope `Query`).
+Reserved query keys: `order`, `limit`, `offset` (not filters). Auth filter on
+every route defaults to `UserAuthFilter` unless overridden per operation in
+the manifest.
+
+Example — manifest entry with `"operations": ["list", "get"]` only:
+
+```cpp
+static inline const std::array<RouteConfig, 1> kRoutes = {{
+    {"/api/v1/domains", &DomainsView::handleList, {drogon::Get}, {"…UserAuthFilter"}},
+}};
+static inline const std::array<ItemRouteConfig, 1> kItemRoutes = {{
+    {"/api/v1/domains/{id}", &DomainsView::handleGet, {drogon::Get}, {"…UserAuthFilter"}},
+}};
+```
+
+#### Column-level keys → `Field` entries in `kFields`
+
+Each non-excluded live column becomes one element of
+`static constexpr std::array<Field, N> kFields`.
+
+| Manifest `columns.<name>` key | Default when column omitted from `columns` | Default when column listed with empty `{}` | Generated `Field{…}` fragment |
+|---|---|---|---|
+| (presence) | column still emitted if it exists on the table | same | `"<name>", FieldType::<T>, …` |
+| `filter_ops` | `[]` → not filterable | `[]` → not filterable | third arg: `0`, or `Op::Eq \| Op::Like`, etc. |
+| `insertable` | `true` | `true` | fourth arg: `true` / `false` |
+| `updatable` | `true` | `true` | fifth arg: `true` / `false` |
+
+`FieldType::<T>` always comes from the **live column's** Postgres
+`udt_name`, never from the manifest (see [Postgres type mapping](#postgres-type-mapping)).
+
+Filter-op manifest strings map to `Op` bitmask bits:
+
+| Manifest `filter_ops` string | C++ expression |
+|---|---|
+| `eq` | `Op::Eq` |
+| `neq` | `Op::Neq` |
+| `gt` | `Op::Gt` |
+| `gte` | `Op::Gte` |
+| `lt` | `Op::Lt` |
+| `lte` | `Op::Lte` |
+| `like` | `Op::Like` |
+| `in` | `Op::In` |
+
+Multiple ops are OR'd: `["eq", "like"]` → `Op::Eq | Op::Like`. A single
+op is emitted as `static_cast<uint8_t>(Op::Eq)` because a bare `Op::X`
+does not implicitly convert to the `uint8_t filter_ops` field.
+
+#### Column defaults and `kFields` membership
+
+A column appears in `kFields` **if and only if** all of the following hold:
+
+- it exists on the live table;
+- it is **not** the primary key;
+- it is **not** the resolved tenant column;
+- its name is **not** in `SENSITIVE_COLUMNS`
+  (`password`, `token_secret_hash`, `password_hash`, `secret`).
+
+Everything else on the table is included automatically — the manifest does
+**not** need a per-column entry unless that column deviates from the
+defaults. Omitting a column from `columns` is **not** the same as hiding
+it: the column is still readable and writable; it is simply not
+filterable (`filter_ops = 0`).
+
+Concrete example from `core.users` (manifest lists six columns; eighteen
+appear in `kFields`):
+
+| Column | In manifest `columns`? | In `kFields`? | `filter_ops` in C++ | `insertable` / `updatable` |
+|---|---|---|---|---|
+| `id` | — | no (PK) | — | — |
+| `organisation` | — | no (tenant) | — | — |
+| `password` | — | no (`SENSITIVE_COLUMNS`) | — | — |
+| `first_name` | yes: `["eq","like"]` | yes | `Op::Eq \| Op::Like` | `true`, `true` |
+| `phone_number` | no | yes | `0` | `true`, `true` |
+| `role` | yes: `["eq"]` | yes | `static_cast<uint8_t>(Op::Eq)` | `true`, `true` |
+
+#### Tenant column resolution
+
+Used for `kSpec.tenant_column` when the manifest omits `tenant_column`:
+
+1. Explicit `tenant_column` string in the manifest (must exist on live table).
+2. Else first live column named `organisation` or `organisation_id`.
+3. Else first column with a foreign key to `core.organisations`.
+
+If none match → hard error. Tables like `core.organisations` (tenant
+root), `storage.*` (ownership via `user_id` / `automated_service_id`),
+and keyless views must stay **out of the manifest** and get hand-written
+handlers instead.
+
+#### Postgres type mapping
+
+Live `information_schema.columns.udt_name` → `FieldType` (also used for
+`kSpec.pk`):
+
+| Postgres `udt_name` | `FieldType` |
+|---|---|
+| `int2`, `int4` | `Int` |
+| `int8` | `BigInt` |
+| `text`, `varchar`, `bpchar`, `uuid`, `inet`, `numeric` | `Text` |
+| `bool` | `Bool` |
+| `timestamptz`, `timestamp`, `date` | `Timestamp` |
+| `jsonb`, `json` | `Jsonb` |
+| (anything else) | `Text` + generator warning |
+
+Primary key and tenant column types are resolved the same way but those
+columns are not repeated inside `kFields`.
+
+#### End-to-end mapping example (`core.domains`)
+
+Manifest fragment:
+
+```json
+"domains": {
+  "tenant_column": "organisation",
+  "read_relation": "core.domains",
+  "write_table": "core.domains",
+  "default_order": "id",
+  "max_limit": 500,
+  "operations": ["list", "get", "create", "update", "delete"],
+  "columns": {
+    "name": { "filter_ops": ["eq", "like"] }
+  }
+}
+```
+
+Generated C++ (abbreviated):
+
+```cpp
+class DomainsView : public CrudViewHandler<DomainsView> {
+    static constexpr std::array<Field, 1> kFields = {{
+        {"name", FieldType::Text, Op::Eq | Op::Like, true, true},
+    }};
+    static constexpr CrudViewSpec kSpec{
+        .read_relation = "core.domains",
+        .write_table = "core.domains",
+        .tenant_column = "organisation",
+        .pk = {"id", FieldType::Int},          // from live DB, not manifest
+        .fields = kFields,
+        .default_order = "id",
+        .max_limit = 500,
+    };
+    // kRoutes: GET list + POST create on /api/v1/domains
+    // kItemRoutes: GET/PATCH/DELETE on /api/v1/domains/{id}
+};
+```
+
+Live columns `id`, `organisation`, and `name` exist; only `name` lands in
+`kFields` because `id` is PK and `organisation` is tenant.
+
+### How it works (summary)
+
+1. **Load and validate `crud/manifest.json`** — unknown keys, bad filter
+   references, and inconsistent `operation_filters` fail fast with manifest
+   paths in the error text.
+2. **Connect** via `psycopg2` and walk the manifest allow-list.
+3. **Per table**, run the [exact algorithm](#generation-behavior-exact-algorithm)
+   above: introspect structure from Postgres, merge intent from manifest,
+   emit one `.gen.hpp`.
+4. **Rewrite** `AllViews.gen.hpp`; **append-only** update of
+   `RegisteredViews.cpp` (deleted registration lines stay deleted).
 
 ### `crud/manifest.json` — the API-intent allow-list
 
@@ -285,7 +538,8 @@ server runtime. Shape (`$schema_version: 1`):
 }
 ```
 
-Semantics:
+Semantics (see [Manifest table entry → C++ output](#manifest-table-entry--c-output-reference)
+for the full key-by-key mapping):
 
 - A table missing from the manifest entirely is NOT generated (allow-list).
   `operations: []` is the spelling for "never exposed as raw CRUD" (what a
@@ -415,7 +669,9 @@ regenerate instead.
   through the same `IHandler` mechanism as every hand-written handler, and
   every request executes in-process via `CrudViewEngine` on the existing
   `DbClient` — tenant scoping stays a bound SQL parameter the client can
-  neither see nor override.
+  neither see nor override. For the full HTTP contract (filters, bodies,
+  status codes), see
+  [`documentation/datastore/crud_views.md`](../../../../../documentation/datastore/crud_views.md).
 
 ### Troubleshooting
 
@@ -457,6 +713,460 @@ regenerate instead.
   *schema* and on `crud/manifest.json`: the generator is a pure function
   of the live DB plus the manifest; surprise diffs mean the dev DB drifted
   from the migration files or the manifest.
+
+---
+
+## Embedded VFS asset generators (`scripts/`)
+
+These generators bake files (web UIs, SQL, configs, docs) into the
+compiled binary as Zstd-compressed byte arrays in `.rodata`. At runtime
+consumers look up assets by **virtual path** through a compile-time sorted
+`AssetRegistry` — no filesystem dependency in production.
+
+Unlike datastore DB codegen, VFS generation is **part of the normal build
+graph**: `cmake --build` runs `bun vite build` (when needed) then
+`generate_embedded_assets.py`. Output headers live under the **build
+directory** (`<build>/…/dashboard_generated/`, `sql_generated/`, …), not
+in the source tree.
+
+### End-to-end pipeline (web UI example)
+
+```
+sgrn/web/datastore/src/**     React/TS sources
+        │
+        ▼  bun install + VITE_BASE_PATH=/datastore bun run build
+sgrn/web/datastore/build/     Vite dist (index.html, assets/*.js, …)
+        │
+        ▼  generate_web_headers.py  (= generate_embedded_assets.py --kind web)
+<build>/sgrn/lib/datastore/src/dashboard_generated/web_assets.hpp
+        │
+        ▼  #include <web_assets.hpp>  +  compile into sgrn_datastore
+Binary serves GET /index.html, /assets/… from sgrn::datastore::assets::web::ASSETS[]
+```
+
+Gateway follows the same shape with `sgrn/web/gateway/` →
+`sgrn::gateway::assets::web`.
+
+### End-to-end pipeline (gateway SPA)
+
+```
+sgrn/web/gateway/src/**        Svelte/TS sources
+        │
+        ▼  bun run build  (touches dist/.build_done)
+sgrn/web/gateway/dist/         Vite output (index.html, assets/*, …)
+        │
+        ▼  generate_web_headers.py  (--namespace sgrn::gateway::assets::web)
+<build>/sgrn/lib/gateway/web_generated/web_assets.hpp
+        │
+        ▼  compiled into sgrn_gateway  +  #include <web_assets.hpp>
+Crow registers GET for each virtual_path; SPA fallback + runtime index.html patch
+```
+
+Gateway does **not** set `VITE_BASE_PATH` in CMake (unlike the datastore
+dashboard). Subpath deployment is handled at **response time** by injecting
+`<base href="…">` and `window.__SGRN_BASE__` from nginx's
+`X-Forwarded-Prefix` (see `gateway/adapters/http/assets.cpp`).
+
+### Build directory map
+
+All generated VFS headers live under the **CMake binary dir**, not in
+`git`. Typical layout after `cmake --build <dir>`:
+
+| Variable / path | Physical location (example) | Master header |
+|---|---|---|
+| `DASHBOARD_BUILD_DIR` | `sgrn/web/datastore/build/` (Vite dist, **in source tree**) | — |
+| `DASHBOARD_GEN_DIR` | `<build>/sgrn/lib/datastore/src/dashboard_generated/` | `web_assets.hpp` |
+| `SQL_GEN_DIR` | `<build>/sgrn/lib/datastore/src/sql_generated/` | `sql_assets.hpp` |
+| `CONFIG_GEN_DIR` | `<build>/sgrn/lib/datastore/src/config_generated/` | `config_assets.hpp` |
+| `WEB_DIST_DIR` | `sgrn/web/gateway/dist/` | — |
+| `WEB_GEN_DIR` | `<build>/sgrn/lib/gateway/web_generated/` | `web_assets.hpp` |
+| `DOC_GEN_DIR` | `<build>/sgrn/lib/gateway/doc_generated/` | `doc_assets.hpp` |
+
+`sgrn_datastore` lists the three datastore master headers as **sources** and
+adds the three `*_GEN_DIR` paths to `target_include_directories`, so
+`#include <web_assets.hpp>` resolves without copying headers into
+`sgrn/apps/datastore/`.
+
+### Changing an embedded web UI (developer loop)
+
+You normally **never** run the Python generators by hand — edit frontend
+sources and rebuild:
+
+```bash
+# Repo root; micromamba activate SGRN if needed.
+
+# Datastore React dashboard (also rebuilds when TS bindings change):
+cmake --build <build-dir> --target sgrn_datastore
+# or explicitly:
+cmake --build <build-dir> --target sgrn_dashboard_assets
+
+# Gateway Svelte SPA (pulled in by the gateway library target):
+cmake --build <build-dir> --target sgrn_gateway
+```
+
+What invalidates each step (see `sgrn/lib/datastore/src/CMakeLists.txt` and
+`sgrn/lib/gateway/CMakeLists.txt`):
+
+| Trigger | Effect |
+|---|---|
+| Any file under `sgrn/web/*/src/` (CONFIGURE_DEPENDS glob) | Vite rebuild |
+| `sgrn/typescript/{datastore,gateway,types}/` binding changes | Dashboard and/or gateway Vite rebuild |
+| `package.json` / `bun.lock` (dashboard only: also binding `package.json`) | `bun install` stamp, then Vite |
+| New/changed file in `dist/` or `build/` output | Zstd header regen on next build |
+| Edit to `generate_embedded_assets.py` / `generate_web_headers.py` | All dependent custom commands rerun |
+
+After a UI change, if the browser still serves old hashed JS/CSS, force a
+full rebuild of the asset target — stale `web_assets.hpp` means the binary
+still registers old `virtual_path` keys.
+
+### Virtual paths, Vite base URL, and HTTP routes
+
+The generator stores lookup keys in `EmbeddedAsset::virtual_path` with a
+**leading slash** (`/index.html`, `/assets/index-abc123.js`), produced by
+`virtual_prefix + "/" + relative_path` in the master header.
+
+| Layer | Datastore dashboard | Gateway SPA |
+|---|---|---|
+| Vite `base` at build time | `VITE_BASE_PATH=/datastore` (CMake) | default `/` |
+| Embedded route keys | `/index.html`, `/assets/…` | same shape under `/` |
+| Public URL behind nginx | Often `https://host/datastore/…` | Often `https://host/gateway/…` |
+| Server-side base fix | None (assets built with `/datastore` prefix in HTML) | Runtime patch on `index.html` only |
+
+**Datastore (Drogon):** `registerDashboardAssets()` registers
+`GET` on each `virtual_path` exactly as emitted. When the table contains
+`/index.html`, an additional `GET /` handler aliases the same cached
+response (`init/assets.hpp`).
+
+**Gateway (Crow):** one dynamic route per asset; unknown non-API paths fall
+back to patched `index.html`. API prefixes (`/data`, `/registry`, `/ws`, …)
+never hit the SPA fallback (`assets.cpp`).
+
+**Lookup API:** `VFS.find("/index.html")` uses exact `string_view` match
+(compile-time sorted binary search). Paths without the leading slash will
+not match.
+
+### Datastore dashboard vs gateway SPA (web generators)
+
+| | **Datastore** | **Gateway** |
+|---|---|---|
+| Sources | `sgrn/web/datastore/` (React) | `sgrn/web/gateway/` (Svelte) |
+| Vite output dir | `sgrn/web/datastore/build/` | `sgrn/web/gateway/dist/` |
+| TS bindings glob | `sgrn/typescript/datastore/` + `types/` | `sgrn/typescript/gateway/` |
+| `bun install` in CMake | yes (stamp + deps on lockfiles) | no (build assumes deps present) |
+| Generator namespace | `sgrn::datastore::assets::web` | `sgrn::gateway::assets::web` |
+| HTTP stack | Drogon static handlers | Crow + SPA fallback |
+| `index.html` over the wire | Zstd or plain like other assets | always decompressed + patched head |
+
+Both call the same shim with `--level 22` and `--master web_assets.hpp`.
+
+### `generate_embedded_assets.py` — unified generator
+
+#### CLI reference
+
+```bash
+python3 scripts/generate_embedded_assets.py <src_dir> <out_dir> \
+    --namespace sgrn::datastore::assets::web \
+    --kind web \
+    [--extensions .html .js .css …] \
+    [--virtual-prefix /sql] \
+    [--master web_assets.hpp] \
+    [--level 19] \
+    [--exclude compile_commands.json …]
+```
+
+| Flag | Default | Effect |
+|---|---|---|
+| `src_dir` | (required) | Root directory scanned recursively |
+| `out_dir` | (required) | Where per-file and master headers are written |
+| `--namespace` | `sgrn::datastore::assets::web` | C++ namespace wrapping every symbol |
+| `--kind` | `web` | Semantic category → `AssetKind` enum value |
+| `--extensions` | kind-specific set (see below) | Filter; omit filter when kind default is `None` (`other`) |
+| `--virtual-prefix` | `""` | Prepended to every lookup key (`/sql` + `init.sql` → `/sql/init.sql`) |
+| `--master` | `assets.hpp` | Aggregating header filename |
+| `--level` | `19` | Zstd level (CMake uses `22`) |
+| `--exclude` | none | Skip files whose relative path or basename contains a pattern |
+
+Default extensions per `--kind`:
+
+| `--kind` | Extensions scanned | Special processing |
+|---|---|---|
+| `web` | `.html .js .mjs .css .svg .png .jpg .jpeg .ico .webp .woff .woff2` | raw bytes |
+| `sql` | `.sql` | **only** `<src_dir>/init.sql`; `\i` includes inlined recursively; comments stripped |
+| `config` | `.conf .service` | `#` comments stripped; `.json` included when passed via `--extensions` |
+| `cert` | `.pem .crt .key .cer` | raw bytes |
+| `other` | all files | raw bytes |
+
+`--kind` → C++ `AssetKind`:
+
+| `--kind` | Generated `AssetKind` constant |
+|---|---|
+| `web` | `sgrn::AssetKind::Web` |
+| `sql` | `sgrn::AssetKind::Sql` |
+| `config` | `sgrn::AssetKind::Config` |
+| `cert` | `sgrn::AssetKind::Cert` |
+| `other` | `sgrn::AssetKind::Other` |
+
+#### Generation behavior (exact algorithm)
+
+1. Recursively scan `src_dir` for files matching `--extensions` (or all
+   files when extensions default to `None`).
+2. For `kind == sql`: process **only** `init.sql` at the root of
+   `src_dir`; every other `.sql` file is pulled in via `\i`/`\ir` inside
+   `flattenSql()`.
+3. Apply `--exclude` patterns (substring match on relative path or basename).
+4. For each kept file:
+   - **Preprocess** payload (`flattenSql` / `stripConfigComments` / raw read).
+   - **Compress** with Zstd at `--level`.
+   - **Emit** one per-file header `<rel_path_with_slashes_as_underscores>.hpp`.
+5. **Emit master header** (`--master`): `#include` every per-file header,
+   define `ASSETS[]`, `VFS = AssetRegistry(ASSETS)`, `ASSET_COUNT`.
+
+Per-file headers are **rewritten every run** (full regen). There is no
+append-only mode unlike `RegisteredViews.cpp`.
+
+#### Source file → C++ VFS output (reference)
+
+##### Path and symbol naming
+
+| Source file (relative to `src_dir`) | Per-file header | C++ symbol prefix | Virtual path (lookup key) |
+|---|---|---|---|
+| `index.html` | `index.html.hpp` | `INDEX_HTML_DATA`, `_COMPRESSED_SIZE`, `_ORIGINAL_SIZE` | `index.html` (or `{virtual-prefix}/index.html`) |
+| `assets/app.js` | `assets_app.js.hpp` | `ASSETS_APP_JS_*` | `assets/app.js` |
+| `postgres/init.sql` (sql kind) | `init.sql.hpp` | `INIT_SQL_*` | `init.sql` |
+
+Symbol rule: relative path → `SCREAMING_SNAKE_CASE`
+(`assets/app.js` → `ASSETS_APP_JS`). Header filename rule: `/` and `\`
+→ `_`.
+
+MIME type comes from file extension via `MIME_MAP` (web/config/json);
+unknown extensions get `application/octet-stream`.
+
+Full `MIME_MAP` (extension → `content_type` string in `ASSETS[]`):
+
+| Extension | MIME |
+|---|---|
+| `.html` | `text/html; charset=utf-8` |
+| `.css` | `text/css; charset=utf-8` |
+| `.js`, `.mjs` | `application/javascript; charset=utf-8` |
+| `.svg` | `image/svg+xml` |
+| `.png` | `image/png` |
+| `.jpg`, `.jpeg` | `image/jpeg` |
+| `.ico` | `image/x-icon` |
+| `.webp` | `image/webp` |
+| `.woff` | `font/woff` |
+| `.woff2` | `font/woff2` |
+| `.json` | `application/json` |
+| `.txt`, `.sql`, `.toml` | `text/plain; charset=utf-8` |
+| (other) | `application/octet-stream` |
+
+##### Per-file header shape
+
+Each source file becomes a header like:
+
+```cpp
+// Auto-generated — do not edit. Source: assets/app.js
+#pragma once
+#include <cstdint>
+#include <cstddef>
+
+namespace sgrn::datastore::assets::web {
+
+inline constexpr uint8_t ASSETS_APP_JS_DATA[] = {
+    0x28, 0xB5, 0x2F, 0xFD, …   // Zstd-compressed payload in .rodata
+};
+inline constexpr size_t ASSETS_APP_JS_COMPRESSED_SIZE = sizeof(ASSETS_APP_JS_DATA);
+inline constexpr size_t ASSETS_APP_JS_ORIGINAL_SIZE   = 12345;
+
+} // namespace …
+```
+
+##### Master header shape (`web_assets.hpp`, `sql_assets.hpp`, …)
+
+```cpp
+#pragma once
+#include <sgrn/assets/EmbeddedAsset.hpp>
+#include "index.html.hpp"
+#include "assets_app.js.hpp"
+// …
+
+namespace sgrn::datastore::assets::web {
+
+inline constexpr sgrn::EmbeddedAsset ASSETS[] = {
+    {"index.html", "text/html; charset=utf-8",
+      INDEX_HTML_DATA, INDEX_HTML_COMPRESSED_SIZE, INDEX_HTML_ORIGINAL_SIZE,
+      sgrn::AssetKind::Web},
+    {"assets/app.js", "application/javascript; charset=utf-8",
+      ASSETS_APP_JS_DATA, …, sgrn::AssetKind::Web},
+};
+
+inline constexpr auto VFS = sgrn::AssetRegistry(ASSETS);
+inline constexpr size_t ASSET_COUNT = VFS.size();
+
+} // namespace …
+```
+
+Runtime lookup: `sgrn::datastore::assets::web::VFS.find("/index.html")`
+→ `const EmbeddedAsset*` or `nullptr`. Iteration in declaration order:
+`for (i = 0; i < ASSET_COUNT; ++i) ASSETS[i]`.
+
+##### SQL kind — `\i` inlining and comment stripping
+
+Only `postgres/init.sql` is passed to the generator. The script:
+
+1. Walks each line; `\i path` / `\ir path` recursively inlines the
+   referenced file (relative to the including file's directory).
+2. Strips `/* */` block comments and `--` line comments.
+3. Compresses the flattened script into a **single** `ASSETS[0]` entry.
+
+At runtime `decompressSqlAssets()` in `bootstrap.hpp` decompresses
+`sql::ASSETS[0]` and feeds the result to Postgres during `--init-db`.
+
+##### Config kind — what gets embedded
+
+CMake invocation (`sgrn/lib/datastore/src/CMakeLists.txt`):
+
+- Source: `sgrn/lib/datastore/configs/`
+- Extensions: `.json .conf .service`
+- Excludes: `compile_commands.json`, `endpoints.json`, nginx snippets
+  that are templates only (`fastcgi*.conf`, `snakeoil.conf`)
+- Namespace: `sgrn::datastore::assets::config`
+
+`extractConfigAssets()` writes each asset to disk under the operation
+directory, applying path templates (`{{OPERATION_DIR}}`, etc.) to the
+decompressed text.
+
+### CMake targets and build integration
+
+| Consumer | Frontend / source dir | Build step | Generator | Output (under build dir) | CMake target |
+|---|---|---|---|---|---|
+| **Datastore dashboard** | `sgrn/web/datastore/` | `bun install` + `VITE_BASE_PATH=/datastore bun run build` | `generate_web_headers.py` | `dashboard_generated/web_assets.hpp` | `sgrn_dashboard_assets` |
+| **Datastore SQL** | `sgrn/lib/datastore/postgres/` | none | `generate_embedded_assets.py --kind sql` | `sql_generated/sql_assets.hpp` | `sgrn_sql_assets` |
+| **Datastore config** | `sgrn/lib/datastore/configs/` | none | `generate_embedded_assets.py --kind config` | `config_generated/config_assets.hpp` | `sgrn_config_assets` |
+| **Gateway SPA** | `sgrn/web/gateway/` | `bun run build` → `dist/` | `generate_web_headers.py` | `web_generated/web_assets.hpp` | (dependency of `sgrn_gateway`) |
+| **Gateway docs** | `documentation/gateway/` | none | `generate_embedded_assets.py --kind other` | `doc_generated/doc_assets.hpp` | (dependency of `sgrn_gateway`) |
+
+Generated header paths are exported as `CACHE INTERNAL` variables
+(`DASHBOARD_GEN_DIR`, `SQL_GEN_DIR`, …) so `sgrn/apps/datastore` can
+`#include <web_assets.hpp>` via the build's include path.
+
+**Dependency tracking:** SQL/config/doc custom commands use
+`file(GLOB_RECURSE … CONFIGURE_DEPENDS)` on source trees. Dashboard/gateway
+web builds also depend on shared TypeScript bindings under
+`sgrn/typescript/{datastore,gateway}/` so API type changes invalidate the
+frontend bundle.
+
+### Runtime consumption (generated C++ → behavior)
+
+| Namespace | Included from | Used for |
+|---|---|---|
+| `sgrn::datastore::assets::web` | `init/assets.hpp` | `registerDashboardAssets()` — Drogon routes at each `virtual_path`; `/` aliases `index.html` |
+| `sgrn::datastore::assets::sql` | `bootstrap/bootstrap.hpp` | `--init-db`: decompress single flattened `init.sql`, execute against Postgres |
+| `sgrn::datastore::assets::config` | `bootstrap/bootstrap.hpp` | `init` / bootstrap: extract nginx, systemd, `sgrn.json`, … to operation dir |
+| `sgrn::gateway::assets::web` | `gateway/adapters/http/assets.cpp` | Crow dynamic routes; SPA fallback; runtime `<!-- SGRN_RUNTIME_HEAD -->` patch on `index.html` for nginx `X-Forwarded-Prefix` |
+| `sgrn::gateway::assets::doc` | (compiled in; no handler yet) | Embedded man-page style docs under `documentation/gateway/` |
+
+**HTTP serving pattern (both web bundles):**
+
+- Clients advertising `Accept-Encoding: zstd` receive the pre-compressed
+  blob directly (except gateway `index.html`, which is always decompressed
+  so runtime `<base>` / `window.__SGRN_BASE__` injection can run).
+- Other clients trigger one-time Zstd decompression; responses are cached
+  (`CachedAssetResponses` in datastore, `std::once_flag` + map in gateway).
+
+### `generate_web_headers.py` — compatibility shim
+
+Legacy CMake rules call this script instead of `generate_embedded_assets.py`
+directly. It forwards to:
+
+```text
+generate_embedded_assets.py <src> <out>
+  --namespace <ns>  --kind web  --master web_assets.hpp  --level <n>
+```
+
+The `--use-bun` flag is accepted but ignored (the frontend build is always
+a separate CMake step). Prefer calling `generate_embedded_assets.py`
+directly for new asset categories.
+
+### `embded_web.py` — legacy manual embedder
+
+Pre-dates the unified VFS system (filename is a historical typo; the module
+docstring says `embed_web.py`). CLI:
+
+```bash
+python3 scripts/embded_web.py file1.html file2.js [-o web.hpp] [--level 19]
+```
+
+Behavior:
+
+- Input is an **explicit file list**, not a directory walk.
+- Virtual paths are **`/` + basename only** (`dashboard.html` → `"/dashboard.html"`), not nested dist paths.
+- Emits one monolithic header: `WebAsset` struct array + `WEB_ASSETS[]` /
+  `WEB_ASSET_COUNT` — no `EmbeddedAsset`, no `AssetRegistry`, no per-file
+  headers.
+- Symbol names derive from **filename** only (`app.min.js` → `APP_MIN_JS`).
+
+Useful for quick one-off experiments; **not wired into CMake**. New work
+should use `generate_embedded_assets.py`.
+
+### Adding a new embedded asset category
+
+Pattern used by SQL, config, gateway docs, and both web UIs:
+
+1. Choose `--kind`, `--namespace` (`sgrn::{project}::assets::{kind}`), and
+   `--master` filename (`*_assets.hpp`).
+2. Add a `add_custom_command(OUTPUT …)` in the relevant `CMakeLists.txt`
+   that invokes `generate_embedded_assets.py` (or the web shim for `--kind
+   web`).
+3. `file(GLOB_RECURSE … CONFIGURE_DEPENDS)` on the source tree for
+   dependency tracking.
+4. List the master header in a library/executable target and add
+   `target_include_directories(… PRIVATE "${GEN_DIR}")`.
+5. Consume via `#include <…_assets.hpp>` and `namespace::VFS.find(…)`.
+
+Keep generation **out of** the default DB-codegen loop — VFS headers are
+build products, not git-tracked sources.
+
+### Manual regeneration (outside CMake)
+
+```bash
+# Repo root. Run only when debugging the generator itself.
+
+# Datastore dashboard dist → headers (after a manual Vite build)
+cd sgrn/web/datastore && VITE_BASE_PATH=/datastore bun run build
+python3 scripts/generate_web_headers.py \
+    sgrn/web/datastore/build \
+    /tmp/dashboard_generated \
+    --namespace sgrn::datastore::assets::web --level 22
+
+# Gateway dist → headers
+cd sgrn/web/gateway && bun run build
+python3 scripts/generate_web_headers.py \
+    sgrn/web/gateway/dist \
+    /tmp/web_generated \
+    --namespace sgrn::gateway::assets::web --level 22
+
+# SQL bundle only
+python3 scripts/generate_embedded_assets.py \
+    sgrn/lib/datastore/postgres /tmp/sql_generated \
+    --kind sql --master sql_assets.hpp \
+    --namespace sgrn::datastore::assets::sql --level 22
+```
+
+Normally you just `cmake --build <dir>` and let the custom commands run.
+
+### VFS troubleshooting
+
+- **`zstandard` import error** → `pip install zstandard` (or use the SGRN
+  conda env).
+- **`bun: command not found`** during dashboard/gateway build → install
+  [Bun](https://bun.sh); web asset compression runs only after Vite succeeds.
+- **Empty `ASSET_COUNT`** → wrong `src_dir`, extension filter too narrow,
+  or (for SQL) missing `init.sql` at the postgres root.
+- **Dashboard 404 on assets** → rebuild `sgrn_dashboard_assets`; stale
+  `web_assets.hpp` if the Vite hash filenames changed but CMake did not rerun.
+- **Gateway SPA wrong base URL behind nginx** → gateway patches
+  `index.html` using `X-Forwarded-Prefix`; check nginx sends the header
+  (see `sites-enabled/sgrn.conf`).
 
 ---
 
@@ -532,6 +1242,23 @@ marked functions — no archaeology needed:
    manual `sgrn_generate_views`-style custom target from
    `cmake/sgrn_views_codegen.cmake`, adjusted to your paths. Keep
    generation out of the default build graph.
+
+### Embedded VFS (`generate_embedded_assets.py`)
+
+Minimal port:
+
+1. Copy `scripts/generate_embedded_assets.py` (depends on `pip install
+   zstandard` only).
+2. Copy `sgrn/lib/core/include/sgrn/assets/EmbeddedAsset.hpp` and wire your
+   decompressor (SGRN uses `sgrn::utils::compression::decompressStringZstd`).
+3. Pick `--namespace` / `--kind` / `--master` and add one CMake custom
+   command — mirror `sgrn_dashboard_assets` or `sgrn_sql_assets`.
+4. At runtime, iterate `ASSETS[]` or `VFS.find("/your/path")`; register
+   HTTP routes from `virtual_path` + `content_type` if serving web assets.
+
+Fork knobs: `MIME_MAP`, `default_extensions`, `flattenSql()` /
+`stripConfigComments()` behavior, and Zstd `--level`. No database or Drogon
+dependency in the generator itself.
 
 ### What NOT to take
 
