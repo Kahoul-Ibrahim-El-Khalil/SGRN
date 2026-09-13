@@ -9,6 +9,7 @@
 #include <fmt/core.h>
 #include <sgrn/debug.hpp>
 #include <sgrn/gateway/twin/PlcState.hpp>
+#include <memory>
 #include <open62541/common.h>
 #include <open62541/nodeids.h>
 #include <open62541/server.h>
@@ -75,12 +76,14 @@ static void setReadWriteDataSource(UA_Server* tp_server, const UA_NodeId& t_var_
     UA_Server_setVariableNode_dataSource(tp_server, t_var_id, ds);
 }
 
-static NodeContext* makeFieldContext(twin::PlcMemory* tp_plc_memory, uint16_t t_db_number, const std::string& t_full_path,
+static std::unique_ptr<NodeContext> makeFieldContext(twin::PlcMemory* tp_plc_memory, uint16_t t_db_number, const std::string& t_full_path,
     ::sgrn::gateway::SecurityManager* tp_security, const DbField& t_field, bool t_is_array, bool t_is_custom_udt, int t_ua_type_idx,
     uint32_t t_field_size, wrappers::opcua::TypeRegistry& t_type_registry, bool t_trigger_events)
 
 {
-    NodeContext* p_ctx = new NodeContext{
+    // Owned from birth: if anything below (or the caller's push_back) throws,
+    // the context is freed instead of leaking the raw new.
+    auto p_ctx_owned = std::unique_ptr<NodeContext>(new NodeContext{
         .server = tp_plc_memory,
         .db_number = t_db_number,
         .field_path = t_full_path,
@@ -98,7 +101,8 @@ static NodeContext* makeFieldContext(twin::PlcMemory* tp_plc_memory, uint16_t t_
         .scratch_buf = {},
         .enum_type = nullptr,
         .enum_map = {},
-    };
+    });
+    NodeContext* p_ctx = p_ctx_owned.get();
     p_ctx->min_val = t_field.min_val;
     p_ctx->max_val = t_field.max_val;
     p_ctx->scratch_buf.resize(p_ctx->field_size);
@@ -118,7 +122,7 @@ static NodeContext* makeFieldContext(twin::PlcMemory* tp_plc_memory, uint16_t t_
             SGRN_WARN_LOG("OPC UA: field '{}' has enum_map but unsupported base type — registering as plain scalar", t_full_path);
         }
     }
-    return p_ctx;
+    return p_ctx_owned;
 }
 
 static uint32_t computeFieldSize(const DbField& t_field, bool t_is_array) {
@@ -225,7 +229,7 @@ void addAggregateValueNode(const OpcUaAdapterContext& t_adapter_ctx, const OpcUa
     UA_Server* p_raw = t_adapter_ctx.p_opcua_server->raw();
     const UA_NodeId& parent = t_path.parent_id.get();
 
-    auto* p_ctx = new NodeContext{
+    auto p_ctx_owned = std::unique_ptr<NodeContext>(new NodeContext{
         .server = t_adapter_ctx.p_plc_memory,
         .db_number = t_db.number,
         .field_path = t_path.path,
@@ -238,11 +242,13 @@ void addAggregateValueNode(const OpcUaAdapterContext& t_adapter_ctx, const OpcUa
         .field_offset = t_aggregate.field_offset,
         .field_size = t_aggregate.field_size,
         .type = ::sgrn::scl::DataType::Struct,
+        .string_capacity = 0,
+        .scratch_buf = {},
         .enum_type = nullptr,
         .enum_map = {},
-        .string_capacity = 0,
-    };
-    t_nodes_ctx.p_owned_contexts->push_back(std::unique_ptr<NodeContext>(p_ctx));
+    });
+    NodeContext* p_ctx = p_ctx_owned.get();
+    t_nodes_ctx.p_owned_contexts->push_back(std::move(p_ctx_owned));
 
     UA_NodeId t_var_id = UA_NODEID_STRING_ALLOC(1, (t_path.node_id + ".Value").c_str());
     UA_VariableAttributes t_v_attr = UA_VariableAttributes_default;
@@ -344,10 +350,11 @@ void addLeafVariableNode(const OpcUaAdapterContext& t_adapter_ctx, const OpcUaNo
     }
 
     const uint32_t t_field_size = computeFieldSize(t_field, is_array);
-    auto* p_ctx = makeFieldContext(t_adapter_ctx.p_plc_memory, t_db.number, t_path.path, t_adapter_ctx.p_security_manager, t_field,
+    auto p_ctx_owned = makeFieldContext(t_adapter_ctx.p_plc_memory, t_db.number, t_path.path, t_adapter_ctx.p_security_manager, t_field,
         is_array, is_custom_udt, t_ua_type_idx, t_field_size, *t_adapter_ctx.p_type_registry, t_db.trigger_events);
+    NodeContext* p_ctx = p_ctx_owned.get();
     p_ctx->enum_type = p_enum_type;
-    t_nodes_ctx.p_owned_contexts->push_back(std::unique_ptr<NodeContext>(p_ctx));
+    t_nodes_ctx.p_owned_contexts->push_back(std::move(p_ctx_owned));
 
     UA_NodeId t_var_id = UA_NODEID_STRING_ALLOC(1, t_path.node_id.c_str());
     UA_VariableAttributes t_v_attr = UA_VariableAttributes_default;

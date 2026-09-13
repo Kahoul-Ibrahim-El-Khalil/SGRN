@@ -4,6 +4,7 @@
 #include <sgrn/datastore/handlers/auth.hpp>
 #include <sgrn/datastore/handlers/query.hpp>
 #include <sgrn/datastore/handlers/storage.hpp>
+#include <sgrn/datastore/handlers/storage_admin.hpp>
 
 // Generated CRUD views (compile-time REST-over-Postgres). The header only
 // declares initGeneratedViews(); the per-table instances live in the
@@ -21,6 +22,7 @@ inline void initHandlers() {
     static admin::AdminApiHandler admin_api_handler;
     static query::QueryApiHandler query_api_handler;
     static storage::StorageApiHandler storage_api_handler;
+    static storage_admin::StorageAdminHandler storage_admin_handler;
 
     // Compile-time generated CRUD views (one static instance per table;
     // see src/handlers/generated/RegisteredViews.cpp).

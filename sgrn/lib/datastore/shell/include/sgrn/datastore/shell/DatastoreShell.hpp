@@ -122,6 +122,10 @@ private:
     int cmdWhoami();
     int cmdStats();
     int cmdInfo();
+    int cmdStorageOverview(const std::vector<std::string>& t_args);
+    int cmdStorageOrphans(const std::vector<std::string>& t_args);
+    int cmdStoragePurge(const std::vector<std::string>& t_args);
+    int cmdStorageSearch(const std::vector<std::string>& t_args);
     int cmdLs(const std::vector<std::string>& t_args);
     int cmdCd(const std::vector<std::string>& t_args);
     int cmdCat(const std::vector<std::string>& t_args);

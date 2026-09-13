@@ -34,7 +34,16 @@
 namespace sgrn::scripting
 {
 
-inline bool g_suppress_errors = false;
+// Per-thread error suppression for expression probing. Was a plain `inline`
+// global written by execute() and read by the message callback: two threads
+// running execute() concurrently (REPL + one-shot runner, or two REPL
+// sessions in one process) raced on it. thread_local is the correct fix
+// rather than a mutex: the callback fires synchronously on the thread that
+// is compiling/executing, so each thread's flag exactly covers its own
+// callbacks, and a mutex could deadlock if that thread re-enters. The name
+// is unchanged, so out-of-class users (SchemaVM's registration probes) keep
+// compiling untouched.
+inline thread_local bool g_suppress_errors = false;
 
 static void as_message_callback(const asSMessageInfo* tp_msg, void* tp_param) {
     (void)tp_param;
@@ -164,6 +173,7 @@ protected:
     }
 
     virtual bool handleMetaCommand(const std::string& t_line) {
+        (void)t_line;
         return false;
     }
 

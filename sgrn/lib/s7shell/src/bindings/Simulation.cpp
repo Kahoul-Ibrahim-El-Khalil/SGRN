@@ -39,7 +39,12 @@ using sgrn::plcsim::simulation::SimulationEngine;
 
 class SimParamsWrapper {
 public:
-    SimParams params;
+    SimParams& get() {
+        return params_;
+    }
+    const SimParams& get() const {
+        return params_;
+    }
 
     void addRef() {
         ref_count_++;
@@ -50,6 +55,12 @@ public:
     }
 
 private:
+    // All data members share one access block so the class stays
+    // standard-layout: RegisterObjectProperty() below locates properties
+    // with offsetof(), which requires it. registerSimulationTypes is a
+    // friend so it may name params_ for those offsets.
+    friend Result<void, std::string> registerSimulationTypes(asIScriptEngine* tp_engine);
+    SimParams params_;
     int ref_count_{1};
 };
 
@@ -67,7 +78,7 @@ public:
         : rt_ref_(tp_rt)
         , as_engine_(tp_as_engine) {
         tp_rt->addRef();
-        engine_ = std::make_unique<SimulationEngine>(tp_rt->getImpl(), tp_params ? tp_params->params : SimParams{});
+        engine_ = std::make_unique<SimulationEngine>(tp_rt->getImpl(), tp_params ? tp_params->get() : SimParams{});
     }
 
     ~SimEngineWrapper() {
@@ -191,11 +202,11 @@ Result<void, std::string> registerSimulationTypes(asIScriptEngine* tp_engine) {
     SGRN_AS_REG(
         tp_engine->RegisterObjectBehaviour("SimParams", asBEHAVE_FACTORY, "SimParams@ f()", asFUNCTION(SimParams_Factory), asCALL_CDECL));
 
-    SGRN_AS_REG(tp_engine->RegisterObjectProperty("SimParams", "uint64 seed", offsetof(SimParamsWrapper, params.seed)));
-    SGRN_AS_REG(tp_engine->RegisterObjectProperty("SimParams", "uint timestep_ms", offsetof(SimParamsWrapper, params.timestep_ms)));
-    SGRN_AS_REG(tp_engine->RegisterObjectProperty("SimParams", "uint duration_s", offsetof(SimParamsWrapper, params.duration_s)));
-    SGRN_AS_REG(tp_engine->RegisterObjectProperty("SimParams", "double noise_level", offsetof(SimParamsWrapper, params.noise_level)));
-    SGRN_AS_REG(tp_engine->RegisterObjectProperty("SimParams", "string fault", offsetof(SimParamsWrapper, params.fault_scenario)));
+    SGRN_AS_REG(tp_engine->RegisterObjectProperty("SimParams", "uint64 seed", offsetof(SimParamsWrapper, params_.seed)));
+    SGRN_AS_REG(tp_engine->RegisterObjectProperty("SimParams", "uint timestep_ms", offsetof(SimParamsWrapper, params_.timestep_ms)));
+    SGRN_AS_REG(tp_engine->RegisterObjectProperty("SimParams", "uint duration_s", offsetof(SimParamsWrapper, params_.duration_s)));
+    SGRN_AS_REG(tp_engine->RegisterObjectProperty("SimParams", "double noise_level", offsetof(SimParamsWrapper, params_.noise_level)));
+    SGRN_AS_REG(tp_engine->RegisterObjectProperty("SimParams", "string fault", offsetof(SimParamsWrapper, params_.fault_scenario)));
 
     // ── funcdef — the tick callback signature ────────────────────────────────
     // void SimTickFn(PlcRuntime@ rt, double t_s, uint64 step_idx)

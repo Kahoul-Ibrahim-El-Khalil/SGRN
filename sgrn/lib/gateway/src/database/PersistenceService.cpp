@@ -131,6 +131,17 @@ Result<void> PersistenceService::configure(const PersistenceConfig& t_cfg, const
     schema_json_ = t_schema_json;
     read_db_fn_ = std::move(t_read_db);
 
+    // Render the binary schema payload once, up front: archives open lazily
+    // (long after configure returns), and the header needs the bytes then.
+    if (t_schema_store) {
+        if (auto bin_res = t_schema_store->toBinary(); !bin_res.hasError()) {
+            schema_binary_ = std::move(bin_res).value();
+            has_binary_schema_ = true;
+        } else {
+            fmt::print(fg(fmt::color::yellow), "[persist] Binary schema encode failed — falling back to JSON header.\n");
+        }
+    }
+
     // One anchor cadence for both formats: binary keyframes follow
     // anchor_interval_s when set, otherwise the default. (Binary deltas
     // require restart points for resync, so unlike JSONL anchors this never
@@ -211,61 +222,32 @@ void PersistenceService::onTelemetryEvent(const TelemetryEvent& t_event) {
         if (!current_archive_) {
             (void)openNewArchive(t_now);
         }
-        if (current_archive_ && t_event.db > 0) {
+        // DBs to snapshot for this event: the single-DB leaf path (`db`)
+        // plus the multi-DB DeltaSnapshot batch (`dirty_dbs`, populated by
+        // GatewayApplication::wireTelemetry from the same dirty batch the
+        // JSON snapshot was built from). A DeltaSnapshot leaves `db` at 0,
+        // so without dirty_dbs the per-DB branch below never runs for it.
+        std::vector<uint16_t> dbs;
+        if (t_event.db > 0)
+            dbs.push_back(t_event.db);
+        for (uint16_t db : t_event.dirty_dbs) {
+            if (db == 0)
+                continue;
+            if (std::find(dbs.begin(), dbs.end(), db) == dbs.end())
+                dbs.push_back(db);
+        }
+        if (current_archive_ && !dbs.empty()) {
             const uint64_t ts = t_event.timestamp > 0 ? t_event.timestamp : static_cast<uint64_t>(t_now);
             if (read_db_fn_) {
-                auto full_res = read_db_fn_(t_event.db);
-                if (full_res.hasValue() && !full_res.value().empty()) {
-                    auto& last = last_db_bytes_[t_event.db];
-                    if (last != full_res.value()) {
-                        const auto& full = full_res.value();
-                        const uint16_t db_num = t_event.db;
-                        const auto key_it = last_keyframe_ts_.find(t_event.db);
-                        const bool need_keyframe =
-                            last.empty() || key_it == last_keyframe_ts_.end() || (t_now - key_it->second) >= binary_keyframe_interval_ms_;
-
-                        bool wrote_delta = false;
-                        if (!need_keyframe && last.size() == full.size()) {
-                            const auto runs = diffRuns(last, full);
-                            uint64_t delta_bytes = 2; // embedded db_num
-                            for (const auto& run : runs)
-                                delta_bytes += 8 + run.len;
-                            if (!runs.empty() && delta_bytes <= 0xFFFFFFFFu &&
-                                delta_bytes < static_cast<double>(full.size()) * kBinaryDeltaMaxRatio) {
-                                const uint16_t marker = kDeltaFrameDbNum;
-                                const uint32_t total = static_cast<uint32_t>(delta_bytes);
-                                (void)current_archive_->writeRaw(&ts, sizeof(ts));
-                                (void)current_archive_->writeRaw(&marker, sizeof(marker));
-                                (void)current_archive_->writeRaw(&total, sizeof(total));
-                                (void)current_archive_->writeRaw(&db_num, sizeof(db_num));
-                                for (const auto& run : runs) {
-                                    (void)current_archive_->writeRaw(&run.offset, sizeof(run.offset));
-                                    (void)current_archive_->writeRaw(&run.len, sizeof(run.len));
-                                    (void)current_archive_->writeRaw(full.data() + run.offset, run.len);
-                                }
-                                wrote_delta = true;
-                                ++delta_frames_;
-                            }
-                        }
-                        if (!wrote_delta) {
-                            writeBinaryAnchor(t_event.db, full, static_cast<int64_t>(ts));
-                            // Wall clock on both sides: the frame carries the
-                            // event timestamp, but keyframe ageing is measured
-                            // in wall time (event clocks may lag).
-                            last_keyframe_ts_[t_event.db] = t_now;
-                        }
-                        last = full;
-                        ++current_line_counter_;
-                        maybeFlushBatch(t_now);
-                    }
-                }
-            } else if (t_event.typed_leaf.bytes && !t_event.typed_leaf.bytes->empty()) {
+                for (uint16_t db : dbs)
+                    writeBinaryDbImage(db, ts, t_now);
+            } else if (dbs.size() == 1 && t_event.typed_leaf.bytes && !t_event.typed_leaf.bytes->empty()) {
                 // Degraded fallback (no full-DB reader wired): anchors the
                 // per-leaf slice as-is, CRC'd over the stored bytes. Every
                 // data frame self-identifies as delta or anchor; this one is
                 // verifiable but only exact for offset-0 leaves (slices carry
                 // no offset), and it bypasses dedup/keyframe tracking.
-                writeBinaryAnchor(t_event.db, *t_event.typed_leaf.bytes, static_cast<int64_t>(ts));
+                writeBinaryAnchor(dbs.front(), *t_event.typed_leaf.bytes, static_cast<int64_t>(ts));
                 ++current_line_counter_;
                 maybeFlushBatch(t_now);
             }
@@ -549,16 +531,21 @@ Result<void, std::string> PersistenceService::openNewArchive(int64_t t_now) {
     delta_lines_ = 0;
 
     if (is_binary) {
-        // Binary Header Frame: "SGRN" (4B) + Version (2B) + Schema Length (4B) + Schema JSON
+        // Binary Header Frame: "SGRN" (4B) + Version (2B) + Schema Length (4B) + Schema payload.
+        // Version 4+ carries the binary schema encoding (SchemaSerializer);
+        // version 3 is the legacy JSON-text schema, still written when no
+        // schema store was provided at configure time. Readers accept both.
+        const bool use_binary_schema = has_binary_schema_;
+        const uint16_t ver = (use_binary_schema || schema_json_.empty()) ? kBinaryWalVersion : 3;
+        const std::string& schema_payload = use_binary_schema ? schema_binary_ : schema_json_;
         char magic[4] = {'S', 'G', 'R', 'N'};
-        uint16_t ver = kBinaryWalVersion;
-        uint32_t schema_len = static_cast<uint32_t>(schema_json_.size());
+        uint32_t schema_len = static_cast<uint32_t>(schema_payload.size());
 
         (void)current_archive_->writeRaw(magic, 4);
         (void)current_archive_->writeRaw(&ver, sizeof(ver));
         (void)current_archive_->writeRaw(&schema_len, sizeof(schema_len));
         if (schema_len > 0) {
-            (void)current_archive_->writeRaw(schema_json_.data(), schema_len);
+            (void)current_archive_->writeRaw(schema_payload.data(), schema_len);
         }
         ++current_line_counter_;
     } else {
@@ -702,6 +689,53 @@ Result<void> PersistenceService::writeBinaryControlLine(const std::string& t_jso
         SGRN_IF_ERROR_PROPAGATE(current_archive_->writeRaw(t_json.data(), len));
     }
     return {};
+}
+
+void PersistenceService::writeBinaryDbImage(uint16_t t_db, uint64_t t_ts, int64_t t_now) {
+    SGRN_RETURN_IF(!current_archive_ || !read_db_fn_, ;);
+
+    auto full_res = read_db_fn_(t_db);
+    SGRN_RETURN_IF(full_res.hasError() || full_res.value().empty(), ;);
+
+    auto& last = last_db_bytes_[t_db];
+    SGRN_RETURN_IF(last == full_res.value(), ;);
+
+    const auto& full = full_res.value();
+    const auto key_it = last_keyframe_ts_.find(t_db);
+    const bool need_keyframe =
+        last.empty() || key_it == last_keyframe_ts_.end() || (t_now - key_it->second) >= binary_keyframe_interval_ms_;
+
+    bool wrote_delta = false;
+    if (!need_keyframe && last.size() == full.size()) {
+        const auto runs = diffRuns(last, full);
+        uint64_t delta_bytes = 2; // embedded db_num
+        for (const auto& run : runs)
+            delta_bytes += 8 + run.len;
+        if (!runs.empty() && delta_bytes <= 0xFFFFFFFFu && delta_bytes < static_cast<double>(full.size()) * kBinaryDeltaMaxRatio) {
+            const uint16_t marker = kDeltaFrameDbNum;
+            const uint32_t total = static_cast<uint32_t>(delta_bytes);
+            (void)current_archive_->writeRaw(&t_ts, sizeof(t_ts));
+            (void)current_archive_->writeRaw(&marker, sizeof(marker));
+            (void)current_archive_->writeRaw(&total, sizeof(total));
+            (void)current_archive_->writeRaw(&t_db, sizeof(t_db));
+            for (const auto& run : runs) {
+                (void)current_archive_->writeRaw(&run.offset, sizeof(run.offset));
+                (void)current_archive_->writeRaw(&run.len, sizeof(run.len));
+                (void)current_archive_->writeRaw(full.data() + run.offset, run.len);
+            }
+            wrote_delta = true;
+            ++delta_frames_;
+        }
+    }
+    if (!wrote_delta) {
+        writeBinaryAnchor(t_db, full, static_cast<int64_t>(t_ts));
+        // Wall clock on both sides: the frame carries the event timestamp,
+        // but keyframe ageing is measured in wall time (event clocks may lag).
+        last_keyframe_ts_[t_db] = t_now;
+    }
+    last = full;
+    ++current_line_counter_;
+    maybeFlushBatch(t_now);
 }
 
 void PersistenceService::writeBinaryAnchor(uint16_t t_db, const std::vector<uint8_t>& t_image, int64_t t_ts) {

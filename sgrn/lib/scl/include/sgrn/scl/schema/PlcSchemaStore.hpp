@@ -46,6 +46,9 @@ public:
     static sgrn::Result<PlcSchemaStore, SclError> loadFromJsonFile(const std::string& t_path);
     static sgrn::Result<PlcSchemaStore, SclError> loadFromJson(const rapidjson::Value& t_root);
 
+    /// Decodes a binary schema payload (see SchemaSerializer::serializeBinary).
+    static sgrn::Result<PlcSchemaStore, SclError> loadFromBinary(std::string_view t_bytes);
+
     // ── DB schema queries ─────────────────────────────────────────────────────
 
     bool hasDb(uint16_t t_db_number) const;
@@ -103,6 +106,9 @@ public:
     sgrn::Result<void, SclError> loadSchema(const std::string& t_path_or_content, bool t_force = false);
 
     std::string toJson(std::optional<uint16_t> t_db_number = std::nullopt, bool t_headers_only = false, bool t_pretty = false) const;
+
+    /// Binary encoding of the whole store (see SchemaSerializer).
+    sgrn::Result<std::string, SclError> toBinary() const;
 
     // ── Diagnostics ───────────────────────────────────────────────────────────
 

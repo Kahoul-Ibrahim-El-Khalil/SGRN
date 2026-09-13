@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 
 import type { User } from "@/pages/signin/types"; // Assumes you have the User type defined in types/index.ts
+import { appPath } from "@/lib/appPath";
 
 interface AuthContextType {
     user: User | null;
@@ -54,7 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.removeItem("user_info");
         localStorage.removeItem("SGRN-TOKEN");
 
-        window.location.href = "/signin";
+        window.location.href = appPath("/signin");
     }, []);
 
     return (

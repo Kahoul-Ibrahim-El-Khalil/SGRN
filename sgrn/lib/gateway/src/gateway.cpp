@@ -199,12 +199,13 @@ Result<void, std::string> GatewayApplication::wireTelemetry() {
     // These are individual field updates published as LeafUpdate events.
     // TreeCacheEngine subscribes to these to invalidate cached JSON paths.
     server_.processor()->setOnFieldUpdate([](const sgrn::gateway::twin::FieldUpdateNotification& note) {
-        TelemetryEvent ev{.type = sgrn::gateway::core::EventType::LeafUpdate,
-            .db = note.db,
-            .path = note.path,
-            .json_value = std::make_shared<std::string>(note.json_value),
-            .typed_leaf = note.typed_leaf,
-            .timestamp = note.timestamp};
+        TelemetryEvent ev;
+        ev.type = sgrn::gateway::core::EventType::LeafUpdate;
+        ev.db = note.db;
+        ev.path = note.path;
+        ev.json_value = std::make_shared<std::string>(note.json_value);
+        ev.typed_leaf = note.typed_leaf;
+        ev.timestamp = note.timestamp;
         TelemetryBroker::instance().publish(std::move(ev));
     });
 
@@ -263,6 +264,9 @@ Result<void, std::string> GatewayApplication::wireTelemetry() {
         ev.json_value = std::make_shared<std::string>(std::move(snapshot));
         ev.timestamp = sgrn::utils::time::nowMilliseconds();
         ev.is_flat = dict_ready; // tells WebSocket adapter to skip flattenNestedTree
+        // Per-DB list for the binary WAL writer: a DeltaSnapshot leaves `db`
+        // at 0, so without this the binary frame path never runs for it.
+        ev.dirty_dbs = dirty_dbs;
 
         // Build dirty_paths from DB numbers (reverse lookup to names for TreePath).
         for (const auto& db_num : dirty_dbs) {

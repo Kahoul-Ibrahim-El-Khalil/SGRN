@@ -135,10 +135,14 @@ class DbField:
 
     @classmethod
     def from_dict(cls, t_data: Dict[str, Any]) -> "DbField":
+        # Wire keys are "bit"/"number"/"name" (see scl serializeDbField);
+        # the "bit_index"/"db_number"/"db_name" spellings are accepted as
+        # legacy aliases from older producers.
+        bit = t_data.get("bit", t_data.get("bit_index"))
         return cls(
             name=_as_str(t_data.get("name")),
             offset=_as_int(t_data.get("offset")),
-            bit_index=_as_int(t_data.get("bit_index")),
+            bit_index=_as_int(bit),
             type=_as_str(t_data.get("type")),
             count=_as_int(t_data.get("count"), 1),
             capacity=t_data.get("capacity"),
@@ -176,8 +180,8 @@ class DbSchema:
     @classmethod
     def from_dict(cls, t_data: Dict[str, Any]) -> "DbSchema":
         return cls(
-            db_number=_as_int(t_data.get("db_number")),
-            db_name=_as_str(t_data.get("db_name")),
+            db_number=_as_int(t_data.get("db_number", t_data.get("number"))),
+            db_name=_as_str(t_data.get("db_name") or t_data.get("name")),
             size_bytes=_as_int(t_data.get("size_bytes")),
             source_file=t_data.get("source_file"),
             endianness=t_data.get("endianness"),

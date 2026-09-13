@@ -55,6 +55,18 @@ public:
     bool hasPendingCommands() const;
 
 private:
+    // Follow-up scheduling shared by every processDirty() exit path. Must be
+    // called AFTER dirty_scheduled_ has been released: consumes
+    // dirty_recheck_ and re-acquires single-flight for one more pass when a
+    // write arrived mid-processing. Reversing that order (consume-then-
+    // release) orphans a signalDirty() landing between the two steps — it
+    // observes scheduled==true and posts nothing, while the trailing release
+    // discards its recheck, stalling telemetry until an unrelated later
+    // write re-signals. If a producer already re-acquired single-flight
+    // (its signalDirty() won the CAS after our release), its post covers
+    // the dirty state and this is a no-op.
+    void repostDirtyPass();
+
     PlcMemory& memory_;
     asio::io_context* light_ctx_{nullptr};
     asio::thread_pool* heavy_pool_{nullptr};

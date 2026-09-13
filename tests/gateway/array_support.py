@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_array_support.py — Integration test for S7 Gateway array support.
+array_support.py — Integration test for S7 Gateway array support.
 
 Tests:
   1. HTTP: POST full array   → 200, value returned
@@ -11,7 +11,7 @@ Tests:
   6. OPC UA (optional): read the same array variable via OPC UA
 
 Usage:
-  python3 test_array_support.py \\
+  python3 tests/gateway/array_support.py \\
       --host 127.0.0.1 \\
       --http-port 8080 \\
       [--opcua-port 4840] \\

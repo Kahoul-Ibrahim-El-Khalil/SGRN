@@ -36,6 +36,25 @@ target_link_libraries(sgrn_scl PRIVATE
 sgrn_target(sgrn_scl)
 
 # =============================================================================
+# Tests
+# =============================================================================
+
+if(SGRN_BUILD_TESTS)
+    sgrn_add_component_executable(
+        TARGET schema_binary_codec_test
+        SOURCES tests/schema_binary_codec_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn_scl
+    )
+    target_include_directories(schema_binary_codec_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    add_test(NAME schema_binary_codec_test COMMAND schema_binary_codec_test)
+    sgrn_target(schema_binary_codec_test)
+endif()
+
+# =============================================================================
 # sclc executable and sclc packaging have moved to sgrn/apps/
 # (sclc/ dir + shared packaging block).
 # =============================================================================

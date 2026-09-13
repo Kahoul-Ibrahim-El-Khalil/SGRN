@@ -505,6 +505,60 @@ if(SGRN_BUILD_TESTS)
     )
     add_test(NAME twin_ports_test COMMAND twin_ports_test)
     sgrn_target(twin_ports_test)
+
+    # Lost-wakeup regression test: producer threads hammer writeDbMemory()
+    # while the heavy_pool dirty callback drains; every burst's final write
+    # must be observed (no orphaned dirty batch). Links the twin on purpose.
+    sgrn_add_component_executable(
+        TARGET dirty_wakeup_test
+        SOURCES tests/dirty_wakeup_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn_gateway_twin
+    )
+    target_include_directories(dirty_wakeup_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/sgrn/lib/scl/include
+    )
+    target_compile_definitions(dirty_wakeup_test PRIVATE ASIO_STANDALONE)
+    add_test(NAME dirty_wakeup_test COMMAND dirty_wakeup_test)
+    sgrn_target(dirty_wakeup_test)
+
+    # Binary WAL regression test: multi-DB DeltaSnapshot events (db == 0,
+    # dirty_dbs set) must produce anchor/delta/keyframe frames, and the
+    # archive must round-trip through recoverStateFromArchives().
+    sgrn_add_component_executable(
+        TARGET persistence_binary_test
+        SOURCES tests/persistence_binary_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn_gateway
+            sgrn_gateway_twin
+    )
+    target_include_directories(persistence_binary_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/sgrn/lib/scl/include
+    )
+    target_compile_definitions(persistence_binary_test PRIVATE ASIO_STANDALONE)
+    add_test(NAME persistence_binary_test COMMAND persistence_binary_test)
+    sgrn_target(persistence_binary_test)
+
+    # Deterministic DB-write-ordering test: one processCommands() call over
+    # scrambled DBs must invoke the batch callback in ascending DB order.
+    sgrn_add_component_executable(
+        TARGET process_commands_order_test
+        SOURCES tests/process_commands_order_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn_gateway_twin
+    )
+    target_include_directories(process_commands_order_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/sgrn/lib/scl/include
+    )
+    target_compile_definitions(process_commands_order_test PRIVATE ASIO_STANDALONE)
+    add_test(NAME process_commands_order_test COMMAND process_commands_order_test)
+    sgrn_target(process_commands_order_test)
 endif()
 
 # 4.6 Documentation

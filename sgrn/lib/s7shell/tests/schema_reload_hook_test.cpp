@@ -43,6 +43,8 @@ int main() {
     }
     const auto types_after = p_engine->GetObjectTypeCount();
     assert(types_after > types_before && "schema reload did not register new DB types on the engine");
+    (void)types_before; // assert-only use (compiled out with NDEBUG)
+    (void)types_after;  // assert-only use (compiled out with NDEBUG)
 
     p_engine->ShutDownAndRelease();
     std::cout << "[schema_reload_hook_test] ALL OK\n";

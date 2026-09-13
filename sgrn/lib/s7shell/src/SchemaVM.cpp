@@ -18,6 +18,7 @@
 #include <string>
 
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
+#include <sgrn/utils/strings.hpp>
 
 namespace sgrn::s7shell::shell
 {
@@ -305,114 +306,6 @@ static void GenericUDTFieldSetter_double(asIScriptGeneric* tp_gen) {
     double val = tp_gen->GetArgDouble(0);
     auto* p_sub_proxy = p_proxy->index(field_name);
     p_sub_proxy->assignDouble(val);
-    p_sub_proxy->release();
-}
-
-static void GenericUDTFieldGetter_int8(asIScriptGeneric* tp_gen) {
-    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
-    std::string field_name = getUdtFieldName(tp_gen);
-    auto* p_sub_proxy = p_proxy->index(field_name);
-    tp_gen->SetReturnByte(p_sub_proxy->toUInt8());
-    p_sub_proxy->release();
-}
-
-static void GenericUDTFieldSetter_int8(asIScriptGeneric* tp_gen) {
-    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
-    std::string field_name = getUdtFieldName(tp_gen);
-    // Setter signature uses 'int' to accept integer literals/hex without AS narrowing errors.
-    // Truncate to uint8 here in C++.
-    uint8_t val = static_cast<uint8_t>(tp_gen->GetArgDWord(0));
-    auto* p_sub_proxy = p_proxy->index(field_name);
-    p_sub_proxy->assignUInt8(val);
-    p_sub_proxy->release();
-}
-
-static void GenericUDTFieldGetter_int16(asIScriptGeneric* tp_gen) {
-    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
-    std::string field_name = getUdtFieldName(tp_gen);
-    auto* p_sub_proxy = p_proxy->index(field_name);
-    tp_gen->SetReturnWord(p_sub_proxy->toUInt16());
-    p_sub_proxy->release();
-}
-
-static void GenericUDTFieldSetter_int16(asIScriptGeneric* tp_gen) {
-    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
-    std::string field_name = getUdtFieldName(tp_gen);
-    // Setter signature uses 'int' to accept integer literals/hex without AS narrowing errors.
-    // Truncate to uint16 here in C++.
-    uint16_t val = static_cast<uint16_t>(tp_gen->GetArgDWord(0));
-    auto* p_sub_proxy = p_proxy->index(field_name);
-    p_sub_proxy->assignUInt16(val);
-    p_sub_proxy->release();
-}
-
-static void GenericUDTFieldGetter_int64(asIScriptGeneric* tp_gen) {
-    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
-    std::string field_name = getUdtFieldName(tp_gen);
-    auto* p_sub_proxy = p_proxy->index(field_name);
-    tp_gen->SetReturnQWord(p_sub_proxy->toUInt64());
-    p_sub_proxy->release();
-}
-
-static void GenericUDTFieldSetter_int64(asIScriptGeneric* tp_gen) {
-    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
-    std::string field_name = getUdtFieldName(tp_gen);
-    uint64_t val = tp_gen->GetArgQWord(0);
-    auto* p_sub_proxy = p_proxy->index(field_name);
-    p_sub_proxy->assignUInt64(val);
-    p_sub_proxy->release();
-}
-
-static void GenericUDTFieldGetter_int32(asIScriptGeneric* tp_gen) {
-    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
-    std::string field_name = getUdtFieldName(tp_gen);
-    auto* p_sub_proxy = p_proxy->index(field_name);
-    tp_gen->SetReturnDWord(p_sub_proxy->toInt());
-    p_sub_proxy->release();
-}
-
-static void GenericUDTFieldSetter_int32(asIScriptGeneric* tp_gen) {
-    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
-    std::string field_name = getUdtFieldName(tp_gen);
-    int32_t val = tp_gen->GetArgDWord(0);
-    auto* p_sub_proxy = p_proxy->index(field_name);
-    p_sub_proxy->assignInt(val);
-    p_sub_proxy->release();
-}
-
-static void GenericUDTFieldSetter_uint8(asIScriptGeneric* tp_gen) {
-    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
-    std::string field_name = getUdtFieldName(tp_gen);
-    uint8_t val = static_cast<uint8_t>(tp_gen->GetArgDWord(0));
-    auto* p_sub_proxy = p_proxy->index(field_name);
-    p_sub_proxy->assignUInt8(val);
-    p_sub_proxy->release();
-}
-
-static void GenericUDTFieldSetter_uint16(asIScriptGeneric* tp_gen) {
-    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
-    std::string field_name = getUdtFieldName(tp_gen);
-    uint16_t val = static_cast<uint16_t>(tp_gen->GetArgDWord(0));
-    auto* p_sub_proxy = p_proxy->index(field_name);
-    p_sub_proxy->assignUInt16(val);
-    p_sub_proxy->release();
-}
-
-static void GenericUDTFieldSetter_uint32(asIScriptGeneric* tp_gen) {
-    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
-    std::string field_name = getUdtFieldName(tp_gen);
-    uint32_t val = tp_gen->GetArgDWord(0);
-    auto* p_sub_proxy = p_proxy->index(field_name);
-    p_sub_proxy->assignUInt(val);
-    p_sub_proxy->release();
-}
-
-static void GenericUDTFieldSetter_uint64(asIScriptGeneric* tp_gen) {
-    auto* p_proxy = static_cast<ScriptFieldProxy*>(tp_gen->GetObject());
-    std::string field_name = getUdtFieldName(tp_gen);
-    uint64_t val = tp_gen->GetArgQWord(0);
-    auto* p_sub_proxy = p_proxy->index(field_name);
-    p_sub_proxy->assignUInt64(val);
     p_sub_proxy->release();
 }
 
@@ -711,19 +604,6 @@ static GenericAccessors accessorsForASType(const char* tp_as_type) {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-std::string sanitizeFieldName(const std::string& t_name) {
-    std::string out;
-    out.reserve(t_name.size());
-    for (char c : t_name) {
-        if (std::isalnum(static_cast<unsigned char>(c)) || c == '_')
-            out += c;
-        else
-            out += '_';
-    }
-    if (out.empty() || std::isdigit(static_cast<unsigned char>(out[0])))
-        out = "_" + out;
-    return out;
-}
 static ScriptFieldProxy* IdentityProxyCast(ScriptFieldProxy* tp_proxy);
 // this function register an anonymous type of a struct
 static void registerProxyStructType(sgrn::scripting::ScriptHost& t_host, const std::string& t_type_name,
@@ -752,14 +632,14 @@ static void registerProxyStructType(sgrn::scripting::ScriptHost& t_host, const s
 
     // Register the actual members.
     for (const auto& f : t_fields) {
-        const std::string safe_name = sanitizeFieldName(f.name);
+        const std::string safe_name = sgrn::utils::strings::sanitizeIdentifier(f.name);
 
         // Nested STRUCT / UDT
         if (!f.children.empty() || !f.udt_name.empty()) {
             std::string child_type;
 
             if (!f.udt_name.empty()) {
-                child_type = sanitizeFieldName(f.udt_name);
+                child_type = sgrn::utils::strings::sanitizeIdentifier(f.udt_name);
             } else {
                 child_type = t_type_name + "_" + safe_name;
 
@@ -816,7 +696,7 @@ static void registerFieldProperties(sgrn::scripting::ScriptHost& t_host, const s
     for (const auto& f : t_fields) {
         std::string field_path = t_path_prefix.empty() ? f.name : t_path_prefix + "." + f.name;
 
-        std::string safe_name = sanitizeFieldName(f.name);
+        std::string safe_name = sgrn::utils::strings::sanitizeIdentifier(f.name);
 
         bool is_string = f.type == scl::DataType::String || f.type == scl::DataType::WString || f.type == scl::DataType::XString ||
                          f.type == scl::DataType::XWString;
@@ -833,14 +713,14 @@ static void registerFieldProperties(sgrn::scripting::ScriptHost& t_host, const s
                 auto p_meta = std::make_unique<UdtArrayMeta>();
 
                 p_meta->path = field_path;
-                p_meta->udt_name = sanitizeFieldName(f.udt_name);
+                p_meta->udt_name = sgrn::utils::strings::sanitizeIdentifier(f.udt_name);
                 p_meta->count = f.count;
 
                 UdtArrayMeta* raw = p_meta.get();
 
                 t_registry.udt_array_metas.push_back(std::move(p_meta));
 
-                std::string decl = fmt::format("array<{}@>@", sanitizeFieldName(f.udt_name));
+                std::string decl = fmt::format("array<{}@>@", sgrn::utils::strings::sanitizeIdentifier(f.udt_name));
 
                 std::string getter_sig = fmt::format("{} get_{}() const", decl, safe_name);
 
@@ -895,7 +775,7 @@ static void registerFieldProperties(sgrn::scripting::ScriptHost& t_host, const s
             // Named UDT
             // ------------------------------------------------------------
             if (!f.udt_name.empty()) {
-                ret_type = sanitizeFieldName(f.udt_name);
+                ret_type = sgrn::utils::strings::sanitizeIdentifier(f.udt_name);
             }
 
             // ------------------------------------------------------------
@@ -1029,7 +909,7 @@ static void registerUdtFieldProperties(sgrn::scripting::ScriptHost& t_host, cons
     const std::vector<scl::DbField>& t_fields, SchemaVMRegistry& t_registry) {
 
     for (const auto& f : t_fields) {
-        std::string safe_name = sanitizeFieldName(f.name);
+        std::string safe_name = sgrn::utils::strings::sanitizeIdentifier(f.name);
 
         auto p_name = std::make_unique<std::string>(f.name);
         std::string* raw_name = p_name.get();
@@ -1043,12 +923,12 @@ static void registerUdtFieldProperties(sgrn::scripting::ScriptHost& t_host, cons
                 // UDT array
                 auto p_meta = std::make_unique<UdtArrayMeta>();
                 p_meta->path = f.name;
-                p_meta->udt_name = sanitizeFieldName(f.udt_name);
+                p_meta->udt_name = sgrn::utils::strings::sanitizeIdentifier(f.udt_name);
                 p_meta->count = f.count;
                 UdtArrayMeta* raw = p_meta.get();
                 t_registry.udt_array_metas.push_back(std::move(p_meta));
 
-                std::string decl = fmt::format("array<{}@>@", sanitizeFieldName(f.udt_name));
+                std::string decl = fmt::format("array<{}@>@", sgrn::utils::strings::sanitizeIdentifier(f.udt_name));
                 std::string getter_sig = fmt::format("{} get_{}() const", decl, safe_name);
                 t_host.getEngine()->RegisterObjectMethod(
                     t_as_type_name.c_str(), getter_sig.c_str(), asFUNCTION(GenericUDTFieldGetter_udt_array), asCALL_GENERIC, raw);
@@ -1064,7 +944,7 @@ static void registerUdtFieldProperties(sgrn::scripting::ScriptHost& t_host, cons
         if (!f.children.empty() || f.type == scl::DataType::DTL || f.type == scl::DataType::DateTime) {
             std::string ret_type = "FieldProxy";
             if (!f.udt_name.empty()) {
-                ret_type = sanitizeFieldName(f.udt_name);
+                ret_type = sgrn::utils::strings::sanitizeIdentifier(f.udt_name);
             }
 
             std::string getter_sig = fmt::format("{}@ get_{}() const", ret_type, safe_name);
@@ -1155,7 +1035,7 @@ void registerSchemaTypes(sgrn::scripting::ScriptHost& t_host, const PlcSchemaSto
 
     // 1. Register all UDT types first
     for (const auto& udt : t_store.udts()) {
-        std::string tn = sanitizeFieldName(udt.name);
+        std::string tn = sgrn::utils::strings::sanitizeIdentifier(udt.name);
         if (p_engine->GetTypeInfoByName(tn.c_str()) != nullptr)
             continue;
         t_registry.registered_schema_types.insert(tn);
@@ -1179,19 +1059,18 @@ void registerSchemaTypes(sgrn::scripting::ScriptHost& t_host, const PlcSchemaSto
 
     // 2. Register fields for all UDT types
     for (const auto& udt : t_store.udts()) {
-        std::string tn = sanitizeFieldName(udt.name);
+        std::string tn = sgrn::utils::strings::sanitizeIdentifier(udt.name);
         registerUdtFieldProperties(t_host, tn, udt.fields, t_registry);
     }
 
     // 3. Register all DB types
     for (const auto& [db_num, tp_db] : t_store.dbs()) {
-        std::string tn = sanitizeFieldName(tp_db.db_name.empty() ? fmt::format("DB{}", db_num) : tp_db.db_name);
+        std::string tn = sgrn::utils::strings::sanitizeIdentifier(tp_db.db_name.empty() ? fmt::format("DB{}", db_num) : tp_db.db_name);
 
         if (p_engine->GetTypeInfoByName(tn.c_str()) != nullptr)
             continue;
         t_registry.registered_schema_types.insert(tn);
 
-        asIScriptEngine* p_engine = t_host.getEngine();
         if (p_engine->RegisterObjectType(tn.c_str(), 0, asOBJ_REF) < 0)
             continue;
 
@@ -1274,7 +1153,8 @@ void registerDbPropertyAccessors(sgrn::scripting::ScriptHost& t_host, const PlcS
         return;
 
     for (const auto& [db_num, tp_db] : t_store.dbs()) {
-        std::string type_name = sanitizeFieldName(tp_db.db_name.empty() ? fmt::format("DB{}", db_num) : tp_db.db_name);
+        std::string type_name =
+            sgrn::utils::strings::sanitizeIdentifier(tp_db.db_name.empty() ? fmt::format("DB{}", db_num) : tp_db.db_name);
 
         // Ensure the DB type itself was registered (or at least some type with this name, could be UDT)
         if (!t_registry.registered_schema_types.count(type_name)) {

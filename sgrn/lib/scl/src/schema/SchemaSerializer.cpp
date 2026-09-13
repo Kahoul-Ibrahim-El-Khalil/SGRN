@@ -3,9 +3,13 @@
 #include <sgrn/scl/schema/SchemaSerializer.hpp>
 #include <sgrn/scl/utils.hpp>
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
 #include <regex>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
@@ -629,6 +633,592 @@ void SchemaSerializer::resolveUdtsInRegistry(PlcSchemaStore& t_registry) {
             detail::resolveUdtInField(t_field, t_registry);
         }
     }
+}
+
+} // namespace sgrn::scl
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Binary schema codec (archive header, WAL version 4+)
+//
+// Layout (all integers little-endian; strings are u32 length + UTF-8 bytes):
+//   "SGRS" magic + codec_ver:u16 + flags:u16(reserved)
+//   db_count:u32, udt_count:u32, tag_count:u32, then the three sections.
+// Field record: name, offset:i32, bit:u8, type name, count:u32,
+//   array bounds:i32 x2, string_capacity:u32, struct_size:u32, flags:u16,
+//   then optionals in flag order (udt_name, children, unit, min:f64,
+//   max:f64, enum_map, init_value). Flags also carry trigger_events,
+//   is_dynamic, and the 2-bit endianness (0=Big, 1=Little, 2=Unknown).
+// Unlike the JSON form this is lossless: array bounds, init values, UDT
+// alias detail, and full tag addresses all survive the round-trip.
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace sgrn::scl
+{
+namespace bin
+{
+
+// Field presence/property flags (u16).
+inline constexpr uint16_t kHasUdt = 1 << 0;
+inline constexpr uint16_t kHasChildren = 1 << 1;
+inline constexpr uint16_t kHasUnit = 1 << 2;
+inline constexpr uint16_t kHasMin = 1 << 3;
+inline constexpr uint16_t kHasMax = 1 << 4;
+inline constexpr uint16_t kHasEnum = 1 << 5;
+inline constexpr uint16_t kHasInit = 1 << 6;
+inline constexpr uint16_t kTriggerEvents = 1 << 7;
+inline constexpr uint16_t kIsDynamic = 1 << 8;
+// Bits 10-11: endianness (0 = Big default, 1 = Little, 2 = Unknown).
+inline constexpr uint16_t kEndianShift = 10;
+inline constexpr uint16_t kEndianMask = 0x3 << kEndianShift;
+
+// DB flags (u8): bit0 = source_file present.
+inline constexpr uint8_t kDbHasSourceFile = 1 << 0;
+// UDT flags (u8): bit0 = enum_map, bit1 = unit, bit2 = min, bit3 = max.
+inline constexpr uint8_t kUdtHasEnum = 1 << 0;
+inline constexpr uint8_t kUdtHasUnit = 1 << 1;
+inline constexpr uint8_t kUdtHasMin = 1 << 2;
+inline constexpr uint8_t kUdtHasMax = 1 << 3;
+
+inline constexpr size_t kMaxStringLen = 1u << 24;
+inline constexpr size_t kMaxCount = 1u << 20;
+
+class Writer {
+public:
+    void u8(uint8_t t_v) {
+        buf_.push_back(static_cast<char>(t_v));
+    }
+    void u16(uint16_t t_v) {
+        for (int i = 0; i < 2; ++i)
+            buf_.push_back(static_cast<char>((t_v >> (8 * i)) & 0xFF));
+    }
+    void u32(uint32_t t_v) {
+        for (int i = 0; i < 4; ++i)
+            buf_.push_back(static_cast<char>((t_v >> (8 * i)) & 0xFF));
+    }
+    void i32(int32_t t_v) {
+        u32(static_cast<uint32_t>(t_v));
+    }
+    void f64(double t_v) {
+        uint64_t bits = 0;
+        std::memcpy(&bits, &t_v, sizeof(bits));
+        for (int i = 0; i < 8; ++i)
+            buf_.push_back(static_cast<char>((bits >> (8 * i)) & 0xFF));
+    }
+    void str(const std::string& t_s) {
+        u32(static_cast<uint32_t>(t_s.size()));
+        buf_.append(t_s);
+    }
+    std::string finish() {
+        return std::move(buf_);
+    }
+
+private:
+    std::string buf_;
+};
+
+class Reader {
+public:
+    explicit Reader(std::string_view t_bytes)
+        : bytes_(t_bytes) {
+    }
+    bool u8(uint8_t& t_v) {
+        if (pos_ + 1 > bytes_.size())
+            return false;
+        t_v = static_cast<uint8_t>(bytes_[pos_]);
+        pos_ += 1;
+        return true;
+    }
+    bool u16(uint16_t& t_v) {
+        if (pos_ + 2 > bytes_.size())
+            return false;
+        t_v = static_cast<uint16_t>(static_cast<uint8_t>(bytes_[pos_]) | (static_cast<uint8_t>(bytes_[pos_ + 1]) << 8));
+        pos_ += 2;
+        return true;
+    }
+    bool u32(uint32_t& t_v) {
+        if (pos_ + 4 > bytes_.size())
+            return false;
+        t_v = 0;
+        for (int i = 0; i < 4; ++i)
+            t_v |= static_cast<uint32_t>(static_cast<uint8_t>(bytes_[pos_ + i])) << (8 * i);
+        pos_ += 4;
+        return true;
+    }
+    bool i32(int32_t& t_v) {
+        uint32_t u = 0;
+        if (!u32(u))
+            return false;
+        std::memcpy(&t_v, &u, sizeof(t_v));
+        return true;
+    }
+    bool f64(double& t_v) {
+        if (pos_ + 8 > bytes_.size())
+            return false;
+        uint64_t bits = 0;
+        for (int i = 0; i < 8; ++i)
+            bits |= static_cast<uint64_t>(static_cast<uint8_t>(bytes_[pos_ + i])) << (8 * i);
+        std::memcpy(&t_v, &bits, sizeof(t_v));
+        pos_ += 8;
+        return true;
+    }
+    bool str(std::string& t_s) {
+        uint32_t len = 0;
+        if (!u32(len) || len > kMaxStringLen || pos_ + len > bytes_.size())
+            return false;
+        t_s.assign(bytes_.data() + pos_, len);
+        pos_ += len;
+        return true;
+    }
+    bool atEnd() const {
+        return pos_ == bytes_.size();
+    }
+
+private:
+    std::string_view bytes_;
+    size_t pos_{0};
+};
+
+inline uint8_t endianToU8(s7codec::Endian t_e) {
+    switch (t_e) {
+        case s7codec::Endian::Little:
+            return 1;
+        case s7codec::Endian::Unknown:
+            return 2;
+        default:
+            return 0;
+    }
+}
+
+inline bool u8ToEndian(uint8_t t_v, s7codec::Endian& t_e) {
+    switch (t_v) {
+        case 0:
+            t_e = s7codec::Endian::Big;
+            return true;
+        case 1:
+            t_e = s7codec::Endian::Little;
+            return true;
+        case 2:
+            t_e = s7codec::Endian::Unknown;
+            return true;
+        default:
+            return false;
+    }
+}
+
+void writeField(Writer& t_w, const DbField& t_f) {
+    t_w.str(t_f.name);
+    t_w.i32(t_f.offset);
+    t_w.u8(t_f.bit_index);
+    t_w.str(s7codec::s7TypeToString(t_f.type));
+    t_w.u32(t_f.count);
+    t_w.i32(t_f.array_lower_bound);
+    t_w.i32(t_f.array_upper_bound);
+    t_w.u32(t_f.string_capacity);
+    t_w.u32(t_f.struct_size);
+
+    uint16_t flags = 0;
+    if (!t_f.udt_name.empty())
+        flags |= kHasUdt;
+    if (!t_f.children.empty())
+        flags |= kHasChildren;
+    if (t_f.unit.has_value())
+        flags |= kHasUnit;
+    if (t_f.min_val.has_value())
+        flags |= kHasMin;
+    if (t_f.max_val.has_value())
+        flags |= kHasMax;
+    if (!t_f.enum_map.empty())
+        flags |= kHasEnum;
+    if (!t_f.init_value.empty())
+        flags |= kHasInit;
+    if (t_f.trigger_events)
+        flags |= kTriggerEvents;
+    if (t_f.is_dynamic)
+        flags |= kIsDynamic;
+    flags |= static_cast<uint16_t>(endianToU8(t_f.endianness) << kEndianShift);
+    t_w.u16(flags);
+
+    if (!t_f.udt_name.empty())
+        t_w.str(t_f.udt_name);
+    if (!t_f.children.empty()) {
+        t_w.u32(static_cast<uint32_t>(t_f.children.size()));
+        for (const auto& child : t_f.children)
+            writeField(t_w, child);
+    }
+    if (t_f.unit.has_value())
+        t_w.str(t_f.unit.value());
+    if (t_f.min_val.has_value())
+        t_w.f64(t_f.min_val.value());
+    if (t_f.max_val.has_value())
+        t_w.f64(t_f.max_val.value());
+    if (!t_f.enum_map.empty()) {
+        t_w.u32(static_cast<uint32_t>(t_f.enum_map.size()));
+        for (const auto& [key, value] : t_f.enum_map) {
+            t_w.i32(key);
+            t_w.str(value);
+        }
+    }
+    if (!t_f.init_value.empty())
+        t_w.str(t_f.init_value);
+}
+
+bool readField(Reader& t_r, DbField& t_f, int t_depth = 0) {
+    // Schema trees are shallow; cap recursion against malicious payloads.
+    if (t_depth > 64)
+        return false;
+    uint32_t count = 0;
+    uint16_t flags = 0;
+    std::string type_name;
+    if (!t_r.str(t_f.name) || !t_r.i32(t_f.offset) || !t_r.u8(t_f.bit_index) || !t_r.str(type_name) || !t_r.u32(count) ||
+        !t_r.i32(t_f.array_lower_bound) || !t_r.i32(t_f.array_upper_bound) || !t_r.u32(t_f.string_capacity) || !t_r.u32(t_f.struct_size) ||
+        !t_r.u16(flags))
+        return false;
+    if (count > kMaxCount)
+        return false;
+    t_f.count = count;
+    s7codec::Type type = s7codec::Type::Byte;
+    if (!s7codec::stringToType(type_name.c_str(), type))
+        return false;
+    t_f.type = type;
+    s7codec::Endian endian = s7codec::Endian::Big;
+    if (!u8ToEndian(static_cast<uint8_t>((flags & kEndianMask) >> kEndianShift), endian))
+        return false;
+    t_f.endianness = endian;
+    t_f.trigger_events = (flags & kTriggerEvents) != 0;
+    t_f.is_dynamic = (flags & kIsDynamic) != 0;
+
+    if (flags & kHasUdt) {
+        if (!t_r.str(t_f.udt_name))
+            return false;
+    }
+    if (flags & kHasChildren) {
+        uint32_t n = 0;
+        if (!t_r.u32(n) || n > kMaxCount)
+            return false;
+        t_f.children.reserve(n);
+        for (uint32_t i = 0; i < n; ++i) {
+            DbField child;
+            if (!readField(t_r, child, t_depth + 1))
+                return false;
+            t_f.children.push_back(std::move(child));
+        }
+    }
+    if (flags & kHasUnit) {
+        std::string unit;
+        if (!t_r.str(unit))
+            return false;
+        t_f.unit = std::move(unit);
+    }
+    if (flags & kHasMin) {
+        double v = 0;
+        if (!t_r.f64(v))
+            return false;
+        t_f.min_val = v;
+    }
+    if (flags & kHasMax) {
+        double v = 0;
+        if (!t_r.f64(v))
+            return false;
+        t_f.max_val = v;
+    }
+    if (flags & kHasEnum) {
+        uint32_t n = 0;
+        if (!t_r.u32(n) || n > kMaxCount)
+            return false;
+        for (uint32_t i = 0; i < n; ++i) {
+            int32_t key = 0;
+            std::string value;
+            if (!t_r.i32(key) || !t_r.str(value))
+                return false;
+            t_f.enum_map[key] = std::move(value);
+        }
+    }
+    if (flags & kHasInit) {
+        if (!t_r.str(t_f.init_value))
+            return false;
+    }
+    return true;
+}
+
+void writeDb(Writer& t_w, const DbSchema& t_db) {
+    t_w.u16(t_db.db_number);
+    t_w.str(t_db.db_name);
+    t_w.i32(t_db.size_bytes);
+    t_w.i32(t_db.max_depth);
+    t_w.u8(endianToU8(t_db.endianness));
+    t_w.u8(t_db.trigger_events ? 1 : 0);
+    t_w.u8(static_cast<uint8_t>(t_db.modbus_area));
+    uint8_t flags = t_db.source_file.empty() ? 0 : kDbHasSourceFile;
+    t_w.u8(flags);
+    if (!t_db.source_file.empty())
+        t_w.str(t_db.source_file);
+    t_w.u32(static_cast<uint32_t>(t_db.fields.size()));
+    for (const auto& field : t_db.fields)
+        writeField(t_w, field);
+}
+
+bool readDb(Reader& t_r, DbSchema& t_db) {
+    uint16_t number = 0;
+    uint8_t endian = 0;
+    uint8_t trigger = 0;
+    uint8_t area = 0;
+    uint8_t flags = 0;
+    if (!t_r.u16(number) || !t_r.str(t_db.db_name) || !t_r.i32(t_db.size_bytes) || !t_r.i32(t_db.max_depth) || !t_r.u8(endian) ||
+        !t_r.u8(trigger) || !t_r.u8(area) || !t_r.u8(flags))
+        return false;
+    if (!u8ToEndian(endian, t_db.endianness) || area > static_cast<uint8_t>(ModbusArea::Discrete))
+        return false;
+    t_db.db_number = number;
+    t_db.trigger_events = trigger != 0;
+    t_db.modbus_area = static_cast<ModbusArea>(area);
+    // NOTE: source_file precedes the field count in the byte order.
+    if (flags & kDbHasSourceFile) {
+        if (!t_r.str(t_db.source_file))
+            return false;
+    }
+    uint32_t n = 0;
+    if (!t_r.u32(n) || n > kMaxCount)
+        return false;
+    t_db.fields.reserve(n);
+    for (uint32_t i = 0; i < n; ++i) {
+        DbField field;
+        if (!readField(t_r, field))
+            return false;
+        t_db.fields.push_back(std::move(field));
+    }
+    return true;
+}
+
+void writeUdt(Writer& t_w, const UdtDefinition& t_udt) {
+    t_w.u16(t_udt.udt_number);
+    t_w.str(t_udt.name);
+    t_w.i32(t_udt.size_bytes);
+    t_w.i32(t_udt.max_depth);
+    t_w.u8(endianToU8(t_udt.endianness));
+    t_w.u8(t_udt.trigger_events ? 1 : 0);
+    t_w.u8(t_udt.is_scalar_alias ? 1 : 0);
+    t_w.str(s7codec::s7TypeToString(t_udt.scalar_type));
+    uint8_t flags = 0;
+    if (!t_udt.enum_map.empty())
+        flags |= kUdtHasEnum;
+    if (t_udt.unit.has_value())
+        flags |= kUdtHasUnit;
+    if (t_udt.min_val.has_value())
+        flags |= kUdtHasMin;
+    if (t_udt.max_val.has_value())
+        flags |= kUdtHasMax;
+    t_w.u8(flags);
+    if (!t_udt.enum_map.empty()) {
+        t_w.u32(static_cast<uint32_t>(t_udt.enum_map.size()));
+        for (const auto& [key, value] : t_udt.enum_map) {
+            t_w.i32(key);
+            t_w.str(value);
+        }
+    }
+    if (t_udt.unit.has_value())
+        t_w.str(t_udt.unit.value());
+    if (t_udt.min_val.has_value())
+        t_w.f64(t_udt.min_val.value());
+    if (t_udt.max_val.has_value())
+        t_w.f64(t_udt.max_val.value());
+    t_w.u32(static_cast<uint32_t>(t_udt.fields.size()));
+    for (const auto& field : t_udt.fields)
+        writeField(t_w, field);
+}
+
+bool readUdt(Reader& t_r, UdtDefinition& t_udt) {
+    uint16_t number = 0;
+    uint8_t endian = 0;
+    uint8_t trigger = 0;
+    uint8_t alias = 0;
+    uint8_t flags = 0;
+    std::string scalar_name;
+    if (!t_r.u16(number) || !t_r.str(t_udt.name) || !t_r.i32(t_udt.size_bytes) || !t_r.i32(t_udt.max_depth) || !t_r.u8(endian) ||
+        !t_r.u8(trigger) || !t_r.u8(alias) || !t_r.str(scalar_name) || !t_r.u8(flags))
+        return false;
+    if (!u8ToEndian(endian, t_udt.endianness))
+        return false;
+    t_udt.udt_number = number;
+    t_udt.trigger_events = trigger != 0;
+    t_udt.is_scalar_alias = alias != 0;
+    if (!s7codec::stringToType(scalar_name.c_str(), t_udt.scalar_type))
+        return false;
+    if (flags & kUdtHasEnum) {
+        uint32_t m = 0;
+        if (!t_r.u32(m) || m > kMaxCount)
+            return false;
+        for (uint32_t i = 0; i < m; ++i) {
+            int32_t key = 0;
+            std::string value;
+            if (!t_r.i32(key) || !t_r.str(value))
+                return false;
+            t_udt.enum_map[key] = std::move(value);
+        }
+    }
+    if (flags & kUdtHasUnit) {
+        std::string unit;
+        if (!t_r.str(unit))
+            return false;
+        t_udt.unit = std::move(unit);
+    }
+    if (flags & kUdtHasMin) {
+        double v = 0;
+        if (!t_r.f64(v))
+            return false;
+        t_udt.min_val = v;
+    }
+    if (flags & kUdtHasMax) {
+        double v = 0;
+        if (!t_r.f64(v))
+            return false;
+        t_udt.max_val = v;
+    }
+    // Fields come last so a truncated payload fails before mutating much.
+    // (The store itself is only committed by the caller on full success.)
+    uint32_t n = 0;
+    if (!t_r.u32(n) || n > kMaxCount)
+        return false;
+    std::vector<DbField> fields;
+    fields.reserve(n);
+    for (uint32_t i = 0; i < n; ++i) {
+        DbField field;
+        if (!readField(t_r, field))
+            return false;
+        fields.push_back(std::move(field));
+    }
+    t_udt.fields = std::move(fields);
+    return true;
+}
+
+void writeTag(Writer& t_w, const PlcTag& t_tag) {
+    t_w.str(t_tag.name);
+    t_w.str(t_tag.table_name);
+    t_w.str(t_tag.type_str);
+    t_w.str(t_tag.remark);
+    t_w.i32(t_tag.addr.area);
+    t_w.u16(t_tag.addr.db_number);
+    t_w.i32(t_tag.addr.byte_offset);
+    t_w.i32(t_tag.addr.bit_index);
+    t_w.i32(t_tag.addr.word_len);
+    t_w.i32(t_tag.addr.byte_count);
+    t_w.str(t_tag.addr.label);
+    t_w.str(s7codec::s7TypeToString(t_tag.type));
+}
+
+bool readTag(Reader& t_r, PlcTag& t_tag) {
+    int32_t area = 0;
+    int32_t byte_offset = 0;
+    int32_t bit_index = 0;
+    int32_t word_len = 0;
+    int32_t byte_count = 0;
+    uint16_t db_number = 0;
+    std::string type_name;
+    if (!t_r.str(t_tag.name) || !t_r.str(t_tag.table_name) || !t_r.str(t_tag.type_str) || !t_r.str(t_tag.remark) || !t_r.i32(area) ||
+        !t_r.u16(db_number) || !t_r.i32(byte_offset) || !t_r.i32(bit_index) || !t_r.i32(word_len) || !t_r.i32(byte_count) ||
+        !t_r.str(t_tag.addr.label) || !t_r.str(type_name))
+        return false;
+    t_tag.addr.area = area;
+    t_tag.addr.db_number = db_number;
+    t_tag.addr.byte_offset = byte_offset;
+    t_tag.addr.bit_index = bit_index;
+    t_tag.addr.word_len = word_len;
+    t_tag.addr.byte_count = byte_count;
+    if (!s7codec::stringToType(type_name.c_str(), t_tag.type))
+        return false;
+    return true;
+}
+
+} // namespace bin
+
+sgrn::Result<std::string, scl::SclError> SchemaSerializer::serializeBinary(const PlcSchemaStore& t_registry) {
+    bin::Writer w;
+    w.u8(static_cast<uint8_t>(kBinarySchemaMagic[0]));
+    w.u8(static_cast<uint8_t>(kBinarySchemaMagic[1]));
+    w.u8(static_cast<uint8_t>(kBinarySchemaMagic[2]));
+    w.u8(static_cast<uint8_t>(kBinarySchemaMagic[3]));
+    w.u16(kBinarySchemaCodecVersion);
+    w.u16(0); // flags, reserved
+    w.u32(static_cast<uint32_t>(t_registry.dbs().size()));
+    w.u32(static_cast<uint32_t>(t_registry.udts().size()));
+    w.u32(static_cast<uint32_t>(t_registry.tags().size()));
+    for (const auto& [num, db] : t_registry.dbs()) {
+        (void)num;
+        bin::writeDb(w, db);
+    }
+    for (const auto& udt : t_registry.udts())
+        bin::writeUdt(w, udt);
+    for (const auto& [name, tag] : t_registry.tags()) {
+        (void)name;
+        bin::writeTag(w, tag);
+    }
+    return w.finish();
+}
+
+sgrn::Result<void, scl::SclError> SchemaSerializer::deserializeBinary(PlcSchemaStore& t_registry, std::string_view t_bytes) {
+    bin::Reader r(t_bytes);
+    for (char c : kBinarySchemaMagic) {
+        uint8_t v = 0;
+        if (!r.u8(v) || v != static_cast<uint8_t>(c))
+            return scl::SclError::ParseError;
+    }
+    uint16_t codec_ver = 0;
+    uint16_t flags = 0;
+    uint32_t db_count = 0;
+    uint32_t udt_count = 0;
+    uint32_t tag_count = 0;
+    if (!r.u16(codec_ver) || !r.u16(flags) || !r.u32(db_count) || !r.u32(udt_count) || !r.u32(tag_count))
+        return scl::SclError::ParseError;
+    if (codec_ver != kBinarySchemaCodecVersion)
+        return scl::SclError::UnsupportedType;
+    if (flags != 0)
+        return scl::SclError::UnsupportedType;
+    if (db_count > bin::kMaxCount || udt_count > bin::kMaxCount || tag_count > bin::kMaxCount)
+        return scl::SclError::OutOfRange;
+
+    // Parse into locals first; the registry is only committed below, mirroring
+    // deserialize()'s structure (direct dbs_ insert, validated UDT/tag adds).
+    std::vector<DbSchema> dbs;
+    dbs.reserve(db_count);
+    for (uint32_t i = 0; i < db_count; ++i) {
+        DbSchema db;
+        if (!bin::readDb(r, db))
+            return scl::SclError::ParseError;
+        dbs.push_back(std::move(db));
+    }
+    std::vector<UdtDefinition> udts;
+    udts.reserve(udt_count);
+    for (uint32_t i = 0; i < udt_count; ++i) {
+        UdtDefinition udt;
+        if (!bin::readUdt(r, udt))
+            return scl::SclError::ParseError;
+        udts.push_back(std::move(udt));
+    }
+    std::vector<PlcTag> tags;
+    tags.reserve(tag_count);
+    for (uint32_t i = 0; i < tag_count; ++i) {
+        PlcTag tag;
+        if (!bin::readTag(r, tag))
+            return scl::SclError::ParseError;
+        tags.push_back(std::move(tag));
+    }
+    if (!r.atEnd())
+        return scl::SclError::ParseError;
+
+    for (auto& db : dbs)
+        t_registry.dbs_[db.db_number] = std::move(db);
+    for (auto& udt : udts) {
+        if (auto res = t_registry.addUdt(std::move(udt)); res.hasError())
+            return res.error();
+    }
+    for (auto& tag : tags) {
+        if (auto res = t_registry.addTag(std::move(tag)); res.hasError())
+            return res.error();
+    }
+
+    t_registry.rebuildIndices();
+    SchemaSerializer::resolveUdtsInRegistry(t_registry);
+    t_registry.rebuildIndices();
+    return {};
 }
 
 } // namespace sgrn::scl

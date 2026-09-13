@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { UserPlus, Users, Settings, Shield, Check, Copy, Play, Terminal, Loader2, Search, RefreshCw } from "lucide-react";
+import { UserPlus, Users, Settings, Shield, Check, Copy, Play, Terminal, Loader2, Search, RefreshCw, Database } from "lucide-react";
 import { PageLayout } from "@/components/PageLayout";
 import { fetchOrganisations, fetchDomains, fetchStatuses } from "@/pages/signin/backend";
 
@@ -34,7 +34,7 @@ function useOrgDependencies(t_selected_org: string | null) {
     return { domains, statuses };
 }
 
-type RegistrationMode = "user" | "automated_service" | "query_builder";
+type RegistrationMode = "user" | "automated_service" | "query_builder" | "storage";
 
 interface AutomatedServiceListEntry {
     id: number;
@@ -84,6 +84,19 @@ export default function AdminTab() {
     const [queryParams, setQueryParams] = useState<string>("");
     const [queryResult, setQueryResult] = useState<any>(null);
     const [queryLoading, setQueryLoading] = useState(false);
+
+    // Storage Admin State (MinIO object-layer management)
+    const [storageBuckets, setStorageBuckets] = useState<any[]>([]);
+    const [loadingStorageOverview, setLoadingStorageOverview] = useState(false);
+    const [storageSearchInput, setStorageSearchInput] = useState<string>("");
+    const [storageSearchResult, setStorageSearchResult] = useState<any>(null);
+    const [searchingStorage, setSearchingStorage] = useState(false);
+    const [orphanBucket, setOrphanBucket] = useState<string>("");
+    const [orphanPrefix, setOrphanPrefix] = useState<string>("");
+    const [orphanReport, setOrphanReport] = useState<any>(null);
+    const [scanningOrphans, setScanningOrphans] = useState(false);
+    const [purgeResult, setPurgeResult] = useState<any>(null);
+    const [purgingOrphans, setPurgingOrphans] = useState(false);
 
     useEffect(() => {
         fetchOrganisations().then(setOrganisations);
@@ -351,6 +364,100 @@ export default function AdminTab() {
         showEvent("success", "Copied to clipboard");
     };
 
+    const fetchStorageOverview = useCallback(async () => {
+        setLoadingStorageOverview(true);
+        try {
+            const response = await authenticatedFetch(AdminBackendApiEndpoints.STORAGE_OVERVIEW);
+            const payload = await response.json();
+            if (!response.ok) {
+                throw new Error(payload.error || "Failed to load storage census");
+            }
+            setStorageBuckets(Array.isArray(payload.buckets) ? payload.buckets : []);
+        } catch (error) {
+            console.error("Failed to fetch storage overview:", error);
+            showEvent("error", "Unable to load storage census");
+        } finally {
+            setLoadingStorageOverview(false);
+        }
+    }, [showEvent]);
+
+    const searchStorageByHash = useCallback(async () => {
+        const hash = storageSearchInput.trim();
+        if (!hash) {
+            showEvent("error", "Enter an object hash (content key) first");
+            return;
+        }
+        setSearchingStorage(true);
+        try {
+            const response = await authenticatedFetch(`${AdminBackendApiEndpoints.STORAGE_SEARCH}?key=${encodeURIComponent(hash)}`);
+            const payload = await response.json();
+            if (!response.ok) {
+                throw new Error(payload.error || "Storage search failed");
+            }
+            setStorageSearchResult(payload);
+        } catch (error) {
+            console.error("Storage search failed:", error);
+            showEvent("error", "Storage search failed");
+        } finally {
+            setSearchingStorage(false);
+        }
+    }, [storageSearchInput, showEvent]);
+
+    const scanStorageOrphans = useCallback(async () => {
+        setScanningOrphans(true);
+        setPurgeResult(null);
+        try {
+            const params = new URLSearchParams();
+            if (orphanBucket.trim()) params.set("bucket", orphanBucket.trim());
+            if (orphanPrefix.trim()) params.set("prefix", orphanPrefix.trim());
+            const query = params.toString() ? `?${params.toString()}` : "";
+            const response = await authenticatedFetch(`${AdminBackendApiEndpoints.STORAGE_ORPHANS}${query}`);
+            const payload = await response.json();
+            if (!response.ok) {
+                throw new Error(payload.error || "Orphan scan failed");
+            }
+            setOrphanReport(payload);
+        } catch (error) {
+            console.error("Orphan scan failed:", error);
+            showEvent("error", "Orphan scan failed");
+        } finally {
+            setScanningOrphans(false);
+        }
+    }, [orphanBucket, orphanPrefix, showEvent]);
+
+    const purgeStorageOrphans = useCallback(
+        async (dryRun: boolean) => {
+            if (!orphanReport) return;
+            setPurgingOrphans(true);
+            try {
+                const response = await authenticatedFetch(AdminBackendApiEndpoints.STORAGE_PURGE_ORPHANS, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        bucket: orphanReport.bucket,
+                        prefix: orphanReport.prefix || undefined,
+                        dry_run: dryRun,
+                    }),
+                });
+                const payload = await response.json();
+                if (!response.ok) {
+                    throw new Error(payload.error || "Purge failed");
+                }
+                setPurgeResult(payload);
+                if (!dryRun) {
+                    showEvent("success", `Purged ${payload.deleted?.length ?? 0} orphan key(s)`);
+                    scanStorageOrphans();
+                }
+            } catch (error) {
+                console.error("Purge failed:", error);
+                showEvent("error", "Orphan purge failed");
+            } finally {
+                setPurgingOrphans(false);
+            }
+        },
+        [orphanReport, scanStorageOrphans, showEvent],
+    );
+
     const renderOptions = (t_items: IdNamePair[]) =>
         t_items.map((t_item) => (
             <option key={t_item.id} value={t_item.name}>
@@ -376,16 +483,24 @@ export default function AdminTab() {
                         >
                             <Settings size={16} /> <span>Service Provisioning</span>
                         </button>
+                        <button
+                            className={`admin-mode-btn ${mode === "storage" ? "admin-mode-btn-active" : ""}`}
+                            onClick={() => setMode("storage")}
+                        >
+                            <Database size={16} /> <span>Storage Admin</span>
+                        </button>
                     </div>
 
                     <div className="reg-header">
                         {mode === "user" && <UserPlus size={20} className="text-primary" />}
                         {mode === "automated_service" && <Shield size={20} className="text-primary" />}
                         {mode === "query_builder" && <Search size={20} className="text-primary" />}
+                        {mode === "storage" && <Database size={20} className="text-primary" />}
                         <h2 className="reg-title">
                             {mode === "user" && "Register User"}
                             {mode === "automated_service" && "Register Service"}
                             {mode === "query_builder" && "Data Explorer"}
+                            {mode === "storage" && "MinIO Storage Admin"}
                         </h2>
                     </div>
 
@@ -656,8 +771,188 @@ export default function AdminTab() {
                             </div>
 
                             <div className="query-help">
-                                <strong>Syntax:</strong> column=op.value, op in eq,neq,gt,gte,lt,lte,like,in |
-                                order=created_at.desc | limit=10 | offset=0
+                                <strong>Syntax:</strong> column=op.value, op in eq,neq,gt,gte,lt,lte,like,in | order=created_at.desc |
+                                limit=10 | offset=0
+                            </div>
+                        </div>
+                    )}
+
+                    {mode === "storage" && (
+                        <div className="query-builder">
+                            <div className="query-controls">
+                                <div className="query-controls-row">
+                                    <button
+                                        className="btn-desktop-primary"
+                                        onClick={fetchStorageOverview}
+                                        disabled={loadingStorageOverview}
+                                    >
+                                        {loadingStorageOverview ? <Loader2 className="animate-spin" size={18} /> : <RefreshCw size={18} />}
+                                        <span>&nbsp;LOAD CENSUS</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {storageBuckets.length > 0 && (
+                                <div className="roster-card">
+                                    <div className="roster-title">BUCKET CENSUS — MINIO vs DATABASE</div>
+                                    <div className="datagrid-wrapper">
+                                        <table className="datagrid-industrial">
+                                            <thead>
+                                                <tr>
+                                                    <th>BUCKET</th>
+                                                    <th>MINIO OBJS</th>
+                                                    <th>MINIO BYTES</th>
+                                                    <th>DB OBJS</th>
+                                                    <th>DB BYTES</th>
+                                                    <th>FILES</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {storageBuckets.map((b: any) => (
+                                                    <tr key={b.name}>
+                                                        <td className="admin-cell-primary">{b.name}</td>
+                                                        <td>
+                                                            {b.minio?.objects}
+                                                            {b.minio?.truncated ? "+" : ""}
+                                                        </td>
+                                                        <td>{b.minio?.bytes}</td>
+                                                        <td>{b.db?.objects}</td>
+                                                        <td>{b.db?.bytes}</td>
+                                                        <td>{b.db?.files}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="query-controls">
+                                <div className="query-controls-row">
+                                    <input
+                                        className="input-desktop flex-1"
+                                        placeholder="OBJECT HASH (content key, base64url sha512)"
+                                        value={storageSearchInput}
+                                        onChange={(e) => setStorageSearchInput(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter") searchStorageByHash();
+                                        }}
+                                    />
+                                    <button className="btn-desktop-primary w-12" onClick={searchStorageByHash} disabled={searchingStorage}>
+                                        {searchingStorage ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {storageSearchResult && (
+                                <div className="json-explorer">
+                                    <div className="explorer-header">
+                                        <div className="explorer-header-left">
+                                            <Terminal size={14} className="admin-cell-primary" />
+                                            <span className="explorer-label">HASH LOOKUP RESULT</span>
+                                        </div>
+                                    </div>
+                                    <div className="explorer-body">
+                                        <pre>{JSON.stringify(storageSearchResult, null, 2)}</pre>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="query-controls">
+                                <div className="query-controls-row">
+                                    <input
+                                        className="input-desktop w-64"
+                                        placeholder="BUCKET (default)"
+                                        value={orphanBucket}
+                                        onChange={(e) => setOrphanBucket(e.target.value)}
+                                    />
+                                    <input
+                                        className="input-desktop flex-1"
+                                        placeholder="KEY PREFIX FILTER (optional)"
+                                        value={orphanPrefix}
+                                        onChange={(e) => setOrphanPrefix(e.target.value)}
+                                    />
+                                    <button className="btn-desktop-primary" onClick={scanStorageOrphans} disabled={scanningOrphans}>
+                                        {scanningOrphans ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
+                                        <span>&nbsp;SCAN GARBAGE</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {orphanReport && (
+                                <div className="roster-card">
+                                    <div className="roster-title">
+                                        ORPHAN SCAN — {orphanReport.bucket} — {orphanReport.minio_scanned} KEYS SCANNED
+                                        {orphanReport.minio_truncated ? " (TRUNCATED)" : ""} — MINIO-ONLY {orphanReport.minio_only_count} (
+                                        {orphanReport.minio_only_bytes} BYTES) — DB ROWS MISSING OBJECTS{" "}
+                                        {orphanReport.db_missing?.length ?? 0}
+                                    </div>
+                                    {orphanReport.minio_only?.length > 0 && (
+                                        <div className="datagrid-wrapper">
+                                            <table className="datagrid-industrial">
+                                                <thead>
+                                                    <tr>
+                                                        <th>MINIO-ONLY KEY (PURGE CANDIDATE)</th>
+                                                        <th>SIZE</th>
+                                                        <th>ETAG</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {orphanReport.minio_only.map((k: any) => (
+                                                        <tr key={k.key}>
+                                                            <td className="admin-cell-primary">{k.key}</td>
+                                                            <td>{k.size}</td>
+                                                            <td>{k.etag}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                    {orphanReport.db_missing?.length > 0 && (
+                                        <div className="datagrid-wrapper">
+                                            <table className="datagrid-industrial">
+                                                <thead>
+                                                    <tr>
+                                                        <th>DB ROW WITHOUT MINIO OBJECT (BROKEN REF)</th>
+                                                        <th>SIZE</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {orphanReport.db_missing.map((k: any) => (
+                                                        <tr key={k.key}>
+                                                            <td className="admin-cell-primary">{k.key}</td>
+                                                            <td>{k.size}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                    <div className="query-controls-row">
+                                        <button className="btn-desktop" onClick={() => purgeStorageOrphans(true)} disabled={purgingOrphans}>
+                                            DRY-RUN PURGE
+                                        </button>
+                                        <button
+                                            className="btn-desktop-primary"
+                                            onClick={() => purgeStorageOrphans(false)}
+                                            disabled={purgingOrphans}
+                                        >
+                                            {purgingOrphans ? <Loader2 className="animate-spin" size={18} /> : <span>CONFIRM PURGE</span>}
+                                        </button>
+                                    </div>
+                                    {purgeResult && (
+                                        <div className="explorer-body">
+                                            <pre>{JSON.stringify(purgeResult, null, 2)}</pre>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            <div className="query-help">
+                                <strong>Garbage collection:</strong> scan first, dry-run purge second, confirm purge last. Purge only
+                                deletes MinIO keys with no database row — re-verified at delete time. DB rows missing their MinIO object are
+                                reported, never deleted.
                             </div>
                         </div>
                     )}

@@ -33,6 +33,40 @@ from sgrn.dtypes import decode_record
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("dual_test")
 
+# S7 temporal types, by their schema type names.
+TEMPORAL_TYPES = frozenset({"DTL", "DT", "DATE", "TOD", "LTOD", "LDT", "LDTL", "TIME", "LTIME"})
+
+
+def leaf_types(t_fields, t_out):
+    """Flatten the field tree to {leaf name: S7 type name} for the comparison below."""
+    for f in t_fields or []:
+        t_out.setdefault(f.name, (f.type or "").upper())
+        leaf_types(getattr(f, "children", None), t_out)
+    return t_out
+
+
+def both_zero_temporal(t_json_value, t_bin_value):
+    """True when both sides render the same unset (all-zero) instant.
+
+    The paths render a zero timestamp differently (JSON: "0000-00-00 ...",
+    binary: zero bytes) while meaning the same physical truth, so the
+    strict comparison below would flag a phantom mismatch. Anything
+    non-zero falls through to the exact check.
+    """
+    if not isinstance(t_json_value, str):
+        return False
+    if set(t_json_value.strip()) - set("0-:. "):
+        return False
+    if isinstance(t_bin_value, (bytes, bytearray, memoryview)):
+        raw = bytes(t_bin_value)
+        return len(raw) > 0 and all(c == 0 for c in raw)
+    if isinstance(t_bin_value, str):
+        return len(t_bin_value) > 0 and set(t_bin_value) <= {"0"}
+    try:
+        return bool(t_bin_value == 0)
+    except Exception:
+        return False
+
 async def main() -> None:
     # Use environment vars or default to standard test ports
     gateway_url = os.environ.get("SGRN_URL", "http://localhost:8000")
@@ -44,8 +78,7 @@ async def main() -> None:
     try:
         reg = gw.registry()
     except Exception as e:
-        log.error(f"Failed to fetch registry: {e}")
-        return
+        raise RuntimeError(f"Failed to fetch registry: {e}")
 
     # Find a suitable DB to test (needs to be non-empty)
     db_schema = None
@@ -59,8 +92,7 @@ async def main() -> None:
             break
 
     if db_schema is None:
-        log.error("No valid DBs found in registry.")
-        return
+        raise RuntimeError("No valid DBs found in registry.")
 
     log.info(f"Testing Dual Subscriptions on DB {db_num} ('{db_name}')")
 
@@ -125,24 +157,27 @@ async def main() -> None:
     
     # 6. Compare the final states
     if not received_json or not received_binary:
-        log.warning("Test finished but did not receive data on both channels.")
         log.info(f"JSON data count: {len(received_json)}, Binary data count: {len(received_binary)}")
-        return
+        raise RuntimeError("Test finished but did not receive data on both channels.")
 
     log.info("--- Validating Synchronization ---")
     mismatch = False
-    
+    types_by_leaf = leaf_types(db_schema.fields, {})
+
     # We only check keys that were received via the JSON delta
     for k, v in received_json.items():
         if k not in received_binary:
-            # Depending on how nested structs are flattened by the backend, 
+            # Depending on how nested structs are flattened by the backend,
             # this check might need recursive logic in complex systems.
             log.error(f"Key '{k}' missing in decoded binary payload")
             mismatch = True
             continue
-            
+
         bin_v = received_binary[k]
-        
+
+        if types_by_leaf.get(k, "") in TEMPORAL_TYPES and both_zero_temporal(v, bin_v):
+            continue
+
         # Float comparisons need tolerance due to stringification in JSON vs IEEE 754 in binary
         if isinstance(v, float) and isinstance(bin_v, float):
             if not np.isclose(v, bin_v, rtol=1e-5):
@@ -155,7 +190,11 @@ async def main() -> None:
     if not mismatch:
         log.info(f"✅ SUCCESS! Binary zero-copy decoding perfectly matches the JSON semantic twin.")
     else:
-        log.error("❌ FAILED! Mismatches found between the two protocols.")
+        raise RuntimeError("Mismatches found between the two protocols.")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except RuntimeError as e:
+        log.error(f"❌ FAILED! {e}")
+        sys.exit(1)

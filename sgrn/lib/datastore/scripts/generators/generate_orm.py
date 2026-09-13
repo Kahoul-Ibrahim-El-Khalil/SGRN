@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 import os
+from pathlib import Path
 import json
 import argparse
 import subprocess
 import shutil
 
+# sgrn/lib/datastore — derived from this script's location so the default
+# target dir works regardless of the caller's CWD (invoke from the repo
+# root, e.g. `python3 sgrn/lib/datastore/scripts/generators/...`).
+DATASTORE_ROOT = Path(__file__).resolve().parent.parent.parent
+
 # Defaults
-DEFAULT_TARGET_DIR = "src/orm/models"
+DEFAULT_TARGET_DIR = str(DATASTORE_ROOT / "src" / "orm" / "models")
 DEFAULT_SCHEMAS = ["core", "storage"]
 
 # Database Defaults

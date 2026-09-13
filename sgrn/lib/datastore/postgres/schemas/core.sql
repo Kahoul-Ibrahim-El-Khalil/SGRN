@@ -311,52 +311,28 @@ where
   terminated_at is null;
 
 -- ============================================================
--- sgrn: CRUD view annotations (consumed by generate_views.py)
+-- CRUD view exposure (consumed by generate_views.py via crud/manifest.json)
 -- ============================================================
--- Filter intent and write-eligibility live as COMMENT ON COLUMN, in the
--- same migration file that defines the column — no separate manifest.
--- Defaults with no comment: filter_ops = 0 (closed, not searchable),
--- insertable/updatable = true (open, writable; use `sgrn: readonly` to
--- close per-column or per-table).
--- The tenant column (`organisation`) needs no annotation: it is
--- auto-detected and always bound server-side, never client-settable.
--- Tables with no detectable tenant column are skipped from generation
--- (write a hand-authored IHandler for them instead).
+-- Which tables/operations/filters/columns the API exposes is declared in
+-- crud/manifest.json — not here. Manifest defaults: filter_ops = 0
+-- (closed, not searchable), insertable/updatable = true (open, writable).
+-- The tenant column (`organisation`) is auto-detected and always bound
+-- server-side, never client-settable. Tables absent from the manifest are
+-- not generated (write a hand-authored IHandler for them instead).
 -- ============================================================
 
--- organisations (no tenant column => skipped from CRUD generation;
--- annotations kept for documentation / future hand-written handlers)
-COMMENT ON COLUMN core.organisations.name IS 'sgrn: filter=eq,like';
-COMMENT ON COLUMN core.organisations.storage_limit IS 'sgrn: filter=eq,gte,lte';
-COMMENT ON COLUMN core.organisations.status IS 'sgrn: filter=eq,in';
-COMMENT ON COLUMN core.organisations.domain IS 'sgrn: filter=eq,like';
+-- organisations (no tenant column => absent from crud/manifest.json;
+-- served by hand-written handlers, never raw CRUD)
+-- (filter intent for its columns, if ever needed, belongs in the manifest)
 
--- domains
-COMMENT ON COLUMN core.domains.name IS 'sgrn: filter=eq,like';
-
--- users
-COMMENT ON COLUMN core.users.email IS 'sgrn: filter=eq,like';
-COMMENT ON COLUMN core.users.first_name IS 'sgrn: filter=eq,like';
-COMMENT ON COLUMN core.users.family_name IS 'sgrn: filter=eq,like';
-COMMENT ON COLUMN core.users.status IS 'sgrn: filter=eq,in';
-COMMENT ON COLUMN core.users.role IS 'sgrn: filter=eq';
-COMMENT ON COLUMN core.users.domain IS 'sgrn: filter=eq';
+-- users (filter/write flags live in crud/manifest.json)
 -- password hash is never exposed via CRUD: the generator omits it from the
 -- field list entirely (neither readable, filterable, nor writable).
-COMMENT ON COLUMN core.users.password IS 'sgrn: readonly';
 
--- automated_services
-COMMENT ON COLUMN core.automated_services.name IS 'sgrn: filter=eq,like';
-COMMENT ON COLUMN core.automated_services.status IS 'sgrn: filter=eq,in';
-COMMENT ON COLUMN core.automated_services.domain IS 'sgrn: filter=eq';
+-- automated_services (filter/write flags live in crud/manifest.json)
 -- token is a public identifier: readable, but never client-settable.
-COMMENT ON COLUMN core.automated_services.token IS 'sgrn: readonly';
 -- secret hash is never exposed via CRUD: omitted from the field list entirely.
-COMMENT ON COLUMN core.automated_services.token_secret_hash IS 'sgrn: readonly';
 
--- user_domain_permissions
-COMMENT ON COLUMN core.user_domain_permissions.user_id IS 'sgrn: filter=eq,in';
-COMMENT ON COLUMN core.user_domain_permissions.domain IS 'sgrn: filter=eq';
+-- user_domain_permissions (filter/write flags live in crud/manifest.json)
 
 -- sessions: never exposed as raw CRUD (tokens + IPs); the auth service owns it.
-COMMENT ON TABLE core.sessions IS 'sgrn: readonly';

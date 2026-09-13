@@ -8,7 +8,8 @@ function normalizeBasePath(t_base_path: string): string {
 let basePathOverride: string | null = null;
 
 export function setBasePath(t_base_path: string | null): void {
-  basePathOverride = t_base_path === null ? null : normalizeBasePath(t_base_path);
+  basePathOverride =
+    t_base_path === null ? null : normalizeBasePath(t_base_path);
 }
 
 export function getBasePath(): string {
@@ -40,7 +41,10 @@ export function ws(path: string): string {
     typeof window !== "undefined" ? window.location : globalThis.location;
   const scheme = locationLike?.protocol === "https:" ? "wss" : "ws";
   if (typeof window !== "undefined") {
-    const win = window as Window & { __SGRN_WS_PORT__?: number; __SGRN_BASE__?: string };
+    const win = window as Window & {
+      __SGRN_WS_PORT__?: number;
+      __SGRN_BASE__?: string;
+    };
     if (win.__SGRN_WS_PORT__) {
       const hostname = locationLike?.hostname ?? "localhost";
       return `${scheme}://${hostname}:${win.__SGRN_WS_PORT__}${path}`;

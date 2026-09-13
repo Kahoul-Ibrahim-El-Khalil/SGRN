@@ -168,6 +168,23 @@ public:
     sgrn::Result<std::string, std::string> storageStatsJson();
     sgrn::Result<std::string, std::string> storageConstraintsJson();
 
+    /// MinIO storage administration (admin-only endpoints). Raw JSON
+    /// passthroughs; the shell renders them as tables / pretty JSON.
+    sgrn::Result<std::string, std::string> storageAdminOverviewJson(uint32_t t_max_pages = 10);
+    sgrn::Result<std::string, std::string> storageAdminOrphansJson(
+        const std::string& t_bucket, const std::string& t_prefix, uint32_t t_limit = 500, uint32_t t_max_pages = 10);
+    sgrn::Result<std::string, std::string> storageAdminPurgeOrphansJson(const std::string& t_bucket, const std::vector<std::string>& t_keys,
+        const std::string& t_prefix, bool t_dry_run, uint32_t t_limit = 500);
+    sgrn::Result<std::string, std::string> storageAdminSearchJson(
+        const std::string& t_bucket, const std::string& t_key, const std::string& t_prefix, uint32_t t_limit = 100);
+
+    /// Typed parses of the admin storage reports above (for table output).
+    sgrn::Result<std::vector<StorageBucketCensus>, std::string> tryStorageAdminOverview(uint32_t t_max_pages = 10);
+    sgrn::Result<StorageOrphansReport, std::string> tryStorageAdminOrphans(
+        const std::string& t_bucket, const std::string& t_prefix, uint32_t t_limit = 500, uint32_t t_max_pages = 10);
+    sgrn::Result<StoragePurgeResult, std::string> tryStorageAdminPurge(const std::string& t_bucket, const std::vector<std::string>& t_keys,
+        const std::string& t_prefix, bool t_dry_run, uint32_t t_limit = 500);
+
     const DatastoreClientConfig& config() const {
         return config_;
     }

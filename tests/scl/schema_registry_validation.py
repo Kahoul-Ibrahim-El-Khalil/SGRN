@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+"""schema_registry_validation.py — SCL compiler registry-output validation.
+
+Compiles a small declarative .scl schema with the native `sclc` binary and
+asserts the emitted JSON registry (UDTs, DBs, resolved fields) matches the
+expected shape. Offline; needs a built `sclc`.
+
+Usage:
+    python3 tests/scl/schema_registry_validation.py
+"""
 import os
 import sys
 import subprocess
@@ -76,7 +85,7 @@ def main():
         dbs = registry["dbs"]
         assert len(dbs) == 1, f"Expected 1 DB, found {len(dbs)}"
         motors_db = dbs[0]
-        assert motors_db["db_name"] == "Motors"
+        assert motors_db["name"] == "Motors"
         
         # SCL Compiler should resolve the fields
         fields = motors_db.get("fields", [])

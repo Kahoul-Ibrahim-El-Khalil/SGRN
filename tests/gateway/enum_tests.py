@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-test_enum_edgecases.py — Exercises every enum read/write/registration path
-against the `enums_advanced` simulation (see schema.scl in this directory).
+enum_tests.py — Exercises every enum read/write/registration path
+against the `enums` simulation (see schema.scl in sgrn/lib/gateway/simulations/enums).
 
 Requires: asyncua (`pip install asyncua`) and requests (`pip install requests`)
 for the HTTP ground-truth cross-check.
 
 Usage:
-    python3 test_enum_edgecases.py --opcua opc.tcp://localhost:4840 --http http://localhost:8000
+    python3 tests/gateway/enum_tests.py --opcua opc.tcp://localhost:4840 --http http://localhost:8080
 
 This is a correctness harness, not a load test — it runs sequentially and
 prints a PASS/FAIL line per case, then a summary at the end with a non-zero

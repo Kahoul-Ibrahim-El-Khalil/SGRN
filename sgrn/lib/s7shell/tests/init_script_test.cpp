@@ -65,13 +65,16 @@ void testGlobalAfterFunction() {
     bool found = false;
     int* p_before = findGlobalInt(p_mod, "before_var", found);
     assert(found && p_before != nullptr && *p_before == 7 && "global before the function is missing");
+    (void)p_before; // assert-only use (compiled out with NDEBUG)
 
     int* p_after = findGlobalInt(p_mod, "after_var", found);
     assert(found && p_after != nullptr && *p_after == 42 && "global after the function was swallowed by the function buffer");
+    (void)p_after; // assert-only use (compiled out with NDEBUG)
 
     // Step 2 must still register the free function in the init_script module.
     asIScriptModule* p_init = p_engine->GetModule("init_script");
     assert(p_init != nullptr && p_init->GetFunctionCount() > 0 && "init_script module lost the function");
+    (void)p_init; // assert-only use (compiled out with NDEBUG)
 
     p_engine->ShutDownAndRelease();
 

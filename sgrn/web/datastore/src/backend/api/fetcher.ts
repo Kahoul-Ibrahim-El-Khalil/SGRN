@@ -2,6 +2,7 @@
 
 import type { SgrnResult } from "@sgrn/types";
 import { ErrorScope } from "@sgrn/types";
+import { appPath } from "@/lib/appPath";
 
 export const SGRN_TOKEN_KEY_IDENTIFIER: string = "Authorization";
 
@@ -32,7 +33,7 @@ export async function authenticatedFetch(t_url: string, t_http_options: RequestI
 
         // Only redirect if not already on signin page
         if (!window.location.pathname.includes("/signin")) {
-            window.location.href = "/signin";
+            window.location.href = appPath("/signin");
         }
         return response;
     }

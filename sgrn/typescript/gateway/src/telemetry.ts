@@ -51,7 +51,10 @@ export class GatewayClient {
               (d["updates"] as unknown[]).forEach((u) => this.notifyUpdate(u));
               return;
             }
-            if (d["event"] === "update" || (d["db"] !== undefined && d["value"] !== undefined)) {
+            if (
+              d["event"] === "update" ||
+              (d["db"] !== undefined && d["value"] !== undefined)
+            ) {
               this.notifyUpdate(data);
             }
           }

@@ -311,7 +311,6 @@ inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::executePut_(S7Clien
 
     const size_t total = all_items.size();
     size_t offset = 0;
-    int chunk_idx = 0;
 
     // Transmit to PLC in chunks, committing each chunk's successful items to the
     // local shadow memory as soon as it lands. A later chunk failing at the
@@ -344,7 +343,6 @@ inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::executePut_(S7Clien
         }
 
         offset += count;
-        chunk_idx += 1;
     }
 
     return {};
@@ -364,7 +362,6 @@ inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::executeGet_(S7Clien
     const size_t total = all_items.size();
     size_t offset = 0;
     bool any_item_error = false;
-    int chunk_idx = 0;
     // Transmit read requests to PLC, committing each chunk's results to the
     // shadow memory as soon as it lands. A later chunk failing at the
     // transport level must not discard reads the PLC already returned.
@@ -391,7 +388,6 @@ inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::executeGet_(S7Clien
         }
 
         offset += count;
-        chunk_idx += 1;
     }
 
     SGRN_RETURN_ERROR_IF(any_item_error, SclError::Generic);

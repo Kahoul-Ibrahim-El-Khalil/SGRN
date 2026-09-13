@@ -17,8 +17,9 @@ set(VIEWS_GEN_DIR "${CMAKE_BINARY_DIR}/generated/views" CACHE INTERNAL "")
 # baked into the build files).
 add_custom_target(sgrn_generate_views
     COMMAND ${Python3_EXECUTABLE} "${PROJECT_SOURCE_DIR}/scripts/generators/generate_views.py"
+            --manifest "${PROJECT_SOURCE_DIR}/crud/manifest.json"
             --out "${PROJECT_SOURCE_DIR}/src/handlers/generated"
-    COMMENT "Regenerating CRUD view handlers from live schema (manual step; needs PGPASSWORD in the environment)"
+    COMMENT "Regenerating CRUD view handlers from live schema + crud/manifest.json (manual step; needs PGPASSWORD in the environment)"
 )
 
 # src/query/ holds the hand-written runtime engine (CrudViewEngine.cpp).

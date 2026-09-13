@@ -1,11 +1,24 @@
 #pragma once
 #include <drogon/HttpAppFramework.h>
+#include <sgrn/Result.hpp>
 #include <sgrn/datastore/query/CrudViewSpec.hpp>
 
+#include <json/json.h>
 #include <string>
+#include <string_view>
 
 namespace sgrn::datastore::query
 {
+
+// Converts one JSON body value to its Postgres text bind for the given
+// column type. All CRUD binds are text — Postgres casts implicitly (see
+// sgrn::datastore::core::execSqlCoroVec) — so this validates the JSON type
+// against the column type and renders the canonical text form (decimal
+// integers, "true"/"false", ISO strings, compact JSON for jsonb).
+// Mismatches (a string for an Int column, an object for a scalar, ...) are
+// client errors: the result carries a message for the 400 response, never a
+// silently coerced value.
+sgrn::Result<std::string> fieldValueToBind(std::string_view t_field_name, FieldType t_type, const Json::Value& t_value);
 
 // LIST: tenant-scoped, whitelisted filters via ?col=op.value, ?order=,
 // ?limit=, ?offset=. Rejects any param not in spec.fields with 400.

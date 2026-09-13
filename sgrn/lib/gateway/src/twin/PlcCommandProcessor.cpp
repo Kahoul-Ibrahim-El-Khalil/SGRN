@@ -8,6 +8,7 @@
 #include <sgrn/utils/time.hpp>
 #include <asio.hpp>
 #include <cstring>
+#include <map>
 #include <shared_mutex>
 
 namespace sgrn::gateway::twin
@@ -49,7 +50,10 @@ void PlcCommandProcessor::processCommands() {
     std::vector<FieldWrite> field_writes;
     field_writes.reserve(commands.size());
 
-    std::unordered_map<uint16_t, std::vector<size_t>> field_indices_by_db;
+    // Ordered by DB number: the batch loop below must commit DBs in a
+    // deterministic (ascending) order within one call. An unordered_map here
+    // made the order unspecified and run-dependent.
+    std::map<uint16_t, std::vector<size_t>> field_indices_by_db;
 
     for (size_t i = 0; i < commands.size(); ++i) {
         PlcCommand& cmd = commands[i];
@@ -162,11 +166,27 @@ void PlcCommandProcessor::processCommands() {
         }
     }
 }
+
+void PlcCommandProcessor::repostDirtyPass() {
+    if (dirty_recheck_.exchange(false, std::memory_order_acq_rel)) {
+        bool expected = false;
+        if (light_ctx_ && dirty_scheduled_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+            asio::post(*light_ctx_, [this]() { processDirty(); });
+        }
+    }
+}
+
 void PlcCommandProcessor::processDirty() {
     processCommands();
 
     if (!memory_.checkDirty()) {
+        // Idle pass: nothing to do. Release single-flight first, then
+        // consume the recheck flag — a signalDirty() landing between
+        // checkDirty() and the store below must not be orphaned (same
+        // lost-wakeup shape as the completion handler, with an even wider
+        // window). repostDirtyPass() re-posts when one did.
         dirty_scheduled_.store(false, std::memory_order_release);
+        repostDirtyPass();
         return;
     }
 
@@ -181,16 +201,15 @@ void PlcCommandProcessor::processDirty() {
 
             // After processing, check if new writes arrived. If so, schedule
             // another pass on the light context so those writes are captured.
-            if (dirty_recheck_.exchange(false, std::memory_order_acq_rel)) {
-                if (light_ctx_) {
-                    asio::post(*light_ctx_, [this]() { processDirty(); });
-                    return;
-                }
-            }
+            // Release single-flight BEFORE consuming the recheck flag (see
+            // repostDirtyPass() for the orphaned-wakeup interleaving this
+            // order avoids).
             dirty_scheduled_.store(false, std::memory_order_release);
+            repostDirtyPass();
         });
     } else {
         dirty_scheduled_.store(false, std::memory_order_release);
+        repostDirtyPass();
     }
 }
 

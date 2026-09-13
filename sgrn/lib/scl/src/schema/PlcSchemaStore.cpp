@@ -124,6 +124,14 @@ sgrn::Result<PlcSchemaStore, SclError> PlcSchemaStore::loadFromJson(const rapidj
     return store;
 }
 
+sgrn::Result<PlcSchemaStore, SclError> PlcSchemaStore::loadFromBinary(std::string_view t_bytes) {
+    PlcSchemaStore store;
+    auto res = SchemaSerializer::deserializeBinary(store, t_bytes);
+    if (res.hasError())
+        return res.error();
+    return store;
+}
+
 // ── DB Schema Queries ───────────────────────────────────────────────────────
 
 bool PlcSchemaStore::hasDb(uint16_t t_db_number) const {
@@ -420,6 +428,10 @@ std::vector<std::string> PlcSchemaStore::availableDbNames() const {
 
 std::string PlcSchemaStore::toJson(std::optional<uint16_t> t_db_number, bool t_headers_only, bool t_pretty) const {
     return SchemaSerializer::serialize(*this, t_db_number, t_headers_only, t_pretty);
+}
+
+sgrn::Result<std::string, SclError> PlcSchemaStore::toBinary() const {
+    return SchemaSerializer::serializeBinary(*this);
 }
 
 } // namespace sgrn::scl

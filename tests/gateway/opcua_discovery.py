@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
+"""opcua_discovery.py — OPC UA information-model inspector for a live gateway.
 
+Browses the gateway's OPC UA address space (port 4840 by default) and reads
+back Digital Twin DBs, printing the node tree and data-type model. Exits
+non-zero on connection or decode failures.
+
+Usage:
+    python3 tests/gateway/opcua_discovery.py
+"""
 import asyncio
 import dataclasses
 import enum
@@ -786,6 +794,9 @@ async def main():
 
         import traceback
         traceback.print_exc()
+        # A failed discovery must fail the process (the orchestrator maps
+        # exit code to PASS/FAIL); the finally below still disconnects.
+        sys.exit(1)
 
     finally:
         try:

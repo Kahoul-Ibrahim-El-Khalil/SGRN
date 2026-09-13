@@ -77,6 +77,7 @@ std::vector<uint8_t> readDb(PlcRuntime& t_rt) {
     std::vector<uint8_t> buf(kDbSize, 0);
     auto r = t_rt.getMemory().readDbMemory(kDb, 0, kDbSize, buf.data());
     assert(!r.hasError());
+    (void)r; // assert-only use (compiled out with NDEBUG)
     return buf;
 }
 
@@ -152,6 +153,7 @@ void testSpeedFactorScalesWallClock() {
         const bool ok = replayer.run();
         const auto elapsed = std::chrono::steady_clock::now() - start;
         assert(ok);
+        (void)ok; // assert-only use (compiled out with NDEBUG)
         assert(readDb(*rt) == last && "final frame image not applied");
         return std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
     };

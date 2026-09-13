@@ -16,7 +16,7 @@ integer layout. See `jsonl-format.md` for the JSONL sibling format and
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │ Header: "SGRN" (4B) + version:u16 (2B) + schema_len:u32 (4B) │
-│         + schema JSON (schema_len bytes)                     │
+│         + schema payload (schema_len bytes)                  │
 ├──────────────────────────────────────────────────────────────┤
 │ Frame: ts:u64/i64 (8B) + db_num:u16 (2B) + payload_len:u32   │
 │        (4B) + payload (payload_len bytes)                    │
@@ -33,12 +33,50 @@ the first truncated frame (`pos + payload_len > size`).
 | Field        | Size | Type   | Notes                                              |
 |--------------|------|--------|----------------------------------------------------|
 | magic        | 4    | bytes  | ASCII `SGRN`                                       |
-| version      | 2    | uint16 | Format version: `1` (full-image frames), `2` (v1 + delta frames), `3` (v2 + anchor frames) |
-| schema_len   | 4    | uint32 | Byte length of the schema JSON that follows        |
-| schema       | N    | UTF-8  | `PlcSchemaStore::toJson()` (may be `{}` / short)   |
+| version      | 2    | uint16 | Format version: `1` (full-image frames), `2` (v1 + delta frames), `3` (v2 + anchor frames), `4` (v3 + binary schema payload) |
+| schema_len   | 4    | uint32 | Byte length of the schema payload that follows     |
+| schema       | N    | bytes  | v4+: binary schema (`SGRS` magic, see below); v3: `PlcSchemaStore::toJson()` UTF-8; empty skips the schema check |
 
-Writers stamp `kBinaryWalVersion` (`2`); readers refuse `ver < 1` or
-`ver > kBinaryWalVersion` instead of misparsing.
+Writers stamp `kBinaryWalVersion` (`4`); readers refuse `ver < 1` or
+`ver > kBinaryWalVersion` instead of misparsing. Readers that skip the
+schema bytes (replayers, dataset tools) are version-agnostic: only the
+schema *comparison* in `RecoveryEngine` and the layout builder in
+`sgrn_dataset transcode` branch on the payload encoding (sniffed via the
+`SGRS` magic, so a v4 reader also accepts v3 files).
+
+### Binary schema payload (v4+)
+
+Produced by `SchemaSerializer::serializeBinary` (`PlcSchemaStore::toBinary`),
+parsed by `deserializeBinary` / `loadFromBinary`. All integers
+little-endian; strings are `len:u32` + UTF-8 bytes (no NUL). Lossless —
+unlike the JSON form it keeps array bounds, init values, UDT alias detail,
+and full tag addresses.
+
+```
+"SGRS" magic (4B) + codec_ver:u16 (=1) + flags:u16 (reserved, 0)
+db_count:u32, udt_count:u32, tag_count:u32, then the three sections
+```
+
+Per DB: `db_number:u16`, name, `size_bytes:i32`, `max_depth:i32`,
+`endianness:u8` (0=Big,1=Little,2=Unknown), `trigger:u8`, `modbus_area:u8`
+(0=None,1=Holding,2=Input,3=Coil,4=Discrete), `flags:u8` (bit0: source_file
+follows), `[source_file]`, `field_count:u32`, fields.
+
+Per field (recursive for `children`): name, `offset:i32`, `bit:u8`, type
+(canonical S7 name, e.g. `DINT`), `count:u32`, array bounds `i32` x2,
+`string_capacity:u32`, `struct_size:u32`, `flags:u16`, then optionals in flag
+order: `udt_name`, `children` (`count:u32` + nested), `unit`, `min:f64`,
+`max:f64`, `enum_map` (`count:u32` + `key:i32` + name pairs), `init_value`.
+Flag bits also carry `trigger_events`, `is_dynamic`, and the 2-bit
+endianness. Per UDT: number, name, sizes, endianness, trigger, scalar-alias
+flag, scalar type name, enum/unit/min/max optionals, fields. Per tag: name,
+table, XML type string, remark, full address (`area:i32`, `db:u16`,
+`byte:i32`, `bit:i32`, `word_len:i32`, `byte_count:i32`, label), resolved
+type name.
+
+Decoders fail closed (`ParseError` on bad magic/truncation/trailing
+bytes, `UnsupportedType` on unknown codec version, `InvalidType` on unknown
+type names) and cap recursion depth, string lengths, and element counts.
 
 ## Frame types
 

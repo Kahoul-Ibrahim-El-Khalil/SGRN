@@ -28,9 +28,17 @@ sclc ./symbols/ -o registry.json
 sclc Motor.scl                          # compiled JSON to stdout
 cat Motor.scl | sclc -
 sclc gen ./symbols/ -o plc_schema.hpp
-sclc as ./symbols/ -o ./generated/
+sclc as ./symbols/ -o ./generated/          # schema surface → schema.as
+sclc as ./symbols/ -o ./generated/ --include-shell-api   # + s7shell_api.as (native API only)
+sclc as plant.scl --include-predefined -o ./generated/   # as.predefined: native API + schema ambient header
 sclc man
 ```
+
+`emit-angelscript` writes declaration-only `schema.as` by default.
+`--include-shell-api` additionally writes `s7shell_api.as` (bare native API
+surface, matches `s7shell emit-as`). `--include-predefined` instead writes a
+single `as.predefined` combining the native API with the schema surface for
+IDE language servers; the two flags are mutually exclusive.
 
 ## Dependencies
 

@@ -39,8 +39,10 @@ sgrn::Result<void> TypeRegistry::adopt(UdtRegistrationBatch&& t_batch) {
         }
     }
     if (!custom_types_.empty()) {
+        // cleanup = false: the types array stays owned by the registry (its
+        // storage backs custom_types_), open62541 must not free it.
         custom_data_types_array_ =
-            std::make_unique<UA_DataTypeArray>(UA_DataTypeArray{nullptr, custom_types_.size(), custom_types_.data()});
+            std::make_unique<UA_DataTypeArray>(UA_DataTypeArray{nullptr, custom_types_.size(), custom_types_.data(), false});
     }
     return {};
 }
@@ -55,7 +57,7 @@ void TypeRegistry::attachTo(UA_ServerConfig* tp_config) {
     }
 
     custom_data_types_array_ =
-        std::make_unique<UA_DataTypeArray>(UA_DataTypeArray{tp_config->customDataTypes, custom_types_.size(), custom_types_.data()});
+        std::make_unique<UA_DataTypeArray>(UA_DataTypeArray{tp_config->customDataTypes, custom_types_.size(), custom_types_.data(), false});
     tp_config->customDataTypes = custom_data_types_array_.get();
 }
 

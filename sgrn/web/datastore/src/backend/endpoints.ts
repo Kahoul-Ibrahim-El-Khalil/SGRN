@@ -5,6 +5,10 @@ export const AdminBackendApiEndpoints = {
     LIST_AUTOMATED_SERVICES: "/api/v1/automated-services",
     UPDATE_AUTOMATED_SERVICE_METADATA: (id: number) => `/api/v1/admin/automated-services/${id}/metadata`,
     ROTATE_AUTOMATED_SERVICE_TOKEN: "/api/v1/admin/automated-services/rotate-token",
+    STORAGE_OVERVIEW: "/api/v1/admin/storage/overview",
+    STORAGE_ORPHANS: "/api/v1/admin/storage/orphans",
+    STORAGE_PURGE_ORPHANS: "/api/v1/admin/storage/orphans/purge",
+    STORAGE_SEARCH: "/api/v1/admin/storage/search",
 } as const;
 export const SessionBackendApiEndpoints = {
     SIGN_IN: "/api/v1/auth/user/signin",

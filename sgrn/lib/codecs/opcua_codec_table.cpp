@@ -23,7 +23,9 @@
 
 #include "opcua_codec_table.hpp"
 
+#include <sgrn/scl/types/DataType.hpp>
 #include <cstring>
+#include <iterator>
 #include <open62541/types_generated.h>
 #include <open62541/types_generated_handling.h>
 #include <s7codec/codec.hpp>
@@ -158,7 +160,7 @@ static bool toUaDateTime(const DecodedValue& dv, Type /*s7*/, UA_Variant& out) n
 }
 
 // ---------------------------------------------------------------------------
-// The table — must match the 30 types in sgrn::scl::kTypeTable
+// The table — must match the 32 types in sgrn::scl::kTypeTable
 // ---------------------------------------------------------------------------
 
 const CodecEntry kCodecTable[32] = {
@@ -248,5 +250,9 @@ const CodecEntry* codecEntryFor(s7codec::Type t_type) noexcept {
     }
     return nullptr;
 }
+
+// Compile-time drift guard for the comments above: the codec table must
+// cover exactly the SCL type table, one row per type.
+static_assert(std::size(kCodecTable) == sgrn::scl::kTypeTable.size(), "kCodecTable must match sgrn::scl::kTypeTable entry for entry");
 
 } // namespace sgrn::codecs

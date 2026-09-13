@@ -532,14 +532,14 @@ sgrn::Result<void, ::sgrn::common::ErrorClass> ModbusAdapter::syncEntryToArena(c
     std::string json_val;
 
     if (t_entry.type == DataType::Bool) {
-        if (t_entry.reg_start >= mapping_->nbBits()) {
+        if (static_cast<size_t>(t_entry.reg_start) >= static_cast<size_t>(mapping_->nbBits())) {
             SGRN_WARN_LOG("Modbus: entry '{}' out of mapping bounds, skipping", t_entry.field_path);
             return ErrorClass::Internal;
         }
         const bool v = mapping_->bits()[t_entry.reg_start] != 0;
         json_val = v ? "true" : "false";
     } else {
-        if (t_entry.reg_start + t_entry.reg_count > mapping_->nbRegisters()) {
+        if (static_cast<size_t>(t_entry.reg_start) + t_entry.reg_count > static_cast<size_t>(mapping_->nbRegisters())) {
             SGRN_WARN_LOG("Modbus: entry '{}' out of mapping bounds, skipping", t_entry.field_path);
             return ErrorClass::Internal;
         }
@@ -629,7 +629,7 @@ sgrn::Result<void, ::sgrn::common::ErrorClass> ModbusAdapter::processWriteReques
             continue;
         const int written_end = mb_addr + count;
         const int entry_end = entry.reg_start + entry.reg_count;
-        if (entry.reg_start < written_end && entry_end > mb_addr) {
+        if (static_cast<size_t>(entry.reg_start) < static_cast<size_t>(written_end) && entry_end > mb_addr) {
             auto sec_mgr = getSecurityManager();
             if (!sec_mgr || sec_mgr->authorizeModbus(t_client_ip, entry.db_number)) {
                 if (auto r = syncEntryToArena(entry); !r)
@@ -654,7 +654,7 @@ std::string ModbusAdapter::decodeRegisters(const ModbusVirtualEntry& t_entry, co
     const int useful_bytes = t_entry.byte_count;
     std::vector<uint8_t> bytes(static_cast<size_t>(useful_bytes), 0);
 
-    for (int r = 0; r < t_entry.reg_count; ++r) {
+    for (uint32_t r = 0; r < t_entry.reg_count; ++r) {
         const int hi_idx = r * 2;
         const int lo_idx = r * 2 + 1;
         if (hi_idx < useful_bytes)
@@ -671,21 +671,21 @@ std::string ModbusAdapter::decodeBits(const ModbusVirtualEntry& t_entry, const u
 }
 
 void ModbusAdapter::encodeToRegisters(const ModbusVirtualEntry& t_entry, const uint8_t* tp_arena_bytes, uint16_t* tp_regs_out) const {
-    for (int r = 0; r < t_entry.reg_count; ++r) {
+    for (uint32_t r = 0; r < t_entry.reg_count; ++r) {
         const int hi_idx = r * 2;
         const int lo_idx = r * 2 + 1;
-        const uint8_t hi = (hi_idx < t_entry.byte_count) ? tp_arena_bytes[hi_idx] : 0;
-        const uint8_t lo = (lo_idx < t_entry.byte_count) ? tp_arena_bytes[lo_idx] : 0;
+        const uint8_t hi = (hi_idx < static_cast<int>(t_entry.byte_count)) ? tp_arena_bytes[hi_idx] : 0;
+        const uint8_t lo = (lo_idx < static_cast<int>(t_entry.byte_count)) ? tp_arena_bytes[lo_idx] : 0;
         tp_regs_out[r] = static_cast<uint16_t>((hi << 8) | lo);
     }
 }
 
 void ModbusAdapter::encodeToBits(const ModbusVirtualEntry& t_entry, const uint8_t* tp_arena_bytes, uint8_t* tp_bits_out) const {
-    for (int i = 0; i < t_entry.reg_count; ++i) {
+    for (uint32_t i = 0; i < t_entry.reg_count; ++i) {
         const int absolute_bit = t_entry.bit_index + i;
         const int byte_idx = absolute_bit / 8;
         const int bit_idx = absolute_bit % 8;
-        if (byte_idx < t_entry.byte_count)
+        if (byte_idx < static_cast<int>(t_entry.byte_count))
             tp_bits_out[i] = (tp_arena_bytes[byte_idx] >> bit_idx) & 0x01;
         else
             tp_bits_out[i] = 0;

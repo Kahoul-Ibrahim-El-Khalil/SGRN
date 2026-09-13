@@ -91,6 +91,8 @@ EXAMPLES:
     cat Motor.scl | sclc -                      # read stdin, print JSON to stdout
     sclc gen ./symbols/ -o plc_schema.hpp
     sclc as ./symbols/ -o ./generated/
+    sclc as plant.scl -o ./generated/ --include-shell-api
+    sclc as plant.scl -o ./generated/ --include-predefined
     sclc scl registry.json -o ./scl-output/
     sclc dir ./symbols/ -o ./canonical/
 
@@ -292,6 +294,7 @@ int cmdCodegen(int t_argc, char** tp_argv) {
     opts.add_options()("inputs", "Input files, directories, or JSON registry ('-' for stdin)", cxxopts::value<std::vector<std::string>>())(
         "p,parse", "Directory or file to compile", cxxopts::value<std::string>())("s,schema", "Alias for --parse",
         cxxopts::value<std::string>())("i,input", "Input JSON registry file", cxxopts::value<std::string>())(
+        "f,file", "One or more symbol files", cxxopts::value<std::vector<std::string>>())(
         "o,output", "Output .hpp file ('-' for stdout)", cxxopts::value<std::string>()->default_value(""))(
         "guard", "Header guard prefix", cxxopts::value<std::string>()->default_value("SCLC_GENERATED"))(
         "force", "Overwrite existing entries", cxxopts::value<bool>()->default_value("false"))("h,help", "Print help");
@@ -342,6 +345,7 @@ int cmdEmitScl(int t_argc, char** tp_argv) {
     opts.add_options()("inputs", "Input files or directories ('-' for stdin)", cxxopts::value<std::vector<std::string>>())(
         "p,parse", "Directory or file to compile first", cxxopts::value<std::string>())("s,schema", "Alias for --parse",
         cxxopts::value<std::string>())("i,input", "Input JSON registry file", cxxopts::value<std::string>())(
+        "f,file", "One or more symbol files", cxxopts::value<std::vector<std::string>>())(
         "o,output", "Output directory for .scl files", cxxopts::value<std::string>()->default_value("./scl-output"))(
         "force", "Overwrite existing entries", cxxopts::value<bool>()->default_value("false"))("h,help", "Print help");
 
@@ -383,6 +387,7 @@ int cmdEmitDir(int t_argc, char** tp_argv) {
     opts.add_options()("inputs", "Input files or directories ('-' for stdin)", cxxopts::value<std::vector<std::string>>())(
         "p,parse", "Directory or file to compile first", cxxopts::value<std::string>())("s,schema", "Alias for --parse",
         cxxopts::value<std::string>())("i,input", "Input JSON registry file", cxxopts::value<std::string>())(
+        "f,file", "One or more symbol files", cxxopts::value<std::vector<std::string>>())(
         "o,output", "Output directory", cxxopts::value<std::string>()->default_value("./canonical"))(
         "force", "Overwrite existing entries", cxxopts::value<bool>()->default_value("false"))("h,help", "Print help");
 
@@ -420,20 +425,49 @@ int cmdEmitDir(int t_argc, char** tp_argv) {
 }
 
 int cmdEmitAngelScript(int t_argc, char** tp_argv) {
+    // Tolerate single-dash spellings of the multi-word long flags here
+    // (e.g. `-include-predefined`); cxxopts would otherwise read them as a
+    // short-option group (`-i` + attached value). Build a normalized argv
+    // rather than rewriting the argument buffers in place.
+    std::vector<std::string> args_norm;
+    args_norm.reserve(t_argc);
+    for (int i = 0; i < t_argc; ++i) {
+        std::string a = tp_argv[i];
+        if (a == "-include-predefined" || a == "-include-shell-api")
+            a = "--" + a.substr(1);
+        args_norm.push_back(std::move(a));
+    }
+    std::vector<const char*> argv_norm;
+    argv_norm.reserve(args_norm.size());
+    for (const std::string& a : args_norm)
+        argv_norm.push_back(a.c_str());
+
     cxxopts::Options opts("sclc emit-angelscript", "Generate declaration-only AngelScript .as files.");
     opts.add_options()("inputs", "Input files or directories ('-' for stdin)", cxxopts::value<std::vector<std::string>>())(
         "p,parse", "Directory or file to compile first", cxxopts::value<std::string>())("s,schema", "Alias for --parse",
         cxxopts::value<std::string>())("i,input", "Input JSON registry file", cxxopts::value<std::string>())(
-        "o,output", "Output directory for .as files", cxxopts::value<std::string>()->default_value("./generated"))(
-        "include-shell-api", "Include s7shell built-in API surface", cxxopts::value<bool>()->default_value("false"))(
+        "f,file", "One or more symbol files", cxxopts::value<std::vector<std::string>>())(
+        "o,output", "Output directory for .as files", cxxopts::value<std::string>()->default_value("./generated"))("include-shell-api",
+        "Include the s7shell built-in API surface (writes s7shell_api.as)",
+        cxxopts::value<bool>()->default_value("false"))("include-predefined",
+        "Emit 'as.predefined': native API + schema surface for IDE language servers (mutually exclusive with --include-shell-api)",
+        cxxopts::value<bool>()->default_value("false"))(
         "force", "Overwrite existing entries", cxxopts::value<bool>()->default_value("false"))("h,help", "Print help");
 
     opts.parse_positional("inputs");
 
-    auto res = opts.parse(t_argc, tp_argv);
+    auto res = opts.parse(static_cast<int>(argv_norm.size()), argv_norm.data());
     if (res.count("help")) {
         fmt::print("{}\n", opts.help());
         return EXIT_SUCCESS;
+    }
+
+    const bool include_shell_api = res["include-shell-api"].as<bool>();
+    const bool include_predefined = res["include-predefined"].as<bool>();
+    if (include_shell_api && include_predefined) {
+        fmt::print(stderr, "\033[31merror:\033[0m --include-predefined and --include-shell-api are mutually exclusive: "
+                           "both declare the native API surface; pass only one.\n");
+        return EXIT_FAILURE;
     }
 
     auto inputs = resolveInputPaths(res);
@@ -454,14 +488,16 @@ int cmdEmitAngelScript(int t_argc, char** tp_argv) {
 
     sgrn::scl::AsEmitterOptions opts_as;
     opts_as.output_dir = res["output"].as<std::string>();
-    opts_as.include_shell_api = res["include-shell-api"].as<bool>();
+    opts_as.include_shell_api = include_shell_api;
+    opts_as.include_predefined = include_predefined;
 
     auto emit_res = sgrn::scl::AsApiEmitter::emit(registry, opts_as);
     if (emit_res.hasError()) {
         fmt::print(stderr, "\033[31merror:\033[0m {}\n", emit_res.error());
         return EXIT_FAILURE;
     }
-    fmt::print(stderr, "\033[32memitted:\033[0m AngelScript API surface to {}\n", opts_as.output_dir);
+    const std::string written = include_predefined ? "as.predefined" : (include_shell_api ? "schema.as + s7shell_api.as" : "schema.as");
+    fmt::print(stderr, "\033[32memitted:\033[0m AngelScript declarations ({}) to {}\n", written, opts_as.output_dir);
     return EXIT_SUCCESS;
 }
 

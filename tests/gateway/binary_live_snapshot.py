@@ -41,14 +41,15 @@ from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-PY_BINDINGS_DIR = ROOT_DIR / "sgrn" / "bindings" / "python"
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+PY_BINDINGS_DIR = REPO_ROOT / "sgrn" / "python"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 if str(PY_BINDINGS_DIR) not in sys.path:
     sys.path.insert(0, str(PY_BINDINGS_DIR))
 
-import demo  # noqa: E402
+# NOTE: repo-root demo.py is imported lazily inside _setup_context() —
+# managed mode only. External mode (orchestrated runs) never needs it.
 from sgrn.dtypes import decode_record  # noqa: E402
 from sgrn.gateway import Gateway, GatewayError  # noqa: E402
 from sgrn.models import DbField, DbSchema  # noqa: E402
@@ -296,6 +297,11 @@ def _setup_context() -> LiveContext:
     run = None
     try:
         if MANAGED_LIVE:
+            global demo
+            try:
+                import demo  # noqa: E402  (repo-root helper, managed mode only)
+            except ImportError as e:
+                raise RuntimeError("managed mode needs repo-root demo.py importable") from e
             if os.geteuid() != 0:
                 raise RuntimeError("managed live tests require root because demo.py launches s7shell on privileged ports")
             selected = demo.resolve_simulation(SIMULATION_CHOICE)
@@ -355,6 +361,10 @@ async def _capture_json_snapshot(ctx: LiveContext) -> Dict[str, Any]:
     captured_json: Dict[str, Any] = {}
 
     def on_json(frame: Dict[str, Any]) -> None:
+        # Control frames (dictionary, manifest, ...) share the channel but
+        # carry no twin data — latch only the snapshot holding our DB.
+        if ctx.schema.db_name not in frame:
+            return
         captured_json.clear()
         captured_json.update(frame)
         json_event.set()

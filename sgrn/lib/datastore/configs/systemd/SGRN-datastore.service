@@ -11,6 +11,12 @@ WorkingDirectory=${SGRN_DATA_DIR}
 EnvironmentFile=${SGRN_DATA_DIR}/.env
 Environment="PATH=${SGRN_DEPLOYMENT_ENV}/bin:/usr/bin:/bin"
 Environment="SGRN_CONFIG_PATH=${SGRN_DATA_DIR}/sgrn.json"
+# Readiness gate: After= only orders startup, it never waits for MinIO to
+# accept traffic — without this the bucket check at boot races MinIO's own
+# startup (HeadBucket "No response body"). Address must match --address in
+# SGRN-minio.service. Fails the start (loudly) if MinIO is not ready within
+# ~90s instead of booting degraded.
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 180); do /usr/bin/curl -sf http://127.0.0.1:9000/minio/health/ready >/dev/null && exit 0; sleep 0.5; done; echo "SGRN-datastore: MinIO not ready after 90s, refusing to start" >&2; exit 1'
 ExecStart=${SGRN_BIN_DIR}/sgrn_datastore
 
 Restart=on-failure

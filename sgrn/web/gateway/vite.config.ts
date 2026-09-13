@@ -1,11 +1,11 @@
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig, type Plugin } from "vite";
 import { viteSingleFile } from "vite-plugin-singlefile";
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * Worker path fix — viteSingleFile does not inline workers, so they're
@@ -25,8 +25,15 @@ function fixWorkerUrlPlugin(): Plugin {
     enforce: "post",
     generateBundle(_options, bundle) {
       for (const [, chunk] of Object.entries(bundle)) {
-        if (chunk.type === "asset" && typeof chunk.source === "string" && chunk.fileName.endsWith(".html")) {
-          chunk.source = chunk.source.replace(/\.\.\/(worker-[^"']+\.js)/g, "./$1");
+        if (
+          chunk.type === "asset" &&
+          typeof chunk.source === "string" &&
+          chunk.fileName.endsWith(".html")
+        ) {
+          chunk.source = chunk.source.replace(
+            /\.\.\/(worker-[^"']+\.js)/g,
+            "./$1",
+          );
         }
       }
     },
@@ -34,22 +41,15 @@ function fixWorkerUrlPlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [
-    svelte(),
-    viteSingleFile(),
-    fixWorkerUrlPlugin(),
-  ],
+  plugins: [svelte(), viteSingleFile(), fixWorkerUrlPlugin()],
   base: "./",
   resolve: {
     alias: {
       "@sgrn/gateway": path.resolve(
         __dirname,
-        "../../typescript/gateway/src/index.ts"
+        "../../typescript/gateway/src/index.ts",
       ),
-      "@docs": path.resolve(
-        __dirname,
-        "../../../documentation/gateway"
-      ),
+      "@docs": path.resolve(__dirname, "../../../documentation/gateway"),
     },
   },
   build: {

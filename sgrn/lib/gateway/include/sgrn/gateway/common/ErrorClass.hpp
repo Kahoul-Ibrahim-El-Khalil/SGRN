@@ -23,6 +23,8 @@ constexpr ::sgrn::common::ErrorClass classify(twin::PlcMemoryError t_status) {
             return ::sgrn::common::ErrorClass::OutOfRange;
         case PlcMemoryError::NULL_BUFFER:
         case PlcMemoryError::INVALID_BIT_INDEX:
+        case PlcMemoryError::UKNOWN:
+        case PlcMemoryError::EXTERNAL:
             return ::sgrn::common::ErrorClass::Internal;
     }
     return ::sgrn::common::ErrorClass::Internal;

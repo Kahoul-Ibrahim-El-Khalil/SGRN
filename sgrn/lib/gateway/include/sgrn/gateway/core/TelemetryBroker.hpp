@@ -13,6 +13,7 @@
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace sgrn::gateway::core
 {
@@ -36,6 +37,13 @@ struct TelemetryEvent {
 
     // Tier 1: Include specific dirty paths
     std::vector<sgrn::gateway::twin::TreePath> dirty_paths;
+
+    // DB numbers covered by a multi-DB DeltaSnapshot. Single-DB events
+    // (LeafUpdate, per-DB snapshots) use `db` above; a coalesced
+    // DeltaSnapshot leaves `db` at 0 and lists every dirty DB here so
+    // per-DB consumers (binary WAL writer) can snapshot each image.
+    // Empty for single-DB events.
+    std::vector<uint16_t> dirty_dbs;
 
     // When true, json_value is already a flat numeric-keyed JSON object
     // {"<leaf_id>": value, ...} — WebSocket adapter must skip flattenNestedTree.

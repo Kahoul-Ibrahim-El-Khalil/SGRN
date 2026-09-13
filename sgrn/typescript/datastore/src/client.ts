@@ -74,7 +74,8 @@ export class AutomatedServiceClient {
 
     const svc_data = data.automated_service ?? {};
     this.session = {
-      automated_service_id: (data.automated_service_id ?? svc_data.id) as number,
+      automated_service_id: (data.automated_service_id ??
+        svc_data.id) as number,
       automated_service: svc_data,
       session_id: data.session_id,
     };
@@ -92,7 +93,10 @@ export class AutomatedServiceClient {
   }
 
   async getSession(): Promise<SgrnResult<AutomatedServiceSession>> {
-    const res = await this.request<AutomatedServiceSession>("GET", URLS.session);
+    const res = await this.request<AutomatedServiceSession>(
+      "GET",
+      URLS.session,
+    );
     if (isError(res)) {
       return res;
     }
@@ -101,7 +105,12 @@ export class AutomatedServiceClient {
   }
 
   async getConstraints(): Promise<SgrnResult<UploadConstraints>> {
-    return this.request<UploadConstraints>("GET", URLS.constraints, undefined, false);
+    return this.request<UploadConstraints>(
+      "GET",
+      URLS.constraints,
+      undefined,
+      false,
+    );
   }
 
   async downloadFile(t_virtual_path: string): Promise<SgrnResult<Response>> {
@@ -125,7 +134,9 @@ export class AutomatedServiceClient {
     }
   }
 
-  async downloadFileAsBuffer(t_virtual_path: string): Promise<SgrnResult<ArrayBuffer>> {
+  async downloadFileAsBuffer(
+    t_virtual_path: string,
+  ): Promise<SgrnResult<ArrayBuffer>> {
     const res = await this.downloadFile(t_virtual_path);
     if (isError(res)) {
       return res;
@@ -141,7 +152,10 @@ export class AutomatedServiceClient {
     }
   }
 
-  async uploadFile(t_file: File | Blob, t_virtual_path: string): Promise<SgrnResult<UploadResult>> {
+  async uploadFile(
+    t_file: File | Blob,
+    t_virtual_path: string,
+  ): Promise<SgrnResult<UploadResult>> {
     try {
       const url = `${this.base_url}${URLS.files}?path=${encodeURIComponent(t_virtual_path)}`;
       const auth_res = this.authHeaders();
@@ -155,8 +169,12 @@ export class AutomatedServiceClient {
       const form_data = new FormData();
       form_data.append("file", t_file, file_name);
 
-      const dummy_req = new Request("http://l", { method: "POST", body: form_data });
-      const content_type = dummy_req.headers.get("content-type") || "multipart/form-data";
+      const dummy_req = new Request("http://l", {
+        method: "POST",
+        body: form_data,
+      });
+      const content_type =
+        dummy_req.headers.get("content-type") || "multipart/form-data";
       const raw_body = await dummy_req.arrayBuffer();
 
       // @ts-expect-error Bun-specific API is available in Bun runtimes.
@@ -168,7 +186,11 @@ export class AutomatedServiceClient {
         "Content-Encoding": "zstd",
       };
 
-      const res = await fetch(url, { method: "POST", headers, body: compressed_body });
+      const res = await fetch(url, {
+        method: "POST",
+        headers,
+        body: compressed_body,
+      });
       if (!res.ok) {
         return await this.processErrorResponse(res);
       }
@@ -182,7 +204,10 @@ export class AutomatedServiceClient {
     }
   }
 
-  async uploadFileFromDisk(t_file_path: string, t_virtual_path?: string): Promise<SgrnResult<UploadResult>> {
+  async uploadFileFromDisk(
+    t_file_path: string,
+    t_virtual_path?: string,
+  ): Promise<SgrnResult<UploadResult>> {
     try {
       const bun_file = Bun.file(t_file_path);
       const file_name = t_file_path.split("/").pop() ?? "upload";
@@ -197,7 +222,10 @@ export class AutomatedServiceClient {
     }
   }
 
-  async downloadFileToDisk(t_virtual_path: string, t_output_path: string): Promise<SgrnResult<void>> {
+  async downloadFileToDisk(
+    t_virtual_path: string,
+    t_output_path: string,
+  ): Promise<SgrnResult<void>> {
     const res = await this.downloadFileAsBuffer(t_virtual_path);
     if (isError(res)) {
       return res;
@@ -215,7 +243,10 @@ export class AutomatedServiceClient {
 
   private authHeaders(): SgrnResult<Record<string, string>> {
     if (!this.jwt) {
-      return { error: "Not signed in – call signIn() first.", scope: ErrorScope.Authentication };
+      return {
+        error: "Not signed in – call signIn() first.",
+        scope: ErrorScope.Authentication,
+      };
     }
     return { data: { Authorization: `Bearer ${this.jwt}` } };
   }

@@ -472,6 +472,182 @@ sgrn::Result<std::string, std::string> DatastoreClient::storageConstraintsJson()
     return sgrn::utils::json::serializeCompact(doc);
 }
 
+sgrn::Result<std::string, std::string> DatastoreClient::storageAdminOverviewJson(uint32_t t_max_pages) {
+    auto doc = makeRequest("GET", "/api/v1/admin/storage/overview?max_pages=" + std::to_string(t_max_pages));
+    if (doc.IsNull())
+        return sgrn::Result<std::string, std::string>::Error("storage overview failed: empty response");
+    return sgrn::utils::json::serializeCompact(doc);
+}
+
+sgrn::Result<std::string, std::string> DatastoreClient::storageAdminOrphansJson(
+    const std::string& t_bucket, const std::string& t_prefix, uint32_t t_limit, uint32_t t_max_pages) {
+    std::string url = "/api/v1/admin/storage/orphans?limit=" + std::to_string(t_limit) + "&max_pages=" + std::to_string(t_max_pages);
+    if (!t_bucket.empty())
+        url += "&bucket=" + urlEncodeQueryValue(t_bucket);
+    if (!t_prefix.empty())
+        url += "&prefix=" + urlEncodeQueryValue(t_prefix);
+    auto doc = makeRequest("GET", url);
+    if (doc.IsNull())
+        return sgrn::Result<std::string, std::string>::Error("storage orphans failed: empty response");
+    return sgrn::utils::json::serializeCompact(doc);
+}
+
+sgrn::Result<std::string, std::string> DatastoreClient::storageAdminPurgeOrphansJson(
+    const std::string& t_bucket, const std::vector<std::string>& t_keys, const std::string& t_prefix, bool t_dry_run, uint32_t t_limit) {
+    rapidjson::Document body;
+    auto& alloc = body.GetAllocator();
+    body.SetObject();
+    if (!t_bucket.empty())
+        body.AddMember("bucket", rapidjson::Value(t_bucket.c_str(), alloc), alloc);
+    if (!t_keys.empty()) {
+        rapidjson::Value keys(rapidjson::kArrayType);
+        for (const auto& k : t_keys)
+            keys.PushBack(rapidjson::Value(k.c_str(), alloc), alloc);
+        body.AddMember("keys", keys, alloc);
+    }
+    if (!t_prefix.empty())
+        body.AddMember("prefix", rapidjson::Value(t_prefix.c_str(), alloc), alloc);
+    body.AddMember("dry_run", t_dry_run, alloc);
+    body.AddMember("limit", t_limit, alloc);
+    auto doc = makeRequest("POST", "/api/v1/admin/storage/orphans/purge", sgrn::utils::json::serializeCompact(body));
+    if (doc.IsNull())
+        return sgrn::Result<std::string, std::string>::Error("storage purge failed: empty response");
+    return sgrn::utils::json::serializeCompact(doc);
+}
+
+sgrn::Result<std::string, std::string> DatastoreClient::storageAdminSearchJson(
+    const std::string& t_bucket, const std::string& t_key, const std::string& t_prefix, uint32_t t_limit) {
+    std::string url = "/api/v1/admin/storage/search?limit=" + std::to_string(t_limit);
+    if (!t_bucket.empty())
+        url += "&bucket=" + urlEncodeQueryValue(t_bucket);
+    if (!t_key.empty())
+        url += "&key=" + urlEncodeQueryValue(t_key);
+    else if (!t_prefix.empty())
+        url += "&prefix=" + urlEncodeQueryValue(t_prefix);
+    auto doc = makeRequest("GET", url);
+    if (doc.IsNull())
+        return sgrn::Result<std::string, std::string>::Error("storage search failed: empty response");
+    return sgrn::utils::json::serializeCompact(doc);
+}
+
+namespace
+{
+
+// Parse a raw admin-storage JSON body into a rapidjson Document.
+sgrn::Result<rapidjson::Document, std::string> parseAdminStorageJson(sgrn::Result<std::string, std::string> t_raw, const char* t_what) {
+    if (t_raw.hasError())
+        return sgrn::Result<rapidjson::Document, std::string>::Error(t_raw.error());
+    auto parsed = sgrn::utils::json::deserialize(t_raw.value());
+    if (parsed.hasError())
+        return sgrn::Result<rapidjson::Document, std::string>::Error(std::string(t_what) + ": invalid JSON response");
+    return std::move(parsed.value());
+}
+
+bool jsonBool(const rapidjson::Value& t_obj, const char* t_key) {
+    return t_obj.HasMember(t_key) && t_obj[t_key].IsBool() && t_obj[t_key].GetBool();
+}
+
+int64_t jsonInt(const rapidjson::Value& t_obj, const char* t_key) {
+    if (!t_obj.HasMember(t_key))
+        return 0;
+    return parseIntField(t_obj[t_key]);
+}
+
+void fillOrphanKeys(const rapidjson::Value& t_doc, const char* t_key, std::vector<StorageOrphanKey>& t_out) {
+    if (!t_doc.HasMember(t_key) || !t_doc[t_key].IsArray())
+        return;
+    for (const auto& e : t_doc[t_key].GetArray()) {
+        if (!e.IsObject())
+            continue;
+        StorageOrphanKey k;
+        k.key_ = strField(e, "key");
+        k.size_ = e.HasMember("size") ? parseIntField(e["size"]) : 0;
+        k.etag_ = strField(e, "etag");
+        t_out.push_back(std::move(k));
+    }
+}
+
+void fillStringList(const rapidjson::Value& t_doc, const char* t_key, std::vector<std::string>& t_out) {
+    if (!t_doc.HasMember(t_key) || !t_doc[t_key].IsArray())
+        return;
+    for (const auto& e : t_doc[t_key].GetArray()) {
+        if (e.IsString())
+            t_out.emplace_back(e.GetString());
+        else if (e.IsObject() && e.HasMember("key") && e["key"].IsString())
+            t_out.emplace_back(e["key"].GetString());
+    }
+}
+
+} // namespace
+
+sgrn::Result<std::vector<StorageBucketCensus>, std::string> DatastoreClient::tryStorageAdminOverview(uint32_t t_max_pages) {
+    auto doc_res = parseAdminStorageJson(storageAdminOverviewJson(t_max_pages), "storage overview");
+    if (doc_res.hasError())
+        return sgrn::Result<std::vector<StorageBucketCensus>, std::string>::Error(doc_res.error());
+    rapidjson::Document doc = std::move(doc_res.value());
+    if (!doc.IsObject() || !doc.HasMember("buckets") || !doc["buckets"].IsArray())
+        return sgrn::Result<std::vector<StorageBucketCensus>, std::string>::Error("storage overview: unexpected response shape");
+    std::vector<StorageBucketCensus> out;
+    for (const auto& b : doc["buckets"].GetArray()) {
+        if (!b.IsObject())
+            continue;
+        StorageBucketCensus c;
+        c.name_ = strField(b, "name");
+        if (b.HasMember("minio") && b["minio"].IsObject()) {
+            c.minio_objects_ = jsonInt(b["minio"], "objects");
+            c.minio_bytes_ = jsonInt(b["minio"], "bytes");
+            c.minio_truncated_ = jsonBool(b["minio"], "truncated");
+        }
+        if (b.HasMember("db") && b["db"].IsObject()) {
+            c.db_objects_ = jsonInt(b["db"], "objects");
+            c.db_bytes_ = jsonInt(b["db"], "bytes");
+            c.db_files_ = jsonInt(b["db"], "files");
+        }
+        out.push_back(std::move(c));
+    }
+    return out;
+}
+
+sgrn::Result<StorageOrphansReport, std::string> DatastoreClient::tryStorageAdminOrphans(
+    const std::string& t_bucket, const std::string& t_prefix, uint32_t t_limit, uint32_t t_max_pages) {
+    auto doc_res = parseAdminStorageJson(storageAdminOrphansJson(t_bucket, t_prefix, t_limit, t_max_pages), "storage orphans");
+    if (doc_res.hasError())
+        return sgrn::Result<StorageOrphansReport, std::string>::Error(doc_res.error());
+    rapidjson::Document doc = std::move(doc_res.value());
+    if (!doc.IsObject())
+        return sgrn::Result<StorageOrphansReport, std::string>::Error("storage orphans: unexpected response shape");
+    StorageOrphansReport r;
+    r.bucket_ = strField(doc, "bucket");
+    r.prefix_ = strField(doc, "prefix");
+    r.minio_scanned_ = jsonInt(doc, "minio_scanned");
+    r.minio_truncated_ = jsonBool(doc, "minio_truncated");
+    fillOrphanKeys(doc, "minio_only", r.minio_only_);
+    r.minio_only_count_ = jsonInt(doc, "minio_only_count");
+    r.minio_only_bytes_ = jsonInt(doc, "minio_only_bytes");
+    fillOrphanKeys(doc, "db_missing", r.db_missing_);
+    r.db_missing_unchecked_ = jsonInt(doc, "db_missing_unchecked");
+    return r;
+}
+
+sgrn::Result<StoragePurgeResult, std::string> DatastoreClient::tryStorageAdminPurge(
+    const std::string& t_bucket, const std::vector<std::string>& t_keys, const std::string& t_prefix, bool t_dry_run, uint32_t t_limit) {
+    auto doc_res = parseAdminStorageJson(storageAdminPurgeOrphansJson(t_bucket, t_keys, t_prefix, t_dry_run, t_limit), "storage purge");
+    if (doc_res.hasError())
+        return sgrn::Result<StoragePurgeResult, std::string>::Error(doc_res.error());
+    rapidjson::Document doc = std::move(doc_res.value());
+    if (!doc.IsObject())
+        return sgrn::Result<StoragePurgeResult, std::string>::Error("storage purge: unexpected response shape");
+    StoragePurgeResult r;
+    r.dry_run_ = jsonBool(doc, "dry_run");
+    if (r.dry_run_)
+        fillStringList(doc, "would_delete", r.affected_);
+    else
+        fillStringList(doc, "deleted", r.affected_);
+    fillStringList(doc, "errors", r.errors_);
+    fillStringList(doc, "skipped", r.skipped_);
+    return r;
+}
+
 bool DatastoreClient::signIn() {
     switch (config_.auth_mode_) {
         case AuthMode::AutomatedService:

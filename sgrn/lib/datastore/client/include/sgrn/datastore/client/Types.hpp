@@ -80,6 +80,42 @@ struct AdminUserEntry {
     std::string status_{};
 };
 
+/// MinIO storage administration (admin-only endpoints).
+struct StorageBucketCensus {
+    std::string name_;
+    int64_t minio_objects_{0};
+    int64_t minio_bytes_{0};
+    bool minio_truncated_{false};
+    int64_t db_objects_{0};
+    int64_t db_bytes_{0};
+    int64_t db_files_{0};
+};
+
+struct StorageOrphanKey {
+    std::string key_;
+    int64_t size_{0};
+    std::string etag_;
+};
+
+struct StorageOrphansReport {
+    std::string bucket_;
+    std::string prefix_;
+    int64_t minio_scanned_{0};
+    bool minio_truncated_{false};
+    std::vector<StorageOrphanKey> minio_only_;
+    int64_t minio_only_count_{0};
+    int64_t minio_only_bytes_{0};
+    std::vector<StorageOrphanKey> db_missing_;
+    int64_t db_missing_unchecked_{0};
+};
+
+struct StoragePurgeResult {
+    bool dry_run_{true};
+    std::vector<std::string> affected_; // would_delete (dry run) or deleted
+    std::vector<std::string> errors_;
+    std::vector<std::string> skipped_;
+};
+
 struct ServiceEntry {
     int64_t id_{0};
     std::string name_{};

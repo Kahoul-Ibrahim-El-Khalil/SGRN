@@ -11,10 +11,15 @@ import type {
   UdtSchema,
 } from "./types";
 
-function resolveChildren(t_field: DbField, t_registry: RegistryResponse): DbField[] | undefined {
+function resolveChildren(
+  t_field: DbField,
+  t_registry: RegistryResponse,
+): DbField[] | undefined {
   let children = t_field.children;
   if (!children && (t_field.type.startsWith("UDT") || t_field.udt_name)) {
-    const udt = t_registry.udts?.find((u) => u.name === (t_field.udt_name || t_field.type));
+    const udt = t_registry.udts?.find(
+      (u) => u.name === (t_field.udt_name || t_field.type),
+    );
     if (udt) {
       children = udt.fields;
     }
@@ -37,7 +42,9 @@ export function buildRegistryTree(
     t_depth: number,
     t_parent_row_id: string,
   ): void {
-    const full_path = t_parent_path ? `${t_parent_path}/${t_field.name}` : t_field.name;
+    const full_path = t_parent_path
+      ? `${t_parent_path}/${t_field.name}`
+      : t_field.name;
     const key = `${t_db.name}-${full_path}`;
     const children = resolveChildren(t_field, t_registry);
     const is_struct = !!(children && children.length > 0);
@@ -89,7 +96,7 @@ export function buildRegistryTree(
         nodes.push({
           id: `${row_id}-truncated`,
           type: "field",
-      db_num: t_db.number,
+          db_num: t_db.number,
           db_name: t_db.name,
           name: `Truncated: ${t_field.count - render_limit} more elements...`,
           path: "",
@@ -141,8 +148,11 @@ export function flattenRegistryFields(
   if (!t_fields) return [];
   const results: FlatRegistryField[] = [];
   for (const field of t_fields) {
-    const offset = field.bit > 0 ? `${field.offset}.${field.bit}` : `${field.offset}.0`;
-    const full_path = t_parent_path ? `${t_parent_path}/${field.name}` : field.name;
+    const offset =
+      field.bit > 0 ? `${field.offset}.${field.bit}` : `${field.offset}.0`;
+    const full_path = t_parent_path
+      ? `${t_parent_path}/${field.name}`
+      : field.name;
     results.push({
       name: field.name,
       type: field.type,
@@ -159,7 +169,9 @@ export function flattenRegistryFields(
 
     const children = resolveChildren(field, t_registry);
     if (children) {
-      results.push(...flattenRegistryFields(children, t_registry, t_depth + 1, full_path));
+      results.push(
+        ...flattenRegistryFields(children, t_registry, t_depth + 1, full_path),
+      );
     }
   }
   return results;
@@ -169,9 +181,11 @@ export function filterDbs(t_dbs: DbSchema[], t_term: string): DbSchema[] {
   if (!t_term) return t_dbs;
   return t_dbs.filter((db) => {
     const db_match =
-      db.name.toLowerCase().includes(t_term) || `db${db.number}`.includes(t_term);
+      db.name.toLowerCase().includes(t_term) ||
+      `db${db.number}`.includes(t_term);
     const field_match =
-      db.fields?.some((field) => field.name.toLowerCase().includes(t_term)) ?? false;
+      db.fields?.some((field) => field.name.toLowerCase().includes(t_term)) ??
+      false;
     return db_match || field_match;
   });
 }
@@ -198,16 +212,20 @@ export function getCipType(s7Type: string): string {
   if (t === "SINT") return "SINT (0xC2)";
   if (t === "WORD" || t === "UINT") return "UINT (0xC7)";
   if (t === "INT") return "INT (0xC3)";
-  if (t === "DWORD" || t === "UDINT" || t === "TIME" || t === "TOD") return "UDINT (0xC8)";
+  if (t === "DWORD" || t === "UDINT" || t === "TIME" || t === "TOD")
+    return "UDINT (0xC8)";
   if (t === "DINT") return "DINT (0xC4)";
   if (t === "REAL") return "REAL (0xCA)";
-  if (t === "LWORD" || t === "ULINT" || t === "LTIME" || t === "LTOD") return "ULINT (0xC9)";
+  if (t === "LWORD" || t === "ULINT" || t === "LTIME" || t === "LTOD")
+    return "ULINT (0xC9)";
   if (t === "LINT") return "LINT (0xC5)";
   if (t === "LREAL") return "LREAL (0xCB)";
   return "BYTE_ARRAY (0xD3)";
 }
 
-export function buildEipProjection(t_registry: RegistryResponse): EipProjectionRow[] {
+export function buildEipProjection(
+  t_registry: RegistryResponse,
+): EipProjectionRow[] {
   const rows: EipProjectionRow[] = [];
   for (const db of t_registry.dbs ?? []) {
     let attr = 1;
@@ -228,7 +246,9 @@ export function buildEipProjection(t_registry: RegistryResponse): EipProjectionR
   return rows;
 }
 
-export function buildOpcuaProjection(t_registry: RegistryResponse): OpcuaProjectionRow[] {
+export function buildOpcuaProjection(
+  t_registry: RegistryResponse,
+): OpcuaProjectionRow[] {
   const rows: OpcuaProjectionRow[] = [];
 
   for (const db of t_registry.dbs ?? []) {
@@ -241,7 +261,9 @@ export function buildOpcuaProjection(t_registry: RegistryResponse): OpcuaProject
 
     const walkFields = (fields: DbField[], parentPath: string): void => {
       for (const field of fields) {
-        const fullPath = parentPath ? `${parentPath}.${field.name}` : field.name;
+        const fullPath = parentPath
+          ? `${parentPath}.${field.name}`
+          : field.name;
         const isArray = field.count > 1 || field.type.includes("Array");
         rows.push({
           db: db.name,

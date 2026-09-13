@@ -17,7 +17,6 @@
 #include <sgrn/s7shell/script/ScriptSchemaStore.hpp>
 #include <sgrn/s7shell/script/ScriptTagTable.hpp>
 #include <angelscript.h>
-#include <chrono>
 #include <cmath>
 #include <ctime>
 #include <scriptarray/scriptarray.h>
@@ -25,18 +24,10 @@
 #include <snap7.h>
 #include <stdexcept>
 #include <string>
-#include <thread>
 
 namespace sgrn::s7shell::shell
 {
 using sgrn::Result;
-
-/// sleep(ms) — block the calling script thread for t_ms milliseconds.
-/// Useful for timing loops in live PLC recording scripts.
-static void script_sleep(int t_ms) {
-    if (t_ms > 0)
-        std::this_thread::sleep_for(std::chrono::milliseconds(t_ms));
-}
 
 static std::string script_getenv(const std::string& t_name) {
     const char* p_val = std::getenv(t_name.c_str());

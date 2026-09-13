@@ -25,7 +25,7 @@ Library code lives in `sgrn/lib/`; apps only wire mains to libs. Or run
    bundle at the bottom of this file (targets must exist first — that is
    why packaging lives here, not in the lib files).
 5. If integration-tested, add the binary path to `tests/ts/src/GatewayProcess.ts`
-   or `tests/test.py` (binaries land in
+   or `tests/run_tests.py` (binaries land in
    `.build/<preset>/sgrn/apps/<name>/<name>`).
 6. Write `sgrn/apps/<name>/README.md`: role, usage (quote `--help`),
    config, dependencies.

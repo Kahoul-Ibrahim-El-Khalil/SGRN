@@ -104,7 +104,7 @@ Result<void, std::string> registerEnumStringsProperty(UA_Server* tp_raw, const U
 
     auto* lts = static_cast<UA_LocalizedText*>(UA_Array_new(n, &UA_TYPES[UA_TYPES_LOCALIZEDTEXT]));
 
-    SGRN_RETURN_IF_NULL(!lts, {});
+    SGRN_RETURN_IF_NULL(lts, {});
 
     size_t index = 0;
     for (const auto& [value, name] : t_def.values) {
@@ -128,6 +128,8 @@ Result<void, std::string> registerEnumStringsProperty(UA_Server* tp_raw, const U
         UA_QUALIFIEDNAME(0, const_cast<char*>("EnumStrings")), UA_NODEID_NUMERIC(0, UA_NS0ID_PROPERTYTYPE), attr, nullptr, nullptr);
 
     UA_NodeId_clear(const_cast<UA_NodeId*>(&property_id));
+
+    return {};
 }
 
 #if defined(UA_TYPES_ENUMVALUETYPE)
@@ -277,7 +279,7 @@ UA_UInt16 severityForPriority(int t_priority) {
 
 // Time / SourceName / Severity / Message — the properties every triggered
 // event needs regardless of alarm-specific fields.
-void writeBaseEventProperties(
+[[maybe_unused]] void writeBaseEventProperties(
     UA_Server* p_raw, const UA_NodeId& t_event_id, uint64_t t_timestamp_ms, UA_UInt16 t_severity, const std::string& t_message) {
     UA_DateTime event_time = UA_DateTime_fromUnixTime(static_cast<UA_Int64>(t_timestamp_ms / 1000)) +
                              static_cast<UA_DateTime>((t_timestamp_ms % 1000) * UA_DATETIME_MSEC);
@@ -296,7 +298,8 @@ void writeBaseEventProperties(
 }
 
 // AlarmCode / Priority — the S7AlarmEventType-specific properties.
-void writeAlarmSpecificProperties(UA_Server* p_raw, const UA_NodeId& t_event_id, const rapidjson::Value& t_alarm_obj, int t_priority) {
+[[maybe_unused]] void writeAlarmSpecificProperties(
+    UA_Server* p_raw, const UA_NodeId& t_event_id, const rapidjson::Value& t_alarm_obj, int t_priority) {
     if (t_alarm_obj.HasMember("code")) {
         UA_UInt16 code = static_cast<UA_UInt16>(t_alarm_obj["code"].GetUint());
         UA_Server_writeObjectProperty_scalar(p_raw, t_event_id, UA_QUALIFIEDNAME(1, (char*)"AlarmCode"), &code, &UA_TYPES[UA_TYPES_UINT16]);

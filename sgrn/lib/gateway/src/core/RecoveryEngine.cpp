@@ -6,6 +6,7 @@
 #include <sgrn/gateway/twin/TreePath.hpp>
 #include <sgrn/gateway/twin/encoding.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
+#include <sgrn/scl/schema/SchemaSerializer.hpp>
 #include <sgrn/utils/compression.hpp>
 #include <sgrn/utils/json.hpp>
 #include <sgrn/utils/time.hpp>
@@ -25,6 +26,7 @@
 #include <iterator>
 #include <shared_mutex>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -404,14 +406,25 @@ sgrn::Result<ReplayOutcome, std::string> replayBinaryArchive(
     const uint32_t schema_len = header.schema_len;
 
     // Schema check mirrors scanArchive(): empty schema accepts anything,
-    // otherwise the embedded JSON must match the live schema exactly.
+    // otherwise the embedded schema must match the live schema exactly.
+    // Version 4+ headers carry the binary encoding (magic "SGRS"); older
+    // ones carry JSON text. Both compare through the canonical JSON form.
     if (schema_len > 0) {
-        rapidjson::Document schema_doc;
-        schema_doc.Parse(raw.substr(10, schema_len).c_str());
-        if (schema_doc.HasParseError() || !schema_doc.IsObject())
-            return Error("unparseable embedded schema");
-        if (serializeCompact(schema_doc) != t_schema_store.toJson())
-            return Error("schema mismatch");
+        const std::string_view payload(raw.data() + 10, schema_len);
+        if (sgrn::scl::isBinarySchemaPayload(payload)) {
+            auto store_res = sgrn::scl::PlcSchemaStore::loadFromBinary(payload);
+            if (store_res.hasError())
+                return Error("unparseable embedded schema");
+            if (std::move(store_res).value().toJson() != t_schema_store.toJson())
+                return Error("schema mismatch");
+        } else {
+            rapidjson::Document schema_doc;
+            schema_doc.Parse(raw.substr(10, schema_len).c_str());
+            if (schema_doc.HasParseError() || !schema_doc.IsObject())
+                return Error("unparseable embedded schema");
+            if (serializeCompact(schema_doc) != t_schema_store.toJson())
+                return Error("schema mismatch");
+        }
     }
     out.schema_ok = true;
 

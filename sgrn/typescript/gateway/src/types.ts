@@ -181,7 +181,10 @@ export interface DashboardState {
   activeTab: "process" | "registry";
   searchQuery: string;
   registrySearchQuery: string;
-  cellMap: Map<string, { val: HTMLElement; sync: HTMLElement; row: HTMLElement }>;
+  cellMap: Map<
+    string,
+    { val: HTMLElement; sync: HTMLElement; row: HTMLElement }
+  >;
   expandedNodes: Set<string>;
   updateCount: number;
   sessionStart: number | null;
@@ -208,6 +211,8 @@ export enum ErrorScope {
   Unknown = "Unknown",
 }
 
-export function isError<T>(result: SgrnResult<T>): result is { error: string; scope: ErrorScope; data?: never } {
+export function isError<T>(
+  result: SgrnResult<T>,
+): result is { error: string; scope: ErrorScope; data?: never } {
   return result.error !== undefined;
 }

@@ -138,6 +138,19 @@ if(SGRN_BUILD_TESTS)
     add_test(NAME schema_reload_hook_test COMMAND schema_reload_hook_test)
     target_compile_features(schema_reload_hook_test PRIVATE cxx_std_23)
     sgrn_target(schema_reload_hook_test)
+
+    # AngelScriptEngine concurrency smoke test: several threads drive their
+    # own REPL engine through the execute() suppression paths at once.
+    sgrn_add_component_executable(
+        TARGET angel_concurrency_test
+        SOURCES tests/angel_concurrency_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn_s7shell
+    )
+    add_test(NAME angel_concurrency_test COMMAND angel_concurrency_test)
+    target_compile_features(angel_concurrency_test PRIVATE cxx_std_23)
+    sgrn_target(angel_concurrency_test)
 endif()
 
 # =============================================================================

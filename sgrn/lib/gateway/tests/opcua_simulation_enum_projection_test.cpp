@@ -39,6 +39,7 @@ int main() {
     sgrn::scl::PlcSchemaStore store;
     auto loaded = store.loadSchema(kSimulationSchema);
     assert(loaded.has_value());
+    (void)loaded; // assert-only use (compiled out with NDEBUG)
 
     const auto& udts = store.udts();
     auto status_alias = std::find_if(udts.begin(), udts.end(), [](const auto& udt) { return udt.name == "Status"; });

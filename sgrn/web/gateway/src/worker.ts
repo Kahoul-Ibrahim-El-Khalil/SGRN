@@ -2,7 +2,11 @@
 // worker.ts — SGRN Industrial Telemetry Worker
 // Handles high-frequency WebSocket data in a background thread.
 // ─────────────────────────────────────────────────────────────────────────────
-import { GatewayClient, type WorkerCommand, type WorkerMessage } from "@sgrn/gateway";
+import {
+  GatewayClient,
+  type WorkerCommand,
+  type WorkerMessage,
+} from "@sgrn/gateway";
 
 let validKeys: Set<string> | null = null;
 let client: GatewayClient | null = null;
@@ -119,7 +123,10 @@ function flush(): void {
         "type" in (data as Record<string, unknown>) &&
         (data as Record<string, unknown>).type === "dictionary"
       ) {
-        const dictData = data as { type: string; leaves: { id: number; path: string }[] };
+        const dictData = data as {
+          type: string;
+          leaves: { id: number; path: string }[];
+        };
         if (dictData.leaves && Array.isArray(dictData.leaves)) {
           idToPath.clear();
           for (const leaf of dictData.leaves) {
@@ -130,7 +137,10 @@ function flush(): void {
           dictionaryMode = true;
           const dictMsg: WorkerMessage = {
             type: "debug",
-            args: { msg: `Dictionary mode enabled (${idToPath.size} leaves)`, color: "var(--accent)" },
+            args: {
+              msg: `Dictionary mode enabled (${idToPath.size} leaves)`,
+              color: "var(--accent)",
+            },
           };
           self.postMessage(dictMsg);
         }
@@ -158,7 +168,11 @@ function flush(): void {
           const entry = (data as Record<string, unknown>)[idStr];
           let value: unknown;
           let entryTs = ts;
-          if (entry && typeof entry === "object" && "value" in (entry as Record<string, unknown>)) {
+          if (
+            entry &&
+            typeof entry === "object" &&
+            "value" in (entry as Record<string, unknown>)
+          ) {
             value = (entry as { value: unknown }).value;
             entryTs = (entry as { ts: number }).ts || ts;
           } else {

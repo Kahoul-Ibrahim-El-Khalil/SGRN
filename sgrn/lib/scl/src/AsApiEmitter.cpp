@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include <sgrn/scl/AsApiEmitter.hpp>
+#include <sgrn/utils/strings.hpp>
 
 #include <fmt/format.h>
 #include <filesystem>
@@ -14,41 +15,6 @@ namespace sgrn::scl
 {
 
 namespace fs = std::filesystem;
-
-static const char* dataTypeToAs(DataType type) {
-    switch (type) {
-        case DataType::Bool:
-            return "bool";
-        case DataType::Byte:
-        case DataType::USInt:
-            return "uint8";
-        case DataType::SInt:
-            return "int8";
-        case DataType::Word:
-        case DataType::UInt:
-            return "uint16";
-        case DataType::Int:
-            return "int16";
-        case DataType::DWord:
-        case DataType::UDInt:
-            return "uint32";
-        case DataType::DInt:
-            return "int32";
-        case DataType::LWord:
-        case DataType::ULInt:
-            return "uint64";
-        case DataType::LInt:
-            return "int64";
-        case DataType::Real:
-            return "float";
-        case DataType::LReal:
-            return "double";
-        case DataType::String:
-            return "string";
-        default:
-            return "int";
-    }
-}
 
 static const char* SHELL_API_TEMPLATE = R"(// s7shell_api.as — Built-in S7Shell API declarations for IDE / linting.
 // Tooling-only: DO NOT load into AngelScript engine at runtime.
@@ -98,7 +64,6 @@ class WebSocketServer {
     WebSocketServer(PlcRuntime@ rt);
     void start(const string &in ip = "0.0.0.0", uint16 port = 9001);
     void stop();
-    bool isRunning() const;
     void broadcast(const string &in json);
     void loadPolicy(const string &in path);
 }
@@ -153,41 +118,217 @@ void print(const string &in str);
 void sleep(uint ms);
 )";
 
+static bool isStringType(DataType t) {
+    return t == DataType::String || t == DataType::WString || t == DataType::XString || t == DataType::XWString;
+}
+
+static const char* scalarAsType(DataType type) {
+    switch (type) {
+        case DataType::Bool:
+            return "bool";
+        case DataType::Byte:
+        case DataType::USInt:
+            return "uint8";
+        case DataType::SInt:
+            return "int8";
+        case DataType::Word:
+        case DataType::UInt:
+        case DataType::Date:
+        case DataType::Counter:
+        case DataType::Timer:
+            return "uint16";
+        case DataType::Int:
+            return "int16";
+        case DataType::DWord:
+        case DataType::UDInt:
+            return "uint";
+        case DataType::DInt:
+            return "int";
+        case DataType::LWord:
+        case DataType::ULInt:
+            return "uint64";
+        case DataType::LInt:
+            return "int64";
+        case DataType::Real:
+            return "float";
+        case DataType::LReal:
+            return "double";
+        case DataType::Char:
+        case DataType::WChar:
+        case DataType::String:
+        case DataType::WString:
+        case DataType::XString:
+        case DataType::XWString:
+            return "string";
+        case DataType::Time:
+            return "int";
+        case DataType::LTime:
+            return "int64";
+        case DataType::TimeOfDay:
+            return "uint";
+        case DataType::LTimeOfDay:
+            return "uint64";
+        default:
+            return "";
+    }
+}
+
+static void emitMembers(std::ostringstream& t_out, const std::vector<DbField>& t_fields, const std::string& t_parent,
+    const std::string& t_indent, std::ostringstream& t_nested) {
+    for (const auto& f : t_fields) {
+        const std::string name = sgrn::utils::strings::sanitizeIdentifier(f.name);
+        const bool is_string = isStringType(f.type);
+        if (f.count > 1 && !is_string) {
+            if (!f.udt_name.empty()) {
+                t_out << t_indent << "array<" << sgrn::utils::strings::sanitizeIdentifier(f.udt_name) << "@> " << name << ";\n";
+            } else if (const char* elem = scalarAsType(f.type)) {
+                t_out << t_indent << "array<" << elem << "> " << name << ";\n";
+            } else {
+                t_out << t_indent << "// NOTE: " << name << " omitted (runtime skips it too)\n";
+            }
+            continue;
+        }
+        if (!f.udt_name.empty() && f.type == DataType::Struct) {
+            t_out << t_indent << sgrn::utils::strings::sanitizeIdentifier(f.udt_name) << "@ " << name << ";\n";
+            continue;
+        }
+        if (!f.children.empty()) {
+            const std::string nested = t_parent + "_" + name;
+            std::ostringstream nested_body;
+            emitMembers(nested_body, f.children, nested, "    ", t_nested);
+            t_nested << "class " << nested << "\n{\n" << nested_body.str() << "}\n\n";
+            t_out << t_indent << nested << "@ " << name << ";\n";
+            continue;
+        }
+        if (!f.udt_name.empty()) {
+            if (const char* prim = scalarAsType(f.type)) {
+                t_out << t_indent << prim << " " << name << ";\n";
+                continue;
+            }
+        }
+        if (f.type == DataType::DTL || f.type == DataType::DateTime) {
+            t_out << t_indent << "DTL@ " << name << ";\n";
+            continue;
+        }
+        if (const char* prim = scalarAsType(f.type)) {
+            t_out << t_indent << prim << " " << name << ";\n";
+        } else {
+            t_out << t_indent << "// NOTE: " << name << " omitted (runtime skips it too)\n";
+        }
+    }
+}
+
+static void emitClass(std::ostringstream& t_out, const std::string& t_name, const std::vector<DbField>& t_fields, bool t_db_methods) {
+    std::ostringstream nested;
+    std::ostringstream body;
+    emitMembers(body, t_fields, t_name, "    ", nested);
+    t_out << nested.str();
+    t_out << "class " << t_name << "\n{\n" << body.str();
+    if (t_db_methods) {
+        t_out << "    void put();\n";
+        t_out << "    " << t_name << "@ get();\n";
+        t_out << "    void print() const;\n";
+        t_out << "    string toJson() const;\n";
+    }
+    t_out << "}\n";
+}
+
 Result<void, std::string> AsApiEmitter::emit(const PlcSchemaStore& store, const AsEmitterOptions& opts) {
+    // include_predefined and include_shell_api both wire the native API
+    // surface into the output directory; emitting both would double-declare
+    // it (PlcRuntime, Persistence, print, ...) and confuse IDE tooling.
+    if (opts.include_predefined && opts.include_shell_api) {
+        return Error(
+            "--include-predefined and --include-shell-api are mutually exclusive: both declare the native API surface; pass only one.");
+    }
+
     std::error_code ec;
     fs::create_directories(opts.output_dir, ec);
     if (ec) {
-        return Result<void, std::string>::Error("Failed to create output directory: " + ec.message());
+        return Error("Failed to create output directory: " + ec.message());
     }
 
-    // Emit DBs
+    // Native s7shell API surface (PlcRuntime, S7Client, Persistence, ...).
+    std::ostringstream api_out;
+    api_out << SHELL_API_TEMPLATE << "\n";
+
+    // Schema UDT declarations (non-scalar-alias types only; scalar aliases
+    // resolve to primitives and need no class declarations).
+    std::ostringstream udts_out;
+    for (const auto& udt : store.udts()) {
+        if (udt.is_scalar_alias)
+            continue;
+        emitClass(udts_out, sgrn::utils::strings::sanitizeIdentifier(udt.name), udt.fields, false);
+        udts_out << "\n";
+    }
+
+    // DB classes + globals, mirroring exactly what the s7shell runtime
+    // registers (SchemaVM) and injects for scripts (injectDbRefs /
+    // buildDbPreamble): bare snake_case global, generic db<N> global, and
+    // the get_* accessors — the emitter and engine MUST agree on these.
+    std::ostringstream dbs_out;
+    std::ostringstream globals_out;
     for (const auto& [num, db] : store.dbs()) {
-        std::string filename = fmt::format("DB{}_{}.as", num, db.db_name.empty() ? "Data" : db.db_name);
-        fs::path filepath = fs::path(opts.output_dir) / filename;
-
-        std::ofstream ofs(filepath);
-        if (!ofs.is_open())
-            return Result<void, std::string>::Error("Failed to open " + filepath.string());
-
-        ofs << "// AUTO-GENERATED by sclc emit-angelscript. Do not edit.\n\n";
-        ofs << fmt::format("namespace DB{}\n{{\n", num);
-        ofs << fmt::format("    class {}\n    {{\n", db.db_name.empty() ? "Data" : db.db_name);
-
-        for (const auto& field : db.fields) {
-            std::string type_str = field.udt_name.empty() ? dataTypeToAs(field.type) : field.udt_name;
-            ofs << fmt::format("        {} {};\n", type_str, field.name);
-        }
-
-        ofs << "    }\n}\n";
+        const std::string cls =
+            sgrn::utils::strings::sanitizeIdentifier(db.db_name.empty() ? fmt::format("DB{}", db.db_number) : db.db_name);
+        const std::string db_var = db.db_name.empty() ? fmt::format("db{}", db.db_number) : db.db_name;
+        const std::string snake = sgrn::utils::strings::toSnakeCase(db_var);
+        emitClass(dbs_out, cls, db.fields, true);
+        dbs_out << "\n";
+        globals_out << cls << "@ " << snake << ";\n";
+        globals_out << cls << "@ db" << db.db_number << ";\n";
+        globals_out << cls << "@ get_" << snake << "();\n";
+        globals_out << cls << "@ get_db" << db.db_number << "();\n";
     }
 
-    // Emit shell API surface if requested
+    std::string regenerate = "sclc emit-angelscript";
+    if (opts.include_predefined)
+        regenerate += " --include-predefined";
+    else if (opts.include_shell_api)
+        regenerate += " --include-shell-api";
+
+    std::ostringstream out;
+    out << "// AUTO-GENERATED by " << regenerate << ". Do not edit.\n";
+    out << "// Tooling-only: never loaded by the AngelScript runtime.\n\n";
+
+    // --include-predefined writes as.predefined: the single complete ambient
+    // header (native API + schema UDT/DB classes + DB globals) that IDE
+    // language servers can pick up. Default schema.as carries only the schema
+    // surface; the API then lives in s7shell_api.as (legacy --include-shell-api).
+    if (opts.include_predefined) {
+        out << "// ---- native s7shell API ----\n\n";
+        out << api_out.str() << "\n";
+    }
+
+    // Schema UDTs.
+    if (!udts_out.str().empty()) {
+        out << "// ---- schema UDTs ----\n\n";
+        out << udts_out.str() << "\n";
+    }
+
+    // DB types + globals (bare declarations matching the runtime preamble).
+    if (!dbs_out.str().empty()) {
+        out << "// ---- DB types and globals ----\n\n";
+        out << dbs_out.str() << "\n";
+        out << globals_out.str();
+    }
+
+    const std::string filename = opts.include_predefined ? "as.predefined" : "schema.as";
+    fs::path schema_path = fs::path(opts.output_dir) / filename;
+    {
+        std::ofstream ofs(schema_path);
+        if (!ofs.is_open())
+            return Error("Failed to open " + schema_path.string());
+        ofs << out.str();
+    }
+
+    // Legacy companion: the bare native API surface (matches `s7shell emit-as`).
     if (opts.include_shell_api) {
         fs::path api_path = fs::path(opts.output_dir) / "s7shell_api.as";
         std::ofstream ofs(api_path);
-        if (ofs.is_open()) {
-            ofs << SHELL_API_TEMPLATE;
-        }
+        if (!ofs.is_open())
+            return Error("Failed to open " + api_path.string());
+        ofs << SHELL_API_TEMPLATE;
     }
 
     return {};

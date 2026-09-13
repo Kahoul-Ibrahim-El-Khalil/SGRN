@@ -490,4 +490,23 @@ inline bool fieldPathMatches(std::string_view t_pattern, std::string_view t_path
     return p_idx == t_pattern.size() && t_idx == t_path.size();
 }
 
+// Makes a string safe as an AngelScript type/member identifier: keeps
+/// [A-Za-z0-9_], replaces anything else with '_', prefixes '_' when empty
+/// or leading-digit. Shared by the s7shell runtime type registration and
+/// the sclc emit-angelscript declarations — the two MUST agree or IDE
+/// tooling and the engine resolve different symbol names.
+inline std::string sanitizeIdentifier(const std::string& t_s) {
+    std::string out;
+    out.reserve(t_s.size());
+    for (char c : t_s) {
+        if (std::isalnum(static_cast<unsigned char>(c)) || c == '_')
+            out += c;
+        else
+            out += '_';
+    }
+    if (out.empty() || std::isdigit(static_cast<unsigned char>(out[0])))
+        out = "_" + out;
+    return out;
+}
+
 } // namespace sgrn::utils::strings

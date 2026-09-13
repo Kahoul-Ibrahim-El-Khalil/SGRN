@@ -1,3 +1,5 @@
+import "schema.as"
+
 const string SCHEMA_PATH = "schema.scl";
 
 const string IP = "127.0.0.1";

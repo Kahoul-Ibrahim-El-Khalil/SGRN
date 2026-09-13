@@ -302,6 +302,10 @@ Task<HttpResponsePtr> AdminApiHandler::handleGetEndpoints(HttpRequestPtr tsp_req
     endpoints.append("/api/v1/admin/status");
     endpoints.append("/api/v1/admin/users");
     endpoints.append("/api/v1/admin/metaprobe/sessions");
+    endpoints.append("/api/v1/admin/storage/overview");
+    endpoints.append("/api/v1/admin/storage/orphans");
+    endpoints.append("/api/v1/admin/storage/orphans/purge");
+    endpoints.append("/api/v1/admin/storage/search");
     co_return createJsonResponse(endpoints, k200OK);
 }
 

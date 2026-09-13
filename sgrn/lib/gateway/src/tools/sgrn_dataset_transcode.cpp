@@ -6,6 +6,8 @@
 #include <sgrn/gateway/database/PersistenceService.hpp>
 #include <sgrn/gateway/tools/sgrn_dataset.hpp>
 #include <sgrn/gateway/twin/FieldTraversal.hpp>
+#include <sgrn/scl/schema/PlcSchemaStore.hpp>
+#include <sgrn/scl/schema/SchemaSerializer.hpp>
 #include <sgrn/utils/compression.hpp>
 #include <sgrn/utils/time.hpp>
 #include <fstream>
@@ -248,7 +250,22 @@ bool transcodeBinaryToJsonl(const std::string& t_decompressed, const std::string
     const uint32_t schema_len = header.schema_len;
     std::string schema_json;
     if (schema_len > 0) {
-        schema_json = t_decompressed.substr(10, schema_len);
+        const std::string schema_bytes = t_decompressed.substr(10, schema_len);
+        if (sgrn::scl::isBinarySchemaPayload(schema_bytes)) {
+            // v4 header: decode the binary schema to its JSON form so the
+            // schema line below and the layout builder work unchanged.
+            auto store_res = sgrn::scl::PlcSchemaStore::loadFromBinary(schema_bytes);
+            if (store_res.hasError()) {
+                fmt::print(fg(fmt::color::yellow), "[sgrn_dataset] Cannot decode binary schema from {} ({}), emitting metadata records\n",
+                    t_source_name, sgrn::scl::toString(store_res.error()));
+            } else {
+                schema_json = std::move(store_res).value().toJson();
+            }
+        } else {
+            schema_json = schema_bytes;
+        }
+    }
+    if (!schema_json.empty()) {
         rapidjson::StringBuffer sb;
         rapidjson::Writer<rapidjson::StringBuffer> w(sb);
         w.StartObject();

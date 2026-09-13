@@ -70,13 +70,13 @@ struct CodecEntry {
 /**
  * @brief The canonical OPC UA <-> S7 codec table -- one row per scalar S7 type.
  *
- * Rows are ordered to match kTypeTable in sgrn::scl (same 30 types).
+ * Rows are ordered to match kTypeTable in sgrn::scl (same 32 types).
  * Do NOT rely on index-based access; use `codecEntryFor()`.
  */
 extern const CodecEntry kCodecTable[32];
 
 /**
- * @brief O(N) lookup by S7 type (N = 30, compile-time constant).
+ * @brief O(N) lookup by S7 type (N = 32, compile-time constant).
  * @return Pointer to the matching entry, or nullptr if unmapped.
  */
 const CodecEntry* codecEntryFor(s7codec::Type t_type) noexcept;

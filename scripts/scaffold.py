@@ -172,7 +172,7 @@ def scaffold_app(root, name):
     print("next steps:")
     print(f"  1. add_subdirectory({name}) to {root}/apps/CMakeLists.txt under the matching SGRN_BUILD_* gate")
     print("  2. add the target to a sgrn_package_runtime_dependencies bundle there")
-    print("  3. if integration-tested, register the binary path in tests/ts/ or tests/test.py")
+    print("  3. if integration-tested, register the binary path in tests/ts/ or tests/run_tests.py")
 
 
 def scaffold_lib(root, name, header_only):

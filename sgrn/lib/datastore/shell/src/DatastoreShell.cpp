@@ -240,9 +240,10 @@ std::vector<std::string> DatastoreShell::generateCompletions(const std::string& 
     auto words = splitWords(before);
 
     if (words.empty()) {
-        static constexpr std::array<std::string_view, 33> builtins = {"connect", "login", "logout", "orgs", "domains", "statuses", "users",
+        static constexpr std::array<std::string_view, 37> builtins = {"connect", "login", "logout", "orgs", "domains", "statuses", "users",
             "useradd", "services", "service-add", "service-token-rotate", "passwd", "whoami", "stats", "info", "constraints", "ls", "cd",
-            "cat", "get", "put", "mkdir", "mv", "rm", "tree", "du", "session", "scope", "switch", "zip", "help", "quit", "exit"};
+            "cat", "get", "put", "mkdir", "mv", "rm", "tree", "du", "session", "scope", "switch", "zip", "storage-overview",
+            "storage-orphans", "storage-purge", "storage-search", "help", "quit", "exit"};
         for (const auto& cmd : builtins) {
             if (cmd.rfind(t_text, 0) == 0)
                 matches.insert(std::string(cmd));
@@ -1455,6 +1456,155 @@ int DatastoreShell::cmdInfo() {
     return 0;
 }
 
+namespace
+{
+
+// --flag VALUE option parser shared by the storage-admin commands.
+std::string shellFlag(const std::vector<std::string>& t_args, const std::string& t_flag, const std::string& t_dflt = "") {
+    for (size_t i = 0; i + 1 < t_args.size(); ++i) {
+        if (t_args[i] == t_flag)
+            return t_args[i + 1];
+    }
+    return t_dflt;
+}
+
+bool shellHasFlag(const std::vector<std::string>& t_args, const std::string& t_flag) {
+    return std::find(t_args.begin(), t_args.end(), t_flag) != t_args.end();
+}
+
+uint32_t shellUint(const std::vector<std::string>& t_args, const std::string& t_flag, uint32_t t_dflt) {
+    const std::string raw = shellFlag(t_args, t_flag);
+    if (raw.empty())
+        return t_dflt;
+    try {
+        return static_cast<uint32_t>(std::stoul(raw));
+    } catch (const std::exception&) {
+        return t_dflt;
+    }
+}
+
+} // namespace
+
+int DatastoreShell::cmdStorageOverview(const std::vector<std::string>& t_args) {
+    if (!client_)
+        return 1;
+    auto r = client_->tryStorageAdminOverview(shellUint(t_args, "--max-pages", 10));
+    if (r.hasError()) {
+        fmt::print(stderr, "storage-overview: {}\n", r.error());
+        return 1;
+    }
+    std::vector<std::vector<std::string>> rows;
+    for (const auto& b : r.value()) {
+        rows.push_back({b.name_, std::to_string(b.minio_objects_) + (b.minio_truncated_ ? "+" : ""), std::to_string(b.minio_bytes_),
+            std::to_string(b.db_objects_), std::to_string(b.db_bytes_), std::to_string(b.db_files_)});
+    }
+    printTable({"BUCKET", "MINIO OBJS", "MINIO BYTES", "DB OBJS", "DB BYTES", "FILES"}, std::move(rows), {1, 2, 3, 4, 5});
+    return 0;
+}
+
+int DatastoreShell::cmdStorageOrphans(const std::vector<std::string>& t_args) {
+    if (!client_)
+        return 1;
+    auto r = client_->tryStorageAdminOrphans(shellFlag(t_args, "--bucket"), shellFlag(t_args, "--prefix"),
+        shellUint(t_args, "--limit", 500), shellUint(t_args, "--max-pages", 10));
+    if (r.hasError()) {
+        fmt::print(stderr, "storage-orphans: {}\n", r.error());
+        return 1;
+    }
+    const auto& rep = r.value();
+    fmt::print("bucket '{}'{}: scanned {} minio keys{} | minio-only {} ({} bytes) | db-missing {} ({} unchecked)\n", rep.bucket_,
+        rep.prefix_.empty() ? "" : " prefix '" + rep.prefix_ + "'", rep.minio_scanned_, rep.minio_truncated_ ? " [truncated]" : "",
+        rep.minio_only_count_, rep.minio_only_bytes_, rep.db_missing_.size(), rep.db_missing_unchecked_);
+    if (!rep.minio_only_.empty()) {
+        std::vector<std::vector<std::string>> rows;
+        for (const auto& k : rep.minio_only_)
+            rows.push_back({k.key_, std::to_string(k.size_), k.etag_});
+        printTable({"MINIO-ONLY KEY (purge candidates)", "SIZE", "ETAG"}, std::move(rows), {1});
+    }
+    if (!rep.db_missing_.empty()) {
+        std::vector<std::vector<std::string>> rows;
+        for (const auto& k : rep.db_missing_)
+            rows.push_back({k.key_, std::to_string(k.size_)});
+        printTable({"DB ROW WITHOUT MINIO OBJECT (broken refs)", "SIZE"}, std::move(rows), {1});
+    }
+    return 0;
+}
+
+int DatastoreShell::cmdStoragePurge(const std::vector<std::string>& t_args) {
+    if (!client_)
+        return 1;
+    std::vector<std::string> keys;
+    for (size_t i = 0; i < t_args.size(); ++i) {
+        if (!t_args[i].empty() && t_args[i][0] != '-') {
+            const bool is_value = i > 0 && (t_args[i - 1] == "--bucket" || t_args[i - 1] == "--prefix" || t_args[i - 1] == "--limit");
+            if (!is_value)
+                keys.push_back(t_args[i]);
+        }
+    }
+    const bool dry_run = !shellHasFlag(t_args, "--execute");
+    auto r = client_->tryStorageAdminPurge(
+        shellFlag(t_args, "--bucket"), keys, shellFlag(t_args, "--prefix"), dry_run, shellUint(t_args, "--limit", 500));
+    if (r.hasError()) {
+        fmt::print(stderr, "storage-purge: {}\n", r.error());
+        return 1;
+    }
+    const auto& res = r.value();
+    if (res.dry_run_) {
+        fmt::print("DRY RUN — {} key(s) would be deleted (re-run with --execute to arm):\n", res.affected_.size());
+        std::vector<std::vector<std::string>> rows;
+        for (const auto& k : res.affected_)
+            rows.push_back({k});
+        printTable({"WOULD DELETE"}, std::move(rows));
+    } else {
+        fmt::print(
+            "deleted {} key(s), {} error(s), {} skipped (re-referenced):\n", res.affected_.size(), res.errors_.size(), res.skipped_.size());
+        if (!res.affected_.empty()) {
+            std::vector<std::vector<std::string>> rows;
+            for (const auto& k : res.affected_)
+                rows.push_back({k});
+            printTable({"DELETED"}, std::move(rows));
+        }
+    }
+    if (!res.errors_.empty()) {
+        for (const auto& e : res.errors_)
+            fmt::print(stderr, "  error: {}\n", e);
+    }
+    if (!res.skipped_.empty()) {
+        for (const auto& k : res.skipped_)
+            fmt::print("  skipped (now referenced): {}\n", k);
+    }
+    return 0;
+}
+
+int DatastoreShell::cmdStorageSearch(const std::vector<std::string>& t_args) {
+    if (!client_)
+        return 1;
+    const std::string prefix_val = shellFlag(t_args, "--prefix");
+    std::string target;
+    for (size_t i = 0; i < t_args.size(); ++i) {
+        if (!t_args[i].empty() && t_args[i][0] != '-') {
+            const bool is_value = i > 0 && (t_args[i - 1] == "--bucket" || t_args[i - 1] == "--limit" || t_args[i - 1] == "--prefix");
+            if (!is_value && target.empty())
+                target = t_args[i];
+        }
+    }
+    if (!target.empty() && !prefix_val.empty()) {
+        fmt::print(stderr, "storage-search: supply either a hash or --prefix, not both\n");
+        return 1;
+    }
+    if (target.empty() && prefix_val.empty()) {
+        fmt::print(stderr, "storage-search: missing object hash (usage: storage-search [--bucket B] <HASH> | --prefix PREFIX)\n");
+        return 1;
+    }
+    auto r = client_->storageAdminSearchJson(shellFlag(t_args, "--bucket"), target, prefix_val, shellUint(t_args, "--limit", 100));
+    if (r.hasError()) {
+        fmt::print(stderr, "storage-search: {}\n", r.error());
+        return 1;
+    }
+    printJsonPretty(r.value());
+    return 0;
+}
+
 int DatastoreShell::cmdLs(const std::vector<std::string>& t_args) {
     const std::string path = t_args.empty() ? cwd_ : normalizePath(t_args[0]);
     if (!storage_)
@@ -1764,6 +1914,13 @@ void DatastoreShell::printHelp() {
                "  service-token-rotate <ID-or-NAME>                  rotate a service token, prints once (admin)\n"
                "  stats                                              storage stats as JSON\n"
                "  info | constraints                                 storage info/constraints as JSON\n"
+               "  storage-overview [--max-pages N]                   minio vs DB census per bucket (admin)\n"
+               "  storage-orphans [--bucket B] [--prefix P] [--limit N]\n"
+               "                                               list minio-only garbage + DB rows missing objects (admin)\n"
+               "  storage-purge [--bucket B] [--prefix P | KEY...] [--limit N] [--execute]\n"
+               "                                               delete minio-only keys (dry run unless --execute) (admin)\n"
+               "  storage-search [--bucket B] <HASH> | --prefix PREFIX\n"
+               "                                               find object by content hash: DB refs + minio stat (admin)\n"
                "  zip <REMOTE-DIR> [LOCAL.zip]                       download a folder as zip\n"
                "  scope [personal|users|automated-services|domain|auto]\n"
                "                                               show/switch namespace scope\n"
@@ -1809,7 +1966,7 @@ int DatastoreShell::dispatch(const std::vector<std::string>& t_words) {
     if (t_words.empty())
         return 0;
 
-    static const std::array<CommandDispatchEntry, 37> kCommandTable = {{{"help", false,
+    static const std::array<CommandDispatchEntry, 41> kCommandTable = {{{"help", false,
                                                                             [](DatastoreShell* shell, const std::vector<std::string>&) {
                                                                                 shell->printHelp();
                                                                                 return 0;
@@ -1861,6 +2018,12 @@ int DatastoreShell::dispatch(const std::vector<std::string>& t_words) {
             [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdServiceRotate(args); }},
         {"stats", true, [](DatastoreShell* shell, const std::vector<std::string>&) { return shell->cmdStats(); }},
         {"info", true, [](DatastoreShell* shell, const std::vector<std::string>&) { return shell->cmdInfo(); }},
+        {"storage-overview", true,
+            [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdStorageOverview(args); }},
+        {"storage-orphans", true,
+            [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdStorageOrphans(args); }},
+        {"storage-purge", true, [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdStoragePurge(args); }},
+        {"storage-search", true, [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdStorageSearch(args); }},
         {"constraints", true, [](DatastoreShell* shell, const std::vector<std::string>&) { return shell->cmdInfo(); }},
         {"zip", true, [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdZip(args); }}}};
 

@@ -78,11 +78,11 @@ int S7API S7ProtocolAdapter::s7RequestCallback(void* tp_usr_ptr, int t_sender, i
         if (!p_adapter->memory_.isReady()) {
             return ::evrErrException;
         }
-        const auto size_opt = p_adapter->memory_.dbSize(db_num);
-        if (!size_opt) {
+        const auto db_size_opt = p_adapter->memory_.dbSize(db_num);
+        if (!db_size_opt) {
             return ::evrErrAreaNotFound;
         }
-        if (start + bytes > *size_opt) {
+        if (start + bytes > *db_size_opt) {
             return ::evrErrOutOfRange;
         }
 

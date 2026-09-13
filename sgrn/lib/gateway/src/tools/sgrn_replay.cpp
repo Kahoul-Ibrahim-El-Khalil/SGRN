@@ -24,33 +24,6 @@
 namespace sgrn::gateway
 {
 
-namespace
-{
-
-/// Scans forward for the next verifiable anchor frame. Returns its frame
-/// start offset, or nullopt. CRC verification makes false hits ~2^-32.
-std::optional<size_t> findNextAnchorFrame(const std::string& t_data, size_t t_from) {
-    const size_t n = t_data.size();
-    for (size_t p = t_from; p + 14 <= n; ++p) {
-        uint16_t db = 0;
-        std::memcpy(&db, t_data.data() + p + 8, sizeof(db));
-        if (db != database::kAnchorFrameDbNum)
-            continue;
-        uint32_t len = 0;
-        std::memcpy(&len, t_data.data() + p + 10, sizeof(len));
-        if (len < 6 || p + 14 + len > n)
-            continue;
-        const uint8_t* pl = reinterpret_cast<const uint8_t*>(t_data.data() + p + 14);
-        uint32_t crc = 0;
-        std::memcpy(&crc, pl + 2, sizeof(crc));
-        if (database::binaryWalCrc32(pl + 6, len - 6) == crc)
-            return p;
-    }
-    return std::nullopt;
-}
-
-} // namespace
-
 GatewayReplayer::GatewayReplayer(const ReplayConfig& t_config)
     : config_(t_config) {
 }

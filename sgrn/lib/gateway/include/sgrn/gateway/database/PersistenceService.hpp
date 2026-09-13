@@ -82,10 +82,13 @@ inline uint32_t binaryWalCrc32(const uint8_t* t_data, size_t t_size) {
  * @brief Current binary WAL version stamped in the archive header.
  *
  * v1 = full-image data frames only. v2 = v1 + delta frames. v3 = v2 +
- * anchor frames (verifiable full images). Readers refuse versions above
- * this; writers always stamp this.
+ * anchor frames (verifiable full images). v4 = v3 + binary schema payload
+ * in the header (see SchemaSerializer::serializeBinary); v3 embedded the
+ * schema as JSON text and is still written when no schema store is
+ * available, and still read back. Readers refuse versions above this;
+ * writers always stamp this (or v3 for the schemaless/JSON fallback).
  */
-inline constexpr uint16_t kBinaryWalVersion = 3;
+inline constexpr uint16_t kBinaryWalVersion = 4;
 
 // ── Shared binary-WAL decode primitives ──────────────────────────────────
 // One implementation for every reader (sgrn_dataset, sgrn_replay,
@@ -386,6 +389,13 @@ private:
     /// last_db_bytes_, last_keyframe_ts_, the line counter, flush.
     void writeBinaryAnchor(uint16_t t_db, const std::vector<uint8_t>& t_image, int64_t t_ts);
 
+    /// Snapshots one DB into the open binary archive: anchor on first sight,
+    /// keyframe expiry, or large changes; delta frame when the diff is
+    /// cheaper than kBinaryDeltaMaxRatio of a full image. Dedupes consecutive
+    /// identical images via last_db_bytes_. No-op when the image is unchanged
+    /// or unreadable. Caller owns the archive, line counter, flush.
+    void writeBinaryDbImage(uint16_t t_db, uint64_t t_ts, int64_t t_now);
+
     /// Closes the archive (footer + stream end + rename + DB registration).
     void finalizeArchive(int64_t t_ts_end);
 
@@ -402,6 +412,11 @@ private:
     std::string unsynced_dir_;
     std::shared_ptr<GatewayDatabase> db_;
     std::string schema_json_; ///< serialized PlcSchemaStore, written as WAL line 1
+    // Binary-encoded schema for v4 archive headers, rendered once at
+    // configure() time from the schema store (archives open lazily, long
+    // after configure returns). Empty when no store was provided.
+    std::string schema_binary_;
+    bool has_binary_schema_{false};
 
     twin::LeafDictionary dict_;
     std::vector<bool> allowed_by_id_;

@@ -1,3 +1,5 @@
+// Compression round-trip test for the streaming zstd JSONL primitives that
+// back the WAL (incremental writer, bounded-memory reader, line index).
 #include <sgrn/utils/compression.hpp>
 
 #include <cassert>
