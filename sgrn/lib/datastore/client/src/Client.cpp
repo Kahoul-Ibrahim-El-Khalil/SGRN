@@ -37,7 +37,6 @@ DatastoreClient::DatastoreClient(DatastoreClientConfig t_config)
     http_client_->set_keep_alive(true);
 
     storage_client_ = std::make_unique<StorageClient>(*this);
-    telemetry_client_ = std::make_unique<TelemetryClient>(*this);
 
     if (config_.auth_mode_ == AuthMode::SessionToken) {
         signInSessionToken();
@@ -57,39 +56,8 @@ DatastoreClient::~DatastoreClient() {
 StorageClient& DatastoreClient::storage() {
     return *storage_client_;
 }
-TelemetryClient& DatastoreClient::telemetry() {
-    return *telemetry_client_;
-}
 
 // ─── Asynchronous API ────────────────────────────────────────────────────────
-
-void DatastoreClient::publishTelemetryAsync(const std::string& t_object_name, const rapidjson::Value& t_data) {
-    rapidjson::Document payload;
-    auto& alloc = payload.GetAllocator();
-    payload.SetObject();
-    payload.AddMember("object_name", rapidjson::Value(t_object_name.c_str(), alloc), alloc);
-
-    rapidjson::Value data_copy;
-    data_copy.CopyFrom(t_data, alloc);
-    payload.AddMember("data", data_copy, alloc);
-
-    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-    payload.AddMember("timestamp", ms, alloc);
-
-    Task task;
-    task.type = TaskType::PublishTelemetry;
-    task.data = sgrn::utils::json::serializeCompact(payload);
-
-    pool_->post([this, t = std::move(task)] { processTask(t); });
-}
-
-void DatastoreClient::publishJsonTelemetryAsync(const rapidjson::Value& t_data) {
-    Task task;
-    task.type = TaskType::PublishTelemetry;
-    task.data = sgrn::utils::json::serializeCompact(t_data);
-
-    pool_->post([this, t = std::move(task)] { processTask(t); });
-}
 
 void DatastoreClient::uploadFileAsync(const std::string& t_remote_path, const std::string& t_local_path) {
     Task task;
@@ -111,9 +79,7 @@ void DatastoreClient::uploadFileAsync(const std::string& t_remote_path, const st
 
 void DatastoreClient::processTask(const Task& t_task) {
     try {
-        if (t_task.type == TaskType::PublishTelemetry) {
-            sendTelemetryTask(t_task.data);
-        } else if (t_task.type == TaskType::UploadFile) {
+        if (t_task.type == TaskType::UploadFile) {
             doUpload(t_task.identifier, t_task.data);
         }
     } catch (const std::exception& e) {
@@ -121,47 +87,10 @@ void DatastoreClient::processTask(const Task& t_task) {
     }
 }
 
-void DatastoreClient::sendTelemetryTask(const std::string& t_json) {
-    if (!hasSessionToken())
-        signIn();
-
-    std::string body = t_json;
-    httplib::Headers headers;
-    headers.emplace("Authorization", "Bearer " + getSessionToken());
-
-    if (config_.compress_zstd_) {
-        auto compressed = sgrn::utils::compressStringZstd(body, config_.zstd_level_);
-        if (compressed) {
-            body = std::move(compressed.value());
-            headers.emplace("Content-Encoding", "zstd");
-        }
-    }
-
-    auto res = http_client_->Post(config_.telemetry_path_, headers, body, "application/json");
-
-    if (res && res->status == 401 && config_.retry_on_unauthorized_) {
-        clearSessionToken();
-        if (signIn() && hasSessionToken()) {
-            headers.erase("Authorization");
-            headers.emplace("Authorization", "Bearer " + getSessionToken());
-            res = http_client_->Post(config_.telemetry_path_, headers, body, "application/json");
-        }
-    }
-
-    if (!res || res->status >= 400) {
-        SGRN_WARN("DatastoreClient", "Failed to send telemetry: status={}", res ? res->status : 0);
-    }
-}
-
 // ─── Synchronous Operations (Helpers) ────────────────────────────────────────
 
 rapidjson::Document DatastoreClient::query(const std::string& t_table, const std::string& t_params) {
     std::string endpoint = "/api/v1/postgrest/automated-service/storage/files";
-    if (t_table == "telemetry_data" || t_table == "telemetry") {
-        endpoint = "/api/v1/postgrest/automated-service/telemetry/data";
-    } else if (t_table == "telemetry_objects") {
-        endpoint = "/api/v1/postgrest/automated-service/telemetry/objects";
-    }
 
     std::string url = endpoint + (t_params.empty() ? "" : "?" + t_params);
     return makeRequest("GET", std::move(url));
@@ -593,10 +522,10 @@ sgrn::Result<std::vector<StorageBucketCensus>, std::string> DatastoreClient::try
             continue;
         StorageBucketCensus c;
         c.name_ = strField(b, "name");
-        if (b.HasMember("minio") && b["minio"].IsObject()) {
-            c.minio_objects_ = jsonInt(b["minio"], "objects");
-            c.minio_bytes_ = jsonInt(b["minio"], "bytes");
-            c.minio_truncated_ = jsonBool(b["minio"], "truncated");
+        if (b.HasMember("garage") && b["garage"].IsObject()) {
+            c.garage_objects_ = jsonInt(b["garage"], "objects");
+            c.garage_bytes_ = jsonInt(b["garage"], "bytes");
+            c.garage_truncated_ = jsonBool(b["garage"], "truncated");
         }
         if (b.HasMember("db") && b["db"].IsObject()) {
             c.db_objects_ = jsonInt(b["db"], "objects");
@@ -619,11 +548,11 @@ sgrn::Result<StorageOrphansReport, std::string> DatastoreClient::tryStorageAdmin
     StorageOrphansReport r;
     r.bucket_ = strField(doc, "bucket");
     r.prefix_ = strField(doc, "prefix");
-    r.minio_scanned_ = jsonInt(doc, "minio_scanned");
-    r.minio_truncated_ = jsonBool(doc, "minio_truncated");
-    fillOrphanKeys(doc, "minio_only", r.minio_only_);
-    r.minio_only_count_ = jsonInt(doc, "minio_only_count");
-    r.minio_only_bytes_ = jsonInt(doc, "minio_only_bytes");
+    r.garage_scanned_ = jsonInt(doc, "garage_scanned");
+    r.garage_truncated_ = jsonBool(doc, "garage_truncated");
+    fillOrphanKeys(doc, "garage_only", r.garage_only_);
+    r.garage_only_count_ = jsonInt(doc, "garage_only_count");
+    r.garage_only_bytes_ = jsonInt(doc, "garage_only_bytes");
     fillOrphanKeys(doc, "db_missing", r.db_missing_);
     r.db_missing_unchecked_ = jsonInt(doc, "db_missing_unchecked");
     return r;

@@ -28,7 +28,7 @@ The Datastore natively understands the Gateway's "Anchor-Delta" persistence stra
 The Datastore does not inherently try to replace specialized time-series databases. Instead, it serves as an intelligent orchestrator:
 
 - **TimescaleDB / PostgreSQL:** Data can be structured and pushed to TimescaleDB for complex SQL aggregations.
-- **Object Storage (MinIO / S3):** Cold data or raw Anchor-Delta streams can be archived into S3 buckets as immutable JSONL/Parquet files for machine learning pipelines.
+- **Object Storage (Garage / S3):** Cold data or raw Anchor-Delta streams can be archived into S3 buckets as immutable JSONL/Parquet files for machine learning pipelines.
 - **Resilience:** If the backend database goes down, the Datastore queues the payloads locally. Upon backend recovery, it drains the queue while continuing to accept new edge traffic seamlessly.
 
 ---

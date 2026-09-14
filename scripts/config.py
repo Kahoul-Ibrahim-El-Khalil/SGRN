@@ -75,7 +75,6 @@ USE_PCH       = py_platform.system() != "Windows"
 DROGON_GIT_URL  = "https://github.com/drogonframework/drogon.git"
 DROGON_GIT_TAG  = "v1.9.10"
 
-MINIO_GIT_URL       = "https://github.com/minio/minio.git"
 TIMESCALEDB_GIT_URL = "https://github.com/timescale/timescaledb.git"
 
 MSYS2_UCRT64_REPO = "https://repo.msys2.org/mingw/ucrt64/"
@@ -118,9 +117,10 @@ MINGW_RUNTIME_DLLS = [
 # ===========================================================================
 # 7. System Services & Credentials
 # ===========================================================================
-MINIO_SERVICE_NAME     = "SGRN-minio.service"
-MINIO_DEFAULT_USER     = "minioadmin"
-MINIO_DEFAULT_PASS     = "minioadmin"
+GARAGE_SERVICE_NAME    = "SGRN-garage.service"
+GARAGE_S3_ENDPOINT     = "http://127.0.0.1:3900"
+GARAGE_S3_REGION       = "us-east-1"
+GARAGE_DEFAULT_BUCKET  = "sgrn-uploads"
 
 DEFAULT_DB_PASSWORD        = "dracaeris"
 POSTGRES_PORT              = 5432

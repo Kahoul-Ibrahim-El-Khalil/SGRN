@@ -1,0 +1,29 @@
+# SGRN — Garage single-node object storage (template; values from .env).
+# s3_region "us-east-1" matches configs/sgrn.json so the datastore
+# needs no region change. garage.toml is a pure function of .env, so
+# --generate-config may safely rewrite it (unlike sgrn.json, which
+# carries dashboard-tuned live values).
+metadata_dir = "${SGRN_DATA_DIR}/garage/meta"
+data_dir = "${SGRN_DATA_DIR}/garage/data"
+db_engine = "lmdb"
+replication_factor = 1
+consistency_mode = "consistent"
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+rpc_secret = "${GARAGE_RPC_SECRET}"
+bootstrap_peers = []
+
+[s3_api]
+s3_region = "us-east-1"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.garage"
+
+[s3_web]
+bind_addr = "[::]:3902"
+root_domain = ".web.garage"
+index = "index.html"
+
+[admin]
+api_bind_addr = "[::]:3903"
+admin_token = "${GARAGE_ADMIN_TOKEN}"

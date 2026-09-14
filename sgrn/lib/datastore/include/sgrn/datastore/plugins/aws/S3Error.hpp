@@ -1,7 +1,7 @@
 #pragma once
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S3Error — typed error enum for S3Client / MinIO operations.
+// S3Error — typed error enum for S3Client / Garage operations.
 //
 // Mirrors the DbIoError pattern from sgrn/gateway/twin/DbIoError.hpp:
 //   - enum class : uint16_t
@@ -82,7 +82,7 @@ inline S3Error fromAwsError(const Aws::Client::AWSError<Aws::S3::S3Errors>& e) n
 /// so that BackendError.hpp remains free of AWS SDK headers.
 inline ::sgrn::datastore::BackendError toBackendError(S3Error e, std::string_view detail = "") {
     std::string msg = detail.empty() ? std::string(toString(e)) : std::string(detail);
-    return ::sgrn::datastore::BackendError(::sgrn::datastore::BackendErrorKind::Minio, "Minio", std::move(msg));
+    return ::sgrn::datastore::BackendError(::sgrn::datastore::BackendErrorKind::Garage, "Garage", std::move(msg));
 }
 
 } // namespace sgrn::datastore::plugins::aws

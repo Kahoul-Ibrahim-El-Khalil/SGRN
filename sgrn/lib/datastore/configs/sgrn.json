@@ -36,9 +36,9 @@
       "name": "sgrn::datastore::plugins::aws::S3Client",
       "config": {
         "region": "us-east-1",
-        "endpoint": "http://127.0.0.1:9000",
-        "access_key": "${MINIO_ROOT_USER}",
-        "secret_key": "${MINIO_ROOT_PASSWORD}"
+        "endpoint": "http://127.0.0.1:3900",
+        "access_key": "${GARAGE_ACCESS_KEY}",
+        "secret_key": "${GARAGE_SECRET_KEY}"
       }
     },
     {
@@ -95,13 +95,6 @@
       "page_endpoint_limit": 120,
       "page_endpoint_window_s": 60,
       "burst_allowance": 10
-    },
-    "telemetry": {
-      "batching_enabled": false,
-      "acknowledge_on_queue": false,
-      "flush_interval_s": 2.0,
-      "max_batch_size": 256,
-      "max_pending_items": 10000
     },
     "s3": {
       "default_bucket": "sgrn-uploads",

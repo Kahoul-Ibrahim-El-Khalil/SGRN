@@ -3481,7 +3481,7 @@
        ---------------------------------------------------------------------- */
 
     .admin-shell {
-        max-width: 1080px;
+        max-width: 1980px;
         margin: 0 auto;
     }
 
@@ -5234,16 +5234,16 @@
 @layer components {
     /* ---------- global density ---------- */
     .desktop-content {
-        padding: 14px 18px 22px !important;
+        padding: none;
     }
 
     .desktop-sidebar {
-        width: 196px !important;
-        flex: 0 0 196px !important;
+        width: 100px !important;
+        flex: 0 0 0px !important;
     }
 
     .sidebar-container {
-        padding: 10px 8px !important;
+        padding: none;
     }
 
     .sidebar-logo-area {

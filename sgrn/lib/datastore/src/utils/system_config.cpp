@@ -194,12 +194,6 @@ const std::vector<FieldSpec>& systemConfigSchema() {
         {"custom_config.rate_limiting.page_endpoint_limit", FieldType::UInt, true, "Rate limiting", "Page limit", 1, 100000},
         {"custom_config.rate_limiting.page_endpoint_window_s", FieldType::UInt, true, "Rate limiting", "Page window (s)", 1, 3600},
         {"custom_config.rate_limiting.burst_allowance", FieldType::UInt, true, "Rate limiting", "Burst allowance", 0, 10000},
-        // --- Telemetry (custom_config.telemetry): restart (no live consumer yet) ---
-        {"custom_config.telemetry.batching_enabled", FieldType::Bool, false, "Telemetry", "Batching enabled"},
-        {"custom_config.telemetry.acknowledge_on_queue", FieldType::Bool, false, "Telemetry", "Acknowledge on queue"},
-        {"custom_config.telemetry.flush_interval_s", FieldType::Double, false, "Telemetry", "Flush interval (s)", 0, 0, 0.1, 3600.0},
-        {"custom_config.telemetry.max_batch_size", FieldType::UInt, false, "Telemetry", "Max batch size", 1, 100000},
-        {"custom_config.telemetry.max_pending_items", FieldType::UInt, false, "Telemetry", "Max pending items", 1, 1000000},
         // --- Server (app.*): restart (drogon listeners are immutable at runtime) ---
         {"app.client_max_body_size", FieldType::UInt, false, "Server", "Max request body (bytes)", 1048576, 8589934592ULL},
         {"app.max_connections", FieldType::UInt, false, "Server", "Max connections", 1, 100000},

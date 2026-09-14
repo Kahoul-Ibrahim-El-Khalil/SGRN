@@ -349,6 +349,6 @@ Generated CRUD is single-relation only. Do **not** use the manifest for:
 - Aggregations, window functions, or reporting queries
 - `storage.*` tables (ownership via `user_id`, not `organisation`)
 - Registration flows, password changes, token rotation
-- File upload, streaming, or MinIO-backed objects
+- File upload, streaming, or Garage-backed objects
 
 See [development.md](development.md) for the decision table and handler examples.

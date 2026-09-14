@@ -9,13 +9,10 @@ from scripts.common import (
 )
 from scripts.config import (
     TEMPLATE_USER, TEMPLATE_HOME, SGRN_CONFIG_FILES, POSTGRES_CONFIG_FILES,
-    MINIO_SERVICE_NAME, MINIO_DEFAULT_USER, MINIO_DEFAULT_PASS,
-    MINIO_GIT_URL,
     SGRN_USER_HOME, CONFIG_DIR, PG_DATA_DIR, POSTGRES_CONFIG_DIR, NGINX_CONFIG_DIR,
-    SYSTEMD_CONFIG_DIR, EXTERN_DIR_NAME, BUILD_DIR_NAME, DESERTATION_FOLDERS,
+    SYSTEMD_CONFIG_DIR, BUILD_DIR_NAME, DESERTATION_FOLDERS,
     BACKEND_DIR
 )
-from scripts.db import loadEnv
 
 def syncConfigs(root: Path, conda_prefix: str):
     print("\n[Sync] Syncing configurations...")
@@ -56,28 +53,28 @@ def deploySystemd(root: Path):
     user, home = getCurrentUser(), getCurrentHome()
     if not src_dir.exists(): return
 
-    env_vars = loadEnv(root)
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
         for svc in src_dir.glob("*.service"):
             content = svc.read_text().replace(f"User={TEMPLATE_USER}", f"User={user}").replace(f"Group={TEMPLATE_USER}", f"Group={user}").replace(TEMPLATE_HOME, home)
-            if svc.name == MINIO_SERVICE_NAME:
-                content = content.replace(f'Environment="MINIO_ROOT_USER={MINIO_DEFAULT_USER}"', f'Environment="MINIO_ROOT_USER={env_vars.get("MINIO_ROOT_USER", MINIO_DEFAULT_USER)}"')
-                content = content.replace(f'Environment="MINIO_ROOT_PASSWORD={MINIO_DEFAULT_PASS}"', f'Environment="MINIO_ROOT_PASSWORD={env_vars.get("MINIO_ROOT_PASSWORD", MINIO_DEFAULT_PASS)}"')
             processed_svc = tmp_path / svc.name; processed_svc.write_text(content)
             run(["sudo", "cp", str(processed_svc), str(dst_dir / svc.name)], label=f"deploy {svc.name}")
     run(["sudo", "systemctl", "daemon-reload"], label="daemon-reload")
 
-def buildMinio(root: Path, conda_prefix: str) -> bool:
-    print("[MinIO] Building MinIO...")
-    minio_dir = root / EXTERN_DIR_NAME / "minio"
-    target = Path(conda_prefix) / "bin" / "minio"
-    if target.exists(): return True
-    if not minio_dir.exists():
-        if not run(["git", "clone", "--depth", "1", MINIO_GIT_URL, str(minio_dir)], label="clone minio"):
-            return False
-    env = os.environ.copy(); env["GOBIN"] = str(Path(conda_prefix) / "bin"); env["CGO_ENABLED"] = "0"
-    return run(["go", "install", "."], cwd=str(minio_dir), env=env, label="go install minio")
+def ensureGarage(root: Path) -> bool:
+    """Check the prebuilt `garage` binary is on PATH (https://garagehq.deuxfleurs.fr,
+    or `cargo install`). Unlike MinIO there is nothing to compile here."""
+    print("[Garage] Checking for garage binary...")
+    if shutil.which("garage"):
+        return True
+    print("[Garage] ERROR: `garage` not found on PATH. Install the prebuilt")
+    print("  binary (~/bin or /usr/local/bin) then provision once per machine:")
+    print("  garage -c $SGRN_DATA_DIR/garage/garage.toml layout assign -z dc1 -c 50G <node-id>")
+    print("  garage -c $SGRN_DATA_DIR/garage/garage.toml layout apply --version 1")
+    print("  garage -c $SGRN_DATA_DIR/garage/garage.toml key import $GARAGE_ACCESS_KEY $GARAGE_SECRET_KEY -n sgrn-datastore --yes")
+    print("  garage -c $SGRN_DATA_DIR/garage/garage.toml bucket create sgrn-uploads")
+    print("  garage -c $SGRN_DATA_DIR/garage/garage.toml bucket allow --read --write sgrn-uploads --key sgrn-datastore")
+    return False
 
 def syncDesertations(root: Path, targets: list[str] = None):
     print("[Desers] Building Desertations...")

@@ -27,7 +27,7 @@ using ::sgrn::Result;
 /**
  * Drogon Plugin: S3Client
  *
- * Provides an async coroutine-friendly wrapper around AWS S3 / MinIO.
+ * Provides an async coroutine-friendly wrapper around AWS S3 / Garage.
  *
  * Thread-safety contract:
  *   - All public methods are coroutine-safe: they capture arguments by value,
@@ -39,7 +39,7 @@ using ::sgrn::Result;
  * JSON config keys (all optional):
  *   "worker_threads"  : int  — thread pool size (default 4)
  *   "region"          : str
- *   "endpoint"        : str  — MinIO / custom S3 endpoint
+ *   "endpoint"        : str  — Garage / custom S3 endpoint
  *   "public_endpoint" : str
  *   "access_key"      : str
  *   "secret_key"      : str
@@ -112,7 +112,10 @@ public:
 
     drogon::Task<BackendResult<void>> abortMultipartUpload(std::string t_bucket, std::string t_key, std::string t_upload_id);
 
-    drogon::Task<BackendResult<void>> uploadFileMultipart(
+    /// Streams a local file as a real multipart upload (bounded memory:
+    /// ~one part in RAM). Resolves with the number of parts assembled,
+    /// stored by the service layer as the upload's chunking trace.
+    drogon::Task<BackendResult<int>> uploadFileMultipart(
         std::string t_bucket, std::string t_key, std::string t_content_type, std::filesystem::path t_file_path, size_t t_part_size_bytes);
 
     drogon::Task<BackendResult<Json::Value>> listParts(

@@ -46,7 +46,12 @@ select
   so.deleted_at as object_deleted_at,
   -- format
   f.extension,
-  f.mime_type
+  f.mime_type,
+  -- chunking trace (appended last: CREATE OR REPLACE VIEW cannot
+  -- reorder existing columns)
+  so.upload_mode,
+  so.part_count,
+  so.part_size_bytes
 from
   storage.file_paths fp
   join storage.objects so on so.id = fp.object_id

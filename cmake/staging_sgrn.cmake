@@ -109,10 +109,6 @@ macro(sgrn_stage_to_prefix)
         sgrn_stage_library(sgrn_datastore_shell)
         sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/lib/datastore/shell/include/sgrn/datastore/shell" "sgrn/datastore/shell")
     endif()
-    if(TARGET sgrn_sdk)
-        sgrn_stage_library(sgrn_sdk)
-        sgrn_stage_headers("${CMAKE_SOURCE_DIR}/sgrn/lib/sdk/include/sgrn/sdk" "sgrn/sdk")
-    endif()
 
     # 4. Stage SGRN SCL library + headers
     if(TARGET sgrn_scl)

@@ -116,8 +116,9 @@ inline bool upsertEnvVar(const std::filesystem::path& t_env_path, const std::str
 
 inline std::string replaceTemplateVars(std::string t_text, const std::string& t_pg_db, const std::string& t_pg_pass,
     const std::string& t_jwt_secret, const std::string& t_sgrn_user = {}, const std::string& t_sgrn_data = {},
-    const std::string& t_sgrn_bin = {}, const std::string& t_sgrn_deployment_env = {}, const std::string& t_minio_user = {},
-    const std::string& t_minio_pass = {}, const std::string& t_pg_user = {}) {
+    const std::string& t_sgrn_bin = {}, const std::string& t_sgrn_deployment_env = {}, const std::string& t_pg_user = {},
+    const std::string& t_garage_access = {}, const std::string& t_garage_secret = {}, const std::string& t_garage_rpc = {},
+    const std::string& t_garage_admin = {}) {
     auto replace_all = [](std::string& t_s, const std::string& t_ey, const std::string& t_val) {
         if (t_val.empty())
             return;
@@ -135,8 +136,10 @@ inline std::string replaceTemplateVars(std::string t_text, const std::string& t_
     replace_all(t_text, "${SGRN_DATA_DIR}", t_sgrn_data);
     replace_all(t_text, "${SGRN_BIN_DIR}", t_sgrn_bin);
     replace_all(t_text, "${SGRN_DEPLOYMENT_ENV}", t_sgrn_deployment_env);
-    replace_all(t_text, "${MINIO_ROOT_USER}", t_minio_user);
-    replace_all(t_text, "${MINIO_ROOT_PASSWORD}", t_minio_pass);
+    replace_all(t_text, "${GARAGE_ACCESS_KEY}", t_garage_access);
+    replace_all(t_text, "${GARAGE_SECRET_KEY}", t_garage_secret);
+    replace_all(t_text, "${GARAGE_RPC_SECRET}", t_garage_rpc);
+    replace_all(t_text, "${GARAGE_ADMIN_TOKEN}", t_garage_admin);
     return t_text;
 }
 
@@ -148,7 +151,8 @@ inline void createDirectoryStructure(const std::string& t_base_dir) {
     namespace fs = std::filesystem;
     fs::create_directories(t_base_dir);
     fs::create_directories(fs::path(t_base_dir) / "Postgres" / "data");
-    fs::create_directories(fs::path(t_base_dir) / "minio");
+    fs::create_directories(fs::path(t_base_dir) / "garage" / "meta");
+    fs::create_directories(fs::path(t_base_dir) / "garage" / "data");
     fs::create_directories(fs::path(t_base_dir) / "var" / "log" / "nginx");
     fs::create_directories(fs::path(t_base_dir) / "var" / "run");
 }
@@ -187,9 +191,21 @@ inline void generateDefaultEnvFile(const std::filesystem::path& t_env_path, cons
     env_out << "# ── JWT (must be ≥ 32 chars for HS256) ────\n";
     env_out << "JWT_SECRET=change_me_at_least_32_chars_jwt_secret\n\n";
 
-    env_out << "# ── MinIO Object Storage ───────────────────\n";
-    env_out << "MINIO_ROOT_USER=minioadmin\n";
-    env_out << "MINIO_ROOT_PASSWORD=change_me_minio_password\n";
+    env_out << "# ── Garage Object Storage ────────────────────\n";
+    env_out << "# S3 API on :3900, region us-east-1 (matches sgrn.json).\n";
+    env_out << "# Provision once per machine after --generate-config:\n";
+    env_out << "#   garage -c $SGRN_DATA_DIR/garage/garage.toml layout assign -z dc1 -c 50G <node-id>\n";
+    env_out << "#   garage -c $SGRN_DATA_DIR/garage/garage.toml layout apply --version 1\n";
+    env_out
+        << "#   garage -c $SGRN_DATA_DIR/garage/garage.toml key import <GARAGE_ACCESS_KEY> <GARAGE_SECRET_KEY> -n sgrn-datastore --yes\n";
+    env_out << "#   garage -c $SGRN_DATA_DIR/garage/garage.toml bucket create sgrn-uploads\n";
+    env_out << "#   garage -c $SGRN_DATA_DIR/garage/garage.toml bucket allow --read --write sgrn-uploads --key sgrn-datastore\n";
+    env_out << "GARAGE_S3_ENDPOINT=http://127.0.0.1:3900\n";
+    env_out << "GARAGE_REGION=us-east-1\n";
+    env_out << "GARAGE_ACCESS_KEY=change_me_garage_access_key\n";
+    env_out << "GARAGE_SECRET_KEY=change_me_garage_secret_key\n";
+    env_out << "GARAGE_RPC_SECRET=change_me_garage_rpc_secret_64_hex_chars\n";
+    env_out << "GARAGE_ADMIN_TOKEN=change_me_garage_admin_token_64_hex_chars\n";
 
     SGRN_INFO("DatastoreInit", "");
     SGRN_INFO("DatastoreInit", "╔══════════════════════════════════════════════╗");
@@ -260,7 +276,7 @@ inline void generateSystemdServices(const std::string& t_base_dir, const std::fu
     fs::path systemd_out_dir = fs::path(t_base_dir) / "systemd";
     fs::create_directories(systemd_out_dir);
 
-    static constexpr std::string_view kSystemdServices[] = {"SGRN-datastore.service", "SGRN-minio.service", "SGRN-postgres.service",
+    static constexpr std::string_view kSystemdServices[] = {"SGRN-datastore.service", "SGRN-garage.service", "SGRN-postgres.service",
         "SGRN-redis.service", "SGRN-nginx.service", "sgrn.service"};
 
     for (auto svc : kSystemdServices) {
@@ -362,7 +378,7 @@ inline void stopLegacyServices(const std::string& t_sudo_user, uid_t t_user_uid)
     // must be torn down, never started.
     std::string cmd = fmt::format("sudo -u {} XDG_RUNTIME_DIR=/run/user/{} systemctl --user stop "
                                   "SGRN-nginx.service sgrn.service SGRN-datastore.service "
-                                  "SGRN-minio.service SGRN-postgres.service SGRN-postgrest.service "
+                                  "SGRN-garage.service SGRN-minio.service SGRN-postgres.service SGRN-postgrest.service "
                                   "SGRN-redis.service 2>/dev/null || true",
         t_sudo_user, t_user_uid);
     std::system(cmd.c_str());
@@ -374,8 +390,9 @@ inline void stopLegacyServices(const std::string& t_sudo_user, uid_t t_user_uid)
 // the configureSystemd() euid check); every command tolerates absence.
 inline void removeObsoleteUnits(const std::filesystem::path& t_data_dir) {
     namespace fs = std::filesystem;
-    static constexpr std::string_view kObsoleteUnits[] = {"SGRN-postgrest.service"};
-    static constexpr std::string_view kObsoleteDataFiles[] = {"systemd/SGRN-postgrest.service", "postgrest.conf"};
+    static constexpr std::string_view kObsoleteUnits[] = {"SGRN-postgrest.service", "SGRN-minio.service"};
+    static constexpr std::string_view kObsoleteDataFiles[] = {
+        "systemd/SGRN-postgrest.service", "systemd/SGRN-minio.service", "postgrest.conf"};
 
     for (auto unit : kObsoleteUnits) {
         SGRN_INFO("DatastoreInit", "Removing obsolete unit {} (if present)...", unit);
@@ -442,7 +459,7 @@ inline std::vector<std::string> orderServicesForRestart(std::vector<std::string>
     auto tier = [](const std::string& t_svc) {
         if (t_svc == "SGRN-postgres.service" || t_svc == "SGRN-redis.service")
             return 0;
-        if (t_svc == "SGRN-minio.service")
+        if (t_svc == "SGRN-garage.service")
             return 1;
         if (t_svc == "SGRN-nginx.service")
             return 3;
@@ -630,12 +647,14 @@ inline bool generateConfigOnly(const std::string& t_base_dir) {
     std::string sgrn_data = envOrDefault("SGRN_DATA_DIR", t_base_dir);
     std::string sgrn_bin = envOrDefault("SGRN_BIN_DIR", "/usr/local/bin");
     std::string sgrn_deployment_env = envOrDefault("SGRN_DEPLOYMENT_ENV", "/home/" + sgrn_user + "/micromamba/envs/SGRN");
-    std::string minio_user = envOrDefault("MINIO_ROOT_USER", "minioadmin");
-    std::string minio_pass = envOrDefault("MINIO_ROOT_PASSWORD", "change_me_minio_password");
+    std::string garage_access = envOrDefault("GARAGE_ACCESS_KEY", "change_me_garage_access_key");
+    std::string garage_secret = envOrDefault("GARAGE_SECRET_KEY", "change_me_garage_secret_key");
+    std::string garage_rpc = envOrDefault("GARAGE_RPC_SECRET", "change_me_garage_rpc_secret_64_hex_chars");
+    std::string garage_admin = envOrDefault("GARAGE_ADMIN_TOKEN", "change_me_garage_admin_token_64_hex_chars");
 
     auto tmpl = [&](std::string text) -> std::string {
         return replaceTemplateVars(std::move(text), pg_db, pg_pass, jwt_secret, sgrn_user, sgrn_data, sgrn_bin, sgrn_deployment_env,
-            minio_user, minio_pass, pg_user);
+            pg_user, garage_access, garage_secret, garage_rpc, garage_admin);
     };
 
     generateSelfSignedCert(fs::path(t_base_dir) / "certs");
@@ -673,12 +692,10 @@ inline void initDatabaseOnly(const std::string& t_base_dir) {
     std::string sgrn_data = envOrDefault("SGRN_DATA_DIR", t_base_dir);
     std::string sgrn_bin = envOrDefault("SGRN_BIN_DIR", "/usr/local/bin");
     std::string sgrn_deployment_env = envOrDefault("SGRN_DEPLOYMENT_ENV", "/home/" + sgrn_user + "/micromamba/envs/SGRN");
-    std::string minio_user = envOrDefault("MINIO_ROOT_USER", "minioadmin");
-    std::string minio_pass = envOrDefault("MINIO_ROOT_PASSWORD", "change_me_minio_password");
 
     auto tmpl = [&](std::string text) -> std::string {
-        return replaceTemplateVars(std::move(text), pg_db, pg_pass, jwt_secret, sgrn_user, sgrn_data, sgrn_bin, sgrn_deployment_env,
-            minio_user, minio_pass, pg_user);
+        return replaceTemplateVars(
+            std::move(text), pg_db, pg_pass, jwt_secret, sgrn_user, sgrn_data, sgrn_bin, sgrn_deployment_env, pg_user);
     };
 
     std::string sql = decompressSqlAssets(tmpl);

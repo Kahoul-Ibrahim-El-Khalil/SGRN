@@ -97,4 +97,4 @@ Connected to https://localhost:8443 as user.
 
 ## Dependencies
 
-Links `sgrn::core` (AngelScriptEngine base, string/array/dict add-ons, filesystem module), `sgrn_sdk` (REST transport, session, drive API), `sgrn_utils` and fmt; readline/history via `cmake/find_readline.cmake`.
+Links `sgrn::core` (AngelScriptEngine base, string/array/dict add-ons, filesystem module), `sgrn_datastore_client` (REST transport, session, drive API), `sgrn_utils` and fmt; readline/history via `cmake/find_readline.cmake`.

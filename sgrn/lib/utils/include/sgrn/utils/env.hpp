@@ -19,7 +19,7 @@ namespace sgrn::utils::env
 /// Read an environment variable or return a default if unset.
 ///
 /// Use case: Bootstrap and configuration code that needs to read
-/// deployment parameters (POSTGRES_HOST, JWT_SECRET, MINIO_ROOT_USER, …)
+/// deployment parameters (POSTGRES_HOST, JWT_SECRET, GARAGE_ACCESS_KEY, …)
 /// with sensible fallbacks when the variable is not yet exported.
 ///
 /// Example:

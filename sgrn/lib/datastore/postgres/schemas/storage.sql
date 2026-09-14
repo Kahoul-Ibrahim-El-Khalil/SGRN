@@ -17,7 +17,7 @@ create table if not exists storage.formats (
 );
 
 -- ============================================================
--- objects  (raw minio records)
+-- objects  (raw garage records)
 -- ============================================================
 create table if not exists storage.objects (
   id bigint generated always as identity primary key,
@@ -68,7 +68,12 @@ create table if not exists storage.objects (
       and compression_algorithm is not null
     )
   ),
-  provider text not null default 'MINIO',
+  provider text not null default 'GARAGE',
+  -- chunking trace: which S3 path the bytes took ("single" or "multipart").
+  -- Refreshed on re-upload (see upsert_object); NULL counts mean "not multipart".
+  upload_mode text not null default 'single',
+  part_count int default null,
+  part_size_bytes bigint default null,
   deleted_at timestamptz default null,
   created_at timestamptz not null default now(),
   unique (bucket, key)
@@ -82,6 +87,15 @@ add column if not exists compression_algorithm text;
 
 alter table if exists storage.objects
 add column if not exists compression_level int;
+
+alter table if exists storage.objects
+add column if not exists upload_mode text not null default 'single';
+
+alter table if exists storage.objects
+add column if not exists part_count int;
+
+alter table if exists storage.objects
+add column if not exists part_size_bytes bigint;
 
 do $$
 begin
@@ -638,10 +652,13 @@ create or replace function storage.upsert_object (
   p_key text,
   p_size bigint,
   p_original_size bigint,
-  p_provider text default 'MINIO',
+  p_provider text default 'GARAGE',
   p_is_compressed boolean default false,
   p_compression_algorithm text default null,
-  p_compression_level int default null
+  p_compression_level int default null,
+  p_upload_mode text default 'single',
+  p_part_count int default null,
+  p_part_size_bytes bigint default null
 ) returns bigint language plpgsql as $$
 declare
   v_id bigint;
@@ -655,7 +672,10 @@ begin
     provider,
     is_compressed,
     compression_algorithm,
-    compression_level
+    compression_level,
+    upload_mode,
+    part_count,
+    part_size_bytes
   )
   values (
     p_bucket,
@@ -665,7 +685,10 @@ begin
     p_provider,
     p_is_compressed,
     p_compression_algorithm,
-    p_compression_level
+    p_compression_level,
+    p_upload_mode,
+    p_part_count,
+    p_part_size_bytes
   )
   on conflict (bucket, key) do nothing
   returning id into v_id;
@@ -700,6 +723,17 @@ begin
     raise exception 'Conflicting metadata for existing object (bucket=%, key=%)', p_bucket, p_key
       using errcode = '23505';
   end if;
+
+  -- Chunking trace is refresh-metadata, not identity: the same bytes
+  -- re-uploaded under a different threshold just update the mode columns.
+  update storage.objects
+  set upload_mode = p_upload_mode,
+      part_count = p_part_count,
+      part_size_bytes = p_part_size_bytes
+  where id = v_existing.id
+    and (upload_mode is distinct from p_upload_mode
+      or part_count is distinct from p_part_count
+      or part_size_bytes is distinct from p_part_size_bytes);
 
   v_id := v_existing.id;
   return v_id;

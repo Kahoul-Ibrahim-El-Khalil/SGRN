@@ -1,7 +1,7 @@
 # sgrn_datastore
 
 Self-contained persistence/API platform: HTTP REST-like API over
-PostgreSQL/TimescaleDB, object storage (MinIO), Redis and an embedded
+PostgreSQL/TimescaleDB, object storage (Garage, S3-compatible), Redis and an embedded
 observability dashboard (Drogon-based). This directory holds the entry
 point; the backend library and asset pipelines live in `sgrn/lib/datastore`.
 
@@ -9,7 +9,7 @@ point; the backend library and asset pipelines live in `sgrn/lib/datastore`.
 
 `main()` dispatches on the first argument, otherwise boots the Drogon app
 (`configDrogonApp` + signal handling + dashboard assets, filters, handlers,
-MinIO plugin):
+S3 plugin):
 
 | Invocation | Effect |
 |---|---|
@@ -20,8 +20,9 @@ MinIO plugin):
 | `--init` | Config generation followed by DB init |
 | `--config-systemd` | Systemd unit setup |
 
-First-time deployment needs PostgreSQL 15+, MinIO, Redis 7+
-and Nginx 1.24+ (all in the SGRN Micromamba env); run `--help` for the full
+First-time deployment needs PostgreSQL 15+, Garage v2.x, Redis 7+
+and Nginx 1.24+ (all in the SGRN Micromamba env, except the `garage`
+binary); run `--help` for the full
 printed guide.
 
 ## Dependencies

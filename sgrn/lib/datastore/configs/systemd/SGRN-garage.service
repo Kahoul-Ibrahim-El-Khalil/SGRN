@@ -1,0 +1,23 @@
+[Unit]
+Description=Garage Object Storage (SGRN)
+After=network.target
+
+[Service]
+User=${SGRN_USER}
+Type=simple
+
+EnvironmentFile=${SGRN_DATA_DIR}/.env
+# `garage` must be on PATH: /usr/local/bin, ~/bin, or ${SGRN_DEPLOYMENT_ENV}/bin
+# (e.g. ln -s "$(command -v garage)" ${SGRN_DEPLOYMENT_ENV}/bin/garage).
+Environment="PATH=${SGRN_DEPLOYMENT_ENV}/bin:/usr/local/bin:/usr/bin:/bin"
+
+ExecStartPre=/usr/bin/mkdir -p ${SGRN_DATA_DIR}/garage/meta ${SGRN_DATA_DIR}/garage/data
+ExecStart=/usr/bin/env garage -c ${SGRN_DATA_DIR}/garage/garage.toml server
+
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+
+[Install]
+WantedBy=default.target

@@ -56,24 +56,4 @@ private:
     DatastoreClient& client_;
 };
 
-/**
- * @brief Telemetry Client: Focuses on telemetry and real-time metrics.
- */
-class TelemetryClient {
-public:
-    explicit TelemetryClient(DatastoreClient& t_client);
-
-    /**
-     * @brief Asynchronous telemetry publishing.
-     */
-    void publish(const std::string& t_object_name, const rapidjson::Value& t_data);
-    void publishJson(const rapidjson::Value& t_data);
-    void publishRaw(const std::string& t_json);
-
-    rapidjson::Document query(const std::string& t_query_params = "");
-
-private:
-    DatastoreClient& client_;
-};
-
 } // namespace sgrn::datastore::client

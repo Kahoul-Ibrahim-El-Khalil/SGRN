@@ -130,9 +130,6 @@ void DatastoreBridge::tryConnect() {
                 sdk.auth_mode_ = sgrn::sdk::AuthMode::AutomatedService;
                 sdk.public_token_ = cfg_.public_token;
                 sdk.private_token_ = cfg_.private_token;
-                sdk.compress_zstd_ = true;
-                sdk.auto_decompress_zstd_ = false;
-                sdk.telemetry_timeout_s_ = 5.0;
                 client_ = std::make_unique<sgrn::sdk::SgrnClient>(std::move(sdk));
             }
 

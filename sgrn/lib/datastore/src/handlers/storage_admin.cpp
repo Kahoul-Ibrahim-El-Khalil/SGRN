@@ -34,7 +34,7 @@
 namespace
 {
 
-// Upstream (MinIO) failures surface as 502, distinct from our own 500s.
+// Upstream (Garage) failures surface as 502, distinct from our own 500s.
 struct S3UpstreamError : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
@@ -120,27 +120,27 @@ Json::Int64 fieldInt(const drogon::orm::Field& t_field) {
     }
 }
 
-struct MinioKey {
+struct GarageKey {
     std::string key;
     Json::Int64 size = 0;
     std::string etag;
 };
 
-struct MinioScan {
-    std::vector<MinioKey> keys;
+struct GarageScan {
+    std::vector<GarageKey> keys;
     bool truncated = false;
     uint32_t pages = 0;
 };
 
 // Page through ListObjectsV2 (server-side prefix filter) up to max_pages.
-Task<MinioScan> scanBucketKeys(
+Task<GarageScan> scanBucketKeys(
     ::sgrn::datastore::plugins::aws::S3Client* s3, const std::string& t_bucket, const std::string& t_prefix, uint32_t t_max_pages) {
-    MinioScan scan;
+    GarageScan scan;
     std::string token;
     for (uint32_t page = 0; page < t_max_pages; ++page) {
         const Json::Value res = co_await s3unwrap(s3->listObjects(t_bucket, t_prefix, token, 1000));
         for (const auto& obj : res["objects"]) {
-            MinioKey k;
+            GarageKey k;
             k.key = obj["key"].asString();
             k.size = obj["size"].asInt64();
             k.etag = obj["etag"].asString();
@@ -184,15 +184,15 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOverview(HttpRequestPtr tsp_req
             Json::Value entry;
             entry["name"] = name;
 
-            const MinioScan scan = co_await scanBucketKeys(s3, name, "", max_pages);
+            const GarageScan scan = co_await scanBucketKeys(s3, name, "", max_pages);
             Json::Int64 bytes = 0;
             for (const auto& k : scan.keys) {
                 bytes += k.size;
             }
-            entry["minio"]["objects"] = static_cast<Json::Int64>(scan.keys.size());
-            entry["minio"]["bytes"] = static_cast<Json::Int64>(bytes);
-            entry["minio"]["truncated"] = scan.truncated;
-            entry["minio"]["pages"] = scan.pages;
+            entry["garage"]["objects"] = static_cast<Json::Int64>(scan.keys.size());
+            entry["garage"]["bytes"] = static_cast<Json::Int64>(bytes);
+            entry["garage"]["truncated"] = scan.truncated;
+            entry["garage"]["pages"] = scan.pages;
 
             auto objs = co_await sgrn::datastore::core::execSqlCoroVec(
                 db, "SELECT COUNT(*), COALESCE(SUM(size),0) FROM storage.objects WHERE bucket = $1", {name});
@@ -227,7 +227,7 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOrphans(HttpRequestPtr tsp_req)
         }
         auto db = db_res.value();
 
-        const MinioScan scan = co_await scanBucketKeys(s3, bucket, prefix, max_pages);
+        const GarageScan scan = co_await scanBucketKeys(s3, bucket, prefix, max_pages);
 
         auto db_rows = co_await sgrn::datastore::core::execSqlCoroVec(
             db, "SELECT key, size FROM storage.objects WHERE bucket = $1 AND key LIKE $2 || '%' ESCAPE '\\'", {bucket, escapeLike(prefix)});
@@ -237,28 +237,28 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOrphans(HttpRequestPtr tsp_req)
             db_sizes[row["key"].as<std::string>()] = fieldInt(row["size"]);
         }
 
-        Json::Value minio_only = Json::arrayValue;
-        int64_t minio_only_bytes = 0;
-        std::size_t minio_only_count = 0;
+        Json::Value garage_only = Json::arrayValue;
+        int64_t garage_only_bytes = 0;
+        std::size_t garage_only_count = 0;
         std::unordered_set<std::string> seen;
         seen.reserve(scan.keys.size() * 2);
         for (const auto& k : scan.keys) {
             seen.insert(k.key);
             if (db_sizes.find(k.key) == db_sizes.end()) {
-                ++minio_only_count;
-                minio_only_bytes += k.size;
-                if (minio_only.size() < limit) {
+                ++garage_only_count;
+                garage_only_bytes += k.size;
+                if (garage_only.size() < limit) {
                     Json::Value e;
                     e["key"] = k.key;
                     e["size"] = static_cast<Json::Int64>(k.size);
                     e["etag"] = k.etag;
-                    minio_only.append(std::move(e));
+                    garage_only.append(std::move(e));
                 }
             }
         }
 
-        // DB rows with no MinIO object: HEAD-verify each (bounded by limit)
-        // so the report is exact even when the MinIO scan truncated.
+        // DB rows with no Garage object: HEAD-verify each (bounded by limit)
+        // so the report is exact even when the Garage scan truncated.
         Json::Value db_missing = Json::arrayValue;
         std::size_t db_missing_unchecked = 0;
         for (const auto& [key, size] : db_sizes) {
@@ -281,11 +281,11 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOrphans(HttpRequestPtr tsp_req)
         Json::Value out;
         out["bucket"] = bucket;
         out["prefix"] = prefix;
-        out["minio_scanned"] = static_cast<Json::Int64>(scan.keys.size());
-        out["minio_truncated"] = scan.truncated;
-        out["minio_only"] = std::move(minio_only);
-        out["minio_only_count"] = static_cast<Json::Int64>(minio_only_count);
-        out["minio_only_bytes"] = static_cast<Json::Int64>(minio_only_bytes);
+        out["garage_scanned"] = static_cast<Json::Int64>(scan.keys.size());
+        out["garage_truncated"] = scan.truncated;
+        out["garage_only"] = std::move(garage_only);
+        out["garage_only_count"] = static_cast<Json::Int64>(garage_only_count);
+        out["garage_only_bytes"] = static_cast<Json::Int64>(garage_only_bytes);
         out["db_missing"] = std::move(db_missing);
         out["db_missing_unchecked"] = static_cast<Json::Int64>(db_missing_unchecked);
         co_return sgrn::createJsonResponse(out, k200OK);
@@ -341,7 +341,7 @@ Task<HttpResponsePtr> StorageAdminHandler::handlePurgeOrphans(HttpRequestPtr tsp
             }
         } else if (json->isMember("prefix") && (*json)["prefix"].isString()) {
             const uint32_t max_pages = static_cast<uint32_t>(clampParam(queryParam(tsp_req, "max_pages", ""), 10, 100));
-            const MinioScan scan = co_await scanBucketKeys(s3, bucket, (*json)["prefix"].asString(), max_pages);
+            const GarageScan scan = co_await scanBucketKeys(s3, bucket, (*json)["prefix"].asString(), max_pages);
             auto prefix_rows = co_await sgrn::datastore::core::execSqlCoroVec(db,
                 "SELECT key FROM storage.objects WHERE bucket = $1 AND key LIKE $2 || '%' ESCAPE '\\'",
                 {bucket, escapeLike((*json)["prefix"].asString())});
@@ -489,10 +489,10 @@ Task<HttpResponsePtr> StorageAdminHandler::handleSearch(HttpRequestPtr tsp_req) 
                 out["files"] = std::move(refs);
             }
             try {
-                out["minio"] = co_await s3unwrap(s3->statObject(bucket, key));
+                out["garage"] = co_await s3unwrap(s3->statObject(bucket, key));
             } catch (const S3UpstreamError& e) {
-                out["minio"] = Json::Value::null;
-                out["minio_error"] = e.what();
+                out["garage"] = Json::Value::null;
+                out["garage_error"] = e.what();
             }
             co_return sgrn::createJsonResponse(out, k200OK);
         }

@@ -114,7 +114,7 @@ constexpr std::string_view kFileMetadataColumns =
     "file_id AS id, file_name AS name, file_path AS full_path, directory_path, directory_id, extension, created_at, "
     "is_compressed, compression_algorithm, compression_level, session_id, user_id, automated_service_id, "
     "domain_name AS domain, organisation_name AS organisation, object_id, bucket, key, object_size AS size, "
-    "object_created_at, mime_type";
+    "object_created_at, mime_type, upload_mode, part_count, part_size_bytes";
 
 // Wire types mirror the old postgrest.files JSON: integers as numbers,
 // booleans as booleans, everything else as strings, SQL NULL as null.
@@ -141,8 +141,8 @@ Json::Value fileFieldToJson(const drogon::orm::Field& t_field, bool t_as_int, bo
 }
 
 Json::Value fileRowToJson(const drogon::orm::Row& t_row) {
-    static const std::unordered_set<std::string> kIntColumns = {
-        "id", "directory_id", "object_id", "session_id", "user_id", "automated_service_id", "size", "compression_level"};
+    static const std::unordered_set<std::string> kIntColumns = {"id", "directory_id", "object_id", "session_id", "user_id",
+        "automated_service_id", "size", "compression_level", "part_count", "part_size_bytes"};
     Json::Value r(Json::objectValue);
     for (std::size_t i = 0; i < t_row.size(); ++i) {
         drogon::orm::Field f = t_row[i];
@@ -992,7 +992,8 @@ Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(Jso
             if (t_search.empty()) {
                 if (is_domain) {
                     co_return co_await tsp_db_client->execSqlCoro(
-                        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, so.size AS compressed_size, so.original_size "
+                        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, so.size AS compressed_size, so.original_size, "
+                        "so.upload_mode, so.part_count "
                         "FROM storage.files f JOIN storage.objects so ON so.id = f.object_id WHERE f.domain = $1 AND "
                         "((f.directory_id IS NULL AND $2 = '/') OR (f.directory_id IN (SELECT id FROM storage.directories WHERE domain = "
                         "$1 AND path = $3))) "
@@ -1001,7 +1002,8 @@ Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(Jso
                         target_domain, current_path, path_for_parent_lookup);
                 } else {
                     co_return co_await tsp_db_client->execSqlCoro(
-                        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, so.size AS compressed_size, so.original_size "
+                        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, so.size AS compressed_size, so.original_size, "
+                        "so.upload_mode, so.part_count "
                         "FROM storage.files f JOIN storage.objects so ON so.id = f.object_id WHERE f." +
                             owner_col +
                             " = $1 AND "
@@ -1015,7 +1017,8 @@ Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(Jso
             } else {
                 if (is_domain) {
                     co_return co_await tsp_db_client->execSqlCoro(
-                        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, so.size AS compressed_size, so.original_size "
+                        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, so.size AS compressed_size, so.original_size, "
+                        "so.upload_mode, so.part_count "
                         "FROM storage.files f JOIN storage.objects so ON so.id = f.object_id WHERE f.domain = $1 AND "
                         "f.name ILIKE $2 AND f.full_path LIKE $3 "
                         "ORDER BY f.name LIMIT " +
@@ -1023,7 +1026,8 @@ Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(Jso
                         target_domain, search_pattern, recursive_pattern);
                 } else {
                     co_return co_await tsp_db_client->execSqlCoro(
-                        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, so.size AS compressed_size, so.original_size "
+                        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, so.size AS compressed_size, so.original_size, "
+                        "so.upload_mode, so.part_count "
                         "FROM storage.files f JOIN storage.objects so ON so.id = f.object_id WHERE f." +
                             owner_col +
                             " = $1 AND "
@@ -1043,6 +1047,9 @@ Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(Jso
             file_item["extension"] = row["extension"].isNull() ? "" : row["extension"].as<std::string>();
             file_item["size"] = Json::Int64(row["compressed_size"].as<int64_t>());
             file_item["original_size"] = Json::Int64(row["original_size"].as<int64_t>());
+            file_item["upload_mode"] = row["upload_mode"].as<std::string>();
+            file_item["part_count"] =
+                row["part_count"].isNull() ? Json::Value(Json::nullValue) : Json::Value(Json::Int64(row["part_count"].as<int64_t>()));
             file_item["created_at"] = row["created_at"].as<std::string>();
             t_files_array.append(std::move(file_item));
         }

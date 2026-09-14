@@ -59,7 +59,7 @@ Json::Value fileRoot() {
             "rate_limiting": {"enabled": true, "storage_endpoint_limit": 30}
         },
         "db_clients": [{"passwd": "db-pass", "host": "127.0.0.1"}],
-        "plugins": [{"config": {"secret_key": "minio-secret"}}]
+        "plugins": [{"config": {"secret_key": "garage-secret"}}]
     })");
 }
 
@@ -110,7 +110,7 @@ int main() {
         Json::Value root = parseJson(R"({
             "custom_config": {
                 "s3": {"max_file_size_mb": 2048, "chunking_threshold_mb": 64, "chunk_part_size_mb": 12},
-                "telemetry": {"max_batch_size": 256}
+                "rate_limiting": {"general_endpoint_limit": 100}
             },
             "db_clients": [{"passwd": "${POSTGRES_PASSWORD}"}]
         })");
@@ -119,7 +119,7 @@ int main() {
         CHECK(err.empty());
         CHECK(root["custom_config"]["s3"]["chunking_threshold_mb"].asUInt64() == 128);
         CHECK(root["custom_config"]["s3"]["max_file_size_mb"].asUInt64() == 2048);
-        CHECK(root["custom_config"]["telemetry"]["max_batch_size"].asUInt() == 256);
+        CHECK(root["custom_config"]["rate_limiting"]["general_endpoint_limit"].asUInt() == 100);
         CHECK(root["db_clients"][0]["passwd"].asString() == "${POSTGRES_PASSWORD}");
         CHECK(report.hot.size() == 1 && report.hot[0] == "custom_config.s3.chunking_threshold_mb");
         CHECK(report.restart.empty());

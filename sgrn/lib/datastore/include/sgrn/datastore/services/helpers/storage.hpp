@@ -27,7 +27,7 @@ constexpr size_t kBytesPerKb = 1024ULL;
 constexpr size_t kMinCompressSize = 1;
 constexpr size_t kChunkingThresholdMb = 64;
 constexpr size_t kChunkPartSizeMb = 12;
-constexpr size_t kMinPartSizeMb = 5; // S3/MinIO hard minimum, all parts but the last
+constexpr size_t kMinPartSizeMb = 5; // S3 hard minimum, all parts but the last
 } // namespace defaults
 
 // ============================================================================
@@ -122,6 +122,11 @@ struct UploadContext {
     // Set by the upload strategies: "single" or "multipart". Returned in the
     // upload response so admins can verify which S3 path a file took.
     std::string upload_mode = "single";
+    // Multipart trace (meaningful only when upload_mode == "multipart"):
+    // how many parts were assembled + the configured part size in bytes.
+    // Persisted per object so chunking stays traceable after the fact.
+    std::optional<int64_t> part_count = std::nullopt;
+    std::optional<int64_t> part_size_bytes = std::nullopt;
 
     std::optional<int64_t> directory_id = std::nullopt;
     std::optional<int64_t> object_id = std::nullopt;
@@ -234,6 +239,13 @@ bool verifyCompressionSignature(std::string_view t_data, std::string_view t_algo
 drogon::Task<::sgrn::datastore::BackendResult<int64_t>> insertObject(drogon::orm::DbClientPtr tsp_db_client, std::string t_bucket,
     std::string t_key, size_t t_size, size_t t_original_size, bool t_is_compressed = false,
     std::optional<std::string> t_compression_algorithm = std::nullopt, std::optional<uint8_t> t_compression_level = std::nullopt);
+
+// Chunking trace refresh after a successful multipart upload. The object row
+// is inserted (defaults: single/NULLs) before the S3 upload; the multipart
+// branch stamps the actual mode/part count afterwards, inside the same
+// transaction, so the row always describes the bytes in the store.
+drogon::Task<::sgrn::datastore::BackendResult<void>> updateObjectChunking(drogon::orm::DbClientPtr tsp_db_client, int64_t t_object_id,
+    std::string_view t_upload_mode, std::optional<int64_t> t_part_count, std::optional<int64_t> t_part_size_bytes);
 
 drogon::Task<::sgrn::datastore::BackendResult<int64_t>> insertFile(drogon::orm::DbClientPtr tsp_db_client, std::string t_name,
     int64_t t_object_id, std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int32_t t_session_id,

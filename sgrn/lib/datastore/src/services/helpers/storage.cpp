@@ -209,7 +209,7 @@ Task<BackendResult<int64_t>> insertObject(drogon::orm::DbClientPtr tsp_db_client
     std::optional<uint8_t> t_compression_level) {
     try {
         drogon::orm::Result result = co_await tsp_db_client->execSqlCoro(
-            "SELECT storage.upsert_object($1, $2, $3, $4, 'MINIO', $5, $6, $7) AS id", std::move(t_bucket), std::move(t_key),
+            "SELECT storage.upsert_object($1, $2, $3, $4, 'GARAGE', $5, $6, $7) AS id", std::move(t_bucket), std::move(t_key),
             static_cast<int64_t>(t_size), static_cast<int64_t>(t_original_size), t_is_compressed, t_compression_algorithm,
             t_compression_level.has_value() ? std::optional<int32_t>(static_cast<int32_t>(*t_compression_level)) : std::nullopt);
 
@@ -220,6 +220,18 @@ Task<BackendResult<int64_t>> insertObject(drogon::orm::DbClientPtr tsp_db_client
     } catch (const std::exception& ex) {
         co_return BackendResult<int64_t>::Error(
             BackendError(BackendErrorKind::Database, std::format("Failed to upsert object: {}", ex.what())));
+    }
+}
+
+Task<BackendResult<void>> updateObjectChunking(drogon::orm::DbClientPtr tsp_db_client, int64_t t_object_id, std::string_view t_upload_mode,
+    std::optional<int64_t> t_part_count, std::optional<int64_t> t_part_size_bytes) {
+    try {
+        co_await tsp_db_client->execSqlCoro(
+            "UPDATE storage.objects SET upload_mode = $2, part_count = $3, part_size_bytes = $4 WHERE id = $1", t_object_id,
+            std::string(t_upload_mode), t_part_count, t_part_size_bytes);
+        co_return {};
+    } catch (const std::exception& ex) {
+        co_return BackendError{"Database", std::format("Failed to stamp chunking trace: {}", ex.what())};
     }
 }
 

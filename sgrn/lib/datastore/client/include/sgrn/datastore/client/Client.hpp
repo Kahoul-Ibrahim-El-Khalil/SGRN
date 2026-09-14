@@ -43,19 +43,9 @@ struct AutomatedServiceConfig {
     std::string password_;
     std::string session_token_;
 
-    std::string telemetry_path_{"/api/v1/telemetry/ingest"};
-    bool compress_zstd_{true};
-    uint8_t zstd_level_{5};
-    std::size_t telemetry_max_queue_{10'000};
-    double telemetry_timeout_s_{10.0};
-    bool telemetry_block_on_full_{false};
-    uint32_t telemetry_enqueue_timeout_ms_{1000};
-    std::string telemetry_queue_dir_{"./telemetry-queue"};
-
     std::string user_storage_path_{"/api/v1/storage/files"};
     std::string service_storage_path_{"/api/v1/storage/automated-service/files"};
     std::string storage_path_{"/api/v1/storage/automated-service/files"};
-    bool auto_decompress_zstd_{false};
     double storage_timeout_s_{30.0};
 
     bool retry_on_unauthorized_{true};
@@ -112,7 +102,6 @@ using SgrnClientConfig = AutomatedServiceConfig;
 
 // Forward declarations
 class StorageClient;
-class TelemetryClient;
 
 /**
  * @brief DatastoreClient
@@ -127,13 +116,10 @@ public:
      * @brief Access domain-specific clients (lightweight views).
      */
     StorageClient& storage();
-    TelemetryClient& telemetry();
 
     /**
      * @brief Unified asynchronous task publishing.
      */
-    void publishTelemetryAsync(const std::string& t_object_name, const rapidjson::Value& t_data);
-    void publishJsonTelemetryAsync(const rapidjson::Value& t_data);
     void uploadFileAsync(const std::string& t_remote_path, const std::string& t_local_path);
 
     /**
@@ -168,7 +154,7 @@ public:
     sgrn::Result<std::string, std::string> storageStatsJson();
     sgrn::Result<std::string, std::string> storageConstraintsJson();
 
-    /// MinIO storage administration (admin-only endpoints). Raw JSON
+    /// Garage storage administration (admin-only endpoints). Raw JSON
     /// passthroughs; the shell renders them as tables / pretty JSON.
     sgrn::Result<std::string, std::string> storageAdminOverviewJson(uint32_t t_max_pages = 10);
     sgrn::Result<std::string, std::string> storageAdminOrphansJson(
@@ -231,7 +217,7 @@ private:
     bool signInUser();
     bool signInSessionToken();
 
-    enum class TaskType { PublishTelemetry, UploadFile };
+    enum class TaskType { UploadFile };
     struct Task {
         TaskType type;
         std::string identifier;
@@ -240,10 +226,8 @@ private:
     };
 
     void processTask(const Task& t_task);
-    void sendTelemetryTask(const std::string& t_json);
 
     std::unique_ptr<StorageClient> storage_client_;
-    std::unique_ptr<TelemetryClient> telemetry_client_;
 
     DatastoreClientConfig config_;
 

@@ -107,15 +107,38 @@ export async function fetchDriveFileContent(t_file_path: string, t_scope: Storag
     }
 }
 
+export interface DriveUploadReceipt {
+    upload_mode?: string;
+    part_count?: number | null;
+    part_size_bytes?: number | null;
+    file_id?: number;
+    object_id?: number;
+    key?: string;
+}
+
+/** Human-readable chunking trace for an upload receipt. */
+export function describeStorageTrace(t_upload_mode?: string, t_part_count?: number | null): string {
+    return t_upload_mode === "multipart" ? ` — stored as multipart · ${t_part_count ?? "?"} parts` : " — stored as single PUT";
+}
+
+/** Batch summary suffix: how many results went multipart + total parts. */
+export function summarizeBatchTrace(t_results: any[]): string {
+    const multi = t_results.filter((r) => r?.upload_mode === "multipart");
+    if (multi.length === 0) return "";
+    const parts = multi.reduce((n, r) => n + (typeof r?.part_count === "number" ? r.part_count : 0), 0);
+    return ` · ${multi.length} stored as multipart (${parts} parts)`;
+}
+
 /**
  * Upload a file to a specific directory path and scope.
+ * Resolves with the backend upload receipt (chunking trace included).
  */
 export async function uploadDriveFile(
     t_directory_path: string,
     t_file: File,
     t_scope: StorageScope = "personal",
     t_on_progress?: (percent: number) => void,
-): Promise<SgrnResult<void>> {
+): Promise<SgrnResult<DriveUploadReceipt>> {
     try {
         const token = sessionStorage.getItem("SGRN-TOKEN");
 
@@ -154,7 +177,11 @@ export async function uploadDriveFile(
 
             xhr.onload = () => {
                 if (xhr.status >= 200 && xhr.status < 300) {
-                    resolve({ data: undefined });
+                    let receipt: DriveUploadReceipt = {};
+                    try {
+                        receipt = (JSON.parse(xhr.responseText) as DriveUploadReceipt) ?? {};
+                    } catch (_) {}
+                    resolve({ data: receipt });
                 } else {
                     let error_msg = `Upload failed: ${xhr.status}`;
                     let scope = ErrorScope.Network;

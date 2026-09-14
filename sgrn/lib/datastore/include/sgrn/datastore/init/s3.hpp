@@ -8,7 +8,7 @@
 
 namespace sgrn::datastore::plugins
 {
-inline void initMinio() {
+inline void initS3() {
     drogon::app().registerBeginningAdvice([]() {
         auto* p_s3 = drogon::app().getPlugin<sgrn::datastore::plugins::aws::S3Client>();
         if (!p_s3) {
@@ -19,7 +19,7 @@ inline void initMinio() {
         const Json::Value& cfg = drogon::app().getCustomConfig();
         std::string bucket = cfg.get("s3", Json::Value{}).get("default_bucket", "sgrn-uploads").asString();
 
-        // Run on the event loop as a one-shot coroutine. MinIO may still be
+        // Run on the event loop as a one-shot coroutine. Garage may still be
         // coming up (or restarting mid-life), so retry the check with backoff
         // instead of single-shotting it. The unit-level readiness gate
         // (ExecStartPre on SGRN-datastore.service) covers the boot race; this

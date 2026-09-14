@@ -33,7 +33,7 @@ constexpr const char help_message[] =
 
   Prerequisites — the following must be on $PATH (or in SGRN conda env):
     • postgres / pg_ctl          (PostgreSQL 15+)
-    • minio                      (MinIO latest)
+    • garage                     (Garage v2.x, single-node layout)
     • redis-server               (Redis 7+)
     • nginx                      (Nginx 1.24+)
 
@@ -55,7 +55,8 @@ constexpr const char help_message[] =
     Required fields to change (all marked "change_me"):
       POSTGRES_PASSWORD   — password for the sgrn_datastore DB role
       JWT_SECRET          — HS256 secret (≥ 32 chars) for the Datastore API
-      MINIO_ROOT_PASSWORD — MinIO object storage admin password
+      GARAGE_ACCESS_KEY / GARAGE_SECRET_KEY — Garage S3 key (imported once,
+        see .env header) + GARAGE_RPC_SECRET / GARAGE_ADMIN_TOKEN
 
   ── Step 3: Run database initialization (as user, PostgreSQL running) ──
 

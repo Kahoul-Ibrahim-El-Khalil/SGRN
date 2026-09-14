@@ -31,7 +31,7 @@ namespace sgrn::datastore
 enum class BackendErrorKind : uint8_t {
     Database,    ///< Postgres / Drogon ORM failures
     Redis,       ///< Redis operation failures
-    Minio,       ///< S3 / MinIO operation failures
+    Garage,      ///< S3 / Garage operation failures
     Auth,        ///< Authentication / authorisation logic (not an exception)
     Filesystem,  ///< Local file-system I/O errors
     Network,     ///< Generic network failures
@@ -47,8 +47,8 @@ constexpr std::string_view kindToScopeString(BackendErrorKind k) noexcept {
             return "Database";
         case BackendErrorKind::Redis:
             return "Redis";
-        case BackendErrorKind::Minio:
-            return "Minio";
+        case BackendErrorKind::Garage:
+            return "Garage";
         case BackendErrorKind::Auth:
             return "Authentication";
         case BackendErrorKind::Filesystem:

@@ -724,7 +724,7 @@ Task<BackendResult<void>> S3Client::abortMultipartUpload(std::string t_bucket, s
     });
 }
 
-Task<BackendResult<void>> S3Client::uploadFileMultipart(
+Task<BackendResult<int>> S3Client::uploadFileMultipart(
     std::string t_bucket, std::string t_key, std::string t_content_type, std::filesystem::path t_file_path, size_t t_part_size_bytes) {
 
     // 1. Start the upload.
@@ -776,8 +776,14 @@ Task<BackendResult<void>> S3Client::uploadFileMultipart(
         co_return BackendError{"Filesystem", "Multipart upload produced zero parts (empty file?)"};
     }
 
-    // 4. Finalize — S3/MinIO assembles the parts into one ordinary object here.
-    co_return co_await completeMultipartUpload(t_bucket, t_key, upload_id, std::move(parts));
+    // 4. Finalize — S3 assembles the parts into one ordinary object here.
+    // (Capture the count first: parts is moved into the request below.)
+    const int part_count = static_cast<int>(parts.size());
+    BackendResult<void> fin_res = co_await completeMultipartUpload(t_bucket, t_key, upload_id, std::move(parts));
+    if (fin_res.hasError()) {
+        co_return std::move(fin_res).error();
+    }
+    co_return part_count;
 }
 
 Task<BackendResult<Json::Value>> S3Client::listParts(

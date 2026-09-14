@@ -102,25 +102,4 @@ TransferOutcome StorageClient::downloadZip(const std::string& t_path, const std:
     return {true, res.http_status, t_local_path};
 }
 
-// ─── Telemetry Client ────────────────────────────────────────────────────────
-
-TelemetryClient::TelemetryClient(DatastoreClient& t_client)
-    : client_(t_client) {
-}
-
-void TelemetryClient::publish(const std::string& t_object_name, const rapidjson::Value& t_data) {
-    client_.publishTelemetryAsync(t_object_name, t_data);
-}
-
-void TelemetryClient::publishJson(const rapidjson::Value& t_data) {
-    client_.publishJsonTelemetryAsync(t_data);
-}
-
-void TelemetryClient::publishRaw([[maybe_unused]] const std::string& t_json) {
-}
-
-rapidjson::Document TelemetryClient::query(const std::string& t_query_params) {
-    return client_.query("telemetry_data", t_query_params);
-}
-
 } // namespace sgrn::datastore::client

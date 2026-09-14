@@ -614,6 +614,10 @@ Task<BackendResult<Json::Value>> StorageService::uploadFile(UploadContext t_cont
         // Debuggability: which S3 path the bytes took, and both sizes — the
         // threshold decision uses the original size, the wire used final.
         response["upload_mode"] = t_context.upload_mode;
+        response["part_count"] =
+            t_context.part_count.has_value() ? Json::Value(Json::Int64(*t_context.part_count)) : Json::Value(Json::nullValue);
+        response["part_size_bytes"] =
+            t_context.part_size_bytes.has_value() ? Json::Value(Json::Int64(*t_context.part_size_bytes)) : Json::Value(Json::nullValue);
         response["original_size_bytes"] = Json::UInt64(t_context.identity.original_size);
         response["final_size_bytes"] = Json::UInt64(t_context.identity.final_size);
         co_return BackendResult<Json::Value>(std::move(response));
@@ -807,8 +811,15 @@ Task<BackendResult<void>> StorageService::executeInMemoryUpload(drogon::orm::DbC
         }
         TempFileGuard spill_guard = std::move(*spill_res);
         t_context.upload_mode = "multipart";
-        co_return co_await s3_res.value()->uploadFileMultipart(
+        t_context.part_size_bytes = static_cast<int64_t>(live_cfg.chunkPartSizeBytes());
+        BackendResult<int> mp_res = co_await s3_res.value()->uploadFileMultipart(
             t_context.bucket, t_context.identity.hash.key, t_context.identity.mime_type, spill_guard.path, live_cfg.chunkPartSizeBytes());
+        if (mp_res.hasError()) {
+            co_return std::move(mp_res).error();
+        }
+        t_context.part_count = static_cast<int64_t>(*mp_res);
+        co_return co_await helpers::updateObjectChunking(
+            tsp_transaction, t_context.object_id.value(), t_context.upload_mode, t_context.part_count, t_context.part_size_bytes);
     }
     t_context.upload_mode = "single";
     co_return co_await s3_res.value()->uploadFromMemory(
@@ -852,8 +863,15 @@ Task<BackendResult<void>> StorageService::executeStreamingUpload(drogon::orm::Db
     const StorageConfig live_cfg = currentStorageConfig();
     if (t_context.identity.original_size >= live_cfg.chunkingThresholdBytes()) {
         t_context.upload_mode = "multipart";
-        co_return co_await s3_res.value()->uploadFileMultipart(
+        t_context.part_size_bytes = static_cast<int64_t>(live_cfg.chunkPartSizeBytes());
+        BackendResult<int> mp_res = co_await s3_res.value()->uploadFileMultipart(
             t_context.bucket, t_context.identity.hash.key, t_context.identity.mime_type, upload_path, live_cfg.chunkPartSizeBytes());
+        if (mp_res.hasError()) {
+            co_return std::move(mp_res).error();
+        }
+        t_context.part_count = static_cast<int64_t>(*mp_res);
+        co_return co_await helpers::updateObjectChunking(
+            tsp_transaction, t_context.object_id.value(), t_context.upload_mode, t_context.part_count, t_context.part_size_bytes);
     }
     t_context.upload_mode = "single";
     co_return co_await s3_res.value()->uploadFile(t_context.bucket, t_context.identity.hash.key, upload_path.string());

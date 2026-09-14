@@ -64,7 +64,7 @@ inline drogon::HttpStatusCode kindToHttpStatusCode(::sgrn::datastore::BackendErr
             return drogon::k500InternalServerError;
         case ::sgrn::datastore::BackendErrorKind::Redis:
             return drogon::k500InternalServerError;
-        case ::sgrn::datastore::BackendErrorKind::Minio:
+        case ::sgrn::datastore::BackendErrorKind::Garage:
             return drogon::k500InternalServerError;
         case ::sgrn::datastore::BackendErrorKind::Auth:
             return drogon::k401Unauthorized;

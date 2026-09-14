@@ -1,11 +1,8 @@
 #pragma once
 
 #include <cstdint>
-#include <map>
 #include <optional>
 #include <string>
-#include <type_traits>
-#include <variant>
 #include <vector>
 
 #include <fmt/format.h>
@@ -15,9 +12,6 @@
 
 namespace sgrn::datastore::client
 {
-
-using TelemetryValue = std::variant<int64_t, double, std::string, bool>;
-using TelemetryPayload = std::map<std::string, TelemetryValue>;
 
 enum class StorageScope {
     Auto,
@@ -80,12 +74,12 @@ struct AdminUserEntry {
     std::string status_{};
 };
 
-/// MinIO storage administration (admin-only endpoints).
+/// Garage storage administration (admin-only endpoints).
 struct StorageBucketCensus {
     std::string name_;
-    int64_t minio_objects_{0};
-    int64_t minio_bytes_{0};
-    bool minio_truncated_{false};
+    int64_t garage_objects_{0};
+    int64_t garage_bytes_{0};
+    bool garage_truncated_{false};
     int64_t db_objects_{0};
     int64_t db_bytes_{0};
     int64_t db_files_{0};
@@ -100,11 +94,11 @@ struct StorageOrphanKey {
 struct StorageOrphansReport {
     std::string bucket_;
     std::string prefix_;
-    int64_t minio_scanned_{0};
-    bool minio_truncated_{false};
-    std::vector<StorageOrphanKey> minio_only_;
-    int64_t minio_only_count_{0};
-    int64_t minio_only_bytes_{0};
+    int64_t garage_scanned_{0};
+    bool garage_truncated_{false};
+    std::vector<StorageOrphanKey> garage_only_;
+    int64_t garage_only_count_{0};
+    int64_t garage_only_bytes_{0};
     std::vector<StorageOrphanKey> db_missing_;
     int64_t db_missing_unchecked_{0};
 };
@@ -332,21 +326,6 @@ inline std::string jsonCompact(const rapidjson::Value& t_value) {
     return sgrn::utils::json::serializeCompact(t_value);
 }
 
-inline std::string telemetryValueToString(const TelemetryValue& t_value) {
-    return std::visit(
-        [](const auto& t_item) -> std::string {
-            using T = std::decay_t<decltype(t_item)>;
-            if constexpr (std::is_same_v<T, std::string>) {
-                return fmt::format("\"{}\"", t_item);
-            } else if constexpr (std::is_same_v<T, bool>) {
-                return t_item ? "true" : "false";
-            } else {
-                return fmt::format("{}", t_item);
-            }
-        },
-        t_value);
-}
-
 } // namespace detail
 
 } // namespace sgrn::datastore::client
@@ -355,30 +334,6 @@ namespace sgrn::sdk
 {
 using namespace sgrn::datastore::client;
 }
-
-template <>
-struct fmt::formatter<sgrn::datastore::client::TelemetryValue> : formatter<std::string_view> {
-    auto format(const sgrn::datastore::client::TelemetryValue& t_value, format_context& t_ctx) const {
-        return formatter<std::string_view>::format(sgrn::datastore::client::detail::telemetryValueToString(t_value), t_ctx);
-    }
-};
-
-template <>
-struct fmt::formatter<sgrn::datastore::client::TelemetryPayload> : formatter<std::string_view> {
-    auto format(const sgrn::datastore::client::TelemetryPayload& t_payload, format_context& t_ctx) const {
-        std::string out = "{";
-        bool first = true;
-        for (const auto& [key, t_value] : t_payload) {
-            if (!first) {
-                out += ", ";
-            }
-            first = false;
-            out += fmt::format("\"{}\": {}", key, t_value);
-        }
-        out += "}";
-        return formatter<std::string_view>::format(out, t_ctx);
-    }
-};
 
 template <>
 struct fmt::formatter<sgrn::datastore::client::ObjectInfo> : formatter<std::string_view> {

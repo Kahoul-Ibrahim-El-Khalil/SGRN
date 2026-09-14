@@ -17,7 +17,7 @@ export interface FileMetadata {
   user_id?: number;
   domain?: string | null;
   bucket: string;
-  minio_key: string;
+  garage_key: string;
   size: number;
   object_created_at?: string;
   mime_type?: string | null;
@@ -35,6 +35,9 @@ export interface StorageObject {
   compression_level: number | null;
   created_at?: string;
   deleted_at?: string | null;
+  upload_mode?: string;
+  part_count?: number | null;
+  part_size_bytes?: number | null;
 }
 
 export interface UploadResult {
@@ -61,6 +64,11 @@ export interface UploadResult {
     compression_level?: number;
   };
   uploaded_at?: string;
+  upload_mode?: string;
+  part_count?: number | null;
+  part_size_bytes?: number | null;
+  original_size_bytes?: number;
+  final_size_bytes?: number;
   [key: string]: unknown;
 }
 
@@ -132,7 +140,7 @@ export const ErrorScope = {
   Runtime: "Runtime",
   Database: "Database",
   Redis: "Redis",
-  Minio: "Minio",
+  Garage: "Garage",
   Compression: "Compression",
   Hashing: "Hashing",
   ApplicationLogic: "ApplicationLogic",
@@ -225,6 +233,8 @@ export interface DriveFile {
   size: number; // Compressed size
   original_size: number;
   created_at: string;
+  upload_mode?: string;
+  part_count?: number | null;
 }
 
 export interface DirectoryListing {

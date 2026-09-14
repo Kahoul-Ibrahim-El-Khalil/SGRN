@@ -29,7 +29,7 @@ inline void init() {
     assets::registerDashboardAssets();
     filters::createAndRegisterFilters();
     handlers::initHandlers();
-    plugins::initMinio();
+    plugins::initS3();
     ratelimit::initRateLimiting();
 
     drogon::app().run();

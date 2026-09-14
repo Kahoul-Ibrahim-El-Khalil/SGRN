@@ -1495,10 +1495,10 @@ int DatastoreShell::cmdStorageOverview(const std::vector<std::string>& t_args) {
     }
     std::vector<std::vector<std::string>> rows;
     for (const auto& b : r.value()) {
-        rows.push_back({b.name_, std::to_string(b.minio_objects_) + (b.minio_truncated_ ? "+" : ""), std::to_string(b.minio_bytes_),
+        rows.push_back({b.name_, std::to_string(b.garage_objects_) + (b.garage_truncated_ ? "+" : ""), std::to_string(b.garage_bytes_),
             std::to_string(b.db_objects_), std::to_string(b.db_bytes_), std::to_string(b.db_files_)});
     }
-    printTable({"BUCKET", "MINIO OBJS", "MINIO BYTES", "DB OBJS", "DB BYTES", "FILES"}, std::move(rows), {1, 2, 3, 4, 5});
+    printTable({"BUCKET", "GARAGE OBJS", "GARAGE BYTES", "DB OBJS", "DB BYTES", "FILES"}, std::move(rows), {1, 2, 3, 4, 5});
     return 0;
 }
 
@@ -1512,20 +1512,20 @@ int DatastoreShell::cmdStorageOrphans(const std::vector<std::string>& t_args) {
         return 1;
     }
     const auto& rep = r.value();
-    fmt::print("bucket '{}'{}: scanned {} minio keys{} | minio-only {} ({} bytes) | db-missing {} ({} unchecked)\n", rep.bucket_,
-        rep.prefix_.empty() ? "" : " prefix '" + rep.prefix_ + "'", rep.minio_scanned_, rep.minio_truncated_ ? " [truncated]" : "",
-        rep.minio_only_count_, rep.minio_only_bytes_, rep.db_missing_.size(), rep.db_missing_unchecked_);
-    if (!rep.minio_only_.empty()) {
+    fmt::print("bucket '{}'{}: scanned {} garage keys{} | garage-only {} ({} bytes) | db-missing {} ({} unchecked)\n", rep.bucket_,
+        rep.prefix_.empty() ? "" : " prefix '" + rep.prefix_ + "'", rep.garage_scanned_, rep.garage_truncated_ ? " [truncated]" : "",
+        rep.garage_only_count_, rep.garage_only_bytes_, rep.db_missing_.size(), rep.db_missing_unchecked_);
+    if (!rep.garage_only_.empty()) {
         std::vector<std::vector<std::string>> rows;
-        for (const auto& k : rep.minio_only_)
+        for (const auto& k : rep.garage_only_)
             rows.push_back({k.key_, std::to_string(k.size_), k.etag_});
-        printTable({"MINIO-ONLY KEY (purge candidates)", "SIZE", "ETAG"}, std::move(rows), {1});
+        printTable({"GARAGE-ONLY KEY (purge candidates)", "SIZE", "ETAG"}, std::move(rows), {1});
     }
     if (!rep.db_missing_.empty()) {
         std::vector<std::vector<std::string>> rows;
         for (const auto& k : rep.db_missing_)
             rows.push_back({k.key_, std::to_string(k.size_)});
-        printTable({"DB ROW WITHOUT MINIO OBJECT (broken refs)", "SIZE"}, std::move(rows), {1});
+        printTable({"DB ROW WITHOUT GARAGE OBJECT (broken refs)", "SIZE"}, std::move(rows), {1});
     }
     return 0;
 }
@@ -1914,13 +1914,13 @@ void DatastoreShell::printHelp() {
                "  service-token-rotate <ID-or-NAME>                  rotate a service token, prints once (admin)\n"
                "  stats                                              storage stats as JSON\n"
                "  info | constraints                                 storage info/constraints as JSON\n"
-               "  storage-overview [--max-pages N]                   minio vs DB census per bucket (admin)\n"
+               "  storage-overview [--max-pages N]                   garage vs DB census per bucket (admin)\n"
                "  storage-orphans [--bucket B] [--prefix P] [--limit N]\n"
-               "                                               list minio-only garbage + DB rows missing objects (admin)\n"
+               "                                               list garage-only garbage + DB rows missing objects (admin)\n"
                "  storage-purge [--bucket B] [--prefix P | KEY...] [--limit N] [--execute]\n"
-               "                                               delete minio-only keys (dry run unless --execute) (admin)\n"
+               "                                               delete garage-only keys (dry run unless --execute) (admin)\n"
                "  storage-search [--bucket B] <HASH> | --prefix PREFIX\n"
-               "                                               find object by content hash: DB refs + minio stat (admin)\n"
+               "                                               find object by content hash: DB refs + garage stat (admin)\n"
                "  zip <REMOTE-DIR> [LOCAL.zip]                       download a folder as zip\n"
                "  scope [personal|users|automated-services|domain|auto]\n"
                "                                               show/switch namespace scope\n"

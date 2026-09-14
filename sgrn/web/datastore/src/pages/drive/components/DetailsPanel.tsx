@@ -109,6 +109,17 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({ item, onClose }) => 
                             value={formatSize((item as DriveFile).original_size || 0)}
                         />
                     )}
+                    {!isFolder && (
+                        <DetailItem
+                            icon={<HardDrive size={16} />}
+                            label="Storage"
+                            value={
+                                (item as DriveFile).upload_mode === "multipart"
+                                    ? `Multipart · ${(item as DriveFile).part_count ?? "?"} parts`
+                                    : "Single PUT"
+                            }
+                        />
+                    )}
                     <DetailItem
                         icon={<Calendar size={16} />}
                         label="Created At"

@@ -105,7 +105,7 @@ export default function AdminTab() {
     const [queryResult, setQueryResult] = useState<any>(null);
     const [queryLoading, setQueryLoading] = useState(false);
 
-    // Storage Admin State (MinIO object-layer management)
+    // Storage Admin State (Garage object-layer management)
     const [storageBuckets, setStorageBuckets] = useState<any[]>([]);
     const [loadingStorageOverview, setLoadingStorageOverview] = useState(false);
     const [storageSearchInput, setStorageSearchInput] = useState<string>("");
@@ -542,7 +542,7 @@ export default function AdminTab() {
                             {mode === "user" && "Register User"}
                             {mode === "automated_service" && "Register Service"}
                             {mode === "query_builder" && "Data Explorer"}
-                            {mode === "storage" && "MinIO Storage Admin"}
+                            {mode === "storage" && "Garage Storage Admin"}
                             {mode === "system" && "System Configuration"}
                             {mode === "permissions" && "Domain Permissions"}
                             {mode === "analytics" && "Analytics"}
@@ -867,14 +867,14 @@ export default function AdminTab() {
 
                                     {storageBuckets.length > 0 && (
                                         <div className="roster-card">
-                                            <div className="roster-title">BUCKET CENSUS — MINIO vs DATABASE</div>
+                                            <div className="roster-title">BUCKET CENSUS — GARAGE vs DATABASE</div>
                                             <div className="datagrid-wrapper">
                                                 <table className="datagrid-industrial">
                                                     <thead>
                                                         <tr>
                                                             <th>BUCKET</th>
-                                                            <th>MINIO OBJS</th>
-                                                            <th>MINIO BYTES</th>
+                                                            <th>GARAGE OBJS</th>
+                                                            <th>GARAGE BYTES</th>
                                                             <th>DB OBJS</th>
                                                             <th>DB BYTES</th>
                                                             <th>FILES</th>
@@ -885,10 +885,10 @@ export default function AdminTab() {
                                                             <tr key={b.name}>
                                                                 <td className="admin-cell-primary">{b.name}</td>
                                                                 <td>
-                                                                    {b.minio?.objects}
-                                                                    {b.minio?.truncated ? "+" : ""}
+                                                                    {b.garage?.objects}
+                                                                    {b.garage?.truncated ? "+" : ""}
                                                                 </td>
-                                                                <td>{b.minio?.bytes}</td>
+                                                                <td>{b.garage?.bytes}</td>
                                                                 <td>{b.db?.objects}</td>
                                                                 <td>{b.db?.bytes}</td>
                                                                 <td>{b.db?.files}</td>
@@ -959,23 +959,23 @@ export default function AdminTab() {
                                     {orphanReport && (
                                         <div className="roster-card">
                                             <div className="roster-title">
-                                                ORPHAN SCAN — {orphanReport.bucket} — {orphanReport.minio_scanned} KEYS SCANNED
-                                                {orphanReport.minio_truncated ? " (TRUNCATED)" : ""} — MINIO-ONLY{" "}
-                                                {orphanReport.minio_only_count} ({orphanReport.minio_only_bytes} BYTES) — DB ROWS MISSING
+                                                ORPHAN SCAN — {orphanReport.bucket} — {orphanReport.garage_scanned} KEYS SCANNED
+                                                {orphanReport.garage_truncated ? " (TRUNCATED)" : ""} — GARAGE-ONLY{" "}
+                                                {orphanReport.garage_only_count} ({orphanReport.garage_only_bytes} BYTES) — DB ROWS MISSING
                                                 OBJECTS {orphanReport.db_missing?.length ?? 0}
                                             </div>
-                                            {orphanReport.minio_only?.length > 0 && (
+                                            {orphanReport.garage_only?.length > 0 && (
                                                 <div className="datagrid-wrapper">
                                                     <table className="datagrid-industrial">
                                                         <thead>
                                                             <tr>
-                                                                <th>MINIO-ONLY KEY (PURGE CANDIDATE)</th>
+                                                                <th>GARAGE-ONLY KEY (PURGE CANDIDATE)</th>
                                                                 <th>SIZE</th>
                                                                 <th>ETAG</th>
                                                             </tr>
                                                         </thead>
                                                         <tbody>
-                                                            {orphanReport.minio_only.map((k: any) => (
+                                                            {orphanReport.garage_only.map((k: any) => (
                                                                 <tr key={k.key}>
                                                                     <td className="admin-cell-primary">{k.key}</td>
                                                                     <td>{k.size}</td>
@@ -991,7 +991,7 @@ export default function AdminTab() {
                                                     <table className="datagrid-industrial">
                                                         <thead>
                                                             <tr>
-                                                                <th>DB ROW WITHOUT MINIO OBJECT (BROKEN REF)</th>
+                                                                <th>DB ROW WITHOUT GARAGE OBJECT (BROKEN REF)</th>
                                                                 <th>SIZE</th>
                                                             </tr>
                                                         </thead>
@@ -1036,8 +1036,8 @@ export default function AdminTab() {
 
                                     <div className="query-help">
                                         <strong>Garbage collection:</strong> scan first, dry-run purge second, confirm purge last. Purge
-                                        only deletes MinIO keys with no database row — re-verified at delete time. DB rows missing their
-                                        MinIO object are reported, never deleted.
+                                        only deletes Garage keys with no database row — re-verified at delete time. DB rows missing their
+                                        Garage object are reported, never deleted.
                                     </div>
                                 </>
                             )}

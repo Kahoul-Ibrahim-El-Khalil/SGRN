@@ -26,6 +26,8 @@ import {
     downloadDriveFile,
     uploadDriveFile,
     uploadDriveFilesBatch,
+    describeStorageTrace,
+    summarizeBatchTrace,
     createDirectory,
     deleteDriveItem,
     renameItem,
@@ -186,18 +188,22 @@ function useDriveUpload(
                 if (isError(result)) {
                     showEvent("error", result.error);
                 } else {
-                    const { success_count, fail_count } = result.data;
+                    const { success_count, fail_count, results } = result.data;
                     showEvent(
                         success_count > 0 ? "success" : "error",
                         success_count > 0
-                            ? `${success_count} file${success_count > 1 ? "s" : ""} uploaded${fail_count > 0 ? `, ${fail_count} failed` : ""}`
+                            ? `${success_count} file${success_count > 1 ? "s" : ""} uploaded${fail_count > 0 ? `, ${fail_count} failed` : ""}${summarizeBatchTrace(results ?? [])}`
                             : `Failed to upload ${fail_count} files`,
                     );
                 }
             } else {
                 const result = await uploadDriveFile(currentPath, list[0], currentScope, () => {});
                 if (isError(result)) showEvent("error", `${list[0].name}: ${result.error}`);
-                else showEvent("success", `${list[0].name} uploaded successfully`);
+                else
+                    showEvent(
+                        "success",
+                        `${list[0].name} uploaded successfully${describeStorageTrace(result.data.upload_mode, result.data.part_count)}`,
+                    );
             }
 
             setUploading(false);
@@ -220,11 +226,11 @@ function useDriveUpload(
             if (isError(result)) {
                 showEvent("error", result.error);
             } else {
-                const { success_count, fail_count } = result.data;
+                const { success_count, fail_count, results } = result.data;
                 showEvent(
                     success_count > 0 ? "success" : "error",
                     success_count > 0
-                        ? `Folder uploaded: ${success_count} files preserved${fail_count > 0 ? `, ${fail_count} failed` : ""}`
+                        ? `Folder uploaded: ${success_count} files preserved${fail_count > 0 ? `, ${fail_count} failed` : ""}${summarizeBatchTrace(results ?? [])}`
                         : "Folder upload failed",
                 );
             }
@@ -246,18 +252,22 @@ function useDriveUpload(
                 if (isError(result)) {
                     showEvent("error", result.error);
                 } else {
-                    const { success_count, fail_count } = result.data;
+                    const { success_count, fail_count, results } = result.data;
                     showEvent(
                         success_count > 0 ? "success" : "error",
                         success_count > 0
-                            ? `${success_count} file${success_count > 1 ? "s" : ""} uploaded${fail_count > 0 ? `, ${fail_count} failed` : ""}`
+                            ? `${success_count} file${success_count > 1 ? "s" : ""} uploaded${fail_count > 0 ? `, ${fail_count} failed` : ""}${summarizeBatchTrace(results ?? [])}`
                             : `Failed to upload ${fail_count} files`,
                     );
                 }
             } else {
                 const result = await uploadDriveFile(currentPath, list[0], currentScope, () => {});
                 if (isError(result)) showEvent("error", `${list[0].name}: ${result.error}`);
-                else showEvent("success", `${list[0].name} uploaded successfully`);
+                else
+                    showEvent(
+                        "success",
+                        `${list[0].name} uploaded successfully${describeStorageTrace(result.data.upload_mode, result.data.part_count)}`,
+                    );
             }
 
             setUploading(false);

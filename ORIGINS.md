@@ -7,7 +7,7 @@ Rather, it originated from a singular primary objective; the subsequent three co
 ## Primary Objective: Scalable Industrial Data Ingestion and Storage
 
 The original problem domain was engineering a methodology for the reliable, scalable ingestion and persistence of industrial data. 
-**`datastore`**—comprising a REST-oriented architectural style, PostgreSQL for hierarchical and relational data modeling, and MinIO for unstructured binary payloads—constitutes the principal artifact of the project. 
+**`datastore`**—comprising a REST-oriented architectural style, PostgreSQL for hierarchical and relational data modeling, and Garage (S3-compatible) for unstructured binary payloads—constitutes the principal artifact of the project. 
 
 All other components within this architecture were subsequently developed to resolve antecedent bottlenecks that precluded the realization of this primary storage objective.
 
