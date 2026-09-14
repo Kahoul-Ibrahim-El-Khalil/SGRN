@@ -435,7 +435,7 @@ export default function AdminTab() {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         bucket: orphanReport.bucket,
-                        prefix: orphanReport.prefix || undefined,
+                        prefix: orphanReport.prefix ?? "",
                         dry_run: dryRun,
                     }),
                 });

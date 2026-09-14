@@ -1,8 +1,10 @@
 #pragma once
 
 #include <drogon/drogon.h>
+#include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/compression.hpp>
+#include <cctype>
 #include <config_assets.hpp>
 #include <functional>
 #include <memory>
@@ -164,6 +166,9 @@ inline DashboardAssetHandler getDashboardAssetHandler(size_t t_i) {
 }
 
 inline void registerDashboardAssets() {
+    DashboardAssetHandler index_handler;
+    bool has_index = false;
+
     for (size_t t_i = 0; t_i < web::ASSET_COUNT; ++t_i) {
         const auto& t_asset = web::ASSETS[t_i];
 
@@ -172,11 +177,73 @@ inline void registerDashboardAssets() {
         // a web page request is made.
         auto handler_copy = handler;
 
+        if (t_asset.virtual_path == "/index.html") {
+            // Keep a copy for the SPA fallback below (client-side routes like
+            // /drive, /admin, /profile must serve the same shell so the React
+            // router + ProtectedRoute can boot, validate the token, and either
+            // render or redirect to /signin).
+            index_handler = handler;
+            has_index = true;
+        }
+
         drogon::app().registerHandler(std::string(t_asset.virtual_path), std::move(handler), {drogon::Get});
 
         if (t_asset.virtual_path == "/index.html") {
             drogon::app().registerHandler("/", std::move(handler_copy), {drogon::Get});
         }
+    }
+
+    if (has_index) {
+        // SPA fallback for client-side routing (BrowserRouter: /signin,
+        // /drive, /admin, /profile, catch-all → /signin). Without this, a hard
+        // reload on /admin issues GET /admin straight to the backend, which has
+        // no exact route and falls through to the 403 "Unkown path" default
+        // handler — the React app never boots and auth state is lost.
+        //
+        // Exact asset handlers (/, /index.html, /assets/*) keep priority;
+        // the regex below additionally excludes /api* and /assets* so it can
+        // never shadow them even on frameworks where regex wins. Inside, we
+        // re-check exclusions + Accept: text/html and fall through to the
+        // existing 403 JSON for anything non-page (genuinely unknown API-ish
+        // paths stay a 403, not silently HTML).
+        drogon::app().registerHandlerViaRegex("^/(?!api($|/)|assets($|/)).*$",
+            [index_handler](const drogon::HttpRequestPtr& tsp_req, std::function<void(const drogon::HttpResponsePtr&)>&& tsp_callback) {
+                if (tsp_req->method() != drogon::Get) {
+                    tsp_callback(::sgrn::createErrorResponse("Unkown path", drogon::k403Forbidden));
+                    return;
+                }
+                const std::string& path = tsp_req->path();
+                // "/" and "/index.html" already have exact handlers; serve the
+                // shell unconditionally if the fallback ever sees them (keeps
+                // "/" behavior identical even if regex were to win).
+                if (path != "/" && path != "/index.html") {
+                    // Mirror classifyPath() Page exclusions: API + embedded
+                    // assets must never fall back to index.html.
+                    auto starts_with = [](std::string_view s, std::string_view p) {
+                        return s.size() >= p.size() && s.substr(0, p.size()) == p;
+                    };
+                    if (path == "/api" || starts_with(path, "/api/") || path == "/assets" || starts_with(path, "/assets/")) {
+                        tsp_callback(::sgrn::createErrorResponse("Unkown path", drogon::k403Forbidden));
+                        return;
+                    }
+                    // Only browser navigations (Accept includes text/html) get
+                    // the SPA shell; API/fetch clients asking for JSON must
+                    // keep receiving the 403 safety net.
+                    std::string accept = tsp_req->getHeader("Accept");
+                    if (accept.empty()) {
+                        accept = tsp_req->getHeader("accept");
+                    }
+                    for (auto& c : accept) {
+                        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    }
+                    if (accept.find("text/html") == std::string::npos) {
+                        tsp_callback(::sgrn::createErrorResponse("Unkown path", drogon::k403Forbidden));
+                        return;
+                    }
+                }
+                index_handler(tsp_req, std::move(tsp_callback));
+            },
+            {drogon::Get});
     }
 }
 
