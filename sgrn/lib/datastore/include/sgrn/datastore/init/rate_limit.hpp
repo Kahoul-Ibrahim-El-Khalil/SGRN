@@ -10,9 +10,43 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <mutex>
 
 namespace sgrn::datastore::ratelimit
 {
+
+// Live rate-limit config. initRateLimiting() seeds the holder at boot and the
+// pre-routing advice reads a copy per request; the admin system-config
+// endpoint republishes after a validated save, so limit/window edits apply
+// without a restart. Copies are tiny (a few ints); a plain mutex is enough.
+//
+// One deliberate exception: flipping `enabled` needs a restart. The advice
+// itself is only registered when enabled at boot, so enabling at runtime
+// would silently do nothing — the PUT handler reports that path as
+// restart-required instead of pretending it applied.
+struct RateLimitHolder {
+    mutable std::mutex mutex;
+    std::shared_ptr<const RateLimitConfig> config = std::make_shared<const RateLimitConfig>();
+    bool enabled_at_boot = false;
+
+    RateLimitConfig snapshot() const {
+        std::lock_guard lock(mutex);
+        return *config;
+    }
+    void publish(RateLimitConfig t_cfg) {
+        std::lock_guard lock(mutex);
+        config = std::make_shared<const RateLimitConfig>(std::move(t_cfg));
+    }
+};
+
+inline std::shared_ptr<RateLimitHolder>& rateLimitHolder() {
+    static auto holder = std::make_shared<RateLimitHolder>();
+    return holder;
+}
+
+inline void publishRateLimitConfig(RateLimitConfig t_cfg) {
+    rateLimitHolder()->publish(std::move(t_cfg));
+}
 
 // Sliding-window rate limiting enforced centrally in a pre-routing advice:
 // every request (API, embedded UI assets, even would-be 404s) is classified
@@ -31,18 +65,21 @@ inline void initRateLimiting() {
         SGRN_INFO("SGRN-Datastore", "Rate limiting disabled by configuration");
         return;
     }
-    auto shared = std::make_shared<RateLimitConfig>(cfg);
-    drogon::app().registerPreRoutingAdvice([shared](const drogon::HttpRequestPtr& tsp_req, drogon::AdviceCallback&& t_respond,
+    auto holder = rateLimitHolder();
+    holder->enabled_at_boot = true;
+    holder->publish(cfg);
+    drogon::app().registerPreRoutingAdvice([holder](const drogon::HttpRequestPtr& tsp_req, drogon::AdviceCallback&& t_respond,
                                                drogon::AdviceChainCallback&& t_proceed) {
         if (tsp_req->method() == drogon::Options) {
             t_proceed(); // CORS preflights are never limited
             return;
         }
+        const RateLimitConfig live = holder->snapshot();
         const RateClass cls = classifyPath(tsp_req->path());
         const std::string ip = tsp_req->getPeerAddr().toIp();
         const std::string key = buildKey(cls, ip, authAccountId(tsp_req));
-        const uint32_t limit = effectiveLimit(*shared, cls);
-        const uint64_t window = windowMs(*shared, cls);
+        const uint32_t limit = effectiveLimit(live, cls);
+        const uint64_t window = windowMs(live, cls);
 
         auto redis = drogon::app().getRedisClient();
         if (!redis) {

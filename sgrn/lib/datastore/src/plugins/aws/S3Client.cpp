@@ -27,6 +27,7 @@
 #include <aws/s3/model/PutObjectRequest.h>
 #include <aws/s3/model/PutObjectTaggingRequest.h>
 #include <aws/s3/model/UploadPartRequest.h>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 
@@ -721,6 +722,62 @@ Task<BackendResult<void>> S3Client::abortMultipartUpload(std::string t_bucket, s
 
         return {};
     });
+}
+
+Task<BackendResult<void>> S3Client::uploadFileMultipart(
+    std::string t_bucket, std::string t_key, std::string t_content_type, std::filesystem::path t_file_path, size_t t_part_size_bytes) {
+
+    // 1. Start the upload.
+    BackendResult<std::string> upload_id_res = co_await createMultipartUpload(t_bucket, t_key, t_content_type);
+    if (upload_id_res.hasError()) {
+        co_return std::move(upload_id_res).error();
+    }
+    std::string upload_id = std::move(*upload_id_res);
+
+    // 2. Stream the (already-compressed) temp file through a bounded buffer,
+    //    uploading one part at a time. Memory use stays flat at ~part_size_bytes
+    //    regardless of total file size — never holds more than one part in RAM.
+    std::ifstream in(t_file_path, std::ios::binary);
+    if (!in) {
+        co_await abortMultipartUpload(t_bucket, t_key, upload_id);
+        co_return BackendError{"Filesystem", "Failed to open file for multipart upload"};
+    }
+
+    Json::Value parts = Json::arrayValue;
+    int part_number = 1;
+    std::string buffer;
+    buffer.resize(t_part_size_bytes);
+
+    while (in) {
+        in.read(buffer.data(), static_cast<std::streamsize>(t_part_size_bytes));
+        std::streamsize bytes_read = in.gcount();
+        if (bytes_read <= 0) {
+            break;
+        }
+        std::string part_body = buffer.substr(0, static_cast<size_t>(bytes_read));
+
+        BackendResult<std::string> etag_res = co_await uploadPart(t_bucket, t_key, upload_id, part_number, std::move(part_body));
+        if (etag_res.hasError()) {
+            // 3. Any part failure aborts the whole upload — never leave a
+            //    half-uploaded multipart session dangling in storage.
+            co_await abortMultipartUpload(t_bucket, t_key, upload_id);
+            co_return std::move(etag_res).error();
+        }
+
+        Json::Value part;
+        part["part_number"] = part_number;
+        part["etag"] = *etag_res;
+        parts.append(std::move(part));
+        ++part_number;
+    }
+
+    if (parts.empty()) {
+        co_await abortMultipartUpload(t_bucket, t_key, upload_id);
+        co_return BackendError{"Filesystem", "Multipart upload produced zero parts (empty file?)"};
+    }
+
+    // 4. Finalize — S3/MinIO assembles the parts into one ordinary object here.
+    co_return co_await completeMultipartUpload(t_bucket, t_key, upload_id, std::move(parts));
 }
 
 Task<BackendResult<Json::Value>> S3Client::listParts(

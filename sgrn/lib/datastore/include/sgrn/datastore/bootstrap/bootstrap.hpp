@@ -21,6 +21,7 @@
 #include <stdexcept>
 #include <string>
 #include <sys/types.h>
+#include <system_error>
 #include <thread>
 #include <trantor/net/EventLoopThread.h>
 #include <unistd.h>
@@ -232,6 +233,18 @@ inline void extractConfigAssets(const std::string& t_base_dir, const std::functi
         auto dec_result = sgrn::utils::compression::decompressStringZstd(asset.compressedView());
         if (!dec_result.hasError()) {
             fs::create_directories(out_path.parent_path());
+            // Dashboard-tuned live configs must survive reinit: back up the
+            // existing sgrn.json to sgrn.json.bak instead of silently
+            // discarding admin changes. Other assets are stateless templates.
+            if (out_path.filename() == "sgrn.json" && fs::exists(out_path)) {
+                std::error_code backup_ec;
+                fs::copy_file(out_path, fs::path(out_path.string() + ".bak"), fs::copy_options::overwrite_existing, backup_ec);
+                if (backup_ec) {
+                    SGRN_WARN("DatastoreInit", "  -> Could not back up {}: {}", out_path.string(), backup_ec.message());
+                } else {
+                    SGRN_INFO("DatastoreInit", "  -> Backed up live config to {}.bak", out_path.string());
+                }
+            }
             std::ofstream out(out_path, std::ios::binary);
             out << t_tmpl(dec_result.value());
             SGRN_INFO("DatastoreInit", "  -> Wrote: {}", out_path.string());

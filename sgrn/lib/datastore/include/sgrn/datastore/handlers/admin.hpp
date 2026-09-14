@@ -30,10 +30,31 @@ public:
     drogon::Task<drogon::HttpResponsePtr> handleUpdateAutomatedServiceMetadata(drogon::HttpRequestPtr tsp_req, std::string t_id);
     drogon::Task<drogon::HttpResponsePtr> handleRotateAutomatedServiceToken(drogon::HttpRequestPtr tsp_req);
 
+    // GET /api/v1/admin/permissions?user_id=&email=&domain=&organisation=&limit=
+    // Joined admin view over core.user_domain_permissions (email + flags).
+    // The generic CRUD at /api/v1/user-domain-permissions is tenant-scoped
+    // and row-ID addressed; this is the operator surface: identity-joined,
+    // searchable, admin-filtered.
+    drogon::Task<drogon::HttpResponsePtr> handleListPermissions(drogon::HttpRequestPtr tsp_req);
+
+    // POST /api/v1/admin/permissions
+    // Grant (upsert) domain access: {user_id|email, organisation?, domain,
+    // allowed_subpath?, can_read?, can_write?, can_delete?}. Organisation
+    // defaults to the user's own (cross-org grants are refused); the domain
+    // must exist in that organisation (else the FK would 500 — pre-checked
+    // for a clean 400). Zero-trust note: granting the FIRST row for a user
+    // is what unlocks them; the response says so when that happens.
+    drogon::Task<drogon::HttpResponsePtr> handleGrantPermission(drogon::HttpRequestPtr tsp_req);
+
+    // DELETE /api/v1/admin/permissions?id= (or ?user_id=&organisation=&domain=)
+    // Revoke. Warns when the user keeps no domain rows afterwards: with
+    // zero-trust default-deny that locks them out of storage entirely.
+    drogon::Task<drogon::HttpResponsePtr> handleRevokePermission(drogon::HttpRequestPtr tsp_req);
+
 private:
     std::string endpoints_cache_;
 
-    inline static const std::array<::sgrn::IHandler<AdminApiHandler>::route_config, 6> kRoutes = {{
+    inline static const std::array<::sgrn::IHandler<AdminApiHandler>::route_config, 9> kRoutes = {{
         {"/api/v1/admin/status", &AdminApiHandler::handleGetStatus, {drogon::Get},
             {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
         {"/api/v1/admin/users", &AdminApiHandler::handleGetUsers, {drogon::Get},
@@ -44,6 +65,12 @@ private:
             {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
         {"/api/v1/endpoints", &AdminApiHandler::handleGetEndpoints, {drogon::Get}, {"sgrn::datastore::filters::UserAuthFilter"}},
         {"/api/v1/admin/automated-services/rotate-token", &AdminApiHandler::handleRotateAutomatedServiceToken, {drogon::Post},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
+        {"/api/v1/admin/permissions", &AdminApiHandler::handleListPermissions, {drogon::Get},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
+        {"/api/v1/admin/permissions", &AdminApiHandler::handleGrantPermission, {drogon::Post},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
+        {"/api/v1/admin/permissions", &AdminApiHandler::handleRevokePermission, {drogon::Delete},
             {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
     }};
 

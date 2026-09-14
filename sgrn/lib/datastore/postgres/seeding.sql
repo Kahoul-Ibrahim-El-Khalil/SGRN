@@ -555,7 +555,87 @@ values
   ('jsonl', 'application/json', false, 'JSONL Data File',    true),
   
   -- images (webp was missing)
-  ('webp', 'image/webp',       true,  'WebP Image',          true)
+  ('webp', 'image/webp',       true,  'WebP Image',          true),
+  -- video (extended)
+  ('mpeg', 'video/mpeg',       true,  'MPEG Video',          true),
+  ('mpg',  'video/mpeg',       true,  'MPEG Video',          true),
+  ('flv',  'video/x-flv',      true,  'Flash Video',         true),
+  ('3gp',  'video/3gpp',       true,  '3GPP Video',          true),
+  ('mts',  'video/mp2t',       true,  'MPEG Transport Stream', true),
+  -- audio (extended)
+  ('mid',  'audio/midi',       true,  'MIDI Audio',          true),
+  ('midi', 'audio/midi',       true,  'MIDI Audio',          true),
+  ('aiff', 'audio/aiff',       true,  'AIFF Audio',          true),
+  ('mka',  'audio/x-matroska', true,  'Matroska Audio',      true),
+  -- images (extended)
+  ('heic', 'image/heic',            true,  'HEIC Image',        true),
+  ('heif', 'image/heif',            true,  'HEIF Image',        true),
+  ('avif', 'image/avif',            true,  'AVIF Image',        true),
+  ('psd',  'image/vnd.adobe.photoshop', true, 'Photoshop Document', true),
+  ('tif',  'image/tiff',            true,  'TIFF Image',        true),
+  ('dng',  'image/x-adobe-dng',     true,  'Digital Negative',  true),
+  ('cr2',  'image/x-canon-cr2',     true,  'Canon RAW Image',   true),
+  ('arw',  'image/x-sony-arw',      true,  'Sony RAW Image',    true),
+  -- documents / mail (extended)
+  ('epub', 'application/epub+zip',  true,  'EPUB eBook',        true),
+  ('mobi', 'application/x-mobipocket-ebook', true, 'Mobipocket eBook', true),
+  ('djvu', 'image/vnd.djvu',        true,  'DjVu Document',     true),
+  ('msg',  'application/vnd.ms-outlook', true, 'Outlook Message', true),
+  ('eml',  'message/rfc822',        false, 'Email Message',     true),
+  ('ics',  'text/calendar',         false, 'Calendar File',     true),
+  ('vcf',  'text/vcard',            false, 'Contact Card',      true),
+  -- data (extended)
+  ('avro',    'application/avro',                true,  'Avro Data File',       true),
+  ('orc',     'application/x-orc',               true,  'ORC Data File',        true),
+  ('arrow',   'application/vnd.apache.arrow.file', true, 'Arrow Data File',     true),
+  ('feather', 'application/vnd.apache.arrow.file', true, 'Feather Data File',   true),
+  ('sqlite',  'application/vnd.sqlite3',         true,  'SQLite Database',      true),
+  ('bak',     'application/octet-stream',        false, 'Backup File',          true),
+  -- archives / disk images (extended)
+  ('xz',  'application/x-xz',                 true, 'XZ Archive',          true),
+  ('bz2', 'application/x-bzip2',              true, 'Bzip2 Archive',       true),
+  ('iso', 'application/x-iso9660-image',      true, 'ISO Disk Image',      true),
+  ('dmg', 'application/x-apple-diskimage',    true, 'Apple Disk Image',    true),
+  ('img', 'application/octet-stream',         true, 'Raw Disk Image',      true),
+  ('cab', 'application/vnd.ms-cab-compressed', true, 'Cabinet Archive',    true),
+  -- code (extended)
+  ('cs',    'text/x-csharp', false, 'C# Source Code',   true),
+  ('php',   'text/x-php',    false, 'PHP Source Code',  true),
+  ('rb',    'text/x-ruby',   false, 'Ruby Source Code', true),
+  ('swift', 'text/x-swift',  false, 'Swift Source Code', true),
+  ('kt',    'text/x-kotlin', false, 'Kotlin Source Code', true),
+  ('scala', 'text/x-scala',  false, 'Scala Source Code', true),
+  ('lua',   'text/x-lua',    false, 'Lua Source Code',  true),
+  ('pl',    'text/x-perl',   false, 'Perl Source Code', true),
+  ('scss',  'text/x-scss',   false, 'SCSS Stylesheet',  true),
+  ('less',  'text/x-less',   false, 'LESS Stylesheet',  true),
+  ('vue',   'text/x-vue',    false, 'Vue Component',    true),
+  ('wasm',  'application/wasm', true, 'WebAssembly Module', true),
+  ('map',   'application/json', false, 'Source Map',     true),
+  -- fonts
+  ('ttf',   'font/ttf',      true,  'TrueType Font',     true),
+  ('otf',   'font/otf',      true,  'OpenType Font',     true),
+  ('woff',  'font/woff',     true,  'WOFF Font',         true),
+  ('woff2', 'font/woff2',    true,  'WOFF2 Font',        true),
+  -- 3D / CAD / BIM (extended)
+  ('glb',  'model/gltf-binary', true,  'glTF Binary Model', true),
+  ('gltf', 'model/gltf+json',   true,  'glTF Model',        true),
+  ('jt',   'model/jt',          true,  'JT Model',          true),
+  ('3mf',  'model/3mf',         true,  '3MF Model',         true),
+  ('ply',  'model/ply',         true,  'PLY Model',         true),
+  ('ifc',  'application/x-step', false, 'IFC BIM Model',    true),
+  -- GIS
+  ('shp',     'application/x-shapefile', true,  'Shapefile',       true),
+  ('geojson', 'application/geo+json',    false, 'GeoJSON Data',    true),
+  ('kml',     'application/vnd.google-earth.kml+xml', false, 'KML Map Data', true),
+  ('gpx',     'application/gpx+xml',     false, 'GPX Track Data',  true),
+  -- subtitles
+  ('srt', 'application/x-subrip', false, 'SubRip Subtitles', true),
+  ('vtt', 'text/vtt',             false, 'WebVTT Subtitles', true),
+  -- certificates (nginx/TLS material used by this stack)
+  ('pem', 'application/x-pem-file',      false, 'PEM Certificate',     true),
+  ('crt', 'application/x-x509-ca-cert',  false, 'X.509 Certificate',   true),
+  ('cer', 'application/x-x509-ca-cert',  false, 'X.509 Certificate',   true)
 on conflict (extension) do nothing;
 
 -- 5. initial admin user

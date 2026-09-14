@@ -112,6 +112,9 @@ public:
 
     drogon::Task<BackendResult<void>> abortMultipartUpload(std::string t_bucket, std::string t_key, std::string t_upload_id);
 
+    drogon::Task<BackendResult<void>> uploadFileMultipart(
+        std::string t_bucket, std::string t_key, std::string t_content_type, std::filesystem::path t_file_path, size_t t_part_size_bytes);
+
     drogon::Task<BackendResult<Json::Value>> listParts(
         std::string t_bucket, std::string t_key, std::string t_upload_id, uint32_t t_max_parts = 1000);
 

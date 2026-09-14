@@ -13,6 +13,7 @@
 #include <sgrn/utils/compression.hpp>
 #include <sgrn/utils/hashing.hpp>
 #include <sgrn/utils/mime.hpp>
+#include <mutex>
 #include <orm/models/storage/Formats.h>
 #include <orm/models/storage/Objects.h>
 
@@ -39,44 +40,91 @@ using namespace sgrn::datastore::core;
 // StorageConfig Implementation
 // ============================================================================
 
-StorageConfig StorageConfig::loadFromConfig() {
+StorageConfig StorageConfig::fromS3Json(const Json::Value& t_s3) {
     StorageConfig cfg;
+    const Json::Value& storage_cfg = t_s3;
+    if (!storage_cfg.isObject()) {
+        return cfg;
+    }
+    if (storage_cfg.isMember("default_bucket") && storage_cfg["default_bucket"].isString()) {
+        cfg.default_bucket = storage_cfg["default_bucket"].asString();
+    }
+    if (storage_cfg.isMember("threshold_compress_ram_mb")) {
+        cfg.threshold_compress_ram_mb = storage_cfg["threshold_compress_ram_mb"].asUInt64();
+    }
+    if (storage_cfg.isMember("max_file_size_mb")) {
+        cfg.max_file_size_mb = storage_cfg["max_file_size_mb"].asUInt64();
+    }
+    if (storage_cfg.isMember("compression_level")) {
+        cfg.compression_level = static_cast<uint8_t>(storage_cfg["compression_level"].asUInt());
+    }
+    if (storage_cfg.isMember("compression_size_threshold_kb")) {
+        cfg.compression_size_threshold_kb = storage_cfg["compression_size_threshold_kb"].asUInt64();
+    }
+    if (storage_cfg.isMember("chunking_threshold_mb")) {
+        cfg.chunking_threshold_mb = storage_cfg["chunking_threshold_mb"].asUInt64();
+    }
+    if (storage_cfg.isMember("chunk_part_size_mb")) {
+        cfg.chunk_part_size_mb = storage_cfg["chunk_part_size_mb"].asUInt64();
+    }
+    // Validate against S3/MinIO's hard minimum instead of failing at upload time.
+    if (cfg.chunk_part_size_mb < defaults::kMinPartSizeMb) {
+        WARN_LOG(
+            "s3.chunk_part_size_mb ({} MB) is below the {} MB S3 minimum — clamping.", cfg.chunk_part_size_mb, defaults::kMinPartSizeMb);
+        cfg.chunk_part_size_mb = defaults::kMinPartSizeMb;
+    }
+    if (storage_cfg.isMember("allowed_extensions") && storage_cfg["allowed_extensions"].isArray()) {
+        cfg.allowed_extensions.clear();
+        for (const auto& ext : storage_cfg["allowed_extensions"]) {
+            cfg.allowed_extensions.insert(ext.asString());
+        }
+    }
+    if (storage_cfg.isMember("prohibited_extensions") && storage_cfg["prohibited_extensions"].isArray()) {
+        cfg.prohibited_extensions.clear();
+        for (const auto& ext : storage_cfg["prohibited_extensions"]) {
+            cfg.prohibited_extensions.insert(ext.asString());
+        }
+    }
+    if (cfg.chunking_threshold_mb >= cfg.max_file_size_mb) {
+        WARN_LOG("s3.chunking_threshold_mb ({} MB) is at/above max_file_size_mb ({} MB) — multipart is unreachable.",
+            cfg.chunking_threshold_mb, cfg.max_file_size_mb);
+    }
+    INFO_LOG("Loaded storage config: bucket={}, compress_ram={}MB, max_size={}MB, compression_level={}, allowed_exts={}, "
+             "chunking_threshold={}MB, chunk_part_size={}MB",
+        cfg.default_bucket, cfg.threshold_compress_ram_mb, cfg.max_file_size_mb, static_cast<int>(cfg.compression_level),
+        cfg.allowed_extensions.size(), cfg.chunking_threshold_mb, cfg.chunk_part_size_mb);
+    return cfg;
+}
+
+StorageConfig StorageConfig::loadFromConfig() {
     try {
         const Json::Value& custom_config = drogon::app().getCustomConfig();
         if (custom_config.isMember("s3")) {
-            const Json::Value& storage_cfg = custom_config["s3"];
-            if (storage_cfg.isMember("threshold_compress_ram_mb")) {
-                cfg.threshold_compress_ram_mb = storage_cfg["threshold_compress_ram_mb"].asUInt64();
-            }
-            if (storage_cfg.isMember("max_file_size_mb")) {
-                cfg.max_file_size_mb = storage_cfg["max_file_size_mb"].asUInt64();
-            }
-            if (storage_cfg.isMember("compression_level")) {
-                cfg.compression_level = static_cast<uint8_t>(storage_cfg["compression_level"].asUInt());
-            }
-            if (storage_cfg.isMember("compression_size_threshold_kb")) {
-                cfg.compression_size_threshold_kb = storage_cfg["compression_size_threshold_kb"].asUInt64();
-            }
-            if (storage_cfg.isMember("allowed_extensions") && storage_cfg["allowed_extensions"].isArray()) {
-                cfg.allowed_extensions.clear();
-                for (const auto& ext : storage_cfg["allowed_extensions"]) {
-                    cfg.allowed_extensions.insert(ext.asString());
-                }
-            }
-            if (storage_cfg.isMember("prohibited_extensions") && storage_cfg["prohibited_extensions"].isArray()) {
-                cfg.prohibited_extensions.clear();
-                for (const auto& ext : storage_cfg["prohibited_extensions"]) {
-                    cfg.prohibited_extensions.insert(ext.asString());
-                }
-            }
-            INFO_LOG("Loaded storage config: compress_ram={}MB, max_size={}MB, compression_level={}, allowed_exts={}",
-                cfg.threshold_compress_ram_mb_, cfg.max_file_size_mb_, static_cast<int>(cfg.compression_level_),
-                cfg.allowed_extensions.size());
+            return fromS3Json(custom_config["s3"]);
         }
     } catch (const std::exception& ex) {
         WARN_LOG("Failed to load config, using defaults: {}", ex.what());
     }
-    return cfg;
+    return StorageConfig{};
+}
+
+// Process-wide live config: mutex-guarded value, copied out per read.
+// Copies are cheap (a few scalars + two tiny sets); writers are rare
+// (boot + admin saves), so a plain mutex is the right tool.
+namespace
+{
+std::mutex g_storage_config_mutex;
+StorageConfig g_storage_config;
+} // namespace
+
+void publishStorageConfig(StorageConfig t_cfg) {
+    std::lock_guard lock(g_storage_config_mutex);
+    g_storage_config = std::move(t_cfg);
+}
+
+StorageConfig currentStorageConfig() {
+    std::lock_guard lock(g_storage_config_mutex);
+    return g_storage_config;
 }
 
 // ============================================================================
@@ -84,13 +132,7 @@ StorageConfig StorageConfig::loadFromConfig() {
 // ============================================================================
 
 StorageService::StorageService() {
-    config_ = StorageConfig::loadFromConfig();
-    Json::Value config_app = drogon::app().getCustomConfig();
-    if (config_app.isMember("s3") && config_app["s3"].isMember("default_bucket")) {
-        default_bucket_ = config_app["s3"]["default_bucket"].asString();
-    } else {
-        default_bucket_ = std::string("sgrn-uploads");
-    }
+    publishStorageConfig(StorageConfig::loadFromConfig());
 }
 
 BackendResult<plugins::aws::S3Client*> StorageService::S3Client() const {
@@ -99,10 +141,6 @@ BackendResult<plugins::aws::S3Client*> StorageService::S3Client() const {
 
 BackendResult<drogon::orm::DbClientPtr> StorageService::getDbClient() const {
     return drogon::app().getDbClient();
-}
-
-const StorageConfig& StorageService::getConfig() {
-    return config_;
 }
 
 StorageScope StorageService::parseScope(const std::string& t_scope_str) {
@@ -157,7 +195,7 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(Json::Value t_se
         co_return sgrn::createJsonResponse(std::move(key_res));
     }
 
-    BackendResult<std::string> data_res = co_await downloadFile(default_bucket_, key_res.value());
+    BackendResult<std::string> data_res = co_await downloadFile(currentStorageConfig().default_bucket, key_res.value());
     if (data_res.hasError()) {
         co_return sgrn::createJsonResponse(std::move(data_res));
     }
@@ -209,7 +247,7 @@ Task<HttpResponsePtr> StorageService::handleUploadFileRequest(
         .user_id = scope_res->is_automated_service ? std::nullopt : std::optional<int32_t>(scope_res->owner_id),
         .automated_service_id = scope_res->is_automated_service ? std::optional<int32_t>(scope_res->owner_id) : std::nullopt,
         .organisation = t_session["user"].isMember("organisation") ? t_session["user"]["organisation"].asString() : "",
-        .bucket = default_bucket_};
+        .bucket = currentStorageConfig().default_bucket};
 
     BackendResult<Json::Value> r = co_await uploadFile(std::move(t_context), t_http_file);
     if (r.hasError()) {
@@ -219,10 +257,10 @@ Task<HttpResponsePtr> StorageService::handleUploadFileRequest(
 }
 
 Task<HttpResponsePtr> StorageService::handleGetConstraints() {
-    const auto& cfg = getConfig();
+    const StorageConfig cfg = currentStorageConfig();
     Json::Value constraints;
     constraints["max_file_size_mb"] = Json::Value::UInt64(cfg.max_file_size_mb);
-    constraints["max_file_size_bytes"] = Json::Value::UInt64(config_.maxFileSizeBytes());
+    constraints["max_file_size_bytes"] = Json::Value::UInt64(cfg.maxFileSizeBytes());
     co_return HttpResponse::newHttpJsonResponse(std::move(constraints));
 }
 
@@ -502,7 +540,6 @@ Task<HttpResponsePtr> StorageService::handleUploadFilesBatchRequest(
 
 Task<BackendResult<Json::Value>> StorageService::uploadFile(UploadContext t_context, drogon::HttpFile t_file) {
     try {
-        const auto& cfg = getConfig();
         BackendResult<drogon::orm::DbClientPtr> db_res = getDbClient();
         if (db_res.hasError()) {
             co_return db_res.error();
@@ -514,9 +551,16 @@ Task<BackendResult<Json::Value>> StorageService::uploadFile(UploadContext t_cont
             co_return validation.error();
         }
 
+        // Formats-registry veto (admin-toggleable per extension).
+        BackendResult<void> format_ok = co_await enforceFormatAllowed(sp_db_client, t_context.original_filename);
+        if (format_ok.hasError()) {
+            co_return format_ok.error();
+        }
+
         std::string t_mime_type = helpers::inferMimeType(t_file.getFileName());
-        UploadThresholds t_thresholds{.compress_ram_bytes = config_.thresholdCompressRamBytes(),
-            .compression_size_threshold = config_.compression_size_threshold_kb * 1024};
+        const StorageConfig live_cfg = currentStorageConfig();
+        UploadThresholds t_thresholds{.compress_ram_bytes = live_cfg.thresholdCompressRamBytes(),
+            .compression_size_threshold = live_cfg.compression_size_threshold_kb * 1024};
 
         FileHash t_original_hash;
         bool process_in_memory = t_thresholds.shouldProcessInMemory(t_file.fileLength());
@@ -547,10 +591,10 @@ Task<BackendResult<Json::Value>> StorageService::uploadFile(UploadContext t_cont
 
         if (process_in_memory) {
             upload_res = co_await executeInMemoryUpload(sp_transaction, t_context, t_file, t_mime_type, t_thresholds,
-                config_.compression_level, std::move(file_data_copy), t_original_hash);
+                live_cfg.compression_level, std::move(file_data_copy), t_original_hash);
         } else {
             upload_res = co_await executeStreamingUpload(
-                sp_transaction, t_context, t_file, t_mime_type, t_thresholds, config_.compression_level, t_original_hash);
+                sp_transaction, t_context, t_file, t_mime_type, t_thresholds, live_cfg.compression_level, t_original_hash);
         }
         if (upload_res.hasError()) {
             co_return upload_res.error(); // transaction destructs here → rollback
@@ -567,6 +611,11 @@ Task<BackendResult<Json::Value>> StorageService::uploadFile(UploadContext t_cont
             response["object_id"] = Json::Int64(*t_context.object_id);
         response["name"] = t_context.original_filename;
         response["key"] = t_context.identity.hash.key;
+        // Debuggability: which S3 path the bytes took, and both sizes — the
+        // threshold decision uses the original size, the wire used final.
+        response["upload_mode"] = t_context.upload_mode;
+        response["original_size_bytes"] = Json::UInt64(t_context.identity.original_size);
+        response["final_size_bytes"] = Json::UInt64(t_context.identity.final_size);
         co_return BackendResult<Json::Value>(std::move(response));
     } catch (const std::exception& ex) {
         co_return BackendError{"Runtime", std::format("Upload failed: {}", ex.what())};
@@ -592,14 +641,14 @@ Task<bool> StorageService::objectExists(std::string t_bucket, std::string t_key)
 }
 
 BackendResult<bool> StorageService::validateFileSize(size_t t_size) {
-    if (t_size > getConfig().maxFileSizeBytes())
+    if (t_size > currentStorageConfig().maxFileSizeBytes())
         return BackendError{"Filesystem", "File too large"};
     return true;
 }
 
 BackendResult<bool> StorageService::validateExtension(std::string_view t_filename) {
     // SEC: Use lowercase comparison to prevent bypass via ".PHP", ".JSP", etc.
-    if (!getConfig().isExtensionAllowed(helpers::extractExtensionLower(t_filename)))
+    if (!currentStorageConfig().isExtensionAllowed(helpers::extractExtensionLower(t_filename)))
         return BackendError{"Filesystem", "Extension not allowed"};
     return true;
 }
@@ -614,6 +663,22 @@ Task<BackendResult<bool>> StorageService::validateUpload(const UploadContext& t_
         co_return r2;
     }
     co_return true;
+}
+
+Task<BackendResult<void>> StorageService::enforceFormatAllowed(drogon::orm::DbClientPtr tsp_db_client, std::string_view t_filename) {
+    try {
+        const std::string ext = helpers::extractExtensionLower(t_filename);
+        if (ext.empty()) {
+            co_return {};
+        }
+        drogon::orm::Result res = co_await tsp_db_client->execSqlCoro("SELECT is_allowed FROM storage.formats WHERE extension = $1", ext);
+        if (!res.empty() && !res[0]["is_allowed"].isNull() && res[0]["is_allowed"].as<std::string>() != "t") {
+            co_return BackendError{"Filesystem", "Extension not allowed"};
+        }
+        co_return {};
+    } catch (const std::exception& ex) {
+        co_return BackendError{"Database", std::format("Format check failed: {}", ex.what())};
+    }
 }
 
 Task<BackendResult<std::pair<FileIdentity, std::string>>> StorageService::processInMemory(const drogon::HttpFile& t_http_file,
@@ -726,6 +791,26 @@ Task<BackendResult<void>> StorageService::executeInMemoryUpload(drogon::orm::DbC
     if (s3_res.hasError()) {
         co_return s3_res.error();
     }
+
+    // Same threshold as the streaming path: when the admin lowers it to at or
+    // below the RAM threshold (e.g. to debug multipart with small files),
+    // in-memory uploads chunk too instead of silently staying single-PUT.
+    // Spill to a temp file first — the bytes are already fully in RAM here,
+    // so this adds no meaningful memory cost.
+    // NOTE: the threshold compares ORIGINAL (pre-compression) sizes — the
+    // number the admin sees — not wire bytes. Same basis as max_file_size.
+    const StorageConfig live_cfg = currentStorageConfig();
+    if (t_context.identity.original_size >= live_cfg.chunkingThresholdBytes()) {
+        BackendResult<TempFileGuard> spill_res = helpers::saveToTempFile(final_data);
+        if (spill_res.hasError()) {
+            co_return spill_res.error();
+        }
+        TempFileGuard spill_guard = std::move(*spill_res);
+        t_context.upload_mode = "multipart";
+        co_return co_await s3_res.value()->uploadFileMultipart(
+            t_context.bucket, t_context.identity.hash.key, t_context.identity.mime_type, spill_guard.path, live_cfg.chunkPartSizeBytes());
+    }
+    t_context.upload_mode = "single";
     co_return co_await s3_res.value()->uploadFromMemory(
         t_context.bucket, t_context.identity.hash.key, std::move(final_data), t_context.identity.mime_type);
 }
@@ -756,6 +841,21 @@ Task<BackendResult<void>> StorageService::executeStreamingUpload(drogon::orm::Db
     if (s3_res.hasError()) {
         co_return std::move(s3_res).error();
     }
+
+    // Large files go out as real multipart uploads with
+    // bounded memory (~one part in RAM); everything else keeps single PUT.
+    // NOTE: compared against the ORIGINAL size (what the admin uploaded),
+    // not the post-compression wire size — same basis as max_file_size, so
+    // the threshold is predictable regardless of compression ratio.
+    // Snapshot fresh here (not held across the awaits above) so a dashboard
+    // config save mid-upload takes effect on the next upload, never mid-way.
+    const StorageConfig live_cfg = currentStorageConfig();
+    if (t_context.identity.original_size >= live_cfg.chunkingThresholdBytes()) {
+        t_context.upload_mode = "multipart";
+        co_return co_await s3_res.value()->uploadFileMultipart(
+            t_context.bucket, t_context.identity.hash.key, t_context.identity.mime_type, upload_path, live_cfg.chunkPartSizeBytes());
+    }
+    t_context.upload_mode = "single";
     co_return co_await s3_res.value()->uploadFile(t_context.bucket, t_context.identity.hash.key, upload_path.string());
 }
 

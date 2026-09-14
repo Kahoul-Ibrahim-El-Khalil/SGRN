@@ -24,6 +24,22 @@ inline std::string getConfigPath() {
     return expandUserPath(user_sgrn_config_json);
 }
 
+// The file the running process actually loaded (argv[1] wins over the search
+// order above). The admin system-config endpoint must read/write THIS file —
+// resolving via getConfigPath() again at request time can address a different
+// file when the service was started with an explicit path, making dashboard
+// saves silently no-op. Recorded by configDrogonApp(); empty when the app
+// was configured by other means (then getConfigPath() is the fallback).
+inline std::string& loadedConfigPathStore() {
+    static std::string path;
+    return path;
+}
+
+inline std::string currentConfigPath() {
+    const std::string& loaded = loadedConfigPathStore();
+    return loaded.empty() ? getConfigPath() : loaded;
+}
+
 inline ::sgrn::Result<void, std::string> configDrogonApp(int t_argc, char** tp_argv) {
     std::filesystem::path config_file;
     if (t_argc > 1) {
@@ -31,6 +47,7 @@ inline ::sgrn::Result<void, std::string> configDrogonApp(int t_argc, char** tp_a
     } else {
         config_file = std::filesystem::path(getConfigPath());
     }
+    loadedConfigPathStore() = config_file.string();
     if (!std::filesystem::exists(config_file)) {
         return "Config file not found: " + config_file.string();
     }

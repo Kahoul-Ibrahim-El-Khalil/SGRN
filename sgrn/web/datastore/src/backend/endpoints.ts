@@ -9,6 +9,12 @@ export const AdminBackendApiEndpoints = {
     STORAGE_ORPHANS: "/api/v1/admin/storage/orphans",
     STORAGE_PURGE_ORPHANS: "/api/v1/admin/storage/orphans/purge",
     STORAGE_SEARCH: "/api/v1/admin/storage/search",
+    SYSTEM_CONFIG: "/api/v1/admin/system/config",
+    STORAGE_FORMATS: "/api/v1/admin/storage/formats",
+    QUOTAS: "/api/v1/admin/quotas",
+    PERMISSIONS: "/api/v1/admin/permissions",
+    ANALYTICS_OVERVIEW: "/api/v1/admin/analytics/overview",
+    ANALYTICS_BREAKDOWN: "/api/v1/admin/analytics/breakdown",
 } as const;
 export const SessionBackendApiEndpoints = {
     SIGN_IN: "/api/v1/auth/user/signin",

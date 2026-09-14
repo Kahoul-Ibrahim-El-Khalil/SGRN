@@ -72,7 +72,7 @@
       "cookie_key": "your-secret-key-here-minimum-32-chars-long!!",
       "max_age": 3600
     },
-    "client_max_body_size": 104857600,
+    "client_max_body_size": 2147483648,
     "max_connections": 100,
     "max_memory": 1073741824
   },
@@ -108,12 +108,14 @@
       "worker_threads": 2,
       "threshold_compress_ram_mb": 1,
       "threshold_presigned_mb": 25,
-      "max_file_size_mb": 100,
+      "max_file_size_mb": 2048,
       "default_expiration_seconds": 900,
       "compression_size_threshold_kb": 1,
       "compression_level": 10,
       "allowed_extensions": ["*"],
-      "prohibited_extensions": ["exe", "dll", "so", "sh", "bat"]
+      "prohibited_extensions": ["exe", "dll", "so", "sh", "bat"],
+      "chunking_threshold_mb": 64,
+      "chunk_part_size_mb": 12
     }
   }
 }

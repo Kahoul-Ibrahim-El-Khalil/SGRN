@@ -25,6 +25,9 @@ constexpr uint8_t kCompressionLevel = 3;
 constexpr size_t kBytesPerMb = 1024ULL * 1024ULL;
 constexpr size_t kBytesPerKb = 1024ULL;
 constexpr size_t kMinCompressSize = 1;
+constexpr size_t kChunkingThresholdMb = 64;
+constexpr size_t kChunkPartSizeMb = 12;
+constexpr size_t kMinPartSizeMb = 5; // S3/MinIO hard minimum, all parts but the last
 } // namespace defaults
 
 // ============================================================================
@@ -115,6 +118,10 @@ struct UploadContext {
 
     std::string bucket = "";
     FileIdentity identity = {};
+
+    // Set by the upload strategies: "single" or "multipart". Returned in the
+    // upload response so admins can verify which S3 path a file took.
+    std::string upload_mode = "single";
 
     std::optional<int64_t> directory_id = std::nullopt;
     std::optional<int64_t> object_id = std::nullopt;

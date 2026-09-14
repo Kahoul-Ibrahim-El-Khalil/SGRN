@@ -32,6 +32,11 @@ if(SGRN_BUILD_TESTS)
     add_executable(rate_limit_test tests/rate_limit_test.cpp)
     target_link_libraries(rate_limit_test PRIVATE sgrn_datastore_lib)
     add_test(NAME rate_limit_test COMMAND rate_limit_test)
+    # System-config helper tests (schema/sanitize/validate+merge): pure Json
+    # logic, no Drogon app singleton, no filesystem writes.
+    add_executable(system_config_test tests/system_config_test.cpp)
+    target_link_libraries(system_config_test PRIVATE sgrn_datastore_lib)
+    add_test(NAME system_config_test COMMAND system_config_test)
 endif()
 
 # ==================== Summary ====================
