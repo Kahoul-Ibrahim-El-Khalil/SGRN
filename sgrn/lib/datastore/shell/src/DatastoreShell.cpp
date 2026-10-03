@@ -240,10 +240,11 @@ std::vector<std::string> DatastoreShell::generateCompletions(const std::string& 
     auto words = splitWords(before);
 
     if (words.empty()) {
-        static constexpr std::array<std::string_view, 37> builtins = {"connect", "login", "logout", "orgs", "domains", "statuses", "users",
+        static constexpr std::array<std::string_view, 46> builtins = {"connect", "login", "logout", "orgs", "domains", "statuses", "users",
             "useradd", "services", "service-add", "service-token-rotate", "passwd", "whoami", "stats", "info", "constraints", "ls", "cd",
-            "cat", "get", "put", "mkdir", "mv", "rm", "tree", "du", "session", "scope", "switch", "zip", "storage-overview",
-            "storage-orphans", "storage-purge", "storage-search", "help", "quit", "exit"};
+            "cat", "get", "put", "rput", "upload-status", "upload-abort", "mkdir", "mv", "rm", "tree", "du", "session", "sessions", "scope",
+            "switch", "zip", "storage-overview", "storage-orphans", "storage-purge", "storage-search", "webhooks", "webhook-add",
+            "webhook-del", "help", "quit", "exit"};
         for (const auto& cmd : builtins) {
             if (cmd.rfind(t_text, 0) == 0)
                 matches.insert(std::string(cmd));
@@ -1882,6 +1883,289 @@ int DatastoreShell::cmdZip(const std::vector<std::string>& t_args) {
     return 0;
 }
 
+// ── Resumable upload ─────────────────────────────────────────────────────────
+
+int DatastoreShell::cmdRput(const std::vector<std::string>& t_args) {
+    // Usage: rput <local> [remote] [--chunk-size BYTES]
+    if (t_args.empty()) {
+        fmt::print(stderr, "rput: missing local path (rput <local> [remote] [--chunk-size BYTES])\n");
+        return 1;
+    }
+    if (!client_) {
+        fmt::print(stderr, "rput: not connected\n");
+        return 1;
+    }
+
+    std::string local;
+    std::string remote;
+    int64_t chunk_size = 5 * 1024 * 1024; // 5 MB default
+    for (size_t i = 0; i < t_args.size(); ++i) {
+        const auto& a = t_args[i];
+        if ((a == "--chunk-size" || a == "-c") && i + 1 < t_args.size()) {
+            try {
+                chunk_size = std::stoll(t_args[++i]);
+            } catch (...) {
+                fmt::print(stderr, "rput: invalid chunk-size\n");
+                return 1;
+            }
+        } else if (local.empty()) {
+            local = expandLocalPath(a);
+        } else if (remote.empty()) {
+            remote = normalizePath(a);
+        }
+    }
+    if (local.empty()) {
+        fmt::print(stderr, "rput: missing local file\n");
+        return 1;
+    }
+    if (remote.empty())
+        remote = normalizePath(baseName(local));
+
+    // Resolve destination: if remote is an existing directory append filename
+    auto hit = resolve(remote);
+    if (hit && hit->is_dir)
+        remote = normalizePath(remote + "/" + baseName(local));
+
+    std::ifstream ifs(local, std::ios::binary | std::ios::ate);
+    if (!ifs) {
+        fmt::print(stderr, "rput: cannot open '{}'\n", local);
+        return 1;
+    }
+    const int64_t total_size = static_cast<int64_t>(ifs.tellg());
+    ifs.seekg(0);
+
+    // Determine MIME type from extension (best-effort)
+    std::string mime = "application/octet-stream";
+    const std::string ext = std::filesystem::path(local).extension().string();
+    if (ext == ".json")
+        mime = "application/json";
+    else if (ext == ".txt")
+        mime = "text/plain";
+    else if (ext == ".html" || ext == ".htm")
+        mime = "text/html";
+    else if (ext == ".png")
+        mime = "image/png";
+    else if (ext == ".jpg" || ext == ".jpeg")
+        mime = "image/jpeg";
+    else if (ext == ".pdf")
+        mime = "application/pdf";
+
+    auto sess_res = client_->initUploadSession(baseName(local), remote, total_size, chunk_size, mime);
+    if (sess_res.hasError()) {
+        fmt::print(stderr, "rput: init failed: {}\n", sess_res.error());
+        return 1;
+    }
+    const auto& sess = sess_res.value();
+    fmt::print("rput: session {} ({} chunks of {} bytes)\n", sess.upload_id, sess.total_chunks, humanBytes(sess.chunk_size));
+
+    std::vector<char> buf(static_cast<size_t>(chunk_size));
+    for (int32_t idx = 0; idx < sess.total_chunks; ++idx) {
+        ifs.read(buf.data(), static_cast<std::streamsize>(chunk_size));
+        const std::streamsize bytes_read = ifs.gcount();
+        if (bytes_read <= 0) {
+            fmt::print(stderr, "rput: short read at chunk {}\n", idx);
+            break;
+        }
+        auto chunk_res = client_->uploadChunk(sess.upload_id, idx, buf.data(), static_cast<size_t>(bytes_read));
+        if (chunk_res.hasError()) {
+            fmt::print(stderr, "rput: chunk {} failed: {}\n", idx, chunk_res.error());
+            fmt::print("rput: session {} left open — use 'upload-abort {}' to cancel.\n", sess.upload_id, sess.upload_id);
+            return 1;
+        }
+        // Inline progress bar (only when stdout is a tty)
+#ifndef _WIN32
+        if (isatty(STDOUT_FILENO)) {
+            const int pct = static_cast<int>((idx + 1) * 100 / sess.total_chunks);
+            const int filled = pct / 5;
+            std::string bar = std::string(static_cast<size_t>(filled), '#') + std::string(static_cast<size_t>(20 - filled), '-');
+            fmt::print("\r[{}] {}% ({}/{})  ", bar, pct, idx + 1, sess.total_chunks);
+            fflush(stdout);
+        }
+#endif
+    }
+#ifndef _WIN32
+    if (isatty(STDOUT_FILENO))
+        fmt::print("\n");
+#endif
+
+    auto done_res = client_->completeUploadSession(sess.upload_id);
+    if (done_res.hasError()) {
+        fmt::print(stderr, "rput: complete failed: {}\n", done_res.error());
+        return 1;
+    }
+    fmt::print(styleOk(), "rput: {} -> {} ({}): {}\n", local, remote, humanBytes(total_size), done_res.value());
+    return 0;
+}
+
+int DatastoreShell::cmdUploadStatus(const std::vector<std::string>& t_args) {
+    if (t_args.empty()) {
+        fmt::print(stderr, "upload-status: missing upload_id\n");
+        return 1;
+    }
+    if (!client_)
+        return 1;
+    auto r = client_->getUploadStatus(t_args[0]);
+    if (r.hasError()) {
+        fmt::print(stderr, "upload-status: {}\n", r.error());
+        return 1;
+    }
+    const auto& s = r.value();
+    fmt::print("id:       {}\n", s.upload_id);
+    fmt::print("file:     {}\n", s.filename);
+    fmt::print("target:   {}\n", s.target_path);
+    fmt::print("size:     {}\n", humanBytes(s.total_size));
+    fmt::print("chunks:   {}/{}\n", s.uploaded_chunks_count, s.total_chunks);
+    fmt::print("status:   {}\n", s.status);
+    if (!s.uploaded_chunk_indices.empty()) {
+        fmt::print("received: ");
+        for (size_t i = 0; i < s.uploaded_chunk_indices.size(); ++i) {
+            if (i)
+                fmt::print(",");
+            fmt::print("{}", s.uploaded_chunk_indices[i]);
+        }
+        fmt::print("\n");
+    }
+    return 0;
+}
+
+int DatastoreShell::cmdUploadAbort(const std::vector<std::string>& t_args) {
+    if (t_args.empty()) {
+        fmt::print(stderr, "upload-abort: missing upload_id\n");
+        return 1;
+    }
+    if (!client_)
+        return 1;
+    auto r = client_->abortUploadSession(t_args[0]);
+    if (r.hasError()) {
+        fmt::print(stderr, "upload-abort: {}\n", r.error());
+        return 1;
+    }
+    fmt::print("{}\n", r.value());
+    return 0;
+}
+
+// ── Live sessions & webhooks ─────────────────────────────────────────────────
+
+int DatastoreShell::cmdSessions() {
+    if (!client_)
+        return 1;
+    auto r = client_->listActiveSessionsJson();
+    if (r.hasError()) {
+        fmt::print(stderr, "sessions: {}\n", r.error());
+        return 1;
+    }
+    // Try to render as a table when response is a JSON array
+    Json::CharReaderBuilder builder;
+    std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+    Json::Value root;
+    std::string errs;
+    const std::string& raw = r.value();
+    if (reader->parse(raw.data(), raw.data() + raw.size(), &root, &errs) && root.isArray()) {
+        std::vector<std::vector<std::string>> rows;
+        for (const auto& s : root) {
+            rows.push_back({
+                s.get("user_id", "").asString(),
+                s.get("email", "").asString(),
+                s.get("domain", "").asString(),
+                s.get("auth_mode", "").asString(),
+                s.get("ip", s.get("remote_ip", "")).asString(),
+                s.get("created_at", s.get("logged_in_at", "")).asString(),
+            });
+        }
+        if (rows.empty()) {
+            fmt::print("(no active sessions)\n");
+        } else {
+            printTable({"USER ID", "EMAIL", "DOMAIN", "AUTH", "IP", "SINCE"}, std::move(rows), {0});
+        }
+    } else {
+        printJsonPretty(raw);
+    }
+    return 0;
+}
+
+int DatastoreShell::cmdWebhooks() {
+    if (!client_)
+        return 1;
+    auto r = client_->listWebhooksJson();
+    if (r.hasError()) {
+        fmt::print(stderr, "webhooks: {}\n", r.error());
+        return 1;
+    }
+    Json::CharReaderBuilder builder;
+    std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+    Json::Value root;
+    std::string errs;
+    const std::string& raw = r.value();
+    if (reader->parse(raw.data(), raw.data() + raw.size(), &root, &errs) && root.isArray()) {
+        std::vector<std::vector<std::string>> rows;
+        for (const auto& w : root) {
+            rows.push_back({
+                w.get("id", "").asString(),
+                w.get("url", "").asString(),
+                w.get("organisation", "").asString(),
+                w.get("is_active", false).asBool() ? "active" : "inactive",
+                w.get("created_at", "").asString(),
+            });
+        }
+        if (rows.empty()) {
+            fmt::print("(no webhooks registered)\n");
+        } else {
+            printTable({"ID", "URL", "ORG", "STATUS", "CREATED"}, std::move(rows), {0});
+        }
+    } else {
+        printJsonPretty(raw);
+    }
+    return 0;
+}
+
+int DatastoreShell::cmdWebhookAdd(const std::vector<std::string>& t_args) {
+    std::string url;
+    std::string secret;
+    for (size_t i = 0; i < t_args.size(); ++i) {
+        const auto& a = t_args[i];
+        if ((a == "--secret" || a == "-s") && i + 1 < t_args.size())
+            secret = t_args[++i];
+        else if (url.empty() && !a.empty() && a[0] != '-')
+            url = a;
+    }
+    if (url.empty()) {
+        fmt::print(stderr, "webhook-add: missing URL (webhook-add <URL> [--secret S])\n");
+        return 1;
+    }
+    if (!client_)
+        return 1;
+    auto r = client_->registerWebhookJson(url, secret);
+    if (r.hasError()) {
+        fmt::print(stderr, "webhook-add: {}\n", r.error());
+        return 1;
+    }
+    printJsonPretty(r.value());
+    return 0;
+}
+
+int DatastoreShell::cmdWebhookDel(const std::vector<std::string>& t_args) {
+    if (t_args.empty()) {
+        fmt::print(stderr, "webhook-del: missing webhook ID\n");
+        return 1;
+    }
+    int32_t id = 0;
+    try {
+        id = std::stoi(t_args[0]);
+    } catch (...) {
+        fmt::print(stderr, "webhook-del: ID must be an integer\n");
+        return 1;
+    }
+    if (!client_)
+        return 1;
+    auto r = client_->deleteWebhookJson(id);
+    if (r.hasError()) {
+        fmt::print(stderr, "webhook-del: {}\n", r.error());
+        return 1;
+    }
+    printJsonPretty(r.value());
+    return 0;
+}
+
 void DatastoreShell::printHelp() {
     fmt::print("datastore-shell — navigate the SGRN datastore API like a filesystem & AngelScript REPL.\n");
     fmt::print(styleHeader(), "\nUnix-style Commands:\n");
@@ -1922,6 +2206,13 @@ void DatastoreShell::printHelp() {
                "  storage-search [--bucket B] <HASH> | --prefix PREFIX\n"
                "                                               find object by content hash: DB refs + garage stat (admin)\n"
                "  zip <REMOTE-DIR> [LOCAL.zip]                       download a folder as zip\n"
+               "  rput <LOCAL> [REMOTE] [--chunk-size BYTES]         resumable chunked upload with progress bar\n"
+               "  upload-status <UPLOAD-ID>                          show resumable upload session status\n"
+               "  upload-abort <UPLOAD-ID>                           abort and cancel a resumable upload session\n"
+               "  sessions                                           list live authenticated sessions (admin)\n"
+               "  webhooks                                           list registered webhook endpoints (admin)\n"
+               "  webhook-add <URL> [--secret S]                     register a new webhook for session events (admin)\n"
+               "  webhook-del <ID>                                   remove a webhook by ID (admin)\n"
                "  scope [personal|users|automated-services|domain|auto]\n"
                "                                               show/switch namespace scope\n"
                "  switch scope [NAME]                              reset/switch namespace scope (empty = auto)\n"
@@ -1951,6 +2242,11 @@ void DatastoreShell::printHelp() {
                "  currentPath() -> string\n"
                "  sessionInfo()\n"
                "  isConnected() -> bool\n"
+               "  rput(localPath, remotePath, chunkSizeBytes) -> string   resumable upload\n"
+               "  sessions() -> string                                     live session JSON (admin)\n"
+               "  webhooks() -> string                                     webhook list JSON (admin)\n"
+               "  webhookAdd(url, secret) -> string                        register webhook (admin)\n"
+               "  webhookDel(id)                                           remove webhook by ID (admin)\n"
                "\n"
                "Script Execution: datastore-shell script.as [args...]\n"
                "Env: SGRN_DATASTORE_URL/TOKEN/SECRET/EMAIL/PASSWORD/SESSION_TOKEN\n");
@@ -1966,7 +2262,7 @@ int DatastoreShell::dispatch(const std::vector<std::string>& t_words) {
     if (t_words.empty())
         return 0;
 
-    static const std::array<CommandDispatchEntry, 41> kCommandTable = {{{"help", false,
+    static const std::array<CommandDispatchEntry, 48> kCommandTable = {{{"help", false,
                                                                             [](DatastoreShell* shell, const std::vector<std::string>&) {
                                                                                 shell->printHelp();
                                                                                 return 0;
@@ -2025,7 +2321,14 @@ int DatastoreShell::dispatch(const std::vector<std::string>& t_words) {
         {"storage-purge", true, [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdStoragePurge(args); }},
         {"storage-search", true, [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdStorageSearch(args); }},
         {"constraints", true, [](DatastoreShell* shell, const std::vector<std::string>&) { return shell->cmdInfo(); }},
-        {"zip", true, [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdZip(args); }}}};
+        {"zip", true, [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdZip(args); }},
+        {"rput", true, [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdRput(args); }},
+        {"upload-status", true, [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdUploadStatus(args); }},
+        {"upload-abort", true, [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdUploadAbort(args); }},
+        {"sessions", true, [](DatastoreShell* shell, const std::vector<std::string>&) { return shell->cmdSessions(); }},
+        {"webhooks", true, [](DatastoreShell* shell, const std::vector<std::string>&) { return shell->cmdWebhooks(); }},
+        {"webhook-add", true, [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdWebhookAdd(args); }},
+        {"webhook-del", true, [](DatastoreShell* shell, const std::vector<std::string>& args) { return shell->cmdWebhookDel(args); }}}};
 
     const std::string& cmd = t_words[0];
     for (const auto& entry : kCommandTable) {
@@ -2091,6 +2394,15 @@ void DatastoreShell::registerBindings() {
         "string pipe(const string &in, const string &in)", asMETHOD(DatastoreShell, as_pipe), asCALL_THISCALL_ASGLOBAL, this);
     engine->RegisterGlobalFunction(
         "string exec(const string &in, const string &in)", asMETHOD(DatastoreShell, as_exec), asCALL_THISCALL_ASGLOBAL, this);
+    // Resumable upload
+    engine->RegisterGlobalFunction(
+        "string rput(const string &in, const string &in, int64)", asMETHOD(DatastoreShell, as_rput), asCALL_THISCALL_ASGLOBAL, this);
+    // Admin: live sessions & webhooks
+    engine->RegisterGlobalFunction("string sessions()", asMETHOD(DatastoreShell, as_sessions), asCALL_THISCALL_ASGLOBAL, this);
+    engine->RegisterGlobalFunction("string webhooks()", asMETHOD(DatastoreShell, as_webhooks), asCALL_THISCALL_ASGLOBAL, this);
+    engine->RegisterGlobalFunction(
+        "string webhookAdd(const string &in, const string &in)", asMETHOD(DatastoreShell, as_webhookAdd), asCALL_THISCALL_ASGLOBAL, this);
+    engine->RegisterGlobalFunction("string webhookDel(int)", asMETHOD(DatastoreShell, as_webhookDel), asCALL_THISCALL_ASGLOBAL, this);
 }
 
 void DatastoreShell::as_connectService(const std::string& t_url, const std::string& t_token, const std::string& t_secret) {
@@ -2234,6 +2546,50 @@ std::string DatastoreShell::as_pipe(const std::string& t_input, const std::strin
 
 std::string DatastoreShell::as_exec(const std::string& t_shell_cmd, const std::string& t_input) {
     return pipeToProcess(t_input, t_shell_cmd);
+}
+
+// ── Resumable upload AS binding ──────────────────────────────────────────────
+
+std::string DatastoreShell::as_rput(const std::string& t_local, const std::string& t_remote, int64_t t_chunk_size) {
+    std::vector<std::string> args = {t_local};
+    if (!t_remote.empty())
+        args.push_back(t_remote);
+    if (t_chunk_size > 0) {
+        args.push_back("--chunk-size");
+        args.push_back(std::to_string(t_chunk_size));
+    }
+    const int rc = cmdRput(args);
+    return rc == 0 ? "ok" : "error";
+}
+
+// ── Admin AS bindings ────────────────────────────────────────────────────────
+
+std::string DatastoreShell::as_sessions() {
+    if (!client_)
+        return "error: not connected";
+    auto r = client_->listActiveSessionsJson();
+    return r.hasError() ? "error: " + r.error() : r.value();
+}
+
+std::string DatastoreShell::as_webhooks() {
+    if (!client_)
+        return "error: not connected";
+    auto r = client_->listWebhooksJson();
+    return r.hasError() ? "error: " + r.error() : r.value();
+}
+
+std::string DatastoreShell::as_webhookAdd(const std::string& t_url, const std::string& t_secret) {
+    if (!client_)
+        return "error: not connected";
+    auto r = client_->registerWebhookJson(t_url, t_secret);
+    return r.hasError() ? "error: " + r.error() : r.value();
+}
+
+std::string DatastoreShell::as_webhookDel(int32_t t_id) {
+    if (!client_)
+        return "error: not connected";
+    auto r = client_->deleteWebhookJson(t_id);
+    return r.hasError() ? "error: " + r.error() : r.value();
 }
 
 } // namespace sgrn::datastore::shell

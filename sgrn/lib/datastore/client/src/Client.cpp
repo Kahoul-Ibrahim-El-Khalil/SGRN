@@ -957,4 +957,182 @@ bool DatastoreClient::deleteDriveItem(int64_t t_id, DriveItemType t_type, Storag
     return !makeRequest("DELETE", endpoint).IsNull();
 }
 
+// ── Resumable upload session management ──────────────────────────────────────
+
+sgrn::Result<DatastoreClient::ResumableUploadSession, std::string> DatastoreClient::initUploadSession(const std::string& t_filename,
+    const std::string& t_target_path, int64_t t_total_size, int64_t t_chunk_size, const std::string& t_mime_type) {
+    rapidjson::Document body;
+    auto& alloc = body.GetAllocator();
+    body.SetObject();
+    body.AddMember("filename", rapidjson::Value(t_filename.c_str(), alloc), alloc);
+    body.AddMember("target_path", rapidjson::Value(t_target_path.c_str(), alloc), alloc);
+    body.AddMember("mime_type", rapidjson::Value(t_mime_type.c_str(), alloc), alloc);
+    body.AddMember("total_size", t_total_size, alloc);
+    body.AddMember("chunk_size", t_chunk_size, alloc);
+    auto doc = makeRequest("POST", "/api/v1/storage/upload/init", sgrn::utils::json::serializeCompact(body));
+    if (doc.IsNull())
+        return sgrn::Result<ResumableUploadSession, std::string>::Error("init upload session failed: empty response");
+    if (doc.HasMember("error"))
+        return sgrn::Result<ResumableUploadSession, std::string>::Error(
+            doc["error"].IsString() ? doc["error"].GetString() : "server error");
+    ResumableUploadSession s;
+    if (doc.HasMember("upload_id") && doc["upload_id"].IsString())
+        s.upload_id = doc["upload_id"].GetString();
+    if (doc.HasMember("chunk_size") && doc["chunk_size"].IsInt64())
+        s.chunk_size = doc["chunk_size"].GetInt64();
+    if (doc.HasMember("total_chunks") && doc["total_chunks"].IsInt())
+        s.total_chunks = doc["total_chunks"].GetInt();
+    if (doc.HasMember("status") && doc["status"].IsString())
+        s.status = doc["status"].GetString();
+    return s;
+}
+
+sgrn::Result<bool, std::string> DatastoreClient::uploadChunk(
+    const std::string& t_upload_id, int32_t t_chunk_index, const char* t_data, size_t t_size) {
+    if (!hasSessionToken())
+        signIn();
+
+    const std::string endpoint =
+        "/api/v1/storage/upload/chunk?upload_id=" + urlEncodeQueryValue(t_upload_id) + "&chunk_index=" + std::to_string(t_chunk_index);
+    httplib::Headers headers;
+    headers.emplace("Authorization", "Bearer " + getSessionToken());
+    std::string payload(t_data, t_size);
+
+    auto res = http_client_->Put(endpoint, headers, payload, "application/octet-stream");
+
+    if (res && res->status == 401 && config_.retry_on_unauthorized_) {
+        clearSessionToken();
+        if (signIn() && hasSessionToken()) {
+            headers.erase("Authorization");
+            headers.emplace("Authorization", "Bearer " + getSessionToken());
+            res = http_client_->Put(endpoint, headers, payload, "application/octet-stream");
+        }
+    }
+
+    if (!res)
+        return sgrn::Result<bool, std::string>::Error("chunk upload failed: no response");
+    if (res->status < 200 || res->status >= 300)
+        return sgrn::Result<bool, std::string>::Error(httpErrorText(res->status, res->body));
+    return true;
+}
+
+sgrn::Result<DatastoreClient::ResumableUploadStatus, std::string> DatastoreClient::getUploadStatus(const std::string& t_upload_id) {
+    auto doc = makeRequest("GET", "/api/v1/storage/upload/status?upload_id=" + urlEncodeQueryValue(t_upload_id));
+    if (doc.IsNull())
+        return sgrn::Result<ResumableUploadStatus, std::string>::Error("get upload status failed: empty response");
+    if (doc.HasMember("error"))
+        return sgrn::Result<ResumableUploadStatus, std::string>::Error(doc["error"].IsString() ? doc["error"].GetString() : "server error");
+    ResumableUploadStatus s;
+    if (doc.HasMember("upload_id") && doc["upload_id"].IsString())
+        s.upload_id = doc["upload_id"].GetString();
+    if (doc.HasMember("filename") && doc["filename"].IsString())
+        s.filename = doc["filename"].GetString();
+    if (doc.HasMember("target_path") && doc["target_path"].IsString())
+        s.target_path = doc["target_path"].GetString();
+    if (doc.HasMember("total_size") && doc["total_size"].IsInt64())
+        s.total_size = doc["total_size"].GetInt64();
+    if (doc.HasMember("chunk_size") && doc["chunk_size"].IsInt64())
+        s.chunk_size = doc["chunk_size"].GetInt64();
+    if (doc.HasMember("total_chunks") && doc["total_chunks"].IsInt())
+        s.total_chunks = doc["total_chunks"].GetInt();
+    if (doc.HasMember("uploaded_chunks_count") && doc["uploaded_chunks_count"].IsInt())
+        s.uploaded_chunks_count = doc["uploaded_chunks_count"].GetInt();
+    if (doc.HasMember("status") && doc["status"].IsString())
+        s.status = doc["status"].GetString();
+    if (doc.HasMember("uploaded_chunk_indices") && doc["uploaded_chunk_indices"].IsArray()) {
+        for (const auto& v : doc["uploaded_chunk_indices"].GetArray())
+            if (v.IsInt())
+                s.uploaded_chunk_indices.push_back(v.GetInt());
+    }
+    return s;
+}
+
+sgrn::Result<std::string, std::string> DatastoreClient::completeUploadSession(const std::string& t_upload_id) {
+    rapidjson::Document body;
+    auto& alloc = body.GetAllocator();
+    body.SetObject();
+    body.AddMember("upload_id", rapidjson::Value(t_upload_id.c_str(), alloc), alloc);
+    auto doc = makeRequest("POST", "/api/v1/storage/upload/complete", sgrn::utils::json::serializeCompact(body));
+    if (doc.IsNull())
+        return sgrn::Result<std::string, std::string>::Error("complete upload failed: empty response");
+    if (doc.HasMember("error"))
+        return sgrn::Result<std::string, std::string>::Error(doc["error"].IsString() ? doc["error"].GetString() : "server error");
+    if (doc.HasMember("message") && doc["message"].IsString())
+        return std::string(doc["message"].GetString());
+    return std::string("Upload completed");
+}
+
+sgrn::Result<std::string, std::string> DatastoreClient::abortUploadSession(const std::string& t_upload_id) {
+    rapidjson::Document body;
+    auto& alloc = body.GetAllocator();
+    body.SetObject();
+    body.AddMember("upload_id", rapidjson::Value(t_upload_id.c_str(), alloc), alloc);
+    auto doc = makeRequest("DELETE", "/api/v1/storage/upload/abort?upload_id=" + urlEncodeQueryValue(t_upload_id));
+    if (doc.IsNull())
+        return sgrn::Result<std::string, std::string>::Error("abort upload failed: empty response");
+    if (doc.HasMember("error"))
+        return sgrn::Result<std::string, std::string>::Error(doc["error"].IsString() ? doc["error"].GetString() : "server error");
+    if (doc.HasMember("message") && doc["message"].IsString())
+        return std::string(doc["message"].GetString());
+    return std::string("Upload aborted");
+}
+
+// ── Live session listing ─────────────────────────────────────────────────────
+
+sgrn::Result<std::string, std::string> DatastoreClient::listActiveSessionsJson() {
+    auto doc = makeRequest("GET", "/api/v1/admin/metaprobe/sessions");
+    if (doc.IsNull())
+        return sgrn::Result<std::string, std::string>::Error("list sessions failed: empty response");
+    return sgrn::utils::json::serializeCompact(doc);
+}
+
+// ── Webhook management ───────────────────────────────────────────────────────
+
+sgrn::Result<std::string, std::string> DatastoreClient::listWebhooksJson() {
+    auto doc = makeRequest("GET", "/api/v1/admin/webhooks");
+    if (doc.IsNull())
+        return sgrn::Result<std::string, std::string>::Error("list webhooks failed: empty response");
+    return sgrn::utils::json::serializeCompact(doc);
+}
+
+sgrn::Result<std::string, std::string> DatastoreClient::registerWebhookJson(const std::string& t_url, const std::string& t_secret) {
+    rapidjson::Document body;
+    auto& alloc = body.GetAllocator();
+    body.SetObject();
+    body.AddMember("url", rapidjson::Value(t_url.c_str(), alloc), alloc);
+    if (!t_secret.empty())
+        body.AddMember("secret", rapidjson::Value(t_secret.c_str(), alloc), alloc);
+    auto doc = makeRequest("POST", "/api/v1/admin/webhooks", sgrn::utils::json::serializeCompact(body));
+    if (doc.IsNull())
+        return sgrn::Result<std::string, std::string>::Error("register webhook failed: empty response");
+    if (doc.HasMember("error"))
+        return sgrn::Result<std::string, std::string>::Error(doc["error"].IsString() ? doc["error"].GetString() : "server error");
+    return sgrn::utils::json::serializeCompact(doc);
+}
+
+sgrn::Result<std::string, std::string> DatastoreClient::deleteWebhookJson(int32_t t_webhook_id) {
+    if (!hasSessionToken())
+        signIn();
+    const std::string endpoint = "/api/v1/admin/webhooks/" + std::to_string(t_webhook_id);
+    httplib::Headers headers;
+    headers.emplace("Authorization", "Bearer " + getSessionToken());
+    auto res = http_client_->Delete(endpoint, headers);
+    if (res && res->status == 401 && config_.retry_on_unauthorized_) {
+        clearSessionToken();
+        if (signIn() && hasSessionToken()) {
+            headers.erase("Authorization");
+            headers.emplace("Authorization", "Bearer " + getSessionToken());
+            res = http_client_->Delete(endpoint, headers);
+        }
+    }
+    if (!res)
+        return sgrn::Result<std::string, std::string>::Error("delete webhook failed: no response");
+    if (res->status < 200 || res->status >= 300)
+        return sgrn::Result<std::string, std::string>::Error(httpErrorText(res->status, res->body));
+    auto root_opt = sgrn::utils::json::deserialize(res->body);
+    if (!root_opt.hasError())
+        return sgrn::utils::json::serializeCompact(root_opt.value());
+    return std::string("Webhook deleted");
+}
+
 } // namespace sgrn::datastore::client

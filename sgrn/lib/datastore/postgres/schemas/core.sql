@@ -27,7 +27,8 @@ create table if not exists core.organisations (
   total_real_size bigint not null default 0,
   storage_limit bigint default null, -- null = unlimited
   total_entry_count bigint not null default 0,
-  entry_count_limit bigint default null
+  entry_count_limit bigint default null,
+  rate_limit_rpm int default null -- null = default system RPM
 );
 
 -- FIX #5: core.domains now holds the canonical operational-domain names
@@ -64,6 +65,10 @@ create table if not exists core.automated_services (
   storage_limit bigint default null,
   total_entry_count bigint not null default 0,
   entry_count_limit bigint default 10000,
+  rate_limit_rpm int default null,
+  max_file_size_mb bigint default null,
+  preferred_chunk_size_mb int default null,
+  rate_limit_upload_rpm int default null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   -- FIX #5: composite FK — domain must exist in core.domains for this organisation
@@ -93,6 +98,10 @@ create table if not exists core.users (
   storage_limit bigint default null,
   total_entry_count bigint not null default 0,
   entry_count_limit bigint default 10000,
+  rate_limit_rpm int default null,
+  max_file_size_mb bigint default null,
+  preferred_chunk_size_mb int default null,
+  rate_limit_upload_rpm int default null,
   created_at timestamptz not null default now(),
   -- FIX #5: composite FK — domain must exist in core.domains for this organisation
   constraint fk_users_domain foreign key (organisation, domain) references core.domains (organisation, name) on update cascade on delete set null
@@ -273,6 +282,8 @@ create table if not exists core.sessions (
   ),
   token uuid not null,
   ip inet not null,
+  session_data jsonb default null,
+  expires_at timestamptz default null,
   created_at timestamptz not null default now(),
   terminated_at timestamptz default null,
   termination_reason text default null check (
@@ -331,8 +342,63 @@ where
 
 -- automated_services (filter/write flags live in crud/manifest.json)
 -- token is a public identifier: readable, but never client-settable.
+
+-- Idempotent column additions for existing databases
+alter table core.users add column if not exists max_file_size_mb bigint default null;
+alter table core.users add column if not exists preferred_chunk_size_mb int default null;
+alter table core.users add column if not exists rate_limit_upload_rpm int default null;
+
+alter table core.automated_services add column if not exists max_file_size_mb bigint default null;
+alter table core.automated_services add column if not exists preferred_chunk_size_mb int default null;
+alter table core.automated_services add column if not exists rate_limit_upload_rpm int default null;
+
 -- secret hash is never exposed via CRUD: omitted from the field list entirely.
 
 -- user_domain_permissions (filter/write flags live in crud/manifest.json)
 
 -- sessions: never exposed as raw CRUD (tokens + IPs); the auth service owns it.
+
+-- ============================================================
+-- session_notify_queue  (cross-instance cache invalidation)
+-- ============================================================
+-- SessionStore instances poll this table every 500ms and delete processed rows.
+-- Rows are inserted automatically by the trigger below, or manually via
+-- SessionStore::pgNotify() (which calls pg_notify AND inserts here).
+-- This hybrid approach works with Drogon's connection pool (no raw PQnotifies).
+create table if not exists core.session_notify_queue (
+  id         bigserial primary key,
+  action     text not null check (action in ('revoke', 'refresh')),
+  token      text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_session_notify_queue_created
+  on core.session_notify_queue (created_at);
+
+-- Auto-clean rows older than 5 minutes (processed by all instances by then).
+-- Runs inline on each poll DELETE to avoid a separate maintenance job.
+
+-- Trigger: auto-enqueue a 'revoke' row whenever a session is terminated.
+-- This fires even for direct SQL updates (e.g. admin force-logout, expired
+-- cleanup jobs) that bypass the application's SessionStore::revokeSession path.
+create or replace function core.enqueue_session_revoke() returns trigger language plpgsql as $$
+begin
+  if new.terminated_at is not null and (old.terminated_at is null) then
+    insert into core.session_notify_queue (action, token)
+    values ('revoke', new.token::text);
+    perform pg_notify('sgrn_session_events',
+      json_build_object('action', 'revoke', 'token', new.token::text)::text);
+  end if;
+  return new;
+end;
+$$;
+
+create trigger trg_enqueue_session_revoke
+after update of terminated_at on core.sessions
+for each row execute function core.enqueue_session_revoke();
+
+-- Cleanup old processed notifications (idempotent, safe to run repeatedly)
+create or replace function core.purge_old_session_notifications() returns void language sql as $$
+  delete from core.session_notify_queue where created_at < now() - interval '5 minutes';
+$$;
+

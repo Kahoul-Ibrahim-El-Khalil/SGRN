@@ -12,7 +12,7 @@ namespace sgrn::datastore::filters
  *
  * Pipeline:
  *   1. Extract Bearer UUID Token
- *   2. Look up session in Redis
+ *   2. Look up session in SessionStore (RAM cache / PostgreSQL)
  *   3. Assert the session belongs to an automated service, not a human user
  *      — checked via session_json["user"]["automated_service_id"] presence
  *   4. Hydrate request attributes:

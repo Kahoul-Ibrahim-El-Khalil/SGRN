@@ -1,0 +1,100 @@
+// generated/{{ manifest.table.name }}.gen.hpp (auto-generated from manifest)
+#pragma once
+
+#include <sgrn/crud/CrudViewHandler.hpp>
+#include <array>
+#include <vector>
+
+namespace sgrn::crud::generated {
+
+class {{ class_name }} : public sgrn::crud::CrudViewHandler<{{ class_name }}> {
+public:
+    static inline const sgrn::crud::CrudPolicy kPolicy{
+        .read_scope = sgrn::crud::ReadScope::{{ read_scope_pascal }},
+        .write_scope = sgrn::crud::WriteScope::{{ write_scope_pascal }},
+        .delete_scope = sgrn::crud::DeleteScope::{{ delete_scope_pascal }},
+        .allowed_roles = { {% for role in manifest.policy.allowed_roles %}"{{ role }}"{% if not loop.last %}, {% endif %}{% endfor %} },
+        .soft_delete = {{ "true" if manifest.policy.soft_delete else "false" }},
+        .audit = {{ "true" if manifest.policy.audit else "false" }},
+        .versioning = {{ "true" if manifest.policy.versioning else "false" }},
+        .batch_enabled = {{ "true" if manifest.policy.batch_enabled else "false" }},
+        .max_limit = {{ manifest.policy.max_limit }},
+    };
+
+    static inline const sgrn::crud::CrudViewSpec kSpec{
+        .table_schema = "{{ manifest.table.schema }}",
+        .table_name = "{{ manifest.table.name }}",
+        .primary_key = "{{ manifest.table.primary_key }}",
+        .primary_key_type = "{{ manifest.table.primary_key_type }}",
+        .tenant_column = "{{ manifest.tenant.column }}",
+        .policy = kPolicy,
+        .fields = {
+            {% for name, field in manifest.fields.items() %}
+            sgrn::crud::CrudFieldSpec{
+                .name = "{{ name }}",
+                .type = sgrn::crud::FieldType::{{ field.type_pascal }},
+                .readable = {{ "true" if field.readable else "false" }},
+                .writable = {{ "true" if field.writable else "false" }},
+                .filterable = {{ "true" if field.filterable else "false" }},
+                .operators = {{ field.op_flags_str }},
+                .validation = sgrn::crud::FieldValidation{
+                    .format = "{{ field.validation.format if field.validation and field.validation.format else "" }}",
+                    .maxlen = {{ field.validation.maxlen if field.validation and field.validation.maxlen else 0 }},
+                    .unique = {{ "true" if field.validation and field.validation.unique else "false" }},
+                    .enum_values = { {% if field.validation and field.validation.enum %}{% for ev in field.validation.enum %}"{{ ev }}"{% if not loop.last %}, {% endif %}{% endfor %}{% endif %} }
+                },
+                .nullable = {{ "true" if field.nullable else "false" }},
+                .default_val = "{{ field.default if field.default is defined else "" }}",
+                .soft_delete_field = {{ "true" if field.soft_delete_field else "false" }},
+                .version_field = {{ "true" if field.version_field else "false" }}
+            }{% if not loop.last %},{% endif %}
+            {% endfor %}
+        },
+        .default_order = "{{ manifest.table.primary_key }} DESC",
+        .admin_overrides = {}
+    };
+
+    {{ class_name }}() : CrudViewHandler(this, kRoutes, kItemRoutes) {}
+
+    METHOD_LIST_BEGIN
+    {% if manifest.routes.list is defined %}
+    ADD_METHOD_TO({{ class_name }}::handleList, "{{ manifest.routes.list.path }}", drogon::Get{% for filter in manifest.routes.list.auth_filters %}, "{{ filter }}"{% endfor %});
+    {% endif %}
+    {% if manifest.routes.create is defined %}
+    ADD_METHOD_TO({{ class_name }}::handleCreate, "{{ manifest.routes.create.path }}", drogon::Post{% for filter in manifest.routes.create.auth_filters %}, "{{ filter }}"{% endfor %});
+    {% endif %}
+    {% if manifest.routes.get is defined %}
+    ADD_METHOD_TO({{ class_name }}::handleGet, "{{ manifest.routes.get.path }}", drogon::Get{% for filter in manifest.routes.get.auth_filters %}, "{{ filter }}"{% endfor %});
+    {% endif %}
+    {% if manifest.routes.update is defined %}
+    ADD_METHOD_TO({{ class_name }}::handleUpdate, "{{ manifest.routes.update.path }}", drogon::Patch{% for filter in manifest.routes.update.auth_filters %}, "{{ filter }}"{% endfor %});
+    {% endif %}
+    {% if manifest.routes.delete is defined %}
+    ADD_METHOD_TO({{ class_name }}::handleDelete, "{{ manifest.routes.delete.path }}", drogon::Delete{% for filter in manifest.routes.delete.auth_filters %}, "{{ filter }}"{% endfor %});
+    {% endif %}
+    METHOD_LIST_END
+
+private:
+    static inline const std::vector<sgrn::crud::RouteConfig> kRoutes = {
+        {% if manifest.routes.list is defined %}
+        {"{{ manifest.routes.list.path }}", drogon::Get, { {% for f in manifest.routes.list.auth_filters %}"{{ f }}"{% if not loop.last %}, {% endif %}{% endfor %} }},
+        {% endif %}
+        {% if manifest.routes.create is defined %}
+        {"{{ manifest.routes.create.path }}", drogon::Post, { {% for f in manifest.routes.create.auth_filters %}"{{ f }}"{% if not loop.last %}, {% endif %}{% endfor %} }}
+        {% endif %}
+    };
+
+    static inline const std::vector<sgrn::crud::ItemRouteConfig> kItemRoutes = {
+        {% if manifest.routes.get is defined %}
+        {"{{ manifest.routes.get.path }}", drogon::Get, { {% for f in manifest.routes.get.auth_filters %}"{{ f }}"{% if not loop.last %}, {% endif %}{% endfor %} }},
+        {% endif %}
+        {% if manifest.routes.update is defined %}
+        {"{{ manifest.routes.update.path }}", drogon::Patch, { {% for f in manifest.routes.update.auth_filters %}"{{ f }}"{% if not loop.last %}, {% endif %}{% endfor %} }},
+        {% endif %}
+        {% if manifest.routes.delete is defined %}
+        {"{{ manifest.routes.delete.path }}", drogon::Delete, { {% for f in manifest.routes.delete.auth_filters %}"{{ f }}"{% if not loop.last %}, {% endif %}{% endfor %} }}
+        {% endif %}
+    };
+};
+
+} // namespace sgrn::crud::generated

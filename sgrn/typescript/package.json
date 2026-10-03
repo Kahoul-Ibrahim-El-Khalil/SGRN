@@ -14,5 +14,8 @@
   ],
   "devDependencies": {
     "@sgrn/datastore": "file:./datastore"
+  },
+  "scripts": {
+    "test:admin": "bun run scripts/admin_features.test.ts"
   }
 }

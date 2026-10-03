@@ -193,6 +193,8 @@ const std::vector<FieldSpec>& systemConfigSchema() {
         {"custom_config.rate_limiting.storage_endpoint_window_s", FieldType::UInt, true, "Rate limiting", "Storage window (s)", 1, 3600},
         {"custom_config.rate_limiting.page_endpoint_limit", FieldType::UInt, true, "Rate limiting", "Page limit", 1, 100000},
         {"custom_config.rate_limiting.page_endpoint_window_s", FieldType::UInt, true, "Rate limiting", "Page window (s)", 1, 3600},
+        {"custom_config.rate_limiting.upload_endpoint_limit", FieldType::UInt, true, "Rate limiting", "Upload limit", 1, 1000000},
+        {"custom_config.rate_limiting.upload_endpoint_window_s", FieldType::UInt, true, "Rate limiting", "Upload window (s)", 1, 3600},
         {"custom_config.rate_limiting.burst_allowance", FieldType::UInt, true, "Rate limiting", "Burst allowance", 0, 10000},
         // --- Server (app.*): restart (drogon listeners are immutable at runtime) ---
         {"app.client_max_body_size", FieldType::UInt, false, "Server", "Max request body (bytes)", 1048576, 8589934592ULL},

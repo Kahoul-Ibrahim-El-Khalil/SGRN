@@ -164,6 +164,39 @@ public:
     sgrn::Result<std::string, std::string> storageAdminSearchJson(
         const std::string& t_bucket, const std::string& t_key, const std::string& t_prefix, uint32_t t_limit = 100);
 
+    /// Resumable upload session management.
+    struct ResumableUploadSession {
+        std::string upload_id;
+        int64_t chunk_size{5 * 1024 * 1024};
+        int32_t total_chunks{0};
+        std::string status;
+    };
+    struct ResumableUploadStatus {
+        std::string upload_id;
+        std::string filename;
+        std::string target_path;
+        int64_t total_size{0};
+        int64_t chunk_size{0};
+        int32_t total_chunks{0};
+        int32_t uploaded_chunks_count{0};
+        std::string status;
+        std::vector<int32_t> uploaded_chunk_indices;
+    };
+    sgrn::Result<ResumableUploadSession, std::string> initUploadSession(const std::string& t_filename, const std::string& t_target_path,
+        int64_t t_total_size, int64_t t_chunk_size = 5 * 1024 * 1024, const std::string& t_mime_type = "application/octet-stream");
+    sgrn::Result<bool, std::string> uploadChunk(const std::string& t_upload_id, int32_t t_chunk_index, const char* t_data, size_t t_size);
+    sgrn::Result<ResumableUploadStatus, std::string> getUploadStatus(const std::string& t_upload_id);
+    sgrn::Result<std::string, std::string> completeUploadSession(const std::string& t_upload_id);
+    sgrn::Result<std::string, std::string> abortUploadSession(const std::string& t_upload_id);
+
+    /// Live session listing (admin: metaprobe).
+    sgrn::Result<std::string, std::string> listActiveSessionsJson();
+
+    /// Webhook management (admin).
+    sgrn::Result<std::string, std::string> listWebhooksJson();
+    sgrn::Result<std::string, std::string> registerWebhookJson(const std::string& t_url, const std::string& t_secret = "");
+    sgrn::Result<std::string, std::string> deleteWebhookJson(int32_t t_webhook_id);
+
     /// Typed parses of the admin storage reports above (for table output).
     sgrn::Result<std::vector<StorageBucketCensus>, std::string> tryStorageAdminOverview(uint32_t t_max_pages = 10);
     sgrn::Result<StorageOrphansReport, std::string> tryStorageAdminOrphans(

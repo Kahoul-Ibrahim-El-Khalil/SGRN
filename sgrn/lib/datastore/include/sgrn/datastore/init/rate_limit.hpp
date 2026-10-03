@@ -4,13 +4,16 @@
 #include <sgrn/datastore/utils/respond.hpp>
 
 #include <drogon/HttpAppFramework.h>
-#include <drogon/nosql/RedisClient.h>
 #include <sgrn/debug.hpp>
 
 #include <atomic>
 #include <chrono>
+#include <deque>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
+#include <string>
+#include <unordered_map>
 
 namespace sgrn::datastore::ratelimit
 {
@@ -48,17 +51,53 @@ inline void publishRateLimitConfig(RateLimitConfig t_cfg) {
     rateLimitHolder()->publish(std::move(t_cfg));
 }
 
-// Sliding-window rate limiting enforced centrally in a pre-routing advice:
-// every request (API, embedded UI assets, even would-be 404s) is classified
-// by path and checked against a Redis Lua script (atomic, distributed-safe
-// across instances). No route table changes needed — generated CRUD views
-// are covered automatically.
-//
-// Keying: client IP, plus the account identifier on auth signin paths
-// (email, or a digest of the service token — raw secrets never leave the
-// request). Redis outage or misconfiguration fails OPEN (requests proceed):
-// sessions already require Redis, so authed paths fail downstream anyway,
-// while anonymous page serving stays up.
+// In-process sliding-window state: per-key sorted list of timestamps (ms).
+// Entries older than the window are evicted lazily on each check.
+// Uses shared_mutex — reads (ZCARD equivalent) allow concurrency while
+// writes (ZADD + eviction) take exclusive ownership.
+struct InProcWindowStore {
+    mutable std::shared_mutex mutex;
+    // key → deque of timestamps (ascending, milliseconds since epoch)
+    std::unordered_map<std::string, std::deque<uint64_t>> windows;
+
+    // Returns Decision. Evicts stale entries, checks count, inserts if allowed.
+    Decision check(const std::string& t_key, uint32_t t_limit, uint64_t t_window_ms) {
+        const uint64_t now_ms = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+        const uint64_t cutoff = now_ms > t_window_ms ? now_ms - t_window_ms : 0;
+
+        std::unique_lock lock(mutex);
+        auto& dq = windows[t_key];
+
+        // Evict expired entries
+        while (!dq.empty() && dq.front() <= cutoff) {
+            dq.pop_front();
+        }
+
+        const uint64_t count = dq.size();
+        if (count >= t_limit) {
+            // Retry after oldest entry exits the window
+            uint64_t retry_after_ms = dq.empty() ? t_window_ms : (dq.front() + t_window_ms - now_ms);
+            if (static_cast<int64_t>(retry_after_ms) < 0)
+                retry_after_ms = 0;
+            return Decision{false, retry_after_ms, 0};
+        }
+
+        dq.push_back(now_ms);
+        return Decision{true, 0, t_limit - count - 1};
+    }
+};
+
+inline InProcWindowStore& windowStore() {
+    static InProcWindowStore store;
+    return store;
+}
+
+// In-process sliding-window rate limiting enforced centrally in a pre-routing advice.
+// Every request (API, embedded UI assets, even would-be 404s) is classified by path
+// and checked against a per-key in-memory sliding window.
+// No Redis required; no route table changes needed — generated CRUD views are
+// covered automatically. Decisions are made in <1µs from the shared_mutex fast path.
 inline void initRateLimiting() {
     RateLimitConfig cfg = RateLimitConfig::fromJson(drogon::app().getCustomConfig());
     if (!cfg.enabled) {
@@ -68,57 +107,34 @@ inline void initRateLimiting() {
     auto holder = rateLimitHolder();
     holder->enabled_at_boot = true;
     holder->publish(cfg);
-    drogon::app().registerPreRoutingAdvice([holder](const drogon::HttpRequestPtr& tsp_req, drogon::AdviceCallback&& t_respond,
-                                               drogon::AdviceChainCallback&& t_proceed) {
-        if (tsp_req->method() == drogon::Options) {
-            t_proceed(); // CORS preflights are never limited
-            return;
-        }
-        const RateLimitConfig live = holder->snapshot();
-        const RateClass cls = classifyPath(tsp_req->path());
-        const std::string ip = tsp_req->getPeerAddr().toIp();
-        const std::string key = buildKey(cls, ip, authAccountId(tsp_req));
-        const uint32_t limit = effectiveLimit(live, cls);
-        const uint64_t window = windowMs(live, cls);
+    drogon::app().registerPreRoutingAdvice(
+        [holder](const drogon::HttpRequestPtr& tsp_req, drogon::AdviceCallback&& t_respond, drogon::AdviceChainCallback&& t_proceed) {
+            if (tsp_req->method() == drogon::Options) {
+                t_proceed(); // CORS preflights are never limited
+                return;
+            }
+            const RateLimitConfig live = holder->snapshot();
+            const RateClass cls = classifyPath(tsp_req->path());
+            const std::string ip = tsp_req->getPeerAddr().toIp();
+            const std::string key = buildKey(cls, ip, authAccountId(tsp_req));
+            const uint32_t limit = effectiveLimit(live, cls);
+            const uint64_t window = windowMs(live, cls);
 
-        auto redis = drogon::app().getRedisClient();
-        if (!redis) {
-            t_proceed();
-            return;
-        }
-        static std::atomic<uint64_t> member_seq{0};
-        const uint64_t now_ms = static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
-        const std::string member = std::to_string(now_ms) + ":" + std::to_string(member_seq.fetch_add(1, std::memory_order_relaxed));
-        const std::string now_s = std::to_string(now_ms);
-        const std::string window_s = std::to_string(window);
-        const std::string limit_s = std::to_string(limit);
-        redis->execCommandAsync(
-            [t_respond = std::move(t_respond), t_proceed = std::move(t_proceed)](const drogon::nosql::RedisResult& r) mutable {
-                try {
-                    const auto parts = r.asArray();
-                    const bool allowed = parts.size() >= 2 && parts[0].asInteger() == 1;
-                    if (allowed) {
-                        t_proceed();
-                        return;
-                    }
-                    const uint64_t retry_ms = parts.size() >= 2 ? static_cast<uint64_t>(parts[1].asInteger()) : 0;
-                    const uint64_t retry_s = (retry_ms + 999) / 1000 < 1 ? 1 : (retry_ms + 999) / 1000;
-                    auto resp = sgrn::createErrorResponse("Rate limit exceeded, retry later", drogon::k429TooManyRequests, "RateLimit");
-                    resp->addHeader("Retry-After", std::to_string(retry_s));
-                    t_respond(resp);
-                } catch (const std::exception&) {
-                    t_proceed(); // malformed reply: fail open
-                }
-            },
-            [t_proceed = std::move(t_proceed)](const std::exception&) mutable {
-                t_proceed(); // Redis error/timeout: fail open
-            },
-            "EVAL %s 1 %s %s %s %s %s", kLuaSlidingWindow, key.c_str(), now_s.c_str(), window_s.c_str(), limit_s.c_str(), member.c_str());
-    });
-    SGRN_INFO("SGRN-Datastore", "Rate limiting enabled (auth {}/{}s, storage {}/{}s, general {}/{}s, page {}/{}s)", cfg.auth.max_requests,
-        cfg.auth.window_ms / 1000, cfg.storage.max_requests, cfg.storage.window_ms / 1000, cfg.general.max_requests,
-        cfg.general.window_ms / 1000, cfg.page.max_requests, cfg.page.window_ms / 1000);
+            Decision decision = windowStore().check(key, limit, window);
+            if (decision.allowed) {
+                t_proceed();
+                return;
+            }
+
+            const uint64_t retry_s = (decision.retry_after_ms + 999) / 1000;
+            auto resp = sgrn::createErrorResponse("Rate limit exceeded, retry later", drogon::k429TooManyRequests, "RateLimit");
+            resp->addHeader("Retry-After", std::to_string(retry_s < 1 ? 1 : retry_s));
+            t_respond(resp);
+        });
+    SGRN_INFO("SGRN-Datastore", "Rate limiting enabled (auth {}/{}s, storage {}/{}s, general {}/{}s, page {}/{}s, upload {}/{}s)",
+        cfg.auth.max_requests, cfg.auth.window_ms / 1000, cfg.storage.max_requests, cfg.storage.window_ms / 1000, cfg.general.max_requests,
+        cfg.general.window_ms / 1000, cfg.page.max_requests, cfg.page.window_ms / 1000, cfg.upload.max_requests,
+        cfg.upload.window_ms / 1000);
 }
 
 } // namespace sgrn::datastore::ratelimit

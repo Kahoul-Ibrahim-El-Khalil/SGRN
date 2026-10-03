@@ -12,9 +12,20 @@ export const AdminBackendApiEndpoints = {
     SYSTEM_CONFIG: "/api/v1/admin/system/config",
     STORAGE_FORMATS: "/api/v1/admin/storage/formats",
     QUOTAS: "/api/v1/admin/quotas",
+    ROLES: "/api/v1/admin/roles",
+    ROLES_ITEM: (id: number) => `/api/v1/admin/roles/${id}`,
+    ROLES_ASSIGN: "/api/v1/admin/roles/assign",
+    ROLES_REVOKE: "/api/v1/admin/roles/revoke",
+    AUDIT_LOGS: "/api/v1/admin/audit-logs",
+    QUOTAS_ORG: "/api/v1/admin/quotas/organisation",
+    QUOTAS_USER: (id: number) => `/api/v1/admin/quotas/user/${id}`,
+    QUOTAS_SERVICE: (id: number) => `/api/v1/admin/quotas/service/${id}`,
     PERMISSIONS: "/api/v1/admin/permissions",
     ANALYTICS_OVERVIEW: "/api/v1/admin/analytics/overview",
     ANALYTICS_BREAKDOWN: "/api/v1/admin/analytics/breakdown",
+    METAPROBE_SESSIONS: "/api/v1/admin/metaprobe/sessions",
+    WEBHOOKS: "/api/v1/admin/webhooks",
+    WEBHOOK_ITEM: (id: number) => `/api/v1/admin/webhooks/${id}`,
 } as const;
 export const SessionBackendApiEndpoints = {
     SIGN_IN: "/api/v1/auth/user/signin",
@@ -40,6 +51,13 @@ export const StorageBackendApiEndpoints = {
     UPLOAD: "/api/v1/storage/files",
     DOWNLOAD: "/api/v1/storage/files",
     DELETE: "/api/v1/storage/drive/delete",
+
+    // Resumable Chunked Upload Operations
+    UPLOAD_INIT: "/api/v1/storage/upload/init",
+    UPLOAD_CHUNK: "/api/v1/storage/upload/chunk",
+    UPLOAD_STATUS: "/api/v1/storage/upload/status",
+    UPLOAD_COMPLETE: "/api/v1/storage/upload/complete",
+    UPLOAD_ABORT: "/api/v1/storage/upload/abort",
 
     // Configuration Operations
     CONSTRAINTS: "/api/v1/storage/info",

@@ -2,6 +2,7 @@
 
 import { authenticatedFetch } from "@/backend/api/fetcher";
 import { StorageBackendApiEndpoints } from "@/backend/endpoints";
+import { ResumableUploader, type ChunkUploadProgress } from "@/lib/resumableUploader";
 import type { DirectoryListing, SgrnResult } from "@sgrn/types";
 import { ErrorScope } from "@sgrn/types";
 
@@ -52,14 +53,20 @@ export async function downloadDriveFile(
     t_file_path: string,
     t_file_name: string,
     t_scope: StorageScope = "personal",
+    t_start_byte: number = 0,
+    onProgress?: (receivedBytes: number, totalBytes: number) => void,
 ): Promise<SgrnResult<void>> {
     try {
         const encoded_path = t_file_path.startsWith("/") ? t_file_path.slice(1) : t_file_path;
         const params = new URLSearchParams({ path: encoded_path, scope: t_scope });
+        const headers: Record<string, string> = {};
+        if (t_start_byte > 0) {
+            headers["Range"] = `bytes=${t_start_byte}-`;
+        }
 
-        const res = await authenticatedFetch(`${StorageBackendApiEndpoints.PATH_BASE}?${params.toString()}`);
+        const res = await authenticatedFetch(`${StorageBackendApiEndpoints.PATH_BASE}?${params.toString()}`, { headers });
 
-        if (!res.ok) {
+        if (!res.ok && res.status !== 206) {
             const err_data = await res.json().catch(() => null);
             return { error: err_data?.error || `Download failed: ${res.status}`, scope: err_data?.scope || ErrorScope.Network };
         }
@@ -68,9 +75,36 @@ export async function downloadDriveFile(
         const match = disposition.match(/filename="([^"]+)"/);
         const download_name = match?.[1] ?? t_file_name;
 
-        const blob = await res.blob();
-        const object_url = URL.createObjectURL(blob);
+        const contentLengthHeader = res.headers.get("Content-Length");
+        const totalBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : 0;
 
+        let blob: Blob;
+
+        if (res.body && typeof res.body.getReader === "function") {
+            const reader = res.body.getReader();
+            const chunks: BlobPart[] = [];
+            let receivedBytes = 0;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                if (value) {
+                    chunks.push(value);
+                    receivedBytes += value.length;
+                    if (onProgress) {
+                        onProgress(receivedBytes, totalBytes);
+                    }
+                }
+            }
+            blob = new Blob(chunks);
+        } else {
+            blob = await res.blob();
+            if (onProgress) {
+                onProgress(blob.size, blob.size);
+            }
+        }
+
+        const object_url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = object_url;
         a.download = download_name;
@@ -199,6 +233,26 @@ export async function uploadDriveFile(
         });
     } catch (e) {
         return { error: `Upload failed: ${e instanceof Error ? e.message : String(e)}`, scope: ErrorScope.Network };
+    }
+}
+
+export async function uploadResumableDriveFile(
+    t_directory_path: string,
+    t_file: File,
+    t_on_progress?: (progress: ChunkUploadProgress) => void,
+): Promise<SgrnResult<void>> {
+    try {
+        const uploader = new ResumableUploader(t_file, t_directory_path);
+        if (t_on_progress) {
+            uploader.onProgress(t_on_progress);
+        }
+        const success = await uploader.start(authenticatedFetch);
+        if (success) {
+            return { data: undefined };
+        }
+        return { error: "Resumable upload failed", scope: ErrorScope.Network };
+    } catch (e) {
+        return { error: `Resumable upload failed: ${e instanceof Error ? e.message : String(e)}`, scope: ErrorScope.Network };
     }
 }
 

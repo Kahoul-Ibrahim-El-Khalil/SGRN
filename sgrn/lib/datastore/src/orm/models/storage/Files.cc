@@ -19,7 +19,6 @@ const std::string Files::Cols::_user_id = "\"user_id\"";
 const std::string Files::Cols::_automated_service_id = "\"automated_service_id\"";
 const std::string Files::Cols::_session_id = "\"session_id\"";
 const std::string Files::Cols::_directory_id = "\"directory_id\"";
-const std::string Files::Cols::_object_id = "\"object_id\"";
 const std::string Files::Cols::_extension = "\"extension\"";
 const std::string Files::Cols::_full_path = "\"full_path\"";
 const std::string Files::Cols::_created_at = "\"created_at\"";
@@ -35,7 +34,6 @@ const std::vector<typename Files::MetaData> Files::metaData_={
 {"automated_service_id","int32_t","integer",4,0,0,0},
 {"session_id","int32_t","integer",4,0,0,1},
 {"directory_id","int64_t","bigint",8,0,0,0},
-{"object_id","int64_t","bigint",8,0,0,1},
 {"extension","std::string","character varying",15,0,0,0},
 {"full_path","std::string","text",0,0,0,1},
 {"created_at","::trantor::Date","timestamp with time zone",0,0,0,1},
@@ -73,10 +71,6 @@ Files::Files(const Row &r, const ssize_t indexOffset) noexcept
         if(!r["directory_id"].isNull())
         {
             directoryId_=std::make_shared<int64_t>(r["directory_id"].as<int64_t>());
-        }
-        if(!r["object_id"].isNull())
-        {
-            objectId_=std::make_shared<int64_t>(r["object_id"].as<int64_t>());
         }
         if(!r["extension"].isNull())
         {
@@ -116,7 +110,7 @@ Files::Files(const Row &r, const ssize_t indexOffset) noexcept
     else
     {
         size_t offset = (size_t)indexOffset;
-        if(offset + 11 > r.size())
+        if(offset + 10 > r.size())
         {
             LOG_FATAL << "Invalid SQL result for this model";
             return;
@@ -155,19 +149,14 @@ Files::Files(const Row &r, const ssize_t indexOffset) noexcept
         index = offset + 6;
         if(!r[index].isNull())
         {
-            objectId_=std::make_shared<int64_t>(r[index].as<int64_t>());
+            extension_=std::make_shared<std::string>(r[index].as<std::string>());
         }
         index = offset + 7;
         if(!r[index].isNull())
         {
-            extension_=std::make_shared<std::string>(r[index].as<std::string>());
-        }
-        index = offset + 8;
-        if(!r[index].isNull())
-        {
             fullPath_=std::make_shared<std::string>(r[index].as<std::string>());
         }
-        index = offset + 9;
+        index = offset + 8;
         if(!r[index].isNull())
         {
             auto timeStr = r[index].as<std::string>();
@@ -190,7 +179,7 @@ Files::Files(const Row &r, const ssize_t indexOffset) noexcept
                 createdAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
             }
         }
-        index = offset + 10;
+        index = offset + 9;
         if(!r[index].isNull())
         {
             domain_=std::make_shared<std::string>(r[index].as<std::string>());
@@ -201,7 +190,7 @@ Files::Files(const Row &r, const ssize_t indexOffset) noexcept
 
 Files::Files(const Json::Value &pJson, const std::vector<std::string> &pMasqueradingVector) noexcept(false)
 {
-    if(pMasqueradingVector.size() != 11)
+    if(pMasqueradingVector.size() != 10)
     {
         LOG_ERROR << "Bad masquerading vector";
         return;
@@ -259,7 +248,7 @@ Files::Files(const Json::Value &pJson, const std::vector<std::string> &pMasquera
         dirtyFlag_[6] = true;
         if(!pJson[pMasqueradingVector[6]].isNull())
         {
-            objectId_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[6]].asInt64());
+            extension_=std::make_shared<std::string>(pJson[pMasqueradingVector[6]].asString());
         }
     }
     if(!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7]))
@@ -267,7 +256,7 @@ Files::Files(const Json::Value &pJson, const std::vector<std::string> &pMasquera
         dirtyFlag_[7] = true;
         if(!pJson[pMasqueradingVector[7]].isNull())
         {
-            extension_=std::make_shared<std::string>(pJson[pMasqueradingVector[7]].asString());
+            fullPath_=std::make_shared<std::string>(pJson[pMasqueradingVector[7]].asString());
         }
     }
     if(!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8]))
@@ -275,15 +264,7 @@ Files::Files(const Json::Value &pJson, const std::vector<std::string> &pMasquera
         dirtyFlag_[8] = true;
         if(!pJson[pMasqueradingVector[8]].isNull())
         {
-            fullPath_=std::make_shared<std::string>(pJson[pMasqueradingVector[8]].asString());
-        }
-    }
-    if(!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9]))
-    {
-        dirtyFlag_[9] = true;
-        if(!pJson[pMasqueradingVector[9]].isNull())
-        {
-            auto timeStr = pJson[pMasqueradingVector[9]].asString();
+            auto timeStr = pJson[pMasqueradingVector[8]].asString();
             struct tm stm;
             memset(&stm,0,sizeof(stm));
             auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
@@ -304,12 +285,12 @@ Files::Files(const Json::Value &pJson, const std::vector<std::string> &pMasquera
             }
         }
     }
-    if(!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10]))
+    if(!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9]))
     {
-        dirtyFlag_[10] = true;
-        if(!pJson[pMasqueradingVector[10]].isNull())
+        dirtyFlag_[9] = true;
+        if(!pJson[pMasqueradingVector[9]].isNull())
         {
-            domain_=std::make_shared<std::string>(pJson[pMasqueradingVector[10]].asString());
+            domain_=std::make_shared<std::string>(pJson[pMasqueradingVector[9]].asString());
         }
     }
 }
@@ -364,17 +345,9 @@ Files::Files(const Json::Value &pJson) noexcept(false)
             directoryId_=std::make_shared<int64_t>((int64_t)pJson["directory_id"].asInt64());
         }
     }
-    if(pJson.isMember("object_id"))
-    {
-        dirtyFlag_[6]=true;
-        if(!pJson["object_id"].isNull())
-        {
-            objectId_=std::make_shared<int64_t>((int64_t)pJson["object_id"].asInt64());
-        }
-    }
     if(pJson.isMember("extension"))
     {
-        dirtyFlag_[7]=true;
+        dirtyFlag_[6]=true;
         if(!pJson["extension"].isNull())
         {
             extension_=std::make_shared<std::string>(pJson["extension"].asString());
@@ -382,7 +355,7 @@ Files::Files(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("full_path"))
     {
-        dirtyFlag_[8]=true;
+        dirtyFlag_[7]=true;
         if(!pJson["full_path"].isNull())
         {
             fullPath_=std::make_shared<std::string>(pJson["full_path"].asString());
@@ -390,7 +363,7 @@ Files::Files(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("created_at"))
     {
-        dirtyFlag_[9]=true;
+        dirtyFlag_[8]=true;
         if(!pJson["created_at"].isNull())
         {
             auto timeStr = pJson["created_at"].asString();
@@ -416,7 +389,7 @@ Files::Files(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("domain"))
     {
-        dirtyFlag_[10]=true;
+        dirtyFlag_[9]=true;
         if(!pJson["domain"].isNull())
         {
             domain_=std::make_shared<std::string>(pJson["domain"].asString());
@@ -427,7 +400,7 @@ Files::Files(const Json::Value &pJson) noexcept(false)
 void Files::updateByMasqueradedJson(const Json::Value &pJson,
                                             const std::vector<std::string> &pMasqueradingVector) noexcept(false)
 {
-    if(pMasqueradingVector.size() != 11)
+    if(pMasqueradingVector.size() != 10)
     {
         LOG_ERROR << "Bad masquerading vector";
         return;
@@ -484,7 +457,7 @@ void Files::updateByMasqueradedJson(const Json::Value &pJson,
         dirtyFlag_[6] = true;
         if(!pJson[pMasqueradingVector[6]].isNull())
         {
-            objectId_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[6]].asInt64());
+            extension_=std::make_shared<std::string>(pJson[pMasqueradingVector[6]].asString());
         }
     }
     if(!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7]))
@@ -492,7 +465,7 @@ void Files::updateByMasqueradedJson(const Json::Value &pJson,
         dirtyFlag_[7] = true;
         if(!pJson[pMasqueradingVector[7]].isNull())
         {
-            extension_=std::make_shared<std::string>(pJson[pMasqueradingVector[7]].asString());
+            fullPath_=std::make_shared<std::string>(pJson[pMasqueradingVector[7]].asString());
         }
     }
     if(!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8]))
@@ -500,15 +473,7 @@ void Files::updateByMasqueradedJson(const Json::Value &pJson,
         dirtyFlag_[8] = true;
         if(!pJson[pMasqueradingVector[8]].isNull())
         {
-            fullPath_=std::make_shared<std::string>(pJson[pMasqueradingVector[8]].asString());
-        }
-    }
-    if(!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9]))
-    {
-        dirtyFlag_[9] = true;
-        if(!pJson[pMasqueradingVector[9]].isNull())
-        {
-            auto timeStr = pJson[pMasqueradingVector[9]].asString();
+            auto timeStr = pJson[pMasqueradingVector[8]].asString();
             struct tm stm;
             memset(&stm,0,sizeof(stm));
             auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
@@ -529,12 +494,12 @@ void Files::updateByMasqueradedJson(const Json::Value &pJson,
             }
         }
     }
-    if(!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10]))
+    if(!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9]))
     {
-        dirtyFlag_[10] = true;
-        if(!pJson[pMasqueradingVector[10]].isNull())
+        dirtyFlag_[9] = true;
+        if(!pJson[pMasqueradingVector[9]].isNull())
         {
-            domain_=std::make_shared<std::string>(pJson[pMasqueradingVector[10]].asString());
+            domain_=std::make_shared<std::string>(pJson[pMasqueradingVector[9]].asString());
         }
     }
 }
@@ -588,17 +553,9 @@ void Files::updateByJson(const Json::Value &pJson) noexcept(false)
             directoryId_=std::make_shared<int64_t>((int64_t)pJson["directory_id"].asInt64());
         }
     }
-    if(pJson.isMember("object_id"))
-    {
-        dirtyFlag_[6] = true;
-        if(!pJson["object_id"].isNull())
-        {
-            objectId_=std::make_shared<int64_t>((int64_t)pJson["object_id"].asInt64());
-        }
-    }
     if(pJson.isMember("extension"))
     {
-        dirtyFlag_[7] = true;
+        dirtyFlag_[6] = true;
         if(!pJson["extension"].isNull())
         {
             extension_=std::make_shared<std::string>(pJson["extension"].asString());
@@ -606,7 +563,7 @@ void Files::updateByJson(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("full_path"))
     {
-        dirtyFlag_[8] = true;
+        dirtyFlag_[7] = true;
         if(!pJson["full_path"].isNull())
         {
             fullPath_=std::make_shared<std::string>(pJson["full_path"].asString());
@@ -614,7 +571,7 @@ void Files::updateByJson(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("created_at"))
     {
-        dirtyFlag_[9] = true;
+        dirtyFlag_[8] = true;
         if(!pJson["created_at"].isNull())
         {
             auto timeStr = pJson["created_at"].asString();
@@ -640,7 +597,7 @@ void Files::updateByJson(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("domain"))
     {
-        dirtyFlag_[10] = true;
+        dirtyFlag_[9] = true;
         if(!pJson["domain"].isNull())
         {
             domain_=std::make_shared<std::string>(pJson["domain"].asString());
@@ -775,23 +732,6 @@ void Files::setDirectoryIdToNull() noexcept
     dirtyFlag_[5] = true;
 }
 
-const int64_t &Files::getValueOfObjectId() const noexcept
-{
-    static const int64_t defaultValue = int64_t();
-    if(objectId_)
-        return *objectId_;
-    return defaultValue;
-}
-const std::shared_ptr<int64_t> &Files::getObjectId() const noexcept
-{
-    return objectId_;
-}
-void Files::setObjectId(const int64_t &pObjectId) noexcept
-{
-    objectId_ = std::make_shared<int64_t>(pObjectId);
-    dirtyFlag_[6] = true;
-}
-
 const std::string &Files::getValueOfExtension() const noexcept
 {
     static const std::string defaultValue = std::string();
@@ -806,17 +746,17 @@ const std::shared_ptr<std::string> &Files::getExtension() const noexcept
 void Files::setExtension(const std::string &pExtension) noexcept
 {
     extension_ = std::make_shared<std::string>(pExtension);
-    dirtyFlag_[7] = true;
+    dirtyFlag_[6] = true;
 }
 void Files::setExtension(std::string &&pExtension) noexcept
 {
     extension_ = std::make_shared<std::string>(std::move(pExtension));
-    dirtyFlag_[7] = true;
+    dirtyFlag_[6] = true;
 }
 void Files::setExtensionToNull() noexcept
 {
     extension_.reset();
-    dirtyFlag_[7] = true;
+    dirtyFlag_[6] = true;
 }
 
 const std::string &Files::getValueOfFullPath() const noexcept
@@ -833,12 +773,12 @@ const std::shared_ptr<std::string> &Files::getFullPath() const noexcept
 void Files::setFullPath(const std::string &pFullPath) noexcept
 {
     fullPath_ = std::make_shared<std::string>(pFullPath);
-    dirtyFlag_[8] = true;
+    dirtyFlag_[7] = true;
 }
 void Files::setFullPath(std::string &&pFullPath) noexcept
 {
     fullPath_ = std::make_shared<std::string>(std::move(pFullPath));
-    dirtyFlag_[8] = true;
+    dirtyFlag_[7] = true;
 }
 
 const ::trantor::Date &Files::getValueOfCreatedAt() const noexcept
@@ -855,7 +795,7 @@ const std::shared_ptr<::trantor::Date> &Files::getCreatedAt() const noexcept
 void Files::setCreatedAt(const ::trantor::Date &pCreatedAt) noexcept
 {
     createdAt_ = std::make_shared<::trantor::Date>(pCreatedAt);
-    dirtyFlag_[9] = true;
+    dirtyFlag_[8] = true;
 }
 
 const std::string &Files::getValueOfDomain() const noexcept
@@ -872,17 +812,17 @@ const std::shared_ptr<std::string> &Files::getDomain() const noexcept
 void Files::setDomain(const std::string &pDomain) noexcept
 {
     domain_ = std::make_shared<std::string>(pDomain);
-    dirtyFlag_[10] = true;
+    dirtyFlag_[9] = true;
 }
 void Files::setDomain(std::string &&pDomain) noexcept
 {
     domain_ = std::make_shared<std::string>(std::move(pDomain));
-    dirtyFlag_[10] = true;
+    dirtyFlag_[9] = true;
 }
 void Files::setDomainToNull() noexcept
 {
     domain_.reset();
-    dirtyFlag_[10] = true;
+    dirtyFlag_[9] = true;
 }
 
 void Files::updateId(const uint64_t id)
@@ -897,7 +837,6 @@ const std::vector<std::string> &Files::insertColumns() noexcept
         "automated_service_id",
         "session_id",
         "directory_id",
-        "object_id",
         "extension",
         "full_path",
         "created_at",
@@ -965,17 +904,6 @@ void Files::outputArgs(drogon::orm::internal::SqlBinder &binder) const
     }
     if(dirtyFlag_[6])
     {
-        if(getObjectId())
-        {
-            binder << getValueOfObjectId();
-        }
-        else
-        {
-            binder << nullptr;
-        }
-    }
-    if(dirtyFlag_[7])
-    {
         if(getExtension())
         {
             binder << getValueOfExtension();
@@ -985,7 +913,7 @@ void Files::outputArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[8])
+    if(dirtyFlag_[7])
     {
         if(getFullPath())
         {
@@ -996,7 +924,7 @@ void Files::outputArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[9])
+    if(dirtyFlag_[8])
     {
         if(getCreatedAt())
         {
@@ -1007,7 +935,7 @@ void Files::outputArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[10])
+    if(dirtyFlag_[9])
     {
         if(getDomain())
         {
@@ -1058,10 +986,6 @@ const std::vector<std::string> Files::updateColumns() const
     if(dirtyFlag_[9])
     {
         ret.push_back(getColumnName(9));
-    }
-    if(dirtyFlag_[10])
-    {
-        ret.push_back(getColumnName(10));
     }
     return ret;
 }
@@ -1125,17 +1049,6 @@ void Files::updateArgs(drogon::orm::internal::SqlBinder &binder) const
     }
     if(dirtyFlag_[6])
     {
-        if(getObjectId())
-        {
-            binder << getValueOfObjectId();
-        }
-        else
-        {
-            binder << nullptr;
-        }
-    }
-    if(dirtyFlag_[7])
-    {
         if(getExtension())
         {
             binder << getValueOfExtension();
@@ -1145,7 +1058,7 @@ void Files::updateArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[8])
+    if(dirtyFlag_[7])
     {
         if(getFullPath())
         {
@@ -1156,7 +1069,7 @@ void Files::updateArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[9])
+    if(dirtyFlag_[8])
     {
         if(getCreatedAt())
         {
@@ -1167,7 +1080,7 @@ void Files::updateArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[10])
+    if(dirtyFlag_[9])
     {
         if(getDomain())
         {
@@ -1230,14 +1143,6 @@ Json::Value Files::toJson() const
     {
         ret["directory_id"]=Json::Value();
     }
-    if(getObjectId())
-    {
-        ret["object_id"]=(Json::Int64)getValueOfObjectId();
-    }
-    else
-    {
-        ret["object_id"]=Json::Value();
-    }
     if(getExtension())
     {
         ret["extension"]=getValueOfExtension();
@@ -1282,7 +1187,7 @@ Json::Value Files::toMasqueradedJson(
     const std::vector<std::string> &pMasqueradingVector) const
 {
     Json::Value ret;
-    if(pMasqueradingVector.size() == 11)
+    if(pMasqueradingVector.size() == 10)
     {
         if(!pMasqueradingVector[0].empty())
         {
@@ -1352,9 +1257,9 @@ Json::Value Files::toMasqueradedJson(
         }
         if(!pMasqueradingVector[6].empty())
         {
-            if(getObjectId())
+            if(getExtension())
             {
-                ret[pMasqueradingVector[6]]=(Json::Int64)getValueOfObjectId();
+                ret[pMasqueradingVector[6]]=getValueOfExtension();
             }
             else
             {
@@ -1363,9 +1268,9 @@ Json::Value Files::toMasqueradedJson(
         }
         if(!pMasqueradingVector[7].empty())
         {
-            if(getExtension())
+            if(getFullPath())
             {
-                ret[pMasqueradingVector[7]]=getValueOfExtension();
+                ret[pMasqueradingVector[7]]=getValueOfFullPath();
             }
             else
             {
@@ -1374,9 +1279,9 @@ Json::Value Files::toMasqueradedJson(
         }
         if(!pMasqueradingVector[8].empty())
         {
-            if(getFullPath())
+            if(getCreatedAt())
             {
-                ret[pMasqueradingVector[8]]=getValueOfFullPath();
+                ret[pMasqueradingVector[8]]=getCreatedAt()->toDbStringLocal();
             }
             else
             {
@@ -1385,24 +1290,13 @@ Json::Value Files::toMasqueradedJson(
         }
         if(!pMasqueradingVector[9].empty())
         {
-            if(getCreatedAt())
+            if(getDomain())
             {
-                ret[pMasqueradingVector[9]]=getCreatedAt()->toDbStringLocal();
+                ret[pMasqueradingVector[9]]=getValueOfDomain();
             }
             else
             {
                 ret[pMasqueradingVector[9]]=Json::Value();
-            }
-        }
-        if(!pMasqueradingVector[10].empty())
-        {
-            if(getDomain())
-            {
-                ret[pMasqueradingVector[10]]=getValueOfDomain();
-            }
-            else
-            {
-                ret[pMasqueradingVector[10]]=Json::Value();
             }
         }
         return ret;
@@ -1455,14 +1349,6 @@ Json::Value Files::toMasqueradedJson(
     else
     {
         ret["directory_id"]=Json::Value();
-    }
-    if(getObjectId())
-    {
-        ret["object_id"]=(Json::Int64)getValueOfObjectId();
-    }
-    else
-    {
-        ret["object_id"]=Json::Value();
     }
     if(getExtension())
     {
@@ -1541,24 +1427,14 @@ bool Files::validateJsonForCreation(const Json::Value &pJson, std::string &err)
         if(!validJsonOfField(5, "directory_id", pJson["directory_id"], err, true))
             return false;
     }
-    if(pJson.isMember("object_id"))
-    {
-        if(!validJsonOfField(6, "object_id", pJson["object_id"], err, true))
-            return false;
-    }
-    else
-    {
-        err="The object_id column cannot be null";
-        return false;
-    }
     if(pJson.isMember("extension"))
     {
-        if(!validJsonOfField(7, "extension", pJson["extension"], err, true))
+        if(!validJsonOfField(6, "extension", pJson["extension"], err, true))
             return false;
     }
     if(pJson.isMember("full_path"))
     {
-        if(!validJsonOfField(8, "full_path", pJson["full_path"], err, true))
+        if(!validJsonOfField(7, "full_path", pJson["full_path"], err, true))
             return false;
     }
     else
@@ -1568,12 +1444,12 @@ bool Files::validateJsonForCreation(const Json::Value &pJson, std::string &err)
     }
     if(pJson.isMember("created_at"))
     {
-        if(!validJsonOfField(9, "created_at", pJson["created_at"], err, true))
+        if(!validJsonOfField(8, "created_at", pJson["created_at"], err, true))
             return false;
     }
     if(pJson.isMember("domain"))
     {
-        if(!validJsonOfField(10, "domain", pJson["domain"], err, true))
+        if(!validJsonOfField(9, "domain", pJson["domain"], err, true))
             return false;
     }
     return true;
@@ -1582,7 +1458,7 @@ bool Files::validateMasqueradedJsonForCreation(const Json::Value &pJson,
                                                const std::vector<std::string> &pMasqueradingVector,
                                                std::string &err)
 {
-    if(pMasqueradingVector.size() != 11)
+    if(pMasqueradingVector.size() != 10)
     {
         err = "Bad masquerading vector";
         return false;
@@ -1653,11 +1529,6 @@ bool Files::validateMasqueradedJsonForCreation(const Json::Value &pJson,
               if(!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, true))
                   return false;
           }
-        else
-        {
-            err="The " + pMasqueradingVector[6] + " column cannot be null";
-            return false;
-        }
       }
       if(!pMasqueradingVector[7].empty())
       {
@@ -1666,6 +1537,11 @@ bool Files::validateMasqueradedJsonForCreation(const Json::Value &pJson,
               if(!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, true))
                   return false;
           }
+        else
+        {
+            err="The " + pMasqueradingVector[7] + " column cannot be null";
+            return false;
+        }
       }
       if(!pMasqueradingVector[8].empty())
       {
@@ -1674,25 +1550,12 @@ bool Files::validateMasqueradedJsonForCreation(const Json::Value &pJson,
               if(!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, true))
                   return false;
           }
-        else
-        {
-            err="The " + pMasqueradingVector[8] + " column cannot be null";
-            return false;
-        }
       }
       if(!pMasqueradingVector[9].empty())
       {
           if(pJson.isMember(pMasqueradingVector[9]))
           {
               if(!validJsonOfField(9, pMasqueradingVector[9], pJson[pMasqueradingVector[9]], err, true))
-                  return false;
-          }
-      }
-      if(!pMasqueradingVector[10].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[10]))
-          {
-              if(!validJsonOfField(10, pMasqueradingVector[10], pJson[pMasqueradingVector[10]], err, true))
                   return false;
           }
       }
@@ -1741,29 +1604,24 @@ bool Files::validateJsonForUpdate(const Json::Value &pJson, std::string &err)
         if(!validJsonOfField(5, "directory_id", pJson["directory_id"], err, false))
             return false;
     }
-    if(pJson.isMember("object_id"))
-    {
-        if(!validJsonOfField(6, "object_id", pJson["object_id"], err, false))
-            return false;
-    }
     if(pJson.isMember("extension"))
     {
-        if(!validJsonOfField(7, "extension", pJson["extension"], err, false))
+        if(!validJsonOfField(6, "extension", pJson["extension"], err, false))
             return false;
     }
     if(pJson.isMember("full_path"))
     {
-        if(!validJsonOfField(8, "full_path", pJson["full_path"], err, false))
+        if(!validJsonOfField(7, "full_path", pJson["full_path"], err, false))
             return false;
     }
     if(pJson.isMember("created_at"))
     {
-        if(!validJsonOfField(9, "created_at", pJson["created_at"], err, false))
+        if(!validJsonOfField(8, "created_at", pJson["created_at"], err, false))
             return false;
     }
     if(pJson.isMember("domain"))
     {
-        if(!validJsonOfField(10, "domain", pJson["domain"], err, false))
+        if(!validJsonOfField(9, "domain", pJson["domain"], err, false))
             return false;
     }
     return true;
@@ -1772,7 +1630,7 @@ bool Files::validateMasqueradedJsonForUpdate(const Json::Value &pJson,
                                              const std::vector<std::string> &pMasqueradingVector,
                                              std::string &err)
 {
-    if(pMasqueradingVector.size() != 11)
+    if(pMasqueradingVector.size() != 10)
     {
         err = "Bad masquerading vector";
         return false;
@@ -1831,11 +1689,6 @@ bool Files::validateMasqueradedJsonForUpdate(const Json::Value &pJson,
       if(!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9]))
       {
           if(!validJsonOfField(9, pMasqueradingVector[9], pJson[pMasqueradingVector[9]], err, false))
-              return false;
-      }
-      if(!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10]))
-      {
-          if(!validJsonOfField(10, pMasqueradingVector[10], pJson[pMasqueradingVector[10]], err, false))
               return false;
       }
     }
@@ -1931,18 +1784,6 @@ bool Files::validJsonOfField(size_t index,
         case 6:
             if(pJson.isNull())
             {
-                err="The " + fieldName + " column cannot be null";
-                return false;
-            }
-            if(!pJson.isInt64())
-            {
-                err="Type error in the "+fieldName+" field";
-                return false;
-            }
-            break;
-        case 7:
-            if(pJson.isNull())
-            {
                 return true;
             }
             if(!pJson.isString())
@@ -1959,6 +1800,18 @@ bool Files::validJsonOfField(size_t index,
                 return false;
             }
             break;
+        case 7:
+            if(pJson.isNull())
+            {
+                err="The " + fieldName + " column cannot be null";
+                return false;
+            }
+            if(!pJson.isString())
+            {
+                err="Type error in the "+fieldName+" field";
+                return false;
+            }
+            break;
         case 8:
             if(pJson.isNull())
             {
@@ -1972,18 +1825,6 @@ bool Files::validJsonOfField(size_t index,
             }
             break;
         case 9:
-            if(pJson.isNull())
-            {
-                err="The " + fieldName + " column cannot be null";
-                return false;
-            }
-            if(!pJson.isString())
-            {
-                err="Type error in the "+fieldName+" field";
-                return false;
-            }
-            break;
-        case 10:
             if(pJson.isNull())
             {
                 return true;

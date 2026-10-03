@@ -1,0 +1,93 @@
+metadata:
+  version: "1.0"
+  description: "Organisation domains management API"
+  generated_timestamp: null
+
+table:
+  schema: core
+  name: domains
+  primary_key: id
+  primary_key_type: int
+
+tenant:
+  column: organisation
+  required: true
+  server_bound: true
+
+policy:
+  read_scope: org
+  write_scope: org
+  delete_scope: admin
+  allowed_roles:
+    - admin
+    - user
+  max_limit: 500
+  soft_delete: false
+  audit: true
+  versioning: false
+  batch_enabled: false
+
+routes:
+  list:
+    path: /api/v1/domains
+    method: GET
+    auth_filters:
+      - UserAuthFilter
+  get:
+    path: /api/v1/domains/{id}
+    method: GET
+    auth_filters:
+      - UserAuthFilter
+  create:
+    path: /api/v1/domains
+    method: POST
+    auth_filters:
+      - UserAuthFilter
+  update:
+    path: /api/v1/domains/{id}
+    method: PATCH
+    auth_filters:
+      - UserAuthFilter
+  delete:
+    path: /api/v1/domains/{id}
+    method: DELETE
+    auth_filters:
+      - UserAuthFilter
+
+fields:
+  id:
+    type: int
+    readable: false
+    writable: false
+
+  organisation:
+    type: text
+    readable: false
+    writable: false
+
+  name:
+    type: text
+    readable: true
+    writable: true
+    filterable: true
+    operators:
+      - eq
+      - like
+    validation:
+      maxlen: 255
+    nullable: false
+
+  description:
+    type: text
+    readable: true
+    writable: true
+    filterable: false
+    nullable: true
+
+  created_at:
+    type: timestamp
+    readable: true
+    writable: false
+    nullable: false
+
+admin_overrides: []

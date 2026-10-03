@@ -15,7 +15,7 @@ using sgrn::datastore::query::PrimaryKey;
 
 class UsersView : public CrudViewHandler<UsersView> {
 public:
-    static constexpr std::array<Field, 18> kFields = {{
+    static constexpr std::array<Field, 22> kFields = {{
         {"first_name", FieldType::Text, Op::Eq | Op::Like, true, true},
         {"family_name", FieldType::Text, Op::Eq | Op::Like, true, true},
         {"email", FieldType::Text, Op::Eq | Op::Like, true, true},
@@ -33,6 +33,10 @@ public:
         {"storage_limit", FieldType::BigInt, 0, true, true},
         {"total_entry_count", FieldType::BigInt, 0, true, true},
         {"entry_count_limit", FieldType::BigInt, 0, true, true},
+        {"rate_limit_rpm", FieldType::Int, 0, true, true},
+        {"max_file_size_mb", FieldType::BigInt, 0, true, true},
+        {"preferred_chunk_size_mb", FieldType::Int, 0, true, true},
+        {"rate_limit_upload_rpm", FieldType::Int, 0, true, true},
         {"created_at", FieldType::Timestamp, 0, true, true},
     }};
 

@@ -25,6 +25,7 @@ import {
     listDirectory,
     downloadDriveFile,
     uploadDriveFile,
+    uploadResumableDriveFile,
     uploadDriveFilesBatch,
     describeStorageTrace,
     summarizeBatchTrace,
@@ -38,6 +39,7 @@ import { RenameModal } from "@/pages/drive/components/RenameModal";
 import { DetailsPanel } from "@/pages/drive/components/DetailsPanel";
 import { SelectionBar } from "@/pages/drive/components/SelectionBar";
 import { FilePreviewModal } from "@/pages/drive/components/FilePreviewModal";
+import { UploadProgressPanel, type UploadProgressItem } from "@/pages/drive/components/UploadProgressPanel";
 import { useEvent } from "@/contexts/EventContext";
 import { useAuth } from "@/contexts/AuthContext";
 import type { DirectoryListing, DriveFolder, DriveFile } from "@sgrn/types";
@@ -172,8 +174,67 @@ function useDriveUpload(
     showEvent: ReturnType<typeof useEvent>["showEvent"],
 ) {
     const [uploading, setUploading] = useState(false);
+    const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const folderInputRef = useRef<HTMLInputElement>(null);
+
+    const clearCompletedUploads = useCallback(() => {
+        setUploadItems((prev) => prev.filter((i) => i.status !== "completed"));
+    }, []);
+
+    const updateItem = useCallback((id: string, patch: Partial<UploadProgressItem>) => {
+        setUploadItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+    }, []);
+
+    const processSingleFile = useCallback(
+        async (file: File) => {
+            const id = Math.random().toString(36).substring(2, 9);
+            const newItem: UploadProgressItem = {
+                id,
+                fileName: file.name,
+                fileSize: file.size,
+                status: "uploading",
+                percent: 0,
+                uploadedChunks: 0,
+                totalChunks: Math.ceil(file.size / (5 * 1024 * 1024)) || 1,
+            };
+
+            setUploadItems((prev) => [newItem, ...prev]);
+
+            if (file.size >= 5 * 1024 * 1024) {
+                showEvent("info", `Initiating chunked resumable upload for ${file.name}...`);
+                const result = await uploadResumableDriveFile(currentPath, file, (p) => {
+                    updateItem(id, {
+                        percent: p.percent,
+                        uploadedChunks: p.uploadedChunks,
+                        totalChunks: p.totalChunks,
+                        uploadedBytes: Math.round((file.size * p.percent) / 100),
+                    });
+                });
+                if (isError(result)) {
+                    updateItem(id, { status: "error", errorMessage: result.error });
+                    showEvent("error", `${file.name}: ${result.error}`);
+                } else {
+                    updateItem(id, { status: "completed", percent: 100, uploadedBytes: file.size });
+                    showEvent("success", `${file.name} uploaded successfully via chunked session.`);
+                }
+            } else {
+                updateItem(id, { percent: 50 });
+                const result = await uploadDriveFile(currentPath, file, currentScope, () => {});
+                if (isError(result)) {
+                    updateItem(id, { status: "error", errorMessage: result.error });
+                    showEvent("error", `${file.name}: ${result.error}`);
+                } else {
+                    updateItem(id, { status: "completed", percent: 100, uploadedBytes: file.size });
+                    showEvent(
+                        "success",
+                        `${file.name} uploaded successfully${describeStorageTrace(result.data.upload_mode, result.data.part_count)}`,
+                    );
+                }
+            }
+        },
+        [currentPath, currentScope, showEvent, updateItem],
+    );
 
     const handleFileSelect = useCallback(
         async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -184,11 +245,24 @@ function useDriveUpload(
             setUploading(true);
 
             if (list.length > 1) {
+                const batchItems: UploadProgressItem[] = list.map((f) => ({
+                    id: Math.random().toString(36).substring(2, 9),
+                    fileName: f.name,
+                    fileSize: f.size,
+                    status: "uploading",
+                    percent: 0,
+                    uploadedChunks: 0,
+                    totalChunks: 1,
+                }));
+                setUploadItems((prev) => [...batchItems, ...prev]);
+
                 const result = await uploadDriveFilesBatch(currentPath, list, currentScope, () => {});
                 if (isError(result)) {
+                    batchItems.forEach((it) => updateItem(it.id, { status: "error", errorMessage: result.error }));
                     showEvent("error", result.error);
                 } else {
                     const { success_count, fail_count, results } = result.data;
+                    batchItems.forEach((it) => updateItem(it.id, { status: "completed", percent: 100 }));
                     showEvent(
                         success_count > 0 ? "success" : "error",
                         success_count > 0
@@ -197,20 +271,14 @@ function useDriveUpload(
                     );
                 }
             } else {
-                const result = await uploadDriveFile(currentPath, list[0], currentScope, () => {});
-                if (isError(result)) showEvent("error", `${list[0].name}: ${result.error}`);
-                else
-                    showEvent(
-                        "success",
-                        `${list[0].name} uploaded successfully${describeStorageTrace(result.data.upload_mode, result.data.part_count)}`,
-                    );
+                await processSingleFile(list[0]);
             }
 
             setUploading(false);
             if (fileInputRef.current) fileInputRef.current.value = "";
             onComplete();
         },
-        [currentPath, currentScope, showEvent, onComplete],
+        [currentPath, currentScope, showEvent, onComplete, processSingleFile, updateItem],
     );
 
     const handleFolderSelect = useCallback(
@@ -261,22 +329,64 @@ function useDriveUpload(
                     );
                 }
             } else {
-                const result = await uploadDriveFile(currentPath, list[0], currentScope, () => {});
-                if (isError(result)) showEvent("error", `${list[0].name}: ${result.error}`);
-                else
-                    showEvent(
-                        "success",
-                        `${list[0].name} uploaded successfully${describeStorageTrace(result.data.upload_mode, result.data.part_count)}`,
-                    );
+                await processSingleFile(list[0]);
             }
 
             setUploading(false);
             onComplete();
         },
-        [currentPath, currentScope, showEvent, onComplete],
+        [currentPath, currentScope, showEvent, onComplete, processSingleFile],
     );
 
-    return { uploading, fileInputRef, folderInputRef, handleFileSelect, handleFolderSelect, uploadFilesDirect };
+    const registerDownload = useCallback(
+        async (file: DriveFile) => {
+            const id = Math.random().toString(36).substring(2, 9);
+            const newItem: UploadProgressItem = {
+                id,
+                fileName: file.name,
+                fileSize: file.size || 0,
+                status: "uploading",
+                percent: 0,
+                uploadedChunks: 1,
+                totalChunks: 1,
+                direction: "download",
+            };
+
+            setUploadItems((prev) => [newItem, ...prev]);
+
+            showEvent("info", `Downloading ${file.name}...`);
+            const result = await downloadDriveFile(file.path, file.name, currentScope, 0, (receivedBytes, totalBytes) => {
+                const total = totalBytes || file.size || receivedBytes || 1;
+                const percent = Math.min(100, Math.round((receivedBytes / total) * 100));
+                updateItem(id, {
+                    percent,
+                    uploadedBytes: receivedBytes,
+                    fileSize: total,
+                });
+            });
+
+            if (isError(result)) {
+                updateItem(id, { status: "error", errorMessage: result.error });
+                showEvent("error", result.error);
+            } else {
+                updateItem(id, { status: "completed", percent: 100, uploadedBytes: file.size });
+                showEvent("success", `${file.name} downloaded successfully`);
+            }
+        },
+        [currentScope, showEvent, updateItem],
+    );
+
+    return {
+        uploading,
+        fileInputRef,
+        folderInputRef,
+        handleFileSelect,
+        handleFolderSelect,
+        uploadFilesDirect,
+        uploadItems,
+        clearCompletedUploads,
+        registerDownload,
+    };
 }
 
 function useDriveActions(
@@ -286,6 +396,7 @@ function useDriveActions(
     onClearSelection: () => void,
     showEvent: ReturnType<typeof useEvent>["showEvent"],
     listing?: any,
+    onDownloadFile?: (file: DriveFile) => void,
 ) {
     const [showNewFolder, setShowNewFolder] = useState(false);
     const [newFolderName, setNewFolderName] = useState("");
@@ -412,12 +523,16 @@ function useDriveActions(
 
     const handleFileClick = useCallback(
         async (file: DriveFile) => {
-            showEvent("info", `Downloading ${file.name}...`);
-            const result = await downloadDriveFile(file.path, file.name, currentScope);
-            if (isError(result)) showEvent("error", result.error);
-            else showEvent("success", `${file.name} downloaded successfully`);
+            if (onDownloadFile) {
+                onDownloadFile(file);
+            } else {
+                showEvent("info", `Downloading ${file.name}...`);
+                const result = await downloadDriveFile(file.path, file.name, currentScope);
+                if (isError(result)) showEvent("error", result.error);
+                else showEvent("success", `${file.name} downloaded successfully`);
+            }
         },
-        [showEvent, currentScope],
+        [showEvent, currentScope, onDownloadFile],
     );
 
     const handleFileDownloadDecompressed = useCallback(
@@ -926,7 +1041,15 @@ export default function DrivePage() {
         showEvent,
     );
 
-    const actions = useDriveActions(scope.currentPath, scope.currentScope, refresh, selection.clear, showEvent, listing.listing);
+    const actions = useDriveActions(
+        scope.currentPath,
+        scope.currentScope,
+        refresh,
+        selection.clear,
+        showEvent,
+        listing.listing,
+        upload.registerDownload,
+    );
 
     // initialize on first mount
     useEffect(() => {
@@ -1086,6 +1209,8 @@ export default function DrivePage() {
                     onClose={() => actions.setRenamingItem(null)}
                     onConfirm={actions.handleRenameConfirm}
                 />
+
+                <UploadProgressPanel items={upload.uploadItems} onClearCompleted={upload.clearCompletedUploads} />
 
                 <FilePreviewModal
                     isOpen={!!previewFile}

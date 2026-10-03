@@ -5,7 +5,13 @@
 #include <sgrn/datastore/utils/IHandler.hpp>
 #include <sgrn/debug.hpp>
 #include <array>
+#include <mutex>
+#include <openssl/evp.h>
 #include <regex>
+#include <string>
+#include <unordered_map>
+#include <vector>
+#include <zstd.h>
 
 namespace sgrn::datastore::handlers::storage
 {
@@ -25,11 +31,20 @@ public:
     drogon::Task<drogon::HttpResponsePtr> handleGetFilesMetadata(drogon::HttpRequestPtr tsp_req);
 
     // =========================================================================
-    // File upload / download
+    // File upload / download (supports HTTP Range headers for Resumable Downloads)
     // =========================================================================
     drogon::Task<drogon::HttpResponsePtr> handleFileRequest(drogon::HttpRequestPtr tsp_req);
     drogon::Task<drogon::HttpResponsePtr> handleAutomatedServiceFileRequest(drogon::HttpRequestPtr tsp_req);
     drogon::Task<drogon::HttpResponsePtr> handleAutomatedServiceGetFilesMetadata(drogon::HttpRequestPtr tsp_req);
+
+    // =========================================================================
+    // Resumable Chunked Uploads
+    // =========================================================================
+    drogon::Task<drogon::HttpResponsePtr> handleInitUploadSession(drogon::HttpRequestPtr tsp_req);
+    drogon::Task<drogon::HttpResponsePtr> handleUploadChunk(drogon::HttpRequestPtr tsp_req);
+    drogon::Task<drogon::HttpResponsePtr> handleGetUploadStatus(drogon::HttpRequestPtr tsp_req);
+    drogon::Task<drogon::HttpResponsePtr> handleCompleteUploadSession(drogon::HttpRequestPtr tsp_req);
+    drogon::Task<drogon::HttpResponsePtr> handleAbortUploadSession(drogon::HttpRequestPtr tsp_req);
 
     // =========================================================================
     // Automated Service Object Management
@@ -53,7 +68,50 @@ public:
 private:
     ::sgrn::datastore::services::storage::StorageService storage_service_;
 
-    // ── Refactoring Helpers ──────────────────────────────────────────────────
+    // ── Per-upload streaming pipeline state ─────────────────────────────────
+    // Holds the open SHA-256 digest context and zstd compression stream for
+    // a single resumable upload session. Created on first chunk, destroyed on
+    // complete or abort.
+    struct UploadSessionState {
+        // SHA-256 over original (pre-compression) bytes — fed every chunk.
+        EVP_MD_CTX* hash_ctx{nullptr};
+        // Running count of original bytes received (for Content-Length on download).
+        int64_t original_bytes{0};
+
+        // zstd streaming compressor — feeds original bytes, emits compressed output.
+        ZSTD_CStream* cstream{nullptr};
+        // Compressed bytes not yet forming a full segment.
+        std::vector<char> seg_buf;
+        // How many complete segments have already been pushed to Garage.
+        int32_t next_seg_idx{0};
+
+        // Mime type (needed for S3 content-type on segment PUTs)
+        std::string mime_type;
+        // Uploaded chunks that have been processed into segments.
+        int32_t processed_chunks{0};
+
+        UploadSessionState() = default;
+        UploadSessionState(const UploadSessionState&) = delete;
+        UploadSessionState& operator=(const UploadSessionState&) = delete;
+        ~UploadSessionState() {
+            if (hash_ctx)
+                EVP_MD_CTX_free(hash_ctx);
+            if (cstream)
+                ZSTD_freeCStream(cstream);
+        }
+    };
+
+    // Guards upload_states_.
+    std::mutex upload_states_mutex_;
+    // upload_id -> state
+    std::unordered_map<std::string, std::shared_ptr<UploadSessionState>> upload_states_;
+
+    // Helper: get-or-create session state. Returns nullptr on alloc failure.
+    std::shared_ptr<UploadSessionState> getOrCreateUploadState(
+        const std::string& t_upload_id, const std::string& t_mime_type, uint8_t t_compression_level = 3);
+
+    // Helper: remove session state (called on complete/abort).
+    void removeUploadState(const std::string& t_upload_id);
 
     // Helpers for handleDriveList
 
@@ -79,45 +137,61 @@ private:
     drogon::Task<drogon::HttpResponsePtr> deleteFolder(
         const drogon::orm::DbClientPtr& tsp_db_client, int64_t t_entity_id, int32_t t_user_id, bool t_is_admin);
 
-    inline static const std::array<IHandler<StorageApiHandler>::route_config, 14> kRoutes{{// 1. Static/Exact routes must come FIRST to
-                                                                                           // avoid
-                                                                                           // being caught by wildcards
-        {"/api/v1/storage/stats", &StorageApiHandler::handleGetStorageStats, {drogon::Get}, {"sgrn::datastore::filters::UserAuthFilter"}},
+    inline static const std::array<IHandler<StorageApiHandler>::route_config, 19> kRoutes = {
+        {{"/api/v1/storage/stats", &StorageApiHandler::handleGetStorageStats, {drogon::Get}, {"sgrn::datastore::filters::UserAuthFilter"}},
 
-        {"/api/v1/storage/files/metadata", &StorageApiHandler::handleGetFilesMetadata, {drogon::Get},
-            {"sgrn::datastore::filters::UserAuthFilter"}},
+            {"/api/v1/storage/files/metadata", &StorageApiHandler::handleGetFilesMetadata, {drogon::Get},
+                {"sgrn::datastore::filters::UserAuthFilter"}},
 
-        {"/api/v1/storage/info", &StorageApiHandler::handleGetConstraints, {drogon::Get}, {}},
+            {"/api/v1/storage/info", &StorageApiHandler::handleGetConstraints, {drogon::Get}, {}},
 
-        {"/api/v1/storage/drive/list", &StorageApiHandler::handleDriveList, {drogon::Get}, {"sgrn::datastore::filters::UserAuthFilter"}},
+            {"/api/v1/storage/upload/init", &StorageApiHandler::handleInitUploadSession, {drogon::Post},
+                {"sgrn::datastore::filters::UserAuthFilter"}},
 
-        {"/api/v1/storage/drive/mkdir", &StorageApiHandler::handleCreateDirectory, {drogon::Post},
-            {"sgrn::datastore::filters::UserAuthFilter"}},
+            {"/api/v1/storage/upload/chunk", &StorageApiHandler::handleUploadChunk, {drogon::Put, drogon::Post},
+                {"sgrn::datastore::filters::UserAuthFilter"}},
 
-        {"/api/v1/storage/drive/move", &StorageApiHandler::handleMove, {drogon::Patch}, {"sgrn::datastore::filters::UserAuthFilter"}},
+            {"/api/v1/storage/upload/status", &StorageApiHandler::handleGetUploadStatus, {drogon::Get},
+                {"sgrn::datastore::filters::UserAuthFilter"}},
 
-        {"/api/v1/storage/drive/delete", &StorageApiHandler::handleDelete, {drogon::Delete}, {"sgrn::datastore::filters::UserAuthFilter"}},
+            {"/api/v1/storage/upload/complete", &StorageApiHandler::handleCompleteUploadSession, {drogon::Post},
+                {"sgrn::datastore::filters::UserAuthFilter"}},
 
-        {"/api/v1/storage/drive/zip", &StorageApiHandler::handleRecursiveDownload, {drogon::Get},
-            {"sgrn::datastore::filters::UserAuthFilter"}},
+            {"/api/v1/storage/upload/abort", &StorageApiHandler::handleAbortUploadSession, {drogon::Delete},
+                {"sgrn::datastore::filters::UserAuthFilter"}},
 
-        {"/api/v1/storage/drive/bulk", &StorageApiHandler::handleBulkAction, {drogon::Post}, {"sgrn::datastore::filters::UserAuthFilter"}},
+            {"/api/v1/storage/drive/list", &StorageApiHandler::handleDriveList, {drogon::Get},
+                {"sgrn::datastore::filters::UserAuthFilter"}},
 
-        {"/api/v1/automated-service/objects", &StorageApiHandler::handleCreateObject, {drogon::Post},
-            {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}},
+            {"/api/v1/storage/drive/mkdir", &StorageApiHandler::handleCreateDirectory, {drogon::Post},
+                {"sgrn::datastore::filters::UserAuthFilter"}},
 
-        {"/api/v1/automated-service/objects", &StorageApiHandler::handleListObjects, {drogon::Get},
-            {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}},
+            {"/api/v1/storage/drive/move", &StorageApiHandler::handleMove, {drogon::Patch}, {"sgrn::datastore::filters::UserAuthFilter"}},
 
-        // 2. Wildcard/Greedy routes must come LAST
-        {"/api/v1/storage/files", &StorageApiHandler::handleFileRequest, {drogon::Get, drogon::Post},
-            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::DecompressionFilter"}},
+            {"/api/v1/storage/drive/delete", &StorageApiHandler::handleDelete, {drogon::Delete},
+                {"sgrn::datastore::filters::UserAuthFilter"}},
 
-        {"/api/v1/storage/automated-service/files", &StorageApiHandler::handleAutomatedServiceFileRequest, {drogon::Get, drogon::Post},
-            {"sgrn::datastore::filters::AutomatedServiceAuthFilter", "sgrn::datastore::filters::DecompressionFilter"}},
+            {"/api/v1/storage/drive/zip", &StorageApiHandler::handleRecursiveDownload, {drogon::Get},
+                {"sgrn::datastore::filters::UserAuthFilter"}},
 
-        {"/api/v1/storage/automated-service/metadata", &StorageApiHandler::handleAutomatedServiceGetFilesMetadata, {drogon::Get},
-            {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}}}};
+            {"/api/v1/storage/drive/bulk", &StorageApiHandler::handleBulkAction, {drogon::Post},
+                {"sgrn::datastore::filters::UserAuthFilter"}},
+
+            {"/api/v1/automated-service/objects", &StorageApiHandler::handleCreateObject, {drogon::Post},
+                {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}},
+
+            {"/api/v1/automated-service/objects", &StorageApiHandler::handleListObjects, {drogon::Get},
+                {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}},
+
+            // 2. Wildcard/Greedy routes must come LAST
+            {"/api/v1/storage/files", &StorageApiHandler::handleFileRequest, {drogon::Get, drogon::Post},
+                {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::DecompressionFilter"}},
+
+            {"/api/v1/storage/automated-service/files", &StorageApiHandler::handleAutomatedServiceFileRequest, {drogon::Get, drogon::Post},
+                {"sgrn::datastore::filters::AutomatedServiceAuthFilter", "sgrn::datastore::filters::DecompressionFilter"}},
+
+            {"/api/v1/storage/automated-service/metadata", &StorageApiHandler::handleAutomatedServiceGetFilesMetadata, {drogon::Get},
+                {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}}}};
 
     // Item routes: `{name}` is mapped by Drogon onto the handler's second
     // argument (see IHandler::item_route_config).

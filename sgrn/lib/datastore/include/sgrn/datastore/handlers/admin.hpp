@@ -30,31 +30,38 @@ public:
     drogon::Task<drogon::HttpResponsePtr> handleUpdateAutomatedServiceMetadata(drogon::HttpRequestPtr tsp_req, std::string t_id);
     drogon::Task<drogon::HttpResponsePtr> handleRotateAutomatedServiceToken(drogon::HttpRequestPtr tsp_req);
 
-    // GET /api/v1/admin/permissions?user_id=&email=&domain=&organisation=&limit=
-    // Joined admin view over core.user_domain_permissions (email + flags).
-    // The generic CRUD at /api/v1/user-domain-permissions is tenant-scoped
-    // and row-ID addressed; this is the operator surface: identity-joined,
-    // searchable, admin-filtered.
+    // Permission System
     drogon::Task<drogon::HttpResponsePtr> handleListPermissions(drogon::HttpRequestPtr tsp_req);
-
-    // POST /api/v1/admin/permissions
-    // Grant (upsert) domain access: {user_id|email, organisation?, domain,
-    // allowed_subpath?, can_read?, can_write?, can_delete?}. Organisation
-    // defaults to the user's own (cross-org grants are refused); the domain
-    // must exist in that organisation (else the FK would 500 — pre-checked
-    // for a clean 400). Zero-trust note: granting the FIRST row for a user
-    // is what unlocks them; the response says so when that happens.
     drogon::Task<drogon::HttpResponsePtr> handleGrantPermission(drogon::HttpRequestPtr tsp_req);
-
-    // DELETE /api/v1/admin/permissions?id= (or ?user_id=&organisation=&domain=)
-    // Revoke. Warns when the user keeps no domain rows afterwards: with
-    // zero-trust default-deny that locks them out of storage entirely.
     drogon::Task<drogon::HttpResponsePtr> handleRevokePermission(drogon::HttpRequestPtr tsp_req);
+
+    // Dynamic RBAC Roles
+    drogon::Task<drogon::HttpResponsePtr> handleGetRoles(drogon::HttpRequestPtr tsp_req);
+    drogon::Task<drogon::HttpResponsePtr> handleCreateRole(drogon::HttpRequestPtr tsp_req);
+    drogon::Task<drogon::HttpResponsePtr> handleUpdateRole(drogon::HttpRequestPtr tsp_req, std::string t_id);
+    drogon::Task<drogon::HttpResponsePtr> handleDeleteRole(drogon::HttpRequestPtr tsp_req, std::string t_id);
+    drogon::Task<drogon::HttpResponsePtr> handleAssignRole(drogon::HttpRequestPtr tsp_req);
+    drogon::Task<drogon::HttpResponsePtr> handleRevokeRole(drogon::HttpRequestPtr tsp_req);
+
+    // Audit System
+    drogon::Task<drogon::HttpResponsePtr> handleGetAuditLogs(drogon::HttpRequestPtr tsp_req);
+    drogon::Task<drogon::HttpResponsePtr> handlePurgeAuditLogs(drogon::HttpRequestPtr tsp_req);
+
+    // Quotas & Rate Limits
+    drogon::Task<drogon::HttpResponsePtr> handleGetQuotas(drogon::HttpRequestPtr tsp_req);
+    drogon::Task<drogon::HttpResponsePtr> handleUpdateOrgQuota(drogon::HttpRequestPtr tsp_req);
+    drogon::Task<drogon::HttpResponsePtr> handleUpdateUserQuota(drogon::HttpRequestPtr tsp_req, std::string t_id);
+    drogon::Task<drogon::HttpResponsePtr> handleUpdateServiceQuota(drogon::HttpRequestPtr tsp_req, std::string t_id);
+
+    // Webhooks
+    drogon::Task<drogon::HttpResponsePtr> handleListWebhooks(drogon::HttpRequestPtr tsp_req);
+    drogon::Task<drogon::HttpResponsePtr> handleRegisterWebhook(drogon::HttpRequestPtr tsp_req);
+    drogon::Task<drogon::HttpResponsePtr> handleDeleteWebhook(drogon::HttpRequestPtr tsp_req, std::string t_id);
 
 private:
     std::string endpoints_cache_;
 
-    inline static const std::array<::sgrn::IHandler<AdminApiHandler>::route_config, 9> kRoutes = {{
+    inline static const std::array<::sgrn::IHandler<AdminApiHandler>::route_config, 20> kRoutes = {{
         {"/api/v1/admin/status", &AdminApiHandler::handleGetStatus, {drogon::Get},
             {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
         {"/api/v1/admin/users", &AdminApiHandler::handleGetUsers, {drogon::Get},
@@ -64,6 +71,8 @@ private:
         {"/api/v1/admin/automated-services/register", &AdminApiHandler::handleRegisterAutomatedService, {drogon::Post},
             {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
         {"/api/v1/endpoints", &AdminApiHandler::handleGetEndpoints, {drogon::Get}, {"sgrn::datastore::filters::UserAuthFilter"}},
+        {"/api/v1/admin/metaprobe/sessions", &AdminApiHandler::handleGetMetaProbeSessions, {drogon::Get},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
         {"/api/v1/admin/automated-services/rotate-token", &AdminApiHandler::handleRotateAutomatedServiceToken, {drogon::Post},
             {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
         {"/api/v1/admin/permissions", &AdminApiHandler::handleListPermissions, {drogon::Get},
@@ -72,13 +81,48 @@ private:
             {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
         {"/api/v1/admin/permissions", &AdminApiHandler::handleRevokePermission, {drogon::Delete},
             {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
+
+        // Roles & RBAC
+        {"/api/v1/admin/roles", &AdminApiHandler::handleGetRoles, {drogon::Get},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
+        {"/api/v1/admin/roles", &AdminApiHandler::handleCreateRole, {drogon::Post},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
+        {"/api/v1/admin/roles/assign", &AdminApiHandler::handleAssignRole, {drogon::Post},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
+        {"/api/v1/admin/roles/revoke", &AdminApiHandler::handleRevokeRole, {drogon::Post},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
+
+        // Audit Logs
+        {"/api/v1/admin/audit-logs", &AdminApiHandler::handleGetAuditLogs, {drogon::Get},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
+        {"/api/v1/admin/audit-logs", &AdminApiHandler::handlePurgeAuditLogs, {drogon::Delete},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
+
+        // Quotas & Rate Limits
+        {"/api/v1/admin/quotas", &AdminApiHandler::handleGetQuotas, {drogon::Get},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
+        {"/api/v1/admin/quotas/organisation", &AdminApiHandler::handleUpdateOrgQuota, {drogon::Put},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
+
+        // Webhooks
+        {"/api/v1/admin/webhooks", &AdminApiHandler::handleListWebhooks, {drogon::Get},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
+        {"/api/v1/admin/webhooks", &AdminApiHandler::handleRegisterWebhook, {drogon::Post},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
     }};
 
-    // Item route: the `{id}` placeholder is mapped by Drogon onto the
-    // handler's second argument (HttpRequest::getParameter() does NOT
-    // carry path placeholders for registerHandler routes).
-    inline static const std::array<::sgrn::IHandler<AdminApiHandler>::item_route_config, 1> kItemRoutes = {{
+    inline static const std::array<::sgrn::IHandler<AdminApiHandler>::item_route_config, 6> kItemRoutes = {{
         {"/api/v1/admin/automated-services/{id}/metadata", &AdminApiHandler::handleUpdateAutomatedServiceMetadata, {drogon::Patch},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
+        {"/api/v1/admin/roles/{id}", &AdminApiHandler::handleUpdateRole, {drogon::Put},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
+        {"/api/v1/admin/roles/{id}", &AdminApiHandler::handleDeleteRole, {drogon::Delete},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
+        {"/api/v1/admin/quotas/user/{id}", &AdminApiHandler::handleUpdateUserQuota, {drogon::Put},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
+        {"/api/v1/admin/quotas/service/{id}", &AdminApiHandler::handleUpdateServiceQuota, {drogon::Put},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
+        {"/api/v1/admin/webhooks/{id}", &AdminApiHandler::handleDeleteWebhook, {drogon::Delete},
             {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::AdminFilter"}},
     }};
 };

@@ -5,6 +5,7 @@
 set(BUILD_TESTING    OFF CACHE BOOL "" FORCE)
 set(BUILD_EXAMPLES   OFF CACHE BOOL "" FORCE)
 set(BUILD_DOC        OFF CACHE BOOL "" FORCE)
+set(BUILD_REDIS      OFF CACHE BOOL "" FORCE)
 
 if(SGRN_BUILD_DROGON)
     set(DROGON_FOUND_PRECOMPILED OFF)
@@ -22,8 +23,10 @@ if(SGRN_BUILD_DROGON)
         endif()
 
         find_package(Drogon CONFIG QUIET PATHS "${_search_prefix}" NO_DEFAULT_PATH)
-        find_package(Trantor CONFIG QUIET PATHS "${_search_prefix}" NO_DEFAULT_PATH)
-        if(Drogon_FOUND AND Trantor_FOUND)
+        if(NOT TARGET Trantor::Trantor AND NOT Trantor_FOUND)
+            find_package(Trantor CONFIG QUIET PATHS "${_search_prefix}" NO_DEFAULT_PATH)
+        endif()
+        if((Drogon_FOUND OR TARGET Drogon::Drogon) AND (Trantor_FOUND OR TARGET Trantor::Trantor))
             # message(STATUS "[SGRN] Found pre-compiled Drogon and Trantor in ${_search_prefix}")
             set(DROGON_FOUND_PRECOMPILED ON)
             # Create global aliases so dependency resolution still works.

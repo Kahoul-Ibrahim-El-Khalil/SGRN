@@ -54,6 +54,7 @@ public:
         static const std::string _storage_limit;
         static const std::string _total_entry_count;
         static const std::string _entry_count_limit;
+        static const std::string _rate_limit_rpm;
     };
 
     static const int primaryKeyNumber;
@@ -186,8 +187,17 @@ public:
     void setEntryCountLimit(const int64_t& pEntryCountLimit) noexcept;
     void setEntryCountLimitToNull() noexcept;
 
+    /**  For column rate_limit_rpm  */
+    /// Get the value of the column rate_limit_rpm, returns the default value if the column is null
+    const int32_t& getValueOfRateLimitRpm() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<int32_t>& getRateLimitRpm() const noexcept;
+    /// Set the value of the column rate_limit_rpm
+    void setRateLimitRpm(const int32_t& pRateLimitRpm) noexcept;
+    void setRateLimitRpmToNull() noexcept;
+
     static size_t getColumnNumber() noexcept {
-        return 10;
+        return 11;
     }
     static const std::string& getColumnName(size_t index) noexcept(false);
 
@@ -220,6 +230,7 @@ private:
     std::shared_ptr<int64_t> storageLimit_;
     std::shared_ptr<int64_t> totalEntryCount_;
     std::shared_ptr<int64_t> entryCountLimit_;
+    std::shared_ptr<int32_t> rateLimitRpm_;
     struct MetaData {
         const std::string colName_;
         const std::string colType_;
@@ -230,7 +241,7 @@ private:
         const bool notNull_;
     };
     static const std::vector<MetaData> metaData_;
-    bool dirtyFlag_[10] = {false};
+    bool dirtyFlag_[11] = {false};
 
 public:
     static const std::string& sqlForFindingByPrimaryKey() {
@@ -288,6 +299,10 @@ public:
             sql += "entry_count_limit,";
             ++parametersCount;
         }
+        if (dirtyFlag_[10]) {
+            sql += "rate_limit_rpm,";
+            ++parametersCount;
+        }
         needSelection = true;
         if (parametersCount > 0) {
             sql[sql.length() - 1] = ')';
@@ -340,6 +355,10 @@ public:
             sql += "default,";
         }
         if (dirtyFlag_[9]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[10]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }

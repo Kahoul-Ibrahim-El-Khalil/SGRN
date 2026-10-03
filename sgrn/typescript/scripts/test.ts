@@ -8,7 +8,7 @@ import {
   isSuccess,
 } from "@sgrn/datastore";
 
-const SERVER_URL: string = "https://localhost:8443";
+const SERVER_URL: string = "https://localhost/datastore";
 
 const credentials: Credentials = {
   token: "pu4lZAkMuMTqxsWSc8juzQ",

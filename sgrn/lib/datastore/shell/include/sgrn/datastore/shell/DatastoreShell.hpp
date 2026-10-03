@@ -140,6 +140,15 @@ private:
     int cmdScope(const std::vector<std::string>& t_args);
     int cmdSwitch(const std::vector<std::string>& t_args);
     int cmdZip(const std::vector<std::string>& t_args);
+    // Resumable upload
+    int cmdRput(const std::vector<std::string>& t_args);
+    int cmdUploadStatus(const std::vector<std::string>& t_args);
+    int cmdUploadAbort(const std::vector<std::string>& t_args);
+    // Live sessions & webhooks (admin)
+    int cmdSessions();
+    int cmdWebhooks();
+    int cmdWebhookAdd(const std::vector<std::string>& t_args);
+    int cmdWebhookDel(const std::vector<std::string>& t_args);
     int dispatch(const std::vector<std::string>& t_words);
 
     // ── shell escape & process piping ─────────────────────────────────────
@@ -176,6 +185,13 @@ private:
     std::string as_cat(const std::string& t_remote_path);
     std::string as_pipe(const std::string& t_input, const std::string& t_shell_cmd);
     std::string as_exec(const std::string& t_shell_cmd, const std::string& t_input);
+    // Resumable upload AS bindings
+    std::string as_rput(const std::string& t_local, const std::string& t_remote, int64_t t_chunk_size);
+    // Admin AS bindings
+    std::string as_sessions();
+    std::string as_webhooks();
+    std::string as_webhookAdd(const std::string& t_url, const std::string& t_secret);
+    std::string as_webhookDel(int32_t t_id);
 };
 
 } // namespace sgrn::datastore::shell

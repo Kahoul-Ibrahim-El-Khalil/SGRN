@@ -7,9 +7,12 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 set(BACKEND_SOURCES "")
 set(ORM_SOURCES "")
 
-# 1. Plugins discovery
+# 1. Session store (PostgreSQL + RAM cache), Audit Logger & Plugins discovery
+file(GLOB_RECURSE SESSION_SOURCES CONFIGURE_DEPENDS session/*.cpp)
+file(GLOB_RECURSE AUDIT_SOURCES CONFIGURE_DEPENDS audit/*.cpp)
 file(GLOB_RECURSE PLUGIN_SOURCES CONFIGURE_DEPENDS plugins/*.cpp)
-list(APPEND BACKEND_SOURCES ${PLUGIN_SOURCES})
+list(FILTER PLUGIN_SOURCES EXCLUDE REGEX ".*/plugins/redis/.*")
+list(APPEND BACKEND_SOURCES ${SESSION_SOURCES} ${AUDIT_SOURCES} ${PLUGIN_SOURCES})
 
 # 2. ORM MODELS (Independent Shared Library)
 if(BUILD_ORM)
@@ -38,10 +41,6 @@ if(BUILD_ORM)
         find_library(SGRN_BROTLIENC_LIBRARY NAMES brotlienc PATHS "${SGRN_CONDA_PREFIX}/lib" NO_DEFAULT_PATH)
         find_library(SGRN_BROTLICOMMON_LIBRARY NAMES brotlicommon PATHS "${SGRN_CONDA_PREFIX}/lib" NO_DEFAULT_PATH)
         if(SGRN_BROTLIDEC_LIBRARY AND SGRN_BROTLIENC_LIBRARY AND SGRN_BROTLICOMMON_LIBRARY)
-            # IMPORTANT: the project-wide toolchain injects `-Wl,--as-needed`,
-            # which can drop these libs (they are only referenced by objects
-            # pulled from static libdrogon.a). Force the NEEDED entries so the
-            # symbols resolve at runtime.
             target_link_options(sgrn_datastore_orm PRIVATE "LINKER:--no-as-needed")
             target_link_libraries(sgrn_datastore_orm PRIVATE
                 "${SGRN_BROTLIDEC_LIBRARY}"
@@ -50,8 +49,6 @@ if(BUILD_ORM)
             )
         endif()
 
-        # libuuid is provided by the SGRN toolset and is required by some
-        # transitive dependencies (e.g. Trantor/Drogon on some builds).
         find_library(SGRN_UUID_LIBRARY NAMES uuid PATHS "${SGRN_CONDA_PREFIX}/lib" NO_DEFAULT_PATH)
         if(SGRN_UUID_LIBRARY)
             target_link_libraries(sgrn_datastore_orm PRIVATE "${SGRN_UUID_LIBRARY}")
@@ -87,7 +84,6 @@ else()
     add_library(sgrn_datastore_lib SHARED ${BACKEND_SOURCES})
 endif()
 
-# Visibility and RPATH only matter for shared builds
 if(NOT SGRN_BUILD_STATIC)
     set_target_properties(sgrn_datastore_lib PROPERTIES 
         CXX_VISIBILITY_PRESET default
@@ -108,17 +104,22 @@ target_link_libraries(sgrn_datastore_lib PUBLIC
     sgrn::drogon
     sgrn::trantor
     sgrn::postgres
+    sgrn::redis
     sgrn::jsoncpp
     sgrn::fmt
     sgrn::openssl
     sgrn::zstd
-    sgrn::redis
     sgrn::aws
     sgrn::utils
     sgrn::core
 )
 
 if(UNIX AND NOT APPLE)
+    find_library(SGRN_HIREDIS_LIBRARY NAMES hiredis PATHS "${SGRN_CONDA_PREFIX}/lib" NO_DEFAULT_PATH)
+    if(SGRN_HIREDIS_LIBRARY)
+        target_link_libraries(sgrn_datastore_lib PUBLIC "${SGRN_HIREDIS_LIBRARY}")
+    endif()
+
     find_library(SGRN_SQLITE3_LIBRARY NAMES sqlite3 PATHS "${SGRN_CONDA_PREFIX}/lib" NO_DEFAULT_PATH)
     if(SGRN_SQLITE3_LIBRARY)
         target_link_options(sgrn_datastore_lib PRIVATE "LINKER:--no-as-needed")
@@ -294,6 +295,7 @@ add_custom_command(
                 fastcgi.conf
                 fastcgi-php.conf
                 snakeoil.conf
+                SGRN-redis.service
             --level 22
     DEPENDS
         ${CONFIG_DEPS}

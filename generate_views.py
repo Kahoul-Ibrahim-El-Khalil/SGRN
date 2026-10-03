@@ -1,0 +1,1 @@
+sgrn/lib/datastore/scripts/generators/generate_views.py

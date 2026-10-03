@@ -141,7 +141,7 @@ create table if not exists storage.directories (
   id bigint generated always as identity primary key,
   user_id int references core.users (id) on delete cascade,
   automated_service_id int references core.automated_services (id) on delete cascade,
-  session_id int not null references core.sessions (id) on delete cascade,
+  session_id bigint not null references core.sessions (id) on delete cascade,
   parent_id bigint default null references storage.directories (id) on delete cascade,
   name text not null,
   path text not null,
@@ -192,6 +192,7 @@ where
   automated_service_id is not null;
 
 -- ============================================================
+-- ============================================================
 -- files
 -- ============================================================
 create table if not exists storage.files (
@@ -199,7 +200,7 @@ create table if not exists storage.files (
   name text not null,
   user_id int references core.users (id) on delete cascade,
   automated_service_id int references core.automated_services (id) on delete cascade,
-  session_id int not null references core.sessions (id) on delete cascade,
+  session_id bigint not null references core.sessions (id) on delete cascade,
   directory_id bigint default null references storage.directories (id) on delete cascade,
   check (
     (
@@ -211,11 +212,77 @@ create table if not exists storage.files (
       and automated_service_id is not null
     )
   ),
-  object_id bigint not null references storage.objects (id) on delete restrict,
+  -- Legacy 1:1 FK — kept nullable for zero-downtime migration.
+  -- Will be dropped once storage.file_objects is backfilled (see migration below).
+  object_id bigint references storage.objects (id) on delete restrict,
   extension varchar(15) references storage.formats (extension) on update cascade,
   full_path text not null,
   created_at timestamptz not null default now()
 );
+
+-- ============================================================
+-- file_objects  (1-N file → Garage object / segment manifest)
+-- ============================================================
+-- Each row maps one file to one Garage S3 object (one segment).
+-- A single-object file has exactly one row (part_index=0, role='primary').
+-- A multi-segment file has N rows ordered by part_index (role='part').
+-- Deduplication is expressed by multiple file rows sharing the same object_id.
+create table if not exists storage.file_objects (
+  id         bigserial primary key,
+  file_id    bigint not null references storage.files (id) on delete cascade,
+  object_id  bigint not null references storage.objects (id) on delete restrict,
+  part_index int    not null default 0,
+  role       text   not null default 'primary'
+               check (role in ('primary', 'part', 'delta')),
+  unique (file_id, part_index)
+);
+
+create index if not exists idx_file_objects_file   on storage.file_objects (file_id);
+create index if not exists idx_file_objects_object on storage.file_objects (object_id);
+
+-- ============================================================
+-- Migration: backfill file_objects from legacy files.object_id
+-- ============================================================
+-- Idempotent: ON CONFLICT DO NOTHING. Safe to run repeatedly.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'storage' and table_name = 'files' and column_name = 'object_id'
+  ) then
+    insert into storage.file_objects (file_id, object_id, part_index, role)
+    select id, object_id, 0, 'primary'
+    from storage.files
+    where object_id is not null
+    on conflict (file_id, part_index) do nothing;
+  end if;
+end;
+$$;
+
+-- Drop the now-redundant 1:1 FK column from storage.files.
+-- Only runs if file_objects has been backfilled (all non-null object_ids migrated).
+do $$
+declare v_missing bigint;
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'storage' and table_name = 'files' and column_name = 'object_id'
+  ) then
+    select count(*) into v_missing
+    from storage.files f
+    where f.object_id is not null
+      and not exists (
+        select 1 from storage.file_objects fo
+        where fo.file_id = f.id and fo.part_index = 0
+      );
+    if v_missing = 0 then
+      alter table storage.files drop column if exists object_id;
+    else
+      raise notice 'storage.files.object_id not dropped: % rows still lack file_objects entries', v_missing;
+    end if;
+  end if;
+end;
+$$;
 
 alter table if exists storage.files
 add column if not exists full_path text;
@@ -281,7 +348,7 @@ alter table if exists storage.files
 alter column full_path
 set not null;
 
--- unique indexes
+-- unique indexes (path uniqueness — not object-scoped, those are removed)
 create unique index if not exists uq_files_root on storage.files (user_id, name)
 where
   directory_id is null
@@ -302,30 +369,11 @@ where
   directory_id is not null
   and automated_service_id is not null;
 
-create unique index if not exists uq_files_object_root on storage.files (object_id, user_id, name)
-where
-  directory_id is null
-  and user_id is not null;
-
-create unique index if not exists uq_files_object_directory on storage.files (object_id, user_id, directory_id, name)
-where
-  directory_id is not null
-  and user_id is not null;
-
-create unique index if not exists uq_files_object_root_service on storage.files (object_id, automated_service_id, name)
-where
-  directory_id is null
-  and automated_service_id is not null;
-
-create unique index if not exists uq_files_object_directory_service on storage.files (
-  object_id,
-  automated_service_id,
-  directory_id,
-  name
-)
-where
-  directory_id is not null
-  and automated_service_id is not null;
+-- Legacy object-scoped unique indexes removed (replaced by file_objects).
+drop index if exists uq_files_object_root;
+drop index if exists uq_files_object_directory;
+drop index if exists uq_files_object_root_service;
+drop index if exists uq_files_object_directory_service;
 
 -- ============================================================
 -- indexes
@@ -368,13 +416,15 @@ create index if not exists idx_files_directory on storage.files (directory_id)
 where
   directory_id is not null;
 
-create index if not exists idx_files_object on storage.files (object_id);
-
-create index if not exists idx_files_name on storage.files (name);
+-- Drop legacy object index (now expressed via file_objects)
+drop index if exists idx_files_object;
 
 -- ============================================================
--- view — full path resolution
+-- view — full path resolution (joins through file_objects)
 -- ============================================================
+-- For multi-segment files: original_size = SUM of all segment original sizes;
+-- compressed_size = SUM of all segment compressed (stored) sizes.
+-- Compression metadata is taken from the first segment (part_index=0).
 create or replace view storage.file_paths as
 select
   f.id,
@@ -388,17 +438,33 @@ select
     '/'
   ) as directory_path,
   f.directory_id,
-  f.object_id,
+  -- Primary object (part_index=0) for key/bucket resolution.
+  primary_obj.id   as object_id,
+  primary_obj.bucket,
+  primary_obj.key  as object_key,
   f.extension,
-  so.is_compressed,
-  so.compression_algorithm,
-  so.compression_level,
-  so.size as compressed_size,
-  so.original_size,
+  primary_obj.is_compressed,
+  primary_obj.compression_algorithm,
+  primary_obj.compression_level,
+  -- Aggregate sizes across all segments
+  coalesce(sizes.compressed_size, 0) as compressed_size,
+  coalesce(sizes.original_size, 0)   as original_size,
   f.created_at
 from
   storage.files f
-  join storage.objects so on so.id = f.object_id;
+  -- First segment for metadata
+  join storage.file_objects fo0 on fo0.file_id = f.id and fo0.part_index = 0
+  join storage.objects primary_obj on primary_obj.id = fo0.object_id
+  -- Aggregate across all segments
+  join (
+    select
+      fo.file_id,
+      sum(o.size)          as compressed_size,
+      sum(o.original_size) as original_size
+    from storage.file_objects fo
+    join storage.objects o on o.id = fo.object_id
+    group by fo.file_id
+  ) sizes on sizes.file_id = f.id;
 
 -- ============================================================
 -- view — directory tree with recursive size/count data
@@ -475,7 +541,8 @@ with recursive
     from
       file_ancestors fa
       join storage.files f on f.id = fa.file_id
-      join storage.objects o on o.id = f.object_id
+      join storage.file_objects fo on fo.file_id = f.id
+      join storage.objects o on o.id = fo.object_id
     group by
       fa.ancestor_id
   )
@@ -582,7 +649,7 @@ execute function storage.sync_file_path ();
 -- ============================================================
 -- function — ensure full directory tree exists (upsert)
 -- ============================================================
-create or replace function storage.ensure_directory_path (p_user_id int, p_session_id int, p_path text) returns bigint language plpgsql as $$
+create or replace function storage.ensure_directory_path (p_user_id int, p_session_id bigint, p_path text) returns bigint language plpgsql as $$
 begin
   return storage.ensure_directory_path(p_user_id, null::int, p_session_id, p_path);
 end;
@@ -591,7 +658,7 @@ $$;
 create or replace function storage.ensure_directory_path (
   p_user_id int,
   p_automated_service_id int,
-  p_session_id int,
+  p_session_id bigint,
   p_path text
 ) returns bigint language plpgsql as $$
 declare
@@ -845,6 +912,20 @@ begin
 end;
 $$;
 
+create or replace function storage.get_file_sizes (
+  p_file_id bigint,
+  out virtual_size bigint,
+  out real_size bigint
+) returns record language plpgsql as $$
+begin
+  select coalesce(sum(o.original_size), 0), coalesce(sum(o.size), 0)
+    into virtual_size, real_size
+    from storage.file_objects fo
+    join storage.objects o on o.id = fo.object_id
+   where fo.file_id = p_file_id;
+end;
+$$;
+
 create or replace function storage.update_directory_sizes () returns trigger language plpgsql as $$
 declare
   v_old_virtual bigint := 0;
@@ -853,25 +934,20 @@ declare
   v_new_real bigint := 0;
 begin
   if tg_op = 'INSERT' then
-    select o.original_size, o.size into v_new_virtual, v_new_real
-    from storage.objects o where o.id = new.object_id;
-    perform storage.apply_directory_size_delta(new.directory_id, coalesce(v_new_virtual, 0), coalesce(v_new_real, 0));
+    select virtual_size, real_size into v_new_virtual, v_new_real from storage.get_file_sizes(new.id);
+    perform storage.apply_directory_size_delta(new.directory_id, v_new_virtual, v_new_real);
     return new;
   elsif tg_op = 'DELETE' then
-    select o.original_size, o.size into v_old_virtual, v_old_real
-    from storage.objects o where o.id = old.object_id;
-    perform storage.apply_directory_size_delta(old.directory_id, -coalesce(v_old_virtual, 0), -coalesce(v_old_real, 0));
+    select virtual_size, real_size into v_old_virtual, v_old_real from storage.get_file_sizes(old.id);
+    perform storage.apply_directory_size_delta(old.directory_id, -v_old_virtual, -v_old_real);
     return old;
   elsif tg_op = 'UPDATE' then
-    if old.directory_id is distinct from new.directory_id
-       or old.object_id is distinct from new.object_id then
-      select o.original_size, o.size into v_old_virtual, v_old_real
-      from storage.objects o where o.id = old.object_id;
-      select o.original_size, o.size into v_new_virtual, v_new_real
-      from storage.objects o where o.id = new.object_id;
+    if old.directory_id is distinct from new.directory_id then
+      select virtual_size, real_size into v_old_virtual, v_old_real from storage.get_file_sizes(old.id);
+      select virtual_size, real_size into v_new_virtual, v_new_real from storage.get_file_sizes(new.id);
 
-      perform storage.apply_directory_size_delta(old.directory_id, -coalesce(v_old_virtual, 0), -coalesce(v_old_real, 0));
-      perform storage.apply_directory_size_delta(new.directory_id, coalesce(v_new_virtual, 0), coalesce(v_new_real, 0));
+      perform storage.apply_directory_size_delta(old.directory_id, -v_old_virtual, -v_old_real);
+      perform storage.apply_directory_size_delta(new.directory_id, v_new_virtual, v_new_real);
     end if;
     return new;
   end if;
@@ -885,8 +961,7 @@ drop trigger if exists trg_update_directory_sizes on storage.files;
 create trigger trg_update_directory_sizes
 after insert
 or
-update of directory_id,
-object_id
+update of directory_id
 or delete on storage.files for each row
 execute function storage.update_directory_sizes ();
 
@@ -898,14 +973,10 @@ execute function storage.update_directory_sizes ();
 -- trigger — cleanup orphaned objects after file deletion
 -- ============================================================
 create or replace function storage.cleanup_orphan_objects () returns trigger language plpgsql as $$
-declare
-  v_old_object_id bigint;
 begin
-  v_old_object_id := old.object_id;
-
-  if v_old_object_id is not null
-     and not exists (select 1 from storage.files where object_id = v_old_object_id) then
-    delete from storage.objects where id = v_old_object_id;
+  if old.object_id is not null
+     and not exists (select 1 from storage.file_objects where object_id = old.object_id) then
+    delete from storage.objects where id = old.object_id;
   end if;
   if tg_op = 'UPDATE' then
     return new;
@@ -914,10 +985,11 @@ begin
 end;
 $$;
 
+drop trigger if exists trg_cleanup_orphan_objects on storage.file_objects;
 create trigger trg_cleanup_orphan_objects
 after
 update of object_id
-or delete on storage.files for each row
+or delete on storage.file_objects for each row
 execute function storage.cleanup_orphan_objects ();
 
 -- ============================================================
@@ -931,75 +1003,72 @@ declare
   v_new_real    bigint := 0;
 begin
   if (tg_op = 'INSERT') then
-    select original_size, size into v_new_virtual, v_new_real
-    from storage.objects where id = new.object_id;
+    select virtual_size, real_size into v_new_virtual, v_new_real from storage.get_file_sizes(new.id);
+
     if new.user_id is not null then
       update core.users
-      set total_virtual_size = coalesce(total_virtual_size, 0) + coalesce(v_new_virtual, 0),
-          total_real_size    = coalesce(total_real_size, 0)    + coalesce(v_new_real, 0),
+      set total_virtual_size = coalesce(total_virtual_size, 0) + v_new_virtual,
+          total_real_size    = coalesce(total_real_size, 0)    + v_new_real,
           total_entry_count   = coalesce(total_entry_count, 0) + 1
       where id = new.user_id;
     elsif new.automated_service_id is not null then
       update core.automated_services
-      set total_virtual_size = coalesce(total_virtual_size, 0) + coalesce(v_new_virtual, 0),
-          total_real_size    = coalesce(total_real_size, 0)    + coalesce(v_new_real, 0),
+      set total_virtual_size = coalesce(total_virtual_size, 0) + v_new_virtual,
+          total_real_size    = coalesce(total_real_size, 0)    + v_new_real,
           total_entry_count   = coalesce(total_entry_count, 0) + 1
       where id = new.automated_service_id;
     end if;
     return new;
   elsif (tg_op = 'DELETE') then
-    select original_size, size into v_old_virtual, v_old_real
-    from storage.objects where id = old.object_id;
+    select virtual_size, real_size into v_old_virtual, v_old_real from storage.get_file_sizes(old.id);
+
     if old.user_id is not null then
       update core.users
-      set total_virtual_size = coalesce(total_virtual_size, 0) - coalesce(v_old_virtual, 0),
-          total_real_size    = coalesce(total_real_size, 0)    - coalesce(v_old_real, 0),
+      set total_virtual_size = coalesce(total_virtual_size, 0) - v_old_virtual,
+          total_real_size    = coalesce(total_real_size, 0)    - v_old_real,
           total_entry_count   = coalesce(total_entry_count, 0) - 1
       where id = old.user_id;
     elsif old.automated_service_id is not null then
       update core.automated_services
-      set total_virtual_size = coalesce(total_virtual_size, 0) - coalesce(v_old_virtual, 0),
-          total_real_size    = coalesce(total_real_size, 0)    - coalesce(v_old_real, 0),
+      set total_virtual_size = coalesce(total_virtual_size, 0) - v_old_virtual,
+          total_real_size    = coalesce(total_real_size, 0)    - v_old_real,
           total_entry_count   = coalesce(total_entry_count, 0) - 1
       where id = old.automated_service_id;
     end if;
     return old;
   elsif (tg_op = 'UPDATE') then
-    if old.object_id is not distinct from new.object_id
-       and old.user_id is not distinct from new.user_id
+    if old.user_id is not distinct from new.user_id
        and old.automated_service_id is not distinct from new.automated_service_id then
       return new;
     end if;
 
-    select original_size, size into v_old_virtual, v_old_real
-    from storage.objects where id = old.object_id;
-    select original_size, size into v_new_virtual, v_new_real
-    from storage.objects where id = new.object_id;
+    select virtual_size, real_size into v_old_virtual, v_old_real from storage.get_file_sizes(old.id);
+    select virtual_size, real_size into v_new_virtual, v_new_real from storage.get_file_sizes(new.id);
 
     if old.user_id is not null then
       update core.users
-      set total_virtual_size = coalesce(total_virtual_size, 0) - coalesce(v_old_virtual, 0),
-          total_real_size    = coalesce(total_real_size, 0)    - coalesce(v_old_real, 0),
+      set total_virtual_size = coalesce(total_virtual_size, 0) - v_old_virtual,
+          total_real_size    = coalesce(total_real_size, 0)    - v_old_real,
           total_entry_count   = coalesce(total_entry_count, 0) - 1
       where id = old.user_id;
     elsif old.automated_service_id is not null then
       update core.automated_services
-      set total_virtual_size = coalesce(total_virtual_size, 0) - coalesce(v_old_virtual, 0),
-          total_real_size    = coalesce(total_real_size, 0)    - coalesce(v_old_real, 0),
+      set total_virtual_size = coalesce(total_virtual_size, 0) - v_old_virtual,
+          total_real_size    = coalesce(total_real_size, 0)    - v_old_real,
           total_entry_count   = coalesce(total_entry_count, 0) - 1
       where id = old.automated_service_id;
     end if;
 
     if new.user_id is not null then
       update core.users
-      set total_virtual_size = coalesce(total_virtual_size, 0) + coalesce(v_new_virtual, 0),
-          total_real_size    = coalesce(total_real_size, 0)    + coalesce(v_new_real, 0),
+      set total_virtual_size = coalesce(total_virtual_size, 0) + v_new_virtual,
+          total_real_size    = coalesce(total_real_size, 0)    + v_new_real,
           total_entry_count   = coalesce(total_entry_count, 0) + 1
       where id = new.user_id;
     elsif new.automated_service_id is not null then
       update core.automated_services
-      set total_virtual_size = coalesce(total_virtual_size, 0) + coalesce(v_new_virtual, 0),
-          total_real_size    = coalesce(total_real_size, 0)    + coalesce(v_new_real, 0),
+      set total_virtual_size = coalesce(total_virtual_size, 0) + v_new_virtual,
+          total_real_size    = coalesce(total_real_size, 0)    + v_new_real,
           total_entry_count   = coalesce(total_entry_count, 0) + 1
       where id = new.automated_service_id;
     end if;
@@ -1014,8 +1083,7 @@ drop trigger if exists trg_update_owner_storage_usage on storage.files;
 
 create trigger trg_update_owner_storage_usage before insert
 or
-update of object_id,
-user_id,
+update of user_id,
 automated_service_id
 or delete on storage.files for each row
 execute function storage.update_owner_storage_usage ();
@@ -1040,11 +1108,13 @@ declare
   v_org_file_count bigint;
   v_org_file_limit bigint;
 begin
-  -- 1. size of the object being referenced
+  -- 1. size of the objects being referenced
   if TG_TABLE_NAME = 'files' then
-    execute 'select original_size from storage.objects where id = $1'
+    select coalesce(sum(o.original_size), 0)
       into v_original_size
-      using new.object_id;
+      from storage.file_objects fo
+      join storage.objects o on o.id = fo.object_id
+     where fo.file_id = new.id;
   else
     v_original_size := 0;
   end if;
@@ -1196,7 +1266,7 @@ create unique index if not exists uq_files_directory_domain on storage.files (do
 create or replace function storage.ensure_directory_path (
   p_user_id int,
   p_automated_service_id int,
-  p_session_id int,
+  p_session_id bigint,
   p_path text,
   p_domain text
 ) returns bigint language plpgsql as $$

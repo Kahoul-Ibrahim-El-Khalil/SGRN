@@ -2,8 +2,8 @@
 
 #include <drogon/drogon.h>
 #include <sgrn/datastore/error/ApiErrors.hpp>
-#include <sgrn/datastore/plugins/redis/RedisMiddleware.hpp>
 #include <sgrn/datastore/services/auth.hpp>
+#include <sgrn/datastore/session/SessionStore.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
 #include <sgrn/datastore/utils/safe_access.hpp>
 #include <sgrn/utils/jsoncpp.hpp>
@@ -42,50 +42,17 @@ Task<HttpResponsePtr> AuthApiHandler::handleSignIn(HttpRequestPtr tsp_req) {
 
 Task<HttpResponsePtr> AuthApiHandler::handleSignOut(HttpRequestPtr tsp_req) {
     auto token_opt = getSgrnToken(tsp_req);
-    if (token_opt.has_value() == false) {
-        // No token present, just redirect
+    if (!token_opt.has_value()) {
         co_return HttpResponse::newRedirectionResponse("/");
     }
 
     try {
-        std::string token = token_opt.value();
-
-        auto redis_res = sgrn::datastore::core::getRedisMiddleware();
-        if (redis_res.hasError()) {
-            ERROR_LOG("Signout: RedisMiddleware not available for token: {}", token);
-            co_return HttpResponse::newRedirectionResponse("/");
-        }
-        auto redis = redis_res.value();
-
-        // 1. Get Session to find the email (to clean user cache)
-        auto session_opt = co_await redis->getSession(token);
-        if (session_opt.has_value() && session_opt.value().isMember("user") && session_opt.value()["user"].isMember("email")) {
-            std::string email = session_opt.value()["user"]["email"].asString();
-            co_await redis->deleteUserCache(email);
-
-            auto db_res = sgrn::datastore::core::getDbClient();
-            if (!db_res.hasError()) {
-                auto db_client = db_res.value();
-                if (session_opt.value().isMember("session_id") && session_opt.value()["session_id"].isInt64()) {
-                    const int64_t session_id = session_opt.value()["session_id"].asInt64();
-                    co_await db_client->execSqlCoro("UPDATE core.sessions SET terminated_at = NOW(), termination_reason = 'logout' "
-                                                    "WHERE id = $1 AND terminated_at IS NULL",
-                        session_id);
-                }
-            }
-        } else {
-            WARN_LOG("Signout: Session exists but missing user/email for token: {}", token);
-        }
-
-        // 2. Delete the Session Data (and upload key)
-        co_await redis->deleteSession(token);
-
-        // 3. Return success redirect
+        const std::string token = std::move(token_opt.value());
+        // Revoke session: evicts from RAM cache, deletes from core.sessions, broadcasts NOTIFY
+        co_await sgrn::datastore::session::SessionStore::instance().revokeSession(token);
         co_return HttpResponse::newRedirectionResponse("/");
-
     } catch (const std::exception& e) {
         ERROR_LOG("Signout error: {}", e.what());
-        // Still redirect even on error - best effort cleanup
         co_return HttpResponse::newRedirectionResponse("/");
     }
 }
@@ -157,12 +124,8 @@ Task<HttpResponsePtr> AuthApiHandler::handleAutomatedServiceSignOut(HttpRequestP
                                         "  AND  terminated_at  IS NULL",
             automated_service_id, token);
 
-        // 2. Evict the token from Redis
-        auto redis_mw_res = sgrn::datastore::core::getRedisMiddleware();
-        if (redis_mw_res.hasError() == false) {
-            auto redis_client = redis_mw_res.value();
-            co_await redis_client->del(token);
-        }
+        // 2. Evict the token from the in-process RAM cache
+        sgrn::datastore::session::SessionStore::instance().evictLocal(token);
 
         co_return createJsonResponse("Session terminated successfully", k200OK);
 

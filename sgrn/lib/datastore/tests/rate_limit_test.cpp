@@ -55,6 +55,12 @@ int main() {
     CHECK(classifyPath("/api/v1/auth/user/password") == RateClass::Auth);
     CHECK(classifyPath("/api/v1/storage/files") == RateClass::Storage);
     CHECK(classifyPath("/api/v1/storage/drive/list") == RateClass::Storage);
+    // Resumable upload endpoints — dedicated high-capacity Upload rate class
+    CHECK(classifyPath("/api/v1/storage/upload/chunk") == RateClass::Upload);
+    CHECK(classifyPath("/api/v1/storage/upload/init") == RateClass::Upload);
+    CHECK(classifyPath("/api/v1/storage/upload/complete") == RateClass::Upload);
+    CHECK(classifyPath("/api/v1/storage/upload/status") == RateClass::Upload);
+    CHECK(classifyPath("/api/v1/storage/upload/abort") == RateClass::Upload);
     CHECK(classifyPath("/") == RateClass::Page);
     CHECK(classifyPath("/index.html") == RateClass::Page);
     CHECK(classifyPath("/assets/app.abc123.js") == RateClass::Page);
@@ -75,6 +81,7 @@ int main() {
         CHECK(effectiveLimit(cfg, RateClass::Storage) == 40); // 30 + burst 10
         CHECK(effectiveLimit(cfg, RateClass::General) == 110);
         CHECK(effectiveLimit(cfg, RateClass::Page) == 130);
+        CHECK(effectiveLimit(cfg, RateClass::Upload) == 10010); // 10000 + burst 10
         CHECK(windowMs(cfg, RateClass::Auth) == 60000);
     }
     // --- config overrides + invalid values fall back -------------------------

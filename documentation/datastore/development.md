@@ -53,10 +53,11 @@ Requirements for **generated CRUD** (see [crud_views.md](crud_views.md)):
   FK to `core.organisations`)
 - No reliance on joins at query time
 
-Apply to a dev database:
+Apply to a dev database (without compiling C++):
 
 ```bash
-sgrn_datastore --init-db
+python3 init-db.py
+# (or sgrn_datastore --init-db if binary is already compiled)
 ```
 
 ### 2. Declare API intent in the manifest

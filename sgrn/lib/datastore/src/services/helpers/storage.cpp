@@ -1,3 +1,4 @@
+#include <sgrn/datastore/DbError.hpp>
 #include <sgrn/datastore/plugins/threadpool/Threadpool.hpp>
 #include <sgrn/datastore/services/helpers/storage.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
@@ -236,7 +237,7 @@ Task<BackendResult<void>> updateObjectChunking(drogon::orm::DbClientPtr tsp_db_c
 }
 
 Task<BackendResult<int64_t>> insertFile(drogon::orm::DbClientPtr tsp_db_client, std::string t_name, int64_t t_object_id,
-    std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int32_t t_session_id, std::string t_extension,
+    std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_extension,
     std::optional<int64_t> t_directory_id, std::string t_domain) {
     try {
         // Ensure the extension exists in the formats table (Safe Auto-Registration)
@@ -249,16 +250,23 @@ Task<BackendResult<int64_t>> insertFile(drogon::orm::DbClientPtr tsp_db_client, 
         }
 
         drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro(
-            "INSERT INTO storage.files (name, object_id, user_id, automated_service_id, session_id, extension, directory_id, domain) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
-            std::move(t_name), t_object_id, t_user_id, t_automated_service_id, t_session_id,
+            "INSERT INTO storage.files (name, user_id, automated_service_id, session_id, extension, directory_id, domain) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+            std::move(t_name), t_user_id, t_automated_service_id, t_session_id,
             t_extension.empty() ? std::optional<std::string>(std::nullopt) : std::optional<std::string>(t_extension), t_directory_id,
             t_domain.empty() ? std::optional<std::string>(std::nullopt) : std::optional<std::string>(t_domain));
 
         if (tp_res.empty()) {
             co_return BackendResult<int64_t>::Error(BackendError(BackendErrorKind::Database, "Failed to insert file"));
         }
-        co_return tp_res[0]["id"].as<int64_t>();
+        const int64_t file_id = tp_res[0]["id"].as<int64_t>();
+
+        co_await tsp_db_client->execSqlCoro(
+            "INSERT INTO storage.file_objects (file_id, object_id, part_index, role) VALUES ($1, $2, 0, 'primary')", file_id, t_object_id);
+
+        co_return file_id;
+    } catch (const drogon::orm::DrogonDbException& ex) {
+        co_return BackendResult<int64_t>::Error(toBackendError(ex));
     } catch (const std::exception& ex) {
         co_return BackendResult<int64_t>::Error(
             BackendError(BackendErrorKind::Database, std::format("Failed to insert file: {}", ex.what())));
@@ -266,7 +274,7 @@ Task<BackendResult<int64_t>> insertFile(drogon::orm::DbClientPtr tsp_db_client, 
 }
 
 Task<BackendResult<std::optional<int64_t>>> resolveDirectoryPath(drogon::orm::DbClientPtr tsp_db_client, std::optional<int32_t> t_user_id,
-    std::optional<int32_t> t_automated_service_id, int32_t t_session_id, std::string t_virtual_path, std::string t_domain) {
+    std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_virtual_path, std::string t_domain) {
     try {
         if (t_virtual_path.empty() || t_virtual_path == "/") {
             co_return std::optional<int64_t>(std::nullopt);
@@ -285,6 +293,8 @@ Task<BackendResult<std::optional<int64_t>>> resolveDirectoryPath(drogon::orm::Db
             co_return std::optional<int64_t>(std::nullopt);
         }
         co_return tp_res[0]["dir_id"].as<int64_t>();
+    } catch (const drogon::orm::DrogonDbException& ex) {
+        co_return BackendResult<std::optional<int64_t>>::Error(toBackendError(ex));
     } catch (const std::exception& ex) {
         co_return BackendResult<std::optional<int64_t>>::Error(
             BackendError(BackendErrorKind::Database, std::format("Failed to resolve directory: {}", ex.what())));
@@ -292,7 +302,7 @@ Task<BackendResult<std::optional<int64_t>>> resolveDirectoryPath(drogon::orm::Db
 }
 
 Task<BackendResult<std::optional<int64_t>>> ensureDirectoryPath(drogon::orm::DbClientPtr tsp_db_client, std::optional<int32_t> t_user_id,
-    std::optional<int32_t> t_automated_service_id, int32_t t_session_id, std::string t_virtual_path, std::string t_domain) {
+    std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_virtual_path, std::string t_domain) {
     try {
         if (t_virtual_path.empty() || t_virtual_path == "/") {
             co_return std::optional<int64_t>(std::nullopt);
@@ -306,6 +316,8 @@ Task<BackendResult<std::optional<int64_t>>> ensureDirectoryPath(drogon::orm::DbC
             co_return std::optional<int64_t>(std::nullopt);
         }
         co_return tp_res[0]["dir_id"].as<int64_t>();
+    } catch (const drogon::orm::DrogonDbException& ex) {
+        co_return BackendResult<std::optional<int64_t>>::Error(toBackendError(ex));
     } catch (const std::exception& ex) {
         co_return BackendResult<std::optional<int64_t>>::Error(
             BackendError(BackendErrorKind::Database, std::format("Failed to ensure directory: {}", ex.what())));
@@ -315,9 +327,10 @@ Task<BackendResult<std::optional<int64_t>>> ensureDirectoryPath(drogon::orm::DbC
 Task<std::optional<UserFileRecord>> getFile(drogon::orm::DbClientPtr tsp_db_client, int64_t t_file_id) {
     try {
         drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro(
-            "SELECT f.id, f.name, f.full_path, f.object_id, f.user_id, f.automated_service_id, f.session_id, f.extension, "
+            "SELECT f.id, f.name, f.full_path, fo.object_id, f.user_id, f.automated_service_id, f.session_id, f.extension, "
             "f.directory_id, f.created_at, so.is_compressed, so.compression_algorithm, so.compression_level "
-            "FROM storage.files f JOIN storage.objects so ON f.object_id = so.id WHERE f.id = $1",
+            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
+            "JOIN storage.objects so ON fo.object_id = so.id WHERE f.id = $1",
             t_file_id);
 
         if (tp_res.empty())
@@ -332,7 +345,7 @@ Task<std::optional<UserFileRecord>> getFile(drogon::orm::DbClientPtr tsp_db_clie
             rec.user_id = row["user_id"].as<int32_t>();
         if (!row["automated_service_id"].isNull())
             rec.automated_service_id = row["automated_service_id"].as<int32_t>();
-        rec.session_id = row["session_id"].as<int32_t>();
+        rec.session_id = row["session_id"].as<int64_t>();
         rec.extension = row["extension"].as<std::string>();
         if (!row["directory_id"].isNull())
             rec.directory_id = row["directory_id"].as<int64_t>();
@@ -350,15 +363,18 @@ Task<std::optional<UserFileRecord>> getFile(drogon::orm::DbClientPtr tsp_db_clie
 
 Task<std::optional<UserFileRecord>> findFileByPath(drogon::orm::DbClientPtr tsp_db_client, const ScopeContext& t_ctx) {
     try {
-        const std::string query = t_ctx.is_automated_service
-                                      ? "SELECT f.id, f.name, f.full_path, f.object_id, f.user_id, f.automated_service_id, f.session_id, "
-                                        "f.extension, f.directory_id, f.created_at, so.is_compressed, so.compression_algorithm, "
-                                        "so.compression_level FROM storage.files f JOIN storage.objects so ON f.object_id = so.id "
-                                        "WHERE f.automated_service_id = $1 AND f.full_path = $2"
-                                      : "SELECT f.id, f.name, f.full_path, f.object_id, f.user_id, f.automated_service_id, f.session_id, "
-                                        "f.extension, f.directory_id, f.created_at, so.is_compressed, so.compression_algorithm, "
-                                        "so.compression_level FROM storage.files f JOIN storage.objects so ON f.object_id = so.id "
-                                        "WHERE f.user_id = $1 AND f.full_path = $2";
+        const std::string query =
+            t_ctx.is_automated_service
+                ? "SELECT f.id, f.name, f.full_path, fo.object_id, f.user_id, f.automated_service_id, f.session_id, "
+                  "f.extension, f.directory_id, f.created_at, so.is_compressed, so.compression_algorithm, "
+                  "so.compression_level FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
+                  "JOIN storage.objects so ON fo.object_id = so.id "
+                  "WHERE f.automated_service_id = $1 AND f.full_path = $2"
+                : "SELECT f.id, f.name, f.full_path, fo.object_id, f.user_id, f.automated_service_id, f.session_id, "
+                  "f.extension, f.directory_id, f.created_at, so.is_compressed, so.compression_algorithm, "
+                  "so.compression_level FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
+                  "JOIN storage.objects so ON fo.object_id = so.id "
+                  "WHERE f.user_id = $1 AND f.full_path = $2";
 
         drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro(query, t_ctx.owner_id, t_ctx.actual_path);
         if (tp_res.empty())
@@ -373,7 +389,7 @@ Task<std::optional<UserFileRecord>> findFileByPath(drogon::orm::DbClientPtr tsp_
             rec.user_id = row["user_id"].as<int32_t>();
         if (!row["automated_service_id"].isNull())
             rec.automated_service_id = row["automated_service_id"].as<int32_t>();
-        rec.session_id = row["session_id"].as<int32_t>();
+        rec.session_id = row["session_id"].as<int64_t>();
         rec.extension = row["extension"].as<std::string>();
         if (!row["directory_id"].isNull())
             rec.directory_id = row["directory_id"].as<int64_t>();
@@ -490,7 +506,7 @@ Task<BackendResult<std::string>> resolveObjectKey(drogon::orm::DbClientPtr tsp_d
 Task<BackendResult<ScopeContext>> resolveScopeSession(
     drogon::orm::DbClientPtr tsp_db_client, const Json::Value& t_session, StorageScope t_scope, const std::string& t_path) {
     ScopeContext t_ctx;
-    t_ctx.t_session_id = t_session["session_id"].asInt();
+    t_ctx.t_session_id = t_session["session_id"].asInt64();
     t_ctx.actual_path = t_path;
     t_ctx.is_virtual_root = false;
 
@@ -679,7 +695,7 @@ Task<BackendResult<ScopeContext>> resolveScopeSession(
             t_ctx.is_user = true;
             t_ctx.user_id = t_ctx.owner_id;
         }
-        t_ctx.t_session_id = (*tp_res)[0]["session_id"].isNull() ? 0 : (*tp_res)[0]["session_id"].as<int32_t>();
+        t_ctx.t_session_id = (*tp_res)[0]["session_id"].isNull() ? 0 : (*tp_res)[0]["session_id"].as<int64_t>();
         co_return t_ctx;
     } catch (const std::exception& e) {
         co_return BackendResult<ScopeContext>::Error(

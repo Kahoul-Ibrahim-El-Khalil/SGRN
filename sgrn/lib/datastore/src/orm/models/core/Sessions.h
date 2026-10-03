@@ -49,6 +49,8 @@ public:
         static const std::string _automated_service_id;
         static const std::string _token;
         static const std::string _ip;
+        static const std::string _session_data;
+        static const std::string _expires_at;
         static const std::string _created_at;
         static const std::string _terminated_at;
         static const std::string _termination_reason;
@@ -140,6 +142,25 @@ public:
     void setIp(const std::string& pIp) noexcept;
     void setIp(std::string&& pIp) noexcept;
 
+    /**  For column session_data  */
+    /// Get the value of the column session_data, returns the default value if the column is null
+    const std::string& getValueOfSessionData() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<std::string>& getSessionData() const noexcept;
+    /// Set the value of the column session_data
+    void setSessionData(const std::string& pSessionData) noexcept;
+    void setSessionData(std::string&& pSessionData) noexcept;
+    void setSessionDataToNull() noexcept;
+
+    /**  For column expires_at  */
+    /// Get the value of the column expires_at, returns the default value if the column is null
+    const ::trantor::Date& getValueOfExpiresAt() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<::trantor::Date>& getExpiresAt() const noexcept;
+    /// Set the value of the column expires_at
+    void setExpiresAt(const ::trantor::Date& pExpiresAt) noexcept;
+    void setExpiresAtToNull() noexcept;
+
     /**  For column created_at  */
     /// Get the value of the column created_at, returns the default value if the column is null
     const ::trantor::Date& getValueOfCreatedAt() const noexcept;
@@ -168,7 +189,7 @@ public:
     void setTerminationReasonToNull() noexcept;
 
     static size_t getColumnNumber() noexcept {
-        return 8;
+        return 10;
     }
     static const std::string& getColumnName(size_t index) noexcept(false);
 
@@ -196,6 +217,8 @@ private:
     std::shared_ptr<int32_t> automatedServiceId_;
     std::shared_ptr<std::string> token_;
     std::shared_ptr<std::string> ip_;
+    std::shared_ptr<std::string> sessionData_;
+    std::shared_ptr<::trantor::Date> expiresAt_;
     std::shared_ptr<::trantor::Date> createdAt_;
     std::shared_ptr<::trantor::Date> terminatedAt_;
     std::shared_ptr<std::string> terminationReason_;
@@ -209,7 +232,7 @@ private:
         const bool notNull_;
     };
     static const std::vector<MetaData> metaData_;
-    bool dirtyFlag_[8] = {false};
+    bool dirtyFlag_[10] = {false};
 
 public:
     static const std::string& sqlForFindingByPrimaryKey() {
@@ -243,16 +266,24 @@ public:
             sql += "ip,";
             ++parametersCount;
         }
-        sql += "created_at,";
-        ++parametersCount;
-        if (!dirtyFlag_[5]) {
-            needSelection = true;
+        if (dirtyFlag_[5]) {
+            sql += "session_data,";
+            ++parametersCount;
         }
         if (dirtyFlag_[6]) {
+            sql += "expires_at,";
+            ++parametersCount;
+        }
+        sql += "created_at,";
+        ++parametersCount;
+        if (!dirtyFlag_[7]) {
+            needSelection = true;
+        }
+        if (dirtyFlag_[8]) {
             sql += "terminated_at,";
             ++parametersCount;
         }
-        if (dirtyFlag_[7]) {
+        if (dirtyFlag_[9]) {
             sql += "termination_reason,";
             ++parametersCount;
         }
@@ -286,14 +317,22 @@ public:
         if (dirtyFlag_[5]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-        } else {
-            sql += "default,";
         }
         if (dirtyFlag_[6]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
         if (dirtyFlag_[7]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        } else {
+            sql += "default,";
+        }
+        if (dirtyFlag_[8]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[9]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }

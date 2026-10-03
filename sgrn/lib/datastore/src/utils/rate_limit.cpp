@@ -57,6 +57,8 @@ std::string className(RateClass t_class) {
             return "page";
         case RateClass::General:
             return "general";
+        case RateClass::Upload:
+            return "upload";
     }
     return "general";
 }
@@ -96,6 +98,8 @@ RateLimitConfig RateLimitConfig::fromJson(const Json::Value& t_custom_config) {
         jsonWindowMs(rl, "general_endpoint_window_s", cfg.general.window_ms)};
     cfg.page = RateLimit{
         jsonUint(rl, "page_endpoint_limit", cfg.page.max_requests), jsonWindowMs(rl, "page_endpoint_window_s", cfg.page.window_ms)};
+    cfg.upload = RateLimit{
+        jsonUint(rl, "upload_endpoint_limit", cfg.upload.max_requests), jsonWindowMs(rl, "upload_endpoint_window_s", cfg.upload.window_ms)};
     cfg.burst_allowance = jsonUint(rl, "burst_allowance", cfg.burst_allowance);
     return cfg;
 }
@@ -105,6 +109,11 @@ RateClass classifyPath(std::string_view t_path) {
     const std::string_view path = t_path.substr(0, t_path.find('?'));
     if (startsWith(path, "/api/v1/auth/")) {
         return RateClass::Auth;
+    }
+    // Resumable upload chunk submissions are placed in a dedicated high-capacity Upload class
+    // (a single 1.2 GB file at 5 MB chunks requires 240+ requests).
+    if (startsWith(path, "/api/v1/storage/upload/")) {
+        return RateClass::Upload;
     }
     if (startsWith(path, "/api/v1/storage/")) {
         return RateClass::Storage;
@@ -125,6 +134,8 @@ uint32_t effectiveLimit(const RateLimitConfig& t_cfg, RateClass t_class) {
             return t_cfg.page.max_requests + t_cfg.burst_allowance;
         case RateClass::General:
             return t_cfg.general.max_requests + t_cfg.burst_allowance;
+        case RateClass::Upload:
+            return t_cfg.upload.max_requests + t_cfg.burst_allowance;
     }
     return t_cfg.general.max_requests + t_cfg.burst_allowance;
 }
@@ -139,6 +150,8 @@ uint64_t windowMs(const RateLimitConfig& t_cfg, RateClass t_class) {
             return t_cfg.page.window_ms;
         case RateClass::General:
             return t_cfg.general.window_ms;
+        case RateClass::Upload:
+            return t_cfg.upload.window_ms;
     }
     return t_cfg.general.window_ms;
 }
@@ -191,23 +204,5 @@ std::string authAccountFromJson(std::string_view t_path, const Json::Value& t_bo
     }
     return {};
 }
-
-const char* kLuaSlidingWindow = R"LUA(
-local count = 0
-local oldest_due_in_ms = 0
-redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, tonumber(ARGV[1]) - tonumber(ARGV[2]))
-count = redis.call('ZCARD', KEYS[1])
-if count >= tonumber(ARGV[3]) then
-  local oldest = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
-  if #oldest >= 2 then
-    oldest_due_in_ms = oldest[2] + tonumber(ARGV[2]) - tonumber(ARGV[1])
-    if oldest_due_in_ms < 0 then oldest_due_in_ms = 0 end
-  end
-  return {0, oldest_due_in_ms}
-end
-redis.call('ZADD', KEYS[1], tonumber(ARGV[1]), ARGV[4])
-redis.call('PEXPIRE', KEYS[1], tonumber(ARGV[2]))
-return {1, tonumber(ARGV[3]) - count - 1}
-)LUA";
 
 } // namespace sgrn::datastore::ratelimit

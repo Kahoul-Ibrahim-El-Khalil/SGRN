@@ -95,7 +95,8 @@ class StorageService {
 public:
     StorageService();
 
-    drogon::Task<drogon::HttpResponsePtr> handleDownloadFileRequest(Json::Value t_session, std::string t_scope, std::string t_file_path);
+    drogon::Task<drogon::HttpResponsePtr> handleDownloadFileRequest(
+        Json::Value t_session, std::string t_scope, std::string t_file_path, std::string t_range_header = "");
     drogon::Task<drogon::HttpResponsePtr> handleUploadFileRequest(
         Json::Value t_session, std::string t_scope, std::string t_file_path, const drogon::HttpFile& t_http_file);
     drogon::Task<drogon::HttpResponsePtr> handleGetConstraints();

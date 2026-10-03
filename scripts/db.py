@@ -8,7 +8,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from scripts.common import (
-    run, rmtree
+    run, rmtree, loadEnv
 )
 from scripts.config import (
     POSTGRES_PORT, POSTGRES_HOST, POSTGRES_STARTUP_TIMEOUT,
@@ -16,17 +16,6 @@ from scripts.config import (
     PG_DATA_DIR, POSTGRES_DIR, ORM_GEN_SCRIPT, EXTERN_DIR_NAME,
     BACKEND_DIR
 )
-
-def loadEnv(root: Path) -> dict[str, str]:
-    env_vars = {}
-    env_file = root / ".env"
-    if env_file.exists():
-        for line in env_file.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, val = line.split("=", 1)
-                env_vars[key.strip()] = val.strip()
-    return env_vars
 
 def get_exe(name: str, conda_prefix: str) -> str:
     if not conda_prefix:

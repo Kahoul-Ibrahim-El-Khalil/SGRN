@@ -23,6 +23,7 @@ const std::string Organisations::Cols::_total_real_size = "\"total_real_size\"";
 const std::string Organisations::Cols::_storage_limit = "\"storage_limit\"";
 const std::string Organisations::Cols::_total_entry_count = "\"total_entry_count\"";
 const std::string Organisations::Cols::_entry_count_limit = "\"entry_count_limit\"";
+const std::string Organisations::Cols::_rate_limit_rpm = "\"rate_limit_rpm\"";
 const std::string Organisations::primaryKeyName = "id";
 const bool Organisations::hasPrimaryKey = true;
 const std::string Organisations::tableName = "core.\"organisations\"";
@@ -37,7 +38,8 @@ const std::vector<typename Organisations::MetaData> Organisations::metaData_={
 {"total_real_size","int64_t","bigint",8,0,0,1},
 {"storage_limit","int64_t","bigint",8,0,0,0},
 {"total_entry_count","int64_t","bigint",8,0,0,1},
-{"entry_count_limit","int64_t","bigint",8,0,0,0}
+{"entry_count_limit","int64_t","bigint",8,0,0,0},
+{"rate_limit_rpm","int32_t","integer",4,0,0,0}
 };
 const std::string &Organisations::getColumnName(size_t index) noexcept(false)
 {
@@ -88,11 +90,15 @@ Organisations::Organisations(const Row &r, const ssize_t indexOffset) noexcept
         {
             entryCountLimit_=std::make_shared<int64_t>(r["entry_count_limit"].as<int64_t>());
         }
+        if(!r["rate_limit_rpm"].isNull())
+        {
+            rateLimitRpm_=std::make_shared<int32_t>(r["rate_limit_rpm"].as<int32_t>());
+        }
     }
     else
     {
         size_t offset = (size_t)indexOffset;
-        if(offset + 10 > r.size())
+        if(offset + 11 > r.size())
         {
             LOG_FATAL << "Invalid SQL result for this model";
             return;
@@ -148,13 +154,18 @@ Organisations::Organisations(const Row &r, const ssize_t indexOffset) noexcept
         {
             entryCountLimit_=std::make_shared<int64_t>(r[index].as<int64_t>());
         }
+        index = offset + 10;
+        if(!r[index].isNull())
+        {
+            rateLimitRpm_=std::make_shared<int32_t>(r[index].as<int32_t>());
+        }
     }
 
 }
 
 Organisations::Organisations(const Json::Value &pJson, const std::vector<std::string> &pMasqueradingVector) noexcept(false)
 {
-    if(pMasqueradingVector.size() != 10)
+    if(pMasqueradingVector.size() != 11)
     {
         LOG_ERROR << "Bad masquerading vector";
         return;
@@ -237,6 +248,14 @@ Organisations::Organisations(const Json::Value &pJson, const std::vector<std::st
         if(!pJson[pMasqueradingVector[9]].isNull())
         {
             entryCountLimit_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[9]].asInt64());
+        }
+    }
+    if(!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10]))
+    {
+        dirtyFlag_[10] = true;
+        if(!pJson[pMasqueradingVector[10]].isNull())
+        {
+            rateLimitRpm_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[10]].asInt64());
         }
     }
 }
@@ -323,12 +342,20 @@ Organisations::Organisations(const Json::Value &pJson) noexcept(false)
             entryCountLimit_=std::make_shared<int64_t>((int64_t)pJson["entry_count_limit"].asInt64());
         }
     }
+    if(pJson.isMember("rate_limit_rpm"))
+    {
+        dirtyFlag_[10]=true;
+        if(!pJson["rate_limit_rpm"].isNull())
+        {
+            rateLimitRpm_=std::make_shared<int32_t>((int32_t)pJson["rate_limit_rpm"].asInt64());
+        }
+    }
 }
 
 void Organisations::updateByMasqueradedJson(const Json::Value &pJson,
                                             const std::vector<std::string> &pMasqueradingVector) noexcept(false)
 {
-    if(pMasqueradingVector.size() != 10)
+    if(pMasqueradingVector.size() != 11)
     {
         LOG_ERROR << "Bad masquerading vector";
         return;
@@ -412,6 +439,14 @@ void Organisations::updateByMasqueradedJson(const Json::Value &pJson,
             entryCountLimit_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[9]].asInt64());
         }
     }
+    if(!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10]))
+    {
+        dirtyFlag_[10] = true;
+        if(!pJson[pMasqueradingVector[10]].isNull())
+        {
+            rateLimitRpm_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[10]].asInt64());
+        }
+    }
 }
 
 void Organisations::updateByJson(const Json::Value &pJson) noexcept(false)
@@ -493,6 +528,14 @@ void Organisations::updateByJson(const Json::Value &pJson) noexcept(false)
         if(!pJson["entry_count_limit"].isNull())
         {
             entryCountLimit_=std::make_shared<int64_t>((int64_t)pJson["entry_count_limit"].asInt64());
+        }
+    }
+    if(pJson.isMember("rate_limit_rpm"))
+    {
+        dirtyFlag_[10] = true;
+        if(!pJson["rate_limit_rpm"].isNull())
+        {
+            rateLimitRpm_=std::make_shared<int32_t>((int32_t)pJson["rate_limit_rpm"].asInt64());
         }
     }
 }
@@ -712,6 +755,28 @@ void Organisations::setEntryCountLimitToNull() noexcept
     dirtyFlag_[9] = true;
 }
 
+const int32_t &Organisations::getValueOfRateLimitRpm() const noexcept
+{
+    static const int32_t defaultValue = int32_t();
+    if(rateLimitRpm_)
+        return *rateLimitRpm_;
+    return defaultValue;
+}
+const std::shared_ptr<int32_t> &Organisations::getRateLimitRpm() const noexcept
+{
+    return rateLimitRpm_;
+}
+void Organisations::setRateLimitRpm(const int32_t &pRateLimitRpm) noexcept
+{
+    rateLimitRpm_ = std::make_shared<int32_t>(pRateLimitRpm);
+    dirtyFlag_[10] = true;
+}
+void Organisations::setRateLimitRpmToNull() noexcept
+{
+    rateLimitRpm_.reset();
+    dirtyFlag_[10] = true;
+}
+
 void Organisations::updateId(const uint64_t id)
 {
 }
@@ -727,7 +792,8 @@ const std::vector<std::string> &Organisations::insertColumns() noexcept
         "total_real_size",
         "storage_limit",
         "total_entry_count",
-        "entry_count_limit"
+        "entry_count_limit",
+        "rate_limit_rpm"
     };
     return inCols;
 }
@@ -833,6 +899,17 @@ void Organisations::outputArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
+    if(dirtyFlag_[10])
+    {
+        if(getRateLimitRpm())
+        {
+            binder << getValueOfRateLimitRpm();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
 }
 
 const std::vector<std::string> Organisations::updateColumns() const
@@ -873,6 +950,10 @@ const std::vector<std::string> Organisations::updateColumns() const
     if(dirtyFlag_[9])
     {
         ret.push_back(getColumnName(9));
+    }
+    if(dirtyFlag_[10])
+    {
+        ret.push_back(getColumnName(10));
     }
     return ret;
 }
@@ -978,6 +1059,17 @@ void Organisations::updateArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
+    if(dirtyFlag_[10])
+    {
+        if(getRateLimitRpm())
+        {
+            binder << getValueOfRateLimitRpm();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
 }
 Json::Value Organisations::toJson() const
 {
@@ -1062,6 +1154,14 @@ Json::Value Organisations::toJson() const
     {
         ret["entry_count_limit"]=Json::Value();
     }
+    if(getRateLimitRpm())
+    {
+        ret["rate_limit_rpm"]=getValueOfRateLimitRpm();
+    }
+    else
+    {
+        ret["rate_limit_rpm"]=Json::Value();
+    }
     return ret;
 }
 
@@ -1074,7 +1174,7 @@ Json::Value Organisations::toMasqueradedJson(
     const std::vector<std::string> &pMasqueradingVector) const
 {
     Json::Value ret;
-    if(pMasqueradingVector.size() == 10)
+    if(pMasqueradingVector.size() == 11)
     {
         if(!pMasqueradingVector[0].empty())
         {
@@ -1186,6 +1286,17 @@ Json::Value Organisations::toMasqueradedJson(
                 ret[pMasqueradingVector[9]]=Json::Value();
             }
         }
+        if(!pMasqueradingVector[10].empty())
+        {
+            if(getRateLimitRpm())
+            {
+                ret[pMasqueradingVector[10]]=getValueOfRateLimitRpm();
+            }
+            else
+            {
+                ret[pMasqueradingVector[10]]=Json::Value();
+            }
+        }
         return ret;
     }
     LOG_ERROR << "Masquerade failed";
@@ -1269,6 +1380,14 @@ Json::Value Organisations::toMasqueradedJson(
     {
         ret["entry_count_limit"]=Json::Value();
     }
+    if(getRateLimitRpm())
+    {
+        ret["rate_limit_rpm"]=getValueOfRateLimitRpm();
+    }
+    else
+    {
+        ret["rate_limit_rpm"]=Json::Value();
+    }
     return ret;
 }
 
@@ -1329,13 +1448,18 @@ bool Organisations::validateJsonForCreation(const Json::Value &pJson, std::strin
         if(!validJsonOfField(9, "entry_count_limit", pJson["entry_count_limit"], err, true))
             return false;
     }
+    if(pJson.isMember("rate_limit_rpm"))
+    {
+        if(!validJsonOfField(10, "rate_limit_rpm", pJson["rate_limit_rpm"], err, true))
+            return false;
+    }
     return true;
 }
 bool Organisations::validateMasqueradedJsonForCreation(const Json::Value &pJson,
                                                        const std::vector<std::string> &pMasqueradingVector,
                                                        std::string &err)
 {
-    if(pMasqueradingVector.size() != 10)
+    if(pMasqueradingVector.size() != 11)
     {
         err = "Bad masquerading vector";
         return false;
@@ -1426,6 +1550,14 @@ bool Organisations::validateMasqueradedJsonForCreation(const Json::Value &pJson,
                   return false;
           }
       }
+      if(!pMasqueradingVector[10].empty())
+      {
+          if(pJson.isMember(pMasqueradingVector[10]))
+          {
+              if(!validJsonOfField(10, pMasqueradingVector[10], pJson[pMasqueradingVector[10]], err, true))
+                  return false;
+          }
+      }
     }
     catch(const Json::LogicError &e)
     {
@@ -1491,13 +1623,18 @@ bool Organisations::validateJsonForUpdate(const Json::Value &pJson, std::string 
         if(!validJsonOfField(9, "entry_count_limit", pJson["entry_count_limit"], err, false))
             return false;
     }
+    if(pJson.isMember("rate_limit_rpm"))
+    {
+        if(!validJsonOfField(10, "rate_limit_rpm", pJson["rate_limit_rpm"], err, false))
+            return false;
+    }
     return true;
 }
 bool Organisations::validateMasqueradedJsonForUpdate(const Json::Value &pJson,
                                                      const std::vector<std::string> &pMasqueradingVector,
                                                      std::string &err)
 {
-    if(pMasqueradingVector.size() != 10)
+    if(pMasqueradingVector.size() != 11)
     {
         err = "Bad masquerading vector";
         return false;
@@ -1556,6 +1693,11 @@ bool Organisations::validateMasqueradedJsonForUpdate(const Json::Value &pJson,
       if(!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9]))
       {
           if(!validJsonOfField(9, pMasqueradingVector[9], pJson[pMasqueradingVector[9]], err, false))
+              return false;
+      }
+      if(!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10]))
+      {
+          if(!validJsonOfField(10, pMasqueradingVector[10], pJson[pMasqueradingVector[10]], err, false))
               return false;
       }
     }
@@ -1690,6 +1832,17 @@ bool Organisations::validJsonOfField(size_t index,
                 return true;
             }
             if(!pJson.isInt64())
+            {
+                err="Type error in the "+fieldName+" field";
+                return false;
+            }
+            break;
+        case 10:
+            if(pJson.isNull())
+            {
+                return true;
+            }
+            if(!pJson.isInt())
             {
                 err="Type error in the "+fieldName+" field";
                 return false;

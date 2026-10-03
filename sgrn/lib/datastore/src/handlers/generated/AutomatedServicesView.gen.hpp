@@ -15,7 +15,7 @@ using sgrn::datastore::query::PrimaryKey;
 
 class AutomatedServicesView : public CrudViewHandler<AutomatedServicesView> {
 public:
-    static constexpr std::array<Field, 14> kFields = {{
+    static constexpr std::array<Field, 18> kFields = {{
         {"name", FieldType::Text, Op::Eq | Op::Like, true, true},
         {"description", FieldType::Text, 0, true, true},
         {"token", FieldType::Text, 0, false, false},
@@ -28,6 +28,10 @@ public:
         {"storage_limit", FieldType::BigInt, 0, true, true},
         {"total_entry_count", FieldType::BigInt, 0, true, true},
         {"entry_count_limit", FieldType::BigInt, 0, true, true},
+        {"rate_limit_rpm", FieldType::Int, 0, true, true},
+        {"max_file_size_mb", FieldType::BigInt, 0, true, true},
+        {"preferred_chunk_size_mb", FieldType::Int, 0, true, true},
+        {"rate_limit_upload_rpm", FieldType::Int, 0, true, true},
         {"created_at", FieldType::Timestamp, 0, true, true},
         {"updated_at", FieldType::Timestamp, 0, true, true},
     }};

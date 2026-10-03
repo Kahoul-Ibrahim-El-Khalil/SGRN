@@ -5,6 +5,8 @@
 #include <drogon/utils/coroutine.h>
 #include <fmt/color.h>
 #include <fmt/core.h>
+#include <sgrn/datastore/audit/AuditLogger.hpp>
+#include <sgrn/datastore/session/SessionStore.hpp>
 #include <sgrn/debug.hpp>
 #include <json/json.h>
 #include <stdexcept>
@@ -22,7 +24,9 @@
 #define ERROR_LOG(msg, ...) SGRN_ERROR("AdminHandler", msg __VA_OPT__(, ) __VA_ARGS__)
 #include <sgrn/datastore/core/db.hpp>
 #include <sgrn/datastore/error/ApiErrors.hpp>
-#include <sgrn/datastore/handlers/admin.hpp>#include <sgrn/datastore/services/admin.hpp>
+#include <sgrn/datastore/handlers/admin.hpp>
+#include <sgrn/datastore/services/WebhookService.hpp>
+#include <sgrn/datastore/services/admin.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe_access.hpp>
@@ -104,6 +108,13 @@ Task<HttpResponsePtr> AdminApiHandler::handleRegisterUser(HttpRequestPtr tsp_req
         auto result = co_await registerUser(db, *payload_opt, role);
 
         if (result["success"].asBool()) {
+            const Json::Value& session_json = tsp_req->attributes()->get<Json::Value>("session_json");
+            const int32_t actor_id = session_json["user"]["id"].asInt();
+            const std::string actor_name = session_json["user"]["email"].asString();
+            const std::string org = session_json["user"]["organisation"].asString();
+            co_await sgrn::datastore::audit::AuditLogger::log(db, org, "user", actor_id, actor_name, "user.created", "user",
+                result.isMember("user_id") ? std::to_string(result["user_id"].asInt()) : payload_opt->email, tsp_req->getPeerAddr().toIp(),
+                *json, "success");
             co_return createJsonResponse(result, k201Created);
         } else {
             co_return createJsonResponse(result, k400BadRequest);
@@ -183,6 +194,17 @@ Task<HttpResponsePtr> AdminApiHandler::handleRegisterAutomatedService(HttpReques
         resp["organisation"] = res[0]["organisation"].as<std::string>();
         resp["kind"] = kind;
 
+        // Sync: insert the new public service token into local RAM sorted vector
+        // and broadcast PG NOTIFY so all cluster nodes update their lookup vectors.
+        const std::string new_serv_token = res[0]["token"].as<std::string>();
+        sgrn::datastore::session::SessionStore::instance().registerServiceToken(new_serv_token);
+        co_await db->execSqlCoro("SELECT pg_notify('service_token_update', $1)", "register:" + new_serv_token);
+
+        const int32_t actor_id = session["user"]["id"].asInt();
+        const std::string actor_name = session["user"]["email"].asString();
+        co_await sgrn::datastore::audit::AuditLogger::log(db, org, "user", actor_id, actor_name, "service.created", "automated_service",
+            std::to_string(res[0]["id"].as<int32_t>()), tsp_req->getPeerAddr().toIp(), *json, "success");
+
         co_return createJsonResponse(resp, k201Created);
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Automated service registration DB error: {}", e.base().what());
@@ -259,7 +281,8 @@ Task<HttpResponsePtr> AdminApiHandler::handleRotateAutomatedServiceToken(HttpReq
     auto db = db_res.value();
 
     try {
-        auto owner_res = co_await db->execSqlCoro("SELECT organisation FROM core.automated_services WHERE id = $1", automated_service_id);
+        auto owner_res =
+            co_await db->execSqlCoro("SELECT organisation, token::text FROM core.automated_services WHERE id = $1", automated_service_id);
         if (owner_res.empty()) {
             co_return createErrorResponse(AdminApiError::InvalidUserId);
         }
@@ -267,6 +290,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleRotateAutomatedServiceToken(HttpReq
         if (owner_org != org) {
             co_return createErrorResponse(AdminApiError::InvalidUserId);
         }
+        const std::string old_tok = owner_res[0]["token"].isNull() ? "" : owner_res[0]["token"].as<std::string>();
 
         auto rotation = co_await db->execSqlCoro("SELECT * FROM core.rotate_automated_service_credentials($1, true)", automated_service_id);
         if (rotation.empty()) {
@@ -289,6 +313,16 @@ Task<HttpResponsePtr> AdminApiHandler::handleRotateAutomatedServiceToken(HttpReq
         if (metadata.isObject() && metadata.isMember("kind") && !metadata["kind"].isNull()) {
             resp["kind"] = metadata["kind"];
         }
+
+        // Sync: old public token is replaced — deregister old UUID from sorted vector
+        // and register new UUID, broadcasting PG NOTIFY to all cluster nodes.
+        if (!old_tok.empty()) {
+            sgrn::datastore::session::SessionStore::instance().deregisterServiceToken(old_tok);
+            co_await db->execSqlCoro("SELECT pg_notify('service_token_update', $1)", "deregister:" + old_tok);
+        }
+        const std::string new_tok = updated["token"].as<std::string>();
+        sgrn::datastore::session::SessionStore::instance().registerServiceToken(new_tok);
+        co_await db->execSqlCoro("SELECT pg_notify('service_token_update', $1)", "register:" + new_tok);
 
         co_return createJsonResponse(resp, k200OK);
     } catch (const std::exception& e) {
@@ -579,6 +613,777 @@ Task<HttpResponsePtr> AdminApiHandler::handleRevokePermission(HttpRequestPtr tsp
     } catch (const std::exception& e) {
         ERROR_LOG("Permission revoke error: {}", e.what());
         co_return createErrorResponse(std::string("Failed to revoke permission: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+// ── RBAC Roles & Permissions ──────────────────────────────────────────────────
+Task<HttpResponsePtr> AdminApiHandler::handleGetRoles(HttpRequestPtr tsp_req) {
+    try {
+        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
+        const std::string org = session["user"]["organisation"].asString();
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError())
+            co_return sgrn::createJsonResponse(db_res);
+        auto db = db_res.value();
+
+        auto res = co_await db->execSqlCoro("SELECT id, name, description, permissions, is_system, created_at, updated_at "
+                                            "FROM core.roles WHERE organisation = $1 ORDER BY name",
+            org);
+
+        Json::Value roles_arr = Json::arrayValue;
+        for (const auto& row : res) {
+            Json::Value r;
+            r["id"] = row["id"].as<int32_t>();
+            r["name"] = row["name"].as<std::string>();
+            r["description"] = row["description"].isNull() ? "" : row["description"].as<std::string>();
+            r["is_system"] = row["is_system"].as<bool>();
+            r["created_at"] = row["created_at"].as<std::string>();
+            r["updated_at"] = row["updated_at"].as<std::string>();
+
+            const std::string raw_perms = row["permissions"].as<std::string>();
+            Json::CharReaderBuilder builder;
+            Json::Value perms_json;
+            std::string errs;
+            const std::unique_ptr<Json::CharReader> up_reader(builder.newCharReader());
+            if (up_reader->parse(raw_perms.data(), raw_perms.data() + raw_perms.size(), &perms_json, &errs)) {
+                r["permissions"] = perms_json;
+            } else {
+                r["permissions"] = Json::arrayValue;
+            }
+            roles_arr.append(r);
+        }
+
+        Json::Value resp;
+        resp["success"] = true;
+        resp["roles"] = roles_arr;
+        co_return createJsonResponse(resp, k200OK);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Failed to get roles: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to get roles: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handleCreateRole(HttpRequestPtr tsp_req) {
+    try {
+        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
+        const std::string org = session["user"]["organisation"].asString();
+        const int32_t actor_id = session["user"]["id"].asInt();
+        const std::string actor_name = session["user"]["email"].asString();
+
+        auto json = tsp_req->getJsonObject();
+        if (!json || !json->isMember("name") || !(*json)["name"].isString()) {
+            co_return createErrorResponse("Role 'name' string is required", k400BadRequest, "AdminApi");
+        }
+
+        const std::string name = (*json)["name"].asString();
+        const std::string desc =
+            json->isMember("description") && (*json)["description"].isString() ? (*json)["description"].asString() : "";
+        Json::Value perms = json->isMember("permissions") && (*json)["permissions"].isArray() ? (*json)["permissions"] : Json::arrayValue;
+
+        Json::StreamWriterBuilder wb;
+        wb["indentation"] = "";
+        const std::string perms_str = Json::writeString(wb, perms);
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError())
+            co_return sgrn::createJsonResponse(db_res);
+        auto db = db_res.value();
+
+        auto res = co_await db->execSqlCoro("INSERT INTO core.roles (organisation, name, description, permissions, is_system) "
+                                            "VALUES ($1, $2, $3, $4::jsonb, false) RETURNING id",
+            org, name, desc, perms_str);
+
+        if (res.empty()) {
+            co_return createErrorResponse(AdminApiError::DbError);
+        }
+
+        const int32_t role_id = res[0]["id"].as<int32_t>();
+
+        co_await sgrn::datastore::audit::AuditLogger::log(db, org, "user", actor_id, actor_name, "role.created", "role",
+            std::to_string(role_id), tsp_req->getPeerAddr().toIp(), *json, "success");
+
+        Json::Value resp;
+        resp["success"] = true;
+        resp["role_id"] = role_id;
+        resp["message"] = "Custom role created successfully";
+        co_return createJsonResponse(resp, k201Created);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Failed to create role: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to create role: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handleUpdateRole(HttpRequestPtr tsp_req, std::string t_id) {
+    try {
+        const int32_t role_id = std::stoi(t_id);
+        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
+        const std::string org = session["user"]["organisation"].asString();
+        const int32_t actor_id = session["user"]["id"].asInt();
+        const std::string actor_name = session["user"]["email"].asString();
+
+        auto json = tsp_req->getJsonObject();
+        if (!json) {
+            co_return createErrorResponse(AdminApiError::InvalidPayload);
+        }
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError())
+            co_return sgrn::createJsonResponse(db_res);
+        auto db = db_res.value();
+
+        Json::StreamWriterBuilder wb;
+        wb["indentation"] = "";
+
+        std::string update_sql = "UPDATE core.roles SET updated_at = NOW()";
+        std::vector<std::string> params = {org, std::to_string(role_id)};
+        int param_idx = 3;
+
+        if (json->isMember("description") && (*json)["description"].isString()) {
+            update_sql += ", description = $" + std::to_string(param_idx++);
+            params.push_back((*json)["description"].asString());
+        }
+        if (json->isMember("permissions") && (*json)["permissions"].isArray()) {
+            update_sql += ", permissions = $" + std::to_string(param_idx++) + "::jsonb";
+            params.push_back(Json::writeString(wb, (*json)["permissions"]));
+        }
+
+        update_sql += " WHERE organisation = $1 AND id = $2 AND is_system = false";
+
+        auto res = co_await sgrn::datastore::core::execSqlCoroVec(db, update_sql, params);
+        if (res.affectedRows() == 0) {
+            co_return createErrorResponse("Role not found or is a protected system role", k400BadRequest, "AdminApi");
+        }
+
+        co_await sgrn::datastore::audit::AuditLogger::log(db, org, "user", actor_id, actor_name, "role.updated", "role",
+            std::to_string(role_id), tsp_req->getPeerAddr().toIp(), *json, "success");
+
+        Json::Value resp;
+        resp["success"] = true;
+        resp["message"] = "Role updated successfully";
+        co_return createJsonResponse(resp, k200OK);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Failed to update role: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to update role: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handleDeleteRole(HttpRequestPtr tsp_req, std::string t_id) {
+    try {
+        const int32_t role_id = std::stoi(t_id);
+        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
+        const std::string org = session["user"]["organisation"].asString();
+        const int32_t actor_id = session["user"]["id"].asInt();
+        const std::string actor_name = session["user"]["email"].asString();
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError())
+            co_return sgrn::createJsonResponse(db_res);
+        auto db = db_res.value();
+
+        auto res =
+            co_await db->execSqlCoro("DELETE FROM core.roles WHERE organisation = $1 AND id = $2 AND is_system = false", org, role_id);
+
+        if (res.affectedRows() == 0) {
+            co_return createErrorResponse("Role not found or is a protected system role", k400BadRequest, "AdminApi");
+        }
+
+        co_await sgrn::datastore::audit::AuditLogger::log(db, org, "user", actor_id, actor_name, "role.deleted", "role",
+            std::to_string(role_id), tsp_req->getPeerAddr().toIp(), Json::objectValue, "success");
+
+        Json::Value resp;
+        resp["success"] = true;
+        resp["message"] = "Role deleted successfully";
+        co_return createJsonResponse(resp, k200OK);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Failed to delete role: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to delete role: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handleAssignRole(HttpRequestPtr tsp_req) {
+    try {
+        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
+        const std::string org = session["user"]["organisation"].asString();
+        const int32_t actor_id = session["user"]["id"].asInt();
+        const std::string actor_name = session["user"]["email"].asString();
+
+        auto json = tsp_req->getJsonObject();
+        if (!json || !json->isMember("role_id")) {
+            co_return createErrorResponse("'role_id' is required", k400BadRequest, "AdminApi");
+        }
+
+        const int32_t role_id = (*json)["role_id"].asInt();
+        std::optional<int32_t> user_id;
+        std::optional<int32_t> service_id;
+
+        if (json->isMember("user_id") && (*json)["user_id"].isInt()) {
+            user_id = (*json)["user_id"].asInt();
+        } else if (json->isMember("automated_service_id") && (*json)["automated_service_id"].isInt()) {
+            service_id = (*json)["automated_service_id"].asInt();
+        } else {
+            co_return createErrorResponse("Specify either 'user_id' or 'automated_service_id'", k400BadRequest, "AdminApi");
+        }
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError())
+            co_return sgrn::createJsonResponse(db_res);
+        auto db = db_res.value();
+
+        co_await db->execSqlCoro(
+            "INSERT INTO core.user_roles (user_id, automated_service_id, role_id) VALUES ($1, $2, $3)", user_id, service_id, role_id);
+
+        co_await sgrn::datastore::audit::AuditLogger::log(db, org, "user", actor_id, actor_name, "role.assigned",
+            user_id.has_value() ? "user" : "automated_service",
+            user_id.has_value() ? std::to_string(*user_id) : std::to_string(*service_id), tsp_req->getPeerAddr().toIp(), *json, "success");
+
+        Json::Value resp;
+        resp["success"] = true;
+        resp["message"] = "Role assigned successfully";
+        co_return createJsonResponse(resp, k200OK);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Failed to assign role: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to assign role: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handleRevokeRole(HttpRequestPtr tsp_req) {
+    try {
+        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
+        const std::string org = session["user"]["organisation"].asString();
+        const int32_t actor_id = session["user"]["id"].asInt();
+        const std::string actor_name = session["user"]["email"].asString();
+
+        auto json = tsp_req->getJsonObject();
+        if (!json || !json->isMember("role_id")) {
+            co_return createErrorResponse("'role_id' is required", k400BadRequest, "AdminApi");
+        }
+
+        const int32_t role_id = (*json)["role_id"].asInt();
+        std::optional<int32_t> user_id;
+        std::optional<int32_t> service_id;
+
+        if (json->isMember("user_id") && (*json)["user_id"].isInt()) {
+            user_id = (*json)["user_id"].asInt();
+        } else if (json->isMember("automated_service_id") && (*json)["automated_service_id"].isInt()) {
+            service_id = (*json)["automated_service_id"].asInt();
+        } else {
+            co_return createErrorResponse("Specify either 'user_id' or 'automated_service_id'", k400BadRequest, "AdminApi");
+        }
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError())
+            co_return sgrn::createJsonResponse(db_res);
+        auto db = db_res.value();
+
+        if (user_id.has_value()) {
+            co_await db->execSqlCoro("DELETE FROM core.user_roles WHERE user_id = $1 AND role_id = $2", *user_id, role_id);
+        } else {
+            co_await db->execSqlCoro("DELETE FROM core.user_roles WHERE automated_service_id = $1 AND role_id = $2", *service_id, role_id);
+        }
+
+        co_await sgrn::datastore::audit::AuditLogger::log(db, org, "user", actor_id, actor_name, "role.revoked",
+            user_id.has_value() ? "user" : "automated_service",
+            user_id.has_value() ? std::to_string(*user_id) : std::to_string(*service_id), tsp_req->getPeerAddr().toIp(), *json, "success");
+
+        Json::Value resp;
+        resp["success"] = true;
+        resp["message"] = "Role revoked successfully";
+        co_return createJsonResponse(resp, k200OK);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Failed to revoke role: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to revoke role: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+// ── Audit Trail System ────────────────────────────────────────────────────────
+Task<HttpResponsePtr> AdminApiHandler::handleGetAuditLogs(HttpRequestPtr tsp_req) {
+    try {
+        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
+        const std::string org = session["user"]["organisation"].asString();
+
+        const std::string actor_type = tsp_req->getParameter("actor_type");
+        const std::string action = tsp_req->getParameter("action");
+        const std::string status = tsp_req->getParameter("status");
+        const std::string limit_raw = tsp_req->getParameter("limit");
+        const std::string offset_raw = tsp_req->getParameter("offset");
+
+        int32_t limit = limit_raw.empty() ? 50 : std::stoi(limit_raw);
+        int32_t offset = offset_raw.empty() ? 0 : std::stoi(offset_raw);
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError())
+            co_return sgrn::createJsonResponse(db_res);
+        auto db = db_res.value();
+
+        std::string query = "SELECT id, organisation, actor_type, actor_id, actor_name, action, target_type, target_id, ip::text, details, "
+                            "status, created_at "
+                            "FROM core.audit_logs WHERE organisation = $1";
+        std::vector<std::string> params = {org};
+        int p_idx = 2;
+
+        if (!actor_type.empty()) {
+            query += " AND actor_type = $" + std::to_string(p_idx++);
+            params.push_back(actor_type);
+        }
+        if (!action.empty()) {
+            query += " AND action = $" + std::to_string(p_idx++);
+            params.push_back(action);
+        }
+        if (!status.empty()) {
+            query += " AND status = $" + std::to_string(p_idx++);
+            params.push_back(status);
+        }
+
+        const int limit_idx = p_idx++;
+        const int offset_idx = p_idx++;
+        query += " ORDER BY created_at DESC LIMIT $" + std::to_string(limit_idx) + " OFFSET $" + std::to_string(offset_idx);
+        params.push_back(std::to_string(limit));
+        params.push_back(std::to_string(offset));
+
+        auto res = co_await sgrn::datastore::core::execSqlCoroVec(db, query, params);
+
+        Json::Value logs_arr = Json::arrayValue;
+        for (const auto& row : res) {
+            Json::Value entry;
+            entry["id"] = row["id"].as<int64_t>();
+            entry["organisation"] = row["organisation"].as<std::string>();
+            entry["actor_type"] = row["actor_type"].as<std::string>();
+            entry["actor_id"] = row["actor_id"].isNull() ? Json::Value(Json::nullValue) : Json::Value(row["actor_id"].as<int32_t>());
+            entry["actor_name"] = row["actor_name"].as<std::string>();
+            entry["action"] = row["action"].as<std::string>();
+            entry["target_type"] = row["target_type"].isNull() ? "" : row["target_type"].as<std::string>();
+            entry["target_id"] = row["target_id"].isNull() ? "" : row["target_id"].as<std::string>();
+            entry["ip"] = row["ip"].as<std::string>();
+            entry["status"] = row["status"].as<std::string>();
+            entry["created_at"] = row["created_at"].as<std::string>();
+
+            const std::string raw_det = row["details"].isNull() ? "{}" : row["details"].as<std::string>();
+            Json::CharReaderBuilder builder;
+            Json::Value det_json;
+            std::string errs;
+            const std::unique_ptr<Json::CharReader> up_reader(builder.newCharReader());
+            if (up_reader->parse(raw_det.data(), raw_det.data() + raw_det.size(), &det_json, &errs)) {
+                entry["details"] = det_json;
+            } else {
+                entry["details"] = Json::objectValue;
+            }
+            logs_arr.append(entry);
+        }
+
+        Json::Value resp;
+        resp["success"] = true;
+        resp["audit_logs"] = logs_arr;
+        resp["limit"] = limit;
+        resp["offset"] = offset;
+        co_return createJsonResponse(resp, k200OK);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Failed to fetch audit logs: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to fetch audit logs: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handlePurgeAuditLogs(HttpRequestPtr tsp_req) {
+    try {
+        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
+        const std::string org = session["user"]["organisation"].asString();
+        const int32_t actor_id = session["user"]["id"].asInt();
+        const std::string actor_name = session["user"]["email"].asString();
+
+        const std::string days_raw = tsp_req->getParameter("older_than_days");
+        int32_t days = days_raw.empty() ? 30 : std::stoi(days_raw);
+        if (days < 1)
+            days = 1;
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError())
+            co_return sgrn::createJsonResponse(db_res);
+        auto db = db_res.value();
+
+        auto res = co_await db->execSqlCoro(
+            "DELETE FROM core.audit_logs WHERE organisation = $1 AND created_at < NOW() - ($2 || ' days')::interval RETURNING id", org,
+            std::to_string(days));
+
+        const int64_t purged_count = res.size();
+
+        // Auditable Clearance: Log an immutable audit entry documenting the purge operation!
+        Json::Value details;
+        details["older_than_days"] = days;
+        details["records_purged"] = purged_count;
+        details["cleared_by"] = actor_name;
+
+        co_await sgrn::datastore::audit::AuditLogger::log(
+            db, org, "user", actor_id, actor_name, "audit.purged", "audit_logs", org, tsp_req->getPeerAddr().toIp(), details, "success");
+
+        Json::Value resp;
+        resp["success"] = true;
+        resp["records_purged"] = purged_count;
+        resp["older_than_days"] = days;
+        resp["message"] = "Audit logs purged successfully";
+        co_return createJsonResponse(resp, k200OK);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Failed to purge audit logs: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to purge audit logs: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+// ── Quotas & Rate Limits ──────────────────────────────────────────────────────
+Task<HttpResponsePtr> AdminApiHandler::handleGetQuotas(HttpRequestPtr tsp_req) {
+    try {
+        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
+        const std::string org = session["user"]["organisation"].asString();
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError())
+            co_return sgrn::createJsonResponse(db_res);
+        auto db = db_res.value();
+
+        // Org level limits
+        auto org_res = co_await db->execSqlCoro(
+            "SELECT total_virtual_size, total_real_size, storage_limit, total_entry_count, entry_count_limit, rate_limit_rpm "
+            "FROM core.organisations WHERE name = $1",
+            org);
+
+        Json::Value org_json;
+        if (!org_res.empty()) {
+            const auto& r = org_res[0];
+            org_json["total_virtual_size"] = r["total_virtual_size"].as<int64_t>();
+            org_json["total_real_size"] = r["total_real_size"].as<int64_t>();
+            org_json["storage_limit"] =
+                r["storage_limit"].isNull() ? Json::Value(Json::nullValue) : Json::Value(r["storage_limit"].as<int64_t>());
+            org_json["total_entry_count"] = r["total_entry_count"].as<int64_t>();
+            org_json["entry_count_limit"] =
+                r["entry_count_limit"].isNull() ? Json::Value(Json::nullValue) : Json::Value(r["entry_count_limit"].as<int64_t>());
+            org_json["rate_limit_rpm"] =
+                r["rate_limit_rpm"].isNull() ? Json::Value(Json::nullValue) : Json::Value(r["rate_limit_rpm"].as<int32_t>());
+        }
+
+        // Users quota list
+        auto users_res = co_await db->execSqlCoro(
+            "SELECT id, email, total_virtual_size, total_real_size, storage_limit, total_entry_count, entry_count_limit, rate_limit_rpm, "
+            "max_file_size_mb, preferred_chunk_size_mb, rate_limit_upload_rpm "
+            "FROM core.users WHERE organisation = $1 AND deleted_at IS NULL ORDER BY email",
+            org);
+
+        Json::Value users_arr = Json::arrayValue;
+        for (const auto& u : users_res) {
+            Json::Value u_j;
+            u_j["id"] = u["id"].as<int32_t>();
+            u_j["email"] = u["email"].as<std::string>();
+            u_j["total_virtual_size"] = u["total_virtual_size"].as<int64_t>();
+            u_j["total_real_size"] = u["total_real_size"].as<int64_t>();
+            u_j["storage_limit"] =
+                u["storage_limit"].isNull() ? Json::Value(Json::nullValue) : Json::Value(u["storage_limit"].as<int64_t>());
+            u_j["total_entry_count"] = u["total_entry_count"].as<int64_t>();
+            u_j["entry_count_limit"] =
+                u["entry_count_limit"].isNull() ? Json::Value(Json::nullValue) : Json::Value(u["entry_count_limit"].as<int64_t>());
+            u_j["rate_limit_rpm"] =
+                u["rate_limit_rpm"].isNull() ? Json::Value(Json::nullValue) : Json::Value(u["rate_limit_rpm"].as<int32_t>());
+            u_j["max_file_size_mb"] =
+                u["max_file_size_mb"].isNull() ? Json::Value(Json::nullValue) : Json::Value(u["max_file_size_mb"].as<int64_t>());
+            u_j["preferred_chunk_size_mb"] = u["preferred_chunk_size_mb"].isNull()
+                                                 ? Json::Value(Json::nullValue)
+                                                 : Json::Value(u["preferred_chunk_size_mb"].as<int32_t>());
+            u_j["rate_limit_upload_rpm"] =
+                u["rate_limit_upload_rpm"].isNull() ? Json::Value(Json::nullValue) : Json::Value(u["rate_limit_upload_rpm"].as<int32_t>());
+            users_arr.append(u_j);
+        }
+
+        // Automated services quota list
+        auto serv_res =
+            co_await db->execSqlCoro("SELECT id, name, token::text, total_virtual_size, total_real_size, storage_limit, total_entry_count, "
+                                     "entry_count_limit, rate_limit_rpm, max_file_size_mb, preferred_chunk_size_mb, rate_limit_upload_rpm "
+                                     "FROM core.automated_services WHERE organisation = $1 AND deleted_at IS NULL ORDER BY name",
+                org);
+
+        Json::Value serv_arr = Json::arrayValue;
+        for (const auto& s : serv_res) {
+            Json::Value s_j;
+            s_j["id"] = s["id"].as<int32_t>();
+            s_j["name"] = s["name"].as<std::string>();
+            s_j["token"] = s["token"].as<std::string>();
+            s_j["total_virtual_size"] = s["total_virtual_size"].as<int64_t>();
+            s_j["total_real_size"] = s["total_real_size"].as<int64_t>();
+            s_j["storage_limit"] =
+                s["storage_limit"].isNull() ? Json::Value(Json::nullValue) : Json::Value(s["storage_limit"].as<int64_t>());
+            s_j["total_entry_count"] = s["total_entry_count"].as<int64_t>();
+            s_j["entry_count_limit"] =
+                s["entry_count_limit"].isNull() ? Json::Value(Json::nullValue) : Json::Value(s["entry_count_limit"].as<int64_t>());
+            s_j["rate_limit_rpm"] =
+                s["rate_limit_rpm"].isNull() ? Json::Value(Json::nullValue) : Json::Value(s["rate_limit_rpm"].as<int32_t>());
+            s_j["max_file_size_mb"] =
+                s["max_file_size_mb"].isNull() ? Json::Value(Json::nullValue) : Json::Value(s["max_file_size_mb"].as<int64_t>());
+            s_j["preferred_chunk_size_mb"] = s["preferred_chunk_size_mb"].isNull()
+                                                 ? Json::Value(Json::nullValue)
+                                                 : Json::Value(s["preferred_chunk_size_mb"].as<int32_t>());
+            s_j["rate_limit_upload_rpm"] =
+                s["rate_limit_upload_rpm"].isNull() ? Json::Value(Json::nullValue) : Json::Value(s["rate_limit_upload_rpm"].as<int32_t>());
+            serv_arr.append(s_j);
+        }
+
+        Json::Value resp;
+        resp["success"] = true;
+        resp["organisation"] = org_json;
+        resp["users"] = users_arr;
+        resp["automated_services"] = serv_arr;
+        co_return createJsonResponse(resp, k200OK);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Failed to get quotas: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to get quotas: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handleUpdateOrgQuota(HttpRequestPtr tsp_req) {
+    try {
+        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
+        const std::string org = session["user"]["organisation"].asString();
+        const int32_t actor_id = session["user"]["id"].asInt();
+        const std::string actor_name = session["user"]["email"].asString();
+
+        auto json = tsp_req->getJsonObject();
+        if (!json)
+            co_return createErrorResponse(AdminApiError::InvalidPayload);
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError())
+            co_return sgrn::createJsonResponse(db_res);
+        auto db = db_res.value();
+
+        std::optional<int64_t> storage_limit;
+        std::optional<int64_t> entry_count_limit;
+        std::optional<int32_t> rate_limit_rpm;
+
+        if (json->isMember("storage_limit") && (*json)["storage_limit"].isInt64())
+            storage_limit = (*json)["storage_limit"].asInt64();
+        if (json->isMember("entry_count_limit") && (*json)["entry_count_limit"].isInt64())
+            entry_count_limit = (*json)["entry_count_limit"].asInt64();
+        if (json->isMember("rate_limit_rpm") && (*json)["rate_limit_rpm"].isInt())
+            rate_limit_rpm = (*json)["rate_limit_rpm"].asInt();
+
+        co_await db->execSqlCoro(
+            "UPDATE core.organisations SET storage_limit = $2, entry_count_limit = $3, rate_limit_rpm = $4 WHERE name = $1", org,
+            storage_limit, entry_count_limit, rate_limit_rpm);
+
+        co_await sgrn::datastore::audit::AuditLogger::log(
+            db, org, "user", actor_id, actor_name, "quota.updated", "organisation", org, tsp_req->getPeerAddr().toIp(), *json, "success");
+
+        Json::Value resp;
+        resp["success"] = true;
+        resp["message"] = "Organisation quota and limits updated successfully";
+        co_return createJsonResponse(resp, k200OK);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Failed to update org quota: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to update org quota: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handleUpdateUserQuota(HttpRequestPtr tsp_req, std::string t_id) {
+    try {
+        const int32_t user_id = std::stoi(t_id);
+        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
+        const std::string org = session["user"]["organisation"].asString();
+        const int32_t actor_id = session["user"]["id"].asInt();
+        const std::string actor_name = session["user"]["email"].asString();
+
+        auto json = tsp_req->getJsonObject();
+        if (!json)
+            co_return createErrorResponse(AdminApiError::InvalidPayload);
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError())
+            co_return sgrn::createJsonResponse(db_res);
+        auto db = db_res.value();
+
+        std::optional<int64_t> storage_limit;
+        std::optional<int64_t> entry_count_limit;
+        std::optional<int32_t> rate_limit_rpm;
+        std::optional<int64_t> max_file_size_mb;
+        std::optional<int32_t> preferred_chunk_size_mb;
+        std::optional<int32_t> rate_limit_upload_rpm;
+
+        if (json->isMember("storage_limit") && !(*json)["storage_limit"].isNull() && (*json)["storage_limit"].isInt64())
+            storage_limit = (*json)["storage_limit"].asInt64();
+        if (json->isMember("entry_count_limit") && !(*json)["entry_count_limit"].isNull() && (*json)["entry_count_limit"].isInt64())
+            entry_count_limit = (*json)["entry_count_limit"].asInt64();
+        if (json->isMember("rate_limit_rpm") && !(*json)["rate_limit_rpm"].isNull() && (*json)["rate_limit_rpm"].isInt())
+            rate_limit_rpm = (*json)["rate_limit_rpm"].asInt();
+        if (json->isMember("max_file_size_mb") && !(*json)["max_file_size_mb"].isNull() && (*json)["max_file_size_mb"].isInt64())
+            max_file_size_mb = (*json)["max_file_size_mb"].asInt64();
+        if (json->isMember("preferred_chunk_size_mb") && !(*json)["preferred_chunk_size_mb"].isNull() &&
+            (*json)["preferred_chunk_size_mb"].isInt())
+            preferred_chunk_size_mb = (*json)["preferred_chunk_size_mb"].asInt();
+        if (json->isMember("rate_limit_upload_rpm") && !(*json)["rate_limit_upload_rpm"].isNull() &&
+            (*json)["rate_limit_upload_rpm"].isInt())
+            rate_limit_upload_rpm = (*json)["rate_limit_upload_rpm"].asInt();
+
+        auto res = co_await db->execSqlCoro("UPDATE core.users SET storage_limit = $3, entry_count_limit = $4, rate_limit_rpm = $5, "
+                                            "max_file_size_mb = $6, preferred_chunk_size_mb = $7, rate_limit_upload_rpm = $8 WHERE "
+                                            "organisation = $1 AND id = $2 AND deleted_at IS NULL",
+            org, user_id, storage_limit, entry_count_limit, rate_limit_rpm, max_file_size_mb, preferred_chunk_size_mb,
+            rate_limit_upload_rpm);
+
+        if (res.affectedRows() == 0) {
+            co_return createErrorResponse(AdminApiError::InvalidUserId);
+        }
+
+        co_await sgrn::datastore::audit::AuditLogger::log(db, org, "user", actor_id, actor_name, "quota.updated", "user",
+            std::to_string(user_id), tsp_req->getPeerAddr().toIp(), *json, "success");
+
+        Json::Value resp;
+        resp["success"] = true;
+        resp["message"] = "User quota and limits updated successfully";
+        co_return createJsonResponse(resp, k200OK);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Failed to update user quota: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to update user quota: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handleUpdateServiceQuota(HttpRequestPtr tsp_req, std::string t_id) {
+    try {
+        const int32_t service_id = std::stoi(t_id);
+        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
+        const std::string org = session["user"]["organisation"].asString();
+        const int32_t actor_id = session["user"]["id"].asInt();
+        const std::string actor_name = session["user"]["email"].asString();
+
+        auto json = tsp_req->getJsonObject();
+        if (!json)
+            co_return createErrorResponse(AdminApiError::InvalidPayload);
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError())
+            co_return sgrn::createJsonResponse(db_res);
+        auto db = db_res.value();
+
+        std::optional<int64_t> storage_limit;
+        std::optional<int64_t> entry_count_limit;
+        std::optional<int32_t> rate_limit_rpm;
+        std::optional<int64_t> max_file_size_mb;
+        std::optional<int32_t> preferred_chunk_size_mb;
+        std::optional<int32_t> rate_limit_upload_rpm;
+
+        if (json->isMember("storage_limit") && !(*json)["storage_limit"].isNull() && (*json)["storage_limit"].isInt64())
+            storage_limit = (*json)["storage_limit"].asInt64();
+        if (json->isMember("entry_count_limit") && !(*json)["entry_count_limit"].isNull() && (*json)["entry_count_limit"].isInt64())
+            entry_count_limit = (*json)["entry_count_limit"].asInt64();
+        if (json->isMember("rate_limit_rpm") && !(*json)["rate_limit_rpm"].isNull() && (*json)["rate_limit_rpm"].isInt())
+            rate_limit_rpm = (*json)["rate_limit_rpm"].asInt();
+        if (json->isMember("max_file_size_mb") && !(*json)["max_file_size_mb"].isNull() && (*json)["max_file_size_mb"].isInt64())
+            max_file_size_mb = (*json)["max_file_size_mb"].asInt64();
+        if (json->isMember("preferred_chunk_size_mb") && !(*json)["preferred_chunk_size_mb"].isNull() &&
+            (*json)["preferred_chunk_size_mb"].isInt())
+            preferred_chunk_size_mb = (*json)["preferred_chunk_size_mb"].asInt();
+        if (json->isMember("rate_limit_upload_rpm") && !(*json)["rate_limit_upload_rpm"].isNull() &&
+            (*json)["rate_limit_upload_rpm"].isInt())
+            rate_limit_upload_rpm = (*json)["rate_limit_upload_rpm"].asInt();
+
+        auto res =
+            co_await db->execSqlCoro("UPDATE core.automated_services SET storage_limit = $3, entry_count_limit = $4, rate_limit_rpm = $5, "
+                                     "max_file_size_mb = $6, preferred_chunk_size_mb = $7, rate_limit_upload_rpm = $8 WHERE "
+                                     "organisation = $1 AND id = $2 AND deleted_at IS NULL",
+                org, service_id, storage_limit, entry_count_limit, rate_limit_rpm, max_file_size_mb, preferred_chunk_size_mb,
+                rate_limit_upload_rpm);
+
+        if (res.affectedRows() == 0) {
+            co_return createErrorResponse(AdminApiError::InvalidUserId);
+        }
+
+        co_await sgrn::datastore::audit::AuditLogger::log(db, org, "user", actor_id, actor_name, "quota.updated", "automated_service",
+            std::to_string(service_id), tsp_req->getPeerAddr().toIp(), *json, "success");
+
+        Json::Value resp;
+        resp["success"] = true;
+        resp["message"] = "Automated service quota and limits updated successfully";
+        co_return createJsonResponse(resp, k200OK);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Failed to update service quota: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to update service quota: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handleGetMetaProbeSessions(HttpRequestPtr tsp_req) {
+    try {
+        Json::Value sessions = co_await sgrn::datastore::session::SessionStore::instance().getActiveSessions();
+        co_return createJsonResponse(sessions, k200OK);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Failed to get live sessions: {}", e.what());
+        co_return createErrorResponse(AdminApiError::DbError);
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handleListWebhooks(HttpRequestPtr tsp_req) {
+    try {
+        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
+        const std::string org = session["user"]["organisation"].asString();
+
+        auto endpoints = co_await sgrn::datastore::services::WebhookService::instance().getWebhooks(org);
+        Json::Value list = Json::arrayValue;
+        for (const auto& ep : endpoints) {
+            Json::Value item;
+            item["id"] = ep.id;
+            item["organisation"] = ep.organisation;
+            item["url"] = ep.url;
+            item["is_active"] = ep.is_active;
+            item["created_at"] = ep.created_at;
+            list.append(item);
+        }
+        co_return createJsonResponse(list, k200OK);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Failed listing webhooks: {}", e.what());
+        co_return createErrorResponse(AdminApiError::DbError);
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handleRegisterWebhook(HttpRequestPtr tsp_req) {
+    try {
+        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
+        const std::string org = session["user"]["organisation"].asString();
+        auto json = tsp_req->getJsonObject();
+
+        if (!json || !json->isMember("url") || !(*json)["url"].isString()) {
+            co_return createErrorResponse("url is required", k400BadRequest, "AdminApi");
+        }
+
+        std::string url = (*json)["url"].asString();
+        std::string secret = json->get("secret", "").asString();
+        std::vector<std::string> events = {"user.signin", "user.signout", "service.signin"};
+
+        auto ep_opt = co_await sgrn::datastore::services::WebhookService::instance().createWebhook(org, url, secret, events);
+        if (!ep_opt) {
+            co_return createErrorResponse("Failed creating webhook subscription", k400BadRequest, "AdminApi");
+        }
+
+        Json::Value resp;
+        resp["id"] = ep_opt->id;
+        resp["url"] = ep_opt->url;
+        resp["organisation"] = ep_opt->organisation;
+        resp["created_at"] = ep_opt->created_at;
+        co_return createJsonResponse(resp, k201Created);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Failed registering webhook: {}", e.what());
+        co_return createErrorResponse(AdminApiError::DbError);
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handleDeleteWebhook(HttpRequestPtr tsp_req, std::string t_id) {
+    try {
+        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
+        const std::string org = session["user"]["organisation"].asString();
+        int32_t webhook_id = std::stoi(t_id);
+
+        bool deleted = co_await sgrn::datastore::services::WebhookService::instance().deleteWebhook(org, webhook_id);
+        if (!deleted) {
+            co_return createErrorResponse("Webhook not found", k404NotFound, "AdminApi");
+        }
+
+        Json::Value resp;
+        resp["success"] = true;
+        resp["message"] = "Webhook deleted successfully";
+        co_return createJsonResponse(resp, k200OK);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Failed deleting webhook: {}", e.what());
+        co_return createErrorResponse(AdminApiError::DbError);
     }
 }
 

@@ -63,7 +63,7 @@ struct UserFileRecord {
     int64_t t_object_id;
     std::optional<int32_t> user_id;
     std::optional<int32_t> automated_service_id;
-    int32_t session_id;
+    int64_t session_id;
     std::string extension;
     std::optional<int64_t> directory_id;
     std::optional<std::string> created_at;
@@ -173,7 +173,7 @@ struct ProcessingResult {
 enum class StorageScope : uint8_t { Personal, AutomatedServices, Users, Domain };
 
 struct ScopeContext {
-    int32_t t_session_id{0};
+    int64_t t_session_id{0};
     int32_t owner_id{0};
     std::optional<int32_t> user_id;
     std::optional<int32_t> t_automated_service_id;
@@ -248,15 +248,15 @@ drogon::Task<::sgrn::datastore::BackendResult<void>> updateObjectChunking(drogon
     std::string_view t_upload_mode, std::optional<int64_t> t_part_count, std::optional<int64_t> t_part_size_bytes);
 
 drogon::Task<::sgrn::datastore::BackendResult<int64_t>> insertFile(drogon::orm::DbClientPtr tsp_db_client, std::string t_name,
-    int64_t t_object_id, std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int32_t t_session_id,
+    int64_t t_object_id, std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id,
     std::string t_extension, std::optional<int64_t> t_directory_id = std::nullopt, std::string t_domain = "");
 
 drogon::Task<::sgrn::datastore::BackendResult<std::optional<int64_t>>> resolveDirectoryPath(drogon::orm::DbClientPtr tsp_db_client,
-    std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int32_t t_session_id, std::string t_virtual_path,
+    std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_virtual_path,
     std::string t_domain = "");
 
 drogon::Task<::sgrn::datastore::BackendResult<std::optional<int64_t>>> ensureDirectoryPath(drogon::orm::DbClientPtr tsp_db_client,
-    std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int32_t t_session_id, std::string t_virtual_path,
+    std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_virtual_path,
     std::string t_domain = "");
 
 drogon::Task<std::optional<UserFileRecord>> getFile(drogon::orm::DbClientPtr tsp_db_client, int64_t t_file_id);

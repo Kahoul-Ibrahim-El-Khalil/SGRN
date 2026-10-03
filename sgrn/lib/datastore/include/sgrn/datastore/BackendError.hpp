@@ -29,22 +29,25 @@ namespace sgrn::datastore
 // =========================================================
 
 enum class BackendErrorKind : uint8_t {
-    Database,    ///< Postgres / Drogon ORM failures
-    Redis,       ///< Redis operation failures
-    Garage,      ///< S3 / Garage operation failures
-    Auth,        ///< Authentication / authorisation logic (not an exception)
-    Filesystem,  ///< Local file-system I/O errors
-    Network,     ///< Generic network failures
-    Compression, ///< zstd / compression pipeline
-    Hashing,     ///< SHA-512 / hash computation
-    Runtime,     ///< Unclassified internal errors
-    Generic,     ///< Fallback / unknown domain
+    Database,      ///< Postgres / Drogon ORM failures
+    AlreadyExists, ///< Entity conflict / unique constraint violation
+    Redis,         ///< Redis operation failures
+    Garage,        ///< S3 / Garage operation failures
+    Auth,          ///< Authentication / authorisation logic (not an exception)
+    Filesystem,    ///< Local file-system I/O errors
+    Network,       ///< Generic network failures
+    Compression,   ///< zstd / compression pipeline
+    Hashing,       ///< SHA-512 / hash computation
+    Runtime,       ///< Unclassified internal errors
+    Generic,       ///< Fallback / unknown domain
 };
 
 constexpr std::string_view kindToScopeString(BackendErrorKind k) noexcept {
     switch (k) {
         case BackendErrorKind::Database:
             return "Database";
+        case BackendErrorKind::AlreadyExists:
+            return "Conflict";
         case BackendErrorKind::Redis:
             return "Redis";
         case BackendErrorKind::Garage:

@@ -16,13 +16,6 @@ export const NavigationBar = () => {
 
     return (
         <header className="desktop-header">
-            <div className="header-logo-container">
-                <div className="header-logo-orb" aria-hidden="true" />
-                <span className="header-logo-text">
-                    SGRN <span className="header-logo-subtitle">Resource Platform</span>
-                </span>
-            </div>
-
             <div className="header-actions">
                 <div className="header-utility-group">
                     <button type="button" className="header-icon-btn" aria-label="Notifications">
@@ -30,9 +23,7 @@ export const NavigationBar = () => {
                     </button>
                     <ThemeToggle />
                 </div>
-
                 <div className="header-toolbar-sep" aria-hidden="true" />
-
                 <div className="header-user-area">
                     <div className="header-user-info">
                         <span className="header-user-name">
@@ -40,7 +31,6 @@ export const NavigationBar = () => {
                         </span>
                         <span className="header-user-role">{isAdmin ? "Admin Access" : "Standard User"}</span>
                     </div>
-
                     <button onClick={handleSignOutClick} className="header-signout-btn" title="Sign Out">
                         <LogOut size={18} />
                     </button>

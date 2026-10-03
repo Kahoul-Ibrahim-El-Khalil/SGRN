@@ -94,8 +94,9 @@ micromamba activate SGRN
 #    updatable). Adding a column needs both; changing only intent needs
 #    only the manifest.
 
-# 2. Reinit a dev database from the edited schema:
-sgrn_datastore --init-db        # drops + recreates, applies postgres/init.sql
+# 2. Reinit a dev database from the edited schema (no compilation required):
+python3 init-db.py              # drops + recreates, applies postgres/init.sql
+# (or `sgrn_datastore --init-db` if binary is compiled)
 
 # 3. Regenerate the Drogon ORM models from the live schema:
 python3 sgrn/lib/datastore/scripts/generators/generate_orm.py --password "$POSTGRES_PASSWORD"

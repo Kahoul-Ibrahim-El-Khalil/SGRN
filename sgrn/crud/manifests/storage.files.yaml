@@ -1,0 +1,147 @@
+metadata:
+  version: "1.0"
+  description: "Storage file metadata API"
+  generated_timestamp: null
+
+table:
+  schema: storage
+  name: files
+  primary_key: id
+  primary_key_type: int
+
+tenant:
+  column: organisation
+  required: true
+  server_bound: true
+
+policy:
+  read_scope: org
+  write_scope: own
+  delete_scope: own
+  allowed_roles:
+    - admin
+    - user
+    - service_account
+  max_limit: 500
+  soft_delete: true
+  audit: true
+  versioning: false
+  batch_enabled: false
+
+routes:
+  list:
+    path: /api/v1/storage/files
+    method: GET
+    auth_filters:
+      - UserAuthFilter
+  get:
+    path: /api/v1/storage/files/{id}
+    method: GET
+    auth_filters:
+      - UserAuthFilter
+  create:
+    path: /api/v1/storage/files
+    method: POST
+    auth_filters:
+      - UserAuthFilter
+  update:
+    path: /api/v1/storage/files/{id}
+    method: PATCH
+    auth_filters:
+      - UserAuthFilter
+  delete:
+    path: /api/v1/storage/files/{id}
+    method: DELETE
+    auth_filters:
+      - UserAuthFilter
+
+fields:
+  id:
+    type: int
+    readable: false
+    writable: false
+
+  organisation:
+    type: text
+    readable: false
+    writable: false
+
+  filename:
+    type: text
+    readable: true
+    writable: true
+    filterable: true
+    operators:
+      - eq
+      - like
+    validation:
+      maxlen: 255
+    nullable: false
+
+  mime_type:
+    type: text
+    readable: true
+    writable: true
+    filterable: true
+    operators:
+      - eq
+    validation:
+      maxlen: 100
+    nullable: false
+
+  size_bytes:
+    type: bigint
+    readable: true
+    writable: true
+    filterable: true
+    operators:
+      - eq
+      - gt
+      - gte
+      - lt
+      - lte
+    nullable: false
+
+  s3_key:
+    type: text
+    readable: true
+    writable: true
+    filterable: false
+    validation:
+      maxlen: 512
+    nullable: false
+
+  checksum_sha256:
+    type: text
+    readable: true
+    writable: true
+    filterable: true
+    operators:
+      - eq
+    validation:
+      maxlen: 64
+    nullable: true
+
+  deleted_at:
+    type: timestamp
+    readable: false
+    writable: false
+    filterable: true
+    operators:
+      - eq
+      - neq
+    soft_delete_field: true
+
+  created_at:
+    type: timestamp
+    readable: true
+    writable: false
+    nullable: false
+
+  updated_at:
+    type: timestamp
+    readable: true
+    writable: false
+    nullable: false
+
+admin_overrides: []

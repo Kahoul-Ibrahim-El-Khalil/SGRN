@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Loader2, Save, RefreshCw, TriangleAlert } from "lucide-react";
+import { Loader2, Save, RefreshCw, TriangleAlert, Activity, Webhook, Plus, Trash2 } from "lucide-react";
 import { useEvent } from "@/contexts/EventContext";
+import { authenticatedFetch } from "@/backend/api/fetcher";
+import { AdminBackendApiEndpoints } from "@/backend/endpoints";
 import {
     fetchSystemConfig,
     updateSystemConfig,
@@ -10,6 +12,218 @@ import {
     type SystemConfigFieldSpec,
     type SystemConfigSaveResult,
 } from "@/backend/api/system_config";
+
+function LiveSessionsSection() {
+    const [sessions, setSessions] = useState<any[]>([]);
+    const [loading, setLoading] = useState(false);
+
+    const loadSessions = useCallback(async () => {
+        setLoading(true);
+        try {
+            const res = await authenticatedFetch(AdminBackendApiEndpoints.METAPROBE_SESSIONS);
+            if (res.ok) {
+                const data = await res.json();
+                setSessions(Array.isArray(data) ? data : []);
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        loadSessions();
+        const timer = setInterval(loadSessions, 5000);
+        return () => clearInterval(timer);
+    }, [loadSessions]);
+
+    return (
+        <div className="admin-config-section mb-6">
+            <div className="admin-config-section-header flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                    <Activity className="text-emerald-500" size={20} />
+                    <h3 className="font-semibold text-lg">Live Active Sessions ({sessions.length})</h3>
+                </div>
+                <button onClick={loadSessions} className="btn-desktop text-xs flex items-center gap-1">
+                    <RefreshCw className={loading ? "animate-spin" : ""} size={14} /> Refresh
+                </button>
+            </div>
+            <div className="admin-table-wrapper mt-3">
+                <table className="admin-table text-sm w-full">
+                    <thead>
+                        <tr>
+                            <th>Actor</th>
+                            <th>Type</th>
+                            <th>IP Address</th>
+                            <th>Created At</th>
+                            <th>Expires At</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {sessions.length === 0 ? (
+                            <tr>
+                                <td colSpan={5} className="text-center py-4 text-gray-500">
+                                    No active sessions found
+                                </td>
+                            </tr>
+                        ) : (
+                            sessions.map((s, idx) => (
+                                <tr key={idx}>
+                                    <td className="font-mono">{s.actor_name}</td>
+                                    <td>
+                                        <span
+                                            className={`badge-status ${s.actor_type === "automated_service" ? "badge-status--active" : ""}`}
+                                        >
+                                            {s.actor_type}
+                                        </span>
+                                    </td>
+                                    <td className="font-mono">{s.ip}</td>
+                                    <td className="text-xs text-gray-400">{s.created_at}</td>
+                                    <td className="text-xs text-gray-400">{s.expires_at}</td>
+                                </tr>
+                            ))
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+}
+
+function WebhooksSection() {
+    const [webhooks, setWebhooks] = useState<any[]>([]);
+    const [url, setUrl] = useState("");
+    const [secret, setSecret] = useState("");
+    const [loading, setLoading] = useState(false);
+    const [creating, setCreating] = useState(false);
+
+    const loadWebhooks = useCallback(async () => {
+        setLoading(true);
+        try {
+            const res = await authenticatedFetch(AdminBackendApiEndpoints.WEBHOOKS);
+            if (res.ok) {
+                const data = await res.json();
+                setWebhooks(Array.isArray(data) ? data : []);
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        loadWebhooks();
+    }, [loadWebhooks]);
+
+    const handleCreate = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!url) return;
+        setCreating(true);
+        try {
+            const res = await authenticatedFetch(AdminBackendApiEndpoints.WEBHOOKS, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ url, secret }),
+            });
+            if (res.ok) {
+                setUrl("");
+                setSecret("");
+                await loadWebhooks();
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setCreating(false);
+        }
+    };
+
+    const handleDelete = async (id: number) => {
+        try {
+            const res = await authenticatedFetch(AdminBackendApiEndpoints.WEBHOOK_ITEM(id), { method: "DELETE" });
+            if (res.ok) {
+                await loadWebhooks();
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    };
+
+    return (
+        <div className="admin-config-section mb-6">
+            <div className="admin-config-section-header flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                    <Webhook className="text-indigo-500" size={20} />
+                    <h3 className="font-semibold text-lg">System Webhook Subscriptions</h3>
+                </div>
+                <button onClick={loadWebhooks} className="btn-desktop text-xs flex items-center gap-1">
+                    <RefreshCw className={loading ? "animate-spin" : ""} size={14} /> Refresh
+                </button>
+            </div>
+
+            <form onSubmit={handleCreate} className="flex gap-2 mt-3 mb-4">
+                <input
+                    type="url"
+                    required
+                    placeholder="https://example.com/webhook"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    className="input-desktop flex-1 text-sm"
+                />
+                <input
+                    type="text"
+                    placeholder="Secret Key (Optional)"
+                    value={secret}
+                    onChange={(e) => setSecret(e.target.value)}
+                    className="input-desktop w-48 text-sm"
+                />
+                <button type="submit" disabled={creating} className="btn-desktop-primary flex items-center gap-1 text-sm">
+                    {creating ? <Loader2 className="animate-spin" size={16} /> : <Plus size={16} />} Register Webhook
+                </button>
+            </form>
+
+            <div className="admin-table-wrapper">
+                <table className="admin-table text-sm w-full">
+                    <thead>
+                        <tr>
+                            <th>URL</th>
+                            <th>Status</th>
+                            <th>Created At</th>
+                            <th className="text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {webhooks.length === 0 ? (
+                            <tr>
+                                <td colSpan={4} className="text-center py-4 text-gray-500">
+                                    No webhooks registered
+                                </td>
+                            </tr>
+                        ) : (
+                            webhooks.map((w) => (
+                                <tr key={w.id}>
+                                    <td className="font-mono text-xs">{w.url}</td>
+                                    <td>
+                                        <span className={`badge-status ${w.is_active ? "badge-status--active" : ""}`}>
+                                            {w.is_active ? "ACTIVE" : "INACTIVE"}
+                                        </span>
+                                    </td>
+                                    <td className="text-xs text-gray-400">{w.created_at}</td>
+                                    <td className="text-right">
+                                        <button onClick={() => handleDelete(w.id)} className="text-red-400 hover:text-red-600 p-1">
+                                            <Trash2 size={16} />
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+}
 
 function isDirty(t_original: any, t_current: any): boolean {
     return JSON.stringify(t_original ?? null) !== JSON.stringify(t_current ?? null);
@@ -290,6 +504,9 @@ export default function SystemConfigPanel() {
                     </div>
                 </div>
             )}
+
+            <LiveSessionsSection />
+            <WebhooksSection />
 
             <div className="query-help">
                 <strong>LIVE</strong> settings apply on save without a restart. <strong>RESTART</strong> settings are written to{" "}

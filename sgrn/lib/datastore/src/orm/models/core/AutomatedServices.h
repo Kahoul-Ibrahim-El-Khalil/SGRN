@@ -59,6 +59,10 @@ public:
         static const std::string _storage_limit;
         static const std::string _total_entry_count;
         static const std::string _entry_count_limit;
+        static const std::string _rate_limit_rpm;
+        static const std::string _max_file_size_mb;
+        static const std::string _preferred_chunk_size_mb;
+        static const std::string _rate_limit_upload_rpm;
         static const std::string _created_at;
         static const std::string _updated_at;
     };
@@ -238,6 +242,42 @@ public:
     void setEntryCountLimit(const int64_t& pEntryCountLimit) noexcept;
     void setEntryCountLimitToNull() noexcept;
 
+    /**  For column rate_limit_rpm  */
+    /// Get the value of the column rate_limit_rpm, returns the default value if the column is null
+    const int32_t& getValueOfRateLimitRpm() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<int32_t>& getRateLimitRpm() const noexcept;
+    /// Set the value of the column rate_limit_rpm
+    void setRateLimitRpm(const int32_t& pRateLimitRpm) noexcept;
+    void setRateLimitRpmToNull() noexcept;
+
+    /**  For column max_file_size_mb  */
+    /// Get the value of the column max_file_size_mb, returns the default value if the column is null
+    const int64_t& getValueOfMaxFileSizeMb() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<int64_t>& getMaxFileSizeMb() const noexcept;
+    /// Set the value of the column max_file_size_mb
+    void setMaxFileSizeMb(const int64_t& pMaxFileSizeMb) noexcept;
+    void setMaxFileSizeMbToNull() noexcept;
+
+    /**  For column preferred_chunk_size_mb  */
+    /// Get the value of the column preferred_chunk_size_mb, returns the default value if the column is null
+    const int32_t& getValueOfPreferredChunkSizeMb() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<int32_t>& getPreferredChunkSizeMb() const noexcept;
+    /// Set the value of the column preferred_chunk_size_mb
+    void setPreferredChunkSizeMb(const int32_t& pPreferredChunkSizeMb) noexcept;
+    void setPreferredChunkSizeMbToNull() noexcept;
+
+    /**  For column rate_limit_upload_rpm  */
+    /// Get the value of the column rate_limit_upload_rpm, returns the default value if the column is null
+    const int32_t& getValueOfRateLimitUploadRpm() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<int32_t>& getRateLimitUploadRpm() const noexcept;
+    /// Set the value of the column rate_limit_upload_rpm
+    void setRateLimitUploadRpm(const int32_t& pRateLimitUploadRpm) noexcept;
+    void setRateLimitUploadRpmToNull() noexcept;
+
     /**  For column created_at  */
     /// Get the value of the column created_at, returns the default value if the column is null
     const ::trantor::Date& getValueOfCreatedAt() const noexcept;
@@ -255,7 +295,7 @@ public:
     void setUpdatedAt(const ::trantor::Date& pUpdatedAt) noexcept;
 
     static size_t getColumnNumber() noexcept {
-        return 17;
+        return 21;
     }
     static const std::string& getColumnName(size_t index) noexcept(false);
 
@@ -293,6 +333,10 @@ private:
     std::shared_ptr<int64_t> storageLimit_;
     std::shared_ptr<int64_t> totalEntryCount_;
     std::shared_ptr<int64_t> entryCountLimit_;
+    std::shared_ptr<int32_t> rateLimitRpm_;
+    std::shared_ptr<int64_t> maxFileSizeMb_;
+    std::shared_ptr<int32_t> preferredChunkSizeMb_;
+    std::shared_ptr<int32_t> rateLimitUploadRpm_;
     std::shared_ptr<::trantor::Date> createdAt_;
     std::shared_ptr<::trantor::Date> updatedAt_;
     struct MetaData {
@@ -305,7 +349,7 @@ private:
         const bool notNull_;
     };
     static const std::vector<MetaData> metaData_;
-    bool dirtyFlag_[17] = {false};
+    bool dirtyFlag_[21] = {false};
 
 public:
     static const std::string& sqlForFindingByPrimaryKey() {
@@ -385,14 +429,30 @@ public:
         if (!dirtyFlag_[14]) {
             needSelection = true;
         }
+        if (dirtyFlag_[15]) {
+            sql += "rate_limit_rpm,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[16]) {
+            sql += "max_file_size_mb,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[17]) {
+            sql += "preferred_chunk_size_mb,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[18]) {
+            sql += "rate_limit_upload_rpm,";
+            ++parametersCount;
+        }
         sql += "created_at,";
         ++parametersCount;
-        if (!dirtyFlag_[15]) {
+        if (!dirtyFlag_[19]) {
             needSelection = true;
         }
         sql += "updated_at,";
         ++parametersCount;
-        if (!dirtyFlag_[16]) {
+        if (!dirtyFlag_[20]) {
             needSelection = true;
         }
         needSelection = true;
@@ -477,10 +537,26 @@ public:
         if (dirtyFlag_[15]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[16]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[17]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[18]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[19]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
         } else {
             sql += "default,";
         }
-        if (dirtyFlag_[16]) {
+        if (dirtyFlag_[20]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         } else {

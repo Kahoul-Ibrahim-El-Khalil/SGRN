@@ -19,18 +19,6 @@
       "is_fast": false
     }
   ],
-  "redis_clients": [
-    {
-      "host": "127.0.0.1",
-      "port": 6379,
-      "name": "default",
-      "passwd": "",
-      "db": 0,
-      "is_fast": false,
-      "number_of_connections": 4,
-      "timeout": -1.0
-    }
-  ],
   "plugins": [
     {
       "name": "sgrn::datastore::plugins::aws::S3Client",
@@ -47,10 +35,6 @@
         "worker_threads": 4,
         "pool_name": "s3-worker-pool"
       }
-    },
-    {
-      "name": "sgrn::datastore::plugins::RedisMiddleware",
-      "config": {}
     }
   ],
   "app": {
@@ -94,6 +78,8 @@
       "storage_endpoint_window_s": 60,
       "page_endpoint_limit": 120,
       "page_endpoint_window_s": 60,
+      "upload_endpoint_limit": 10000,
+      "upload_endpoint_window_s": 60,
       "burst_allowance": 10
     },
     "s3": {

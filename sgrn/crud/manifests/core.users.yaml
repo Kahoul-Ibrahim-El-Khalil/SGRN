@@ -1,0 +1,165 @@
+metadata:
+  version: "1.0"
+  description: "User management API"
+  generated_timestamp: null
+
+table:
+  schema: core
+  name: users
+  primary_key: id
+  primary_key_type: int
+
+tenant:
+  column: organisation
+  required: true
+  server_bound: true
+
+policy:
+  read_scope: org
+  write_scope: own
+  delete_scope: admin
+  allowed_roles:
+    - admin
+    - user
+    - service_account
+  max_limit: 500
+  soft_delete: true
+  audit: true
+  versioning: true
+  batch_enabled: false
+
+routes:
+  list:
+    path: /api/v1/users
+    method: GET
+    auth_filters:
+      - UserAuthFilter
+  get:
+    path: /api/v1/users/{id}
+    method: GET
+    auth_filters:
+      - UserAuthFilter
+  create:
+    path: /api/v1/users
+    method: POST
+    auth_filters:
+      - UserAuthFilter
+  update:
+    path: /api/v1/users/{id}
+    method: PATCH
+    auth_filters:
+      - UserAuthFilter
+  delete:
+    path: /api/v1/users/{id}
+    method: DELETE
+    auth_filters:
+      - UserAuthFilter
+
+fields:
+  id:
+    type: int
+    readable: false
+    writable: false
+
+  organisation:
+    type: text
+    readable: false
+    writable: false
+
+  email:
+    type: text
+    readable: true
+    writable: true
+    filterable: true
+    operators:
+      - eq
+      - like
+      - in
+    validation:
+      format: email
+      maxlen: 255
+      unique: true
+    nullable: false
+
+  first_name:
+    type: text
+    readable: true
+    writable: true
+    filterable: true
+    operators:
+      - eq
+      - like
+    validation:
+      maxlen: 100
+    nullable: true
+
+  family_name:
+    type: text
+    readable: true
+    writable: true
+    filterable: true
+    operators:
+      - eq
+      - like
+    validation:
+      maxlen: 100
+    nullable: true
+
+  role:
+    type: text
+    readable: true
+    writable: true
+    filterable: true
+    operators:
+      - eq
+    validation:
+      enum:
+        - admin
+        - user
+        - readonly
+    nullable: false
+    default: user
+
+  is_active:
+    type: bool
+    readable: true
+    writable: true
+    filterable: true
+    operators:
+      - eq
+    nullable: false
+    default: true
+
+  deleted_at:
+    type: timestamp
+    readable: false
+    writable: false
+    filterable: true
+    operators:
+      - eq
+      - neq
+    soft_delete_field: true
+
+  version:
+    type: int
+    readable: false
+    writable: false
+    version_field: true
+
+  created_at:
+    type: timestamp
+    readable: true
+    writable: false
+    nullable: false
+
+  updated_at:
+    type: timestamp
+    readable: true
+    writable: false
+    nullable: false
+
+admin_overrides:
+  - name: UsersAdminView
+    path: /api/v1/admin/users
+    description: "Admin-only users endpoint with extended filters"
+    filter_hook: UsersAdminViewFilter

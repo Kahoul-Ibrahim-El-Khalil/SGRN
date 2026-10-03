@@ -83,8 +83,16 @@ inline DbError fromDrogonException(const drogon::orm::DrogonDbException& e) noex
 /// Convert a DbError (plus optional human-readable detail from e.base().what())
 /// into a BackendError ready for service-layer propagation.
 inline BackendError toBackendError(DbError e, std::string_view detail = "") {
+    if (e == DbError::ConstraintViolation) {
+        return BackendError(BackendErrorKind::AlreadyExists, "Database",
+            detail.empty() ? "A file or directory with that name already exists in this location." : std::string(detail));
+    }
     std::string msg = detail.empty() ? std::string(toString(e)) : std::string(detail);
     return BackendError(BackendErrorKind::Database, "Database", std::move(msg));
+}
+
+inline BackendError toBackendError(const drogon::orm::DrogonDbException& ex) {
+    return toBackendError(fromDrogonException(ex), ex.base().what());
 }
 
 } // namespace sgrn::datastore

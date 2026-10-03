@@ -165,7 +165,8 @@ Task<BackendResult<ScopeContext>> StorageService::resolveScopeSession(
 // High-Level Handlers
 // ============================================================================
 
-Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(Json::Value t_session, std::string t_scope, std::string t_file_path) {
+Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(
+    Json::Value t_session, std::string t_scope, std::string t_file_path, std::string t_range_header) {
     BackendResult<drogon::orm::DbClientPtr> db_res = getDbClient();
     if (!db_res.has_value())
         co_return sgrn::createJsonResponse(std::move(db_res));
@@ -209,6 +210,53 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(Json::Value t_se
         download_name.end());
 
     HttpResponsePtr sp_resp = HttpResponse::newHttpResponse();
+    sp_resp->addHeader("Accept-Ranges", "bytes");
+
+    if (!t_range_header.empty() && t_range_header.starts_with("bytes=")) {
+        std::string range_spec = t_range_header.substr(6);
+        size_t total_size = file_data.size();
+        size_t start_byte = 0;
+        size_t end_byte = total_size > 0 ? total_size - 1 : 0;
+
+        auto dash_pos = range_spec.find('-');
+        if (dash_pos != std::string::npos) {
+            std::string start_str = range_spec.substr(0, dash_pos);
+            std::string end_str = range_spec.substr(dash_pos + 1);
+            if (!start_str.empty()) {
+                try {
+                    start_byte = std::stoull(start_str);
+                } catch (...) {
+                }
+            }
+            if (!end_str.empty()) {
+                try {
+                    end_byte = std::stoull(end_str);
+                } catch (...) {
+                }
+            }
+        }
+
+        if (start_byte < total_size) {
+            if (end_byte >= total_size)
+                end_byte = total_size - 1;
+            size_t content_length = end_byte - start_byte + 1;
+            std::string chunk = file_data.substr(start_byte, content_length);
+
+            sp_resp->setStatusCode(k206PartialContent);
+            sp_resp->addHeader("Content-Range", fmt::format("bytes {}-{}/{}", start_byte, end_byte, total_size));
+            sp_resp->addHeader("Content-Length", std::to_string(content_length));
+            if (record_res->is_compressed_) {
+                sp_resp->setContentTypeString("application/zstd");
+                sp_resp->addHeader("X-Compressed", "true");
+            } else {
+                sp_resp->setContentTypeString(helpers::inferMimeType(record_res->name));
+            }
+            sp_resp->addHeader("Content-Disposition", fmt::format("attachment; filename=\"{}\"", download_name));
+            sp_resp->setBody(std::move(chunk));
+            co_return sp_resp;
+        }
+    }
+
     sp_resp->setStatusCode(k200OK);
     if (record_res->is_compressed_) {
         sp_resp->setContentTypeString("application/zstd");

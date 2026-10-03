@@ -163,3 +163,15 @@ def run_cmake(source_dir: Path, build_dir: Path, flags: list[str], env: dict[str
     install_cmd = ["cmake", "--install", fwd(build_dir)]
     if not run(install_cmd, label=f"Install {source_dir.name}", env=env):
         sys.exit(1)
+
+def loadEnv(root: Path) -> dict[str, str]:
+    """Parse a .env file and return key-value pairs."""
+    env_vars = {}
+    for env_path in [root / ".env", Path.home() / ".local" / "share" / "sgrn" / ".env"]:
+        if env_path.exists():
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    env_vars[k.strip()] = v.strip().strip("'\"")
+    return env_vars

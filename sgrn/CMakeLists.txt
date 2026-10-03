@@ -35,5 +35,8 @@ option(SGRN_BUILD_GATEWAY "Build gateway component" ON)
 # ------------------------------------------------------------------------------
 add_subdirectory(lib)
 
+# 3.5 CRUD Library
+add_subdirectory(crud)
+
 # 7. Applications (entry points; libraries first so targets exist)
 add_subdirectory(apps)

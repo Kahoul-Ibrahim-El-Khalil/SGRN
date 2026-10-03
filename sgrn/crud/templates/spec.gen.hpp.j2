@@ -1,0 +1,22 @@
+// generated/{{ manifest.table.name }}.spec.gen.hpp (auto-generated from manifest)
+#pragma once
+
+#include <sgrn/crud/CrudSpec.hpp>
+
+namespace sgrn::crud::generated {
+
+struct {{ class_name }}Spec {
+    static const CrudViewSpec& get() {
+        static const CrudViewSpec spec{
+            .table_schema = "{{ manifest.table.schema }}",
+            .table_name = "{{ manifest.table.name }}",
+            .primary_key = "{{ manifest.table.primary_key }}",
+            .primary_key_type = "{{ manifest.table.primary_key_type }}",
+            .tenant_column = "{{ manifest.tenant.column }}",
+            .default_order = "{{ manifest.table.primary_key }} DESC"
+        };
+        return spec;
+    }
+};
+
+} // namespace sgrn::crud::generated

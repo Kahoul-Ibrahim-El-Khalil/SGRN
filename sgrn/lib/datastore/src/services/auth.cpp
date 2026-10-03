@@ -2,8 +2,8 @@
 #include <fmt/core.h>
 #include <sgrn/datastore/BackendError.hpp>
 #include <sgrn/datastore/DbError.hpp>
-#include <sgrn/datastore/plugins/redis/RedisError.hpp>
-#include <sgrn/datastore/plugins/redis/RedisMiddleware.hpp>
+#include <sgrn/datastore/audit/AuditLogger.hpp>
+#include <sgrn/datastore/session/SessionStore.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe_access.hpp>
@@ -31,7 +31,7 @@ using ::sgrn::datastore::BackendError;
 using ::sgrn::datastore::BackendErrorKind;
 using ::sgrn::datastore::fromDrogonException;
 using ::sgrn::datastore::makeBackendError;
-using ::sgrn::datastore::plugins::RedisError;
+using ::sgrn::datastore::session::SessionStore;
 
 namespace sgrn::datastore::handlers::auth
 {
@@ -77,7 +77,6 @@ Task<HttpResponsePtr> performSignInProcess(HttpRequestPtr tsp_http_req, std::str
     Json::Value user_data;
     Json::Value claims;
     std::string t_token;
-    sgrn::datastore::plugins::RedisMiddleware* p_redis = nullptr;
 
     try {
         // 1. Extract user data
@@ -85,7 +84,7 @@ Task<HttpResponsePtr> performSignInProcess(HttpRequestPtr tsp_http_req, std::str
         int32_t role_code = (role == "admin") ? 0 : 1;
         int32_t user_id = row["id"].as<int32_t>();
 
-        // 2. Build claims for JWT
+        // 2. Build claims
         user_data["id"] = user_id;
         user_data["first_name"] = row["first_name"].as<std::string>();
         user_data["family_name"] = row["family_name"].as<std::string>();
@@ -114,12 +113,6 @@ Task<HttpResponsePtr> performSignInProcess(HttpRequestPtr tsp_http_req, std::str
 
         claims["user"] = user_data;
         t_token = drogon::utils::getUuid();
-
-        auto redis_res = sgrn::datastore::core::getRedisMiddleware();
-        if (redis_res.hasError()) {
-            co_return sgrn::createJsonResponse(redis_res);
-        }
-        p_redis = redis_res.value();
     } catch (const std::exception& e) {
         ERROR_LOG("Signin Mapping Error: {}", e.what());
         co_return sgrn::createJsonResponse(makeBackendError(BackendErrorKind::Runtime, std::string("Failed to map user data: ") + e.what())
@@ -157,35 +150,32 @@ Task<HttpResponsePtr> performSignInProcess(HttpRequestPtr tsp_http_req, std::str
         claims["session_id"] = Json::Value(session_id);
 
         if (!previous_token.empty() && previous_token != t_token) {
-            auto del_res = co_await p_redis->deleteSession(previous_token);
-            if (del_res.hasError()) {
-                ERROR_LOG("Failed to delete previous session: {}", del_res.error());
-            }
+            co_await SessionStore::instance().revokeSession(previous_token);
         }
 
-        auto store_res = co_await p_redis->storeSession(t_token, claims, 3600);
-        if (store_res.hasError()) {
+        bool stored = co_await SessionStore::instance().storeSession(t_token, claims, user_id, 86400);
+        if (!stored) {
             co_return sgrn::createJsonResponse(
-                toBackendError(RedisError::CommandFailed, "Redis store session error: " + store_res.error().message_)
-                    .setSubCode("Auth.Redis"));
-        }
-        auto cache_res = co_await p_redis->storeUserCache(t_email, t_token, 3600);
-        if (cache_res.hasError()) {
-            ERROR_LOG("Failed to store user cache: {}", cache_res.error());
+                makeBackendError(BackendErrorKind::Runtime, "Failed to store user session").setSubCode("Auth.SessionStore"));
         }
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Signin Session Database Error: {}", e.base().what());
         co_return sgrn::createJsonResponse(toBackendError(fromDrogonException(e), e.base().what()).setSubCode("Auth.Database"));
     } catch (const std::exception& e) {
-        ERROR_LOG("Signin Redis/Session Error: {}", e.what());
+        ERROR_LOG("Signin Session Error: {}", e.what());
         co_return sgrn::createJsonResponse(
-            toBackendError(RedisError::CommandFailed, std::string("Redis/Session error: ") + e.what()).setSubCode("Auth.Redis"));
+            makeBackendError(BackendErrorKind::Runtime, std::string("Session error: ") + e.what()).setSubCode("Auth.Internal"));
     }
 
     // 6. Construct response
     Json::Value response;
     response["token"] = t_token;
     response["user"] = user_data;
+
+    // Log Audit Event
+    const std::string org = user_data.isMember("organisation") ? user_data["organisation"].asString() : "";
+    co_await sgrn::datastore::audit::AuditLogger::log(db_client, org, "user", user_data["id"].asInt(), user_data["email"].asString(),
+        "auth.login", "user", std::to_string(user_data["id"].asInt()), peer_ip, Json::objectValue, "success");
 
     auto resp = HttpResponse::newHttpJsonResponse(std::move(response));
     resp->addHeader("Authorization", "Bearer " + t_token);
@@ -200,87 +190,45 @@ Task<HttpResponsePtr> updatePassword(
     }
     auto db_client = db_res.value();
 
-    int32_t user_id;
     try {
-        // 1. Verify old password and fetch user id in one query
-        auto result = co_await db_client->execSqlCoro("SELECT id FROM core.users WHERE email = $1 AND password = crypt($2, "
-                                                      "password)",
-            t_email, t_old_password);
-
-        if (result.empty()) {
-            co_return sgrn::createJsonResponse(BackendError(BackendErrorKind::Auth, "Invalid old password").setSubCode("Auth.Credentials"));
+        auto check = co_await db_client->execSqlCoro(
+            "SELECT u.id FROM core.users u WHERE u.email = $1 AND u.password = crypt($2, u.password)", t_email, t_old_password);
+        if (check.empty()) {
+            co_return sgrn::createJsonResponse(
+                BackendError(BackendErrorKind::Auth, "Current password incorrect").setSubCode("Auth.Credentials"));
         }
 
-        user_id = result[0]["id"].as<int32_t>();
-    } catch (const drogon::orm::DrogonDbException& e) {
-        ERROR_LOG("Update Password DB Error: {}", e.base().what());
-        co_return sgrn::createJsonResponse(toBackendError(fromDrogonException(e), e.base().what()).setSubCode("Auth.Database"));
-    } catch (const std::exception& e) {
-        ERROR_LOG("Update Password Mapping Error: {}", e.what());
-        co_return sgrn::createJsonResponse(
-            makeBackendError(BackendErrorKind::Runtime, std::string("Mapping error verifying password: ") + e.what())
-                .setSubCode("Auth.DataMapping"));
-    }
+        const int32_t user_id = check[0]["id"].as<int32_t>();
+        co_await db_client->execSqlCoro(
+            "UPDATE core.users SET password = crypt($1, gen_salt('bf', 10)), updated_at = NOW() WHERE id = $2", t_new_password, user_id);
 
-    std::optional<drogon::orm::Result> terminated;
-    try {
-        // 2. Update password — trg_hash_password will bcrypt it automatically
-        co_await db_client->execSqlCoro("UPDATE core.users SET password = $1 WHERE id = $2", t_new_password, user_id);
-
-        // 3. Terminate all active sessions for this user.
-        //    Any JWT still in Redis will be stale — the auth filter must revalidate
-        //    against core.sessions.terminated_at on each request.
-        terminated = co_await db_client->execSqlCoro("UPDATE core.sessions "
-                                                     "SET    terminated_at      = NOW(), "
-                                                     "       termination_reason = 'password_changed' "
-                                                     "WHERE  user_id        = $1 "
-                                                     "  AND  terminated_at  IS NULL "
-                                                     "RETURNING token",
-            user_id);
-    } catch (const drogon::orm::DrogonDbException& e) {
-        ERROR_LOG("Update Password Session DB Error: {}", e.base().what());
-        co_return sgrn::createJsonResponse(toBackendError(fromDrogonException(e), e.base().what()).setSubCode("Auth.Database"));
-    } catch (const std::exception& e) {
-        ERROR_LOG("Update Password Session Error: {}", e.what());
-        co_return sgrn::createJsonResponse(
-            makeBackendError(BackendErrorKind::Runtime, std::string("Internal error updating password/sessions: ") + e.what())
-                .setSubCode("Auth.Internal"));
-    }
-
-    try {
-        // 4. Evict every invalidated token from Redis so the cache stays consistent
-        auto redis_res = sgrn::datastore::core::getRedisMiddleware();
-        if (redis_res.hasError() == false) {
-            auto p_redis = redis_res.value();
-            for (const auto& terminated_row : *terminated) {
-                std::string stale_token = terminated_row["token"].as<std::string>();
-                // fire-and-forget — cache eviction failure is non-fatal
-                [p_redis, stale_token]() -> drogon::AsyncTask { co_await p_redis->deleteSession(stale_token); }();
-            }
+        // Terminate active sessions in DB & notify RAM cache
+        auto active_sessions =
+            co_await db_client->execSqlCoro("SELECT token FROM core.sessions WHERE user_id = $1 AND terminated_at IS NULL", user_id);
+        for (const auto& srow : active_sessions) {
+            std::string tok = srow["token"].as<std::string>();
+            co_await SessionStore::instance().revokeSession(tok);
         }
-    } catch (const std::exception& e) {
-        // Log but do not fail the request if redis eviction fails
-        ERROR_LOG("Update Password Redis Eviction Error: {}", e.what());
-    }
 
-    Json::Value response;
-    response["message"] = "Password updated successfully. Please sign in again.";
-    response["sessions_terminated"] = static_cast<int>(terminated->size());
-    co_return drogon::HttpResponse::newHttpJsonResponse(std::move(response));
+        Json::Value resp;
+        resp["message"] = "Password updated successfully";
+        co_return HttpResponse::newHttpJsonResponse(resp);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Update password error: {}", e.what());
+        co_return sgrn::createJsonResponse(
+            makeBackendError(BackendErrorKind::Runtime, std::string("Failed to update password: ") + e.what()).setSubCode("Auth.Internal"));
+    }
 }
 
 Task<HttpResponsePtr> performAutomatedServiceSignInProcess(HttpRequestPtr tsp_http_req, std::string t_token, std::string t_secret) {
+    const std::string peer_ip = tsp_http_req->getPeerAddr().toIp();
     auto db_res = sgrn::datastore::core::getDbClient();
     if (db_res.hasError()) {
         co_return sgrn::createJsonResponse(db_res);
     }
     auto db_client = db_res.value();
 
-    const std::string peer_ip = tsp_http_req->getPeerAddr().toIp();
-
     try {
-        // 1. Convert t_token to UUID for Postgres validation
-        //    Postgres will throw if it's not a valid UUID string.
         auto result = co_await db_client->execSqlCoro("SELECT * FROM core.authenticate_automated_service($1::uuid, $2)", t_token, t_secret);
         if (result.empty()) {
             co_return sgrn::createJsonResponse(
@@ -289,7 +237,6 @@ Task<HttpResponsePtr> performAutomatedServiceSignInProcess(HttpRequestPtr tsp_ht
 
         const auto& row = result[0];
 
-        // 2. Build claims for Redis (mirroring user data where possible)
         Json::Value automated_service_data;
         automated_service_data["automated_service_id"] = row["id"].as<int32_t>();
         automated_service_data["organisation"] = row["organisation"].as<std::string>();
@@ -308,21 +255,16 @@ Task<HttpResponsePtr> performAutomatedServiceSignInProcess(HttpRequestPtr tsp_ht
         automated_service_data["entry_count_limit"] =
             row["entry_count_limit"].isNull() ? Json::Value::null : Json::Value(row["entry_count_limit"].as<int64_t>());
 
-        // Mirror role for sifting compatibility if needed
         automated_service_data["role"] = Json::Value(Json::objectValue);
         automated_service_data["role"]["name"] = "automated_service";
-        automated_service_data["role"]["code"] = 1; // Standard non-admin code
+        automated_service_data["role"]["code"] = 1;
 
         Json::Value claims;
-        claims["user"] = automated_service_data; // Legacy naming "user" for session info compatibility
+        claims["user"] = automated_service_data;
 
-        // 3. Generate Opaque Token (UUID) for this session
         std::string session_token = drogon::utils::getUuid();
-
-        // 4. Manage Automated Service Sessions in DB
         const int32_t automated_service_id = row["id"].as<int32_t>();
 
-        // Reuse existing session if possible
         auto active_sessions = co_await db_client->execSqlCoro("SELECT id, token FROM core.sessions "
                                                                "WHERE automated_service_id = $1 AND terminated_at IS NULL "
                                                                "ORDER BY created_at DESC",
@@ -335,7 +277,6 @@ Task<HttpResponsePtr> performAutomatedServiceSignInProcess(HttpRequestPtr tsp_ht
             session_id = active_sessions[0]["id"].as<int64_t>();
             old_tokens.push_back(active_sessions[0]["token"].as<std::string>());
 
-            // Terminate others
             for (size_t i = 1; i < active_sessions.size(); i++) {
                 const int64_t sid = active_sessions[i]["id"].as<int64_t>();
                 old_tokens.push_back(active_sessions[i]["token"].as<std::string>());
@@ -352,31 +293,15 @@ Task<HttpResponsePtr> performAutomatedServiceSignInProcess(HttpRequestPtr tsp_ht
             session_id = ins[0]["id"].as<int64_t>();
         }
 
-        // 5. Cache in Redis
-        auto redis_res = sgrn::datastore::core::getRedisMiddleware();
-        if (redis_res.hasError()) {
-            co_return sgrn::createJsonResponse(redis_res);
-        }
-        auto p_redis = redis_res.value();
-
         claims["session_id"] = Json::Value(session_id);
-        auto store_res = co_await p_redis->storeSession(session_token, claims, 3600);
-        if (store_res.hasError()) {
-            co_return sgrn::createJsonResponse(
-                toBackendError(RedisError::CommandFailed, "Redis store session error: " + store_res.error().message_)
-                    .setSubCode("Auth.Redis"));
-        }
-        // Evict old sessions from Redis
+        co_await SessionStore::instance().storeSession(session_token, claims, automated_service_id, 86400);
+
         for (const auto& old_token : old_tokens) {
             if (!old_token.empty() && old_token != session_token) {
-                auto del_res = co_await p_redis->deleteSession(old_token);
-                if (del_res.hasError()) {
-                    ERROR_LOG("Failed to delete old token: {}", del_res.error());
-                }
+                co_await SessionStore::instance().revokeSession(old_token);
             }
         }
 
-        // 6. Construct response
         Json::Value response;
         response["token"] = session_token;
         response["session_id"] = Json::Value(session_id);
@@ -392,6 +317,7 @@ Task<HttpResponsePtr> performAutomatedServiceSignInProcess(HttpRequestPtr tsp_ht
             makeBackendError(BackendErrorKind::Runtime, std::string("Internal Server Error: ") + e.what()).setSubCode("Auth.Internal"));
     }
 }
+
 } // namespace sgrn::datastore::handlers::auth
 
 #undef DEBUG_LOG

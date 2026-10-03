@@ -18,6 +18,8 @@ const std::string Sessions::Cols::_user_id = "\"user_id\"";
 const std::string Sessions::Cols::_automated_service_id = "\"automated_service_id\"";
 const std::string Sessions::Cols::_token = "\"token\"";
 const std::string Sessions::Cols::_ip = "\"ip\"";
+const std::string Sessions::Cols::_session_data = "\"session_data\"";
+const std::string Sessions::Cols::_expires_at = "\"expires_at\"";
 const std::string Sessions::Cols::_created_at = "\"created_at\"";
 const std::string Sessions::Cols::_terminated_at = "\"terminated_at\"";
 const std::string Sessions::Cols::_termination_reason = "\"termination_reason\"";
@@ -31,6 +33,8 @@ const std::vector<typename Sessions::MetaData> Sessions::metaData_={
 {"automated_service_id","int32_t","integer",4,0,0,0},
 {"token","std::string","uuid",0,0,0,1},
 {"ip","std::string","inet",0,0,0,1},
+{"session_data","std::string","jsonb",0,0,0,0},
+{"expires_at","::trantor::Date","timestamp with time zone",0,0,0,0},
 {"created_at","::trantor::Date","timestamp with time zone",0,0,0,1},
 {"terminated_at","::trantor::Date","timestamp with time zone",0,0,0,0},
 {"termination_reason","std::string","text",0,0,0,0}
@@ -63,6 +67,32 @@ Sessions::Sessions(const Row &r, const ssize_t indexOffset) noexcept
         if(!r["ip"].isNull())
         {
             ip_=std::make_shared<std::string>(r["ip"].as<std::string>());
+        }
+        if(!r["session_data"].isNull())
+        {
+            sessionData_=std::make_shared<std::string>(r["session_data"].as<std::string>());
+        }
+        if(!r["expires_at"].isNull())
+        {
+            auto timeStr = r["expires_at"].as<std::string>();
+            struct tm stm;
+            memset(&stm,0,sizeof(stm));
+            auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
+            time_t t = mktime(&stm);
+            size_t decimalNum = 0;
+            if(p)
+            {
+                if(*p=='.')
+                {
+                    std::string decimals(p+1,&timeStr[timeStr.length()]);
+                    while(decimals.length()<6)
+                    {
+                        decimals += "0";
+                    }
+                    decimalNum = (size_t)atol(decimals.c_str());
+                }
+                expiresAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
+            }
         }
         if(!r["created_at"].isNull())
         {
@@ -116,7 +146,7 @@ Sessions::Sessions(const Row &r, const ssize_t indexOffset) noexcept
     else
     {
         size_t offset = (size_t)indexOffset;
-        if(offset + 8 > r.size())
+        if(offset + 10 > r.size())
         {
             LOG_FATAL << "Invalid SQL result for this model";
             return;
@@ -150,6 +180,34 @@ Sessions::Sessions(const Row &r, const ssize_t indexOffset) noexcept
         index = offset + 5;
         if(!r[index].isNull())
         {
+            sessionData_=std::make_shared<std::string>(r[index].as<std::string>());
+        }
+        index = offset + 6;
+        if(!r[index].isNull())
+        {
+            auto timeStr = r[index].as<std::string>();
+            struct tm stm;
+            memset(&stm,0,sizeof(stm));
+            auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
+            time_t t = mktime(&stm);
+            size_t decimalNum = 0;
+            if(p)
+            {
+                if(*p=='.')
+                {
+                    std::string decimals(p+1,&timeStr[timeStr.length()]);
+                    while(decimals.length()<6)
+                    {
+                        decimals += "0";
+                    }
+                    decimalNum = (size_t)atol(decimals.c_str());
+                }
+                expiresAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
+            }
+        }
+        index = offset + 7;
+        if(!r[index].isNull())
+        {
             auto timeStr = r[index].as<std::string>();
             struct tm stm;
             memset(&stm,0,sizeof(stm));
@@ -170,7 +228,7 @@ Sessions::Sessions(const Row &r, const ssize_t indexOffset) noexcept
                 createdAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
             }
         }
-        index = offset + 6;
+        index = offset + 8;
         if(!r[index].isNull())
         {
             auto timeStr = r[index].as<std::string>();
@@ -193,7 +251,7 @@ Sessions::Sessions(const Row &r, const ssize_t indexOffset) noexcept
                 terminatedAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
             }
         }
-        index = offset + 7;
+        index = offset + 9;
         if(!r[index].isNull())
         {
             terminationReason_=std::make_shared<std::string>(r[index].as<std::string>());
@@ -204,7 +262,7 @@ Sessions::Sessions(const Row &r, const ssize_t indexOffset) noexcept
 
 Sessions::Sessions(const Json::Value &pJson, const std::vector<std::string> &pMasqueradingVector) noexcept(false)
 {
-    if(pMasqueradingVector.size() != 8)
+    if(pMasqueradingVector.size() != 10)
     {
         LOG_ERROR << "Bad masquerading vector";
         return;
@@ -254,25 +312,7 @@ Sessions::Sessions(const Json::Value &pJson, const std::vector<std::string> &pMa
         dirtyFlag_[5] = true;
         if(!pJson[pMasqueradingVector[5]].isNull())
         {
-            auto timeStr = pJson[pMasqueradingVector[5]].asString();
-            struct tm stm;
-            memset(&stm,0,sizeof(stm));
-            auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
-            time_t t = mktime(&stm);
-            size_t decimalNum = 0;
-            if(p)
-            {
-                if(*p=='.')
-                {
-                    std::string decimals(p+1,&timeStr[timeStr.length()]);
-                    while(decimals.length()<6)
-                    {
-                        decimals += "0";
-                    }
-                    decimalNum = (size_t)atol(decimals.c_str());
-                }
-                createdAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
-            }
+            sessionData_=std::make_shared<std::string>(pJson[pMasqueradingVector[5]].asString());
         }
     }
     if(!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6]))
@@ -297,7 +337,7 @@ Sessions::Sessions(const Json::Value &pJson, const std::vector<std::string> &pMa
                     }
                     decimalNum = (size_t)atol(decimals.c_str());
                 }
-                terminatedAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
+                expiresAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
             }
         }
     }
@@ -306,7 +346,59 @@ Sessions::Sessions(const Json::Value &pJson, const std::vector<std::string> &pMa
         dirtyFlag_[7] = true;
         if(!pJson[pMasqueradingVector[7]].isNull())
         {
-            terminationReason_=std::make_shared<std::string>(pJson[pMasqueradingVector[7]].asString());
+            auto timeStr = pJson[pMasqueradingVector[7]].asString();
+            struct tm stm;
+            memset(&stm,0,sizeof(stm));
+            auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
+            time_t t = mktime(&stm);
+            size_t decimalNum = 0;
+            if(p)
+            {
+                if(*p=='.')
+                {
+                    std::string decimals(p+1,&timeStr[timeStr.length()]);
+                    while(decimals.length()<6)
+                    {
+                        decimals += "0";
+                    }
+                    decimalNum = (size_t)atol(decimals.c_str());
+                }
+                createdAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
+            }
+        }
+    }
+    if(!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8]))
+    {
+        dirtyFlag_[8] = true;
+        if(!pJson[pMasqueradingVector[8]].isNull())
+        {
+            auto timeStr = pJson[pMasqueradingVector[8]].asString();
+            struct tm stm;
+            memset(&stm,0,sizeof(stm));
+            auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
+            time_t t = mktime(&stm);
+            size_t decimalNum = 0;
+            if(p)
+            {
+                if(*p=='.')
+                {
+                    std::string decimals(p+1,&timeStr[timeStr.length()]);
+                    while(decimals.length()<6)
+                    {
+                        decimals += "0";
+                    }
+                    decimalNum = (size_t)atol(decimals.c_str());
+                }
+                terminatedAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
+            }
+        }
+    }
+    if(!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9]))
+    {
+        dirtyFlag_[9] = true;
+        if(!pJson[pMasqueradingVector[9]].isNull())
+        {
+            terminationReason_=std::make_shared<std::string>(pJson[pMasqueradingVector[9]].asString());
         }
     }
 }
@@ -353,9 +445,43 @@ Sessions::Sessions(const Json::Value &pJson) noexcept(false)
             ip_=std::make_shared<std::string>(pJson["ip"].asString());
         }
     }
-    if(pJson.isMember("created_at"))
+    if(pJson.isMember("session_data"))
     {
         dirtyFlag_[5]=true;
+        if(!pJson["session_data"].isNull())
+        {
+            sessionData_=std::make_shared<std::string>(pJson["session_data"].asString());
+        }
+    }
+    if(pJson.isMember("expires_at"))
+    {
+        dirtyFlag_[6]=true;
+        if(!pJson["expires_at"].isNull())
+        {
+            auto timeStr = pJson["expires_at"].asString();
+            struct tm stm;
+            memset(&stm,0,sizeof(stm));
+            auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
+            time_t t = mktime(&stm);
+            size_t decimalNum = 0;
+            if(p)
+            {
+                if(*p=='.')
+                {
+                    std::string decimals(p+1,&timeStr[timeStr.length()]);
+                    while(decimals.length()<6)
+                    {
+                        decimals += "0";
+                    }
+                    decimalNum = (size_t)atol(decimals.c_str());
+                }
+                expiresAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
+            }
+        }
+    }
+    if(pJson.isMember("created_at"))
+    {
+        dirtyFlag_[7]=true;
         if(!pJson["created_at"].isNull())
         {
             auto timeStr = pJson["created_at"].asString();
@@ -381,7 +507,7 @@ Sessions::Sessions(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("terminated_at"))
     {
-        dirtyFlag_[6]=true;
+        dirtyFlag_[8]=true;
         if(!pJson["terminated_at"].isNull())
         {
             auto timeStr = pJson["terminated_at"].asString();
@@ -407,7 +533,7 @@ Sessions::Sessions(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("termination_reason"))
     {
-        dirtyFlag_[7]=true;
+        dirtyFlag_[9]=true;
         if(!pJson["termination_reason"].isNull())
         {
             terminationReason_=std::make_shared<std::string>(pJson["termination_reason"].asString());
@@ -418,7 +544,7 @@ Sessions::Sessions(const Json::Value &pJson) noexcept(false)
 void Sessions::updateByMasqueradedJson(const Json::Value &pJson,
                                             const std::vector<std::string> &pMasqueradingVector) noexcept(false)
 {
-    if(pMasqueradingVector.size() != 8)
+    if(pMasqueradingVector.size() != 10)
     {
         LOG_ERROR << "Bad masquerading vector";
         return;
@@ -467,25 +593,7 @@ void Sessions::updateByMasqueradedJson(const Json::Value &pJson,
         dirtyFlag_[5] = true;
         if(!pJson[pMasqueradingVector[5]].isNull())
         {
-            auto timeStr = pJson[pMasqueradingVector[5]].asString();
-            struct tm stm;
-            memset(&stm,0,sizeof(stm));
-            auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
-            time_t t = mktime(&stm);
-            size_t decimalNum = 0;
-            if(p)
-            {
-                if(*p=='.')
-                {
-                    std::string decimals(p+1,&timeStr[timeStr.length()]);
-                    while(decimals.length()<6)
-                    {
-                        decimals += "0";
-                    }
-                    decimalNum = (size_t)atol(decimals.c_str());
-                }
-                createdAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
-            }
+            sessionData_=std::make_shared<std::string>(pJson[pMasqueradingVector[5]].asString());
         }
     }
     if(!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6]))
@@ -510,7 +618,7 @@ void Sessions::updateByMasqueradedJson(const Json::Value &pJson,
                     }
                     decimalNum = (size_t)atol(decimals.c_str());
                 }
-                terminatedAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
+                expiresAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
             }
         }
     }
@@ -519,7 +627,59 @@ void Sessions::updateByMasqueradedJson(const Json::Value &pJson,
         dirtyFlag_[7] = true;
         if(!pJson[pMasqueradingVector[7]].isNull())
         {
-            terminationReason_=std::make_shared<std::string>(pJson[pMasqueradingVector[7]].asString());
+            auto timeStr = pJson[pMasqueradingVector[7]].asString();
+            struct tm stm;
+            memset(&stm,0,sizeof(stm));
+            auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
+            time_t t = mktime(&stm);
+            size_t decimalNum = 0;
+            if(p)
+            {
+                if(*p=='.')
+                {
+                    std::string decimals(p+1,&timeStr[timeStr.length()]);
+                    while(decimals.length()<6)
+                    {
+                        decimals += "0";
+                    }
+                    decimalNum = (size_t)atol(decimals.c_str());
+                }
+                createdAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
+            }
+        }
+    }
+    if(!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8]))
+    {
+        dirtyFlag_[8] = true;
+        if(!pJson[pMasqueradingVector[8]].isNull())
+        {
+            auto timeStr = pJson[pMasqueradingVector[8]].asString();
+            struct tm stm;
+            memset(&stm,0,sizeof(stm));
+            auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
+            time_t t = mktime(&stm);
+            size_t decimalNum = 0;
+            if(p)
+            {
+                if(*p=='.')
+                {
+                    std::string decimals(p+1,&timeStr[timeStr.length()]);
+                    while(decimals.length()<6)
+                    {
+                        decimals += "0";
+                    }
+                    decimalNum = (size_t)atol(decimals.c_str());
+                }
+                terminatedAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
+            }
+        }
+    }
+    if(!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9]))
+    {
+        dirtyFlag_[9] = true;
+        if(!pJson[pMasqueradingVector[9]].isNull())
+        {
+            terminationReason_=std::make_shared<std::string>(pJson[pMasqueradingVector[9]].asString());
         }
     }
 }
@@ -565,9 +725,43 @@ void Sessions::updateByJson(const Json::Value &pJson) noexcept(false)
             ip_=std::make_shared<std::string>(pJson["ip"].asString());
         }
     }
-    if(pJson.isMember("created_at"))
+    if(pJson.isMember("session_data"))
     {
         dirtyFlag_[5] = true;
+        if(!pJson["session_data"].isNull())
+        {
+            sessionData_=std::make_shared<std::string>(pJson["session_data"].asString());
+        }
+    }
+    if(pJson.isMember("expires_at"))
+    {
+        dirtyFlag_[6] = true;
+        if(!pJson["expires_at"].isNull())
+        {
+            auto timeStr = pJson["expires_at"].asString();
+            struct tm stm;
+            memset(&stm,0,sizeof(stm));
+            auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
+            time_t t = mktime(&stm);
+            size_t decimalNum = 0;
+            if(p)
+            {
+                if(*p=='.')
+                {
+                    std::string decimals(p+1,&timeStr[timeStr.length()]);
+                    while(decimals.length()<6)
+                    {
+                        decimals += "0";
+                    }
+                    decimalNum = (size_t)atol(decimals.c_str());
+                }
+                expiresAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
+            }
+        }
+    }
+    if(pJson.isMember("created_at"))
+    {
+        dirtyFlag_[7] = true;
         if(!pJson["created_at"].isNull())
         {
             auto timeStr = pJson["created_at"].asString();
@@ -593,7 +787,7 @@ void Sessions::updateByJson(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("terminated_at"))
     {
-        dirtyFlag_[6] = true;
+        dirtyFlag_[8] = true;
         if(!pJson["terminated_at"].isNull())
         {
             auto timeStr = pJson["terminated_at"].asString();
@@ -619,7 +813,7 @@ void Sessions::updateByJson(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("termination_reason"))
     {
-        dirtyFlag_[7] = true;
+        dirtyFlag_[9] = true;
         if(!pJson["termination_reason"].isNull())
         {
             terminationReason_=std::make_shared<std::string>(pJson["termination_reason"].asString());
@@ -737,6 +931,55 @@ void Sessions::setIp(std::string &&pIp) noexcept
     dirtyFlag_[4] = true;
 }
 
+const std::string &Sessions::getValueOfSessionData() const noexcept
+{
+    static const std::string defaultValue = std::string();
+    if(sessionData_)
+        return *sessionData_;
+    return defaultValue;
+}
+const std::shared_ptr<std::string> &Sessions::getSessionData() const noexcept
+{
+    return sessionData_;
+}
+void Sessions::setSessionData(const std::string &pSessionData) noexcept
+{
+    sessionData_ = std::make_shared<std::string>(pSessionData);
+    dirtyFlag_[5] = true;
+}
+void Sessions::setSessionData(std::string &&pSessionData) noexcept
+{
+    sessionData_ = std::make_shared<std::string>(std::move(pSessionData));
+    dirtyFlag_[5] = true;
+}
+void Sessions::setSessionDataToNull() noexcept
+{
+    sessionData_.reset();
+    dirtyFlag_[5] = true;
+}
+
+const ::trantor::Date &Sessions::getValueOfExpiresAt() const noexcept
+{
+    static const ::trantor::Date defaultValue = ::trantor::Date();
+    if(expiresAt_)
+        return *expiresAt_;
+    return defaultValue;
+}
+const std::shared_ptr<::trantor::Date> &Sessions::getExpiresAt() const noexcept
+{
+    return expiresAt_;
+}
+void Sessions::setExpiresAt(const ::trantor::Date &pExpiresAt) noexcept
+{
+    expiresAt_ = std::make_shared<::trantor::Date>(pExpiresAt);
+    dirtyFlag_[6] = true;
+}
+void Sessions::setExpiresAtToNull() noexcept
+{
+    expiresAt_.reset();
+    dirtyFlag_[6] = true;
+}
+
 const ::trantor::Date &Sessions::getValueOfCreatedAt() const noexcept
 {
     static const ::trantor::Date defaultValue = ::trantor::Date();
@@ -751,7 +994,7 @@ const std::shared_ptr<::trantor::Date> &Sessions::getCreatedAt() const noexcept
 void Sessions::setCreatedAt(const ::trantor::Date &pCreatedAt) noexcept
 {
     createdAt_ = std::make_shared<::trantor::Date>(pCreatedAt);
-    dirtyFlag_[5] = true;
+    dirtyFlag_[7] = true;
 }
 
 const ::trantor::Date &Sessions::getValueOfTerminatedAt() const noexcept
@@ -768,12 +1011,12 @@ const std::shared_ptr<::trantor::Date> &Sessions::getTerminatedAt() const noexce
 void Sessions::setTerminatedAt(const ::trantor::Date &pTerminatedAt) noexcept
 {
     terminatedAt_ = std::make_shared<::trantor::Date>(pTerminatedAt);
-    dirtyFlag_[6] = true;
+    dirtyFlag_[8] = true;
 }
 void Sessions::setTerminatedAtToNull() noexcept
 {
     terminatedAt_.reset();
-    dirtyFlag_[6] = true;
+    dirtyFlag_[8] = true;
 }
 
 const std::string &Sessions::getValueOfTerminationReason() const noexcept
@@ -790,17 +1033,17 @@ const std::shared_ptr<std::string> &Sessions::getTerminationReason() const noexc
 void Sessions::setTerminationReason(const std::string &pTerminationReason) noexcept
 {
     terminationReason_ = std::make_shared<std::string>(pTerminationReason);
-    dirtyFlag_[7] = true;
+    dirtyFlag_[9] = true;
 }
 void Sessions::setTerminationReason(std::string &&pTerminationReason) noexcept
 {
     terminationReason_ = std::make_shared<std::string>(std::move(pTerminationReason));
-    dirtyFlag_[7] = true;
+    dirtyFlag_[9] = true;
 }
 void Sessions::setTerminationReasonToNull() noexcept
 {
     terminationReason_.reset();
-    dirtyFlag_[7] = true;
+    dirtyFlag_[9] = true;
 }
 
 void Sessions::updateId(const uint64_t id)
@@ -814,6 +1057,8 @@ const std::vector<std::string> &Sessions::insertColumns() noexcept
         "automated_service_id",
         "token",
         "ip",
+        "session_data",
+        "expires_at",
         "created_at",
         "terminated_at",
         "termination_reason"
@@ -869,6 +1114,28 @@ void Sessions::outputArgs(drogon::orm::internal::SqlBinder &binder) const
     }
     if(dirtyFlag_[5])
     {
+        if(getSessionData())
+        {
+            binder << getValueOfSessionData();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
+    if(dirtyFlag_[6])
+    {
+        if(getExpiresAt())
+        {
+            binder << getValueOfExpiresAt();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
+    if(dirtyFlag_[7])
+    {
         if(getCreatedAt())
         {
             binder << getValueOfCreatedAt();
@@ -878,7 +1145,7 @@ void Sessions::outputArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[6])
+    if(dirtyFlag_[8])
     {
         if(getTerminatedAt())
         {
@@ -889,7 +1156,7 @@ void Sessions::outputArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[7])
+    if(dirtyFlag_[9])
     {
         if(getTerminationReason())
         {
@@ -932,6 +1199,14 @@ const std::vector<std::string> Sessions::updateColumns() const
     if(dirtyFlag_[7])
     {
         ret.push_back(getColumnName(7));
+    }
+    if(dirtyFlag_[8])
+    {
+        ret.push_back(getColumnName(8));
+    }
+    if(dirtyFlag_[9])
+    {
+        ret.push_back(getColumnName(9));
     }
     return ret;
 }
@@ -984,6 +1259,28 @@ void Sessions::updateArgs(drogon::orm::internal::SqlBinder &binder) const
     }
     if(dirtyFlag_[5])
     {
+        if(getSessionData())
+        {
+            binder << getValueOfSessionData();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
+    if(dirtyFlag_[6])
+    {
+        if(getExpiresAt())
+        {
+            binder << getValueOfExpiresAt();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
+    if(dirtyFlag_[7])
+    {
         if(getCreatedAt())
         {
             binder << getValueOfCreatedAt();
@@ -993,7 +1290,7 @@ void Sessions::updateArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[6])
+    if(dirtyFlag_[8])
     {
         if(getTerminatedAt())
         {
@@ -1004,7 +1301,7 @@ void Sessions::updateArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[7])
+    if(dirtyFlag_[9])
     {
         if(getTerminationReason())
         {
@@ -1059,6 +1356,22 @@ Json::Value Sessions::toJson() const
     {
         ret["ip"]=Json::Value();
     }
+    if(getSessionData())
+    {
+        ret["session_data"]=getValueOfSessionData();
+    }
+    else
+    {
+        ret["session_data"]=Json::Value();
+    }
+    if(getExpiresAt())
+    {
+        ret["expires_at"]=getExpiresAt()->toDbStringLocal();
+    }
+    else
+    {
+        ret["expires_at"]=Json::Value();
+    }
     if(getCreatedAt())
     {
         ret["created_at"]=getCreatedAt()->toDbStringLocal();
@@ -1095,7 +1408,7 @@ Json::Value Sessions::toMasqueradedJson(
     const std::vector<std::string> &pMasqueradingVector) const
 {
     Json::Value ret;
-    if(pMasqueradingVector.size() == 8)
+    if(pMasqueradingVector.size() == 10)
     {
         if(!pMasqueradingVector[0].empty())
         {
@@ -1154,9 +1467,9 @@ Json::Value Sessions::toMasqueradedJson(
         }
         if(!pMasqueradingVector[5].empty())
         {
-            if(getCreatedAt())
+            if(getSessionData())
             {
-                ret[pMasqueradingVector[5]]=getCreatedAt()->toDbStringLocal();
+                ret[pMasqueradingVector[5]]=getValueOfSessionData();
             }
             else
             {
@@ -1165,9 +1478,9 @@ Json::Value Sessions::toMasqueradedJson(
         }
         if(!pMasqueradingVector[6].empty())
         {
-            if(getTerminatedAt())
+            if(getExpiresAt())
             {
-                ret[pMasqueradingVector[6]]=getTerminatedAt()->toDbStringLocal();
+                ret[pMasqueradingVector[6]]=getExpiresAt()->toDbStringLocal();
             }
             else
             {
@@ -1176,13 +1489,35 @@ Json::Value Sessions::toMasqueradedJson(
         }
         if(!pMasqueradingVector[7].empty())
         {
-            if(getTerminationReason())
+            if(getCreatedAt())
             {
-                ret[pMasqueradingVector[7]]=getValueOfTerminationReason();
+                ret[pMasqueradingVector[7]]=getCreatedAt()->toDbStringLocal();
             }
             else
             {
                 ret[pMasqueradingVector[7]]=Json::Value();
+            }
+        }
+        if(!pMasqueradingVector[8].empty())
+        {
+            if(getTerminatedAt())
+            {
+                ret[pMasqueradingVector[8]]=getTerminatedAt()->toDbStringLocal();
+            }
+            else
+            {
+                ret[pMasqueradingVector[8]]=Json::Value();
+            }
+        }
+        if(!pMasqueradingVector[9].empty())
+        {
+            if(getTerminationReason())
+            {
+                ret[pMasqueradingVector[9]]=getValueOfTerminationReason();
+            }
+            else
+            {
+                ret[pMasqueradingVector[9]]=Json::Value();
             }
         }
         return ret;
@@ -1227,6 +1562,22 @@ Json::Value Sessions::toMasqueradedJson(
     else
     {
         ret["ip"]=Json::Value();
+    }
+    if(getSessionData())
+    {
+        ret["session_data"]=getValueOfSessionData();
+    }
+    else
+    {
+        ret["session_data"]=Json::Value();
+    }
+    if(getExpiresAt())
+    {
+        ret["expires_at"]=getExpiresAt()->toDbStringLocal();
+    }
+    else
+    {
+        ret["expires_at"]=Json::Value();
     }
     if(getCreatedAt())
     {
@@ -1292,19 +1643,29 @@ bool Sessions::validateJsonForCreation(const Json::Value &pJson, std::string &er
         err="The ip column cannot be null";
         return false;
     }
+    if(pJson.isMember("session_data"))
+    {
+        if(!validJsonOfField(5, "session_data", pJson["session_data"], err, true))
+            return false;
+    }
+    if(pJson.isMember("expires_at"))
+    {
+        if(!validJsonOfField(6, "expires_at", pJson["expires_at"], err, true))
+            return false;
+    }
     if(pJson.isMember("created_at"))
     {
-        if(!validJsonOfField(5, "created_at", pJson["created_at"], err, true))
+        if(!validJsonOfField(7, "created_at", pJson["created_at"], err, true))
             return false;
     }
     if(pJson.isMember("terminated_at"))
     {
-        if(!validJsonOfField(6, "terminated_at", pJson["terminated_at"], err, true))
+        if(!validJsonOfField(8, "terminated_at", pJson["terminated_at"], err, true))
             return false;
     }
     if(pJson.isMember("termination_reason"))
     {
-        if(!validJsonOfField(7, "termination_reason", pJson["termination_reason"], err, true))
+        if(!validJsonOfField(9, "termination_reason", pJson["termination_reason"], err, true))
             return false;
     }
     return true;
@@ -1313,7 +1674,7 @@ bool Sessions::validateMasqueradedJsonForCreation(const Json::Value &pJson,
                                                   const std::vector<std::string> &pMasqueradingVector,
                                                   std::string &err)
 {
-    if(pMasqueradingVector.size() != 8)
+    if(pMasqueradingVector.size() != 10)
     {
         err = "Bad masquerading vector";
         return false;
@@ -1393,6 +1754,22 @@ bool Sessions::validateMasqueradedJsonForCreation(const Json::Value &pJson,
                   return false;
           }
       }
+      if(!pMasqueradingVector[8].empty())
+      {
+          if(pJson.isMember(pMasqueradingVector[8]))
+          {
+              if(!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, true))
+                  return false;
+          }
+      }
+      if(!pMasqueradingVector[9].empty())
+      {
+          if(pJson.isMember(pMasqueradingVector[9]))
+          {
+              if(!validJsonOfField(9, pMasqueradingVector[9], pJson[pMasqueradingVector[9]], err, true))
+                  return false;
+          }
+      }
     }
     catch(const Json::LogicError &e)
     {
@@ -1433,19 +1810,29 @@ bool Sessions::validateJsonForUpdate(const Json::Value &pJson, std::string &err)
         if(!validJsonOfField(4, "ip", pJson["ip"], err, false))
             return false;
     }
+    if(pJson.isMember("session_data"))
+    {
+        if(!validJsonOfField(5, "session_data", pJson["session_data"], err, false))
+            return false;
+    }
+    if(pJson.isMember("expires_at"))
+    {
+        if(!validJsonOfField(6, "expires_at", pJson["expires_at"], err, false))
+            return false;
+    }
     if(pJson.isMember("created_at"))
     {
-        if(!validJsonOfField(5, "created_at", pJson["created_at"], err, false))
+        if(!validJsonOfField(7, "created_at", pJson["created_at"], err, false))
             return false;
     }
     if(pJson.isMember("terminated_at"))
     {
-        if(!validJsonOfField(6, "terminated_at", pJson["terminated_at"], err, false))
+        if(!validJsonOfField(8, "terminated_at", pJson["terminated_at"], err, false))
             return false;
     }
     if(pJson.isMember("termination_reason"))
     {
-        if(!validJsonOfField(7, "termination_reason", pJson["termination_reason"], err, false))
+        if(!validJsonOfField(9, "termination_reason", pJson["termination_reason"], err, false))
             return false;
     }
     return true;
@@ -1454,7 +1841,7 @@ bool Sessions::validateMasqueradedJsonForUpdate(const Json::Value &pJson,
                                                 const std::vector<std::string> &pMasqueradingVector,
                                                 std::string &err)
 {
-    if(pMasqueradingVector.size() != 8)
+    if(pMasqueradingVector.size() != 10)
     {
         err = "Bad masquerading vector";
         return false;
@@ -1503,6 +1890,16 @@ bool Sessions::validateMasqueradedJsonForUpdate(const Json::Value &pJson,
       if(!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7]))
       {
           if(!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, false))
+              return false;
+      }
+      if(!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8]))
+      {
+          if(!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, false))
+              return false;
+      }
+      if(!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9]))
+      {
+          if(!validJsonOfField(9, pMasqueradingVector[9], pJson[pMasqueradingVector[9]], err, false))
               return false;
       }
     }
@@ -1587,8 +1984,7 @@ bool Sessions::validJsonOfField(size_t index,
         case 5:
             if(pJson.isNull())
             {
-                err="The " + fieldName + " column cannot be null";
-                return false;
+                return true;
             }
             if(!pJson.isString())
             {
@@ -1608,6 +2004,29 @@ bool Sessions::validJsonOfField(size_t index,
             }
             break;
         case 7:
+            if(pJson.isNull())
+            {
+                err="The " + fieldName + " column cannot be null";
+                return false;
+            }
+            if(!pJson.isString())
+            {
+                err="Type error in the "+fieldName+" field";
+                return false;
+            }
+            break;
+        case 8:
+            if(pJson.isNull())
+            {
+                return true;
+            }
+            if(!pJson.isString())
+            {
+                err="Type error in the "+fieldName+" field";
+                return false;
+            }
+            break;
+        case 9:
             if(pJson.isNull())
             {
                 return true;

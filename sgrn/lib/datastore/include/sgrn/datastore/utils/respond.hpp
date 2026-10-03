@@ -62,6 +62,8 @@ inline drogon::HttpStatusCode kindToHttpStatusCode(::sgrn::datastore::BackendErr
     switch (t_kind) {
         case ::sgrn::datastore::BackendErrorKind::Database:
             return drogon::k500InternalServerError;
+        case ::sgrn::datastore::BackendErrorKind::AlreadyExists:
+            return drogon::k409Conflict;
         case ::sgrn::datastore::BackendErrorKind::Redis:
             return drogon::k500InternalServerError;
         case ::sgrn::datastore::BackendErrorKind::Garage:
@@ -162,8 +164,16 @@ inline drogon::HttpResponsePtr createErrorResponse(
         t_scope = "Authentication";
     }
 
+    std::string msg(t_message);
+    if (msg.find("duplicate key value violates unique constraint") != std::string::npos || msg.find("uq_files") != std::string::npos ||
+        msg.find("already exists") != std::string::npos) {
+        msg = "A file or directory with that name already exists in this location.";
+    } else if (msg.find("violates foreign key constraint") != std::string::npos) {
+        msg = "Referenced entity does not exist.";
+    }
+
     Json::Value error_json;
-    error_json["error"] = std::string(t_message);
+    error_json["error"] = std::move(msg);
     error_json["scope"] = std::string(t_scope);
     auto resp = drogon::HttpResponse::newHttpJsonResponse(std::move(error_json));
     resp->setStatusCode(t_http_code);

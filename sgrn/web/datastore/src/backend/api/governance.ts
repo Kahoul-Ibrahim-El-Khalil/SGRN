@@ -30,6 +30,10 @@ export interface QuotaRow {
     storage_limit_bytes: number | null;
     entries_used: number;
     entry_count_limit: number | null;
+    max_file_size_mb?: number | null;
+    preferred_chunk_size_mb?: number | null;
+    rate_limit_upload_rpm?: number | null;
+    rate_limit_rpm?: number | null;
 }
 
 export interface QuotasList {
@@ -80,10 +84,110 @@ export function deleteFormat(t_extension: string): Promise<SgrnResult<{ success:
     );
 }
 
-export function fetchQuotas(t_kind: QuotaKind, t_search = "", t_limit = 100): Promise<SgrnResult<QuotasList>> {
-    const params = new URLSearchParams({ kind: t_kind, limit: String(t_limit) });
-    if (t_search.trim()) params.set("search", t_search.trim());
-    return request<QuotasList>(`${AdminBackendApiEndpoints.QUOTAS}?${params.toString()}`);
+interface BackendGetQuotasResp {
+    success: boolean;
+    organisation?: {
+        total_virtual_size: number;
+        total_real_size: number;
+        storage_limit: number | null;
+        total_entry_count: number;
+        entry_count_limit: number | null;
+        rate_limit_rpm: number | null;
+    };
+    users?: Array<{
+        id: number;
+        email: string;
+        total_virtual_size: number;
+        total_real_size: number;
+        storage_limit: number | null;
+        total_entry_count: number;
+        entry_count_limit: number | null;
+        rate_limit_rpm: number | null;
+        max_file_size_mb?: number | null;
+        preferred_chunk_size_mb?: number | null;
+        rate_limit_upload_rpm?: number | null;
+    }>;
+    automated_services?: Array<{
+        id: number;
+        name: string;
+        token: string;
+        total_virtual_size: number;
+        total_real_size: number;
+        storage_limit: number | null;
+        total_entry_count: number;
+        entry_count_limit: number | null;
+        rate_limit_rpm: number | null;
+        max_file_size_mb?: number | null;
+        preferred_chunk_size_mb?: number | null;
+        rate_limit_upload_rpm?: number | null;
+    }>;
+}
+
+export async function fetchQuotas(t_kind: QuotaKind, t_search = "", t_limit = 100): Promise<SgrnResult<QuotasList>> {
+    const quotaParams = new URLSearchParams({ limit: String(t_limit) });
+    const rawRes = await request<BackendGetQuotasResp>(`${AdminBackendApiEndpoints.QUOTAS}?${quotaParams.toString()}`);
+    if (rawRes.error || !rawRes.data) {
+        return { error: rawRes.error || "Failed to load quotas", scope: rawRes.scope };
+    }
+
+    const data = rawRes.data;
+    const searchLower = t_search.trim().toLowerCase();
+    let rows: QuotaRow[] = [];
+
+    if (t_kind === "user" && data.users) {
+        rows = data.users
+            .filter((u) => !searchLower || u.email.toLowerCase().includes(searchLower))
+            .map((u) => ({
+                id: u.id,
+                email: u.email,
+                organisation: null,
+                storage_used_bytes: u.total_real_size ?? 0,
+                storage_limit_bytes: u.storage_limit ?? null,
+                entries_used: u.total_entry_count ?? 0,
+                entry_count_limit: u.entry_count_limit ?? null,
+                max_file_size_mb: u.max_file_size_mb ?? null,
+                preferred_chunk_size_mb: u.preferred_chunk_size_mb ?? null,
+                rate_limit_upload_rpm: u.rate_limit_upload_rpm ?? null,
+                rate_limit_rpm: u.rate_limit_rpm ?? null,
+            }));
+    } else if (t_kind === "service" && data.automated_services) {
+        rows = data.automated_services
+            .filter((s) => !searchLower || s.name.toLowerCase().includes(searchLower))
+            .map((s) => ({
+                id: s.id,
+                name: s.name,
+                organisation: null,
+                storage_used_bytes: s.total_real_size ?? 0,
+                storage_limit_bytes: s.storage_limit ?? null,
+                entries_used: s.total_entry_count ?? 0,
+                entry_count_limit: s.entry_count_limit ?? null,
+                max_file_size_mb: s.max_file_size_mb ?? null,
+                preferred_chunk_size_mb: s.preferred_chunk_size_mb ?? null,
+                rate_limit_upload_rpm: s.rate_limit_upload_rpm ?? null,
+                rate_limit_rpm: s.rate_limit_rpm ?? null,
+            }));
+    } else if (t_kind === "organisation" && data.organisation) {
+        const o = data.organisation;
+        rows = [
+            {
+                name: "Primary Organisation",
+                organisation: null,
+                storage_used_bytes: o.total_real_size ?? 0,
+                storage_limit_bytes: o.storage_limit ?? null,
+                entries_used: o.total_entry_count ?? 0,
+                entry_count_limit: o.entry_count_limit ?? null,
+                rate_limit_rpm: o.rate_limit_rpm ?? null,
+            },
+        ];
+    }
+
+    return {
+        data: {
+            kind: t_kind,
+            rows,
+            count: rows.length,
+        },
+    };
 }
 
 export function updateQuota(t_body: {
@@ -92,11 +196,33 @@ export function updateQuota(t_body: {
     name?: string;
     storage_limit_bytes?: number | null;
     entry_count_limit?: number | null;
+    max_file_size_mb?: number | null;
+    preferred_chunk_size_mb?: number | null;
+    rate_limit_upload_rpm?: number | null;
+    rate_limit_rpm?: number | null;
 }): Promise<SgrnResult<QuotaRow & { kind: QuotaKind }>> {
-    return request<QuotaRow & { kind: QuotaKind }>(AdminBackendApiEndpoints.QUOTAS, {
+    let endpoint: string = AdminBackendApiEndpoints.QUOTAS;
+    if (t_body.kind === "user" && t_body.id !== undefined) {
+        endpoint = AdminBackendApiEndpoints.QUOTAS_USER(t_body.id);
+    } else if (t_body.kind === "service" && t_body.id !== undefined) {
+        endpoint = AdminBackendApiEndpoints.QUOTAS_SERVICE(t_body.id);
+    } else if (t_body.kind === "organisation") {
+        endpoint = AdminBackendApiEndpoints.QUOTAS_ORG;
+    }
+
+    const payload = {
+        storage_limit: t_body.storage_limit_bytes,
+        entry_count_limit: t_body.entry_count_limit,
+        max_file_size_mb: t_body.max_file_size_mb,
+        preferred_chunk_size_mb: t_body.preferred_chunk_size_mb,
+        rate_limit_upload_rpm: t_body.rate_limit_upload_rpm,
+        rate_limit_rpm: t_body.rate_limit_rpm,
+    };
+
+    return request<QuotaRow & { kind: QuotaKind }>(endpoint, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(t_body),
+        body: JSON.stringify(payload),
     });
 }
 

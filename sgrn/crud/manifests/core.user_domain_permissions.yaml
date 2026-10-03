@@ -1,0 +1,111 @@
+metadata:
+  version: "1.0"
+  description: "User domain permission mappings API"
+  generated_timestamp: null
+
+table:
+  schema: core
+  name: user_domain_permissions
+  primary_key: id
+  primary_key_type: int
+
+tenant:
+  column: organisation
+  required: true
+  server_bound: true
+
+policy:
+  read_scope: org
+  write_scope: admin
+  delete_scope: admin
+  allowed_roles:
+    - admin
+    - user
+  max_limit: 500
+  soft_delete: false
+  audit: true
+  versioning: false
+  batch_enabled: false
+
+routes:
+  list:
+    path: /api/v1/user-domain-permissions
+    method: GET
+    auth_filters:
+      - UserAuthFilter
+  get:
+    path: /api/v1/user-domain-permissions/{id}
+    method: GET
+    auth_filters:
+      - UserAuthFilter
+  create:
+    path: /api/v1/user-domain-permissions
+    method: POST
+    auth_filters:
+      - UserAuthFilter
+  update:
+    path: /api/v1/user-domain-permissions/{id}
+    method: PATCH
+    auth_filters:
+      - UserAuthFilter
+  delete:
+    path: /api/v1/user-domain-permissions/{id}
+    method: DELETE
+    auth_filters:
+      - UserAuthFilter
+
+fields:
+  id:
+    type: int
+    readable: false
+    writable: false
+
+  organisation:
+    type: text
+    readable: false
+    writable: false
+
+  user_id:
+    type: int
+    readable: true
+    writable: true
+    filterable: true
+    operators:
+      - eq
+      - in
+    nullable: false
+
+  domain:
+    type: text
+    readable: true
+    writable: true
+    filterable: true
+    operators:
+      - eq
+      - like
+    validation:
+      maxlen: 255
+    nullable: false
+
+  permission:
+    type: text
+    readable: true
+    writable: true
+    filterable: true
+    operators:
+      - eq
+    validation:
+      enum:
+        - read
+        - write
+        - admin
+    nullable: false
+    default: read
+
+  created_at:
+    type: timestamp
+    readable: true
+    writable: false
+    nullable: false
+
+admin_overrides: []

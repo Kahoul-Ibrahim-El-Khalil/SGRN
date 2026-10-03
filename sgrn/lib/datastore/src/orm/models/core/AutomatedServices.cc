@@ -28,6 +28,10 @@ const std::string AutomatedServices::Cols::_total_real_size = "\"total_real_size
 const std::string AutomatedServices::Cols::_storage_limit = "\"storage_limit\"";
 const std::string AutomatedServices::Cols::_total_entry_count = "\"total_entry_count\"";
 const std::string AutomatedServices::Cols::_entry_count_limit = "\"entry_count_limit\"";
+const std::string AutomatedServices::Cols::_rate_limit_rpm = "\"rate_limit_rpm\"";
+const std::string AutomatedServices::Cols::_max_file_size_mb = "\"max_file_size_mb\"";
+const std::string AutomatedServices::Cols::_preferred_chunk_size_mb = "\"preferred_chunk_size_mb\"";
+const std::string AutomatedServices::Cols::_rate_limit_upload_rpm = "\"rate_limit_upload_rpm\"";
 const std::string AutomatedServices::Cols::_created_at = "\"created_at\"";
 const std::string AutomatedServices::Cols::_updated_at = "\"updated_at\"";
 const std::string AutomatedServices::primaryKeyName = "id";
@@ -50,6 +54,10 @@ const std::vector<typename AutomatedServices::MetaData> AutomatedServices::metaD
 {"storage_limit","int64_t","bigint",8,0,0,0},
 {"total_entry_count","int64_t","bigint",8,0,0,1},
 {"entry_count_limit","int64_t","bigint",8,0,0,0},
+{"rate_limit_rpm","int32_t","integer",4,0,0,0},
+{"max_file_size_mb","int64_t","bigint",8,0,0,0},
+{"preferred_chunk_size_mb","int32_t","integer",4,0,0,0},
+{"rate_limit_upload_rpm","int32_t","integer",4,0,0,0},
 {"created_at","::trantor::Date","timestamp with time zone",0,0,0,1},
 {"updated_at","::trantor::Date","timestamp with time zone",0,0,0,1}
 };
@@ -140,6 +148,22 @@ AutomatedServices::AutomatedServices(const Row &r, const ssize_t indexOffset) no
         {
             entryCountLimit_=std::make_shared<int64_t>(r["entry_count_limit"].as<int64_t>());
         }
+        if(!r["rate_limit_rpm"].isNull())
+        {
+            rateLimitRpm_=std::make_shared<int32_t>(r["rate_limit_rpm"].as<int32_t>());
+        }
+        if(!r["max_file_size_mb"].isNull())
+        {
+            maxFileSizeMb_=std::make_shared<int64_t>(r["max_file_size_mb"].as<int64_t>());
+        }
+        if(!r["preferred_chunk_size_mb"].isNull())
+        {
+            preferredChunkSizeMb_=std::make_shared<int32_t>(r["preferred_chunk_size_mb"].as<int32_t>());
+        }
+        if(!r["rate_limit_upload_rpm"].isNull())
+        {
+            rateLimitUploadRpm_=std::make_shared<int32_t>(r["rate_limit_upload_rpm"].as<int32_t>());
+        }
         if(!r["created_at"].isNull())
         {
             auto timeStr = r["created_at"].as<std::string>();
@@ -188,7 +212,7 @@ AutomatedServices::AutomatedServices(const Row &r, const ssize_t indexOffset) no
     else
     {
         size_t offset = (size_t)indexOffset;
-        if(offset + 17 > r.size())
+        if(offset + 21 > r.size())
         {
             LOG_FATAL << "Invalid SQL result for this model";
             return;
@@ -290,6 +314,26 @@ AutomatedServices::AutomatedServices(const Row &r, const ssize_t indexOffset) no
         index = offset + 15;
         if(!r[index].isNull())
         {
+            rateLimitRpm_=std::make_shared<int32_t>(r[index].as<int32_t>());
+        }
+        index = offset + 16;
+        if(!r[index].isNull())
+        {
+            maxFileSizeMb_=std::make_shared<int64_t>(r[index].as<int64_t>());
+        }
+        index = offset + 17;
+        if(!r[index].isNull())
+        {
+            preferredChunkSizeMb_=std::make_shared<int32_t>(r[index].as<int32_t>());
+        }
+        index = offset + 18;
+        if(!r[index].isNull())
+        {
+            rateLimitUploadRpm_=std::make_shared<int32_t>(r[index].as<int32_t>());
+        }
+        index = offset + 19;
+        if(!r[index].isNull())
+        {
             auto timeStr = r[index].as<std::string>();
             struct tm stm;
             memset(&stm,0,sizeof(stm));
@@ -310,7 +354,7 @@ AutomatedServices::AutomatedServices(const Row &r, const ssize_t indexOffset) no
                 createdAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
             }
         }
-        index = offset + 16;
+        index = offset + 20;
         if(!r[index].isNull())
         {
             auto timeStr = r[index].as<std::string>();
@@ -339,7 +383,7 @@ AutomatedServices::AutomatedServices(const Row &r, const ssize_t indexOffset) no
 
 AutomatedServices::AutomatedServices(const Json::Value &pJson, const std::vector<std::string> &pMasqueradingVector) noexcept(false)
 {
-    if(pMasqueradingVector.size() != 17)
+    if(pMasqueradingVector.size() != 21)
     {
         LOG_ERROR << "Bad masquerading vector";
         return;
@@ -487,7 +531,39 @@ AutomatedServices::AutomatedServices(const Json::Value &pJson, const std::vector
         dirtyFlag_[15] = true;
         if(!pJson[pMasqueradingVector[15]].isNull())
         {
-            auto timeStr = pJson[pMasqueradingVector[15]].asString();
+            rateLimitRpm_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[15]].asInt64());
+        }
+    }
+    if(!pMasqueradingVector[16].empty() && pJson.isMember(pMasqueradingVector[16]))
+    {
+        dirtyFlag_[16] = true;
+        if(!pJson[pMasqueradingVector[16]].isNull())
+        {
+            maxFileSizeMb_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[16]].asInt64());
+        }
+    }
+    if(!pMasqueradingVector[17].empty() && pJson.isMember(pMasqueradingVector[17]))
+    {
+        dirtyFlag_[17] = true;
+        if(!pJson[pMasqueradingVector[17]].isNull())
+        {
+            preferredChunkSizeMb_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[17]].asInt64());
+        }
+    }
+    if(!pMasqueradingVector[18].empty() && pJson.isMember(pMasqueradingVector[18]))
+    {
+        dirtyFlag_[18] = true;
+        if(!pJson[pMasqueradingVector[18]].isNull())
+        {
+            rateLimitUploadRpm_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[18]].asInt64());
+        }
+    }
+    if(!pMasqueradingVector[19].empty() && pJson.isMember(pMasqueradingVector[19]))
+    {
+        dirtyFlag_[19] = true;
+        if(!pJson[pMasqueradingVector[19]].isNull())
+        {
+            auto timeStr = pJson[pMasqueradingVector[19]].asString();
             struct tm stm;
             memset(&stm,0,sizeof(stm));
             auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
@@ -508,12 +584,12 @@ AutomatedServices::AutomatedServices(const Json::Value &pJson, const std::vector
             }
         }
     }
-    if(!pMasqueradingVector[16].empty() && pJson.isMember(pMasqueradingVector[16]))
+    if(!pMasqueradingVector[20].empty() && pJson.isMember(pMasqueradingVector[20]))
     {
-        dirtyFlag_[16] = true;
-        if(!pJson[pMasqueradingVector[16]].isNull())
+        dirtyFlag_[20] = true;
+        if(!pJson[pMasqueradingVector[20]].isNull())
         {
-            auto timeStr = pJson[pMasqueradingVector[16]].asString();
+            auto timeStr = pJson[pMasqueradingVector[20]].asString();
             struct tm stm;
             memset(&stm,0,sizeof(stm));
             auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
@@ -676,9 +752,41 @@ AutomatedServices::AutomatedServices(const Json::Value &pJson) noexcept(false)
             entryCountLimit_=std::make_shared<int64_t>((int64_t)pJson["entry_count_limit"].asInt64());
         }
     }
-    if(pJson.isMember("created_at"))
+    if(pJson.isMember("rate_limit_rpm"))
     {
         dirtyFlag_[15]=true;
+        if(!pJson["rate_limit_rpm"].isNull())
+        {
+            rateLimitRpm_=std::make_shared<int32_t>((int32_t)pJson["rate_limit_rpm"].asInt64());
+        }
+    }
+    if(pJson.isMember("max_file_size_mb"))
+    {
+        dirtyFlag_[16]=true;
+        if(!pJson["max_file_size_mb"].isNull())
+        {
+            maxFileSizeMb_=std::make_shared<int64_t>((int64_t)pJson["max_file_size_mb"].asInt64());
+        }
+    }
+    if(pJson.isMember("preferred_chunk_size_mb"))
+    {
+        dirtyFlag_[17]=true;
+        if(!pJson["preferred_chunk_size_mb"].isNull())
+        {
+            preferredChunkSizeMb_=std::make_shared<int32_t>((int32_t)pJson["preferred_chunk_size_mb"].asInt64());
+        }
+    }
+    if(pJson.isMember("rate_limit_upload_rpm"))
+    {
+        dirtyFlag_[18]=true;
+        if(!pJson["rate_limit_upload_rpm"].isNull())
+        {
+            rateLimitUploadRpm_=std::make_shared<int32_t>((int32_t)pJson["rate_limit_upload_rpm"].asInt64());
+        }
+    }
+    if(pJson.isMember("created_at"))
+    {
+        dirtyFlag_[19]=true;
         if(!pJson["created_at"].isNull())
         {
             auto timeStr = pJson["created_at"].asString();
@@ -704,7 +812,7 @@ AutomatedServices::AutomatedServices(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("updated_at"))
     {
-        dirtyFlag_[16]=true;
+        dirtyFlag_[20]=true;
         if(!pJson["updated_at"].isNull())
         {
             auto timeStr = pJson["updated_at"].asString();
@@ -733,7 +841,7 @@ AutomatedServices::AutomatedServices(const Json::Value &pJson) noexcept(false)
 void AutomatedServices::updateByMasqueradedJson(const Json::Value &pJson,
                                             const std::vector<std::string> &pMasqueradingVector) noexcept(false)
 {
-    if(pMasqueradingVector.size() != 17)
+    if(pMasqueradingVector.size() != 21)
     {
         LOG_ERROR << "Bad masquerading vector";
         return;
@@ -880,7 +988,39 @@ void AutomatedServices::updateByMasqueradedJson(const Json::Value &pJson,
         dirtyFlag_[15] = true;
         if(!pJson[pMasqueradingVector[15]].isNull())
         {
-            auto timeStr = pJson[pMasqueradingVector[15]].asString();
+            rateLimitRpm_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[15]].asInt64());
+        }
+    }
+    if(!pMasqueradingVector[16].empty() && pJson.isMember(pMasqueradingVector[16]))
+    {
+        dirtyFlag_[16] = true;
+        if(!pJson[pMasqueradingVector[16]].isNull())
+        {
+            maxFileSizeMb_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[16]].asInt64());
+        }
+    }
+    if(!pMasqueradingVector[17].empty() && pJson.isMember(pMasqueradingVector[17]))
+    {
+        dirtyFlag_[17] = true;
+        if(!pJson[pMasqueradingVector[17]].isNull())
+        {
+            preferredChunkSizeMb_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[17]].asInt64());
+        }
+    }
+    if(!pMasqueradingVector[18].empty() && pJson.isMember(pMasqueradingVector[18]))
+    {
+        dirtyFlag_[18] = true;
+        if(!pJson[pMasqueradingVector[18]].isNull())
+        {
+            rateLimitUploadRpm_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[18]].asInt64());
+        }
+    }
+    if(!pMasqueradingVector[19].empty() && pJson.isMember(pMasqueradingVector[19]))
+    {
+        dirtyFlag_[19] = true;
+        if(!pJson[pMasqueradingVector[19]].isNull())
+        {
+            auto timeStr = pJson[pMasqueradingVector[19]].asString();
             struct tm stm;
             memset(&stm,0,sizeof(stm));
             auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
@@ -901,12 +1041,12 @@ void AutomatedServices::updateByMasqueradedJson(const Json::Value &pJson,
             }
         }
     }
-    if(!pMasqueradingVector[16].empty() && pJson.isMember(pMasqueradingVector[16]))
+    if(!pMasqueradingVector[20].empty() && pJson.isMember(pMasqueradingVector[20]))
     {
-        dirtyFlag_[16] = true;
-        if(!pJson[pMasqueradingVector[16]].isNull())
+        dirtyFlag_[20] = true;
+        if(!pJson[pMasqueradingVector[20]].isNull())
         {
-            auto timeStr = pJson[pMasqueradingVector[16]].asString();
+            auto timeStr = pJson[pMasqueradingVector[20]].asString();
             struct tm stm;
             memset(&stm,0,sizeof(stm));
             auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
@@ -1068,9 +1208,41 @@ void AutomatedServices::updateByJson(const Json::Value &pJson) noexcept(false)
             entryCountLimit_=std::make_shared<int64_t>((int64_t)pJson["entry_count_limit"].asInt64());
         }
     }
-    if(pJson.isMember("created_at"))
+    if(pJson.isMember("rate_limit_rpm"))
     {
         dirtyFlag_[15] = true;
+        if(!pJson["rate_limit_rpm"].isNull())
+        {
+            rateLimitRpm_=std::make_shared<int32_t>((int32_t)pJson["rate_limit_rpm"].asInt64());
+        }
+    }
+    if(pJson.isMember("max_file_size_mb"))
+    {
+        dirtyFlag_[16] = true;
+        if(!pJson["max_file_size_mb"].isNull())
+        {
+            maxFileSizeMb_=std::make_shared<int64_t>((int64_t)pJson["max_file_size_mb"].asInt64());
+        }
+    }
+    if(pJson.isMember("preferred_chunk_size_mb"))
+    {
+        dirtyFlag_[17] = true;
+        if(!pJson["preferred_chunk_size_mb"].isNull())
+        {
+            preferredChunkSizeMb_=std::make_shared<int32_t>((int32_t)pJson["preferred_chunk_size_mb"].asInt64());
+        }
+    }
+    if(pJson.isMember("rate_limit_upload_rpm"))
+    {
+        dirtyFlag_[18] = true;
+        if(!pJson["rate_limit_upload_rpm"].isNull())
+        {
+            rateLimitUploadRpm_=std::make_shared<int32_t>((int32_t)pJson["rate_limit_upload_rpm"].asInt64());
+        }
+    }
+    if(pJson.isMember("created_at"))
+    {
+        dirtyFlag_[19] = true;
         if(!pJson["created_at"].isNull())
         {
             auto timeStr = pJson["created_at"].asString();
@@ -1096,7 +1268,7 @@ void AutomatedServices::updateByJson(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("updated_at"))
     {
-        dirtyFlag_[16] = true;
+        dirtyFlag_[20] = true;
         if(!pJson["updated_at"].isNull())
         {
             auto timeStr = pJson["updated_at"].asString();
@@ -1447,6 +1619,94 @@ void AutomatedServices::setEntryCountLimitToNull() noexcept
     dirtyFlag_[14] = true;
 }
 
+const int32_t &AutomatedServices::getValueOfRateLimitRpm() const noexcept
+{
+    static const int32_t defaultValue = int32_t();
+    if(rateLimitRpm_)
+        return *rateLimitRpm_;
+    return defaultValue;
+}
+const std::shared_ptr<int32_t> &AutomatedServices::getRateLimitRpm() const noexcept
+{
+    return rateLimitRpm_;
+}
+void AutomatedServices::setRateLimitRpm(const int32_t &pRateLimitRpm) noexcept
+{
+    rateLimitRpm_ = std::make_shared<int32_t>(pRateLimitRpm);
+    dirtyFlag_[15] = true;
+}
+void AutomatedServices::setRateLimitRpmToNull() noexcept
+{
+    rateLimitRpm_.reset();
+    dirtyFlag_[15] = true;
+}
+
+const int64_t &AutomatedServices::getValueOfMaxFileSizeMb() const noexcept
+{
+    static const int64_t defaultValue = int64_t();
+    if(maxFileSizeMb_)
+        return *maxFileSizeMb_;
+    return defaultValue;
+}
+const std::shared_ptr<int64_t> &AutomatedServices::getMaxFileSizeMb() const noexcept
+{
+    return maxFileSizeMb_;
+}
+void AutomatedServices::setMaxFileSizeMb(const int64_t &pMaxFileSizeMb) noexcept
+{
+    maxFileSizeMb_ = std::make_shared<int64_t>(pMaxFileSizeMb);
+    dirtyFlag_[16] = true;
+}
+void AutomatedServices::setMaxFileSizeMbToNull() noexcept
+{
+    maxFileSizeMb_.reset();
+    dirtyFlag_[16] = true;
+}
+
+const int32_t &AutomatedServices::getValueOfPreferredChunkSizeMb() const noexcept
+{
+    static const int32_t defaultValue = int32_t();
+    if(preferredChunkSizeMb_)
+        return *preferredChunkSizeMb_;
+    return defaultValue;
+}
+const std::shared_ptr<int32_t> &AutomatedServices::getPreferredChunkSizeMb() const noexcept
+{
+    return preferredChunkSizeMb_;
+}
+void AutomatedServices::setPreferredChunkSizeMb(const int32_t &pPreferredChunkSizeMb) noexcept
+{
+    preferredChunkSizeMb_ = std::make_shared<int32_t>(pPreferredChunkSizeMb);
+    dirtyFlag_[17] = true;
+}
+void AutomatedServices::setPreferredChunkSizeMbToNull() noexcept
+{
+    preferredChunkSizeMb_.reset();
+    dirtyFlag_[17] = true;
+}
+
+const int32_t &AutomatedServices::getValueOfRateLimitUploadRpm() const noexcept
+{
+    static const int32_t defaultValue = int32_t();
+    if(rateLimitUploadRpm_)
+        return *rateLimitUploadRpm_;
+    return defaultValue;
+}
+const std::shared_ptr<int32_t> &AutomatedServices::getRateLimitUploadRpm() const noexcept
+{
+    return rateLimitUploadRpm_;
+}
+void AutomatedServices::setRateLimitUploadRpm(const int32_t &pRateLimitUploadRpm) noexcept
+{
+    rateLimitUploadRpm_ = std::make_shared<int32_t>(pRateLimitUploadRpm);
+    dirtyFlag_[18] = true;
+}
+void AutomatedServices::setRateLimitUploadRpmToNull() noexcept
+{
+    rateLimitUploadRpm_.reset();
+    dirtyFlag_[18] = true;
+}
+
 const ::trantor::Date &AutomatedServices::getValueOfCreatedAt() const noexcept
 {
     static const ::trantor::Date defaultValue = ::trantor::Date();
@@ -1461,7 +1721,7 @@ const std::shared_ptr<::trantor::Date> &AutomatedServices::getCreatedAt() const 
 void AutomatedServices::setCreatedAt(const ::trantor::Date &pCreatedAt) noexcept
 {
     createdAt_ = std::make_shared<::trantor::Date>(pCreatedAt);
-    dirtyFlag_[15] = true;
+    dirtyFlag_[19] = true;
 }
 
 const ::trantor::Date &AutomatedServices::getValueOfUpdatedAt() const noexcept
@@ -1478,7 +1738,7 @@ const std::shared_ptr<::trantor::Date> &AutomatedServices::getUpdatedAt() const 
 void AutomatedServices::setUpdatedAt(const ::trantor::Date &pUpdatedAt) noexcept
 {
     updatedAt_ = std::make_shared<::trantor::Date>(pUpdatedAt);
-    dirtyFlag_[16] = true;
+    dirtyFlag_[20] = true;
 }
 
 void AutomatedServices::updateId(const uint64_t id)
@@ -1502,6 +1762,10 @@ const std::vector<std::string> &AutomatedServices::insertColumns() noexcept
         "storage_limit",
         "total_entry_count",
         "entry_count_limit",
+        "rate_limit_rpm",
+        "max_file_size_mb",
+        "preferred_chunk_size_mb",
+        "rate_limit_upload_rpm",
         "created_at",
         "updated_at"
     };
@@ -1666,6 +1930,50 @@ void AutomatedServices::outputArgs(drogon::orm::internal::SqlBinder &binder) con
     }
     if(dirtyFlag_[15])
     {
+        if(getRateLimitRpm())
+        {
+            binder << getValueOfRateLimitRpm();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
+    if(dirtyFlag_[16])
+    {
+        if(getMaxFileSizeMb())
+        {
+            binder << getValueOfMaxFileSizeMb();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
+    if(dirtyFlag_[17])
+    {
+        if(getPreferredChunkSizeMb())
+        {
+            binder << getValueOfPreferredChunkSizeMb();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
+    if(dirtyFlag_[18])
+    {
+        if(getRateLimitUploadRpm())
+        {
+            binder << getValueOfRateLimitUploadRpm();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
+    if(dirtyFlag_[19])
+    {
         if(getCreatedAt())
         {
             binder << getValueOfCreatedAt();
@@ -1675,7 +1983,7 @@ void AutomatedServices::outputArgs(drogon::orm::internal::SqlBinder &binder) con
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[16])
+    if(dirtyFlag_[20])
     {
         if(getUpdatedAt())
         {
@@ -1754,6 +2062,22 @@ const std::vector<std::string> AutomatedServices::updateColumns() const
     if(dirtyFlag_[16])
     {
         ret.push_back(getColumnName(16));
+    }
+    if(dirtyFlag_[17])
+    {
+        ret.push_back(getColumnName(17));
+    }
+    if(dirtyFlag_[18])
+    {
+        ret.push_back(getColumnName(18));
+    }
+    if(dirtyFlag_[19])
+    {
+        ret.push_back(getColumnName(19));
+    }
+    if(dirtyFlag_[20])
+    {
+        ret.push_back(getColumnName(20));
     }
     return ret;
 }
@@ -1916,6 +2240,50 @@ void AutomatedServices::updateArgs(drogon::orm::internal::SqlBinder &binder) con
     }
     if(dirtyFlag_[15])
     {
+        if(getRateLimitRpm())
+        {
+            binder << getValueOfRateLimitRpm();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
+    if(dirtyFlag_[16])
+    {
+        if(getMaxFileSizeMb())
+        {
+            binder << getValueOfMaxFileSizeMb();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
+    if(dirtyFlag_[17])
+    {
+        if(getPreferredChunkSizeMb())
+        {
+            binder << getValueOfPreferredChunkSizeMb();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
+    if(dirtyFlag_[18])
+    {
+        if(getRateLimitUploadRpm())
+        {
+            binder << getValueOfRateLimitUploadRpm();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
+    if(dirtyFlag_[19])
+    {
         if(getCreatedAt())
         {
             binder << getValueOfCreatedAt();
@@ -1925,7 +2293,7 @@ void AutomatedServices::updateArgs(drogon::orm::internal::SqlBinder &binder) con
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[16])
+    if(dirtyFlag_[20])
     {
         if(getUpdatedAt())
         {
@@ -2060,6 +2428,38 @@ Json::Value AutomatedServices::toJson() const
     {
         ret["entry_count_limit"]=Json::Value();
     }
+    if(getRateLimitRpm())
+    {
+        ret["rate_limit_rpm"]=getValueOfRateLimitRpm();
+    }
+    else
+    {
+        ret["rate_limit_rpm"]=Json::Value();
+    }
+    if(getMaxFileSizeMb())
+    {
+        ret["max_file_size_mb"]=(Json::Int64)getValueOfMaxFileSizeMb();
+    }
+    else
+    {
+        ret["max_file_size_mb"]=Json::Value();
+    }
+    if(getPreferredChunkSizeMb())
+    {
+        ret["preferred_chunk_size_mb"]=getValueOfPreferredChunkSizeMb();
+    }
+    else
+    {
+        ret["preferred_chunk_size_mb"]=Json::Value();
+    }
+    if(getRateLimitUploadRpm())
+    {
+        ret["rate_limit_upload_rpm"]=getValueOfRateLimitUploadRpm();
+    }
+    else
+    {
+        ret["rate_limit_upload_rpm"]=Json::Value();
+    }
     if(getCreatedAt())
     {
         ret["created_at"]=getCreatedAt()->toDbStringLocal();
@@ -2088,7 +2488,7 @@ Json::Value AutomatedServices::toMasqueradedJson(
     const std::vector<std::string> &pMasqueradingVector) const
 {
     Json::Value ret;
-    if(pMasqueradingVector.size() == 17)
+    if(pMasqueradingVector.size() == 21)
     {
         if(!pMasqueradingVector[0].empty())
         {
@@ -2257,9 +2657,9 @@ Json::Value AutomatedServices::toMasqueradedJson(
         }
         if(!pMasqueradingVector[15].empty())
         {
-            if(getCreatedAt())
+            if(getRateLimitRpm())
             {
-                ret[pMasqueradingVector[15]]=getCreatedAt()->toDbStringLocal();
+                ret[pMasqueradingVector[15]]=getValueOfRateLimitRpm();
             }
             else
             {
@@ -2268,13 +2668,57 @@ Json::Value AutomatedServices::toMasqueradedJson(
         }
         if(!pMasqueradingVector[16].empty())
         {
-            if(getUpdatedAt())
+            if(getMaxFileSizeMb())
             {
-                ret[pMasqueradingVector[16]]=getUpdatedAt()->toDbStringLocal();
+                ret[pMasqueradingVector[16]]=(Json::Int64)getValueOfMaxFileSizeMb();
             }
             else
             {
                 ret[pMasqueradingVector[16]]=Json::Value();
+            }
+        }
+        if(!pMasqueradingVector[17].empty())
+        {
+            if(getPreferredChunkSizeMb())
+            {
+                ret[pMasqueradingVector[17]]=getValueOfPreferredChunkSizeMb();
+            }
+            else
+            {
+                ret[pMasqueradingVector[17]]=Json::Value();
+            }
+        }
+        if(!pMasqueradingVector[18].empty())
+        {
+            if(getRateLimitUploadRpm())
+            {
+                ret[pMasqueradingVector[18]]=getValueOfRateLimitUploadRpm();
+            }
+            else
+            {
+                ret[pMasqueradingVector[18]]=Json::Value();
+            }
+        }
+        if(!pMasqueradingVector[19].empty())
+        {
+            if(getCreatedAt())
+            {
+                ret[pMasqueradingVector[19]]=getCreatedAt()->toDbStringLocal();
+            }
+            else
+            {
+                ret[pMasqueradingVector[19]]=Json::Value();
+            }
+        }
+        if(!pMasqueradingVector[20].empty())
+        {
+            if(getUpdatedAt())
+            {
+                ret[pMasqueradingVector[20]]=getUpdatedAt()->toDbStringLocal();
+            }
+            else
+            {
+                ret[pMasqueradingVector[20]]=Json::Value();
             }
         }
         return ret;
@@ -2400,6 +2844,38 @@ Json::Value AutomatedServices::toMasqueradedJson(
     {
         ret["entry_count_limit"]=Json::Value();
     }
+    if(getRateLimitRpm())
+    {
+        ret["rate_limit_rpm"]=getValueOfRateLimitRpm();
+    }
+    else
+    {
+        ret["rate_limit_rpm"]=Json::Value();
+    }
+    if(getMaxFileSizeMb())
+    {
+        ret["max_file_size_mb"]=(Json::Int64)getValueOfMaxFileSizeMb();
+    }
+    else
+    {
+        ret["max_file_size_mb"]=Json::Value();
+    }
+    if(getPreferredChunkSizeMb())
+    {
+        ret["preferred_chunk_size_mb"]=getValueOfPreferredChunkSizeMb();
+    }
+    else
+    {
+        ret["preferred_chunk_size_mb"]=Json::Value();
+    }
+    if(getRateLimitUploadRpm())
+    {
+        ret["rate_limit_upload_rpm"]=getValueOfRateLimitUploadRpm();
+    }
+    else
+    {
+        ret["rate_limit_upload_rpm"]=Json::Value();
+    }
     if(getCreatedAt())
     {
         ret["created_at"]=getCreatedAt()->toDbStringLocal();
@@ -2516,14 +2992,34 @@ bool AutomatedServices::validateJsonForCreation(const Json::Value &pJson, std::s
         if(!validJsonOfField(14, "entry_count_limit", pJson["entry_count_limit"], err, true))
             return false;
     }
+    if(pJson.isMember("rate_limit_rpm"))
+    {
+        if(!validJsonOfField(15, "rate_limit_rpm", pJson["rate_limit_rpm"], err, true))
+            return false;
+    }
+    if(pJson.isMember("max_file_size_mb"))
+    {
+        if(!validJsonOfField(16, "max_file_size_mb", pJson["max_file_size_mb"], err, true))
+            return false;
+    }
+    if(pJson.isMember("preferred_chunk_size_mb"))
+    {
+        if(!validJsonOfField(17, "preferred_chunk_size_mb", pJson["preferred_chunk_size_mb"], err, true))
+            return false;
+    }
+    if(pJson.isMember("rate_limit_upload_rpm"))
+    {
+        if(!validJsonOfField(18, "rate_limit_upload_rpm", pJson["rate_limit_upload_rpm"], err, true))
+            return false;
+    }
     if(pJson.isMember("created_at"))
     {
-        if(!validJsonOfField(15, "created_at", pJson["created_at"], err, true))
+        if(!validJsonOfField(19, "created_at", pJson["created_at"], err, true))
             return false;
     }
     if(pJson.isMember("updated_at"))
     {
-        if(!validJsonOfField(16, "updated_at", pJson["updated_at"], err, true))
+        if(!validJsonOfField(20, "updated_at", pJson["updated_at"], err, true))
             return false;
     }
     return true;
@@ -2532,7 +3028,7 @@ bool AutomatedServices::validateMasqueradedJsonForCreation(const Json::Value &pJ
                                                            const std::vector<std::string> &pMasqueradingVector,
                                                            std::string &err)
 {
-    if(pMasqueradingVector.size() != 17)
+    if(pMasqueradingVector.size() != 21)
     {
         err = "Bad masquerading vector";
         return false;
@@ -2694,6 +3190,38 @@ bool AutomatedServices::validateMasqueradedJsonForCreation(const Json::Value &pJ
                   return false;
           }
       }
+      if(!pMasqueradingVector[17].empty())
+      {
+          if(pJson.isMember(pMasqueradingVector[17]))
+          {
+              if(!validJsonOfField(17, pMasqueradingVector[17], pJson[pMasqueradingVector[17]], err, true))
+                  return false;
+          }
+      }
+      if(!pMasqueradingVector[18].empty())
+      {
+          if(pJson.isMember(pMasqueradingVector[18]))
+          {
+              if(!validJsonOfField(18, pMasqueradingVector[18], pJson[pMasqueradingVector[18]], err, true))
+                  return false;
+          }
+      }
+      if(!pMasqueradingVector[19].empty())
+      {
+          if(pJson.isMember(pMasqueradingVector[19]))
+          {
+              if(!validJsonOfField(19, pMasqueradingVector[19], pJson[pMasqueradingVector[19]], err, true))
+                  return false;
+          }
+      }
+      if(!pMasqueradingVector[20].empty())
+      {
+          if(pJson.isMember(pMasqueradingVector[20]))
+          {
+              if(!validJsonOfField(20, pMasqueradingVector[20], pJson[pMasqueradingVector[20]], err, true))
+                  return false;
+          }
+      }
     }
     catch(const Json::LogicError &e)
     {
@@ -2784,14 +3312,34 @@ bool AutomatedServices::validateJsonForUpdate(const Json::Value &pJson, std::str
         if(!validJsonOfField(14, "entry_count_limit", pJson["entry_count_limit"], err, false))
             return false;
     }
+    if(pJson.isMember("rate_limit_rpm"))
+    {
+        if(!validJsonOfField(15, "rate_limit_rpm", pJson["rate_limit_rpm"], err, false))
+            return false;
+    }
+    if(pJson.isMember("max_file_size_mb"))
+    {
+        if(!validJsonOfField(16, "max_file_size_mb", pJson["max_file_size_mb"], err, false))
+            return false;
+    }
+    if(pJson.isMember("preferred_chunk_size_mb"))
+    {
+        if(!validJsonOfField(17, "preferred_chunk_size_mb", pJson["preferred_chunk_size_mb"], err, false))
+            return false;
+    }
+    if(pJson.isMember("rate_limit_upload_rpm"))
+    {
+        if(!validJsonOfField(18, "rate_limit_upload_rpm", pJson["rate_limit_upload_rpm"], err, false))
+            return false;
+    }
     if(pJson.isMember("created_at"))
     {
-        if(!validJsonOfField(15, "created_at", pJson["created_at"], err, false))
+        if(!validJsonOfField(19, "created_at", pJson["created_at"], err, false))
             return false;
     }
     if(pJson.isMember("updated_at"))
     {
-        if(!validJsonOfField(16, "updated_at", pJson["updated_at"], err, false))
+        if(!validJsonOfField(20, "updated_at", pJson["updated_at"], err, false))
             return false;
     }
     return true;
@@ -2800,7 +3348,7 @@ bool AutomatedServices::validateMasqueradedJsonForUpdate(const Json::Value &pJso
                                                          const std::vector<std::string> &pMasqueradingVector,
                                                          std::string &err)
 {
-    if(pMasqueradingVector.size() != 17)
+    if(pMasqueradingVector.size() != 21)
     {
         err = "Bad masquerading vector";
         return false;
@@ -2894,6 +3442,26 @@ bool AutomatedServices::validateMasqueradedJsonForUpdate(const Json::Value &pJso
       if(!pMasqueradingVector[16].empty() && pJson.isMember(pMasqueradingVector[16]))
       {
           if(!validJsonOfField(16, pMasqueradingVector[16], pJson[pMasqueradingVector[16]], err, false))
+              return false;
+      }
+      if(!pMasqueradingVector[17].empty() && pJson.isMember(pMasqueradingVector[17]))
+      {
+          if(!validJsonOfField(17, pMasqueradingVector[17], pJson[pMasqueradingVector[17]], err, false))
+              return false;
+      }
+      if(!pMasqueradingVector[18].empty() && pJson.isMember(pMasqueradingVector[18]))
+      {
+          if(!validJsonOfField(18, pMasqueradingVector[18], pJson[pMasqueradingVector[18]], err, false))
+              return false;
+      }
+      if(!pMasqueradingVector[19].empty() && pJson.isMember(pMasqueradingVector[19]))
+      {
+          if(!validJsonOfField(19, pMasqueradingVector[19], pJson[pMasqueradingVector[19]], err, false))
+              return false;
+      }
+      if(!pMasqueradingVector[20].empty() && pJson.isMember(pMasqueradingVector[20]))
+      {
+          if(!validJsonOfField(20, pMasqueradingVector[20], pJson[pMasqueradingVector[20]], err, false))
               return false;
       }
     }
@@ -3095,6 +3663,50 @@ bool AutomatedServices::validJsonOfField(size_t index,
         case 15:
             if(pJson.isNull())
             {
+                return true;
+            }
+            if(!pJson.isInt())
+            {
+                err="Type error in the "+fieldName+" field";
+                return false;
+            }
+            break;
+        case 16:
+            if(pJson.isNull())
+            {
+                return true;
+            }
+            if(!pJson.isInt64())
+            {
+                err="Type error in the "+fieldName+" field";
+                return false;
+            }
+            break;
+        case 17:
+            if(pJson.isNull())
+            {
+                return true;
+            }
+            if(!pJson.isInt())
+            {
+                err="Type error in the "+fieldName+" field";
+                return false;
+            }
+            break;
+        case 18:
+            if(pJson.isNull())
+            {
+                return true;
+            }
+            if(!pJson.isInt())
+            {
+                err="Type error in the "+fieldName+" field";
+                return false;
+            }
+            break;
+        case 19:
+            if(pJson.isNull())
+            {
                 err="The " + fieldName + " column cannot be null";
                 return false;
             }
@@ -3104,7 +3716,7 @@ bool AutomatedServices::validJsonOfField(size_t index,
                 return false;
             }
             break;
-        case 16:
+        case 20:
             if(pJson.isNull())
             {
                 err="The " + fieldName + " column cannot be null";

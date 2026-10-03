@@ -658,24 +658,23 @@ def main():
             if schema not in manifest["schemas"]:
                 fail(f"manifest {args.manifest}: --schemas requested '{schema}', which is not listed under 'schemas'")
 
-    try:
-        import psycopg2
-    except ImportError:
-        print("generate_views.py requires psycopg2 (pip install psycopg2-binary)", file=sys.stderr)
-        raise
-
     reg_file = args.registration or f"{args.out}/RegisteredViews.cpp"
-
-    conn = psycopg2.connect(host=args.host, port=args.port, dbname=args.dbname, user=args.user, password=args.password)
+    conn = connect_db(args.host, args.port, args.dbname, args.user, args.password)
     specs = []
-    for schema, schema_cfg in manifest["schemas"].items():
-        if args.schemas is not None and schema not in args.schemas:
-            continue
-        for table, table_cfg in schema_cfg.get("tables", {}).items():
-            spec = build_view_spec(conn, args.manifest, schema, table, table_cfg, default_filters)
-            if spec:
-                specs.append(spec)
-                emit_header(spec, args.out)
+    try:
+        for schema, schema_cfg in manifest["schemas"].items():
+            if args.schemas is not None and schema not in args.schemas:
+                continue
+            for table, table_cfg in schema_cfg.get("tables", {}).items():
+                spec = build_view_spec(conn, args.manifest, schema, table, table_cfg, default_filters)
+                if spec:
+                    specs.append(spec)
+                    emit_header(spec, args.out)
+    except Exception as e:
+        print(f"[ERROR] Could not connect to or query PostgreSQL database '{args.dbname}' at {args.host}:{args.port}.", file=sys.stderr)
+        print(f"Details: {e}", file=sys.stderr)
+        print("Make sure PostgreSQL is running and initialized (e.g. run 'python3 init-db.py' first).", file=sys.stderr)
+        sys.exit(1)
 
     agg = f"{args.out}/AllViews.gen.hpp"
     os.makedirs(args.out, exist_ok=True)
@@ -686,6 +685,69 @@ def main():
         f.write("#pragma once\n" + "".join(f'#include "{n}"\n' for n in names))
 
     update_registration_file(specs, reg_file)
+
+import subprocess
+
+class PsqlCursorAdapter:
+    def __init__(self, host, port, dbname, user, password):
+        self.host = host
+        self.port = str(port)
+        self.dbname = dbname
+        self.user = user
+        self.password = password
+        self.results = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+    def execute(self, sql, params=()):
+        env = os.environ.copy()
+        if self.password:
+            env["PGPASSWORD"] = self.password
+        query = sql
+        if params:
+            for p in params:
+                if isinstance(p, (int, float)):
+                    query = query.replace("%s", str(p), 1)
+                else:
+                    escaped = str(p).replace("'", "''")
+                    query = query.replace("%s", f"'{escaped}'", 1)
+        wrapped_sql = f"SELECT coalesce(json_agg(t), '[]'::json) FROM ({query}) t;"
+        cmd = ["psql", "-h", self.host, "-p", self.port, "-U", self.user, "-d", self.dbname, "-t", "-A", "-c", wrapped_sql]
+        res = subprocess.run(cmd, env=env, capture_output=True, text=True, check=True)
+        raw_json = res.stdout.strip()
+        data = json.loads(raw_json) if raw_json else []
+        self.results = [tuple(d.values()) for d in data]
+
+    def fetchall(self):
+        return self.results
+
+    def fetchone(self):
+        return self.results[0] if self.results else None
+
+class PsqlConnectionAdapter:
+    def __init__(self, host, port, dbname, user, password):
+        self.host = host
+        self.port = port
+        self.dbname = dbname
+        self.user = user
+        self.password = password
+
+    def cursor(self):
+        return PsqlCursorAdapter(self.host, self.port, self.dbname, self.user, self.password)
+
+    def close(self):
+        pass
+
+def connect_db(host, port, dbname, user, password):
+    try:
+        import psycopg2
+        return psycopg2.connect(host=host, port=port, dbname=dbname, user=user, password=password)
+    except ImportError:
+        return PsqlConnectionAdapter(host=host, port=port, dbname=dbname, user=user, password=password)
 
 
 if __name__ == "__main__":

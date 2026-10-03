@@ -196,8 +196,10 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOverview(HttpRequestPtr tsp_req
 
             auto objs = co_await sgrn::datastore::core::execSqlCoroVec(
                 db, "SELECT COUNT(*), COALESCE(SUM(size),0) FROM storage.objects WHERE bucket = $1", {name});
-            auto files = co_await sgrn::datastore::core::execSqlCoroVec(
-                db, "SELECT COUNT(*) FROM storage.files f JOIN storage.objects o ON o.id = f.object_id WHERE o.bucket = $1", {name});
+            auto files = co_await sgrn::datastore::core::execSqlCoroVec(db,
+                "SELECT COUNT(*) FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN "
+                "storage.objects o ON o.id = fo.object_id WHERE o.bucket = $1",
+                {name});
             entry["db"]["objects"] = static_cast<Json::Int64>(fieldInt(objs[0][0]));
             entry["db"]["bytes"] = static_cast<Json::Int64>(fieldInt(objs[0][1]));
             entry["db"]["files"] = static_cast<Json::Int64>(fieldInt(files[0][0]));
@@ -472,7 +474,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleSearch(HttpRequestPtr tsp_req) 
 
                 auto files = co_await sgrn::datastore::core::execSqlCoroVec(db,
                     "SELECT f.id, f.full_path, f.user_id, f.automated_service_id, f.created_at"
-                    " FROM storage.files f JOIN storage.objects o ON o.id = f.object_id"
+                    " FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o "
+                    "ON o.id = fo.object_id"
                     " WHERE o.bucket = $1 AND o.key = $2 ORDER BY f.id LIMIT 100",
                     {bucket, key});
                 Json::Value refs = Json::arrayValue;
@@ -1258,7 +1261,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPt
         auto series = co_await sgrn::datastore::core::execSqlCoroVec(db,
             "SELECT to_char(date_trunc('day', f.created_at), 'YYYY-MM-DD') AS day, COUNT(*) AS files, "
             "COALESCE(SUM(o.original_size),0) AS bytes_virtual "
-            "FROM storage.files f JOIN storage.objects o ON o.id = f.object_id "
+            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o ON o.id = "
+            "fo.object_id "
             "WHERE f.created_at >= now() - interval '30 days' "
             "GROUP BY 1 ORDER BY 1",
             {});
@@ -1275,7 +1279,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPt
         // --- top extensions by file count ---
         auto exts = co_await sgrn::datastore::core::execSqlCoroVec(db,
             "SELECT COALESCE(f.extension, '(none)') AS ext, COUNT(*) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual "
-            "FROM storage.files f JOIN storage.objects o ON o.id = f.object_id "
+            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o ON o.id = "
+            "fo.object_id "
             "GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
             {});
         Json::Value top_ext = Json::arrayValue;
@@ -1291,11 +1296,13 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPt
         // --- top uploaders (users + services in one list) ---
         auto uploaders = co_await sgrn::datastore::core::execSqlCoroVec(db,
             "SELECT 'user:' || u.email AS actor, COUNT(*) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual "
-            "FROM storage.files f JOIN storage.objects o ON o.id = f.object_id JOIN core.users u ON u.id = f.user_id "
+            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o ON o.id = "
+            "fo.object_id JOIN core.users u ON u.id = f.user_id "
             "GROUP BY 1 "
             "UNION ALL "
             "SELECT 'service:' || s.name AS actor, COUNT(*) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual "
-            "FROM storage.files f JOIN storage.objects o ON o.id = f.object_id JOIN core.automated_services s "
+            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o ON o.id = "
+            "fo.object_id JOIN core.automated_services s "
             "ON s.id = f.automated_service_id "
             "GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
             {});
@@ -1314,7 +1321,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPt
             "SELECT f.name, COALESCE(f.extension, '') AS ext, o.original_size, "
             "COALESCE('user:' || u.email, 'service:' || s.name, '(unknown)') AS actor, "
             "to_char(f.created_at, 'YYYY-MM-DD HH24:MI:SS') AS at "
-            "FROM storage.files f JOIN storage.objects o ON o.id = f.object_id "
+            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o ON o.id = "
+            "fo.object_id "
             "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
             "ORDER BY f.id DESC LIMIT 10",
             {});
@@ -1355,14 +1363,16 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsBreakdown(HttpRequestP
         if (kind == "domain") {
             sql = "SELECT COALESCE(f.domain, '(none)') AS slice, COUNT(*) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual, "
                   "COUNT(DISTINCT COALESCE('u' || f.user_id::text, 's' || f.automated_service_id::text)) AS actors "
-                  "FROM storage.files f JOIN storage.objects o ON o.id = f.object_id "
+                  "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o ON "
+                  "o.id = fo.object_id "
                   "WHERE COALESCE(f.domain, '(none)') ILIKE '%' || $1 || '%' ESCAPE '\\' "
                   "GROUP BY 1 ORDER BY 2 DESC LIMIT " +
                   std::to_string(limit);
         } else if (kind == "organisation") {
             sql = "SELECT g.organisation AS slice, COUNT(*) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual, "
                   "COUNT(DISTINCT COALESCE('u' || f.user_id::text, 's' || f.automated_service_id::text)) AS actors "
-                  "FROM storage.files f JOIN storage.objects o ON o.id = f.object_id "
+                  "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o ON "
+                  "o.id = fo.object_id "
                   "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
                   "LEFT JOIN LATERAL (SELECT COALESCE(u.organisation, s.organisation, '(none)') AS organisation) g ON true "
                   "WHERE g.organisation ILIKE '%' || $1 || '%' ESCAPE '\\' "
@@ -1371,14 +1381,16 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsBreakdown(HttpRequestP
         } else if (kind == "user") {
             sql = "SELECT u.email AS slice, COUNT(*) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual, "
                   "COALESCE(u.storage_limit, -1) AS storage_cap, COALESCE(u.entry_count_limit, -1) AS entry_cap "
-                  "FROM storage.files f JOIN storage.objects o ON o.id = f.object_id JOIN core.users u ON u.id = f.user_id "
+                  "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o ON "
+                  "o.id = fo.object_id JOIN core.users u ON u.id = f.user_id "
                   "WHERE u.deleted_at IS NULL AND u.email ILIKE '%' || $1 || '%' ESCAPE '\\' "
                   "GROUP BY u.email, u.storage_limit, u.entry_count_limit ORDER BY 2 DESC LIMIT " +
                   std::to_string(limit);
         } else {
             sql = "SELECT s.name AS slice, COUNT(*) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual, "
                   "COALESCE(s.storage_limit, -1) AS storage_cap, COALESCE(s.entry_count_limit, -1) AS entry_cap "
-                  "FROM storage.files f JOIN storage.objects o ON o.id = f.object_id JOIN core.automated_services s "
+                  "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o ON "
+                  "o.id = fo.object_id JOIN core.automated_services s "
                   "ON s.id = f.automated_service_id "
                   "WHERE s.deleted_at IS NULL AND s.name ILIKE '%' || $1 || '%' ESCAPE '\\' "
                   "GROUP BY s.name, s.storage_limit, s.entry_count_limit ORDER BY 2 DESC LIMIT " +

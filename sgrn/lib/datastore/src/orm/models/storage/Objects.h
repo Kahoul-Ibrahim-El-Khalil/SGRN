@@ -53,6 +53,9 @@ public:
         static const std::string _compression_algorithm;
         static const std::string _compression_level;
         static const std::string _provider;
+        static const std::string _upload_mode;
+        static const std::string _part_count;
+        static const std::string _part_size_bytes;
         static const std::string _deleted_at;
         static const std::string _created_at;
     };
@@ -177,6 +180,33 @@ public:
     void setProvider(const std::string& pProvider) noexcept;
     void setProvider(std::string&& pProvider) noexcept;
 
+    /**  For column upload_mode  */
+    /// Get the value of the column upload_mode, returns the default value if the column is null
+    const std::string& getValueOfUploadMode() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<std::string>& getUploadMode() const noexcept;
+    /// Set the value of the column upload_mode
+    void setUploadMode(const std::string& pUploadMode) noexcept;
+    void setUploadMode(std::string&& pUploadMode) noexcept;
+
+    /**  For column part_count  */
+    /// Get the value of the column part_count, returns the default value if the column is null
+    const int32_t& getValueOfPartCount() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<int32_t>& getPartCount() const noexcept;
+    /// Set the value of the column part_count
+    void setPartCount(const int32_t& pPartCount) noexcept;
+    void setPartCountToNull() noexcept;
+
+    /**  For column part_size_bytes  */
+    /// Get the value of the column part_size_bytes, returns the default value if the column is null
+    const int64_t& getValueOfPartSizeBytes() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<int64_t>& getPartSizeBytes() const noexcept;
+    /// Set the value of the column part_size_bytes
+    void setPartSizeBytes(const int64_t& pPartSizeBytes) noexcept;
+    void setPartSizeBytesToNull() noexcept;
+
     /**  For column deleted_at  */
     /// Get the value of the column deleted_at, returns the default value if the column is null
     const ::trantor::Date& getValueOfDeletedAt() const noexcept;
@@ -195,7 +225,7 @@ public:
     void setCreatedAt(const ::trantor::Date& pCreatedAt) noexcept;
 
     static size_t getColumnNumber() noexcept {
-        return 11;
+        return 14;
     }
     static const std::string& getColumnName(size_t index) noexcept(false);
 
@@ -227,6 +257,9 @@ private:
     std::shared_ptr<std::string> compressionAlgorithm_;
     std::shared_ptr<int32_t> compressionLevel_;
     std::shared_ptr<std::string> provider_;
+    std::shared_ptr<std::string> uploadMode_;
+    std::shared_ptr<int32_t> partCount_;
+    std::shared_ptr<int64_t> partSizeBytes_;
     std::shared_ptr<::trantor::Date> deletedAt_;
     std::shared_ptr<::trantor::Date> createdAt_;
     struct MetaData {
@@ -239,7 +272,7 @@ private:
         const bool notNull_;
     };
     static const std::vector<MetaData> metaData_;
-    bool dirtyFlag_[11] = {false};
+    bool dirtyFlag_[14] = {false};
 
 public:
     static const std::string& sqlForFindingByPrimaryKey() {
@@ -291,13 +324,26 @@ public:
         if (!dirtyFlag_[8]) {
             needSelection = true;
         }
-        if (dirtyFlag_[9]) {
+        sql += "upload_mode,";
+        ++parametersCount;
+        if (!dirtyFlag_[9]) {
+            needSelection = true;
+        }
+        if (dirtyFlag_[10]) {
+            sql += "part_count,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[11]) {
+            sql += "part_size_bytes,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[12]) {
             sql += "deleted_at,";
             ++parametersCount;
         }
         sql += "created_at,";
         ++parametersCount;
-        if (!dirtyFlag_[10]) {
+        if (!dirtyFlag_[13]) {
             needSelection = true;
         }
         needSelection = true;
@@ -350,8 +396,22 @@ public:
         if (dirtyFlag_[9]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
+        } else {
+            sql += "default,";
         }
         if (dirtyFlag_[10]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[11]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[12]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[13]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         } else {

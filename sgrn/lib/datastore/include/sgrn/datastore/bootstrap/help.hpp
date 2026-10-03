@@ -34,7 +34,6 @@ constexpr const char help_message[] =
   Prerequisites — the following must be on $PATH (or in SGRN conda env):
     • postgres / pg_ctl          (PostgreSQL 15+)
     • garage                     (Garage v2.x, single-node layout)
-    • redis-server               (Redis 7+)
     • nginx                      (Nginx 1.24+)
 
   These are all available in the SGRN Micromamba environment:

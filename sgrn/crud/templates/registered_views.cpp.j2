@@ -1,0 +1,16 @@
+// generated/RegisteredViews.cpp (auto-generated from manifests)
+#include <drogon/HttpAppFramework.h>
+
+{% for handler in handlers %}
+#include "{{ handler.file_basename }}"
+{% endfor %}
+
+namespace sgrn::crud::generated {
+
+void registerAllCrudViews() {
+    {% for handler in handlers %}
+    drogon::app().registerController(std::make_shared<{{ handler.class_name }}>());
+    {% endfor %}
+}
+
+} // namespace sgrn::crud::generated

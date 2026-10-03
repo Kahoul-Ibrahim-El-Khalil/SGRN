@@ -276,8 +276,8 @@ inline void generateSystemdServices(const std::string& t_base_dir, const std::fu
     fs::path systemd_out_dir = fs::path(t_base_dir) / "systemd";
     fs::create_directories(systemd_out_dir);
 
-    static constexpr std::string_view kSystemdServices[] = {"SGRN-datastore.service", "SGRN-garage.service", "SGRN-postgres.service",
-        "SGRN-redis.service", "SGRN-nginx.service", "sgrn.service"};
+    static constexpr std::string_view kSystemdServices[] = {
+        "SGRN-datastore.service", "SGRN-garage.service", "SGRN-postgres.service", "SGRN-nginx.service", "sgrn.service"};
 
     for (auto svc : kSystemdServices) {
         std::string vp = std::string("/systemd/") + std::string(svc);
@@ -390,9 +390,9 @@ inline void stopLegacyServices(const std::string& t_sudo_user, uid_t t_user_uid)
 // the configureSystemd() euid check); every command tolerates absence.
 inline void removeObsoleteUnits(const std::filesystem::path& t_data_dir) {
     namespace fs = std::filesystem;
-    static constexpr std::string_view kObsoleteUnits[] = {"SGRN-postgrest.service", "SGRN-minio.service"};
+    static constexpr std::string_view kObsoleteUnits[] = {"SGRN-postgrest.service", "SGRN-minio.service", "SGRN-redis.service"};
     static constexpr std::string_view kObsoleteDataFiles[] = {
-        "systemd/SGRN-postgrest.service", "systemd/SGRN-minio.service", "postgrest.conf"};
+        "systemd/SGRN-postgrest.service", "systemd/SGRN-minio.service", "systemd/SGRN-redis.service", "postgrest.conf"};
 
     for (auto unit : kObsoleteUnits) {
         SGRN_INFO("DatastoreInit", "Removing obsolete unit {} (if present)...", unit);
@@ -457,7 +457,7 @@ inline std::vector<std::string> orderServicesForRestart(std::vector<std::string>
             ordered.push_back(std::move(svc));
     }
     auto tier = [](const std::string& t_svc) {
-        if (t_svc == "SGRN-postgres.service" || t_svc == "SGRN-redis.service")
+        if (t_svc == "SGRN-postgres.service")
             return 0;
         if (t_svc == "SGRN-garage.service")
             return 1;
@@ -597,6 +597,29 @@ inline void waitForPostgres(const std::string& t_host, const std::string& t_port
 // Main Functions (refactored — each now delegates to focused helpers)
 // ---------------------------------------------------------------------------
 
+/// Shared helper: builds a template variable substitution lambda from .env parameters.
+inline std::function<std::string(std::string)> buildTemplateResolver(
+    const std::string& t_base_dir, const std::string& t_fallback_user = "") {
+    std::string sgrn_user = envOrDefault("USER", t_fallback_user.empty() ? "admin" : t_fallback_user);
+    sgrn_user = envOrDefault("SGRN_USER", sgrn_user);
+    std::string pg_db = envOrDefault("POSTGRES_DB", "sgrn");
+    std::string pg_user = envOrDefault("POSTGRES_USER", "sgrn_datastore");
+    std::string pg_pass = envOrDefault("POSTGRES_PASSWORD", "change_me_secure_db_password");
+    std::string jwt_secret = envOrDefault("JWT_SECRET", "change_me_at_least_32_chars_jwt_secret");
+    std::string sgrn_data = envOrDefault("SGRN_DATA_DIR", t_base_dir);
+    std::string sgrn_bin = envOrDefault("SGRN_BIN_DIR", "/usr/local/bin");
+    std::string sgrn_deployment_env = envOrDefault("SGRN_DEPLOYMENT_ENV", "/home/" + sgrn_user + "/micromamba/envs/SGRN");
+    std::string garage_access = envOrDefault("GARAGE_ACCESS_KEY", "change_me_garage_access_key");
+    std::string garage_secret = envOrDefault("GARAGE_SECRET_KEY", "change_me_garage_secret_key");
+    std::string garage_rpc = envOrDefault("GARAGE_RPC_SECRET", "change_me_garage_rpc_secret_64_hex_chars");
+    std::string garage_admin = envOrDefault("GARAGE_ADMIN_TOKEN", "change_me_garage_admin_token_64_hex_chars");
+
+    return [=](std::string text) -> std::string {
+        return replaceTemplateVars(std::move(text), pg_db, pg_pass, jwt_secret, sgrn_user, sgrn_data, sgrn_bin, sgrn_deployment_env,
+            pg_user, garage_access, garage_secret, garage_rpc, garage_admin);
+    };
+}
+
 inline bool generateConfigOnly(const std::string& t_base_dir) {
     SGRN_INFO("DatastoreInit", "Starting Configuration Generation...");
 
@@ -611,19 +634,11 @@ inline bool generateConfigOnly(const std::string& t_base_dir) {
         generateDefaultEnvFile(env_path, sgrn_user, t_base_dir);
     }
 
-    // Load .env into the process environment so that envOrDefault() calls
-    // below return the user-edited values instead of hardcoded defaults.
-    // See sgrn::utils::env::loadFile() for the parser implementation.
     if (auto env_result = loadEnvFile(env_path); env_result.hasError()) {
         SGRN_ERROR("DatastoreInit", "Failed to load .env: {}", env_result.error());
         std::exit(EXIT_FAILURE);
     }
 
-    // Heal a stale SGRN_BIN_DIR: it is captured once when .env is created,
-    // so moving the checkout (or rebuilding elsewhere) leaves deployed units
-    // pointing at a dead path (systemd 203/EXEC crash-loop). Only touch it
-    // when the recorded dir no longer holds the binary; a valid custom
-    // value is never overwritten.
     {
         std::string recorded = envOrDefault("SGRN_BIN_DIR", "");
         std::string self_dir = currentExeDir();
@@ -637,25 +652,7 @@ inline bool generateConfigOnly(const std::string& t_base_dir) {
         }
     }
 
-    // Read env vars for templating — each call returns the env value or
-    // the provided fallback if the variable is not set.
-    std::string pg_db = envOrDefault("POSTGRES_DB", "sgrn");
-    std::string pg_user = envOrDefault("POSTGRES_USER", "sgrn_datastore");
-    std::string pg_pass = envOrDefault("POSTGRES_PASSWORD", "change_me_secure_db_password");
-    std::string jwt_secret = envOrDefault("JWT_SECRET", "change_me_at_least_32_chars_jwt_secret");
-    sgrn_user = envOrDefault("SGRN_USER", sgrn_user);
-    std::string sgrn_data = envOrDefault("SGRN_DATA_DIR", t_base_dir);
-    std::string sgrn_bin = envOrDefault("SGRN_BIN_DIR", "/usr/local/bin");
-    std::string sgrn_deployment_env = envOrDefault("SGRN_DEPLOYMENT_ENV", "/home/" + sgrn_user + "/micromamba/envs/SGRN");
-    std::string garage_access = envOrDefault("GARAGE_ACCESS_KEY", "change_me_garage_access_key");
-    std::string garage_secret = envOrDefault("GARAGE_SECRET_KEY", "change_me_garage_secret_key");
-    std::string garage_rpc = envOrDefault("GARAGE_RPC_SECRET", "change_me_garage_rpc_secret_64_hex_chars");
-    std::string garage_admin = envOrDefault("GARAGE_ADMIN_TOKEN", "change_me_garage_admin_token_64_hex_chars");
-
-    auto tmpl = [&](std::string text) -> std::string {
-        return replaceTemplateVars(std::move(text), pg_db, pg_pass, jwt_secret, sgrn_user, sgrn_data, sgrn_bin, sgrn_deployment_env,
-            pg_user, garage_access, garage_secret, garage_rpc, garage_admin);
-    };
+    auto tmpl = buildTemplateResolver(t_base_dir);
 
     generateSelfSignedCert(fs::path(t_base_dir) / "certs");
     extractConfigAssets(t_base_dir, tmpl);
@@ -680,23 +677,14 @@ inline void initDatabaseOnly(const std::string& t_base_dir) {
         std::exit(EXIT_FAILURE);
     }
 
-    // Database connection parameters — read from env with safe defaults.
     std::string pg_host = envOrDefault("POSTGRES_HOST", "127.0.0.1");
     std::string pg_port = envOrDefault("POSTGRES_PORT", "5432");
     std::string pg_db = envOrDefault("POSTGRES_DB", "sgrn");
-    std::string pg_superuser = envOrDefault("POSTGRES_SUPERUSER", envOrDefault("USER", "postgres"));
-    std::string pg_user = envOrDefault("POSTGRES_USER", "sgrn_datastore");
-    std::string pg_pass = envOrDefault("POSTGRES_PASSWORD", "change_me_secure_db_password");
-    std::string jwt_secret = envOrDefault("JWT_SECRET", "change_me_at_least_32_chars_jwt_secret");
-    std::string sgrn_user = envOrDefault("SGRN_USER", "admin");
-    std::string sgrn_data = envOrDefault("SGRN_DATA_DIR", t_base_dir);
-    std::string sgrn_bin = envOrDefault("SGRN_BIN_DIR", "/usr/local/bin");
+    std::string pg_superuser = envOrDefault("POSTGRES_SUPERUSER", "postgres");
+    std::string sgrn_user = envOrDefault("SGRN_USER", envOrDefault("USER", "admin"));
     std::string sgrn_deployment_env = envOrDefault("SGRN_DEPLOYMENT_ENV", "/home/" + sgrn_user + "/micromamba/envs/SGRN");
 
-    auto tmpl = [&](std::string text) -> std::string {
-        return replaceTemplateVars(
-            std::move(text), pg_db, pg_pass, jwt_secret, sgrn_user, sgrn_data, sgrn_bin, sgrn_deployment_env, pg_user);
-    };
+    auto tmpl = buildTemplateResolver(t_base_dir);
 
     std::string sql = decompressSqlAssets(tmpl);
 
@@ -795,7 +783,10 @@ inline void configureSystemd() {
         std::exit(EXIT_FAILURE);
     }
 
-    // Drop units/files of services that no longer exist (e.g. PostgREST),
+    auto tmpl = buildTemplateResolver(sgrn_data, sudo_user);
+    generateSystemdServices(sgrn_data, tmpl);
+
+    // Drop units/files of services that no longer exist (e.g. PostgREST, Redis),
     // from both the data dir and the system, before syncing the current set.
     removeObsoleteUnits(sgrn_data);
 
