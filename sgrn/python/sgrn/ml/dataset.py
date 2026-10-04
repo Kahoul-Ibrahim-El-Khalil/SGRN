@@ -43,7 +43,7 @@ ANCHOR_FRAME_DB_NUM = 0xFFFD
 BINARY_WAL_VERSION = 3
 
 
-def _find_next_anchor(raw: bytes, frm: int):
+def _findNextAnchor(raw: bytes, frm: int):
     """Byte-scan for the next CRC-verified anchor frame at/after frm.
 
     Returns the frame start offset, or None. The CRC makes false hits
@@ -68,16 +68,16 @@ class DatasetReader:
         self.csv_path = csv_path
         self.manifest: Dict[str, Any] = {}
         self.features: List[Dict[str, Any]] = []
-        self._load_manifest()
+        self._loadManifest()
 
-    def _load_manifest(self) -> None:
+    def _loadManifest(self) -> None:
         if not os.path.exists(self.manifest_path):
             raise FileNotFoundError(f"Manifest not found: {self.manifest_path}")
         with open(self.manifest_path, "r", encoding="utf-8") as f:
             self.manifest = json.load(f)
         self.features = self.manifest.get("features", [])
 
-    def get_feature_names(self, categorical_only: bool = False, continuous_only: bool = False) -> List[str]:
+    def getFeatureNames(self, categorical_only: bool = False, continuous_only: bool = False) -> List[str]:
         names = []
         for feat in self.features:
             if categorical_only and not feat.get("is_categorical", False):
@@ -87,9 +87,9 @@ class DatasetReader:
             names.append(feat["name"])
         return names
 
-    def load_pandas(self) -> Optional["pd.DataFrame"]:
+    def loadPandas(self) -> Optional["pd.DataFrame"]:
         if pd is None:
-            raise ImportError("pandas library is required for load_pandas()")
+            raise ImportError("pandas library is required for loadPandas()")
         
         dtype_map = {}
         for feat in self.features:
@@ -113,11 +113,11 @@ class DatasetReader:
         df[num_cols] = df[num_cols].fillna(0.0)
         return df
 
-    def load_numpy(self, target_column: Optional[str] = None) -> Tuple[Any, Optional[Any]]:
+    def loadNumpy(self, target_column: Optional[str] = None) -> Tuple[Any, Optional[Any]]:
         if np is None:
-            raise ImportError("numpy library is required for load_numpy()")
+            raise ImportError("numpy library is required for loadNumpy()")
         
-        df = self.load_pandas()
+        df = self.loadPandas()
         
         for col in df.select_dtypes(include=["category"]).columns:
             df[col] = df[col].cat.codes
@@ -149,11 +149,11 @@ class BinaryDatasetReader:
         self.schema_json: Dict[str, Any] = {}
         self.field_meta_list: List[Dict[str, Any]] = []
 
-        self._discover_files()
+        self._discoverFiles()
         if self.files:
-            self._load_header_schema(self.files[0])
+            self._loadHeaderSchema(self.files[0])
 
-    def _discover_files(self) -> None:
+    def _discoverFiles(self) -> None:
         if os.path.isfile(self.path):
             if self.path.endswith('.bin.zst') or self.path.endswith('.zst') or self.path.endswith('.bin'):
                 self.files.append(self.path)
@@ -167,7 +167,7 @@ class BinaryDatasetReader:
         if not self.files:
             raise FileNotFoundError(f"No binary archive files found under path: {self.path}")
 
-    def _decompress_file(self, file_path: str) -> bytes:
+    def _decompressFile(self, file_path: str) -> bytes:
         # 1. Try system zstd CLI tool first if available (handles multi-frame streaming archives reliably)
         import subprocess
         try:
@@ -192,8 +192,8 @@ class BinaryDatasetReader:
         
         raise RuntimeError(f"Failed to decompress {file_path}")
 
-    def _load_header_schema(self, file_path: str) -> None:
-        raw = self._decompress_file(file_path)
+    def _loadHeaderSchema(self, file_path: str) -> None:
+        raw = self._decompressFile(file_path)
         if len(raw) < 10 or raw[:4] != b'SGRN':
             raise ValueError(f"File {file_path} is not a valid SGRN binary archive (missing 'SGRN' magic header)")
         
@@ -202,15 +202,15 @@ class BinaryDatasetReader:
             schema_str = raw[10:10+schema_len].decode('utf-8', errors='ignore')
             try:
                 self.schema_json = json.loads(schema_str)
-                self._parse_field_meta()
+                self._parseFieldMeta()
             except Exception:
                 pass
         
         # If embedded header schema was empty and scl_schema_path was provided, load SCL schema file
         if not self.field_meta_list and self.scl_schema_path and os.path.exists(self.scl_schema_path):
-            self._load_scl_schema_file(self.scl_schema_path)
+            self._loadSclSchemaFile(self.scl_schema_path)
 
-    def _load_scl_schema_file(self, scl_path: str) -> None:
+    def _loadSclSchemaFile(self, scl_path: str) -> None:
         import re
         with open(scl_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
@@ -261,7 +261,7 @@ class BinaryDatasetReader:
                 offset += item_size
             default_db_num += 1
 
-    def _parse_field_meta(self) -> None:
+    def _parseFieldMeta(self) -> None:
         self.field_meta_list.clear()
         dbs = self.schema_json.get("dbs", {})
         if isinstance(dbs, list):
@@ -311,10 +311,10 @@ class BinaryDatasetReader:
                     "unit": f.get("unit", "")
                 })
 
-    def get_field_names(self) -> List[str]:
+    def getFieldNames(self) -> List[str]:
         return [f["full_name"] for f in self.field_meta_list]
 
-    def read_dataset(self) -> Tuple[np.ndarray, List[str], np.ndarray]:
+    def readDataset(self) -> Tuple[np.ndarray, List[str], np.ndarray]:
         """
         Parses all binary archives and returns:
         - timestamps: np.ndarray shape (N,)
@@ -322,13 +322,13 @@ class BinaryDatasetReader:
         - data_matrix: np.ndarray shape (N, F)
         """
         if np is None:
-            raise ImportError("numpy library is required for read_dataset()")
+            raise ImportError("numpy library is required for readDataset()")
 
         # If field_meta_list is empty, try loading SCL schema if provided
         if not self.field_meta_list and self.scl_schema_path and os.path.exists(self.scl_schema_path):
-            self._load_scl_schema_file(self.scl_schema_path)
+            self._loadSclSchemaFile(self.scl_schema_path)
 
-        feature_names = self.get_field_names()
+        feature_names = self.getFieldNames()
         all_timestamps = []
         rows = []
 
@@ -338,7 +338,7 @@ class BinaryDatasetReader:
 
         for file_path in self.files:
             try:
-                raw = self._decompress_file(file_path)
+                raw = self._decompressFile(file_path)
             except Exception:
                 continue
                 
@@ -355,8 +355,8 @@ class BinaryDatasetReader:
                 try:
                     schema_str = raw[10:10+schema_len].decode('utf-8', errors='ignore')
                     self.schema_json = json.loads(schema_str)
-                    self._parse_field_meta()
-                    feature_names = self.get_field_names()
+                    self._parseFieldMeta()
+                    feature_names = self.getFieldNames()
                     current_state = np.zeros(len(feature_names), dtype=np.float32)
                 except Exception:
                     pass
@@ -367,7 +367,7 @@ class BinaryDatasetReader:
                 pos += 14
 
                 if pos + payload_len > len(raw):
-                    found = _find_next_anchor(raw, frame_start)
+                    found = _findNextAnchor(raw, frame_start)
                     if found is None:
                         break
                     pos = found
@@ -393,7 +393,7 @@ class BinaryDatasetReader:
                             payload = bytes(last_images[anchor_db])
                             anchor_ok = True
                     if not anchor_ok:
-                        found = _find_next_anchor(raw, frame_start)
+                        found = _findNextAnchor(raw, frame_start)
                         if found is None:
                             break
                         pos = found
@@ -426,7 +426,7 @@ class BinaryDatasetReader:
                     if not ok:
                         if not corrupt:
                             continue
-                        found = _find_next_anchor(raw, frame_start)
+                        found = _findNextAnchor(raw, frame_start)
                         if found is None:
                             break
                         pos = found

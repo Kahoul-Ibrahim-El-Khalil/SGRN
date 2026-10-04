@@ -82,8 +82,8 @@ END_DATA_BLOCK
 | **`s7shell`** | `.prefix/bin/s7shell` | Soft-PLC simulator & active control engine executing AngelScript logic (`plc_logic.as`). |
 | **`sgrn_dataset`** | `.prefix/bin/sgrn_dataset` | High-performance C++ dataset generator and archive converter (`.bin.zst` <-> `.jsonl.zst` <-> `dataset.csv`). |
 | **`sgrn_replay`** | `.prefix/bin/sgrn_replay` | Gateway history archive replayer; initializes protocol interfaces for Northbound subscribers and streams archive frames. |
-| **`demo_datapipeline.py`** | `./demo_datapipeline.py` | End-to-end test harness: records live history, extracts datasets, trains AutoML models, and runs twin predictions. |
-| **`demo.py`** | `./demo.py` | Interactive post-compilation simulation harness launcher. |
+| **`demos/datapipeline.py`** | `./demos/datapipeline.py` | End-to-end test harness: records live history, extracts datasets, trains AutoML models, and runs twin predictions. |
+| **`demos/gateway.py`** | `./demos/gateway.py` | Interactive simulation launcher for gateway + soft-PLC + dashboard runs. |
 
 ---
 
@@ -148,12 +148,12 @@ cmake --build .build/linux-static-release/ -j12 --target install
 
 ### 2. Run Interactive Simulation Demo with Embedded GUI Window
 ```bash
-./demo.py
+./demos/gateway.py
 ```
 
 ### 3. Run End-to-End Twin Prediction Pipeline Test with Side-by-Side GUI Windows
 ```bash
-./demo_datapipeline.py --gui
+./demos/datapipeline.py --gui
 ```
 
 ---
@@ -165,11 +165,11 @@ from sgrn.ml import DatasetReader, AutoMLTrainer
 
 # 1. Read extracted dataset & manifest
 reader = DatasetReader("manifest.json", "dataset.csv")
-df = reader.load_pandas()  # Automatic NaN imputation & categorical factor encoding
+df = reader.loadPandas()  # Automatic NaN imputation & categorical factor encoding
 
 # 2. Train candidate models and select champion
 trainer = AutoMLTrainer("manifest.json", "dataset.csv")
-summary = trainer.train_and_select_best(
+summary = trainer.trainAndSelectBest(
     target_feature="TankSkid.tank_level",
     task="regression",
     output_model_prefix="scratch/model"

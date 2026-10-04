@@ -1,0 +1,42 @@
+{
+  "schema": "./sgrn/lib/gateway/simulations/tennessee/schema.scl",
+  "state_dir": "/tmp/sgrn-gateway-state",
+  "reconnect_ms": 5000,
+  "security_policy": "permissive",
+  "security_script": "./sgrn/lib/gateway/simulations/tennessee/security.as",
+
+  "southbound": {
+    "s7": {
+      "ip": "0.0.0.0",
+      "port": 102,
+      "max_clients": 10,
+      "pdu_size": 960
+    }
+  },
+
+  "northbound": {
+    "http": {
+      "ip": "0.0.0.0",
+      "port": 8000
+    },
+    "websocket": {
+      "ip": "0.0.0.0",
+      "port": 8000
+    },
+    "opcua": {
+      "ip": "0.0.0.0",
+      "port": 4840
+    }
+  },
+
+  "persistence": {
+    "enabled": true,
+    "mode": "changes_with_timestamp",
+    "format": "binary",
+    "namespaces": ["Reactor", "Separator", "Stripper", "Compressor", "PlantWide"],
+    "atomic_window_ms": 10,
+    "max_events": 200,
+    "batch_interval_s": 10,
+    "zstd_level": 9
+  }
+}

@@ -7,10 +7,10 @@ reassembly, ping/pong, and close. No third-party dependencies are required,
 which keeps the SGRN bindings usable on minimal/offline runtimes.
 
 Exposed pieces:
-    WebSocket            async client with ``connect/send_text/send_bytes/recv/close``
+    WebSocket            async client with ``connect/sendText/sendBytes/recv/close``
     WebSocketError       protocol / transport error
     WebSocketClosed      raised by :meth:`WebSocket.recv` after the peer closes
-    encode_frame         frame builder (also used by echo servers / tests)
+    encodeFrame         frame builder (also used by echo servers / tests)
     FrameDecoder         incremental frame parser (also used by tests)
 """
 
@@ -30,8 +30,8 @@ __all__ = [
     "WebSocket",
     "WebSocketError",
     "WebSocketClosed",
-    "compute_accept_key",
-    "encode_frame",
+    "computeAcceptKey",
+    "encodeFrame",
     "Frame",
 ]
 
@@ -55,13 +55,13 @@ class WebSocketClosed(WebSocketError):
     """Raised when the peer closes the connection (cleanly or not)."""
 
 
-def compute_accept_key(t_key: str) -> str:
+def computeAcceptKey(t_key: str) -> str:
     """Sec-WebSocket-Accept value for the given Sec-WebSocket-Key."""
     digest = hashlib.sha1((t_key + _GUID).encode("ascii")).digest()
     return base64.b64encode(digest).decode("ascii")
 
 
-def encode_frame(t_payload: bytes, t_opcode: int, *, t_client_masked: bool = True) -> bytes:
+def encodeFrame(t_payload: bytes, t_opcode: int, *, t_client_masked: bool = True) -> bytes:
     """Build a single (non-fragmented) WebSocket frame."""
     if len(t_payload) > _MAX_FRAME_SIZE:
         raise WebSocketError(f"payload too large: {len(t_payload)} bytes")
@@ -260,7 +260,7 @@ class WebSocket:
         status, resp_headers = self._parse_handshake(head.decode("latin-1"))
         if status != 101:
             raise WebSocketError(f"handshake failed: HTTP {status}")
-        if resp_headers.get("sec-websocket-accept", "").strip() != compute_accept_key(key):
+        if resp_headers.get("sec-websocket-accept", "").strip() != computeAcceptKey(key):
             raise WebSocketError("handshake failed: bad Sec-WebSocket-Accept")
 
     async def close(self, t_code: int = 1000, t_reason: str = "") -> None:
@@ -270,7 +270,7 @@ class WebSocket:
         try:
             if self._writer and not self._writer.is_closing():
                 payload = struct.pack(">H", t_code) + t_reason.encode("utf-8")
-                self._writer.write(encode_frame(payload, _OP_CLOSE, client_masked=True))
+                self._writer.write(encodeFrame(payload, _OP_CLOSE, client_masked=True))
                 await self._writer.drain()
         except Exception:
             pass
@@ -287,11 +287,11 @@ class WebSocket:
 
     # ── send ─────────────────────────────────────────────────────────────
 
-    async def send_text(self, t_text: str) -> None:
-        await self._send_frame(encode_frame(t_text.encode("utf-8"), _OP_TEXT, client_masked=True))
+    async def sendText(self, t_text: str) -> None:
+        await self._send_frame(encodeFrame(t_text.encode("utf-8"), _OP_TEXT, client_masked=True))
 
-    async def send_bytes(self, t_payload: bytes) -> None:
-        await self._send_frame(encode_frame(t_payload, _OP_BIN, client_masked=True))
+    async def sendBytes(self, t_payload: bytes) -> None:
+        await self._send_frame(encodeFrame(t_payload, _OP_BIN, client_masked=True))
 
     async def _send_frame(self, t_frame: bytes) -> None:
         if self._writer is None or self._closed:
@@ -311,7 +311,7 @@ class WebSocket:
             while self._incoming:
                 frame = self._incoming.popleft()
                 if frame.opcode == _OP_PING and self._writer and not self._writer.is_closing():
-                    self._writer.write(encode_frame(frame.payload, _OP_PONG, client_masked=True))
+                    self._writer.write(encodeFrame(frame.payload, _OP_PONG, client_masked=True))
                     await self._writer.drain()
                     continue
                 if frame.opcode == _OP_CLOSE:

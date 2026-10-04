@@ -696,3 +696,50 @@ tr:hover {
 .text-dim {
   color: var(--text-dim);
 }
+
+.prediction-summary {
+  margin: 10px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--surface-border);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg);
+  flex-shrink: 0;
+}
+
+.prediction-heading,
+.prediction-values {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.prediction-heading {
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.prediction-heading span,
+.prediction-value span {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.prediction-heading .prediction-ready {
+  color: var(--accent);
+}
+
+.prediction-values {
+  flex-wrap: wrap;
+}
+
+.prediction-value {
+  display: grid;
+  gap: 3px;
+  min-width: 100px;
+}
+
+.prediction-value strong {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}

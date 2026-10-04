@@ -96,7 +96,12 @@ DbField plcNodeToDbField(const sgrn::gateway::twin::PlcNode& t_node) {
     // children carry their own relative offsets as stored in PlcNode.
     t_f.offset = 0;
     if (t_node.type_ == s7codec::Type::Struct || !t_node.children_.empty()) {
-        t_f.struct_size = static_cast<int>((t_node.count_ > 1) ? (t_node.size_ / t_node.count_) : t_node.size_);
+        // struct_size is the PER-ELEMENT byte span (DbField convention, and
+        // what PlcNode::serialize assumes for its stride). PlcNode::size_ is
+        // already per-element — do NOT divide by count (that yields a bogus
+        // stride, e.g. 28/3=9 for a 3x28 UDT array, failing every struct-array
+        // encode at the first child past the truncated span).
+        t_f.struct_size = static_cast<int>(t_node.size_);
         for (const auto& child : t_node.children_) {
             DbField cf = plcNodeToDbField(child);
             cf.offset = static_cast<int>(child.offset_);

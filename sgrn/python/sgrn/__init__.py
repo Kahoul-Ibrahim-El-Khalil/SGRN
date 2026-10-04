@@ -32,8 +32,8 @@ from .models import (
     SessionInfo,
     SymbolTag,
     UdtSchema,
-    as_bytes,
-    to_base64url,
+    asBytes,
+    toBase64url,
 )
 from .telemetry import GatewayTelemetry, NumpyHistory, TelemetryBatch, TelemetryEngine, TelemetryUpdate
 
@@ -70,7 +70,7 @@ __all__ = [
     "LogEntry",
     "SecurityRule",
     "SecurityPolicyResponse",
-    "to_base64url",
-    "as_bytes",
+    "toBase64url",
+    "asBytes",
     "__version__",
 ]

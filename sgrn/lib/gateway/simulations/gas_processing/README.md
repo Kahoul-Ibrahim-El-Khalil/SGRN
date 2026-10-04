@@ -14,7 +14,7 @@ This scenario simulates a natural gas dehydration unit using a 3-tower molecular
 ## Enabled / Disabled Features
 - **S7 Adapter**: **Enabled** (Port 102).
 - **HTTP/WebSocket API**: **Enabled** (Port 8000; WebSocket at `/ws`).
-- **Modbus Adapter**: **Disabled** in demo via `demo.py` due to port 502 root binding restrictions (unless run with `sudo`).
+- **Modbus Adapter**: **Disabled** in the default simulation configuration due to port 502 root binding restrictions.
 - **Security**: **Strict Mode**. AngelScript policy enforced via `security.as`.
 - **Persistence**: **Enabled**. Snapshots are flushed to `/tmp/sgrn-gateway-state`.
 
@@ -22,6 +22,8 @@ This scenario simulates a natural gas dehydration unit using a 3-tower molecular
 1. Observe the cycling state of the towers in `DB2` (`AdsorberTowers`).
 2. Watch the `coalescer_dp` in `DB1` slowly rise due to fouling.
 3. Observe the `heater_outlet_temp` ramping up and down in `DB3` in sync with the tower states.
+
+For the complete recorded-history experiment, run `python3 demos/history_twin.py` from the repository root. The isolated S7Shell simulation uses its `Persistence` binding to write the binary WAL, then the experiment replays that archive through `sgrn_replay` and runs a prediction gateway beside it. The temporary gateway serves the S7 connection during capture but does not record the archive. The `--fault` option adds a selected fault to the isolated recording copy, leaving this baseline simulation unchanged.
 
 > [!TIP]
 > **Forcing Values:** Because the Gateway acts as a unified hub, you can interactively force variables and override the running physics using an external **OPC-UA Client** (connecting to `opc.tcp://localhost:4840`) or by directly connecting with the **`s7shell`** in a separate terminal.

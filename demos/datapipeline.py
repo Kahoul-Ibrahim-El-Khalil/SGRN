@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-demo_datapipeline.py — End-to-End Twin-Comparison Test Harness for SGRN ML & Data Pipeline.
+demos/datapipeline.py — End-to-End Twin-Comparison Test Harness for SGRN ML & Data Pipeline.
 
 Workflow:
   1. Primary Gateway (Ground Truth) emits real-time telemetry events.
@@ -18,7 +18,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 BUILD_BIN_DIR = BASE_DIR / ".prefix" / "bin"
 GATEWAY_BIN = BUILD_BIN_DIR / "gateway"
 S7SHELL_BIN = BUILD_BIN_DIR / "s7shell"
@@ -27,10 +27,10 @@ SGRN_DATASET_BIN = BUILD_BIN_DIR / "sgrn_dataset"
 WORK_DIR = BASE_DIR / "scratch" / "ml_pipeline_demo"
 SIM_DIR = BASE_DIR / "sgrn" / "lib" / "gateway" / "simulations" / "simple_skid"
 
-def print_header(title: str):
+def printHeader(title: str):
     print(f"\n{'='*60}\n {title}\n{'='*60}")
 
-def find_binary(name: str) -> Path | None:
+def findBinary(name: str) -> Path | None:
     candidates = [
         BASE_DIR / ".prefix" / "bin" / name,
         BASE_DIR / ".dist" / "linux-static-release" / name,
@@ -44,24 +44,24 @@ def find_binary(name: str) -> Path | None:
             return p
     return None
 
-def check_binaries():
+def checkBinaries():
     global GATEWAY_BIN, S7SHELL_BIN, SGRN_DATASET_BIN
     
-    gb = find_binary("gateway")
+    gb = findBinary("gateway")
     if gb: GATEWAY_BIN = gb
     
-    sb = find_binary("s7shell")
+    sb = findBinary("s7shell")
     if sb: S7SHELL_BIN = sb
     
-    db = find_binary("sgrn_dataset")
+    db = findBinary("sgrn_dataset")
     if db: SGRN_DATASET_BIN = db
     
     if not SGRN_DATASET_BIN.exists():
         print(f"[demo_datapipeline] Warning: sgrn_dataset binary not found at {SGRN_DATASET_BIN}. Run cmake build first.")
 
-def run_pipeline_demo(gui_mode: bool = False):
-    print_header("SGRN End-to-End Twin-Comparison ML Pipeline Harness")
-    check_binaries()
+def runPipelineDemo(gui_mode: bool = False):
+    printHeader("SGRN End-to-End Twin-Comparison ML Pipeline Harness")
+    checkBinaries()
 
     # 1. Prepare isolated workspace & configs
     if WORK_DIR.exists():
@@ -168,7 +168,7 @@ def run_pipeline_demo(gui_mode: bool = False):
     try:
         from sgrn.ml import AutoMLTrainer, DatasetReader
         trainer = AutoMLTrainer(str(manifest_file), str(csv_file))
-        summary = trainer.train_and_select_best("TankSkid.tank_level", task="regression", output_model_prefix=str(WORK_DIR / "model"))
+        summary = trainer.trainAndSelectBest("TankSkid.tank_level", task="regression", output_model_prefix=str(WORK_DIR / "model"))
     except Exception as e:
         print(f"[demo_datapipeline] AutoML training error: {e}")
         sys.exit(1)
@@ -182,7 +182,7 @@ def run_pipeline_demo(gui_mode: bool = False):
     time.sleep(1.5)
 
     reader = DatasetReader(str(manifest_file), str(csv_file))
-    df = reader.load_pandas()
+    df = reader.loadPandas()
     
     print(f"[4/5] Replaying timestamps and predicting TankSkid.tank_level...")
     print(f"Timestamp (ms)   | Ground Truth (TankSkid.tank_level) | Model Prediction | Residual (Abs Diff)")
@@ -236,10 +236,10 @@ def run_pipeline_demo(gui_mode: bool = False):
             pred_proc.terminate()
             pred_proc.wait()
 
-    print_header("End-to-End Twin-Comparison Pipeline Demonstration Completed!")
+    printHeader("End-to-End Twin-Comparison Pipeline Demonstration Completed!")
 
 if __name__ == "__main__":
     use_gui = "--gui" in sys.argv
     if use_gui:
         print("[demo_datapipeline] Launching with --gui side-by-side desktop windows!")
-    run_pipeline_demo(gui_mode=use_gui)
+    runPipelineDemo(gui_mode=use_gui)

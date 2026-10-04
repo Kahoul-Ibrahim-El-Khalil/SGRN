@@ -5,7 +5,7 @@ Lets callers treat gateway registry schemas (``DbSchema`` / ``UdtSchema``)
 as NumPy structured dtypes, so a single raw memory read turns straight into
 a structured NumPy record instead of a hand-parsed dict. This is the fast
 path for feeding PLC memory into ML/data pipelines: see
-``Gateway.read_db_array`` and ``DbSchema.to_dtype``.
+``Gateway.readDbArray`` and ``DbSchema.toDtype``.
 
 Fixed-width numeric fields use the byte order declared by the schema for
 that field. The gateway can mix big-endian and little-endian fields inside
@@ -27,8 +27,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "S7TypeError",
-    "s7_scalar_dtype",
-    "s7_field_dtype",
+    "s7ScalarDtype",
+    "s7FieldDtype",
     "build_dtype",
     "unpackBool",
     "unpackString",
@@ -80,13 +80,13 @@ _HEADER_BYTES: Dict[str, int] = {"STRING": 2, "WSTRING": 4, "XSTRING": 8, "XWSTR
 _CHAR_WIDTH: Dict[str, int] = {"STRING": 1, "WSTRING": 2, "XSTRING": 1, "XWSTRING": 2}
 
 
-def _resolve_byteorder(t_endianness: Optional[str]) -> str:
+def _resolveByteorder(t_endianness: Optional[str]) -> str:
     if isinstance(t_endianness, str) and t_endianness.lower().startswith("l"):
         return "<"
     return ">"
 
 
-def s7_scalar_dtype(
+def s7ScalarDtype(
     t_type_name: str,
     *,
     t_capacity: Optional[int] = None,
@@ -98,7 +98,7 @@ def s7_scalar_dtype(
         code = _SCALAR_MAP[t]
         if code.startswith("S"):
             return np.dtype(code)
-        return np.dtype(f"{_resolve_byteorder(t_endianness)}{code}")
+        return np.dtype(f"{_resolveByteorder(t_endianness)}{code}")
     if t in _OPAQUE_SIZE_BYTES:
         return np.dtype(f"V{_OPAQUE_SIZE_BYTES[t]}")
     if t in _HEADER_BYTES:
@@ -108,7 +108,7 @@ def s7_scalar_dtype(
     raise S7TypeError(f"no NumPy mapping for S7 type {t_type_name!r} (STRUCT/UDT fields need build_dtype)")
 
 
-def s7_field_dtype(
+def s7FieldDtype(
     t_field: "DbField",
     *,
     t_udts: Optional[Dict[str, "UdtSchema"]] = None,
@@ -147,7 +147,7 @@ def s7_field_dtype(
         size = t_field.struct_size or 1
         return np.dtype(f"V{size}"), shape
 
-    base = s7_scalar_dtype(
+    base = s7ScalarDtype(
         t_field.type,
         t_capacity=t_field.capacity,
         t_endianness=resolved_endianness,
@@ -166,7 +166,7 @@ def _buildDtype(
     Build a NumPy structured dtype mirroring a DB/UDT field tree.
 
     Field offsets come straight from the registry, so the resulting dtype
-    maps directly onto the raw bytes returned by ``Gateway.memory_read`` —
+    maps directly onto the raw bytes returned by ``Gateway.memoryRead`` —
     no per-field parsing required. BOOL fields that share a byte (common
     for PLC bit-packed flags) intentionally overlap in the dtype; use
     :func:`unpackBool` to pull out the individual bit after reading.
@@ -177,7 +177,7 @@ def _buildDtype(
     seen: Dict[str, int] = {}
 
     for f in t_fields:
-        dt, shape = s7_field_dtype(f, t_udts=t_udts, t_inherited_endianness=t_inherited_endianness)
+        dt, shape = s7FieldDtype(f, t_udts=t_udts, t_inherited_endianness=t_inherited_endianness)
         name = f.name
         if name in seen:
             seen[name] += 1
@@ -221,14 +221,14 @@ def unpackString(t_raw: bytes, *, t_wide: bool = False) -> str:
     return bytes(t_raw[4 : 4 + cur_len * 2]).decode("utf-16-be", errors="replace")
 
 
-def decode_record(
+def decodeRecord(
     t_record: Any,
     t_fields: Sequence["DbField"],
     *,
     t_udts: Optional[Dict[str, "UdtSchema"]] = None
 ) -> Dict[str, Any]:
     """
-    Recursively decode a structured NumPy record (from `DbSchema.to_dtype()`)
+    Recursively decode a structured NumPy record (from `DbSchema.toDtype()`)
     back into a clean, JSON-serializable Python dictionary.
     
     This is extremely useful for debugging binary WebSocket streams, as it
@@ -253,22 +253,22 @@ def decode_record(
         if f.count > 1:
             arr = []
             for i in range(f.count):
-                arr.append(_decode_value(raw_val[i], f, t_udts))
+                arr.append(_decodeValue(raw_val[i], f, t_udts))
             result[name] = arr
         else:
-            result[name] = _decode_value(raw_val, f, t_udts)
+            result[name] = _decodeValue(raw_val, f, t_udts)
             
     return result
 
 
-def _decode_value(t_val: Any, t_field: "DbField", t_udts: Optional[Dict[str, "UdtSchema"]]) -> Any:
+def _decodeValue(t_val: Any, t_field: "DbField", t_udts: Optional[Dict[str, "UdtSchema"]]) -> Any:
     if t_field.children:
-        return decode_record(t_val, t_field.children, t_udts=t_udts)
+        return decodeRecord(t_val, t_field.children, t_udts=t_udts)
     
     if t_field.udt_name:
         udt = (t_udts or {}).get(t_field.udt_name)
         if udt is not None:
-            return decode_record(t_val, udt.fields, t_udts=t_udts)
+            return decodeRecord(t_val, udt.fields, t_udts=t_udts)
         return bytes(t_val).hex()  # Opaque unresolvable UDT blob
         
     t = t_field.type.upper()

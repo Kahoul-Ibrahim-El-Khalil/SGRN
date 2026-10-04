@@ -354,6 +354,34 @@ std::string PlcState::getDeltaSnapshotFlat(
                 continue;
 
             const std::string id_str = std::to_string(id);
+
+            // Array-of-struct leaves (e.g. "Db.towers.moisture_loading") carry
+            // one value per element: the dictionary path addresses the field,
+            // and nodes_ holds the element-0 descriptor. Emit a JSON array
+            // across the parent's stride instead of element 0 alone, so no
+            // element is invisible on the wire. (Primitive arrays serialize
+            // natively via the node itself and never reach this branch.)
+            bool emitted_array = false;
+            const size_t dot = path.find_last_of('.');
+            if (dot != std::string::npos) {
+                auto pit = nodes_.find(path.substr(0, dot));
+                if (pit != nodes_.end() && pit->second && pit->second.get() != it->second.get() && pit->second->count_ > 1 &&
+                    !pit->second->is_dynamic_ && pit->second->size_ > 0) {
+                    const uint32_t n = pit->second->count_;
+                    const size_t stride = static_cast<size_t>(pit->second->size_);
+                    if (n <= 4096 && stride > 0 && stride <= (static_cast<size_t>(1) << 20)) {
+                        writer.Key(id_str.c_str(), static_cast<rapidjson::SizeType>(id_str.size()));
+                        writer.StartArray();
+                        for (uint32_t i = 0; i < n; ++i)
+                            it->second->serialize(writer, tree(), 0, i * stride);
+                        writer.EndArray();
+                        emitted_array = true;
+                    }
+                }
+            }
+            if (emitted_array)
+                continue;
+
             writer.Key(id_str.c_str(), static_cast<rapidjson::SizeType>(id_str.size()));
             it->second->serialize(writer, tree(), 0, 0);
         }

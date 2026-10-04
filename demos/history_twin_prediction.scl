@@ -1,0 +1,6 @@
+// Minimal schema for the right-hand model prediction gateway.
+DATA_BLOCK "ModelOutput" DB 1
+VAR
+    dew_point_prediction : Real #UNIT("°C"); // Predicted outlet dew point, H replay ticks ahead.
+END_VAR
+END_DATA_BLOCK

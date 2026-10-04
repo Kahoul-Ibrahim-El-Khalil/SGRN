@@ -33,7 +33,7 @@ from sgrn.models import (
     MemorySpan,
     RegistryResponse,
     SecurityPolicyResponse,
-    to_base64url,
+    toBase64url,
 )
 
 REGISTRY = {
@@ -89,7 +89,7 @@ REACTOR_CORE_BYTES = struct.pack(">f", 42.5) + struct.pack(">5h", 1, 2, 3, 4, 5)
 # revision (which referenced this name from ``do_PUT`` before it was ever
 # assigned at module scope — a ``NameError`` waiting to happen the first
 # time ``PUT /memory/batch`` was actually exercised).
-BATCH_WRITE_RESPONSE = [{"db": 1, "offset": 0, "size": 4, "written": to_base64url(BINARY_PAYLOAD)}]
+BATCH_WRITE_RESPONSE = [{"db": 1, "offset": 0, "size": 4, "written": toBase64url(BINARY_PAYLOAD)}]
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -142,7 +142,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.write(REACTOR_CORE_BYTES)
             return
         if path == "/memory/batch":
-            return self._write([{"db": 1, "offset": 0, "size": 4, "data": to_base64url(BINARY_PAYLOAD)}])
+            return self._write([{"db": 1, "offset": 0, "size": 4, "data": toBase64url(BINARY_PAYLOAD)}])
         if path == "/connections":
             return self._write(CONNECTIONS)
         if path == "/db/history":
@@ -212,64 +212,64 @@ def main() -> None:
     assert isinstance(reg, RegistryResponse)
     assert len(reg.dbs) == 1 and reg.dbs[0].db_name == "ReactorCore"
     assert reg.dbs[0].fields[0].type == "REAL"
-    assert reg.db_by_number(10) is reg.dbs[0]
+    assert reg.dbByNumber(10) is reg.dbs[0]
     assert reg.udts[0].name == "Temps"
     assert reg.tags[0].address == "DB10.DBD0"
     assert gw.registry(t_headers_only=True).dbs[0].fields == []
     assert gw.registry(t_db=10).dbs[0].db_number == 10
 
     # Registry aux
-    assert gw.registry_types() == {"INT": 2}
+    assert gw.registryTypes() == {"INT": 2}
     try:
-        gw.modbus_map()
-        raise AssertionError("modbus_map should 404")
+        gw.modbusMap()
+        raise AssertionError("modbusMap should 404")
     except GatewayError as e:
         assert getattr(e, "status", None) == 404
 
     # Data
-    assert gw.read_data()["ReactorCore"]["thermal_power_mw"] == 42.5
-    assert gw.read_data("ReactorCore/speed") is not None
-    res = gw.write_fields("ReactorCore", {"speed": 1.0})
+    assert gw.readData()["ReactorCore"]["thermal_power_mw"] == 42.5
+    assert gw.readData("ReactorCore/speed") is not None
+    res = gw.writeFields("ReactorCore", {"speed": 1.0})
     assert isinstance(res, DataWriteResult) and res.fields_written == 1
-    assert gw.write_field("ReactorCore/speed", 1.0).value == 1.0
-    assert gw.write_array_element("DB2/temperatures", 2, 42.0).fields_written == 1
-    assert gw.write_multi_db({"ReactorCore": {"speed": 2.0}}) == {"fields_written": 2}
-    assert gw.replace_field("ReactorCore/speed", 3.0).fields_written > 0
+    assert gw.writeField("ReactorCore/speed", 1.0).value == 1.0
+    assert gw.writeArrayElement("DB2/temperatures", 2, 42.0).fields_written == 1
+    assert gw.writeMultiDb({"ReactorCore": {"speed": 2.0}}) == {"fields_written": 2}
+    assert gw.replaceField("ReactorCore/speed", 3.0).fields_written > 0
 
     # Memory (raw bytes)
-    assert gw.memory_read(1, 0, 4) == BINARY_PAYLOAD
-    assert gw.memory_write(1, 0, BINARY_PAYLOAD) == BINARY_PAYLOAD
-    reads = gw.memory_batch_read([MemorySpan(1, 0, 4)])
+    assert gw.memoryRead(1, 0, 4) == BINARY_PAYLOAD
+    assert gw.memoryWrite(1, 0, BINARY_PAYLOAD) == BINARY_PAYLOAD
+    reads = gw.memoryBatchRead([MemorySpan(1, 0, 4)])
     assert len(reads) == 1 and isinstance(reads[0], MemoryReadItem) and reads[0].data == BINARY_PAYLOAD
-    batch = gw.memory_batch_write([MemoryBatchWriteItem(1, 0, BINARY_PAYLOAD)])
+    batch = gw.memoryBatchWrite([MemoryBatchWriteItem(1, 0, BINARY_PAYLOAD)])
     assert batch[0].written == BINARY_PAYLOAD
 
-    # Memory (NumPy) — dtype param on memory_read/memory_batch_read,
-    # ndarray input on memory_write/memory_batch_write.
-    arr = gw.memory_read(1, 0, 4, t_dtype=">u1")
+    # Memory (NumPy) — dtype param on memoryRead/memoryBatchRead,
+    # ndarray input on memoryWrite/memoryBatchWrite.
+    arr = gw.memoryRead(1, 0, 4, t_dtype=">u1")
     assert isinstance(arr, np.ndarray) and arr.tolist() == [1, 2, 3, 4]
     np_payload = np.array([9, 9, 9, 9], dtype=">u1")
-    assert gw.memory_write(1, 0, np_payload) == b"\x09\x09\x09\x09"
-    np_batch = gw.memory_batch_write([MemoryBatchWriteItem(1, 0, np.array([1, 2, 3, 4], dtype=">u1"))])
+    assert gw.memoryWrite(1, 0, np_payload) == b"\x09\x09\x09\x09"
+    np_batch = gw.memoryBatchWrite([MemoryBatchWriteItem(1, 0, np.array([1, 2, 3, 4], dtype=">u1"))])
     assert np_batch[0].written == BINARY_PAYLOAD
-    arrays = gw.memory_batch_read([MemorySpan(1, 0, 4)], t_dtype=">u1")
+    arrays = gw.memoryBatchRead([MemorySpan(1, 0, 4)], t_dtype=">u1")
     assert isinstance(arrays[0], np.ndarray) and arrays[0].tolist() == [1, 2, 3, 4]
 
     # Schema -> NumPy structured dtype, and a whole-DB structured read.
-    dt = reg.dbs[0].to_dtype()
+    dt = reg.dbs[0].toDtype()
     assert dt.names == ("thermal_power_mw", "rods")
     assert dt.fields["thermal_power_mw"][0].itemsize == 4
     assert dt.fields["rods"][0].shape == (5,)
-    record = gw.read_db_array("ReactorCore", t_registry=reg)
+    record = gw.readDbArray("ReactorCore", t_registry=reg)
     assert abs(float(record["thermal_power_mw"]) - 42.5) < 1e-4
     assert list(record["rods"]) == [1, 2, 3, 4, 5]
 
     # Diagnostics
     conns = gw.connections()
     assert conns[0].ip == "127.0.0.1" and conns[0].type == "s7"
-    assert gw.db_history() == {"series": []}
-    assert gw.db_sessions()[0].bytes_sent == 2
-    assert gw.db_logs(50)[0].level == "INFO"
+    assert gw.dbHistory() == {"series": []}
+    assert gw.dbSessions()[0].bytes_sent == 2
+    assert gw.dbLogs(50)[0].level == "INFO"
     assert gw.endpoints()[0].path == "/registry"
 
     # Policy
@@ -279,7 +279,7 @@ def main() -> None:
 
     # Errors
     try:
-        gw.read_data("DoesNotExist")
+        gw.readData("DoesNotExist")
         raise AssertionError("expected GatewayHTTPError on 404")
     except GatewayError as e:
         assert getattr(e, "status", None) == 404

@@ -59,7 +59,7 @@ END_TYPE
 TYPE "FlowMeter"
   VAR
     rate      : Real #UNIT("dam³/h");
-    totalizer  : LReal #UNIT("dam³/h");;    // cumulative totalized flow
+    totalizer  : LReal #UNIT("dam³/h");    // cumulative totalized flow
     low_flow_alarm  : Bool;
     sensor_fault    : Bool;
   END_VAR
@@ -206,6 +206,8 @@ DATA_BLOCK "OutletQuality" DB 5
 VAR
     // ── Dew point analyzer ──
     dew_point               : Real #UNIT("°C");     // target ≤ -100 °C (pipeline spec dependent)
+    dew_point_forecast      : Real #UNIT("°C");     // model forecast H ticks ahead
+    dew_point_forecast_std  : Real #UNIT("°C");     // forecast uncertainty
     dew_point_spec : Real #UNIT("°C");     // contractual sales spec
     dew_point_hi_alarm      : Bool;
     analyzer_fault          : Bool;
@@ -231,6 +233,9 @@ DATA_BLOCK "SafetySystems" DB 6
 VAR
     // ── ESD logic ──
     esd_signal          : Bool;
+    model_trip_advice   : Bool;     // checker-gated model advice; not a plant trip
+    model_anomaly       : Bool;
+    model_fault_code    : Word;
     esd_manual          : Bool;
     esd_auto            : Bool;
     esd_reason_code      : Word;

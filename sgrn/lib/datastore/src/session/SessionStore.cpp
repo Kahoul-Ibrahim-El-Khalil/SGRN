@@ -206,8 +206,7 @@ Task<void> SessionStore::revokeSession(const std::string& token, std::string ter
 
         // 3. Stamp terminated_at + reason in PostgreSQL
         co_await db->execSqlCoro(
-            "UPDATE core.sessions SET terminated_at = NOW(), termination_reason = $2 WHERE token = $1::uuid",
-            token, termination_reason);
+            "UPDATE core.sessions SET terminated_at = NOW(), termination_reason = $2 WHERE token = $1::uuid", token, termination_reason);
 
         // 4. Build rich webhook payload from cached claims
         Json::Value payload;
@@ -229,16 +228,21 @@ Task<void> SessionStore::revokeSession(const std::string& token, std::string ter
             }
             if (cached_claims.isMember("user")) {
                 const Json::Value& u = cached_claims["user"];
-                if (u.isMember("id"))          payload["user_id"] = u["id"];
-                if (u.isMember("email"))        payload["email"] = u["email"];
+                if (u.isMember("id"))
+                    payload["user_id"] = u["id"];
+                if (u.isMember("email"))
+                    payload["email"] = u["email"];
                 if (u.isMember("organisation")) {
                     payload["organisation"] = u["organisation"];
                     org = u["organisation"].asString();
                 }
-                if (u.isMember("domain"))  payload["domain"] = u["domain"];
-                if (u.isMember("automated_service_id")) payload["automated_service_id"] = u["automated_service_id"];
+                if (u.isMember("domain"))
+                    payload["domain"] = u["domain"];
+                if (u.isMember("automated_service_id"))
+                    payload["automated_service_id"] = u["automated_service_id"];
             }
-            if (cached_claims.isMember("ip"))   payload["ip"] = cached_claims["ip"];
+            if (cached_claims.isMember("ip"))
+                payload["ip"] = cached_claims["ip"];
         }
 
         // 5. Send NOTIFY so other instances evict this token from their RAM caches
@@ -259,9 +263,8 @@ Task<std::optional<Json::Value>> SessionStore::refreshSession(const std::string&
         auto db = drogon::app().getDbClient();
 
         // Re-fetch the authoritative session_data from PostgreSQL
-        auto result = co_await db->execSqlCoro(
-            "SELECT session_data FROM core.sessions WHERE token = $1::uuid AND terminated_at IS NULL "
-            "AND (expires_at IS NULL OR expires_at > NOW())",
+        auto result = co_await db->execSqlCoro("SELECT session_data FROM core.sessions WHERE token = $1::uuid AND terminated_at IS NULL "
+                                               "AND (expires_at IS NULL OR expires_at > NOW())",
             token);
 
         if (result.empty() || result[0]["session_data"].isNull()) {
@@ -311,9 +314,7 @@ Task<void> SessionStore::pgNotify(const std::string& action, const std::string& 
         auto db = drogon::app().getDbClient();
         // 1. Insert into the polling table — reliable cross-instance delivery
         //    even if the libpq NOTIFY channel is missed (pool connection recycling).
-        co_await db->execSqlCoro(
-            "INSERT INTO core.session_notify_queue (action, token) VALUES ($1, $2)",
-            action, token);
+        co_await db->execSqlCoro("INSERT INTO core.session_notify_queue (action, token) VALUES ($1, $2)", action, token);
         // 2. Also fire pg_notify for instances that happen to be listening live
         std::string notify_payload = "{\"action\":\"" + action + "\",\"token\":\"" + token + "\"}";
         co_await db->execSqlCoro("SELECT pg_notify('sgrn_session_events', $1)", notify_payload);
@@ -353,21 +354,19 @@ void SessionStore::startPgListener() {
                 while (true) {
                     co_await drogon::sleepCoro(drogon::app().getLoop(), 0.5);
 
-                    auto rows = co_await listen_db->execSqlCoro(
-                        "SELECT pg_notification_queue_usage() AS q"); // ping keeps connection alive
+                    auto rows = co_await listen_db->execSqlCoro("SELECT pg_notification_queue_usage() AS q"); // ping keeps connection alive
 
                     // Process any pending notifications by checking the session
                     // events channel. Drogon wraps libpq so raw PQnotifies() isn't
                     // directly accessible here — we rely on the pg_notify trigger
                     // path writing into a dedicated events table that we poll.
-                    auto events = co_await listen_db->execSqlCoro(
-                        "DELETE FROM core.session_notify_queue WHERE id IN ("
-                        "  SELECT id FROM core.session_notify_queue ORDER BY id LIMIT 50"
-                        ") RETURNING action, token");
+                    auto events = co_await listen_db->execSqlCoro("DELETE FROM core.session_notify_queue WHERE id IN ("
+                                                                  "  SELECT id FROM core.session_notify_queue ORDER BY id LIMIT 50"
+                                                                  ") RETURNING action, token");
 
                     for (const auto& row : events) {
                         std::string action = row["action"].as<std::string>();
-                        std::string tok    = row["token"].as<std::string>();
+                        std::string tok = row["token"].as<std::string>();
 
                         if (action == "revoke") {
                             evictLocal(tok);
@@ -377,7 +376,8 @@ void SessionStore::startPgListener() {
                             try {
                                 auto res = co_await listen_db->execSqlCoro(
                                     "SELECT session_data FROM core.sessions WHERE token = $1::uuid "
-                                    "AND terminated_at IS NULL AND (expires_at IS NULL OR expires_at > NOW())", tok);
+                                    "AND terminated_at IS NULL AND (expires_at IS NULL OR expires_at > NOW())",
+                                    tok);
                                 if (!res.empty() && !res[0]["session_data"].isNull()) {
                                     std::string raw = res[0]["session_data"].as<std::string>();
                                     Json::Value claims;
@@ -393,7 +393,8 @@ void SessionStore::startPgListener() {
                                 } else {
                                     evictLocal(tok);
                                 }
-                            } catch (...) {}
+                            } catch (...) {
+                            }
                         }
                     }
                 }

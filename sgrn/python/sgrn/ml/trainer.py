@@ -13,7 +13,7 @@ class AutoMLTrainer:
     def __init__(self, manifest_path: str, csv_path: str):
         self.reader = DatasetReader(manifest_path, csv_path)
 
-    def train_and_select_best(self, target_feature: str, task: str = "regression", output_model_prefix: str = "model") -> Dict[str, Any]:
+    def trainAndSelectBest(self, target_feature: str, task: str = "regression", output_model_prefix: str = "model") -> Dict[str, Any]:
         """Trains multiple candidate models, evaluates metrics, selects champion model."""
         if np is None:
             raise ImportError("numpy is required for AutoMLTrainer")
@@ -26,7 +26,7 @@ class AutoMLTrainer:
         except ImportError:
             raise ImportError("scikit-learn is required for AutoMLTrainer. Install with: pip install scikit-learn")
 
-        X, y = self.reader.load_numpy(target_column=target_feature)
+        X, y = self.reader.loadNumpy(target_column=target_feature)
         X = np.nan_to_num(X, nan=0.0)
 
         best_model_name = ""
@@ -92,7 +92,7 @@ class AutoMLTrainer:
         print(f"[AutoMLTrainer] Champion Selected: {best_model_name} (Score: {best_score:.4f}) -> {meta_path}")
         return result_summary
 
-    def save_to_datastore(self, gateway_client: Any, model_name: str, meta_data: Dict[str, Any]) -> bool:
+    def saveToDatastore(self, gateway_client: Any, model_name: str, meta_data: Dict[str, Any]) -> bool:
         """Stores trained model state and metadata directly in the SGRN datastore via Gateway client bindings."""
         try:
             if hasattr(gateway_client, "write_data"):

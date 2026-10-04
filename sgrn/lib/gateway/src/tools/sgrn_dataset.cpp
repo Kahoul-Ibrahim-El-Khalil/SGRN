@@ -67,24 +67,22 @@ sgrn::Result<void> DatasetProcessor::loadSchema(const std::string& t_scl_path) {
     features_.clear();
     feature_index_map_.clear();
 
-    for (const auto& db_pair : schema_store_.dbs()) {
-        const uint16_t db_num = db_pair.first;
-        const auto& db = db_pair.second;
+    auto is_string_like = [](sgrn::scl::DataType t) {
+        return t == sgrn::scl::DataType::String || t == sgrn::scl::DataType::WString || t == sgrn::scl::DataType::XString ||
+               t == sgrn::scl::DataType::XWString;
+    };
 
-        sgrn::gateway::twin::visitDbFields(db.fields, [&](const sgrn::gateway::twin::DbFieldVisitInfo& t_info) {
-            if (!t_info.is_leaf)
-                return; // only leaf fields hold decodable values
-
-            const auto& field = *t_info.field;
+    std::function<void(const sgrn::scl::DbField&, const std::string&, int, uint16_t, const std::string&)> add_leaf =
+        [&](const sgrn::scl::DbField& field, const std::string& path, int abs_offset, uint16_t db_num, const std::string& db_name) {
             FeatureMeta meta;
-            meta.db_name = db.db_name;
-            meta.field_path = t_info.path;
-            meta.full_name = fmt::format("{}.{}", db.db_name, t_info.path);
+            meta.db_name = db_name;
+            meta.field_path = path;
+            meta.full_name = fmt::format("{}.{}", db_name, path);
             meta.data_type = s7codec::s7TypeToString(field.type);
             meta.unit = field.unit.value_or("");
             meta.is_categorical = isCategoricalType(field.type);
             meta.db_num = db_num;
-            meta.offset = static_cast<size_t>(t_info.absolute_offset);
+            meta.offset = static_cast<size_t>(abs_offset);
             meta.bit_index = field.bit_index;
             meta.raw_type = field.type;
 
@@ -96,7 +94,61 @@ sgrn::Result<void> DatasetProcessor::loadSchema(const std::string& t_scl_path) {
 
             feature_index_map_[meta.full_name] = features_.size();
             features_.push_back(std::move(meta));
-        });
+        };
+
+    // Recursive walk with array expansion: array-of-struct and primitive
+    // arrays fan out to one feature per element ("path[i].leaf" / "path[i]"),
+    // so every element is decodable from binary images and addressable from
+    // JSON leaves. Matches the WS leaf-dictionary wire contract.
+    std::function<void(const std::vector<sgrn::scl::DbField>&, const std::string&, int, uint16_t, const std::string&)> walk =
+        [&](const std::vector<sgrn::scl::DbField>& fields, const std::string& prefix, int base, uint16_t db_num,
+            const std::string& db_name) {
+            for (const auto& field : fields) {
+                const std::string p = prefix.empty() ? field.name : prefix + "." + field.name;
+                const int abs = base + field.offset;
+                const bool is_arr = field.count > 1 && !is_string_like(field.type) && field.type != sgrn::scl::DataType::String;
+                if (!field.children.empty() && !is_arr) {
+                    walk(field.children, p, abs, db_num, db_name);
+                    continue;
+                }
+                if (!field.children.empty() && is_arr) {
+                    // Struct array: stride is the per-element span.
+                    const int stride = std::max(1, static_cast<int>(field.struct_size));
+                    const uint32_t n = std::min(field.count, 4096u);
+                    for (uint32_t i = 0; i < n; ++i)
+                        walk(field.children, p + "[" + std::to_string(i) + "]", abs + static_cast<int>(i * stride), db_num, db_name);
+                    continue;
+                }
+                if (field.children.empty() && is_arr) {
+                    // Primitive array: expand per element (bool arrays are
+                    // bit-packed from bit_index).
+                    const uint32_t n = std::min(field.count, 4096u);
+                    if (field.type == sgrn::scl::DataType::Bool) {
+                        for (uint32_t i = 0; i < n; ++i) {
+                            const int total_bit = static_cast<int>(field.bit_index) + static_cast<int>(i);
+                            sgrn::scl::DbField el = field;
+                            el.count = 1;
+                            el.bit_index = static_cast<uint8_t>(total_bit % 8);
+                            add_leaf(el, p + "[" + std::to_string(i) + "]", abs + total_bit / 8, db_num, db_name);
+                        }
+                    } else {
+                        const int stride = std::max(1, static_cast<int>(s7TypeByteSize(field.type)));
+                        for (uint32_t i = 0; i < n; ++i) {
+                            sgrn::scl::DbField el = field;
+                            el.count = 1;
+                            add_leaf(el, p + "[" + std::to_string(i) + "]", abs + static_cast<int>(i * stride), db_num, db_name);
+                        }
+                    }
+                    continue;
+                }
+                add_leaf(field, p, abs, db_num, db_name);
+            }
+        };
+
+    for (const auto& db_pair : schema_store_.dbs()) {
+        const uint16_t db_num = db_pair.first;
+        const auto& db = db_pair.second;
+        walk(db.fields, "", 0, db_num, db.db_name);
     }
 
     return {};
@@ -220,6 +272,96 @@ sgrn::Result<DatasetSummary> DatasetProcessor::process(const DatasetConfig& t_co
             summary.end_timestamp_ms = ts;
         }
 
+        auto splitDots = [](const std::string& t_s) {
+            std::vector<std::string> out;
+            std::string cur;
+            for (char c : t_s) {
+                if (c == '.') {
+                    out.push_back(cur);
+                    cur.clear();
+                } else {
+                    cur.push_back(c);
+                }
+            }
+            out.push_back(cur);
+            return out;
+        };
+
+        auto storeScalar = [&](const std::string& key, const rapidjson::Value& v) {
+            std::string val_str;
+            if (v.IsString())
+                val_str = v.GetString();
+            else if (v.IsNumber())
+                val_str = std::to_string(v.GetDouble());
+            else if (v.IsBool())
+                val_str = v.GetBool() ? "true" : "false";
+            else if (v.IsNull())
+                val_str = "null";
+            else {
+                rapidjson::StringBuffer sb;
+                rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+                v.Accept(w);
+                val_str = sb.GetString();
+            }
+            current_state_[key] = val_str;
+        };
+
+        // Store one leaf; array values fan out to the indexed schema features
+        // ("a.b[i].c"), resolved against feature_index_map_ so the keys match
+        // the CSV columns exactly. Unknown shapes are skipped, as before.
+        // walkNested is assigned below; object (elements) recurse through it.
+        std::function<void(const std::string&, const rapidjson::Value&)> walkNested;
+        auto storeLeaf = [&](const std::string& key, const rapidjson::Value& v) {
+            if (v.IsObject()) {
+                if (walkNested)
+                    walkNested(key, v);
+                return;
+            }
+            if (!v.IsArray()) {
+                if (v.IsString() || v.IsNumber() || v.IsBool())
+                    storeScalar(key, v);
+                return;
+            }
+            const auto segs = splitDots(key);
+            for (size_t p = 0; p < segs.size(); ++p) {
+                // candidate with the array index at segment p:
+                // "<segs[0..p]>[0]<.rest>"
+                std::string cand;
+                for (size_t k = 0; k <= p; ++k)
+                    cand += (k ? "." : "") + segs[k];
+                cand += "[0]";
+                for (size_t k = p + 1; k < segs.size(); ++k)
+                    cand += "." + segs[k];
+                if (feature_index_map_.find(cand) == feature_index_map_.end())
+                    continue;
+                for (rapidjson::SizeType i = 0; i < v.Size(); ++i) {
+                    std::string ikey;
+                    for (size_t k = 0; k <= p; ++k)
+                        ikey += (k ? "." : "") + segs[k];
+                    ikey += "[" + std::to_string(i) + "]";
+                    for (size_t k = p + 1; k < segs.size(); ++k)
+                        ikey += "." + segs[k];
+                    if (feature_index_map_.find(ikey) == feature_index_map_.end())
+                        continue;
+                    const auto& el = v[i];
+                    if (el.IsString() || el.IsNumber() || el.IsBool() || el.IsNull())
+                        storeScalar(ikey, el);
+                    else if (el.IsObject() && walkNested)
+                        walkNested(ikey, el);
+                }
+                return;
+            }
+        };
+
+        walkNested = [&](const std::string& prefix, const rapidjson::Value& v) {
+            if (!v.IsObject()) {
+                storeLeaf(prefix, v);
+                return;
+            }
+            for (auto m = v.MemberBegin(); m != v.MemberEnd(); ++m)
+                walkNested(prefix.empty() ? m->name.GetString() : prefix + "." + m->name.GetString(), m->value);
+        };
+
         auto ingestKeyedValues = [&](const rapidjson::Value& t_obj) {
             for (auto it = t_obj.MemberBegin(); it != t_obj.MemberEnd(); ++it) {
                 std::string key = it->name.GetString();
@@ -230,17 +372,7 @@ sgrn::Result<DatasetSummary> DatasetProcessor::process(const DatasetConfig& t_co
                         key = t_dict[id];
                 }
 
-                std::string val_str;
-                if (it->value.IsString())
-                    val_str = it->value.GetString();
-                else if (it->value.IsNumber())
-                    val_str = std::to_string(it->value.GetDouble());
-                else if (it->value.IsBool())
-                    val_str = it->value.GetBool() ? "true" : "false";
-                else
-                    continue;
-
-                current_state_[key] = val_str;
+                storeLeaf(key, it->value);
             }
         };
 
@@ -261,20 +393,9 @@ sgrn::Result<DatasetSummary> DatasetProcessor::process(const DatasetConfig& t_co
             }
             if (looks_nested) {
                 for (auto db_it = data.MemberBegin(); db_it != data.MemberEnd(); ++db_it) {
-                    std::string db_name = db_it->name.GetString();
                     if (!db_it->value.IsObject())
                         continue;
-                    for (auto f_it = db_it->value.MemberBegin(); f_it != db_it->value.MemberEnd(); ++f_it) {
-                        std::string full_key = fmt::format("{}.{}", db_name, f_it->name.GetString());
-                        std::string val_str;
-                        if (f_it->value.IsString())
-                            val_str = f_it->value.GetString();
-                        else if (f_it->value.IsNumber())
-                            val_str = std::to_string(f_it->value.GetDouble());
-                        else if (f_it->value.IsBool())
-                            val_str = f_it->value.GetBool() ? "true" : "false";
-                        current_state_[full_key] = val_str;
-                    }
+                    walkNested(db_it->name.GetString(), db_it->value);
                 }
             } else {
                 ingestKeyedValues(data);

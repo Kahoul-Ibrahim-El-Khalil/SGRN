@@ -171,6 +171,7 @@ function flush(): void {
           if (
             entry &&
             typeof entry === "object" &&
+            !Array.isArray(entry) &&
             "value" in (entry as Record<string, unknown>)
           ) {
             value = (entry as { value: unknown }).value;
@@ -178,7 +179,22 @@ function flush(): void {
           } else {
             value = entry;
           }
-          updateBuffer.set(fullKey, { value, ts: entryTs });
+          if (Array.isArray(value)) {
+            // Array-of-struct leaves arrive as one value per element: fan out
+            // to per-element keys matching the legacy flatten format
+            // (Db-field/[i]/leaf), so seed and deltas share key space.
+            // NOTE: this assumes the value array covers elements [0..N) of
+            // the array field that owns the leaf (server-side contract).
+            for (let i = 0; i < value.length; i++) {
+              const parts = fullKey.split("/");
+              const leaf = parts.pop() as string;
+              const elemKey = [...parts, `[${i}]`, leaf].join("/");
+              if (validKeys && !validKeys.has(elemKey)) continue;
+              updateBuffer.set(elemKey, { value: value[i], ts: entryTs });
+            }
+          } else {
+            updateBuffer.set(fullKey, { value, ts: entryTs });
+          }
         }
       } else {
         // Legacy mode: nested DB-object map

@@ -20,9 +20,9 @@ Covers the complete currently-exposed HTTP surface:
 The HTTP client itself stays dependency-free (``urllib.request``) and returns
 typed :mod:`sgrn.models` dataclasses for known shapes.
 
-NumPy is a first-class citizen on the raw-memory surface: ``memory_read`` /
-``memory_batch_read`` can hand back NumPy arrays directly, ``memory_write`` /
-``memory_batch_write`` accept them, and :meth:`Gateway.read_db_array` turns a
+NumPy is a first-class citizen on the raw-memory surface: ``memoryRead`` /
+``memoryBatchRead`` can hand back NumPy arrays directly, ``memoryWrite`` /
+``memoryBatchWrite`` accept them, and :meth:`Gateway.readDbArray` turns a
 registry schema + one memory read into a single structured NumPy record —
 no manual byte parsing required. See :mod:`sgrn.dtypes`.
 """
@@ -52,8 +52,8 @@ from .models import (
     RegistryResponse,
     SecurityPolicyResponse,
     SessionInfo,
-    as_bytes,
-    to_base64url,
+    asBytes,
+    toBase64url,
 )
 
 __all__ = [
@@ -93,7 +93,7 @@ class Gateway:
     ...     print(db.db_number, db.db_name)
 
     >>> # Structured NumPy access to a whole DB in one round trip:
-    >>> record = gw.read_db_array("ReactorCore")
+    >>> record = gw.readDbArray("ReactorCore")
     >>> record["thermal_power_mw"]
     """
 
@@ -218,7 +218,7 @@ class Gateway:
         :param headers_only: return only DB headers (omit field trees).
         :param db: restrict the response to a single DB by number.
         :param cache: reuse (and populate) a full-registry cache; used by
-            :meth:`read_db_array` so repeated calls don't re-fetch the
+            :meth:`readDbArray` so repeated calls don't re-fetch the
             schema on every read. Ignored when ``headers_only`` or ``db``
             narrow the response, since those aren't full snapshots.
         """
@@ -232,16 +232,16 @@ class Gateway:
         data = self._execute("GET", "/registry", t_params=params)
         if not isinstance(data, dict):
             raise GatewayError("GET /registry returned malformed JSON")
-        reg = RegistryResponse.from_dict(data)
+        reg = RegistryResponse.fromDict(data)
         if t_cache and not t_headers_only and t_db is None:
             self._registry_cache = reg
         return reg
 
-    def registry_types(self) -> Any:
+    def registryTypes(self) -> Any:
         """GET /registry/types — the S7 type dictionary."""
         return self._execute("GET", "/registry/types")
 
-    def modbus_map(self) -> Any:
+    def modbusMap(self) -> Any:
         """
         GET /registry/modbus — the Modbus virtual register map.
 
@@ -251,7 +251,7 @@ class Gateway:
 
     # ── Data endpoints (semantic twin) ─────────────────────────────────────────
 
-    def read_data(self, t_path: Optional[str] = None) -> Any:
+    def readData(self, t_path: Optional[str] = None) -> Any:
         """
         GET /data[/<path>] — full digital twin, one DB, or a subtree/leaf.
 
@@ -261,15 +261,15 @@ class Gateway:
         url = "/data" if t_path in (None, "", "/") else f"/data/{t_path.lstrip('/')}"
         return self._execute("GET", url)
 
-    read_db = read_data  # alias: ``gw.read_db("DB10")``
+    readDb = readData  # alias: ``gw.readDb("DB10")``
 
-    def replace_field(self, t_path: str, t_value: Any) -> DataWriteResult:
+    def replaceField(self, t_path: str, t_value: Any) -> DataWriteResult:
         """PUT /data/<path> — full replacement of a field with a JSON value."""
         url = f"/data/{t_path.lstrip('/')}"
         data = self._execute("PUT", url, t_json_body=t_value)
-        return DataWriteResult.from_dict(data or {})
+        return DataWriteResult.fromDict(data or {})
 
-    def write_fields(self, t_path: str, t_fields: Dict[str, Any]) -> DataWriteResult:
+    def writeFields(self, t_path: str, t_fields: Dict[str, Any]) -> DataWriteResult:
         """
         POST /data/<path> — atomic merge write of the given field object.
 
@@ -279,21 +279,21 @@ class Gateway:
         """
         url = f"/data/{t_path.lstrip('/')}"
         data = self._execute("POST", url, t_json_body=t_fields)
-        return DataWriteResult.from_dict(data or {})
+        return DataWriteResult.fromDict(data or {})
 
-    def write_field(self, t_path: str, t_value: Any) -> DataWriteResult:
+    def writeField(self, t_path: str, t_value: Any) -> DataWriteResult:
         """POST /data/<path> — scalar/leaf write at the resolved field path."""
         url = f"/data/{t_path.lstrip('/')}"
         data = self._execute("POST", url, t_json_body=t_value)
-        return DataWriteResult.from_dict(data or {})
+        return DataWriteResult.fromDict(data or {})
 
-    def write_array_element(self, t_path: str, t_index: int, t_value: Any) -> DataWriteResult:
+    def writeArrayElement(self, t_path: str, t_index: int, t_value: Any) -> DataWriteResult:
         """POST /data/<path>/<N> — scalar write to a single array element."""
         url = f"/data/{t_path.lstrip('/')}/{t_index}"
         data = self._execute("POST", url, t_json_body=t_value)
-        return DataWriteResult.from_dict(data or {})
+        return DataWriteResult.fromDict(data or {})
 
-    def write_multi_db(self, t_payload: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    def writeMultiDb(self, t_payload: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         """
         POST /data/ — atomic merge-write across multiple DBs.
 
@@ -304,7 +304,7 @@ class Gateway:
 
     # ── Raw memory endpoints (byte level) ──────────────────────────────────────
 
-    def memory_read(
+    def memoryRead(
         self,
         t_db: int,
         t_offset: int,
@@ -317,14 +317,14 @@ class Gateway:
 
         :param dtype: when given, the response is returned as a NumPy array
             of this dtype instead of raw ``bytes`` (e.g. ``">f4"`` for a
-            single REAL, or a structured dtype from ``DbSchema.to_dtype``).
+            single REAL, or a structured dtype from ``DbSchema.toDtype``).
         """
         raw = self._execute("GET", f"/memory/db/{t_db}/offset/{t_offset}/size/{t_size}", t_as_json=False)
         if t_dtype is not None:
             return np.frombuffer(raw, dtype=t_dtype).copy()
         return raw
 
-    def memory_write(self, t_db: int, t_offset: int, t_data: BytesLike) -> bytes:
+    def memoryWrite(self, t_db: int, t_offset: int, t_data: BytesLike) -> bytes:
         """
         PUT /memory/db/<db>/offset/<o>/size/<s> — raw byte write.
 
@@ -334,7 +334,7 @@ class Gateway:
 
         The response echoes the written bytes (S7 confirmation semantics).
         """
-        raw = as_bytes(t_data)
+        raw = asBytes(t_data)
         return self._execute(
             "PUT",
             f"/memory/db/{t_db}/offset/{t_offset}/size/{len(raw)}",
@@ -343,7 +343,7 @@ class Gateway:
             t_as_json=False,
         )
 
-    def memory_batch_read(
+    def memoryBatchRead(
         self,
         t_spans: List[MemorySpan],
         *,
@@ -356,7 +356,7 @@ class Gateway:
 
         :param dtype: when given, each item's bytes are returned as a
             NumPy array of this dtype instead of a :class:`MemoryReadItem`
-            (use ``item.as_array(dtype)`` per-item if spans need different
+            (use ``item.asArray(dtype)`` per-item if spans need different
             dtypes).
         """
         params: Dict[str, Any] = {}
@@ -365,12 +365,12 @@ class Gateway:
             params.setdefault("offset", []).append(span.offset)
             params.setdefault("size", []).append(span.size)
         data = self._execute("GET", "/memory/batch", t_params=params)
-        items = [MemoryReadItem.from_dict(i) for i in (data or []) if isinstance(i, dict)]
+        items = [MemoryReadItem.fromDict(i) for i in (data or []) if isinstance(i, dict)]
         if t_dtype is not None:
-            return [i.as_array(t_dtype) for i in items]
+            return [i.asArray(t_dtype) for i in items]
         return items
 
-    def memory_batch_write(self, t_items: List[MemoryBatchWriteItem]) -> List[MemoryBatchWriteResult]:
+    def memoryBatchWrite(self, t_items: List[MemoryBatchWriteItem]) -> List[MemoryBatchWriteResult]:
         """
         PUT /memory/batch — atomic all-or-nothing multi-DB write (base64url).
 
@@ -378,15 +378,15 @@ class Gateway:
         """
         payload = []
         for i in t_items:
-            raw = as_bytes(i.data)
-            payload.append({"db": i.db, "offset": i.offset, "size": len(raw), "data": to_base64url(raw)})
+            raw = asBytes(i.data)
+            payload.append({"db": i.db, "offset": i.offset, "size": len(raw), "data": toBase64url(raw)})
         data = self._execute("PUT", "/memory/batch", t_json_body=payload)
         items_out = data or []
-        return [MemoryBatchWriteResult.from_dict(r) for r in items_out if isinstance(r, dict)]
+        return [MemoryBatchWriteResult.fromDict(r) for r in items_out if isinstance(r, dict)]
 
     # ── Schema-driven NumPy access ───────────────────────────────────────────────
 
-    def read_db_array(
+    def readDbArray(
         self,
         t_db: Union[str, int],
         *,
@@ -397,7 +397,7 @@ class Gateway:
         Read one DB's full memory and return it as a single structured
         NumPy record, built from its registry schema — the fast path for
         ML workflows that want typed array access without hand-parsing
-        ``read_data``'s JSON tree.
+        ``readData``'s JSON tree.
 
         :param db: DB name (``str``) or DB number (``int``).
         :param registry: reuse an already-fetched :class:`RegistryResponse`
@@ -407,16 +407,16 @@ class Gateway:
 
         Example
         -------
-        >>> rec = gw.read_db_array("ReactorCore")
+        >>> rec = gw.readDbArray("ReactorCore")
         >>> float(rec["thermal_power_mw"])
         42.5
         """
-        reg = t_registry or self.registry(cache=t_cache_registry)
-        schema = reg.db_by_name(t_db) if isinstance(t_db, str) else reg.db_by_number(t_db)
+        reg = t_registry or self.registry(t_cache=t_cache_registry)
+        schema = reg.dbByName(t_db) if isinstance(t_db, str) else reg.dbByNumber(t_db)
         if schema is None:
             raise GatewayError(f"unknown DB {t_db!r} (not present in the registry)")
-        dt = schema.to_dtype(t_udts=reg.udts_by_name())
-        raw = self.memory_read(schema.db_number, 0, schema.size_bytes)
+        dt = schema.toDtype(t_udts=reg.udtsByName())
+        raw = self.memoryRead(schema.db_number, 0, schema.size_bytes)
         return np.frombuffer(raw, dtype=dt, count=1)[0]
 
     # ── Diagnostics ─────────────────────────────────────────────────────────────
@@ -424,32 +424,32 @@ class Gateway:
     def connections(self) -> List[ConnectionInfo]:
         """GET /connections — active/recent north- and south-bound connections."""
         data = self._execute("GET", "/connections")
-        return [ConnectionInfo.from_dict(c) for c in (data or []) if isinstance(c, dict)]
+        return [ConnectionInfo.fromDict(c) for c in (data or []) if isinstance(c, dict)]
 
-    def db_history(self) -> Any:
+    def dbHistory(self) -> Any:
         """GET /db/history — full historical database as JSON."""
         return self._execute("GET", "/db/history")
 
-    def db_sessions(self) -> List[SessionInfo]:
+    def dbSessions(self) -> List[SessionInfo]:
         """GET /db/sessions — active and recent client sessions."""
         data = self._execute("GET", "/db/sessions")
-        return [SessionInfo.from_dict(s) for s in (data or []) if isinstance(s, dict)]
+        return [SessionInfo.fromDict(s) for s in (data or []) if isinstance(s, dict)]
 
-    def db_logs(self, t_limit: int = 100) -> List[LogEntry]:
+    def dbLogs(self, t_limit: int = 100) -> List[LogEntry]:
         """GET /db/logs?limit=<N> — most recent system log lines."""
         data = self._execute("GET", "/db/logs", t_params={"limit": t_limit})
-        return [LogEntry.from_dict(l) for l in (data or []) if isinstance(l, dict)]
+        return [LogEntry.fromDict(l) for l in (data or []) if isinstance(l, dict)]
 
     def endpoints(self) -> List[EndpointInfo]:
         """GET /endpoints — API documentation as a list of endpoint entries."""
         data = self._execute("GET", "/endpoints")
         docs = data.get("endpoints", []) if isinstance(data, dict) else []
-        return [EndpointInfo.from_dict(e) for e in docs if isinstance(e, dict)]
+        return [EndpointInfo.fromDict(e) for e in docs if isinstance(e, dict)]
 
     def policy(self) -> SecurityPolicyResponse:
         """GET /api/policy — the live security policy."""
         data = self._execute("GET", "/api/policy")
-        return SecurityPolicyResponse.from_dict(data or {})
+        return SecurityPolicyResponse.fromDict(data or {})
 
 
 # Backwards/collegial alias: the placeholder shipped as ``Gateway``; some

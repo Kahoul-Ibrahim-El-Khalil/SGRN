@@ -22,6 +22,13 @@
   let loading_registry: boolean = true;
   let registry_error: string = "";
   let show_only_subscribed: boolean = false;
+  let is_prediction_gateway = false;
+  $: model_prediction = $liveTelemetryValues["ModelOutput-dew_point_prediction"]?.value;
+  $: has_model_prediction = typeof model_prediction === "number" &&
+    Number.isFinite(model_prediction);
+  $: model_prediction_text = has_model_prediction
+    ? `${(model_prediction as number).toFixed(2)} °C`
+    : "Waiting for prediction";
 
   // Telemetry flat cell map: key → { val, sync }
   let cell_map: Map<string, { val: string; sync: string }> = new Map<
@@ -48,6 +55,9 @@
   let expanded_reg_groups: Set<string> = new Set<string>();
 
   onMount(async () => {
+    is_prediction_gateway =
+      new URLSearchParams(window.location.search).get("gatewayName") ===
+      "Model predictions";
     try {
       registry = await fetchFullRegistry();
       const built = buildRegistryTree(registry);
@@ -344,6 +354,23 @@
       </div>
     {/if}
   </div>
+
+  {#if is_prediction_gateway && active_tab === "process"}
+    <section class="prediction-summary" aria-live="polite">
+      <div class="prediction-heading">
+        <strong>Predicted outlet dew point</strong>
+        <span class:prediction-ready={has_model_prediction}>
+          {has_model_prediction ? "Live" : "Waiting"}
+        </span>
+      </div>
+      <div class="prediction-values">
+        <div class="prediction-value">
+          <span>H-step predicted outlet dew point</span>
+          <strong>{model_prediction_text}</strong>
+        </div>
+      </div>
+    </section>
+  {/if}
 
   <!-- Process Image tab -->
   {#if active_tab === "process"}

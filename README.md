@@ -49,6 +49,17 @@ The stack is organized into highly cohesive, decoupled C++ modules.
 
 ## Getting Started
 
+### Explore the stack
+
+After building the Linux binaries, start an interactive gateway + soft-PLC simulation and open its dashboard with:
+
+```bash
+python3 demos/gateway.py --list
+python3 demos/gateway.py simple_skid
+```
+
+The gateway launcher and experiment index are in [`demos/`](./demos/README.md). Repository maintenance entry points for database setup, web deployment, and code generation are grouped in [`actions/`](./actions/).
+
 Building SGRN relies on a structured environment managed by Micromamba and CMake presets.
 
 ### 1. Clone & Initialize Submodules

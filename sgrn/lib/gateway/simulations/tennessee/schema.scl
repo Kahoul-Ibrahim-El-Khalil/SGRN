@@ -1,0 +1,191 @@
+// ============================================================================
+// schema.scl — Tennessee Eastman Process (TEP) surrogate for SGRN
+//
+// Downs & Vogel (1993) benchmark mapped onto the SGRN information model.
+//   DB1 "Reactor"      : reactor vessel + feeds (XMEAS 1-9, 21, 23-28 / XMV 1-4, 10)
+//   DB2 "Separator"    : condenser + vapor/liquid separator (XMEAS 10-14, 22, 29-36 / XMV 6-7, 11)
+//   DB3 "Stripper"     : product stripper (XMEAS 15-19, 37-41 / XMV 8-9)
+//   DB4 "Compressor"   : recycle compressor + mixing zone (XMEAS 5-6, 20 / XMV 5)
+//   DB5 "PlantWide"    : purge/product accounting, fault injection, safety envelope
+//
+// Signal names are unit-agnostic; physical units ride on #UNIT("...") per
+// documentation/PIPELINE_AND_TOOLS.md. Full tag table in ./README.md.
+// The Python surrogate in ./../../../demo_model.py generates the same tags.
+// ============================================================================
+
+TYPE "Composition8"
+  VAR
+    comp_a : Real #UNIT("mol%");
+    comp_b : Real #UNIT("mol%");
+    comp_c : Real #UNIT("mol%");
+    comp_d : Real #UNIT("mol%");
+    comp_e : Real #UNIT("mol%");
+    comp_f : Real #UNIT("mol%");
+    comp_g : Real #UNIT("mol%");
+    comp_h : Real #UNIT("mol%");
+  END_VAR
+END_TYPE
+
+TYPE "PIDLoop"
+  VAR
+    setpoint      : LReal;
+    process_value : LReal;
+    output_pct    : Real;
+    kp            : Real;
+    ki            : Real;
+    kd            : Real;
+    integral_acc  : LReal;
+    enabled       : Bool;
+    auto_mode     : Bool;
+    saturated     : Bool;
+  END_VAR
+END_TYPE
+
+TYPE "ValveActuator"
+  VAR
+    position_pct : Real;
+    command_pct  : Real;
+    fault        : Bool;
+    limit_open   : Bool;
+    limit_closed : Bool;
+  END_VAR
+END_TYPE
+
+TYPE "AlarmRecord"
+  VAR
+    active         : Bool;
+    acknowledged   : Bool;
+    code           : Word;
+    priority       : USInt;
+    description_id : UInt;
+    timestamp_ms   : DInt;
+  END_VAR
+END_TYPE
+
+// ─── DB1 "Reactor" — Reaction vessel + fresh feeds ───────────────────────────
+DATA_BLOCK "Reactor" DB 1
+
+#MODBUS_HOLDING
+VAR
+    // Fresh + recycle feeds (manipulated through valves below)
+    a_feed_flow       : Real #UNIT("kscm");   // XMEAS 1  stream 1
+    d_feed_flow       : Real #UNIT("kg/h");   // XMEAS 2  stream 2
+    e_feed_flow       : Real #UNIT("kg/h");   // XMEAS 3  stream 3
+    ac_feed_flow      : Real #UNIT("kscm");   // XMEAS 4  stream 4
+    reactor_feed_rate : Real #UNIT("kscm");   // XMEAS 6  stream 6
+
+    // Reactor state
+    pressure          : Real #UNIT("kPa");    // XMEAS 7  (~2700 nominal)
+    level             : Real #UNIT("%");      // XMEAS 8  (~75 nominal)
+    temp              : Real #UNIT("degC");   // XMEAS 9  (~120 nominal)
+    cooling_out_temp  : Real #UNIT("degC");   // XMEAS 21 reactor cooling water outlet
+
+    // Reactor-feed composition stream 6 (XMEAS 23-28 -> A..F; G/H ~0 in feed)
+    feed_comp         : "Composition8";
+
+    // Manipulated valves (XMV 1-4, 10)
+    d_feed_valve      : "ValveActuator";      // XMV 1
+    e_feed_valve      : "ValveActuator";      // XMV 2
+    a_feed_valve      : "ValveActuator";      // XMV 3
+    ac_feed_valve     : "ValveActuator";      // XMV 4
+    cooling_valve     : "ValveActuator";      // XMV 10 reactor cooling water
+
+    // Base-layer loops (declarative setpoints, closed by s7shell / agent)
+    pressure_pid      : "PIDLoop";
+    level_pid         : "PIDLoop";
+    temp_pid          : "PIDLoop";
+
+    timestamp         : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB2 "Separator" — Condenser + vapor/liquid separator ────────────────────
+DATA_BLOCK "Separator" DB 2
+VAR
+    purge_rate        : Real #UNIT("kscm");   // XMEAS 10 stream 9
+    product_temp      : Real #UNIT("degC");   // XMEAS 11 separator temperature
+    sep_level         : Real #UNIT("%");      // XMEAS 12 (~50 nominal)
+    sep_pressure      : Real #UNIT("kPa");    // XMEAS 13 (~2600 nominal)
+    sep_underflow     : Real #UNIT("m3/h");   // XMEAS 14 stream 10
+    cooling_out_temp  : Real #UNIT("degC");   // XMEAS 22 separator cooling water outlet
+
+    // Purge gas composition stream 9 (XMEAS 29-36 -> A..H)
+    purge_comp        : "Composition8";
+
+    // Manipulated valves (XMV 6-7, 11)
+    purge_valve       : "ValveActuator";      // XMV 6
+    sep_pot_valve     : "ValveActuator";      // XMV 7 separator liquid flow
+    condenser_valve   : "ValveActuator";      // XMV 11 condenser cooling water
+
+    level_pid         : "PIDLoop";
+    pressure_pid      : "PIDLoop";
+
+    timestamp         : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB3 "Stripper" — Product stripper ───────────────────────────────────────
+DATA_BLOCK "Stripper" DB 3
+VAR
+    level             : Real #UNIT("%");      // XMEAS 15 (~50 nominal)
+    pressure          : Real #UNIT("kPa");    // XMEAS 16 (~2600 nominal)
+    underflow         : Real #UNIT("m3/h");   // XMEAS 17 stream 11 product
+    temp              : Real #UNIT("degC");   // XMEAS 18 (~65 nominal)
+    steam_flow        : Real #UNIT("kg/h");   // XMEAS 19 stripper steam
+
+    // Product composition stream 11 (XMEAS 37-41 -> D,E,F,G,H)
+    product_comp      : "Composition8";
+
+    // Manipulated valves (XMV 8-9)
+    product_valve     : "ValveActuator";      // XMV 8 stripper liquid product flow
+    steam_valve       : "ValveActuator";      // XMV 9 stripper steam valve
+
+    level_pid         : "PIDLoop";
+
+    timestamp         : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB4 "Compressor" — Recycle compressor + mixing zone ─────────────────────
+DATA_BLOCK "Compressor" DB 4
+VAR
+    recycle_flow      : Real #UNIT("kscm");   // XMEAS 5  stream 8
+    work              : Real #UNIT("kW");     // XMEAS 20 compressor work
+    recycle_valve     : "ValveActuator";      // XMV 5  compressor recycle valve
+    agitator_speed    : Real #UNIT("%");      // XMV 12 (usually constant 100%)
+
+    timestamp         : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB5 "PlantWide" — Accounting, fault injection, safety envelope ──────────
+DATA_BLOCK "PlantWide" DB 5
+VAR
+    // Fault scenario selector: 0 = normal, 1..8 = TE IDV subset (see README.md)
+    fault_code        : Int;                  // injected disturbance ID
+    fault_active      : Bool;
+    op_mode           : Int;                  // 0=steady 1=transient 2=shutdown-trip
+    production_rate   : Real #UNIT("kmol/h"); // proxy: product + purge molar flow
+    operating_cost    : Real #UNIT("$/h");    // proxy: work + steam + purge loss
+
+    // Safety envelope watched by the checker (doer-checker architecture)
+    trip_high_pressure_bar : Real #UNIT("kPa"); // default 3000
+    trip_high_temp         : Real #UNIT("degC"); // default 150
+    trip_high_level        : Real #UNIT("%");    // default 100
+    tripped                : Bool;
+    trip_reason_code       : Word;
+
+    // Recommended operating action from the agent (audited by the checker)
+    // 0=hold 1=cut A feed 2=open purge 3=raise cooling 4=cut steam 5=trip-safe-park
+    recommended_action : Int;
+    action_confidence  : Real #UNIT("%");
+    action_blocked     : Bool;               // checker veto flag
+    action_explanation : Int;                // explanation id (top feature index)
+
+    alarms            : ARRAY [0..7] OF "AlarmRecord";
+    active_alarm_count : UInt;
+    any_critical      : Bool;
+
+    timestamp         : DTL;
+END_VAR
+END_DATA_BLOCK

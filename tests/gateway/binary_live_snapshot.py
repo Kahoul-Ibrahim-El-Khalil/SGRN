@@ -5,7 +5,7 @@ Live binary/JSON parity checks for a running SGRN gateway.
 This module can run in two modes:
 
 - Managed mode, the default, starts the gateway and simulation itself via
-  ``demo.py`` and tears them down afterward.
+  ``demos/gateway.py`` and tears them down afterward.
 - External mode, enabled with ``SGRN_LIVE_EXTERNAL=1``, assumes a gateway is
   already running and only connects to it.
 
@@ -48,9 +48,9 @@ if str(REPO_ROOT) not in sys.path:
 if str(PY_BINDINGS_DIR) not in sys.path:
     sys.path.insert(0, str(PY_BINDINGS_DIR))
 
-# NOTE: repo-root demo.py is imported lazily inside _setup_context() —
+# NOTE: demos/gateway.py is imported lazily inside _setup_context() —
 # managed mode only. External mode (orchestrated runs) never needs it.
-from sgrn.dtypes import decode_record  # noqa: E402
+from sgrn.dtypes import decodeRecord  # noqa: E402
 from sgrn.gateway import Gateway, GatewayError  # noqa: E402
 from sgrn.models import DbField, DbSchema  # noqa: E402
 from sgrn.telemetry import GatewayTelemetry  # noqa: E402
@@ -110,11 +110,11 @@ def _field_dtype(schema: DbSchema, field: DbField, reg_udts: Dict[str, Any]) -> 
         size_bytes=max(1, field_struct_size(schema, field, reg_udts)),
         fields=[_field_at_offset_zero(field)],
     )
-    return temp_schema.to_dtype(t_udts=reg_udts)
+    return temp_schema.toDtype(t_udts=reg_udts)
 
 
 def field_struct_size(schema: DbSchema, field: DbField, reg_udts: Dict[str, Any]) -> int:
-    dtype = schema.to_dtype(t_udts=reg_udts)
+    dtype = schema.toDtype(t_udts=reg_udts)
     if field.name not in dtype.fields:
         raise AssertionError(f"field {field.name!r} not present in dtype for DB {schema.db_name}")
     return int(dtype.fields[field.name][0].itemsize)
@@ -299,11 +299,11 @@ def _setup_context() -> LiveContext:
         if MANAGED_LIVE:
             global demo
             try:
-                import demo  # noqa: E402  (repo-root helper, managed mode only)
+                from demos import gateway as demo  # noqa: E402  (managed mode only)
             except ImportError as e:
-                raise RuntimeError("managed mode needs repo-root demo.py importable") from e
+                raise RuntimeError("managed mode needs demos/gateway.py importable") from e
             if os.geteuid() != 0:
-                raise RuntimeError("managed live tests require root because demo.py launches s7shell on privileged ports")
+                raise RuntimeError("managed live tests require root because the selected scenario binds privileged ports")
             selected = demo.resolve_simulation(SIMULATION_CHOICE)
             run = demo.start_simulation(
                 selected,
@@ -328,8 +328,8 @@ def _setup_context() -> LiveContext:
             demo.stop_shell(run.shell_proc)
             time.sleep(0.5)
 
-        db_dtype = schema.to_dtype(t_udts=registry.udts_by_name())
-        field_dtype = _field_dtype(schema, field, registry.udts_by_name())
+        db_dtype = schema.toDtype(t_udts=registry.udtsByName())
+        field_dtype = _field_dtype(schema, field, registry.udtsByName())
         return LiveContext(run=run, gateway=gateway, registry=registry, schema=schema, field=field, db_dtype=db_dtype, field_dtype=field_dtype)
     except Exception:
         if run is not None:
@@ -404,7 +404,7 @@ async def _capture_binary_full_db_snapshot(ctx: LiveContext) -> Tuple[int, float
         t_open_timeout=5.0,
         t_reconnect_seconds=5.0,
     )
-    telemetry.subscribe_binary(ctx.schema.db_number)
+    telemetry.subscribeBinary(ctx.schema.db_number)
     telemetry.start()
 
     try:
@@ -416,7 +416,7 @@ async def _capture_binary_full_db_snapshot(ctx: LiveContext) -> Tuple[int, float
 
 
 async def _capture_binary_field_slice(ctx: LiveContext) -> Tuple[int, float, np.void]:
-    field_size = field_struct_size(ctx.schema, ctx.field, ctx.registry.udts_by_name())
+    field_size = field_struct_size(ctx.schema, ctx.field, ctx.registry.udtsByName())
     binary_event = asyncio.Event()
     captured_meta: Dict[str, Any] = {}
 
@@ -433,7 +433,7 @@ async def _capture_binary_field_slice(ctx: LiveContext) -> Tuple[int, float, np.
         t_open_timeout=5.0,
         t_reconnect_seconds=5.0,
     )
-    telemetry.subscribe_binary(ctx.schema.db_number, t_offset=ctx.field.offset, t_size=field_size)
+    telemetry.subscribeBinary(ctx.schema.db_number, t_offset=ctx.field.offset, t_size=field_size)
     telemetry.start()
 
     try:
@@ -455,11 +455,11 @@ def _db_json_from_snapshot(snapshot: Dict[str, Any], schema: DbSchema) -> Any:
 def test_live_websocket_json_seed_matches_http_db_view() -> None:
     assert _CTX is not None
     ws_json = asyncio.run(_capture_json_snapshot(_CTX))
-    http_record = _CTX.gateway.read_db_array(_CTX.schema.db_name, t_registry=_CTX.registry)
-    http_semantic = decode_record(http_record, _CTX.schema.fields, t_udts=_CTX.registry.udts_by_name())
+    http_record = _CTX.gateway.readDbArray(_CTX.schema.db_name, t_registry=_CTX.registry)
+    http_semantic = decodeRecord(http_record, _CTX.schema.fields, t_udts=_CTX.registry.udtsByName())
     ws_db_json = _db_json_from_snapshot(ws_json, _CTX.schema)
-    http_semantic = _normalize_tree_for_schema(http_semantic, _CTX.schema.fields, _CTX.registry.udts_by_name())
-    ws_db_json = _normalize_tree_for_schema(ws_db_json, _CTX.schema.fields, _CTX.registry.udts_by_name())
+    http_semantic = _normalize_tree_for_schema(http_semantic, _CTX.schema.fields, _CTX.registry.udtsByName())
+    ws_db_json = _normalize_tree_for_schema(ws_db_json, _CTX.schema.fields, _CTX.registry.udtsByName())
     try:
         _compare_values(http_semantic, ws_db_json, _CTX.schema.db_name)
     except AssertionError as exc:
@@ -491,13 +491,13 @@ def test_live_binary_full_db_matches_http_memory_and_json_view() -> None:
     assert _CTX is not None
     ws_json = asyncio.run(_capture_json_snapshot(_CTX))
     db_num, ts, record = asyncio.run(_capture_binary_full_db_snapshot(_CTX))
-    http_record = _CTX.gateway.read_db_array(_CTX.schema.db_name, t_registry=_CTX.registry)
-    http_raw = _CTX.gateway.memory_read(_CTX.schema.db_number, 0, _CTX.schema.size_bytes)
-    decoded = decode_record(record, _CTX.schema.fields, t_udts=_CTX.registry.udts_by_name())
-    semantic = decode_record(http_record, _CTX.schema.fields, t_udts=_CTX.registry.udts_by_name())
-    decoded = _normalize_tree_for_schema(decoded, _CTX.schema.fields, _CTX.registry.udts_by_name())
-    ws_db_json = _normalize_tree_for_schema(_db_json_from_snapshot(ws_json, _CTX.schema), _CTX.schema.fields, _CTX.registry.udts_by_name())
-    semantic = _normalize_tree_for_schema(semantic, _CTX.schema.fields, _CTX.registry.udts_by_name())
+    http_record = _CTX.gateway.readDbArray(_CTX.schema.db_name, t_registry=_CTX.registry)
+    http_raw = _CTX.gateway.memoryRead(_CTX.schema.db_number, 0, _CTX.schema.size_bytes)
+    decoded = decodeRecord(record, _CTX.schema.fields, t_udts=_CTX.registry.udtsByName())
+    semantic = decodeRecord(http_record, _CTX.schema.fields, t_udts=_CTX.registry.udtsByName())
+    decoded = _normalize_tree_for_schema(decoded, _CTX.schema.fields, _CTX.registry.udtsByName())
+    ws_db_json = _normalize_tree_for_schema(_db_json_from_snapshot(ws_json, _CTX.schema), _CTX.schema.fields, _CTX.registry.udtsByName())
+    semantic = _normalize_tree_for_schema(semantic, _CTX.schema.fields, _CTX.registry.udtsByName())
 
     artifacts = [
         ("HTTP semantic", semantic),
@@ -532,10 +532,10 @@ def test_live_binary_field_slice_matches_http_json_field_view() -> None:
     assert _CTX is not None
     ws_json = asyncio.run(_capture_json_snapshot(_CTX))
     db_num, ts, record = asyncio.run(_capture_binary_field_slice(_CTX))
-    field_size = field_struct_size(_CTX.schema, _CTX.field, _CTX.registry.udts_by_name())
-    http_raw = _CTX.gateway.memory_read(_CTX.schema.db_number, _CTX.field.offset, field_size)
-    http_json = _CTX.gateway.read_data(f"{_CTX.schema.db_name}/{_CTX.field.name}")
-    decoded = decode_record(record, [_field_at_offset_zero(_CTX.field)], t_udts=_CTX.registry.udts_by_name())
+    field_size = field_struct_size(_CTX.schema, _CTX.field, _CTX.registry.udtsByName())
+    http_raw = _CTX.gateway.memoryRead(_CTX.schema.db_number, _CTX.field.offset, field_size)
+    http_json = _CTX.gateway.readData(f"{_CTX.schema.db_name}/{_CTX.field.name}")
+    decoded = decodeRecord(record, [_field_at_offset_zero(_CTX.field)], t_udts=_CTX.registry.udtsByName())
     decoded_value = decoded[_CTX.field.name]
     http_json = _normalize_dtl_value(http_json)
     decoded_value = _normalize_dtl_value(decoded_value)
@@ -544,10 +544,10 @@ def test_live_binary_field_slice_matches_http_json_field_view() -> None:
     assert record.tobytes() == http_raw
     assert db_num == _CTX.schema.db_number
     field_ws_json = _normalize_tree_for_schema(
-        _db_json_from_snapshot(ws_json, _CTX.schema), _CTX.schema.fields, _CTX.registry.udts_by_name()
+        _db_json_from_snapshot(ws_json, _CTX.schema), _CTX.schema.fields, _CTX.registry.udtsByName()
     )
     full_http_json = _normalize_tree_for_schema(
-        _CTX.gateway.read_data(_CTX.schema.db_name), _CTX.schema.fields, _CTX.registry.udts_by_name()
+        _CTX.gateway.readData(_CTX.schema.db_name), _CTX.schema.fields, _CTX.registry.udtsByName()
     )
     try:
         _compare_values(field_ws_json, full_http_json, _CTX.schema.db_name)

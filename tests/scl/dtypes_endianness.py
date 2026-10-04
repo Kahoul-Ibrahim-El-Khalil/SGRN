@@ -19,7 +19,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 sys.path.insert(0, _REPO_ROOT)
 sys.path.insert(0, os.path.join(_REPO_ROOT, "sgrn", "python"))
 
-from sgrn.dtypes import decode_record
+from sgrn.dtypes import decodeRecord
 from sgrn.models import DbField, DbSchema, UdtSchema
 
 
@@ -76,7 +76,7 @@ def main() -> None:
         ],
     )
 
-    dt = schema.to_dtype(t_udts={mixed_udt.name: mixed_udt})
+    dt = schema.toDtype(t_udts={mixed_udt.name: mixed_udt})
 
     raw = (
         struct.pack(">f", 42.5)
@@ -93,7 +93,7 @@ def main() -> None:
     assert int(nested["nested_be_word"]) == 0xABCD
     assert int(nested["nested_inherit_int"]) == 0x1234
 
-    decoded = decode_record(record, schema.fields, t_udts={mixed_udt.name: mixed_udt})
+    decoded = decodeRecord(record, schema.fields, t_udts={mixed_udt.name: mixed_udt})
     assert np.isclose(decoded["root_be_real"], 42.5)
     assert decoded["tail_le_udint"] == 0x01020304
     assert decoded["mixed_block"]["nested_be_word"] == 0xABCD

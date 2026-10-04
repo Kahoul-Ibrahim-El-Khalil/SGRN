@@ -21,6 +21,7 @@ Usage:
     python3 tests/run_tests.py <name> [sim]     # run one entry
     python3 tests/run_tests.py all [sim]        # run everything runnable
     python3 tests/run_tests.py --module gateway # run one module
+    python3 tests/run_tests.py --kind ts         # run one test kind
     python3 tests/run_tests.py --list           # list entries + status
     python3 tests/run_tests.py <name> --message # describe one entry
 """
@@ -249,10 +250,10 @@ def build_registry():
             add({"name": "cpp-" + name, "module": cpp_module(binary), "kind": "cpp",
                  "mode": "offline", "ctest": name, "binary": binary,
                  "assumptions": "Native unit test. No PLC hardware or network needed."})
-        add({"name": "cpp", "module": "suite", "kind": "cpp", "mode": "suite",
-             "surface": "in-process code (native unit tests)",
-             "about": "All native C++ unit tests via CTest.",
-             "assumptions": "Requires a configured CMake build dir. No PLC hardware or network needed."})
+    add({"name": "cpp", "module": "suite", "kind": "cpp", "mode": "suite",
+         "surface": "in-process code (native unit tests)",
+         "about": "All native C++ unit tests via CTest.",
+         "assumptions": "Requires a configured CMake build dir. No PLC hardware or network needed."})
     return entries, build_dir
 
 
@@ -281,6 +282,10 @@ def check_prereqs(name, info, build_dir):
     if info["kind"] == "ts":
         if shutil.which("bun") is None:
             return False, "bun not on PATH"
+        for app in ("gateway", "s7shell"):
+            binary = os.path.join(REPO_ROOT, ".build", "linux-static-release", "sgrn", "apps", app, app)
+            if not os.path.isfile(binary):
+                return False, f"missing {app} binary {binary} (build the linux-static-release preset first)"
         return True, ""
     if info["kind"] == "cpp":
         if build_dir is None:
@@ -542,6 +547,11 @@ def print_summary(entries, results):
 
 
 def run_selection(entries, build_dir, names, simulation_name=None, include_setup=False):
+    # Running an aggregate suite alongside its individual entries repeats work.
+    if "ts-suite" in names and any(n.startswith("ts-") and n != "ts-suite" for n in names):
+        names = [n for n in names if n != "ts-suite"]
+    if "cpp" in names and any(n.startswith("cpp-") and n != "cpp" for n in names):
+        names = [n for n in names if n != "cpp"]
     results = []
     for name in names:
         info = entries[name]
@@ -567,9 +577,13 @@ def main():
     parser.add_argument("--list", action="store_true", help="List all entries with readiness and exit")
     parser.add_argument("--module", dest="module", default=None,
                         help="Run all entries of one module (gateway, scl, datastore, s7shell, utils, suite)")
+    parser.add_argument("--kind", choices=("python", "ts", "cpp"),
+                        help="Limit selection to Python, TypeScript, or C++ tests")
     args = parser.parse_args()
 
     entries, build_dir = build_registry()
+    if args.kind:
+        entries = {name: info for name, info in entries.items() if info["kind"] == args.kind}
 
     if args.list:
         print_menu(entries, build_dir)

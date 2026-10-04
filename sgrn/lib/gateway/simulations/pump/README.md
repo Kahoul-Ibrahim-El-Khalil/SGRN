@@ -17,13 +17,13 @@ It demonstrates a **dual-client architecture**:
 ## Enabled / Disabled Features
 - **S7 Adapter**: **Enabled** (Port 102). *Both AngelScript clients connect via this port.*
 - **HTTP/WebSocket API**: **Enabled** (Port 8000; WebSocket at `/ws`).
-- **Modbus Adapter**: **Disabled** via `demo.py` due to root binding constraints.
+- **Modbus Adapter**: **Disabled** in the default simulation configuration due to root binding constraints.
 - **Security**: **Strict Mode**. AngelScript policy enforced via `security.as`.
 - **Persistence**: **Enabled**.
 
 ## How to Test
 1. Connect via the Web Dashboard and observe `DB2` (Tank) and `DB5` (Heater).
-2. The `operator.as` script is already running in the background via `demo.py`, automatically manipulating `DB1` (Setpoints). You will see the system dynamically responding, heating up, and cycling.
+2. The `operator.as` script runs alongside the simulation when launched with `python3 demos/gateway.py pump`, automatically manipulating `DB1` (Setpoints). You will see the system dynamically responding, heating up, and cycling.
 3. To trigger a cavitation fault, manually force the tank level low while the pump is running, or override the operator script's commands via the Web UI.
 
 > [!TIP]

@@ -74,10 +74,9 @@ void WebhookService::dispatchEvent(const std::string& organisation, const std::s
 
             // Only deliver to webhooks that either have no event filter (events IS NULL)
             // or have explicitly subscribed to this event type.
-            auto rows = co_await db->execSqlCoro(
-                "SELECT url, secret FROM core.webhooks "
-                "WHERE organisation = $1 AND is_active = true "
-                "AND (events IS NULL OR $2 = ANY(events))",
+            auto rows = co_await db->execSqlCoro("SELECT url, secret FROM core.webhooks "
+                                                 "WHERE organisation = $1 AND is_active = true "
+                                                 "AND (events IS NULL OR $2 = ANY(events))",
                 organisation, event_type);
 
             Json::Value envelope;
@@ -89,7 +88,7 @@ void WebhookService::dispatchEvent(const std::string& organisation, const std::s
             std::string body = Json::writeString(writer, envelope);
 
             for (const auto& row : rows) {
-                std::string url    = row["url"].as<std::string>();
+                std::string url = row["url"].as<std::string>();
                 std::string secret = row["secret"].isNull() ? "" : row["secret"].as<std::string>();
                 sendHttpRequest(url, secret, event_type, body);
             }

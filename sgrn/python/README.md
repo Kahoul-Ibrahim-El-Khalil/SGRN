@@ -14,11 +14,12 @@ This is the full reference the package docstring points at.
   `websockets`); flatten/filter/buffer pipeline (`TelemetryEngine`) and
   rolling NumPy ring buffer (`NumpyHistory`).
 - `dtypes.py` — registry schema → NumPy structured dtype bridge
-  (`decode_record`, endianness-aware per-field decode).
+  (`decodeRecord`, endianness-aware per-field decode).
 - `models.py` — dataclasses: `DbField`, `DbSchema`, `UdtSchema`,
   `DataWriteResult`, `ConnectionInfo`, …
 - `websocket.py`, `telemetry.py` — transport clients.
-- `ml/` — `dataset.py` / `trainer.py` ML helpers.
+- `ml/` — dataset/trainer helpers plus reusable PCA anomaly monitoring,
+  fault diagnosis, and feature-contribution explanations in `diagnostics.py`.
 
 ## Install / use
 
@@ -29,4 +30,10 @@ The repo-root `sgrn/` directory is the C++ tree and must NOT shadow this
 package: test scripts put `sgrn/python` on `sys.path` *before* the repo
 root. In-tree consumers: `tests/gateway/websocket.py`,
 `tests/gateway/rest_api.py`, `tests/scl/dtypes_endianness.py`,
-`train_binary_ml.py`.
+`demos/train_binary_ml.py`.
+
+`sgrn.ml.fitMonitorAndDiagnoser` fits a normal-only PCA monitor, calibrates
+its reconstruction threshold on separate data, and fits a fault classifier.
+`sgrn.ml.explainSample` ranks feature deviations for a fitted bundle. The
+diagnostic functions require scikit-learn when called; install it separately
+if it is not already part of your environment.

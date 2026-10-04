@@ -49,7 +49,20 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
     // Collect target clients and determine if any needs field-level filtering
     bool t_any_needs_filter = false;
     auto targets = collectTargets(t_event, t_any_needs_filter);
-    auto binary_targets = collectBinaryTargets(t_event.db);
+    // Binary targets are keyed by DB number, but DeltaSnapshot events carry
+    // the dirty DB list (dirty_dbs) rather than a single db — collect across
+    // all of them so binary subscribers actually receive frames.
+    std::map<std::tuple<uint16_t, size_t, size_t>, std::vector<crow::websocket::connection*>> binary_targets;
+    if (!t_event.dirty_dbs.empty()) {
+        for (uint16_t dirty_db : t_event.dirty_dbs) {
+            for (auto& [key, conns] : collectBinaryTargets(dirty_db)) {
+                auto& vec = binary_targets[key];
+                vec.insert(vec.end(), conns.begin(), conns.end());
+            }
+        }
+    } else {
+        binary_targets = collectBinaryTargets(t_event.db);
+    }
 
     if (targets.empty() && binary_targets.empty())
         return;

@@ -28,7 +28,7 @@ import numpy as np
 
 from sgrn.gateway import Gateway
 from sgrn.telemetry import GatewayTelemetry
-from sgrn.dtypes import decode_record
+from sgrn.dtypes import decodeRecord
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("dual_test")
@@ -97,7 +97,7 @@ async def main() -> None:
     log.info(f"Testing Dual Subscriptions on DB {db_num} ('{db_name}')")
 
     # Pre-compile the dtype using the registry UDT definitions
-    dt = db_schema.to_dtype(t_udts=reg.udts_by_name())
+    dt = db_schema.toDtype(t_udts=reg.udtsByName())
     
     # State tracking
     received_json = {}
@@ -119,7 +119,7 @@ async def main() -> None:
     def on_binary(db: int, ts: float, record: np.void) -> None:
         if db == db_num:
             # Decode the binary NumPy record into a JSON-equivalent dict
-            decoded = decode_record(record, db_schema.fields, t_udts=reg.udts_by_name())
+            decoded = decodeRecord(record, db_schema.fields, t_udts=reg.udtsByName())
             received_binary.update(decoded)
             log.info(f"[BINARY] Decoded raw memory frame (ts={ts})")
 
@@ -135,7 +135,7 @@ async def main() -> None:
     # 3. Subscribe to BOTH feeds
     # You will receive JSON deltas AND the raw binary buffers
     telemetry.subscribe(t_path=db_name)
-    telemetry.subscribe_binary(t_db=db_num)
+    telemetry.subscribeBinary(t_db=db_num)
     
     # 4. Start the background loop
     telemetry.start()

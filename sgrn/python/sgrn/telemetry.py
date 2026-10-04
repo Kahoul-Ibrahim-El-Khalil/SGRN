@@ -8,7 +8,7 @@ Two layers, mirroring the client side of the embedded Svelte dashboard:
     the ``websockets`` library (RFC 6455 handshake, framing, ping/pong, and
     reconnection are all handled there — nothing hand-rolled here). It
     speaks the wire protocol ``{"command": "subscribe"|"unsubscribe"|
-    "clear_subscriptions", "path": <DbName or DbName/field>}``, seeds
+    "clearSubscriptions", "path": <DbName or DbName/field>}``, seeds
     subscriptions on (re)connect, auto-reconnects, and dispatches parsed
     JSON frames and status changes to callbacks. It does NOT interpret the
     frames.
@@ -113,7 +113,7 @@ class GatewayTelemetry:
     def status(self) -> str:
         return self._status
 
-    def subscribe_binary(self, t_db: int, t_offset: int = 0, t_size: Optional[int] = None) -> None:
+    def subscribeBinary(self, t_db: int, t_offset: int = 0, t_size: Optional[int] = None) -> None:
         """
         Register a binary subscription for an entire Data Block (DB) or a contiguous slice.
         
@@ -134,13 +134,13 @@ class GatewayTelemetry:
         sub = (t_db, t_offset, t_size)
         self.binary_subscriptions.add(sub)
         if self.connected:
-            self._send_command("subscribe_binary", db=t_db, offset=t_offset, size=t_size)
+            self._send_command("subscribeBinary", db=t_db, offset=t_offset, size=t_size)
 
-    def unsubscribe_binary(self, t_db: int, t_offset: int = 0, t_size: Optional[int] = None) -> None:
+    def unsubscribeBinary(self, t_db: int, t_offset: int = 0, t_size: Optional[int] = None) -> None:
         sub = (t_db, t_offset, t_size)
         self.binary_subscriptions.discard(sub)
         if self.connected:
-            self._send_command("unsubscribe_binary", db=t_db, offset=t_offset, size=t_size)
+            self._send_command("unsubscribeBinary", db=t_db, offset=t_offset, size=t_size)
 
     def subscribe(self, t_path: str) -> None:
         """Register a local JSON subscription and push it to the gateway."""
@@ -153,11 +153,11 @@ class GatewayTelemetry:
         if self.connected:
             self._send_command("unsubscribe", path=t_path)
 
-    def clear_subscriptions(self) -> None:
+    def clearSubscriptions(self) -> None:
         self.subscriptions.clear()
         self.binary_subscriptions.clear()
         if self.connected:
-            self._send_command("clear_subscriptions")
+            self._send_command("clearSubscriptions")
 
     def _send_command(
         self,
@@ -181,6 +181,14 @@ class GatewayTelemetry:
             payload["size"] = size
         # Never block a synchronous caller on the socket.
         asyncio.ensure_future(self._ws.send(json.dumps(payload)))
+
+    def sendRaw(self, t_payload: Dict[str, Any]) -> None:
+        """Send a raw JSON command object (e.g. ``{"command":
+        "setDictionaryMode", "enabled": True}``). No-op unless connected.
+        Mirrors ``GatewayClient.sendMessage`` in the web dashboard."""
+        if self._ws is None:
+            return
+        asyncio.ensure_future(self._ws.send(json.dumps(t_payload)))
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
@@ -232,7 +240,7 @@ class GatewayTelemetry:
             for path in sorted(self.subscriptions):
                 await ws.send(json.dumps({"command": "subscribe", "path": path}))
             for db, offset, size in sorted(self.binary_subscriptions):
-                payload = {"command": "subscribe_binary", "db": db}
+                payload = {"command": "subscribeBinary", "db": db}
                 if offset is not None: payload["offset"] = offset
                 if size is not None: payload["size"] = size
                 await ws.send(json.dumps(payload))
@@ -283,7 +291,7 @@ class GatewayTelemetry:
                 log.exception("on_status callback failed")
 
 
-def _is_subscribed(t_subscriptions: Set[str], t_db: str, t_path: str) -> bool:
+def _isSubscribed(t_subscriptions: Set[str], t_db: str, t_path: str) -> bool:
     """Mirror ``worker.ts`` semantics for pruning updates by subscription."""
     if not t_subscriptions:
         return True  # firehose mode
@@ -368,7 +376,7 @@ class TelemetryEngine:
     """
     Abstracted gateway telemetry pipeline (from the embedded Svelte worker).
 
-    Feed it delta snapshots via :meth:`handle_frame` (as
+    Feed it delta snapshots via :meth:`handleFrame` (as
     :class:`GatewayTelemetry` does automatically) and it will:
 
       * flatten nested delta snapshots into flat ``"<Db>-<path>"`` entries,
@@ -406,15 +414,15 @@ class TelemetryEngine:
     def unsubscribe(self, t_path: str) -> None:
         self.subscriptions.discard(t_path)
 
-    def clear_subscriptions(self) -> None:
+    def clearSubscriptions(self) -> None:
         self.subscriptions.clear()
 
-    def is_subscribed(self, t_db: str, t_path: str) -> bool:
-        return _is_subscribed(self.subscriptions, t_db, t_path)
+    def isSubscribed(self, t_db: str, t_path: str) -> bool:
+        return _isSubscribed(self.subscriptions, t_db, t_path)
 
     # ── pipeline ────────────────────────────────────────────────────────────
 
-    def handle_frame(self, t_data: Dict[str, Any]) -> None:
+    def handleFrame(self, t_data: Dict[str, Any]) -> None:
         """
         Ingest one delta snapshot (already parsed to a dict).
 
@@ -428,7 +436,7 @@ class TelemetryEngine:
         for db, db_data in t_data.items():
             if isinstance(db_data, dict):
                 self._flatten(db, "", db_data, ts)
-            elif self.is_subscribed(db, ""):
+            elif self.isSubscribed(db, ""):
                 self._stage(db, "", db_data, ts)
 
         # Debounce: reset the flush timer on each frame (as the worker does).
@@ -441,7 +449,7 @@ class TelemetryEngine:
     def _flatten(self, t_db: str, t_path: str, t_value: Any, t_ts: float) -> None:
         if t_value is None:
             full_key = f"{t_db}-{t_path}"
-            if not self.is_subscribed(t_db, t_path):
+            if not self.isSubscribed(t_db, t_path):
                 return
             if t_path and self.valid_keys is not None and full_key not in self.valid_keys:
                 return
@@ -458,7 +466,7 @@ class TelemetryEngine:
                 self._flatten(t_db, sub_path, item, t_ts)
         else:
             full_key = f"{t_db}-{t_path}"
-            if not self.is_subscribed(t_db, t_path):
+            if not self.isSubscribed(t_db, t_path):
                 return
             if t_path and self.valid_keys is not None and full_key not in self.valid_keys:
                 return

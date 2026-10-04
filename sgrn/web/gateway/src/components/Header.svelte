@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { link, location } from "svelte-spa-router";
   import { theme } from "../lib/theme";
   import {
@@ -7,6 +8,13 @@
     statusText,
     statusDotClass,
   } from "../lib/telemetryStore";
+
+  let gatewayName = "";
+
+  onMount(() => {
+    gatewayName = new URLSearchParams(window.location.search).get("gatewayName")?.trim() ?? "";
+    if (gatewayName) document.title = `${gatewayName} | SGRN Gateway`;
+  });
 
   function toggleTheme() {
     theme.update((t) => (t === "light" ? "dark" : "light"));
@@ -21,6 +29,9 @@
         >S7 Gateway</span
       >
     </h1>
+    {#if gatewayName}
+      <span class="gateway-name" title="Gateway instance">{gatewayName}</span>
+    {/if}
   </div>
   <nav class="header-nav">
     <a
@@ -103,6 +114,17 @@
     background: var(--accent);
     border-radius: 1px;
     flex-shrink: 0;
+  }
+
+  .gateway-name {
+    padding: 2px 7px;
+    border: 1px solid var(--surface-border);
+    border-radius: 3px;
+    color: var(--accent);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .2px;
+    white-space: nowrap;
   }
 
   .brand h1 {
