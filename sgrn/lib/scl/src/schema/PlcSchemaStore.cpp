@@ -381,6 +381,7 @@ void PlcSchemaStore::clear() {
     udts_.clear();
     tags_.clear();
     warnings_.clear();
+    dimensions_.clear();
     base_dir_.clear();
 }
 

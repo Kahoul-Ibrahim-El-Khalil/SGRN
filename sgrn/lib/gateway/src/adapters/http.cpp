@@ -329,6 +329,15 @@ bool HttpAdapter::isAuthorized(const http::HttpRequest& t_req, std::optional<uin
 
 bool HttpAdapter::isAuthorizedField(
     const http::HttpRequest& t_req, std::optional<uint16_t> t_db_number, const std::string& t_field_path, bool t_is_write) const {
+    // Schema-level #READ_ONLY beats policy: a read-only signal rejects
+    // semantic writes regardless of ACLs. Unknown/unresolvable paths fall
+    // through to the SecurityManager (fail-open, as before). Raw
+    // /memory/* writes are byte-level S7 semantics and stay DB-ACL only.
+    if (t_is_write && t_db_number.has_value() && refs_.registry) {
+        if (auto loc = refs_.registry->findField(*t_db_number, t_field_path); loc.has_value() && loc->field && loc->field->is_read_only) {
+            return false;
+        }
+    }
     if (!security_manager_)
         return true;
 

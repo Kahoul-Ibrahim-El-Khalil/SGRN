@@ -3,6 +3,7 @@
 #include <sgrn/SchemaStore.hpp>
 #include <sgrn/scl/types.hpp>
 
+#include <algorithm>
 #include <deque>
 #include <map>
 #include <optional>
@@ -126,6 +127,15 @@ public:
         return dbs_;
     }
 
+    /// Declared dimension vocabulary, unioned across compiled files.
+    const std::vector<std::string>& dimensions() const {
+        return dimensions_;
+    }
+    void addDimension(const std::string& t_dimension) {
+        if (std::find(dimensions_.begin(), dimensions_.end(), t_dimension) == dimensions_.end())
+            dimensions_.push_back(t_dimension);
+    }
+
 private:
     std::string base_dir_;
     std::map<uint16_t, DbSchema> dbs_;
@@ -137,6 +147,7 @@ private:
 
     std::map<std::string, PlcTag> tags_;
     std::vector<std::string> warnings_;
+    std::vector<std::string> dimensions_;
 
     void rebuildIndices();
 };

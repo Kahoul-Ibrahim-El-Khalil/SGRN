@@ -1,3 +1,5 @@
+#include <fmt/format.h>
+
 #include <sgrn/scl/types/ParseResult.hpp>
 
 #include <sgrn/Result.hpp>

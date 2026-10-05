@@ -86,6 +86,9 @@ static Result<void, ::sgrn::scl::SclError> mergeIntoRegistry(PlcSchemaStore& t_r
     for (const std::string& w : t_result.warnings) {
         t_registry.addWarning(fmt::format("[{}] {}", t_source_name, w));
     }
+    for (const std::string& d : t_result.dimensions) {
+        t_registry.addDimension(d);
+    }
 
     for (UdtDefinition& t_udt : t_result.udts) {
         if (t_udt.udt_number == 0 && t_udt_info.number > 0) {

@@ -18,6 +18,14 @@ struct FeatureMeta {
     std::string data_type; // e.g. "REAL", "INT", "BOOL", "ENUM"
     std::string unit;      // e.g. "MW", "°C", "%", "bar" (HOW it is measured)
     std::string dimension; // e.g. "power", "temperature", "flow" (WHAT is measured)
+    std::string description;
+    int precision = -1; // display decimals, -1 = unset
+    double nominal = 0.0;
+    bool has_nominal = false;
+    double alarm_lo = 0.0;
+    double alarm_hi = 0.0;
+    bool has_alarm = false;
+    bool is_label = false; // #LABEL: collected for reference, never a feature
     bool is_categorical = false;
     std::map<int, std::string> enum_map;
     double min_val = 0.0;

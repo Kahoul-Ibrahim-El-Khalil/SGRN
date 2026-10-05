@@ -29,6 +29,23 @@ struct DbField {
     /// Set by #DIMENSION("..."); constrained by file-level #DIMENSIONS(...).
     /// Describes WHAT is measured; unit describes HOW it is measured.
     std::optional<std::string> dimension;
+    /// Human description for dashboards/docs. Set by #DESC("...").
+    std::optional<std::string> description;
+    /// Display decimals for dashboards. Set by #PRECISION(n).
+    std::optional<int> precision;
+    /// Expected operating point (Downs & Vogel base case, etc.).
+    /// Set by #NOMINAL(v). Intended for residuals, not control.
+    std::optional<double> nominal;
+    /// Acceptable operating band. Set by #ALARM(lo, hi). Surfaced in
+    /// registry/dashboard; evaluation is the consumer's job.
+    std::optional<double> alarm_lo;
+    std::optional<double> alarm_hi;
+    /// Label/metadata marker (#LABEL): sgrn_dataset skips these as features.
+    bool is_label{false};
+    /// Excluded from WAL persistence and dataset extraction (#TRANSIENT).
+    bool is_transient{false};
+    /// Write attempts are denied (#READ_ONLY); feeds field-level auth.
+    bool is_read_only{false};
     std::optional<double> min_val;
     std::optional<double> max_val;
     std::map<int, std::string> enum_map;
@@ -125,6 +142,66 @@ inline void serializeToWriter(Writer& t_writer, const sgrn::scl::DbField& t_fiel
     if (t_field.dimension.has_value()) {
         t_writer.Key("dimension");
         t_writer.String(t_field.dimension.value().c_str());
+    }
+    if (t_field.description.has_value()) {
+        t_writer.Key("description");
+        t_writer.String(t_field.description.value().c_str());
+    }
+    if (t_field.precision.has_value()) {
+        t_writer.Key("precision");
+        t_writer.Int(t_field.precision.value());
+    }
+    if (t_field.nominal.has_value()) {
+        t_writer.Key("nominal");
+        t_writer.Double(t_field.nominal.value());
+    }
+    if (t_field.alarm_lo.has_value() && t_field.alarm_hi.has_value()) {
+        t_writer.Key("alarm_lo");
+        t_writer.Double(t_field.alarm_lo.value());
+        t_writer.Key("alarm_hi");
+        t_writer.Double(t_field.alarm_hi.value());
+    }
+    if (t_field.is_label) {
+        t_writer.Key("is_label");
+        t_writer.Bool(true);
+    }
+    if (t_field.is_transient) {
+        t_writer.Key("is_transient");
+        t_writer.Bool(true);
+    }
+    if (t_field.is_read_only) {
+        t_writer.Key("is_read_only");
+        t_writer.Bool(true);
+    }
+    if (t_field.description.has_value()) {
+        t_writer.Key("description");
+        t_writer.String(t_field.description.value().c_str());
+    }
+    if (t_field.precision.has_value()) {
+        t_writer.Key("precision");
+        t_writer.Int(t_field.precision.value());
+    }
+    if (t_field.nominal.has_value()) {
+        t_writer.Key("nominal");
+        t_writer.Double(t_field.nominal.value());
+    }
+    if (t_field.alarm_lo.has_value() && t_field.alarm_hi.has_value()) {
+        t_writer.Key("alarm_lo");
+        t_writer.Double(t_field.alarm_lo.value());
+        t_writer.Key("alarm_hi");
+        t_writer.Double(t_field.alarm_hi.value());
+    }
+    if (t_field.is_label) {
+        t_writer.Key("is_label");
+        t_writer.Bool(true);
+    }
+    if (t_field.is_transient) {
+        t_writer.Key("is_transient");
+        t_writer.Bool(true);
+    }
+    if (t_field.is_read_only) {
+        t_writer.Key("is_read_only");
+        t_writer.Bool(true);
     }
     if (t_field.min_val.has_value()) {
         t_writer.Key("min");

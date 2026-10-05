@@ -111,7 +111,11 @@
         const enum_str = node.enum_map[String(value)];
         formatted = enum_str ? `${value} (${enum_str})` : String(value);
       } else if (typeof value === "number") {
-        formatted = value.toFixed(4);
+        const decimals =
+          node?.precision !== undefined && Number.isFinite(node.precision)
+            ? Math.max(0, Math.min(18, Math.trunc(node.precision)))
+            : 4;
+        formatted = value.toFixed(decimals);
       } else {
         formatted = String(value ?? "");
       }
@@ -457,6 +461,7 @@
                       style="cursor:{node.is_struct || node.is_array
                         ? 'pointer'
                         : 'default'}"
+                      title={node.description ?? ""}
                       on:click={() =>
                         (node.is_struct || node.is_array) &&
                         toggleNode(node.id)}
@@ -486,7 +491,7 @@
                   {/if}
                 </td>
 
-                <!-- RANGE -->
+                <!-- RANGE + ALARM -->
                 <td class="range-cell">
                   {#if node.type === "db" || node.is_struct || node.is_array || node.field_type === "TRUNCATED"}
                     —
@@ -494,6 +499,9 @@
                     [{node.min}, {node.max}]
                   {:else}
                     —
+                  {/if}
+                  {#if node.alarm_lo !== undefined && node.alarm_hi !== undefined && node.type !== "db" && !node.is_struct && !node.is_array}
+                    <span class="meta-muted"> ⚠[{node.alarm_lo}, {node.alarm_hi}]</span>
                   {/if}
                 </td>
 
@@ -642,6 +650,7 @@
                               {/if}
                               <span
                                 class={f.udt_name ? "struct-node" : "leaf-node"}
+                                title={f.description ?? ""}
                                 >{f.name}</span
                               >
                             </div>
@@ -650,6 +659,9 @@
                           <td class="range-cell">
                             {#if f.min !== undefined && f.max !== undefined}
                               [{f.min}, {f.max}]
+                            {/if}
+                            {#if f.alarm_lo !== undefined && f.alarm_hi !== undefined}
+                              <span class="meta-muted">alarm [{f.alarm_lo}, {f.alarm_hi}]</span>
                             {/if}
                             {#if f.enum_map}
                               <span class="meta-muted"
@@ -741,6 +753,7 @@
                               {/if}
                               <span
                                 class={f.udt_name ? "struct-node" : "leaf-node"}
+                                title={f.description ?? ""}
                                 >{f.name}</span
                               >
                             </div>
@@ -749,6 +762,9 @@
                           <td class="range-cell">
                             {#if f.min !== undefined && f.max !== undefined}
                               [{f.min}, {f.max}]
+                            {/if}
+                            {#if f.alarm_lo !== undefined && f.alarm_hi !== undefined}
+                              <span class="meta-muted">alarm [{f.alarm_lo}, {f.alarm_hi}]</span>
                             {/if}
                             {#if f.enum_map}
                               <span class="meta-muted"

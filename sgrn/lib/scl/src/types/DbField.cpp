@@ -1,3 +1,5 @@
+#include <fmt/format.h>
+
 #include <sgrn/scl/types/DbField.hpp>
 
 #include <rapidjson/document.h>
@@ -51,6 +53,22 @@ sgrn::scl::DbField fromJson(const rapidjson::Value& t_node) {
         t_field.unit = t_node["unit"].GetString();
     if (t_node.HasMember("dimension") && t_node["dimension"].IsString())
         t_field.dimension = t_node["dimension"].GetString();
+    if (t_node.HasMember("description") && t_node["description"].IsString())
+        t_field.description = t_node["description"].GetString();
+    if (t_node.HasMember("precision") && t_node["precision"].IsInt())
+        t_field.precision = t_node["precision"].GetInt();
+    if (t_node.HasMember("nominal") && t_node["nominal"].IsNumber())
+        t_field.nominal = t_node["nominal"].GetDouble();
+    if (t_node.HasMember("alarm_lo") && t_node["alarm_lo"].IsNumber())
+        t_field.alarm_lo = t_node["alarm_lo"].GetDouble();
+    if (t_node.HasMember("alarm_hi") && t_node["alarm_hi"].IsNumber())
+        t_field.alarm_hi = t_node["alarm_hi"].GetDouble();
+    if (t_node.HasMember("is_label") && t_node["is_label"].IsBool())
+        t_field.is_label = t_node["is_label"].GetBool();
+    if (t_node.HasMember("is_transient") && t_node["is_transient"].IsBool())
+        t_field.is_transient = t_node["is_transient"].GetBool();
+    if (t_node.HasMember("is_read_only") && t_node["is_read_only"].IsBool())
+        t_field.is_read_only = t_node["is_read_only"].GetBool();
     if (t_node.HasMember("min") && t_node["min"].IsNumber())
         t_field.min_val = t_node["min"].GetDouble();
     if (t_node.HasMember("max") && t_node["max"].IsNumber())

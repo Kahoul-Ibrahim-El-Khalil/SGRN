@@ -27,6 +27,11 @@ struct UdtDefinition {
     std::map<int, std::string> enum_map;
     std::optional<std::string> unit;
     std::optional<std::string> dimension;
+    std::optional<std::string> description;
+    std::optional<int> precision;
+    std::optional<double> nominal;
+    std::optional<double> alarm_lo;
+    std::optional<double> alarm_hi;
     std::optional<double> min_val;
     std::optional<double> max_val;
 };
@@ -81,6 +86,24 @@ inline void serializeToWriter(Writer& t_writer, const sgrn::scl::UdtDefinition& 
     if (t_udt.dimension.has_value()) {
         t_writer.Key("dimension");
         t_writer.String(t_udt.dimension.value().c_str());
+    }
+    if (t_udt.description.has_value()) {
+        t_writer.Key("description");
+        t_writer.String(t_udt.description.value().c_str());
+    }
+    if (t_udt.precision.has_value()) {
+        t_writer.Key("precision");
+        t_writer.Int(t_udt.precision.value());
+    }
+    if (t_udt.nominal.has_value()) {
+        t_writer.Key("nominal");
+        t_writer.Double(t_udt.nominal.value());
+    }
+    if (t_udt.alarm_lo.has_value() && t_udt.alarm_hi.has_value()) {
+        t_writer.Key("alarm_lo");
+        t_writer.Double(t_udt.alarm_lo.value());
+        t_writer.Key("alarm_hi");
+        t_writer.Double(t_udt.alarm_hi.value());
     }
     if (t_udt.min_val.has_value()) {
         t_writer.Key("min");

@@ -12,6 +12,9 @@ set(SGRN_SCL_SOURCES
     src/schema/XmlTagTableImplementation.cpp
     src/schema/TagTable.cpp
     src/schema/ModbusMap.cpp
+    src/types/DbField.cpp
+    src/types/UdtDefinition.cpp
+    src/types/ParseResult.cpp
     src/AsApiEmitter.cpp
 )
 
@@ -52,6 +55,19 @@ if(SGRN_BUILD_TESTS)
     )
     add_test(NAME schema_binary_codec_test COMMAND schema_binary_codec_test)
     sgrn_target(schema_binary_codec_test)
+
+    sgrn_add_component_executable(
+        TARGET scl_directives_test
+        SOURCES tests/scl_directives_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn_scl
+    )
+    target_include_directories(scl_directives_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    add_test(NAME scl_directives_test COMMAND scl_directives_test)
+    sgrn_target(scl_directives_test)
 endif()
 
 # =============================================================================

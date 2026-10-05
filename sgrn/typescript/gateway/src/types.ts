@@ -7,6 +7,11 @@ export interface DbField {
   udt_name?: string;
   unit?: string;
   dimension?: string;
+  description?: string;
+  precision?: number;
+  nominal?: number;
+  alarm_lo?: number;
+  alarm_hi?: number;
   min?: number;
   max?: number;
   enum?: Record<string, string>;
@@ -122,6 +127,11 @@ export interface RegistryTreeNode {
   count: number;
   unit?: string;
   dimension?: string;
+  description?: string;
+  precision?: number;
+  nominal?: number;
+  alarm_lo?: number;
+  alarm_hi?: number;
   min?: number;
   max?: number;
   enum_map?: Record<string, string>;
@@ -143,6 +153,11 @@ export interface FlatRegistryField {
   full_path: string;
   unit?: string;
   dimension?: string;
+  description?: string;
+  precision?: number;
+  nominal?: number;
+  alarm_lo?: number;
+  alarm_hi?: number;
   min?: number;
   max?: number;
   enum_map?: Record<string, string>;

@@ -83,6 +83,11 @@ PlcSchemaStore buildRichStore() {
     DbField press = makeField("pressure", DataType::Real, 116);
     press.unit = "bar";
     press.dimension = "pressure";
+    press.description = "Reactor pressure";
+    press.precision = 1;
+    press.nominal = 2700.0;
+    press.alarm_lo = 2500.0;
+    press.alarm_hi = 3000.0;
     press.min_val = 0.0;
     press.max_val = 16.5;
     press.init_value = "1.013";
@@ -91,6 +96,9 @@ PlcSchemaStore buildRichStore() {
     DbField mode = makeField("mode", DataType::DInt, 120);
     mode.enum_map = {{0, "Off"}, {1, "On"}, {2, "Auto"}};
     mode.is_dynamic = true;
+    mode.is_label = true;
+    mode.is_transient = true;
+    mode.is_read_only = true;
     db.fields.push_back(mode);
 
     DbField stamp = makeField("stamp", DataType::DateTime, 124);
@@ -138,6 +146,11 @@ PlcSchemaStore buildRichStore() {
     alias.enum_map = {{0, "Cold"}, {1, "Hot"}};
     alias.unit = "degC";
     alias.dimension = "temperature";
+    alias.description = "Temperature alias";
+    alias.precision = 1;
+    alias.nominal = 20.0;
+    alias.alarm_lo = -40.0;
+    alias.alarm_hi = 120.0;
     alias.min_val = -40.0;
     alias.max_val = 120.0;
     if (store.addUdt(std::move(alias)).hasError()) {
@@ -218,8 +231,14 @@ int main() {
             CHECK(press && press->min_val && *press->min_val == 0.0);
             CHECK(press && press->max_val && *press->max_val == 16.5);
             CHECK(press && press->init_value == "1.013");
+            CHECK(press && press->description && *press->description == "Reactor pressure");
+            CHECK(press && press->precision && *press->precision == 1);
+            CHECK(press && press->nominal && *press->nominal == 2700.0);
+            CHECK(press && press->alarm_lo && *press->alarm_lo == 2500.0);
+            CHECK(press && press->alarm_hi && *press->alarm_hi == 3000.0);
             const DbField* mode = findField(db->fields, "mode");
             CHECK(mode && mode->enum_map.size() == 3 && mode->enum_map.at(2) == "Auto" && mode->is_dynamic);
+            CHECK(mode && mode->is_label && mode->is_transient && mode->is_read_only);
             const DbField* rod = findField(db->fields, "rod");
             CHECK(rod && rod->udt_name == "RodUdt" && rod->children.size() == 2);
             CHECK(rod && rod->children[1].children.size() == 1 && rod->children[1].children[0].name == "flag");
@@ -233,6 +252,11 @@ int main() {
             CHECK(udt->is_scalar_alias && udt->scalar_type == DataType::Real);
             CHECK(udt->enum_map.at(1) == "Hot" && udt->unit && *udt->unit == "degC");
             CHECK(udt->dimension && *udt->dimension == "temperature");
+            CHECK(udt->description && *udt->description == "Temperature alias");
+            CHECK(udt->precision && *udt->precision == 1);
+            CHECK(udt->nominal && *udt->nominal == 20.0);
+            CHECK(udt->alarm_lo && *udt->alarm_lo == -40.0);
+            CHECK(udt->alarm_hi && *udt->alarm_hi == 120.0);
             CHECK(udt->min_val && *udt->min_val == -40.0 && udt->max_val && *udt->max_val == 120.0);
         }
         auto tag_res = back.getTag("StartButton");

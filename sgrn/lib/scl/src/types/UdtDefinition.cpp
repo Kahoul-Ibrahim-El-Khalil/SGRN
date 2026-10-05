@@ -1,3 +1,5 @@
+#include <fmt/format.h>
+
 #include <sgrn/scl/types/UdtDefinition.hpp>
 
 #include <rapidjson/document.h>
@@ -64,6 +66,16 @@ sgrn::scl::UdtDefinition fromJson(const rapidjson::Value& t_node) {
         udt_def.unit = t_node["unit"].GetString();
     if (t_node.HasMember("dimension") && t_node["dimension"].IsString())
         udt_def.dimension = t_node["dimension"].GetString();
+    if (t_node.HasMember("description") && t_node["description"].IsString())
+        udt_def.description = t_node["description"].GetString();
+    if (t_node.HasMember("precision") && t_node["precision"].IsInt())
+        udt_def.precision = t_node["precision"].GetInt();
+    if (t_node.HasMember("nominal") && t_node["nominal"].IsNumber())
+        udt_def.nominal = t_node["nominal"].GetDouble();
+    if (t_node.HasMember("alarm_lo") && t_node["alarm_lo"].IsNumber())
+        udt_def.alarm_lo = t_node["alarm_lo"].GetDouble();
+    if (t_node.HasMember("alarm_hi") && t_node["alarm_hi"].IsNumber())
+        udt_def.alarm_hi = t_node["alarm_hi"].GetDouble();
     if (t_node.HasMember("min") && t_node["min"].IsNumber())
         udt_def.min_val = t_node["min"].GetDouble();
     if (t_node.HasMember("max") && t_node["max"].IsNumber())

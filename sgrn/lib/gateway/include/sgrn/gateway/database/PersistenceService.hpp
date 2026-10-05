@@ -417,6 +417,8 @@ private:
     // after configure returns). Empty when no store was provided.
     std::string schema_binary_;
     bool has_binary_schema_{false};
+    /// Non-owning schema view for #TRANSIENT filtering (lifetime: gateway).
+    const scl::PlcSchemaStore* schema_store_{nullptr};
 
     twin::LeafDictionary dict_;
     std::vector<bool> allowed_by_id_;

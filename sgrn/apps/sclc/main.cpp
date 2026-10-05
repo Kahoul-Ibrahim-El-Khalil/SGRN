@@ -155,11 +155,20 @@ SIEMENS S7 SCL SYNTAX & INFORMATION MODEL MAPPING MANUAL
       { S7_Optimized_Access := 'FALSE' }
       { S7_SetPoint := 'True' }
 
-   B. Pragma Metadata (#)
-      #BIG_ENDIAN            Big-endian encoding
-      #LITTLE_ENDIAN         Little-endian encoding
-      #UNIT "rpm"            Engineering unit annotation
-      #EVENT_TRIGGER         Enable OPC UA event emission for this node
+    B. Pragma Metadata (#)
+       #BIG_ENDIAN            Big-endian encoding
+       #LITTLE_ENDIAN         Little-endian encoding
+       #UNIT "rpm"            Engineering unit annotation (HOW measured)
+       #DIMENSION "pressure"  Dimension class (WHAT measured)
+       #DIMENSIONS("a", …)    File-top dimension vocabulary (undeclared fails)
+       #DESC "…"              Human description (dashboard tooltip)
+       #LABEL                 Label/metadata marker (flagged, never a feature)
+       #PRECISION(n)          Dashboard display decimals
+       #NOMINAL(v)            Expected operating point (residual reference)
+       #TRANSIENT             Excluded from JSONL WAL + datasets
+       #READ_ONLY             Semantic POST writes denied
+       #ALARM(lo, hi)         Acceptable band (surfaced, not evaluated)
+       #EVENT_TRIGGER         Enable OPC UA event emission for this node
 
    C. Retentivity
       RETAIN / NON_RETAIN    Controls persistence behavior

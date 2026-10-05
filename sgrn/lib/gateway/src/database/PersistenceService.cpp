@@ -130,6 +130,7 @@ Result<void> PersistenceService::configure(const PersistenceConfig& t_cfg, const
     db_ = std::move(tsp_db);
     schema_json_ = t_schema_json;
     read_db_fn_ = std::move(t_read_db);
+    schema_store_ = t_schema_store;
 
     // Render the binary schema payload once, up front: archives open lazily
     // (long after configure returns), and the header needs the bytes then.
@@ -420,6 +421,19 @@ void PersistenceService::rebuildAllowedByIndex() {
                 if (path.rfind(ns, 0) == 0) {
                     passes = true;
                     break;
+                }
+            }
+        }
+        // #TRANSIENT leaves never persist (JSONL deltas and anchors share
+        // this filter; binary WAL keeps full-DB images for resync).
+        // Runs at rebuild time only — the hot path stays a bool lookup.
+        if (passes && schema_store_) {
+            const size_t dot = path.find('.');
+            if (dot != std::string::npos) {
+                if (auto loc = schema_store_->findField(
+                        std::string_view(path.data(), dot), std::string_view(path.data() + dot + 1, path.size() - dot - 1));
+                    loc.has_value() && loc->field && loc->field->is_transient) {
+                    passes = false;
                 }
             }
         }

@@ -36,6 +36,28 @@ The `DbSymbolsParser` performs lexical analysis and builds an Abstract Syntax Tr
   schema binary codec, `sgrn_dataset` manifest features, `GET /registry`,
   and the dashboard (shown next to the unit).
 
+### Semantic annotations reference
+
+| Directive | Form | Meaning | Consumers |
+|---|---|---|---|
+| `#UNIT` | `#UNIT("kPa")` | HOW measured (engineering unit) | registry, dashboard, OPC-UA, manifest |
+| `#DIMENSION` | `#DIMENSION("pressure")` | WHAT measured (dimension class) | registry, dashboard, manifest |
+| `#DIMENSIONS` | `#DIMENSIONS("pressure", …)` top of file | allowed vocabulary; undeclared values fail parse | parser |
+| `#DESC` | `#DESC("…")` | human description | dashboard tooltip, registry, manifest |
+| `#LABEL` | bare | label/metadata, not a model feature (CSV column kept, flagged `is_label`) | `sgrn_dataset` manifest, trainers |
+| `#PRECISION` | `#PRECISION(2)` (0..18) | dashboard display decimals (default 4) | dashboard |
+| `#NOMINAL` | `#NOMINAL(2700.0)` | expected operating point (residual reference, not a control target) | models, manifest |
+| `#TRANSIENT` | bare | excluded from JSONL WAL + datasets (binary WAL keeps full images for resync) | persistence, `sgrn_dataset` |
+| `#READ_ONLY` | bare | semantic `POST /data/*` writes denied regardless of ACLs (raw `/memory/*` stays DB-ACL) | HTTP adapter |
+| `#ALARM` | `#ALARM(lo, hi)`, hi > lo | acceptable band, surfaced in registry/dashboard; evaluation is the consumer's job | dashboard, manifest |
+| `#RANGE` | `#RANGE(min, max)` | sensor span | registry, dashboard |
+| `#ENUM` | `#ENUM(A=1, …)` | named states | registry, dataset (`is_categorical`) |
+
+Inheritance: scalar `TYPE` aliases (`TYPE "P" : Real #UNIT…`) carry
+unit/dimension/desc/precision/nominal/alarm/min/max/enum to fields unless
+the field overrides them. `#LABEL`/`#TRANSIENT`/`#READ_ONLY` are per-signal
+roles and are never inherited.
+
 ### 2. Offset Inference & Alignment Mapping
 
 Unlike modern memory-managed languages, Siemens S7 PLCs have strict, proprietary memory alignment rules (e.g., bits are packed into bytes, words align to 2-byte boundaries).

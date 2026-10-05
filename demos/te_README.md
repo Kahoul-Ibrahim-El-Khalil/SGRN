@@ -18,6 +18,13 @@ in the dashboard next to the unit, in `GET /registry`, and in
 `sgrn_dataset` manifests. Renaming twin paths invalidates old archives —
 reconvert after any rename.
 
+Other directives used here: `#DESC` (dashboard tooltip), `#LABEL`
+(`TELabels`, flagged `is_label` in manifests, never a model feature),
+`#PRECISION` (dashboard decimals), `#NOMINAL` (Downs base case, residual
+reference). Also available: `#TRANSIENT` (out of JSONL WAL + datasets),
+`#READ_ONLY` (semantic POST writes denied), `#ALARM(lo, hi)` (surfaced in
+registry/dashboard, not evaluated). Full table in `sgrn/lib/scl/README.md`.
+
 ## Run in order
 
 ```bash

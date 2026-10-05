@@ -74,13 +74,32 @@ sgrn::Result<void> DatasetProcessor::loadSchema(const std::string& t_scl_path) {
 
     std::function<void(const sgrn::scl::DbField&, const std::string&, int, uint16_t, const std::string&)> add_leaf =
         [&](const sgrn::scl::DbField& field, const std::string& path, int abs_offset, uint16_t db_num, const std::string& db_name) {
+            // #TRANSIENT leaves are excluded from the WAL by design and stay
+            // out of datasets. #LABEL leaves keep their CSV column (models
+            // need targets) but are flagged in the manifest so trainers can
+            // exclude them from X (see trainAndSelectBest target_feature).
+            if (field.is_transient)
+                return;
             FeatureMeta meta;
+            meta.is_label = field.is_label;
             meta.db_name = db_name;
             meta.field_path = path;
             meta.full_name = fmt::format("{}.{}", db_name, path);
             meta.data_type = s7codec::s7TypeToString(field.type);
             meta.unit = field.unit.value_or("");
             meta.dimension = field.dimension.value_or("");
+            meta.description = field.description.value_or("");
+            if (field.precision.has_value())
+                meta.precision = field.precision.value();
+            if (field.nominal.has_value()) {
+                meta.nominal = field.nominal.value();
+                meta.has_nominal = true;
+            }
+            if (field.alarm_lo.has_value() && field.alarm_hi.has_value()) {
+                meta.alarm_lo = field.alarm_lo.value();
+                meta.alarm_hi = field.alarm_hi.value();
+                meta.has_alarm = true;
+            }
             meta.is_categorical = isCategoricalType(field.type);
             meta.db_num = db_num;
             meta.offset = static_cast<size_t>(abs_offset);
@@ -685,6 +704,28 @@ sgrn::Result<void> DatasetProcessor::generateManifest(const std::string& t_manif
 
         writer.Key("dimension");
         writer.String(feat.dimension.c_str());
+
+        writer.Key("is_label");
+        writer.Bool(feat.is_label);
+
+        if (!feat.description.empty()) {
+            writer.Key("description");
+            writer.String(feat.description.c_str());
+        }
+        if (feat.precision >= 0) {
+            writer.Key("precision");
+            writer.Int(feat.precision);
+        }
+        if (feat.has_nominal) {
+            writer.Key("nominal");
+            writer.Double(feat.nominal);
+        }
+        if (feat.has_alarm) {
+            writer.Key("alarm_lo");
+            writer.Double(feat.alarm_lo);
+            writer.Key("alarm_hi");
+            writer.Double(feat.alarm_hi);
+        }
 
         writer.Key("is_categorical");
         writer.Bool(feat.is_categorical);

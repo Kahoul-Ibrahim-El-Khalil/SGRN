@@ -114,6 +114,36 @@ static void serializeDbField(Writer& t_writer, const DbField& t_field) {
         t_writer.Key("dimension");
         t_writer.String(t_field.dimension.value().c_str());
     }
+    if (t_field.description.has_value()) {
+        t_writer.Key("description");
+        t_writer.String(t_field.description.value().c_str());
+    }
+    if (t_field.precision.has_value()) {
+        t_writer.Key("precision");
+        t_writer.Int(t_field.precision.value());
+    }
+    if (t_field.nominal.has_value()) {
+        t_writer.Key("nominal");
+        t_writer.Double(t_field.nominal.value());
+    }
+    if (t_field.alarm_lo.has_value() && t_field.alarm_hi.has_value()) {
+        t_writer.Key("alarm_lo");
+        t_writer.Double(t_field.alarm_lo.value());
+        t_writer.Key("alarm_hi");
+        t_writer.Double(t_field.alarm_hi.value());
+    }
+    if (t_field.is_label) {
+        t_writer.Key("is_label");
+        t_writer.Bool(true);
+    }
+    if (t_field.is_transient) {
+        t_writer.Key("is_transient");
+        t_writer.Bool(true);
+    }
+    if (t_field.is_read_only) {
+        t_writer.Key("is_read_only");
+        t_writer.Bool(true);
+    }
     if (t_field.min_val.has_value()) {
         t_writer.Key("min");
         t_writer.Double(t_field.min_val.value());
@@ -167,6 +197,55 @@ static void serializeUdtDefinition(Writer& t_writer, const UdtDefinition& t_udt)
     if (t_udt.trigger_events) {
         t_writer.Key("trigger_events");
         t_writer.Bool(true);
+    }
+    if (t_udt.is_scalar_alias) {
+        t_writer.Key("is_scalar_alias");
+        t_writer.Bool(true);
+        t_writer.Key("scalar_type");
+        t_writer.String(s7codec::s7TypeToString(t_udt.scalar_type));
+    }
+    if (!t_udt.enum_map.empty()) {
+        t_writer.Key("enum");
+        t_writer.StartObject();
+        for (const auto& [key, value] : t_udt.enum_map) {
+            t_writer.Key(std::to_string(key).c_str());
+            t_writer.String(value.c_str());
+        }
+        t_writer.EndObject();
+    }
+    if (t_udt.unit.has_value()) {
+        t_writer.Key("unit");
+        t_writer.String(t_udt.unit.value().c_str());
+    }
+    if (t_udt.dimension.has_value()) {
+        t_writer.Key("dimension");
+        t_writer.String(t_udt.dimension.value().c_str());
+    }
+    if (t_udt.description.has_value()) {
+        t_writer.Key("description");
+        t_writer.String(t_udt.description.value().c_str());
+    }
+    if (t_udt.precision.has_value()) {
+        t_writer.Key("precision");
+        t_writer.Int(t_udt.precision.value());
+    }
+    if (t_udt.nominal.has_value()) {
+        t_writer.Key("nominal");
+        t_writer.Double(t_udt.nominal.value());
+    }
+    if (t_udt.alarm_lo.has_value() && t_udt.alarm_hi.has_value()) {
+        t_writer.Key("alarm_lo");
+        t_writer.Double(t_udt.alarm_lo.value());
+        t_writer.Key("alarm_hi");
+        t_writer.Double(t_udt.alarm_hi.value());
+    }
+    if (t_udt.min_val.has_value()) {
+        t_writer.Key("min");
+        t_writer.Double(t_udt.min_val.value());
+    }
+    if (t_udt.max_val.has_value()) {
+        t_writer.Key("max");
+        t_writer.Double(t_udt.max_val.value());
     }
     t_writer.EndObject();
 }
@@ -273,6 +352,15 @@ static void doSerialize(Writer& t_writer, const PlcSchemaStore& t_registry, std:
         t_writer.EndArray();
     }
 
+    // Declared dimension vocabulary (union across compiled files).
+    if (!t_db_number.has_value() && !t_registry.dimensions().empty()) {
+        t_writer.Key("dimensions");
+        t_writer.StartArray();
+        for (const auto& dim : t_registry.dimensions())
+            t_writer.String(dim.c_str());
+        t_writer.EndArray();
+    }
+
     // Summary
     t_writer.Key("summary");
     t_writer.StartObject();
@@ -360,6 +448,22 @@ static sgrn::Result<DbField, scl::SclError> fieldFromJson(const rapidjson::Value
         t_field.unit = t_node["unit"].GetString();
     if (t_node.HasMember("dimension") && t_node["dimension"].IsString())
         t_field.dimension = t_node["dimension"].GetString();
+    if (t_node.HasMember("description") && t_node["description"].IsString())
+        t_field.description = t_node["description"].GetString();
+    if (t_node.HasMember("precision") && t_node["precision"].IsInt())
+        t_field.precision = t_node["precision"].GetInt();
+    if (t_node.HasMember("nominal") && t_node["nominal"].IsNumber())
+        t_field.nominal = t_node["nominal"].GetDouble();
+    if (t_node.HasMember("alarm_lo") && t_node["alarm_lo"].IsNumber())
+        t_field.alarm_lo = t_node["alarm_lo"].GetDouble();
+    if (t_node.HasMember("alarm_hi") && t_node["alarm_hi"].IsNumber())
+        t_field.alarm_hi = t_node["alarm_hi"].GetDouble();
+    if (t_node.HasMember("is_label") && t_node["is_label"].IsBool())
+        t_field.is_label = t_node["is_label"].GetBool();
+    if (t_node.HasMember("is_transient") && t_node["is_transient"].IsBool())
+        t_field.is_transient = t_node["is_transient"].GetBool();
+    if (t_node.HasMember("is_read_only") && t_node["is_read_only"].IsBool())
+        t_field.is_read_only = t_node["is_read_only"].GetBool();
     if (t_node.HasMember("min") && t_node["min"].IsNumber())
         t_field.min_val = t_node["min"].GetDouble();
     if (t_node.HasMember("max") && t_node["max"].IsNumber())
@@ -467,6 +571,41 @@ sgrn::Result<UdtDefinition, scl::SclError> SchemaSerializer::udtFromJson(const r
     if (t_node.HasMember("trigger_events") && t_node["trigger_events"].IsBool()) {
         p_udt.trigger_events = t_node["trigger_events"].GetBool();
     }
+    if (t_node.HasMember("is_scalar_alias") && t_node["is_scalar_alias"].IsBool()) {
+        p_udt.is_scalar_alias = t_node["is_scalar_alias"].GetBool();
+    }
+    if (t_node.HasMember("scalar_type") && t_node["scalar_type"].IsString()) {
+        if (auto opt = s7codec::toType(t_node["scalar_type"].GetString()))
+            p_udt.scalar_type = *opt;
+    }
+    if (t_node.HasMember("enum") && t_node["enum"].IsObject()) {
+        for (auto it = t_node["enum"].MemberBegin(); it != t_node["enum"].MemberEnd(); ++it) {
+            try {
+                const int key = std::stoi(it->name.GetString());
+                if (it->value.IsString())
+                    p_udt.enum_map[key] = it->value.GetString();
+            } catch (...) {
+            }
+        }
+    }
+    if (t_node.HasMember("unit") && t_node["unit"].IsString())
+        p_udt.unit = t_node["unit"].GetString();
+    if (t_node.HasMember("dimension") && t_node["dimension"].IsString())
+        p_udt.dimension = t_node["dimension"].GetString();
+    if (t_node.HasMember("description") && t_node["description"].IsString())
+        p_udt.description = t_node["description"].GetString();
+    if (t_node.HasMember("precision") && t_node["precision"].IsInt())
+        p_udt.precision = t_node["precision"].GetInt();
+    if (t_node.HasMember("nominal") && t_node["nominal"].IsNumber())
+        p_udt.nominal = t_node["nominal"].GetDouble();
+    if (t_node.HasMember("alarm_lo") && t_node["alarm_lo"].IsNumber())
+        p_udt.alarm_lo = t_node["alarm_lo"].GetDouble();
+    if (t_node.HasMember("alarm_hi") && t_node["alarm_hi"].IsNumber())
+        p_udt.alarm_hi = t_node["alarm_hi"].GetDouble();
+    if (t_node.HasMember("min") && t_node["min"].IsNumber())
+        p_udt.min_val = t_node["min"].GetDouble();
+    if (t_node.HasMember("max") && t_node["max"].IsNumber())
+        p_udt.max_val = t_node["max"].GetDouble();
 
     return p_udt;
 }
@@ -652,10 +791,13 @@ void SchemaSerializer::resolveUdtsInRegistry(PlcSchemaStore& t_registry) {
 // Field record: name, offset:i32, bit:u8, type name, count:u32,
 //   array bounds:i32 x2, string_capacity:u32, struct_size:u32, flags:u16,
 //   then optionals in flag order (udt_name, children, unit, min:f64,
-//   max:f64, enum_map, init_value, dimension). Flags also carry
+//   max:f64, enum_map, init_value, dimension), then, when bit 15 is set,
+//   an extended block (ext:u16, then desc, precision:u8, nominal:f64,
+//   alarm_lo:f64 + alarm_hi:f64 in ext-bit order). Flags also carry
 //   trigger_events, is_dynamic, and the 2-bit endianness (0=Big, 1=Little,
-//   2=Unknown). NOTE: records WITH dimension require a reader that knows
-//   bit 9; old readers only stay compatible with dimension-free schemas.
+//   2=Unknown). NOTE: records WITH dimension or extended metadata require
+//   a reader that knows the new bits; old readers only stay compatible
+//   with schemas that don't use them.
 // Unlike the JSON form this is lossless: array bounds, init values, UDT
 // alias detail, and full tag addresses all survive the round-trip.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -676,6 +818,18 @@ inline constexpr uint16_t kHasInit = 1 << 6;
 inline constexpr uint16_t kTriggerEvents = 1 << 7;
 inline constexpr uint16_t kIsDynamic = 1 << 8;
 inline constexpr uint16_t kHasDimension = 1 << 9;
+// Bit 15: extended display metadata block (u16 ext flags + optionals).
+// Keeps the base record shape stable; readers that predate the block must
+// refuse records with this bit (same one-way note as dimension).
+inline constexpr uint16_t kHasExt = 1 << 15;
+// Extended block bits (u16, written only when kHasExt is set).
+inline constexpr uint16_t kExtHasDesc = 1 << 0;
+inline constexpr uint16_t kExtHasPrecision = 1 << 1;
+inline constexpr uint16_t kExtHasNominal = 1 << 2;
+inline constexpr uint16_t kExtHasAlarm = 1 << 3;
+inline constexpr uint16_t kExtIsLabel = 1 << 4;
+inline constexpr uint16_t kExtIsTransient = 1 << 5;
+inline constexpr uint16_t kExtIsReadOnly = 1 << 6;
 // Bits 10-11: endianness (0 = Big default, 1 = Little, 2 = Unknown).
 inline constexpr uint16_t kEndianShift = 10;
 inline constexpr uint16_t kEndianMask = 0x3 << kEndianShift;
@@ -683,12 +837,15 @@ inline constexpr uint16_t kEndianMask = 0x3 << kEndianShift;
 // DB flags (u8): bit0 = source_file present.
 inline constexpr uint8_t kDbHasSourceFile = 1 << 0;
 // UDT flags (u8): bit0 = enum_map, bit1 = unit, bit2 = min, bit3 = max,
-// bit4 = dimension (appended last; same one-way note as field dimension).
+// bit4 = dimension, bit7 = extended display block (u8 ext + desc,
+// precision:u8, nominal:f64, alarm_lo/hi:f64; same bit layout as the field
+// extended block). Appended after max, before the field count.
 inline constexpr uint8_t kUdtHasEnum = 1 << 0;
 inline constexpr uint8_t kUdtHasUnit = 1 << 1;
 inline constexpr uint8_t kUdtHasMin = 1 << 2;
 inline constexpr uint8_t kUdtHasMax = 1 << 3;
 inline constexpr uint8_t kUdtHasDimension = 1 << 4;
+inline constexpr uint8_t kUdtHasExt = 1 << 7;
 
 inline constexpr size_t kMaxStringLen = 1u << 24;
 inline constexpr size_t kMaxCount = 1u << 20;
@@ -848,6 +1005,10 @@ void writeField(Writer& t_w, const DbField& t_f) {
         flags |= kIsDynamic;
     if (t_f.dimension.has_value())
         flags |= kHasDimension;
+    const bool has_ext = t_f.description.has_value() || t_f.precision.has_value() || t_f.nominal.has_value() ||
+                         (t_f.alarm_lo.has_value() && t_f.alarm_hi.has_value()) || t_f.is_label || t_f.is_transient || t_f.is_read_only;
+    if (has_ext)
+        flags |= kHasExt;
     flags |= static_cast<uint16_t>(endianToU8(t_f.endianness) << kEndianShift);
     t_w.u16(flags);
 
@@ -875,6 +1036,34 @@ void writeField(Writer& t_w, const DbField& t_f) {
         t_w.str(t_f.init_value);
     if (t_f.dimension.has_value())
         t_w.str(t_f.dimension.value());
+    if (has_ext) {
+        uint16_t ext = 0;
+        if (t_f.description.has_value())
+            ext |= kExtHasDesc;
+        if (t_f.precision.has_value())
+            ext |= kExtHasPrecision;
+        if (t_f.nominal.has_value())
+            ext |= kExtHasNominal;
+        if (t_f.alarm_lo.has_value() && t_f.alarm_hi.has_value())
+            ext |= kExtHasAlarm;
+        if (t_f.is_label)
+            ext |= kExtIsLabel;
+        if (t_f.is_transient)
+            ext |= kExtIsTransient;
+        if (t_f.is_read_only)
+            ext |= kExtIsReadOnly;
+        t_w.u16(ext);
+        if (t_f.description.has_value())
+            t_w.str(t_f.description.value());
+        if (t_f.precision.has_value())
+            t_w.u8(static_cast<uint8_t>(std::clamp(t_f.precision.value(), 0, 255)));
+        if (t_f.nominal.has_value())
+            t_w.f64(t_f.nominal.value());
+        if (t_f.alarm_lo.has_value() && t_f.alarm_hi.has_value()) {
+            t_w.f64(t_f.alarm_lo.value());
+            t_w.f64(t_f.alarm_hi.value());
+        }
+    }
 }
 
 bool readField(Reader& t_r, DbField& t_f, int t_depth = 0) {
@@ -958,6 +1147,39 @@ bool readField(Reader& t_r, DbField& t_f, int t_depth = 0) {
             return false;
         t_f.dimension = std::move(dimension);
     }
+    if (flags & kHasExt) {
+        uint16_t ext = 0;
+        if (!t_r.u16(ext))
+            return false;
+        if (ext & kExtHasDesc) {
+            std::string description;
+            if (!t_r.str(description))
+                return false;
+            t_f.description = std::move(description);
+        }
+        if (ext & kExtHasPrecision) {
+            uint8_t precision = 0;
+            if (!t_r.u8(precision))
+                return false;
+            t_f.precision = static_cast<int>(precision);
+        }
+        if (ext & kExtHasNominal) {
+            double nominal = 0.0;
+            if (!t_r.f64(nominal))
+                return false;
+            t_f.nominal = nominal;
+        }
+        if (ext & kExtHasAlarm) {
+            double lo = 0.0, hi = 0.0;
+            if (!t_r.f64(lo) || !t_r.f64(hi))
+                return false;
+            t_f.alarm_lo = lo;
+            t_f.alarm_hi = hi;
+        }
+        t_f.is_label = (ext & kExtIsLabel) != 0;
+        t_f.is_transient = (ext & kExtIsTransient) != 0;
+        t_f.is_read_only = (ext & kExtIsReadOnly) != 0;
+    }
     return true;
 }
 
@@ -1030,6 +1252,10 @@ void writeUdt(Writer& t_w, const UdtDefinition& t_udt) {
         flags |= kUdtHasMax;
     if (t_udt.dimension.has_value())
         flags |= kUdtHasDimension;
+    const bool udt_has_ext = t_udt.description.has_value() || t_udt.precision.has_value() || t_udt.nominal.has_value() ||
+                             (t_udt.alarm_lo.has_value() && t_udt.alarm_hi.has_value());
+    if (udt_has_ext)
+        flags |= kUdtHasExt;
     t_w.u8(flags);
     if (!t_udt.enum_map.empty()) {
         t_w.u32(static_cast<uint32_t>(t_udt.enum_map.size()));
@@ -1046,6 +1272,29 @@ void writeUdt(Writer& t_w, const UdtDefinition& t_udt) {
         t_w.f64(t_udt.max_val.value());
     if (t_udt.dimension.has_value())
         t_w.str(t_udt.dimension.value());
+    if (udt_has_ext) {
+        // Same bit layout as the field extended block (kExt* constants).
+        uint16_t ext = 0;
+        if (t_udt.description.has_value())
+            ext |= kExtHasDesc;
+        if (t_udt.precision.has_value())
+            ext |= kExtHasPrecision;
+        if (t_udt.nominal.has_value())
+            ext |= kExtHasNominal;
+        if (t_udt.alarm_lo.has_value() && t_udt.alarm_hi.has_value())
+            ext |= kExtHasAlarm;
+        t_w.u16(ext);
+        if (t_udt.description.has_value())
+            t_w.str(t_udt.description.value());
+        if (t_udt.precision.has_value())
+            t_w.u8(static_cast<uint8_t>(std::clamp(t_udt.precision.value(), 0, 255)));
+        if (t_udt.nominal.has_value())
+            t_w.f64(t_udt.nominal.value());
+        if (t_udt.alarm_lo.has_value() && t_udt.alarm_hi.has_value()) {
+            t_w.f64(t_udt.alarm_lo.value());
+            t_w.f64(t_udt.alarm_hi.value());
+        }
+    }
     t_w.u32(static_cast<uint32_t>(t_udt.fields.size()));
     for (const auto& field : t_udt.fields)
         writeField(t_w, field);
@@ -1103,6 +1352,36 @@ bool readUdt(Reader& t_r, UdtDefinition& t_udt) {
         if (!t_r.str(dimension))
             return false;
         t_udt.dimension = std::move(dimension);
+    }
+    if (flags & kUdtHasExt) {
+        uint16_t ext = 0;
+        if (!t_r.u16(ext))
+            return false;
+        if (ext & kExtHasDesc) {
+            std::string description;
+            if (!t_r.str(description))
+                return false;
+            t_udt.description = std::move(description);
+        }
+        if (ext & kExtHasPrecision) {
+            uint8_t precision = 0;
+            if (!t_r.u8(precision))
+                return false;
+            t_udt.precision = static_cast<int>(precision);
+        }
+        if (ext & kExtHasNominal) {
+            double nominal = 0.0;
+            if (!t_r.f64(nominal))
+                return false;
+            t_udt.nominal = nominal;
+        }
+        if (ext & kExtHasAlarm) {
+            double lo = 0.0, hi = 0.0;
+            if (!t_r.f64(lo) || !t_r.f64(hi))
+                return false;
+            t_udt.alarm_lo = lo;
+            t_udt.alarm_hi = hi;
+        }
     }
     // Fields come last so a truncated payload fails before mutating much.
     // (The store itself is only committed by the caller on full success.)

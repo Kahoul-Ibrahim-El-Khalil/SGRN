@@ -327,6 +327,13 @@ public:
                 std::string_view{"#UNIT"},
                 std::string_view{"#DIMENSION"},
                 std::string_view{"#DIMENSIONS"},
+                std::string_view{"#DESC"},
+                std::string_view{"#LABEL"},
+                std::string_view{"#PRECISION"},
+                std::string_view{"#NOMINAL"},
+                std::string_view{"#TRANSIENT"},
+                std::string_view{"#READ_ONLY"},
+                std::string_view{"#ALARM"},
                 std::string_view{"#RANGE"},
                 std::string_view{"#ENUM"},
                 std::string_view{"#EVENT_TRIGGER"},
@@ -662,6 +669,16 @@ private:
                             f.unit = udt.unit;
                         if (!f.dimension.has_value() && udt.dimension.has_value())
                             f.dimension = udt.dimension;
+                        if (!f.description.has_value() && udt.description.has_value())
+                            f.description = udt.description;
+                        if (!f.precision.has_value() && udt.precision.has_value())
+                            f.precision = udt.precision;
+                        if (!f.nominal.has_value() && udt.nominal.has_value())
+                            f.nominal = udt.nominal;
+                        if (!f.alarm_lo.has_value() && udt.alarm_lo.has_value())
+                            f.alarm_lo = udt.alarm_lo;
+                        if (!f.alarm_hi.has_value() && udt.alarm_hi.has_value())
+                            f.alarm_hi = udt.alarm_hi;
                         if (!f.min_val.has_value() && udt.min_val.has_value())
                             f.min_val = udt.min_val;
                         if (!f.max_val.has_value() && udt.max_val.has_value())
@@ -935,14 +952,27 @@ private:
         return fields;
     }
 
-    /// Parses the semantic field attributes (#UNIT / #DIMENSION / #RANGE /
-    /// #ENUM / #EVENT_TRIGGER / #DYNAMIC / #BIG_ENDIAN / #LITTLE_ENDIAN)
-    /// attached to a field or to a scalar-derived TYPE alias. Shared by
-    /// parseStructFields() and parseUdt().
+    /// Parses the semantic field attributes (#UNIT / #DIMENSION / #DESC /
+    /// #LABEL / #PRECISION / #NOMINAL / #TRANSIENT / #READ_ONLY / #ALARM /
+    /// #RANGE / #ENUM / #EVENT_TRIGGER / #DYNAMIC / #BIG_ENDIAN /
+    /// #LITTLE_ENDIAN) attached to a field or to a scalar-derived TYPE alias.
+    /// Shared by parseStructFields() and parseUdt().
     void parseFieldAttributes(DbField& f) {
-        while (checkKeyword("#UNIT") || checkKeyword("#DIMENSION") || checkKeyword("#RANGE") || checkKeyword("#ENUM") ||
-               checkKeyword("#EVENT_TRIGGER") || checkKeyword("#DYNAMIC") || checkKeyword("#BIG_ENDIAN") ||
-               checkKeyword("#LITTLE_ENDIAN")) {
+        auto is_number = [&](double& t_out) {
+            if (match(TokenType::Number)) {
+                t_out = std::stod(previous_.value);
+                return true;
+            }
+            if (matchPunctuation("-") && match(TokenType::Number)) {
+                t_out = -std::stod(previous_.value);
+                return true;
+            }
+            return false;
+        };
+        while (checkKeyword("#UNIT") || checkKeyword("#DIMENSION") || checkKeyword("#DESC") || checkKeyword("#LABEL") ||
+               checkKeyword("#PRECISION") || checkKeyword("#NOMINAL") || checkKeyword("#TRANSIENT") || checkKeyword("#READ_ONLY") ||
+               checkKeyword("#ALARM") || checkKeyword("#RANGE") || checkKeyword("#ENUM") || checkKeyword("#EVENT_TRIGGER") ||
+               checkKeyword("#DYNAMIC") || checkKeyword("#BIG_ENDIAN") || checkKeyword("#LITTLE_ENDIAN")) {
             if (matchKeyword("#UNIT")) {
                 bool has_paren = matchPunctuation("(");
                 if (match(TokenType::StringLiteral)) {
@@ -961,6 +991,58 @@ private:
                 } else {
                     setError(fmt::format("Line {}:{} - Expected string literal after #DIMENSION", current_.line, current_.col));
                 }
+            } else if (matchKeyword("#DESC")) {
+                bool has_paren = matchPunctuation("(");
+                if (match(TokenType::StringLiteral)) {
+                    f.description = previous_.value;
+                    if (has_paren)
+                        expectPunctuation(")", "Expected ')' after #DESC string");
+                } else {
+                    setError(fmt::format("Line {}:{} - Expected string literal after #DESC", current_.line, current_.col));
+                }
+            } else if (matchKeyword("#LABEL")) {
+                f.is_label = true;
+            } else if (matchKeyword("#TRANSIENT")) {
+                f.is_transient = true;
+            } else if (matchKeyword("#READ_ONLY")) {
+                f.is_read_only = true;
+            } else if (matchKeyword("#PRECISION")) {
+                expectPunctuation("(", "Expected '(' after #PRECISION");
+                if (match(TokenType::Number)) {
+                    const int prec = std::stoi(previous_.value);
+                    if (prec < 0 || prec > 18)
+                        setError(fmt::format("Line {}:{} - #PRECISION must be 0..18", current_.line, current_.col));
+                    else
+                        f.precision = prec;
+                } else {
+                    setError(fmt::format("Line {}:{} - Expected integer after #PRECISION(", current_.line, current_.col));
+                }
+                expectPunctuation(")", "Expected ')' after #PRECISION");
+            } else if (matchKeyword("#NOMINAL")) {
+                expectPunctuation("(", "Expected '(' after #NOMINAL");
+                double nominal = 0.0;
+                if (is_number(nominal))
+                    f.nominal = nominal;
+                else
+                    setError(fmt::format("Line {}:{} - Expected number after #NOMINAL(", current_.line, current_.col));
+                expectPunctuation(")", "Expected ')' after #NOMINAL");
+            } else if (matchKeyword("#ALARM")) {
+                expectPunctuation("(", "Expected '(' after #ALARM");
+                double lo = 0.0, hi = 0.0;
+                if (!is_number(lo)) {
+                    setError(fmt::format("Line {}:{} - Expected lo number in #ALARM(lo, hi)", current_.line, current_.col));
+                } else {
+                    expectPunctuation(",", "Expected ',' in #ALARM");
+                    if (!is_number(hi)) {
+                        setError(fmt::format("Line {}:{} - Expected hi number in #ALARM(lo, hi)", current_.line, current_.col));
+                    } else if (!(hi > lo)) {
+                        setError(fmt::format("Line {}:{} - #ALARM requires hi > lo", current_.line, current_.col));
+                    } else {
+                        f.alarm_lo = lo;
+                        f.alarm_hi = hi;
+                    }
+                }
+                expectPunctuation(")", "Expected ')' after #ALARM");
             } else if (matchKeyword("#RANGE")) {
                 expectPunctuation("(", "Expected '(' after #RANGE");
                 if (match(TokenType::Number)) {
@@ -1027,6 +1109,11 @@ private:
         t_udt.enum_map = std::move(base.enum_map);
         t_udt.unit = std::move(base.unit);
         t_udt.dimension = std::move(base.dimension);
+        t_udt.description = std::move(base.description);
+        t_udt.precision = std::move(base.precision);
+        t_udt.nominal = std::move(base.nominal);
+        t_udt.alarm_lo = std::move(base.alarm_lo);
+        t_udt.alarm_hi = std::move(base.alarm_hi);
         t_udt.min_val = std::move(base.min_val);
         t_udt.max_val = std::move(base.max_val);
         t_udt.endianness = base.endianness;
@@ -1130,9 +1217,33 @@ private:
                 f.struct_size = udt_map_[type_name].size_bytes;
 
                 if (udt_map_[type_name].is_scalar_alias) {
-                    f.type = udt_map_[type_name].scalar_type;
-                    f.struct_size = udt_map_[type_name].size_bytes;
-                    f.enum_map = udt_map_[type_name].enum_map;
+                    // Eager scalar-alias substitution: the post-parse
+                    // resolveFields() pass skips fields whose type is already
+                    // concrete, so ALL alias metadata must be inherited here
+                    // (mirrors the lazy path below). Field-level attributes
+                    // parsed afterwards still win (parsed later overwrites).
+                    const UdtDefinition& alias = udt_map_[type_name];
+                    f.type = alias.scalar_type;
+                    f.struct_size = alias.size_bytes;
+                    f.enum_map = alias.enum_map;
+                    if (alias.unit.has_value())
+                        f.unit = alias.unit;
+                    if (alias.dimension.has_value())
+                        f.dimension = alias.dimension;
+                    if (alias.description.has_value())
+                        f.description = alias.description;
+                    if (alias.precision.has_value())
+                        f.precision = alias.precision;
+                    if (alias.nominal.has_value())
+                        f.nominal = alias.nominal;
+                    if (alias.alarm_lo.has_value())
+                        f.alarm_lo = alias.alarm_lo;
+                    if (alias.alarm_hi.has_value())
+                        f.alarm_hi = alias.alarm_hi;
+                    if (alias.min_val.has_value())
+                        f.min_val = alias.min_val;
+                    if (alias.max_val.has_value())
+                        f.max_val = alias.max_val;
                 }
             }
 
