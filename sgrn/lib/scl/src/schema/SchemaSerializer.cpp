@@ -110,6 +110,10 @@ static void serializeDbField(Writer& t_writer, const DbField& t_field) {
         t_writer.Key("unit");
         t_writer.String(t_field.unit.value().c_str());
     }
+    if (t_field.dimension.has_value()) {
+        t_writer.Key("dimension");
+        t_writer.String(t_field.dimension.value().c_str());
+    }
     if (t_field.min_val.has_value()) {
         t_writer.Key("min");
         t_writer.Double(t_field.min_val.value());
@@ -354,6 +358,8 @@ static sgrn::Result<DbField, scl::SclError> fieldFromJson(const rapidjson::Value
         t_field.struct_size = t_node["struct_size"].GetInt();
     if (t_node.HasMember("unit") && t_node["unit"].IsString())
         t_field.unit = t_node["unit"].GetString();
+    if (t_node.HasMember("dimension") && t_node["dimension"].IsString())
+        t_field.dimension = t_node["dimension"].GetString();
     if (t_node.HasMember("min") && t_node["min"].IsNumber())
         t_field.min_val = t_node["min"].GetDouble();
     if (t_node.HasMember("max") && t_node["max"].IsNumber())
@@ -646,8 +652,10 @@ void SchemaSerializer::resolveUdtsInRegistry(PlcSchemaStore& t_registry) {
 // Field record: name, offset:i32, bit:u8, type name, count:u32,
 //   array bounds:i32 x2, string_capacity:u32, struct_size:u32, flags:u16,
 //   then optionals in flag order (udt_name, children, unit, min:f64,
-//   max:f64, enum_map, init_value). Flags also carry trigger_events,
-//   is_dynamic, and the 2-bit endianness (0=Big, 1=Little, 2=Unknown).
+//   max:f64, enum_map, init_value, dimension). Flags also carry
+//   trigger_events, is_dynamic, and the 2-bit endianness (0=Big, 1=Little,
+//   2=Unknown). NOTE: records WITH dimension require a reader that knows
+//   bit 9; old readers only stay compatible with dimension-free schemas.
 // Unlike the JSON form this is lossless: array bounds, init values, UDT
 // alias detail, and full tag addresses all survive the round-trip.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -667,17 +675,20 @@ inline constexpr uint16_t kHasEnum = 1 << 5;
 inline constexpr uint16_t kHasInit = 1 << 6;
 inline constexpr uint16_t kTriggerEvents = 1 << 7;
 inline constexpr uint16_t kIsDynamic = 1 << 8;
+inline constexpr uint16_t kHasDimension = 1 << 9;
 // Bits 10-11: endianness (0 = Big default, 1 = Little, 2 = Unknown).
 inline constexpr uint16_t kEndianShift = 10;
 inline constexpr uint16_t kEndianMask = 0x3 << kEndianShift;
 
 // DB flags (u8): bit0 = source_file present.
 inline constexpr uint8_t kDbHasSourceFile = 1 << 0;
-// UDT flags (u8): bit0 = enum_map, bit1 = unit, bit2 = min, bit3 = max.
+// UDT flags (u8): bit0 = enum_map, bit1 = unit, bit2 = min, bit3 = max,
+// bit4 = dimension (appended last; same one-way note as field dimension).
 inline constexpr uint8_t kUdtHasEnum = 1 << 0;
 inline constexpr uint8_t kUdtHasUnit = 1 << 1;
 inline constexpr uint8_t kUdtHasMin = 1 << 2;
 inline constexpr uint8_t kUdtHasMax = 1 << 3;
+inline constexpr uint8_t kUdtHasDimension = 1 << 4;
 
 inline constexpr size_t kMaxStringLen = 1u << 24;
 inline constexpr size_t kMaxCount = 1u << 20;
@@ -835,6 +846,8 @@ void writeField(Writer& t_w, const DbField& t_f) {
         flags |= kTriggerEvents;
     if (t_f.is_dynamic)
         flags |= kIsDynamic;
+    if (t_f.dimension.has_value())
+        flags |= kHasDimension;
     flags |= static_cast<uint16_t>(endianToU8(t_f.endianness) << kEndianShift);
     t_w.u16(flags);
 
@@ -860,6 +873,8 @@ void writeField(Writer& t_w, const DbField& t_f) {
     }
     if (!t_f.init_value.empty())
         t_w.str(t_f.init_value);
+    if (t_f.dimension.has_value())
+        t_w.str(t_f.dimension.value());
 }
 
 bool readField(Reader& t_r, DbField& t_f, int t_depth = 0) {
@@ -937,6 +952,12 @@ bool readField(Reader& t_r, DbField& t_f, int t_depth = 0) {
         if (!t_r.str(t_f.init_value))
             return false;
     }
+    if (flags & kHasDimension) {
+        std::string dimension;
+        if (!t_r.str(dimension))
+            return false;
+        t_f.dimension = std::move(dimension);
+    }
     return true;
 }
 
@@ -1007,6 +1028,8 @@ void writeUdt(Writer& t_w, const UdtDefinition& t_udt) {
         flags |= kUdtHasMin;
     if (t_udt.max_val.has_value())
         flags |= kUdtHasMax;
+    if (t_udt.dimension.has_value())
+        flags |= kUdtHasDimension;
     t_w.u8(flags);
     if (!t_udt.enum_map.empty()) {
         t_w.u32(static_cast<uint32_t>(t_udt.enum_map.size()));
@@ -1021,6 +1044,8 @@ void writeUdt(Writer& t_w, const UdtDefinition& t_udt) {
         t_w.f64(t_udt.min_val.value());
     if (t_udt.max_val.has_value())
         t_w.f64(t_udt.max_val.value());
+    if (t_udt.dimension.has_value())
+        t_w.str(t_udt.dimension.value());
     t_w.u32(static_cast<uint32_t>(t_udt.fields.size()));
     for (const auto& field : t_udt.fields)
         writeField(t_w, field);
@@ -1072,6 +1097,12 @@ bool readUdt(Reader& t_r, UdtDefinition& t_udt) {
         if (!t_r.f64(v))
             return false;
         t_udt.max_val = v;
+    }
+    if (flags & kUdtHasDimension) {
+        std::string dimension;
+        if (!t_r.str(dimension))
+            return false;
+        t_udt.dimension = std::move(dimension);
     }
     // Fields come last so a truncated payload fails before mutating much.
     // (The store itself is only committed by the caller on full success.)

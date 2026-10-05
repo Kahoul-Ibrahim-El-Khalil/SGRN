@@ -1,4 +1,5 @@
 /*sgrn/gateway/adapters/http/http.cpp*/
+#include <fmt/core.h>
 #include <sgrn/common/json_helper.hpp>
 #include <sgrn/common/path_utils.hpp>
 #include <sgrn/gateway/adapters/http.hpp>
@@ -211,6 +212,24 @@ void HttpAdapter::registerRoutes(GatewayApp& t_app) {
         .methods("GET"_method, "OPTIONS"_method)(
             [serve](const crow::request& t_req) { return serve(t_req, "", &HttpAdapter::handleGetPolicy); });
 
+    // ── Replay pacing (sgrn_replay only; handlers 404 without control) ──────
+    CROW_ROUTE(t_app, "/replay/status")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
+        .methods("GET"_method, "OPTIONS"_method)(
+            [serve](const crow::request& t_req) { return serve(t_req, "", &HttpAdapter::handleGetReplayStatus); });
+    CROW_ROUTE(t_app, "/replay/speed")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
+        .methods("POST"_method, "OPTIONS"_method)(
+            [serve](const crow::request& t_req) { return serve(t_req, "", &HttpAdapter::handlePostReplaySpeed); });
+    CROW_ROUTE(t_app, "/replay/pause")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
+        .methods("POST"_method, "OPTIONS"_method)(
+            [serve](const crow::request& t_req) { return serve(t_req, "", &HttpAdapter::handlePostReplayPause); });
+    CROW_ROUTE(t_app, "/replay/resume")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
+        .methods("POST"_method, "OPTIONS"_method)(
+            [serve](const crow::request& t_req) { return serve(t_req, "", &HttpAdapter::handlePostReplayResume); });
+
     registerWebAssets(t_app);
 }
 
@@ -228,6 +247,74 @@ void HttpAdapter::handleGetPolicy(const http::HttpRequest&, http::HttpResponse& 
     } else {
         t_res.set_content(R"({"rules":[],"total":0,"mode":"relaxed"})", "application/json");
     }
+}
+
+void HttpAdapter::handleGetReplayStatus(const http::HttpRequest&, http::HttpResponse& t_res) {
+    if (!replay_control_) {
+        t_res.status = 404;
+        t_res.set_content(R"JSON({"error":"replay control unavailable"})JSON", "application/json");
+        return;
+    }
+    const double speed = replay_control_->speed.load(std::memory_order_relaxed);
+    const bool paused = replay_control_->paused.load(std::memory_order_relaxed);
+    const bool unpaced = replay_control_->unpaced.load(std::memory_order_relaxed);
+    const int64_t ts = replay_control_->cur_ts.load(std::memory_order_relaxed);
+    const uint64_t frames = replay_control_->frames.load(std::memory_order_relaxed);
+    t_res.set_content(fmt::format(R"({{"speed":{},"paused":{},"unpaced":{},"frames":{},"ts":{}}})", speed, paused ? "true" : "false",
+                          unpaced ? "true" : "false", frames, ts),
+        "application/json");
+}
+
+void HttpAdapter::handlePostReplaySpeed(const http::HttpRequest& t_req, http::HttpResponse& t_res) {
+    if (!replay_control_) {
+        t_res.status = 404;
+        t_res.set_content(R"JSON({"error":"replay control unavailable"})JSON", "application/json");
+        return;
+    }
+    rapidjson::Document doc;
+    if (doc.Parse(t_req.body.c_str()).HasParseError() || !doc.IsObject() || !doc.HasMember("speed")) {
+        t_res.status = 400;
+        t_res.set_content(R"JSON({"error":"expected JSON body with speed field"})JSON", "application/json");
+        return;
+    }
+    const auto& v = doc["speed"];
+    if (v.IsString() && std::string_view(v.GetString()) == "unpaced") {
+        replay_control_->unpaced.store(true, std::memory_order_relaxed);
+    } else if (v.IsNumber()) {
+        const double speed = v.GetDouble();
+        if (!(speed > 0) || speed > 1e9) {
+            t_res.status = 400;
+            t_res.set_content(R"JSON({"error":"speed must be a positive number"})JSON", "application/json");
+            return;
+        }
+        replay_control_->unpaced.store(false, std::memory_order_relaxed);
+        replay_control_->speed.store(speed, std::memory_order_relaxed);
+    } else {
+        t_res.status = 400;
+        t_res.set_content(R"JSON({"error":"speed must be a number or unpaced"})JSON", "application/json");
+        return;
+    }
+    handleGetReplayStatus(t_req, t_res);
+}
+
+void HttpAdapter::handlePostReplayPause(const http::HttpRequest& t_req, http::HttpResponse& t_res) {
+    if (!replay_control_) {
+        t_res.status = 404;
+        t_res.set_content(R"JSON({"error":"replay control unavailable"})JSON", "application/json");
+        return;
+    }
+    replay_control_->paused.store(true, std::memory_order_relaxed);
+    handleGetReplayStatus(t_req, t_res);
+}
+
+void HttpAdapter::handlePostReplayResume(const http::HttpRequest& t_req, http::HttpResponse& t_res) {
+    if (!replay_control_) {
+        t_res.status = 404;
+        t_res.set_content(R"JSON({"error":"replay control unavailable"})JSON", "application/json");
+        return;
+    }
+    replay_control_->paused.store(false, std::memory_order_relaxed);
+    handleGetReplayStatus(t_req, t_res);
 }
 
 // ── ACL helper — delegates to the shared SecurityHelper ─────────────────────

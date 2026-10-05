@@ -25,6 +25,10 @@ struct DbField {
     uint32_t struct_size{0};
     s7codec::Endian endianness{s7codec::Endian::Big};
     std::optional<std::string> unit;
+    /// Physical dimension class (e.g. "pressure", "temperature", "flow").
+    /// Set by #DIMENSION("..."); constrained by file-level #DIMENSIONS(...).
+    /// Describes WHAT is measured; unit describes HOW it is measured.
+    std::optional<std::string> dimension;
     std::optional<double> min_val;
     std::optional<double> max_val;
     std::map<int, std::string> enum_map;
@@ -117,6 +121,10 @@ inline void serializeToWriter(Writer& t_writer, const sgrn::scl::DbField& t_fiel
     if (t_field.unit.has_value()) {
         t_writer.Key("unit");
         t_writer.String(t_field.unit.value().c_str());
+    }
+    if (t_field.dimension.has_value()) {
+        t_writer.Key("dimension");
+        t_writer.String(t_field.dimension.value().c_str());
     }
     if (t_field.min_val.has_value()) {
         t_writer.Key("min");

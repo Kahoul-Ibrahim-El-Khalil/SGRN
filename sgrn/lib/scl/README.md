@@ -25,6 +25,17 @@ The `DbSymbolsParser` performs lexical analysis and builds an Abstract Syntax Tr
 - User Defined Types (`UDT` or `STRUCT` nesting).
 - SGRN-specific inline annotations (e.g., `#MODBUS_HOLDING`, `#UNIT "bar"`, `#BIG_ENDIAN`).
 
+### Semantic annotations: unit vs dimension
+
+- `#UNIT("kPa")` — HOW a value is measured (engineering unit).
+- `#DIMENSION("pressure")` — WHAT is measured (physical dimension class).
+- `#DIMENSIONS("pressure", "temperature", "flow")` — file-level vocabulary,
+  conventionally at the top before the first `DATA_BLOCK`/`TYPE`. When
+  present, every `#DIMENSION`   in the file must be a member, otherwise parsing fails (typo guard). When absent, any `#DIMENSION` is accepted.
+- Dimensions ride the same paths as units: field JSON (`"dimension"`),
+  schema binary codec, `sgrn_dataset` manifest features, `GET /registry`,
+  and the dashboard (shown next to the unit).
+
 ### 2. Offset Inference & Alignment Mapping
 
 Unlike modern memory-managed languages, Siemens S7 PLCs have strict, proprietary memory alignment rules (e.g., bits are packed into bytes, words align to 2-byte boundaries).

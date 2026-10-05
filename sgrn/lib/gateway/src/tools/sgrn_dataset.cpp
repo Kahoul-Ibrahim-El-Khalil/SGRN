@@ -80,6 +80,7 @@ sgrn::Result<void> DatasetProcessor::loadSchema(const std::string& t_scl_path) {
             meta.full_name = fmt::format("{}.{}", db_name, path);
             meta.data_type = s7codec::s7TypeToString(field.type);
             meta.unit = field.unit.value_or("");
+            meta.dimension = field.dimension.value_or("");
             meta.is_categorical = isCategoricalType(field.type);
             meta.db_num = db_num;
             meta.offset = static_cast<size_t>(abs_offset);
@@ -681,6 +682,9 @@ sgrn::Result<void> DatasetProcessor::generateManifest(const std::string& t_manif
 
         writer.Key("unit");
         writer.String(feat.unit.c_str());
+
+        writer.Key("dimension");
+        writer.String(feat.dimension.c_str());
 
         writer.Key("is_categorical");
         writer.Bool(feat.is_categorical);

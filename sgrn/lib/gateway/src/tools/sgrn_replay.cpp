@@ -26,6 +26,8 @@ namespace sgrn::gateway
 
 GatewayReplayer::GatewayReplayer(const ReplayConfig& t_config)
     : config_(t_config) {
+    control_->speed.store(config_.replay_speed > 0 ? config_.replay_speed : 1.0, std::memory_order_relaxed);
+    control_->unpaced.store(config_.no_delay, std::memory_order_relaxed);
 }
 
 GatewayReplayer::~GatewayReplayer() {
@@ -34,6 +36,9 @@ GatewayReplayer::~GatewayReplayer() {
 
 Result<void, std::string> GatewayReplayer::initialize() {
     gateway_app_ = std::make_unique<GatewayApplication>();
+    // Runtime pacing state for HTTP /replay/* (set before startAdapters so
+    // the HTTP adapter serves it on the same listener).
+    gateway_app_->setReplayControl(control_);
 
     if (config_.headless_mode) {
         // No gateway.json: synthesize HTTP+WebSocket-only config in-memory.
@@ -104,6 +109,43 @@ void GatewayReplayer::stop() {
     if (gateway_app_) {
         gateway_app_->shutdown();
     }
+}
+
+bool GatewayReplayer::sleepPaced(int64_t& t_last_ts, int64_t t_ts) {
+    control_->cur_ts.store(t_ts, std::memory_order_relaxed);
+    // Simulated-time debt for this delta (ms). Consumed in ≤50 ms slices so
+    // pause takes effect within milliseconds even for minute-long TE sample
+    // periods, and a mid-run speed change re-prices the REMAINING debt
+    // instantly (no burst, no stall, no catch-up sleep).
+    double sim_debt_ms = 0.0;
+    if (t_last_ts > 0 && t_ts > t_last_ts)
+        sim_debt_ms = static_cast<double>(t_ts - t_last_ts);
+    while (sim_debt_ms > 0.0 && running_.load()) {
+        if (control_->paused.load(std::memory_order_relaxed)) {
+            // Paused time never accrues debt: resume continues seamlessly.
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+        }
+        const bool unpaced = control_->unpaced.load(std::memory_order_relaxed) || config_.no_delay;
+        if (unpaced)
+            break;
+        const double speed = control_->speed.load(std::memory_order_relaxed);
+        if (!(speed > 0) || speed > 1e9)
+            break; // same semantic as before: non-positive speed = no pacing
+        const double wall_need_ms = sim_debt_ms / speed;
+        if (wall_need_ms >= 60000.0)
+            break; // same clamp as before: never sleep >= 60 s, jump instead
+        const int64_t slice_ms = static_cast<int64_t>(std::min(wall_need_ms, 50.0));
+        if (slice_ms <= 0)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(slice_ms));
+        sim_debt_ms -= static_cast<double>(slice_ms) * speed;
+    }
+    if (!running_.load())
+        return false;
+    t_last_ts = t_ts;
+    control_->frames.fetch_add(1, std::memory_order_relaxed);
+    return true;
 }
 
 bool GatewayReplayer::encodeLeaf(const std::string& t_full_path, const rapidjson::Value& t_val, std::deque<std::vector<uint8_t>>& t_storage,
@@ -201,8 +243,8 @@ bool GatewayReplayer::flushPendingBits() {
 
 void GatewayReplayer::replayLoop() {
     fmt::print(fg(fmt::color::cyan), "[sgrn_replay] Starting replay of history archive: {}\n", config_.archive_path);
-    fmt::print(
-        fg(fmt::color::cyan), "[sgrn_replay] Speed multiplier: {}x, Loop mode: {}\n", config_.replay_speed, config_.loop ? "ON" : "OFF");
+    fmt::print(fg(fmt::color::cyan), "[sgrn_replay] Speed multiplier: {}x, Loop mode: {} (runtime: POST /replay/speed)\n",
+        control_->speed.load(std::memory_order_relaxed), config_.loop ? "ON" : "OFF");
 
     do {
         if (!processBinaryArchive(config_.archive_path)) {
@@ -292,14 +334,10 @@ bool GatewayReplayer::processBinaryArchive(const std::string& path) {
                 continue;
             }
 
-            // Handle real-time delay pacing
-            if (!config_.no_delay && last_ts > 0 && ts > last_ts && config_.replay_speed > 0) {
-                int64_t delay_ms = static_cast<int64_t>((ts - last_ts) / config_.replay_speed);
-                if (delay_ms > 0 && delay_ms < 60000) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
-                }
-            }
-            last_ts = ts;
+            // Pacing from delta timestamps / speed; re-anchored on change.
+            // Same raw writeDbMemory path as live gateway below.
+            if (!sleepPaced(last_ts, ts))
+                break;
 
             // Anchor frames (v3+): db + crc32 + full image. Verify before
             // trusting a single byte; a mismatch seeks resync, never adopts.
@@ -426,13 +464,8 @@ bool GatewayReplayer::processBinaryArchive(const std::string& path) {
 
             const int64_t ts = (doc.HasMember("ts") && doc["ts"].IsInt64()) ? doc["ts"].GetInt64() : sgrn::utils::time::nowMilliseconds();
 
-            if (!config_.no_delay && last_ts > 0 && ts > last_ts && config_.replay_speed > 0) {
-                int64_t delay_ms = static_cast<int64_t>((ts - last_ts) / config_.replay_speed);
-                if (delay_ms > 0 && delay_ms < 60000) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
-                }
-            }
-            last_ts = ts;
+            if (!sleepPaced(last_ts, ts))
+                break;
 
             const rapidjson::Value* payload = nullptr;
             if (doc.HasMember("changes") && doc["changes"].IsObject())

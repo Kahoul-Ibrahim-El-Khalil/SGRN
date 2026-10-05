@@ -1,0 +1,95 @@
+// ============================================================================
+// schema.scl — Rieth et al. 2017 TE data mapped to SGRN.
+//
+// SIMULATED DATA ONLY. Not a live plant, not real-plant validation.
+// Downs & Vogel (1993) units; TODO-marked ranges are unverified against the
+// dataset documentation and must not be treated as instrument limits.
+// Field names are descriptive twin paths; the source Rieth column is noted
+// per field. #UNIT says HOW a value is measured, #DIMENSION says WHAT is
+// measured (must be a member of #DIMENSIONS below, else parse fails).
+// Fault onset (1-indexed sample): train faulty 1-20 normal, fault from 21;
+// test faulty 1-160 normal, fault from 161. Verify on one RData load.
+// Labels live in separate DB 10 "TELabels" because the SCL parser has no
+// label/metadata marker and sgrn_dataset treats every leaf as a feature.
+// Downstream code must drop DB "TELabels" by name.
+// NOTE: renaming twin paths invalidates previously converted archives;
+// reconvert with demos/te_to_jsonl.py after any rename.
+// ============================================================================
+
+#DIMENSIONS("flow", "pressure", "level", "temperature", "power", "concentration", "position");
+
+DATA_BLOCK "TE" DB 1
+VAR
+    // Flows (XMEAS 1-6, 10, 14, 17, 19)
+    a_feed_flow       : Real #UNIT("kscmh") #DIMENSION("flow"); // xmeas_1  stream 1
+    d_feed_flow       : Real #UNIT("kg/h")  #DIMENSION("flow"); // xmeas_2  stream 2
+    e_feed_flow       : Real #UNIT("kg/h")  #DIMENSION("flow"); // xmeas_3  stream 3
+    ac_feed_flow      : Real #UNIT("kscmh") #DIMENSION("flow"); // xmeas_4  stream 4
+    recycle_flow      : Real #UNIT("kscmh") #DIMENSION("flow"); // xmeas_5  stream 8
+    reactor_feed_rate : Real #UNIT("kscmh") #DIMENSION("flow"); // xmeas_6  stream 6
+    purge_rate        : Real #UNIT("kscmh") #DIMENSION("flow"); // xmeas_10 stream 9 // TODO range unverified
+    sep_underflow     : Real #UNIT("m3/h")  #DIMENSION("flow"); // xmeas_14 stream 10 // TODO range unverified
+    stripper_underflow : Real #UNIT("m3/h") #DIMENSION("flow"); // xmeas_17 stream 11 // TODO range unverified
+    stripper_steam_flow : Real #UNIT("kg/h") #DIMENSION("flow"); // xmeas_19 stripper steam // TODO range unverified
+    // Pressures, kPa gauge
+    reactor_pressure  : Real #UNIT("kPa") #DIMENSION("pressure"); // xmeas_7  // TODO range unverified
+    sep_pressure      : Real #UNIT("kPa") #DIMENSION("pressure"); // xmeas_13 // TODO range unverified
+    stripper_pressure : Real #UNIT("kPa") #DIMENSION("pressure"); // xmeas_16 // TODO range unverified
+    // Levels, %
+    reactor_level     : Real #UNIT("%") #RANGE(0, 100) #DIMENSION("level"); // xmeas_8
+    sep_level         : Real #UNIT("%") #RANGE(0, 100) #DIMENSION("level"); // xmeas_12
+    stripper_level    : Real #UNIT("%") #RANGE(0, 100) #DIMENSION("level"); // xmeas_15
+    // Temperatures
+    reactor_temp      : Real #UNIT("degC") #DIMENSION("temperature"); // xmeas_9  // TODO range unverified
+    sep_temp          : Real #UNIT("degC") #DIMENSION("temperature"); // xmeas_11 // TODO range unverified
+    stripper_temp     : Real #UNIT("degC") #DIMENSION("temperature"); // xmeas_18 // TODO range unverified
+    reactor_cw_temp   : Real #UNIT("degC") #DIMENSION("temperature"); // xmeas_21 reactor cooling water outlet // TODO range unverified
+    sep_cw_temp       : Real #UNIT("degC") #DIMENSION("temperature"); // xmeas_22 separator cooling water outlet // TODO range unverified
+    // Power
+    compressor_work   : Real #UNIT("kW") #DIMENSION("power"); // xmeas_20 // TODO range unverified
+    // Compositions, mol% (XMEAS 23-28 reactor feed A-F, 29-36 purge A-H, 37-41 product D-H)
+    feed_comp_a       : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_23
+    feed_comp_b       : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_24
+    feed_comp_c       : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_25
+    feed_comp_d       : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_26
+    feed_comp_e       : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_27
+    feed_comp_f       : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_28
+    purge_comp_a      : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_29
+    purge_comp_b      : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_30
+    purge_comp_c      : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_31
+    purge_comp_d      : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_32
+    purge_comp_e      : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_33
+    purge_comp_f      : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_34
+    purge_comp_g      : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_35
+    purge_comp_h      : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_36
+    product_comp_d    : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_37
+    product_comp_e    : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_38
+    product_comp_f    : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_39
+    product_comp_g    : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_40
+    product_comp_h    : Real #UNIT("mol%") #RANGE(0, 100) #DIMENSION("concentration"); // xmeas_41
+    // Manipulated valve positions, 0-100%
+    d_feed_valve      : Real #UNIT("%") #RANGE(0, 100) #DIMENSION("position"); // xmv_1
+    e_feed_valve      : Real #UNIT("%") #RANGE(0, 100) #DIMENSION("position"); // xmv_2
+    a_feed_valve      : Real #UNIT("%") #RANGE(0, 100) #DIMENSION("position"); // xmv_3
+    ac_feed_valve     : Real #UNIT("%") #RANGE(0, 100) #DIMENSION("position"); // xmv_4
+    recycle_valve     : Real #UNIT("%") #RANGE(0, 100) #DIMENSION("position"); // xmv_5
+    purge_valve       : Real #UNIT("%") #RANGE(0, 100) #DIMENSION("position"); // xmv_6
+    sep_pot_valve     : Real #UNIT("%") #RANGE(0, 100) #DIMENSION("position"); // xmv_7 separator liquid flow
+    product_valve     : Real #UNIT("%") #RANGE(0, 100) #DIMENSION("position"); // xmv_8 stripper liquid product flow
+    steam_valve       : Real #UNIT("%") #RANGE(0, 100) #DIMENSION("position"); // xmv_9 stripper steam valve
+    reactor_cw_valve  : Real #UNIT("%") #RANGE(0, 100) #DIMENSION("position"); // xmv_10 reactor cooling water
+    condenser_valve   : Real #UNIT("%") #RANGE(0, 100) #DIMENSION("position"); // xmv_11 condenser cooling water
+END_VAR
+END_DATA_BLOCK
+
+// Labels / metadata. NEVER model features.
+// Smallest parser change if enforcement is wanted: add
+//   #META("label") -> DbField::is_label (bool, default false),
+// serialize in DbField::serializeToWriter, skip is_label leaves in
+// sgrn_dataset feature collection. Not implemented here; filter by DB name.
+DATA_BLOCK "TELabels" DB 10
+VAR
+    faultNumber   : Int;
+    simulationRun : Int;
+END_VAR
+END_DATA_BLOCK

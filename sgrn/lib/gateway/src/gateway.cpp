@@ -400,6 +400,8 @@ Result<void, std::string> GatewayApplication::startAdapters() {
                 config_.http->rate_limit_max_requests, config_.http->rate_limit_window_s);
             auto vmap = modbus_adapter_ ? &modbus_adapter_->virtualMap() : nullptr;
             http_adapter_->configure(symbolic_store_, server_, node_db_, security_manager_, vmap);
+            if (replay_control_)
+                http_adapter_->setReplayControl(replay_control_);
             http_adapter_->registerRoutes(northbound_server_.app());
         }
 

@@ -26,6 +26,7 @@ struct UdtDefinition {
     DataType scalar_type{DataType::Byte};
     std::map<int, std::string> enum_map;
     std::optional<std::string> unit;
+    std::optional<std::string> dimension;
     std::optional<double> min_val;
     std::optional<double> max_val;
 };
@@ -76,6 +77,10 @@ inline void serializeToWriter(Writer& t_writer, const sgrn::scl::UdtDefinition& 
     if (t_udt.unit.has_value()) {
         t_writer.Key("unit");
         t_writer.String(t_udt.unit.value().c_str());
+    }
+    if (t_udt.dimension.has_value()) {
+        t_writer.Key("dimension");
+        t_writer.String(t_udt.dimension.value().c_str());
     }
     if (t_udt.min_val.has_value()) {
         t_writer.Key("min");

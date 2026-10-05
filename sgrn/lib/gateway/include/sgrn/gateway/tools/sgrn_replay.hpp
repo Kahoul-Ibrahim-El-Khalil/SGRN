@@ -9,6 +9,7 @@
 
 #include <sgrn/gateway/core/TelemetryBroker.hpp>
 #include <sgrn/gateway/gateway.hpp>
+#include <sgrn/gateway/tools/replay_control.hpp>
 #include <sgrn/gateway/twin/DbMemorySpan.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
 #include <sgrn/scl/DbSchema.hpp>
@@ -51,9 +52,29 @@ public:
     /// Configured HTTP (dashboard) port, or 0 when the HTTP adapter is off.
     uint16_t httpPort() const;
 
+    // ── Runtime pacing control (no restart, atomic, no hot-path lock) ──────
+    // Called from HTTP /replay/* handlers (any thread) and dashboard.
+    void setSpeed(double t_speed) {
+        if (t_speed > 0 && t_speed <= 1e9)
+            control_->speed.store(t_speed, std::memory_order_relaxed);
+    }
+    void setPaused(bool t_paused) {
+        control_->paused.store(t_paused, std::memory_order_relaxed);
+    }
+    void setUnpaced(bool t_unpaced) {
+        control_->unpaced.store(t_unpaced, std::memory_order_relaxed);
+    }
+    ReplayControlPtr control() const {
+        return control_;
+    }
+
 private:
     void replayLoop();
     bool processBinaryArchive(const std::string& path);
+    /// Sleep for (ts-last_ts)/speed using re-anchored wall clock so a
+    /// mid-run speed change applies only to future deltas (no burst/stall).
+    /// Honors paused/unpaced. Returns false when stopping.
+    bool sleepPaced(int64_t& t_last_ts, int64_t t_ts);
 
     /// Encode one archived leaf (dotted "DbName.field.path" + JSON scalar)
     /// into raw twin bytes. Appends the span to t_spans (backed by t_storage,
@@ -89,6 +110,9 @@ private:
     std::vector<PendingBit> pending_bits_;
     std::shared_ptr<TelemetryBroker> broker_;
     std::unique_ptr<GatewayApplication> gateway_app_;
+
+    /// Runtime pacing state shared with HTTP /replay/* handlers.
+    ReplayControlPtr control_{std::make_shared<ReplayControl>()};
 
     std::atomic<bool> running_{false};
     std::thread replay_thread_;

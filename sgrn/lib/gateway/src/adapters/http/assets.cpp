@@ -16,7 +16,7 @@ namespace sgrn::gateway::adapters
 
 static const std::string kEndpointsMessage = R"({
   "endpoints": [
-    {"path":"/",                                    "method":"GET",  "description":"SGRN Web Dashboard."},
+    {"path":"/",                                    "method":"GET",  "description":"Web dashboard (replay variant on replay gateways; full gateway dashboard otherwise)."},
     {"path":"/registry/types",                      "method":"GET",  "description":"S7 type dictionary."},
     {"path":"/registry",                            "method":"GET",  "description":"Raw S7 memory layout and semantic mapping."},
     {"path":"/data/",                               "method":"GET",  "description":"Full Digital Twin state as nested JSON (semantic)."},
@@ -33,6 +33,10 @@ static const std::string kEndpointsMessage = R"({
     {"path":"/db/history",                          "method":"GET",  "description":"Full historical database as JSON."},
     {"path":"/db/sessions",                         "method":"GET",  "description":"Active and recent client sessions."},
     {"path":"/db/logs",                             "method":"GET",  "description":"Most recent system logs."},
+    {"path":"/replay/status",                       "method":"GET",  "description":"Replay pacing status {speed,paused,unpaced,frames,ts}. 404 when not a replay gateway."},
+    {"path":"/replay/speed",                        "method":"POST", "description":"Set replay speed {\"speed\": <number>|\"unpaced\"} (sim-sec per wall-sec)."},
+    {"path":"/replay/pause",                        "method":"POST", "description":"Pause replay pacing."},
+    {"path":"/replay/resume",                       "method":"POST", "description":"Resume replay pacing."},
     {"path":"/endpoints",                           "method":"GET",  "description":"This API documentation."}
   ]
 })";
@@ -93,7 +97,7 @@ window.__SGRN_BASE__=")" +
 /// API/WS prefixes served by real routes — the SPA fallback must not swallow
 /// them (a missing /data/... path is a genuine 404, not index.html).
 bool isApiPath(const std::string& t_path) {
-    for (const char* prefix : {"/api", "/data", "/memory", "/registry", "/endpoints", "/connections", "/db", "/ws"}) {
+    for (const char* prefix : {"/api", "/data", "/memory", "/registry", "/endpoints", "/connections", "/db", "/ws", "/replay"}) {
         if (t_path.find(prefix) == 0)
             return true;
     }
@@ -108,6 +112,13 @@ void HttpAdapter::registerWebAssets(GatewayApp& t_app) {
     // Shared SPA-fallback responder for "/" and unknown non-API paths.
     auto spa_handler = std::make_shared<std::function<crow::response(const crow::request&)>>();
     auto index_handler = std::make_shared<std::function<crow::response(const crow::request&)>>();
+    // Replay dashboard variant (replay.html): inherits the shared shell but
+    // is NOT the gateway dashboard — no docs routes/bundle. Served at "/"
+    // instead of index.html when replay pacing state is present.
+    auto replay_page_handler = std::make_shared<std::function<crow::response(const crow::request&)>>();
+    // Captured by value into the "/" + fallback lambdas below: when set, this
+    // gateway is a replay gateway (HttpAdapter outlives route registration).
+    ReplayControlPtr replay_control = replay_control_;
 
     for (size_t i = 0; i < web::ASSET_COUNT; ++i) {
         const auto& asset = web::ASSETS[i];
@@ -116,15 +127,15 @@ void HttpAdapter::registerWebAssets(GatewayApp& t_app) {
         auto cached = std::make_shared<std::string>();
         auto flag = std::make_shared<std::once_flag>();
         auto has_error = std::make_shared<bool>(false);
-        // index.html only: patched variants keyed by forwarded prefix, since
-        // direct (:8000) and proxied (https://host/gateway/) clients need
-        // different <base>/__SGRN_BASE__ heads. Handlers run on the Crow
+        // HTML entry points only: patched variants keyed by forwarded prefix,
+        // since direct (:8000) and proxied (https://host/gateway/) clients
+        // need different <base>/__SGRN_BASE__ heads. Handlers run on the Crow
         // pool, so the map is mutex-guarded.
         auto variants = std::make_shared<std::map<std::string, std::string>>();
         auto variants_mutex = std::make_shared<std::mutex>();
 
-        const bool is_index = (route_path == "/index.html");
-        auto handler = [i, cached, flag, has_error, variants, variants_mutex, is_index](const crow::request& t_crow_req) {
+        const bool is_entry = (route_path == "/index.html" || route_path == "/replay.html");
+        auto handler = [i, cached, flag, has_error, variants, variants_mutex, is_entry](const crow::request& t_crow_req) {
             crow::response crow_res;
             // Dynamic rules cannot carry middleware — enforce manually.
             if (!RateLimitMiddleware::checkRequest(t_crow_req, crow_res)) {
@@ -135,14 +146,14 @@ void HttpAdapter::registerWebAssets(GatewayApp& t_app) {
             http::HttpRequest t_req = http::fromCrowRequest(t_crow_req);
             http::HttpResponse t_res;
 
-            t_res.set_header("Vary", is_index ? "Accept-Encoding, X-Forwarded-Prefix" : "Accept-Encoding");
+            t_res.set_header("Vary", is_entry ? "Accept-Encoding, X-Forwarded-Prefix" : "Accept-Encoding");
 
             const bool client_supports_zstd =
                 t_req.has_header("Accept-Encoding") && t_req.get_header_value("Accept-Encoding").find("zstd") != std::string::npos;
 
-            // index.html carries the runtime <base>/__SGRN_BASE__ placeholder
-            // that must be patched in — never serve the pre-baked zstd blob for it.
-            bool serve_precompressed = client_supports_zstd && !is_index;
+            // Entry points carry the runtime <base>/__SGRN_BASE__ placeholder
+            // that must be patched in — never serve the pre-baked zstd blob for them.
+            bool serve_precompressed = client_supports_zstd && !is_entry;
 
             if (serve_precompressed) {
                 t_res.set_header("Content-Encoding", "zstd");
@@ -164,7 +175,7 @@ void HttpAdapter::registerWebAssets(GatewayApp& t_app) {
                 if (*has_error || (cached->empty() && asset.original_size > 0)) {
                     t_res.status = 500;
                     t_res.set_content("Failed to decompress asset", "text/plain");
-                } else if (!is_index) {
+                } else if (!is_entry) {
                     t_res.set_content(cached->data(), cached->size(), std::string(asset.content_type.data()));
                 } else {
                     const std::string prefix = forwardedPrefix(t_req);
@@ -192,15 +203,36 @@ void HttpAdapter::registerWebAssets(GatewayApp& t_app) {
         // runs for routes with explicit per-route middleware indices.)
         t_app.route_dynamic(route_path)(handler);
 
-        if (is_index) {
+        if (route_path == "/index.html") {
             *index_handler = handler;
-            CROW_ROUTE(t_app, "/").methods("GET"_method, "OPTIONS"_method)(handler);
+        } else if (route_path == "/replay.html") {
+            *replay_page_handler = handler;
         }
     }
 
-    // SPA fallback: unknown non-API paths serve index.html (client-side
-    // routing). Registered once after all assets so /index.html exists.
-    *spa_handler = [index_handler](const crow::request& t_crow_req) {
+    // "/" serves the replay dashboard variant on replay gateways, the full
+    // gateway dashboard otherwise. Both stay addressable directly.
+    CROW_ROUTE(t_app, "/")
+        .methods("GET"_method, "OPTIONS"_method)([index_handler, replay_page_handler, replay_control](const crow::request& t_crow_req) {
+            crow::response crow_res;
+            if (!RateLimitMiddleware::checkRequest(t_crow_req, crow_res)) {
+                http::applyCors(crow_res, t_crow_req);
+                return crow_res;
+            }
+            if (replay_control && *replay_page_handler)
+                return (*replay_page_handler)(t_crow_req);
+            if (*index_handler)
+                return (*index_handler)(t_crow_req);
+            crow_res.code = 404;
+            crow_res.body = "Not found";
+            crow_res.set_header("Content-Type", "text/plain");
+            http::applyCors(crow_res, t_crow_req);
+            return crow_res;
+        });
+
+    // SPA fallback: unknown non-API paths serve the active dashboard variant
+    // (client-side routing). Registered once after all assets so entries exist.
+    *spa_handler = [index_handler, replay_page_handler, replay_control](const crow::request& t_crow_req) {
         crow::response crow_res;
         // The catchall carries no middleware indices either — enforce here.
         if (!RateLimitMiddleware::checkRequest(t_crow_req, crow_res)) {
@@ -212,6 +244,8 @@ void HttpAdapter::registerWebAssets(GatewayApp& t_app) {
             crow_res.code = 404;
             crow_res.body = "Not found: " + path;
             crow_res.set_header("Content-Type", "text/plain");
+        } else if (replay_control && *replay_page_handler) {
+            return (*replay_page_handler)(t_crow_req);
         } else if (*index_handler) {
             return (*index_handler)(t_crow_req);
         } else {

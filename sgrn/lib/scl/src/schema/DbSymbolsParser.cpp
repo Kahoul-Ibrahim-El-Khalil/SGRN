@@ -1,4 +1,5 @@
 #include <fmt/core.h>
+#include <fmt/ranges.h>
 #include <sgrn/scl/schema/DbSymbolsParser.hpp>
 #include <sgrn/scl/schema/SchemaSerializer.hpp>
 #include <sgrn/scl/utils.hpp>
@@ -324,6 +325,8 @@ public:
 
                 // Semantic attributes
                 std::string_view{"#UNIT"},
+                std::string_view{"#DIMENSION"},
+                std::string_view{"#DIMENSIONS"},
                 std::string_view{"#RANGE"},
                 std::string_view{"#ENUM"},
                 std::string_view{"#EVENT_TRIGGER"},
@@ -540,15 +543,84 @@ public:
         advance();
     }
 
+    /// File-level dimension vocabulary, e.g.:
+    ///     #DIMENSIONS("pressure", "temperature", "flow")
+    /// May appear anywhere at file scope (conventionally at the top, before
+    /// the first DATA_BLOCK/TYPE). When present, every #DIMENSION value used
+    /// in the file must be a member; otherwise parse fails. When absent, any
+    /// #DIMENSION value is accepted without validation.
+    void parseDimensions() {
+        matchKeyword("#DIMENSIONS");
+        expectPunctuation("(", "Expected '(' after #DIMENSIONS");
+        while (!checkPunctuation(")") && !check(TokenType::EndOfFile) && !m_has_error_) {
+            if (match(TokenType::StringLiteral)) {
+                const std::string dim = previous_.value;
+                if (std::find(result_.dimensions.begin(), result_.dimensions.end(), dim) == result_.dimensions.end())
+                    result_.dimensions.push_back(dim);
+            } else {
+                setError(fmt::format("Line {}:{} - Expected string literal in #DIMENSIONS", current_.line, current_.col));
+                return;
+            }
+            if (!matchPunctuation(","))
+                break;
+        }
+        expectPunctuation(")", "Expected ')' after #DIMENSIONS");
+        matchPunctuation(";");
+    }
+
+    /// Post-parse check: every field dimension must be declared when the file
+    /// declares a #DIMENSIONS vocabulary. Runs after UDT resolution so alias
+    /// and struct children are validated too.
+    void validateDimensions() {
+        if (m_has_error_ || result_.dimensions.empty())
+            return;
+        const auto& dims = result_.dimensions;
+        std::function<void(const std::vector<DbField>&, const std::string&)> walk = [&](const std::vector<DbField>& fields,
+                                                                                        const std::string& scope) {
+            for (const auto& f : fields) {
+                if (f.dimension.has_value() && std::find(dims.begin(), dims.end(), *f.dimension) == dims.end()) {
+                    setError(fmt::format("Undeclared dimension '{}' on '{}.{}' (declared: #DIMENSIONS({}))", *f.dimension, scope, f.name,
+                        fmt::join(dims, ", ")));
+                    return;
+                }
+                if (!f.children.empty() && !m_has_error_)
+                    walk(f.children, scope + "." + f.name);
+            }
+        };
+        for (const auto& udt : result_.udts) {
+            if (m_has_error_)
+                return;
+            if (udt.dimension.has_value() && std::find(dims.begin(), dims.end(), *udt.dimension) == dims.end()) {
+                setError(fmt::format(
+                    "Undeclared dimension '{}' on TYPE '{}' (declared: #DIMENSIONS({}))", *udt.dimension, udt.name, fmt::join(dims, ", ")));
+                return;
+            }
+            walk(udt.fields, "TYPE \"" + udt.name + "\"");
+        }
+        for (const auto& db : result_.dbs) {
+            if (m_has_error_)
+                return;
+            walk(db.fields, "DATA_BLOCK \"" + db.db_name + "\"");
+        }
+    }
+
     Result<ParseResult, SclError> parse() {
         while (!check(TokenType::EndOfFile) && !m_has_error_) {
             if (matchKeyword("TYPE"))
                 parseUdt();
             else if (matchKeyword("DATA_BLOCK"))
                 parseDb();
+            else if (checkKeyword("#DIMENSIONS"))
+                parseDimensions();
             else
                 advance();
         }
+
+        if (m_has_error_) {
+            return Result<ParseResult, SclError>::Error(SclError::ParseError);
+        }
+
+        validateDimensions();
 
         if (m_has_error_) {
             return Result<ParseResult, SclError>::Error(SclError::ParseError);
@@ -588,6 +660,8 @@ private:
                             f.enum_map = udt.enum_map;
                         if (!f.unit.has_value() && udt.unit.has_value())
                             f.unit = udt.unit;
+                        if (!f.dimension.has_value() && udt.dimension.has_value())
+                            f.dimension = udt.dimension;
                         if (!f.min_val.has_value() && udt.min_val.has_value())
                             f.min_val = udt.min_val;
                         if (!f.max_val.has_value() && udt.max_val.has_value())
@@ -861,12 +935,14 @@ private:
         return fields;
     }
 
-    /// Parses the semantic field attributes (#UNIT / #RANGE / #ENUM / #EVENT_TRIGGER /
-    /// #DYNAMIC / #BIG_ENDIAN / #LITTLE_ENDIAN) attached to a field or to a
-    /// scalar-derived TYPE alias. Shared by parseStructFields() and parseUdt().
+    /// Parses the semantic field attributes (#UNIT / #DIMENSION / #RANGE /
+    /// #ENUM / #EVENT_TRIGGER / #DYNAMIC / #BIG_ENDIAN / #LITTLE_ENDIAN)
+    /// attached to a field or to a scalar-derived TYPE alias. Shared by
+    /// parseStructFields() and parseUdt().
     void parseFieldAttributes(DbField& f) {
-        while (checkKeyword("#UNIT") || checkKeyword("#RANGE") || checkKeyword("#ENUM") || checkKeyword("#EVENT_TRIGGER") ||
-               checkKeyword("#DYNAMIC") || checkKeyword("#BIG_ENDIAN") || checkKeyword("#LITTLE_ENDIAN")) {
+        while (checkKeyword("#UNIT") || checkKeyword("#DIMENSION") || checkKeyword("#RANGE") || checkKeyword("#ENUM") ||
+               checkKeyword("#EVENT_TRIGGER") || checkKeyword("#DYNAMIC") || checkKeyword("#BIG_ENDIAN") ||
+               checkKeyword("#LITTLE_ENDIAN")) {
             if (matchKeyword("#UNIT")) {
                 bool has_paren = matchPunctuation("(");
                 if (match(TokenType::StringLiteral)) {
@@ -875,6 +951,15 @@ private:
                         expectPunctuation(")", "Expected ')' after #UNIT string");
                 } else {
                     setError(fmt::format("Line {}:{} - Expected string literal after #UNIT", current_.line, current_.col));
+                }
+            } else if (matchKeyword("#DIMENSION")) {
+                bool has_paren = matchPunctuation("(");
+                if (match(TokenType::StringLiteral)) {
+                    f.dimension = previous_.value;
+                    if (has_paren)
+                        expectPunctuation(")", "Expected ')' after #DIMENSION string");
+                } else {
+                    setError(fmt::format("Line {}:{} - Expected string literal after #DIMENSION", current_.line, current_.col));
                 }
             } else if (matchKeyword("#RANGE")) {
                 expectPunctuation("(", "Expected '(' after #RANGE");
@@ -941,6 +1026,7 @@ private:
         t_udt.scalar_type = base.type;
         t_udt.enum_map = std::move(base.enum_map);
         t_udt.unit = std::move(base.unit);
+        t_udt.dimension = std::move(base.dimension);
         t_udt.min_val = std::move(base.min_val);
         t_udt.max_val = std::move(base.max_val);
         t_udt.endianness = base.endianness;

@@ -13,6 +13,9 @@ struct ParseResult {
     std::vector<DbSchema> dbs;
     std::vector<UdtDefinition> udts;
     std::vector<std::string> warnings;
+    /// File-level declared dimensions (#DIMENSIONS(...)). Empty = undeclared:
+    /// any #DIMENSION value is accepted without validation.
+    std::vector<std::string> dimensions;
 };
 
 /// Writer-agnostic JSON "form" for ParseResult (dbs + udts + warnings).
@@ -36,6 +39,14 @@ inline void serializeToWriter(Writer& t_writer, const sgrn::scl::ParseResult& t_
         t_writer.StartArray();
         for (const auto& warn : t_result.warnings) {
             t_writer.String(warn.c_str());
+        }
+        t_writer.EndArray();
+    }
+    if (!t_result.dimensions.empty()) {
+        t_writer.Key("dimensions");
+        t_writer.StartArray();
+        for (const auto& dim : t_result.dimensions) {
+            t_writer.String(dim.c_str());
         }
         t_writer.EndArray();
     }

@@ -49,6 +49,8 @@ sgrn::scl::DbField fromJson(const rapidjson::Value& t_node) {
         t_field.struct_size = t_node["struct_size"].GetInt();
     if (t_node.HasMember("unit") && t_node["unit"].IsString())
         t_field.unit = t_node["unit"].GetString();
+    if (t_node.HasMember("dimension") && t_node["dimension"].IsString())
+        t_field.dimension = t_node["dimension"].GetString();
     if (t_node.HasMember("min") && t_node["min"].IsNumber())
         t_field.min_val = t_node["min"].GetDouble();
     if (t_node.HasMember("max") && t_node["max"].IsNumber())

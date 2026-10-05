@@ -11,6 +11,10 @@
 
   let gatewayName = "";
 
+  // Dashboard variant: the replay dashboard inherits this header but is not
+  // the gateway dashboard — it hides gateway-only nav (docs/policy/etc).
+  export let variant: "gateway" | "replay" = "gateway";
+
   onMount(() => {
     gatewayName = new URLSearchParams(window.location.search).get("gatewayName")?.trim() ?? "";
     if (gatewayName) document.title = `${gatewayName} | SGRN Gateway`;
@@ -26,7 +30,7 @@
     <div class="logo-orb"></div>
     <h1>
       SGRN <span style="font-weight:400; opacity:.55; letter-spacing:.5px"
-        >S7 Gateway</span
+        >{variant === "replay" ? "Replay" : "S7 Gateway"}</span
       >
     </h1>
     {#if gatewayName}
@@ -41,24 +45,26 @@
       class:active={$location === "/" || $location.startsWith("/dashboard")}
       >Dashboard</a
     >
-    <a
-      href="/projections"
-      use:link
-      class="nav-link"
-      class:active={$location === "/projections"}>Projections</a
-    >
-    <a
-      href="/policy"
-      use:link
-      class="nav-link"
-      class:active={$location === "/policy"}>Policy</a
-    >
-    <a
-      href="/docs"
-      use:link
-      class="nav-link"
-      class:active={$location.startsWith("/docs")}>Docs</a
-    >
+    {#if variant === "gateway"}
+      <a
+        href="/projections"
+        use:link
+        class="nav-link"
+        class:active={$location === "/projections"}>Projections</a
+      >
+      <a
+        href="/policy"
+        use:link
+        class="nav-link"
+        class:active={$location === "/policy"}>Policy</a
+      >
+      <a
+        href="/docs"
+        use:link
+        class="nav-link"
+        class:active={$location.startsWith("/docs")}>Docs</a
+      >
+    {/if}
   </nav>
   <div class="header-controls">
     <div class="stat-group">

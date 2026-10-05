@@ -6,6 +6,7 @@ export interface DbField {
   count: number;
   udt_name?: string;
   unit?: string;
+  dimension?: string;
   min?: number;
   max?: number;
   enum?: Record<string, string>;
@@ -120,6 +121,7 @@ export interface RegistryTreeNode {
   parent_row_id: string | null;
   count: number;
   unit?: string;
+  dimension?: string;
   min?: number;
   max?: number;
   enum_map?: Record<string, string>;
@@ -140,6 +142,7 @@ export interface FlatRegistryField {
   depth: number;
   full_path: string;
   unit?: string;
+  dimension?: string;
   min?: number;
   max?: number;
   enum_map?: Record<string, string>;

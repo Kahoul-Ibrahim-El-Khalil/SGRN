@@ -5,6 +5,7 @@
 #include <sgrn/gateway/adapters/northbound/NorthboundServer.hpp>
 #include <sgrn/gateway/adapters/rate_limit.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
+#include <sgrn/gateway/tools/replay_control.hpp>
 #include <atomic>
 #include <crow.h>
 #include <map>
@@ -88,6 +89,13 @@ public:
 
     void stop();
 
+    /// Optional replay pacing state. Set by GatewayApplication when running
+    /// under sgrn_replay; null in normal gateway mode (routes return 404).
+    /// Shared_ptr so handler threads never dangle; all fields atomic.
+    void setReplayControl(ReplayControlPtr t_control) {
+        replay_control_ = std::move(t_control);
+    }
+
     /// Bound references — set by start()/registerRoutes() before any handler runs.
     struct BoundRefs {
         const PlcSchemaStore* registry{nullptr};
@@ -129,6 +137,12 @@ private:
     void handleGetPolicy(const http::HttpRequest& t_req, http::HttpResponse& t_res);
     void registerWebAssets(GatewayApp& t_app);
 
+    // ── Replay pacing (sgrn_replay only; 404 when replay_control_ == null) ──
+    void handleGetReplayStatus(const http::HttpRequest& t_req, http::HttpResponse& t_res);
+    void handlePostReplaySpeed(const http::HttpRequest& t_req, http::HttpResponse& t_res);
+    void handlePostReplayPause(const http::HttpRequest& t_req, http::HttpResponse& t_res);
+    void handlePostReplayResume(const http::HttpRequest& t_req, http::HttpResponse& t_res);
+
     // ── Server internals ─────────────────────────────────────────────────────
     // Standalone listener, used only by start(). The unified gateway path
     // registers routes on an external app instead (registerRoutes()).
@@ -144,6 +158,8 @@ private:
 
     // Route handlers run against these bound references (no per-request args).
     BoundRefs refs_;
+
+    ReplayControlPtr replay_control_{nullptr};
 };
 
 } // namespace sgrn::gateway::adapters

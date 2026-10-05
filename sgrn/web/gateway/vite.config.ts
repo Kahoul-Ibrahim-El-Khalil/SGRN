@@ -1,6 +1,5 @@
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig, type Plugin } from "vite";
-import { viteSingleFile } from "vite-plugin-singlefile";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,8 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
- * Worker path fix — viteSingleFile does not inline workers, so they're
- * emitted as separate files.  Vite generates:
+ * Worker path fix — workers are emitted as separate files. Vite generates:
  *   new URL("../worker-<hash>.js", import.meta.url)
  * The "../" is relative to the assumed assetsDir (assets/), but with
  * <base href="/gateway/"> injected at runtime the "../" escapes the
@@ -41,7 +39,11 @@ function fixWorkerUrlPlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [svelte(), viteSingleFile(), fixWorkerUrlPlugin()],
+  // NOTE: no viteSingleFile — the two dashboard variants (index, replay)
+  // share code via emitted chunks (true inheritance: common components load
+  // once, docs chunk only referenced by index.html). All dist files are
+  // embedded + served by HttpAdapter::registerWebAssets.
+  plugins: [svelte(), fixWorkerUrlPlugin()],
   base: "./",
   resolve: {
     alias: {
@@ -58,6 +60,13 @@ export default defineConfig({
     assetsInlineLimit: 4096,
     minify: true,
     rollupOptions: {
+      // Two dashboard variants sharing components (inheritance, not copies):
+      // index.html = full gateway dashboard (incl. docs), replay.html =
+      // replay-only dashboard (process image + pacing, no docs bundle).
+      input: {
+        index: path.resolve(__dirname, "index.html"),
+        replay: path.resolve(__dirname, "replay.html"),
+      },
       output: {
         entryFileNames: "assets/[name]-[hash].js",
         chunkFileNames: "assets/[name]-[hash].js",
@@ -78,6 +87,7 @@ export default defineConfig({
       "/connections": "http://localhost:8000",
       "/db": "http://localhost:8000",
       "/endpoints": "http://localhost:8000",
+      "/replay": "http://localhost:8000",
       "/ws": { target: "ws://localhost:8000", ws: true },
     },
   },

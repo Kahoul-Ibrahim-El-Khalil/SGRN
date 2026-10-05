@@ -16,7 +16,8 @@ struct FeatureMeta {
     std::string field_path;
     std::string full_name; // e.g. "DB1.ReactorCore.ThermalPower"
     std::string data_type; // e.g. "REAL", "INT", "BOOL", "ENUM"
-    std::string unit;      // e.g. "MW", "°C", "%", "bar"
+    std::string unit;      // e.g. "MW", "°C", "%", "bar" (HOW it is measured)
+    std::string dimension; // e.g. "power", "temperature", "flow" (WHAT is measured)
     bool is_categorical = false;
     std::map<int, std::string> enum_map;
     double min_val = 0.0;

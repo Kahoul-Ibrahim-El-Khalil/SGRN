@@ -51,6 +51,11 @@ Result<ParseResult, std::string> fromJson(const rapidjson::Value& t_node) {
             if (warn.IsString())
                 t_result.warnings.push_back(warn.GetString());
     }
+    if (t_node.HasMember("dimensions") && t_node["dimensions"].IsArray()) {
+        for (const auto& dim : t_node["dimensions"].GetArray())
+            if (dim.IsString())
+                t_result.dimensions.push_back(dim.GetString());
+    }
 
     return t_result;
 }

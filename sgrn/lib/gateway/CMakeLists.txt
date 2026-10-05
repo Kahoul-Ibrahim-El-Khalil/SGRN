@@ -297,6 +297,7 @@ file(GLOB_RECURSE WEB_SVELTE_SOURCES CONFIGURE_DEPENDS
 
 set(WEB_CONFIG_FILES
     "${WEB_SRC_DIR}/index.html"
+    "${WEB_SRC_DIR}/replay.html"
     "${WEB_SRC_DIR}/vite.config.ts"
     "${WEB_SRC_DIR}/svelte.config.js"
     "${WEB_SRC_DIR}/package.json"

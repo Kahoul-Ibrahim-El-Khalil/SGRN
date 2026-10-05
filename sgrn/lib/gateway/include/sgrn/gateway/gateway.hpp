@@ -19,6 +19,7 @@
 #include <sgrn/gateway/database/GatewayDatabase.hpp>
 #include <sgrn/gateway/database/PersistenceService.hpp>
 #include <sgrn/gateway/datastore/DatastoreBridge.hpp>
+#include <sgrn/gateway/tools/replay_control.hpp>
 #include <sgrn/gateway/twin/DbSnapshot.hpp>
 #include <sgrn/gateway/twin/LeafDictionary.hpp>
 #include <sgrn/gateway/twin/PlcCommandProcessor.hpp>
@@ -118,6 +119,16 @@ public:
         return config_.http.has_value() ? config_.http->port : 0;
     }
 
+    /// Optional replay pacing state for sgrn_replay. When set before
+    /// startAdapters(), the HTTP adapter serves /replay/* from it.
+    /// Null in normal gateway mode. Shared_ptr: handler threads never dangle.
+    void setReplayControl(ReplayControlPtr t_control) {
+        replay_control_ = std::move(t_control);
+    }
+    ReplayControlPtr replayControl() const {
+        return replay_control_;
+    }
+
 private:
     template <typename StarterFunc>
     bool startAdapter(const char* name, uint16_t port, StarterFunc starter) {
@@ -197,6 +208,8 @@ private:
     std::optional<sgrn::gateway::adapters::ethernetip::EipAdapter> eip_adapter_;
     std::optional<sgrn::gateway::adapters::HttpAdapter> http_adapter_;
     std::optional<sgrn::gateway::adapters::websocket::WebSocketAdapter> ws_facade_;
+    /// Runtime replay pacing state (sgrn_replay only, else null).
+    ReplayControlPtr replay_control_{nullptr};
     // Single northbound listener: HTTP routes and the WebSocket `/ws` route
     // share one Crow app, one asio event loop, and one port. Declared last so
     // it stops (and joins) before the adapters whose handlers it may still be

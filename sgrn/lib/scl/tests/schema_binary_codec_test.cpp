@@ -82,6 +82,7 @@ PlcSchemaStore buildRichStore() {
 
     DbField press = makeField("pressure", DataType::Real, 116);
     press.unit = "bar";
+    press.dimension = "pressure";
     press.min_val = 0.0;
     press.max_val = 16.5;
     press.init_value = "1.013";
@@ -136,6 +137,7 @@ PlcSchemaStore buildRichStore() {
     alias.scalar_type = DataType::Real;
     alias.enum_map = {{0, "Cold"}, {1, "Hot"}};
     alias.unit = "degC";
+    alias.dimension = "temperature";
     alias.min_val = -40.0;
     alias.max_val = 120.0;
     if (store.addUdt(std::move(alias)).hasError()) {
@@ -212,6 +214,7 @@ int main() {
             CHECK(temps && temps->array_lower_bound == 1 && temps->array_upper_bound == 4 && temps->count == 4);
             const DbField* press = findField(db->fields, "pressure");
             CHECK(press && press->unit && *press->unit == "bar");
+            CHECK(press && press->dimension && *press->dimension == "pressure");
             CHECK(press && press->min_val && *press->min_val == 0.0);
             CHECK(press && press->max_val && *press->max_val == 16.5);
             CHECK(press && press->init_value == "1.013");
@@ -229,6 +232,7 @@ int main() {
             const UdtDefinition* udt = udt_res.value();
             CHECK(udt->is_scalar_alias && udt->scalar_type == DataType::Real);
             CHECK(udt->enum_map.at(1) == "Hot" && udt->unit && *udt->unit == "degC");
+            CHECK(udt->dimension && *udt->dimension == "temperature");
             CHECK(udt->min_val && *udt->min_val == -40.0 && udt->max_val && *udt->max_val == 120.0);
         }
         auto tag_res = back.getTag("StartButton");

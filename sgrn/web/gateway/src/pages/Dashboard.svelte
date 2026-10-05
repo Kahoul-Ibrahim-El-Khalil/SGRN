@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import ReplayControl from "../components/ReplayControl.svelte";
   import {
     liveTelemetryValues,
     sendWorkerCommand,
@@ -287,6 +288,8 @@
 </script>
 
 <div class="dashboard-wrap">
+  <!-- Runtime replay pacing (visible only on sgrn_replay gateways; 404 hides it) -->
+  <ReplayControl />
   <!-- Tab bar -->
   <div class="tab-bar">
     <button
@@ -474,12 +477,12 @@
                   {/if}
                 </td>
 
-                <!-- UNIT -->
+                <!-- UNIT · DIMENSION -->
                 <td class="unit-cell">
                   {#if node.type === "db" || node.is_struct || node.is_array || node.field_type === "TRUNCATED"}
                     —
                   {:else}
-                    {node.unit ?? "—"}
+                    {node.unit ?? "—"}{#if node.dimension}<span class="meta-muted"> · {node.dimension}</span>{/if}
                   {/if}
                 </td>
 
@@ -643,7 +646,7 @@
                               >
                             </div>
                           </td>
-                          <td class="unit-cell">{f.unit ?? "—"}</td>
+                          <td class="unit-cell">{f.unit ?? "—"}{#if f.dimension}<span class="meta-muted"> · {f.dimension}</span>{/if}</td>
                           <td class="range-cell">
                             {#if f.min !== undefined && f.max !== undefined}
                               [{f.min}, {f.max}]
@@ -742,7 +745,7 @@
                               >
                             </div>
                           </td>
-                          <td class="unit-cell">{f.unit ?? "—"}</td>
+                          <td class="unit-cell">{f.unit ?? "—"}{#if f.dimension}<span class="meta-muted"> · {f.dimension}</span>{/if}</td>
                           <td class="range-cell">
                             {#if f.min !== undefined && f.max !== undefined}
                               [{f.min}, {f.max}]
