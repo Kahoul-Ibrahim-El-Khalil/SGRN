@@ -41,6 +41,7 @@ select
   so.id as object_id,
   so.bucket,
   so.key,
+  so.sha256,
   so.size as object_size,
   so.created_at as object_created_at,
   so.deleted_at as object_deleted_at,

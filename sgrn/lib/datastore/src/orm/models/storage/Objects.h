@@ -47,6 +47,7 @@ public:
         static const std::string _id;
         static const std::string _bucket;
         static const std::string _key;
+        static const std::string _sha256;
         static const std::string _size;
         static const std::string _original_size;
         static const std::string _is_compressed;
@@ -127,6 +128,15 @@ public:
     /// Set the value of the column key
     void setKey(const std::string& pKey) noexcept;
     void setKey(std::string&& pKey) noexcept;
+
+    /**  For column sha256  */
+    /// Get the value of the column sha256, returns the default value if the column is null
+    const std::string& getValueOfSha256() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<std::string>& getSha256() const noexcept;
+    /// Set the value of the column sha256
+    void setSha256(const std::string& pSha256) noexcept;
+    void setSha256(std::string&& pSha256) noexcept;
 
     /**  For column size  */
     /// Get the value of the column size, returns the default value if the column is null
@@ -225,7 +235,7 @@ public:
     void setCreatedAt(const ::trantor::Date& pCreatedAt) noexcept;
 
     static size_t getColumnNumber() noexcept {
-        return 14;
+        return 15;
     }
     static const std::string& getColumnName(size_t index) noexcept(false);
 
@@ -251,6 +261,7 @@ private:
     std::shared_ptr<int64_t> id_;
     std::shared_ptr<std::string> bucket_;
     std::shared_ptr<std::string> key_;
+    std::shared_ptr<std::string> sha256_;
     std::shared_ptr<int64_t> size_;
     std::shared_ptr<int64_t> originalSize_;
     std::shared_ptr<bool> isCompressed_;
@@ -272,7 +283,7 @@ private:
         const bool notNull_;
     };
     static const std::vector<MetaData> metaData_;
-    bool dirtyFlag_[14] = {false};
+    bool dirtyFlag_[15] = {false};
 
 public:
     static const std::string& sqlForFindingByPrimaryKey() {
@@ -299,51 +310,55 @@ public:
             ++parametersCount;
         }
         if (dirtyFlag_[3]) {
-            sql += "size,";
+            sql += "sha256,";
             ++parametersCount;
         }
         if (dirtyFlag_[4]) {
+            sql += "size,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[5]) {
             sql += "original_size,";
             ++parametersCount;
         }
         sql += "is_compressed,";
         ++parametersCount;
-        if (!dirtyFlag_[5]) {
+        if (!dirtyFlag_[6]) {
             needSelection = true;
         }
-        if (dirtyFlag_[6]) {
+        if (dirtyFlag_[7]) {
             sql += "compression_algorithm,";
             ++parametersCount;
         }
-        if (dirtyFlag_[7]) {
+        if (dirtyFlag_[8]) {
             sql += "compression_level,";
             ++parametersCount;
         }
         sql += "provider,";
         ++parametersCount;
-        if (!dirtyFlag_[8]) {
+        if (!dirtyFlag_[9]) {
             needSelection = true;
         }
         sql += "upload_mode,";
         ++parametersCount;
-        if (!dirtyFlag_[9]) {
+        if (!dirtyFlag_[10]) {
             needSelection = true;
         }
-        if (dirtyFlag_[10]) {
+        if (dirtyFlag_[11]) {
             sql += "part_count,";
             ++parametersCount;
         }
-        if (dirtyFlag_[11]) {
+        if (dirtyFlag_[12]) {
             sql += "part_size_bytes,";
             ++parametersCount;
         }
-        if (dirtyFlag_[12]) {
+        if (dirtyFlag_[13]) {
             sql += "deleted_at,";
             ++parametersCount;
         }
         sql += "created_at,";
         ++parametersCount;
-        if (!dirtyFlag_[13]) {
+        if (!dirtyFlag_[14]) {
             needSelection = true;
         }
         needSelection = true;
@@ -376,12 +391,12 @@ public:
         if (dirtyFlag_[5]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-        } else {
-            sql += "default,";
         }
         if (dirtyFlag_[6]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
+        } else {
+            sql += "default,";
         }
         if (dirtyFlag_[7]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
@@ -390,8 +405,6 @@ public:
         if (dirtyFlag_[8]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-        } else {
-            sql += "default,";
         }
         if (dirtyFlag_[9]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
@@ -402,6 +415,8 @@ public:
         if (dirtyFlag_[10]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
+        } else {
+            sql += "default,";
         }
         if (dirtyFlag_[11]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
@@ -412,6 +427,10 @@ public:
             sql.append(placeholderStr, n);
         }
         if (dirtyFlag_[13]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[14]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         } else {

@@ -21,6 +21,8 @@ export interface FileMetadata {
   size: number;
   object_created_at?: string;
   mime_type?: string | null;
+  sha256?: string;
+  etag?: string;
   object?: StorageObject;
 }
 
@@ -235,6 +237,8 @@ export interface DriveFile {
   created_at: string;
   upload_mode?: string;
   part_count?: number | null;
+  sha256?: string;
+  etag?: string;
 }
 
 export interface DirectoryListing {

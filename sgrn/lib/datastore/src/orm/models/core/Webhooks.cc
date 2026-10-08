@@ -29,7 +29,7 @@ const std::vector<typename Webhooks::MetaData> Webhooks::metaData_={
 {"id","int32_t","integer",4,1,1,1},
 {"organisation","std::string","text",0,0,0,1},
 {"url","std::string","text",0,0,0,1},
-{"secret","std::string","text",0,0,0,1},
+{"secret","std::string","text",0,0,0,0},
 {"events","std::string","ARRAY",0,0,0,1},
 {"is_active","bool","boolean",1,0,0,1},
 {"created_at","::trantor::Date","timestamp with time zone",0,0,0,1},
@@ -714,6 +714,11 @@ void Webhooks::setSecret(std::string &&pSecret) noexcept
     secret_ = std::make_shared<std::string>(std::move(pSecret));
     dirtyFlag_[3] = true;
 }
+void Webhooks::setSecretToNull() noexcept
+{
+    secret_.reset();
+    dirtyFlag_[3] = true;
+}
 
 const std::string &Webhooks::getValueOfEvents() const noexcept
 {
@@ -1272,11 +1277,6 @@ bool Webhooks::validateJsonForCreation(const Json::Value &pJson, std::string &er
         if(!validJsonOfField(3, "secret", pJson["secret"], err, true))
             return false;
     }
-    else
-    {
-        err="The secret column cannot be null";
-        return false;
-    }
     if(pJson.isMember("events"))
     {
         if(!validJsonOfField(4, "events", pJson["events"], err, true))
@@ -1350,11 +1350,6 @@ bool Webhooks::validateMasqueradedJsonForCreation(const Json::Value &pJson,
               if(!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, true))
                   return false;
           }
-        else
-        {
-            err="The " + pMasqueradingVector[3] + " column cannot be null";
-            return false;
-        }
       }
       if(!pMasqueradingVector[4].empty())
       {
@@ -1560,8 +1555,7 @@ bool Webhooks::validJsonOfField(size_t index,
         case 3:
             if(pJson.isNull())
             {
-                err="The " + fieldName + " column cannot be null";
-                return false;
+                return true;
             }
             if(!pJson.isString())
             {

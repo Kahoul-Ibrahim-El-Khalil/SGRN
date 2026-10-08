@@ -34,7 +34,7 @@ const std::vector<typename Directories::MetaData> Directories::metaData_={
 {"id","int64_t","bigint",8,1,1,1},
 {"user_id","int32_t","integer",4,0,0,0},
 {"automated_service_id","int32_t","integer",4,0,0,0},
-{"session_id","int32_t","integer",4,0,0,1},
+{"session_id","int64_t","bigint",8,0,0,1},
 {"parent_id","int64_t","bigint",8,0,0,0},
 {"name","std::string","text",0,0,0,1},
 {"path","std::string","text",0,0,0,1},
@@ -68,7 +68,7 @@ Directories::Directories(const Row &r, const ssize_t indexOffset) noexcept
         }
         if(!r["session_id"].isNull())
         {
-            sessionId_=std::make_shared<int32_t>(r["session_id"].as<int32_t>());
+            sessionId_=std::make_shared<int64_t>(r["session_id"].as<int64_t>());
         }
         if(!r["parent_id"].isNull())
         {
@@ -152,7 +152,7 @@ Directories::Directories(const Row &r, const ssize_t indexOffset) noexcept
         index = offset + 3;
         if(!r[index].isNull())
         {
-            sessionId_=std::make_shared<int32_t>(r[index].as<int32_t>());
+            sessionId_=std::make_shared<int64_t>(r[index].as<int64_t>());
         }
         index = offset + 4;
         if(!r[index].isNull())
@@ -257,7 +257,7 @@ Directories::Directories(const Json::Value &pJson, const std::vector<std::string
         dirtyFlag_[3] = true;
         if(!pJson[pMasqueradingVector[3]].isNull())
         {
-            sessionId_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[3]].asInt64());
+            sessionId_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[3]].asInt64());
         }
     }
     if(!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4]))
@@ -383,7 +383,7 @@ Directories::Directories(const Json::Value &pJson) noexcept(false)
         dirtyFlag_[3]=true;
         if(!pJson["session_id"].isNull())
         {
-            sessionId_=std::make_shared<int32_t>((int32_t)pJson["session_id"].asInt64());
+            sessionId_=std::make_shared<int64_t>((int64_t)pJson["session_id"].asInt64());
         }
     }
     if(pJson.isMember("parent_id"))
@@ -514,7 +514,7 @@ void Directories::updateByMasqueradedJson(const Json::Value &pJson,
         dirtyFlag_[3] = true;
         if(!pJson[pMasqueradingVector[3]].isNull())
         {
-            sessionId_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[3]].asInt64());
+            sessionId_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[3]].asInt64());
         }
     }
     if(!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4]))
@@ -639,7 +639,7 @@ void Directories::updateByJson(const Json::Value &pJson) noexcept(false)
         dirtyFlag_[3] = true;
         if(!pJson["session_id"].isNull())
         {
-            sessionId_=std::make_shared<int32_t>((int32_t)pJson["session_id"].asInt64());
+            sessionId_=std::make_shared<int64_t>((int64_t)pJson["session_id"].asInt64());
         }
     }
     if(pJson.isMember("parent_id"))
@@ -800,20 +800,20 @@ void Directories::setAutomatedServiceIdToNull() noexcept
     dirtyFlag_[2] = true;
 }
 
-const int32_t &Directories::getValueOfSessionId() const noexcept
+const int64_t &Directories::getValueOfSessionId() const noexcept
 {
-    static const int32_t defaultValue = int32_t();
+    static const int64_t defaultValue = int64_t();
     if(sessionId_)
         return *sessionId_;
     return defaultValue;
 }
-const std::shared_ptr<int32_t> &Directories::getSessionId() const noexcept
+const std::shared_ptr<int64_t> &Directories::getSessionId() const noexcept
 {
     return sessionId_;
 }
-void Directories::setSessionId(const int32_t &pSessionId) noexcept
+void Directories::setSessionId(const int64_t &pSessionId) noexcept
 {
-    sessionId_ = std::make_shared<int32_t>(pSessionId);
+    sessionId_ = std::make_shared<int64_t>(pSessionId);
     dirtyFlag_[3] = true;
 }
 
@@ -1372,7 +1372,7 @@ Json::Value Directories::toJson() const
     }
     if(getSessionId())
     {
-        ret["session_id"]=getValueOfSessionId();
+        ret["session_id"]=(Json::Int64)getValueOfSessionId();
     }
     else
     {
@@ -1501,7 +1501,7 @@ Json::Value Directories::toMasqueradedJson(
         {
             if(getSessionId())
             {
-                ret[pMasqueradingVector[3]]=getValueOfSessionId();
+                ret[pMasqueradingVector[3]]=(Json::Int64)getValueOfSessionId();
             }
             else
             {
@@ -1636,7 +1636,7 @@ Json::Value Directories::toMasqueradedJson(
     }
     if(getSessionId())
     {
-        ret["session_id"]=getValueOfSessionId();
+        ret["session_id"]=(Json::Int64)getValueOfSessionId();
     }
     else
     {
@@ -2153,7 +2153,7 @@ bool Directories::validJsonOfField(size_t index,
                 err="The " + fieldName + " column cannot be null";
                 return false;
             }
-            if(!pJson.isInt())
+            if(!pJson.isInt64())
             {
                 err="Type error in the "+fieldName+" field";
                 return false;

@@ -32,7 +32,7 @@ const std::vector<typename Files::MetaData> Files::metaData_={
 {"name","std::string","text",0,0,0,1},
 {"user_id","int32_t","integer",4,0,0,0},
 {"automated_service_id","int32_t","integer",4,0,0,0},
-{"session_id","int32_t","integer",4,0,0,1},
+{"session_id","int64_t","bigint",8,0,0,1},
 {"directory_id","int64_t","bigint",8,0,0,0},
 {"extension","std::string","character varying",15,0,0,0},
 {"full_path","std::string","text",0,0,0,1},
@@ -66,7 +66,7 @@ Files::Files(const Row &r, const ssize_t indexOffset) noexcept
         }
         if(!r["session_id"].isNull())
         {
-            sessionId_=std::make_shared<int32_t>(r["session_id"].as<int32_t>());
+            sessionId_=std::make_shared<int64_t>(r["session_id"].as<int64_t>());
         }
         if(!r["directory_id"].isNull())
         {
@@ -139,7 +139,7 @@ Files::Files(const Row &r, const ssize_t indexOffset) noexcept
         index = offset + 4;
         if(!r[index].isNull())
         {
-            sessionId_=std::make_shared<int32_t>(r[index].as<int32_t>());
+            sessionId_=std::make_shared<int64_t>(r[index].as<int64_t>());
         }
         index = offset + 5;
         if(!r[index].isNull())
@@ -232,7 +232,7 @@ Files::Files(const Json::Value &pJson, const std::vector<std::string> &pMasquera
         dirtyFlag_[4] = true;
         if(!pJson[pMasqueradingVector[4]].isNull())
         {
-            sessionId_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[4]].asInt64());
+            sessionId_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[4]].asInt64());
         }
     }
     if(!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5]))
@@ -334,7 +334,7 @@ Files::Files(const Json::Value &pJson) noexcept(false)
         dirtyFlag_[4]=true;
         if(!pJson["session_id"].isNull())
         {
-            sessionId_=std::make_shared<int32_t>((int32_t)pJson["session_id"].asInt64());
+            sessionId_=std::make_shared<int64_t>((int64_t)pJson["session_id"].asInt64());
         }
     }
     if(pJson.isMember("directory_id"))
@@ -441,7 +441,7 @@ void Files::updateByMasqueradedJson(const Json::Value &pJson,
         dirtyFlag_[4] = true;
         if(!pJson[pMasqueradingVector[4]].isNull())
         {
-            sessionId_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[4]].asInt64());
+            sessionId_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[4]].asInt64());
         }
     }
     if(!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5]))
@@ -542,7 +542,7 @@ void Files::updateByJson(const Json::Value &pJson) noexcept(false)
         dirtyFlag_[4] = true;
         if(!pJson["session_id"].isNull())
         {
-            sessionId_=std::make_shared<int32_t>((int32_t)pJson["session_id"].asInt64());
+            sessionId_=std::make_shared<int64_t>((int64_t)pJson["session_id"].asInt64());
         }
     }
     if(pJson.isMember("directory_id"))
@@ -693,20 +693,20 @@ void Files::setAutomatedServiceIdToNull() noexcept
     dirtyFlag_[3] = true;
 }
 
-const int32_t &Files::getValueOfSessionId() const noexcept
+const int64_t &Files::getValueOfSessionId() const noexcept
 {
-    static const int32_t defaultValue = int32_t();
+    static const int64_t defaultValue = int64_t();
     if(sessionId_)
         return *sessionId_;
     return defaultValue;
 }
-const std::shared_ptr<int32_t> &Files::getSessionId() const noexcept
+const std::shared_ptr<int64_t> &Files::getSessionId() const noexcept
 {
     return sessionId_;
 }
-void Files::setSessionId(const int32_t &pSessionId) noexcept
+void Files::setSessionId(const int64_t &pSessionId) noexcept
 {
-    sessionId_ = std::make_shared<int32_t>(pSessionId);
+    sessionId_ = std::make_shared<int64_t>(pSessionId);
     dirtyFlag_[4] = true;
 }
 
@@ -1129,7 +1129,7 @@ Json::Value Files::toJson() const
     }
     if(getSessionId())
     {
-        ret["session_id"]=getValueOfSessionId();
+        ret["session_id"]=(Json::Int64)getValueOfSessionId();
     }
     else
     {
@@ -1237,7 +1237,7 @@ Json::Value Files::toMasqueradedJson(
         {
             if(getSessionId())
             {
-                ret[pMasqueradingVector[4]]=getValueOfSessionId();
+                ret[pMasqueradingVector[4]]=(Json::Int64)getValueOfSessionId();
             }
             else
             {
@@ -1336,7 +1336,7 @@ Json::Value Files::toMasqueradedJson(
     }
     if(getSessionId())
     {
-        ret["session_id"]=getValueOfSessionId();
+        ret["session_id"]=(Json::Int64)getValueOfSessionId();
     }
     else
     {
@@ -1764,7 +1764,7 @@ bool Files::validJsonOfField(size_t index,
                 err="The " + fieldName + " column cannot be null";
                 return false;
             }
-            if(!pJson.isInt())
+            if(!pJson.isInt64())
             {
                 err="Type error in the "+fieldName+" field";
                 return false;

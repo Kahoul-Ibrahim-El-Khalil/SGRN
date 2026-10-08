@@ -3,6 +3,7 @@
 #include <sgrn/datastore/core/db.hpp>
 #include <sgrn/datastore/error/ApiErrors.hpp>
 #include <sgrn/datastore/handlers/storage.hpp>
+#include <sgrn/datastore/services/helpers/magic.hpp>
 #include <sgrn/datastore/services/storage.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe_access.hpp>
@@ -11,6 +12,7 @@
 #include <sgrn/utils/hashing.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <fstream>
 #include <json/value.h>
@@ -118,7 +120,7 @@ constexpr std::string_view kFileMetadataColumns =
     "file_id AS id, file_name AS name, file_path AS full_path, directory_path, directory_id, extension, created_at, "
     "is_compressed, compression_algorithm, compression_level, session_id, user_id, automated_service_id, "
     "domain_name AS domain, organisation_name AS organisation, object_id, bucket, key, object_size AS size, "
-    "object_created_at, mime_type, upload_mode, part_count, part_size_bytes";
+    "object_created_at, mime_type, upload_mode, part_count, part_size_bytes, sha256";
 
 // Wire types mirror the old postgrest.files JSON: integers as numbers,
 // booleans as booleans, everything else as strings, SQL NULL as null.
@@ -152,6 +154,10 @@ Json::Value fileRowToJson(const drogon::orm::Row& t_row) {
         drogon::orm::Field f = t_row[i];
         std::string col = f.name();
         r[col] = fileFieldToJson(f, kIntColumns.contains(col), col == "is_compressed");
+    }
+    // Add ETag derived from sha256 (S3-compatible format: sha256-<hex>)
+    if (!r["sha256"].isNull() && r["sha256"].isString()) {
+        r["etag"] = Json::Value("\"" + r["sha256"].asString() + "\"");
     }
     return r;
 }
@@ -624,9 +630,9 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
         }
         auto db_client = db_res.value();
 
-        Json::Value folders_array(Json::arrayValue);
-        Json::Value files_array(Json::arrayValue);
-        Json::Value trail_array(Json::arrayValue);
+        std::string folders_json = "[";
+        std::string files_json = "[";
+        std::string trail_json = "[";
 
         // 4. Trail Construction
         std::string target_domain = "";
@@ -672,20 +678,17 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
             co_return res;
         };
 
-        auto append_trail_node = [&trail_array](std::string t_path, std::string t_name, std::optional<int64_t> t_id = std::nullopt,
+        auto append_trail_node = [&trail_json](std::string t_path, std::string t_name, std::optional<int64_t> t_id = std::nullopt,
                                      std::optional<std::string> t_display_name = std::nullopt) {
-            Json::Value node;
-            node["path"] = std::move(t_path);
-            node["name"] = std::move(t_name);
+            if (trail_json.size() > 1)
+                trail_json += ',';
             if (t_id.has_value()) {
-                node["id"] = Json::Int64(*t_id);
+                trail_json += fmt::format(R"({{"path":"{}","name":"{}","id":{}{}}})", jsonEscape(t_path), jsonEscape(t_name), *t_id,
+                    t_display_name ? fmt::format(R"(,"display_name":"{}")", jsonEscape(*t_display_name)) : "");
             } else {
-                node["id"] = Json::Value();
+                trail_json += fmt::format(R"({{"path":"{}","name":"{}","id":null{}}})", jsonEscape(t_path), jsonEscape(t_name),
+                    t_display_name ? fmt::format(R"(,"display_name":"{}")", jsonEscape(*t_display_name)) : "");
             }
-            if (t_display_name.has_value()) {
-                node["display_name"] = std::move(*t_display_name);
-            }
-            trail_array.append(std::move(node));
         };
 
         if (!is_virtual_root) {
@@ -742,53 +745,42 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
         if (is_virtual_root) {
             const std::string& organisation = session["user"]["organisation"].asString();
 
-            BackendResult<void> vrl_res = co_await buildVirtualRootListing(folders_array, namespace_prefix, scope, organisation, db_client);
+            BackendResult<void> vrl_res = co_await buildVirtualRootListing(folders_json, namespace_prefix, scope, organisation, db_client);
             if (vrl_res.hasError()) {
                 co_return createJsonErrorResponse(
                     std::format("Failed to list virtual root: {}", vrl_res.error().message_), drogon::k500InternalServerError);
             }
 
-            total_folders = folders_array.size();
+            // Count synthetic folders by scanning commas in the JSON array
+            // (cheaper than a second query — virtual root is always small)
+            total_folders = static_cast<int32_t>(std::count(folders_json.begin(), folders_json.end(), '{'));
         } else {
-            auto stats = co_await buildNormalDriveListing(folders_array, files_array, namespace_prefix, current_path, user_id,
-                target_owner_id, scope, db_client, limit, page, search);
+            auto stats = co_await buildNormalDriveListing(
+                folders_json, files_json, namespace_prefix, current_path, user_id, target_owner_id, scope, db_client, limit, page, search);
             total_folders = stats.first;
             total_files = stats.second;
         }
 
-        // 7. Response Construction
+        // Close the JSON arrays
+        trail_json += ']';
+        folders_json += ']';
+        files_json += ']';
+
+        // Strip trailing slash from current_path for display
         std::string display_path = current_path;
         if (display_path.length() > 1 && display_path.back() == '/') {
             display_path.pop_back();
         }
 
-        Json::Value response;
-        if (display_path == "/" && !namespace_prefix.empty()) {
+        const std::string display_path_val =
+            (display_path == "/" && !namespace_prefix.empty()) ? namespace_prefix : namespace_prefix + display_path;
+        const int32_t total_pages = std::max(1, (int32_t)std::ceil((double)(total_folders + total_files) / limit));
 
-            response["path"] = namespace_prefix;
-        } else {
-            response["path"] = namespace_prefix + display_path;
-        }
-        response["trail"] = std::move(trail_array);
-        response["folders"] = std::move(folders_array);
-        response["files"] = std::move(files_array);
-
-        Json::Value capabilities(Json::objectValue);
-        capabilities["can_read"] = scope_res->can_read;
-        capabilities["can_write"] = scope_res->can_write;
-        capabilities["can_delete"] = scope_res->can_delete;
-        capabilities["allowed_subpath"] = scope_res->allowed_subpath;
-        response["capabilities"] = std::move(capabilities);
-
-        // Pagination Metadata
-        response["total_folders"] = total_folders;
-        response["total_files"] = total_files;
-        response["total_items"] = total_folders + total_files;
-        response["page"] = page;
-        response["page_size"] = limit;
-        response["total_pages"] = std::max(1, (int32_t)std::ceil((double)(total_folders + total_files) / limit));
-
-        co_return drogon::HttpResponse::newHttpJsonResponse(std::move(response));
+        co_return createJsonResponse(fmt::format(
+            R"({{"path":"{}","trail":{},"folders":{},"files":{},"capabilities":{{"can_read":{},"can_write":{},"can_delete":{},"allowed_subpath":"{}"}},"total_folders":{},"total_files":{},"total_items":{},"page":{},"page_size":{},"total_pages":{}}})",
+            jsonEscape(display_path_val), trail_json, folders_json, files_json, scope_res->can_read ? "true" : "false",
+            scope_res->can_write ? "true" : "false", scope_res->can_delete ? "true" : "false", jsonEscape(scope_res->allowed_subpath),
+            total_folders, total_files, total_folders + total_files, page, limit, total_pages));
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Drive list DB exception: {}", e.base().what());
         co_return createErrorResponse(GenericApiError::InternalServerError);
@@ -798,11 +790,8 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
     }
 }
 
-Task<BackendResult<void>> StorageApiHandler::buildVirtualRootListing(Json::Value& t_folders_array, const std::string& t_namespace_prefix,
+Task<BackendResult<void>> StorageApiHandler::buildVirtualRootListing(std::string& t_folders_json, const std::string& t_namespace_prefix,
     StorageScope t_scope, const std::string& t_organisation, const drogon::orm::DbClientPtr& tsp_db_client) {
-    // Admin namespace roots are synthetic:
-    // - / in "users" lists all users in the organisation
-    // - / in "automated-services" lists all service tokens in the organisation
 
     try {
         drogon::orm::Result virtual_res =
@@ -817,17 +806,17 @@ Task<BackendResult<void>> StorageApiHandler::buildVirtualRootListing(Json::Value
                       "SELECT email AS name FROM core.users WHERE organisation = $1 AND deleted_at IS NULL ORDER BY email", t_organisation);
 
         for (const auto& row : virtual_res) {
-            Json::Value folder_item;
+            if (t_folders_json.size() > 1)
+                t_folders_json += ',';
             if (t_scope == StorageScope::AutomatedServices) {
-                folder_item["name"] = row["token"].as<std::string>();
-                folder_item["display_name"] = row["display_name"].as<std::string>();
-            } else if (t_scope == StorageScope::Domain) {
-                folder_item["name"] = row["name"].as<std::string>();
+                const std::string token = row["token"].as<std::string>();
+                t_folders_json += fmt::format(R"({{"name":"{}","display_name":"{}","path":"{}"}})", jsonEscape(token),
+                    jsonEscape(row["display_name"].as<std::string>()), jsonEscape(t_namespace_prefix + "/" + token));
             } else {
-                folder_item["name"] = row["name"].as<std::string>();
+                const std::string name = row["name"].as<std::string>();
+                t_folders_json +=
+                    fmt::format(R"({{"name":"{}","path":"{}"}})", jsonEscape(name), jsonEscape(t_namespace_prefix + "/" + name));
             }
-            folder_item["path"] = t_namespace_prefix + "/" + folder_item["name"].asString();
-            t_folders_array.append(std::move(folder_item));
         }
         co_return {};
 
@@ -836,7 +825,7 @@ Task<BackendResult<void>> StorageApiHandler::buildVirtualRootListing(Json::Value
     }
 }
 
-Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(Json::Value& t_folders_array, Json::Value& t_files_array,
+Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(std::string& t_folders_json, std::string& t_files_json,
     const std::string& t_namespace_prefix, const std::string& t_current_path_in, int32_t t_user_id, int32_t t_target_owner_id,
     StorageScope t_scope, const drogon::orm::DbClientPtr& tsp_db_client, int32_t t_limit, int32_t t_page, const std::string& t_search) {
 
@@ -974,21 +963,20 @@ Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(Jso
         }
     }();
 
+    int32_t folders_on_page = 0;
     for (const auto& row : folders_res) {
-        Json::Value folder_item;
-        folder_item["id"] = row["id"].as<int64_t>();
-        folder_item["name"] = row["name"].as<std::string>();
-        folder_item["path"] = t_namespace_prefix + row["path"].as<std::string>();
-        folder_item["created_at"] = row["created_at"].as<std::string>();
-        folder_item["virtual_size"] = Json::Int64(row["virtual_size"].as<int64_t>());
-        folder_item["real_size"] = Json::Int64(row["real_size"].as<int64_t>());
-        folder_item["count_sub_files"] = row["count_sub_files"].as<int64_t>();
-        folder_item["count_sub_directories"] = row["count_sub_directories"].as<int64_t>();
-        t_folders_array.append(std::move(folder_item));
+        if (t_folders_json.size() > 1)
+            t_folders_json += ',';
+        t_folders_json += fmt::format(
+            R"({{"id":{},"name":"{}","path":"{}","created_at":"{}","virtual_size":{},"real_size":{},"count_sub_files":{},"count_sub_directories":{}}})",
+            row["id"].as<int64_t>(), jsonEscape(row["name"].as<std::string>()),
+            jsonEscape(t_namespace_prefix + row["path"].as<std::string>()), jsonEscape(row["created_at"].as<std::string>()),
+            row["virtual_size"].as<int64_t>(), row["real_size"].as<int64_t>(), row["count_sub_files"].as<int64_t>(),
+            row["count_sub_directories"].as<int64_t>());
+        ++folders_on_page;
     }
 
     // ── 3. Fetch Files ───────────────────────────────────────────────────────
-    int32_t folders_on_page = t_folders_array.size();
     int32_t remaining_limit = t_limit - folders_on_page;
 
     if (remaining_limit > 0) {
@@ -1049,18 +1037,16 @@ Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(Jso
         }();
 
         for (const auto& row : files_res) {
-            Json::Value file_item;
-            file_item["id"] = row["id"].as<int64_t>();
-            file_item["name"] = row["name"].as<std::string>();
-            file_item["path"] = t_namespace_prefix + row["full_path"].as<std::string>();
-            file_item["extension"] = row["extension"].isNull() ? "" : row["extension"].as<std::string>();
-            file_item["size"] = Json::Int64(row["compressed_size"].as<int64_t>());
-            file_item["original_size"] = Json::Int64(row["original_size"].as<int64_t>());
-            file_item["upload_mode"] = row["upload_mode"].as<std::string>();
-            file_item["part_count"] =
-                row["part_count"].isNull() ? Json::Value(Json::nullValue) : Json::Value(Json::Int64(row["part_count"].as<int64_t>()));
-            file_item["created_at"] = row["created_at"].as<std::string>();
-            t_files_array.append(std::move(file_item));
+            if (t_files_json.size() > 1)
+                t_files_json += ',';
+            const std::string part_count_val = row["part_count"].isNull() ? "null" : std::to_string(row["part_count"].as<int64_t>());
+            t_files_json += fmt::format(
+                R"({{"id":{},"name":"{}","path":"{}","extension":"{}","size":{},"original_size":{},"upload_mode":"{}","part_count":{},"created_at":"{}"}})",
+                row["id"].as<int64_t>(), jsonEscape(row["name"].as<std::string>()),
+                jsonEscape(t_namespace_prefix + row["full_path"].as<std::string>()),
+                jsonEscape(row["extension"].isNull() ? "" : row["extension"].as<std::string>()), row["compressed_size"].as<int64_t>(),
+                row["original_size"].as<int64_t>(), jsonEscape(row["upload_mode"].as<std::string>()), part_count_val,
+                jsonEscape(row["created_at"].as<std::string>()));
         }
     }
     co_return {total_folders, total_files};
@@ -1304,11 +1290,7 @@ Task<HttpResponsePtr> StorageApiHandler::moveFile(const std::shared_ptr<drogon::
     // 2. Short-circuit if no changes
     if (current_directory_id == t_target_parent_id && !t_target_name.has_value()) {
         tsp_transaction->rollback();
-        Json::Value response;
-        response["success"] = true;
-        response["id"] = Json::Int64(t_entity_id);
-        response["type"] = "file";
-        co_return createJsonResponse(std::move(response), k200OK);
+        co_return createJsonResponse(fmt::format(R"({{"success":true,"id":{},"type":"file"}})", t_entity_id));
     }
 
     // 3. Validate target directory ownership
@@ -1328,17 +1310,31 @@ Task<HttpResponsePtr> StorageApiHandler::moveFile(const std::shared_ptr<drogon::
         }
     }
 
-    // 4. Perform Update
+    // 4. Re-derive the format when the name changes: a suffix the formats
+    // registry acknowledges keeps its canonical (lowercased) extension, any
+    // other suffix is stored as NULL and remains part of the name.
+    std::optional<std::string> renamed_extension;
+    if (t_target_name.has_value()) {
+        const std::string raw_ext(services::storage::helpers::extractExtension(*t_target_name));
+        if (!raw_ext.empty()) {
+            auto format_res = co_await services::storage::helpers::getFormat(tsp_transaction, raw_ext);
+            if (format_res.has_value() && format_res->getExtension())
+                renamed_extension = *format_res->getExtension();
+        }
+    }
+
+    // 5. Perform Update
     auto update_res =
         (t_target_parent_id.has_value() && t_target_name.has_value())
-            ? co_await tsp_transaction->execSqlCoro(
-                  "UPDATE storage.files SET directory_id = $1, name = $2 WHERE id = $3", *t_target_parent_id, *t_target_name, t_entity_id)
+            ? co_await tsp_transaction->execSqlCoro("UPDATE storage.files SET directory_id = $1, name = $2, extension = $3 WHERE id = $4",
+                  *t_target_parent_id, *t_target_name, renamed_extension, t_entity_id)
             : (t_target_parent_id.has_value()
                       ? co_await tsp_transaction->execSqlCoro(
                             "UPDATE storage.files SET directory_id = $1 WHERE id = $2", *t_target_parent_id, t_entity_id)
                       : (t_target_name.has_value()
                                 ? co_await tsp_transaction->execSqlCoro(
-                                      "UPDATE storage.files SET directory_id = NULL, name = $1 WHERE id = $2", *t_target_name, t_entity_id)
+                                      "UPDATE storage.files SET directory_id = NULL, name = $1, extension = $2 WHERE id = $3",
+                                      *t_target_name, renamed_extension, t_entity_id)
                                 : co_await tsp_transaction->execSqlCoro(
                                       "UPDATE storage.files SET directory_id = NULL WHERE id = $1", t_entity_id)));
 
@@ -1347,15 +1343,9 @@ Task<HttpResponsePtr> StorageApiHandler::moveFile(const std::shared_ptr<drogon::
         co_return createJsonErrorResponse("Update failed", k500InternalServerError);
     }
 
-    Json::Value response;
-    response["success"] = true;
-    response["id"] = Json::Int64(t_entity_id);
-    response["type"] = "file";
-    if (t_target_parent_id)
-        response["parent_id"] = Json::Int64(*t_target_parent_id);
-    if (t_target_name)
-        response["name"] = *t_target_name;
-    co_return createJsonResponse(std::move(response), k200OK);
+    co_return createJsonResponse(fmt::format(R"({{"success":true,"id":{},"type":"file"{}{}}})", t_entity_id,
+        t_target_parent_id ? fmt::format(R"(,"parent_id":{})", *t_target_parent_id) : "",
+        t_target_name ? fmt::format(R"(,"name":"{}")", jsonEscape(*t_target_name)) : ""));
 }
 
 Task<HttpResponsePtr> StorageApiHandler::moveFolder(const std::shared_ptr<drogon::orm::Transaction>& tsp_transaction, int64_t t_entity_id,
@@ -1386,11 +1376,7 @@ Task<HttpResponsePtr> StorageApiHandler::moveFolder(const std::shared_ptr<drogon
     // 2. Short-circuit if no changes
     if (current_parent_id == t_target_parent_id && !t_target_name.has_value()) {
         tsp_transaction->rollback();
-        Json::Value response;
-        response["success"] = true;
-        response["id"] = Json::Int64(t_entity_id);
-        response["type"] = "folder";
-        co_return createJsonResponse(std::move(response), k200OK);
+        co_return createJsonResponse(fmt::format(R"({{"success":true,"id":{},"type":"folder"}})", t_entity_id));
     }
 
     // 3. Validate target and prevent cycles
@@ -1441,15 +1427,9 @@ Task<HttpResponsePtr> StorageApiHandler::moveFolder(const std::shared_ptr<drogon
         co_return createJsonErrorResponse("Update failed", k500InternalServerError);
     }
 
-    Json::Value response;
-    response["success"] = true;
-    response["id"] = Json::Int64(t_entity_id);
-    response["type"] = "folder";
-    if (t_target_parent_id)
-        response["parent_id"] = Json::Int64(*t_target_parent_id);
-    if (t_target_name)
-        response["name"] = *t_target_name;
-    co_return createJsonResponse(std::move(response), k200OK);
+    co_return createJsonResponse(fmt::format(R"({{"success":true,"id":{},"type":"folder"{}{}}})", t_entity_id,
+        t_target_parent_id ? fmt::format(R"(,"parent_id":{})", *t_target_parent_id) : "",
+        t_target_name ? fmt::format(R"(,"name":"{}")", jsonEscape(*t_target_name)) : ""));
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handleDelete(HttpRequestPtr tsp_req) {
@@ -1590,12 +1570,7 @@ Task<HttpResponsePtr> StorageApiHandler::deleteFile(
         co_await tsp_db_client->execSqlCoro("DELETE FROM storage.objects WHERE id = $1", object_id);
     }
 
-    Json::Value response;
-    response["success"] = true;
-    response["id"] = Json::Int64(t_entity_id);
-    response["type"] = "file";
-
-    co_return createJsonResponse(std::move(response), k200OK);
+    co_return createJsonResponse(fmt::format(R"({{"success":true,"id":{},"type":"file"}})", t_entity_id));
 }
 
 Task<HttpResponsePtr> StorageApiHandler::deleteFolder(
@@ -1639,11 +1614,7 @@ Task<HttpResponsePtr> StorageApiHandler::deleteFolder(
         co_return createJsonErrorResponse("Folder deletion failed", k404NotFound);
     }
 
-    Json::Value response;
-    response["success"] = true;
-    response["id"] = Json::Int64(t_entity_id);
-    response["type"] = "folder";
-    co_return createJsonResponse(std::move(response), k200OK);
+    co_return createJsonResponse(fmt::format(R"({{"success":true,"id":{},"type":"folder"}})", t_entity_id));
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handleBulkAction(HttpRequestPtr tsp_req) {
@@ -1741,6 +1712,106 @@ Task<HttpResponsePtr> StorageApiHandler::handleBulkAction(HttpRequestPtr tsp_req
         co_return createErrorResponse(GenericApiError::InternalServerError);
     } catch (const std::exception& ex) {
         ERROR_LOG("Bulk action handler exception: {}", ex.what());
+        co_return createErrorResponse(GenericApiError::InternalServerError);
+    }
+}
+
+Task<HttpResponsePtr> StorageApiHandler::handlePresignedUrl(HttpRequestPtr tsp_req) {
+    try {
+        const auto& session = tsp_req->getAttributes()->get<Json::Value>("session_json");
+        if (session.isNull()) {
+            SGRN_WARN_LOG("handlePresignedUrl: No session found in request attributes");
+            co_return createJsonErrorResponse("Unauthorized: Session missing", k401Unauthorized);
+        }
+        if (!session.isMember("user") || !session["user"].isMember("id") || !session["user"]["id"].isInt()) {
+            SGRN_WARN_LOG("handlePresignedUrl: Malformed session - missing or invalid user ID");
+            co_return createJsonErrorResponse("Forbidden: Malformed session payload", k403Forbidden);
+        }
+        const int32_t user_id = session["user"]["id"].asInt();
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (!db_res.has_value()) {
+            co_return sgrn::createJsonResponse(db_res);
+        }
+        auto db = db_res.value();
+
+        // Parse query parameters
+        std::string file_id_str = tsp_req->getParameter("file_id");
+        std::string action = tsp_req->getParameter("action");     // "get" | "put" | "delete"
+        std::string expiry_str = tsp_req->getParameter("expiry"); // seconds, default 3600
+
+        if (file_id_str.empty() || action.empty()) {
+            co_return createJsonErrorResponse("file_id and action parameters are required", k400BadRequest);
+        }
+
+        int64_t file_id;
+        try {
+            file_id = std::stoll(file_id_str);
+        } catch (...) {
+            co_return createJsonErrorResponse("Invalid file_id", k400BadRequest);
+        }
+
+        if (action != "get" && action != "put" && action != "delete") {
+            co_return createJsonErrorResponse("action must be 'get', 'put', or 'delete'", k400BadRequest);
+        }
+
+        uint32_t expiry = 3600;
+        if (!expiry_str.empty()) {
+            try {
+                expiry = static_cast<uint32_t>(std::stoul(expiry_str));
+            } catch (...) {
+                co_return createJsonErrorResponse("Invalid expiry parameter", k400BadRequest);
+            }
+        }
+        // Cap expiry at 7 days
+        if (expiry > 604800)
+            expiry = 604800;
+
+        // Look up the file to get object_id, bucket, key
+        auto file_rows = co_await db->execSqlCoro("SELECT fo.object_id, o.bucket, o.key FROM storage.file_objects fo "
+                                                  "JOIN storage.objects o ON o.id = fo.object_id "
+                                                  "WHERE fo.file_id = $1 AND fo.part_index = 0",
+            file_id);
+        if (file_rows.empty()) {
+            co_return createJsonErrorResponse("File not found", k404NotFound);
+        }
+
+        int64_t object_id = file_rows[0]["object_id"].as<int64_t>();
+        std::string bucket = file_rows[0]["bucket"].as<std::string>();
+        std::string key = file_rows[0]["key"].as<std::string>();
+
+        // Check ownership
+        auto own_rows = co_await db->execSqlCoro("SELECT 1 FROM storage.files WHERE id = $1 AND user_id = $2", file_id, user_id);
+        if (own_rows.empty()) {
+            co_return createJsonErrorResponse("Forbidden: File not owned by user", k403Forbidden);
+        }
+
+        // Generate presigned URL via S3Client plugin
+        auto s3_res = storage_service_.S3Client();
+        if (!s3_res.has_value()) {
+            co_return createJsonErrorResponse(fmt::format("S3 unavailable: {}", s3_res.error().message_), k500InternalServerError);
+        }
+        auto* s3 = s3_res.value();
+
+        BackendResult<std::string> url_res;
+        if (action == "get") {
+            url_res = co_await s3->presignedGetUrl(bucket, key, expiry);
+        } else if (action == "put") {
+            url_res = co_await s3->presignedPutUrl(bucket, key, expiry);
+        } else {
+            url_res = co_await s3->presignedDeleteUrl(bucket, key, expiry);
+        }
+
+        if (url_res.hasError()) {
+            co_return createJsonErrorResponse(
+                fmt::format("Failed to generate presigned URL: {}", url_res.error().message_), k500InternalServerError);
+        }
+
+        co_return createJsonResponse(fmt::format(R"({{"success":true,"url":"{}","action":"{}","expiry":{},"file_id":{}}})",
+            jsonEscape(*url_res), jsonEscape(action), expiry, file_id));
+
+    } catch (const std::exception& ex) {
+        ERROR_LOG("handlePresignedUrl exception: {}", ex.what());
         co_return createErrorResponse(GenericApiError::InternalServerError);
     }
 }
@@ -1885,12 +1956,8 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleInitUploadSession
             "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
             upload_id, user_id, target_path, filename, mime_type, total_size, chunk_size, total_chunks);
 
-        Json::Value resp;
-        resp["upload_id"] = upload_id;
-        resp["chunk_size"] = chunk_size;
-        resp["total_chunks"] = total_chunks;
-        resp["status"] = "active";
-        co_return HttpResponse::newHttpJsonResponse(std::move(resp));
+        co_return createJsonResponse(fmt::format(
+            R"({{"upload_id":"{}","chunk_size":{},"total_chunks":{},"status":"active"}})", upload_id, chunk_size, total_chunks));
     } catch (const std::exception& e) {
         ERROR_LOG("Init upload session error: {}", e.what());
         co_return createJsonErrorResponse("Failed to initialize upload session", k500InternalServerError);
@@ -1922,11 +1989,15 @@ std::shared_ptr<StorageApiHandler::UploadSessionState> StorageApiHandler::getOrC
     if (EVP_DigestInit_ex(state->hash_ctx, EVP_sha256(), nullptr) != 1)
         return nullptr;
 
-    // zstd compressor
-    state->cstream = ZSTD_createCStream();
-    if (!state->cstream)
-        return nullptr;
-    ZSTD_initCStream(state->cstream, t_level);
+    // Only compress if the MIME type is compressible (e.g. text/json/xml).
+    // For already-compressed or binary formats, store verbatim.
+    if (services::storage::helpers::isCompressibleMimeType(t_mime_type)) {
+        state->cstream = ZSTD_createCStream();
+        if (!state->cstream)
+            return nullptr;
+        ZSTD_initCStream(state->cstream, t_level);
+        state->server_compressed = true;
+    }
 
     state->mime_type = t_mime_type;
     upload_states_[t_upload_id] = state;
@@ -1952,7 +2023,7 @@ static drogon::Task<sgrn::datastore::BackendResult<int64_t>> flushSegment(sgrn::
     const int64_t compressed_size = static_cast<int64_t>(seg_data.size());
 
     // Push segment to Garage
-    auto put_res = co_await s3->uploadFromMemory(bucket, seg_key, std::move(seg_data), mime_type);
+    auto put_res = co_await s3->uploadFromMemory(bucket, seg_key, seg_data, mime_type);
     if (put_res.hasError()) {
         co_return put_res.error();
     }
@@ -1960,9 +2031,14 @@ static drogon::Task<sgrn::datastore::BackendResult<int64_t>> flushSegment(sgrn::
     // original_size for a provisional segment is not known yet (we only know
     // total original_size at complete time). We store compressed_size as a
     // placeholder; it is corrected after the rename in handleCompleteUploadSession.
+    // Compute SHA-256 of the compressed segment data as a placeholder.
+    auto sha256_res = helpers::computeSha256InMemory(seg_data);
+    if (sha256_res.hasError()) {
+        co_return sha256_res.error();
+    }
     auto obj_res =
         co_await helpers::insertObject(db, bucket, seg_key, static_cast<size_t>(compressed_size), static_cast<size_t>(compressed_size),
-            /*is_compressed=*/true, std::string{"zstd"}, static_cast<std::optional<uint8_t>>(kCompressionLevel));
+            *sha256_res, /*is_compressed=*/true, std::string{"zstd"}, static_cast<std::optional<uint8_t>>(kCompressionLevel));
     co_return obj_res;
 }
 
@@ -2018,18 +2094,24 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleUploadChunk(drogo
         EVP_DigestUpdate(state->hash_ctx, body.data(), body.size());
         state->original_bytes += static_cast<int64_t>(body.size());
 
-        // Feed body into zstd streaming compressor
-        ZSTD_inBuffer zstd_in{body.data(), body.size(), 0};
-        const size_t out_buf_size = ZSTD_CStreamOutSize();
-        std::vector<char> out_buf(out_buf_size);
+        if (state->server_compressed) {
+            // Feed body into zstd streaming compressor
+            ZSTD_inBuffer zstd_in{body.data(), body.size(), 0};
+            const size_t out_buf_size = ZSTD_CStreamOutSize();
+            std::vector<char> out_buf(out_buf_size);
 
-        while (zstd_in.pos < zstd_in.size) {
-            ZSTD_outBuffer zstd_out{out_buf.data(), out_buf_size, 0};
-            size_t ret = ZSTD_compressStream(state->cstream, &zstd_out, &zstd_in);
-            if (ZSTD_isError(ret)) {
-                co_return createJsonErrorResponse(fmt::format("Compression error: {}", ZSTD_getErrorName(ret)), k500InternalServerError);
+            while (zstd_in.pos < zstd_in.size) {
+                ZSTD_outBuffer zstd_out{out_buf.data(), out_buf_size, 0};
+                size_t ret = ZSTD_compressStream(state->cstream, &zstd_out, &zstd_in);
+                if (ZSTD_isError(ret)) {
+                    co_return createJsonErrorResponse(
+                        fmt::format("Compression error: {}", ZSTD_getErrorName(ret)), k500InternalServerError);
+                }
+                state->seg_buf.insert(state->seg_buf.end(), out_buf.data(), out_buf.data() + zstd_out.pos);
             }
-            state->seg_buf.insert(state->seg_buf.end(), out_buf.data(), out_buf.data() + zstd_out.pos);
+        } else {
+            // Non-compressible MIME: buffer raw bytes directly
+            state->seg_buf.insert(state->seg_buf.end(), body.data(), body.data() + body.size());
         }
 
         // ── 4. Flush complete segments ───────────────────────────────────────
@@ -2083,12 +2165,8 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleUploadChunk(drogo
                                  "    updated_at = NOW() WHERE id = $1",
             upload_id);
 
-        Json::Value resp;
-        resp["upload_id"] = upload_id;
-        resp["chunk_index"] = chunk_index;
-        resp["received"] = true;
-        resp["segments_flushed"] = static_cast<int>(new_segments.size());
-        co_return HttpResponse::newHttpJsonResponse(std::move(resp));
+        co_return createJsonResponse(fmt::format(
+            R"({{"upload_id":"{}","chunk_index":{},"received":true,"segments_flushed":{}}})", upload_id, chunk_index, new_segments.size()));
 
     } catch (const std::exception& e) {
         ERROR_LOG("Upload chunk error: {}", e.what());
@@ -2117,25 +2195,25 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleGetUploadStatus(d
         }
 
         const auto& s = s_rows[0];
-        Json::Value resp;
-        resp["upload_id"] = upload_id;
-        resp["filename"] = s["filename"].as<std::string>();
-        resp["target_path"] = s["target_path"].as<std::string>();
-        resp["total_size"] = s["total_size"].as<int64_t>();
-        resp["chunk_size"] = s["chunk_size"].as<int64_t>();
-        resp["total_chunks"] = s["total_chunks"].as<int32_t>();
-        resp["uploaded_chunks_count"] = s["uploaded_chunks_count"].as<int32_t>();
-        resp["status"] = s["status"].as<std::string>();
 
-        auto c_rows = co_await db->execSqlCoro(
+        auto idx_rows = co_await db->execSqlCoro(
             "SELECT chunk_index FROM storage.upload_chunks WHERE upload_id = $1 ORDER BY chunk_index ASC", upload_id);
-        Json::Value uploaded_indices = Json::arrayValue;
-        for (const auto& c : c_rows) {
-            uploaded_indices.append(c["chunk_index"].as<int32_t>());
+        std::string indices_json = "[";
+        bool first_idx = true;
+        for (const auto& idx_row : idx_rows) {
+            if (!first_idx)
+                indices_json += ',';
+            first_idx = false;
+            indices_json += std::to_string(idx_row["chunk_index"].as<int32_t>());
         }
-        resp["uploaded_chunk_indices"] = uploaded_indices;
+        indices_json += "]";
 
-        co_return HttpResponse::newHttpJsonResponse(std::move(resp));
+        co_return createJsonResponse(fmt::format(
+            R"({{"upload_id":"{}","filename":"{}","target_path":"{}","total_size":{},"chunk_size":{},"total_chunks":{},"uploaded_chunks_count":{},"status":"{}","uploaded_chunk_indices":{}}})",
+            upload_id, jsonEscape(s["filename"].as<std::string>()), jsonEscape(s["target_path"].as<std::string>()),
+            s["total_size"].as<int64_t>(), s["chunk_size"].as<int64_t>(), s["total_chunks"].as<int32_t>(),
+            s["uploaded_chunks_count"].as<int32_t>(), s["status"].as<std::string>(), indices_json));
+
     } catch (const std::exception& e) {
         ERROR_LOG("Get upload status error: {}", e.what());
         co_return createJsonErrorResponse("Failed fetching upload status", k500InternalServerError);
@@ -2258,7 +2336,59 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
             file_hash.push_back(kHexChars[hash_bytes[i] & 0x0F]);
         }
         const int64_t original_bytes = state->original_bytes;
+        const bool server_compressed = state->server_compressed;
         removeUploadState(upload_id);
+
+        // Extract declared extension from filename for sniffing validation
+        std::string ext(services::storage::helpers::extractExtension(filename));
+
+        // -- 5b. Content sniffing: read first 4096 bytes from S3 for magic detection.
+        // Skip when the server itself compressed the payload: the bytes on S3 will
+        // have a zstd magic header regardless of the declared extension (e.g. json),
+        // which is correct and expected — the sniff check would produce a false positive.
+        std::string sniffed_ext;
+        if (!server_compressed) {
+            auto s3_res2 = storage_service_.S3Client();
+            if (s3_res2.has_value()) {
+                auto* s3_sniff = s3_res2.value();
+                // Download first segment to read magic bytes (use existing_segs which has provisional segments)
+                std::string first_key = existing_segs.empty() ? "" : "pending/" + upload_id + "/0";
+                if (!first_key.empty()) {
+                    BackendResult<std::string> content_res = co_await s3_sniff->getObjectContent(bucket, first_key);
+                    if (content_res.has_value()) {
+                        std::string_view data(*content_res);
+                        std::string preview(data.substr(0, std::min<size_t>(data.size(), 4096)));
+                        auto sniff_res = ::sgrn::datastore::services::helpers::sniffExtension(preview);
+                        if (sniff_res.has_value()) {
+                            sniffed_ext = *sniff_res;
+                        }
+                    }
+                }
+            }
+        }
+
+        // -- 5c. Validate sniffed extension against declared extension
+        if (!sniffed_ext.empty()) {
+            // Normalize both to lowercase for comparison
+            std::string declared_lower = ext;
+            std::transform(declared_lower.begin(), declared_lower.end(), declared_lower.begin(),
+                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            std::string sniffed_lower = sniffed_ext;
+            std::transform(sniffed_lower.begin(), sniffed_lower.end(), sniffed_lower.begin(),
+                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (declared_lower != sniffed_lower) {
+                // Check if sniffed extension is a known format in registry
+                auto format_res = co_await services::storage::helpers::getFormat(db, sniffed_lower);
+                if (format_res.has_value()) {
+                    // Sniffed type is a known format but differs from declared → reject
+                    co_return createJsonErrorResponse(
+                        fmt::format("Content type mismatch: file content appears to be '{}' but was declared as '{}'", sniffed_lower,
+                            declared_lower),
+                        k422UnprocessableEntity);
+                }
+                // Sniffed type unknown → fall back to declared extension (registry will handle)
+            }
+        }
 
         // -- 6. Rename provisional keys to final content-addressed keys
         // Final key: uploads/<file_hash>/<part_index>
@@ -2282,9 +2412,12 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
                     co_return createJsonErrorResponse(
                         fmt::format("Failed to rename segment {}: {}", part_idx, copy_res.error().message_), k500InternalServerError);
                 co_await s3->deleteFile(bucket, prov_key);
-                co_await db->execSqlCoro("UPDATE storage.objects SET key = $1 WHERE id = $2", final_key, old_obj_id);
+                co_await db->execSqlCoro(
+                    "UPDATE storage.objects SET key = $1, sha256 = $2 WHERE id = $3", final_key, file_hash, old_obj_id);
                 final_obj_id = old_obj_id;
             }
+            // Update sha256 for deduplicated objects too
+            co_await db->execSqlCoro("UPDATE storage.objects SET sha256 = $1 WHERE id = $2", file_hash, final_obj_id);
             final_segments.emplace_back(part_idx, final_obj_id);
             ++part_idx;
         }
@@ -2304,9 +2437,11 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
             co_await services::storage::helpers::resolveDirectoryPath(db, user_id, std::nullopt, session_id, virtual_file_path, "");
         std::optional<int64_t> directory_id = (dir_res.hasValue() && dir_res.value().has_value()) ? dir_res.value() : std::nullopt;
 
-        std::string ext;
-        if (auto dot = filename.rfind('.'); dot != std::string::npos)
-            ext = filename.substr(dot + 1);
+        // Compression-aware suffix (same rule as the single-upload path);
+        // insertFile() stores it only when the formats registry acknowledges
+        // it, otherwise the extension stays NULL and the suffix stays part of
+        // the name. (ext already extracted earlier for sniffing validation)
+        // std::string ext(services::storage::helpers::extractExtension(filename));
 
         auto file_res = co_await services::storage::helpers::insertFile(
             db, filename, final_segments[0].second, user_id, std::nullopt, session_id, ext, directory_id, "");
@@ -2336,15 +2471,9 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
                                  "    updated_at = NOW() WHERE id = $1",
             upload_id, file_hash, file_id);
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["upload_id"] = upload_id;
-        resp["file_id"] = Json::Int64(file_id);
-        resp["file_hash"] = file_hash;
-        resp["segment_count"] = static_cast<int>(final_segments.size());
-        resp["original_bytes"] = Json::Int64(original_bytes);
-        resp["message"] = "Upload completed successfully";
-        co_return HttpResponse::newHttpJsonResponse(std::move(resp));
+        co_return createJsonResponse(fmt::format(
+            R"({{"success":true,"upload_id":"{}","file_id":{},"file_hash":"{}","segment_count":{},"original_bytes":{},"message":"Upload completed successfully"}})",
+            upload_id, file_id, file_hash, final_segments.size(), original_bytes));
 
     } catch (const std::exception& e) {
         removeUploadState(upload_id);
@@ -2374,10 +2503,8 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleAbortUploadSessio
 
         co_await db->execSqlCoro("UPDATE storage.upload_sessions SET status = 'aborted', updated_at = NOW() WHERE id = $1", upload_id);
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["message"] = "Upload session aborted";
-        co_return HttpResponse::newHttpJsonResponse(std::move(resp));
+        co_return createJsonResponse(R"({"success":true,"message":"Upload session aborted"})");
+
     } catch (const std::exception& e) {
         ERROR_LOG("Abort upload error: {}", e.what());
         co_return createJsonErrorResponse("Failed aborting upload", k500InternalServerError);

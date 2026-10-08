@@ -23,6 +23,7 @@ create table if not exists storage.objects (
   id bigint generated always as identity primary key,
   bucket text not null,
   key text not null,
+  sha256 char(64) not null,
   size bigint not null check (size > 0),
   original_size bigint not null check (original_size > 0),
   is_compressed boolean not null default false,
@@ -96,6 +97,9 @@ add column if not exists part_count int;
 
 alter table if exists storage.objects
 add column if not exists part_size_bytes bigint;
+
+alter table if exists storage.objects
+add column if not exists sha256 char(64) not null default '';
 
 do $$
 begin
@@ -719,6 +723,7 @@ create or replace function storage.upsert_object (
   p_key text,
   p_size bigint,
   p_original_size bigint,
+  p_sha256 char(64),
   p_provider text default 'GARAGE',
   p_is_compressed boolean default false,
   p_compression_algorithm text default null,
@@ -734,6 +739,7 @@ begin
   insert into storage.objects (
     bucket,
     key,
+    sha256,
     size,
     original_size,
     provider,
@@ -747,6 +753,7 @@ begin
   values (
     p_bucket,
     p_key,
+    p_sha256,
     p_size,
     p_original_size,
     p_provider,
@@ -768,6 +775,7 @@ begin
     o.id,
     o.size,
     o.original_size,
+    o.sha256,
     o.provider,
     o.is_compressed,
     o.compression_algorithm,
@@ -783,6 +791,7 @@ begin
 
   if v_existing.size <> p_size
      or v_existing.original_size <> p_original_size
+     or v_existing.sha256 <> p_sha256
      or v_existing.provider is distinct from p_provider
      or v_existing.is_compressed is distinct from p_is_compressed
      or v_existing.compression_algorithm is distinct from p_compression_algorithm

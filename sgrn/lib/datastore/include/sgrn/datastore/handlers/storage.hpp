@@ -1,10 +1,12 @@
 #pragma once
 #include <drogon/HttpController.h>
 #include <drogon/drogon.h>
+#include <fmt/format.h>
 #include <sgrn/datastore/services/storage.hpp>
 #include <sgrn/datastore/utils/IHandler.hpp>
 #include <sgrn/debug.hpp>
 #include <array>
+#include <json/json.h>
 #include <mutex>
 #include <openssl/evp.h>
 #include <regex>
@@ -55,6 +57,11 @@ public:
     drogon::Task<drogon::HttpResponsePtr> handleDeleteObject(drogon::HttpRequestPtr tsp_req, std::string t_name);
 
     // =========================================================================
+    // Presigned URLs
+    // =========================================================================
+    drogon::Task<drogon::HttpResponsePtr> handlePresignedUrl(drogon::HttpRequestPtr tsp_req);
+
+    // =========================================================================
     // Drive directory listing
     // =========================================================================
     drogon::Task<drogon::HttpResponsePtr> handleDriveList(drogon::HttpRequestPtr tsp_req);
@@ -79,6 +86,8 @@ private:
         int64_t original_bytes{0};
 
         // zstd streaming compressor — feeds original bytes, emits compressed output.
+        // Null when the MIME type is not compressible (e.g. already-compressed
+        // formats); in that case chunks are stored verbatim.
         ZSTD_CStream* cstream{nullptr};
         // Compressed bytes not yet forming a full segment.
         std::vector<char> seg_buf;
@@ -87,6 +96,10 @@ private:
 
         // Mime type (needed for S3 content-type on segment PUTs)
         std::string mime_type;
+        // True when the server applied zstd compression to the payload.
+        // Used by finalize to skip magic-byte sniff (bytes on S3 are zst,
+        // not the declared type — that's expected and correct).
+        bool server_compressed{false};
         // Uploaded chunks that have been processed into segments.
         int32_t processed_chunks{0};
 
@@ -114,12 +127,14 @@ private:
     void removeUploadState(const std::string& t_upload_id);
 
     // Helpers for handleDriveList
+    // Builders write directly into pre-allocated JSON array strings
+    // (no intermediate Json::Value tree — eliminates per-row heap allocations).
 
-    drogon::Task<::sgrn::datastore::BackendResult<void>> buildVirtualRootListing(Json::Value& t_folders_array,
+    drogon::Task<::sgrn::datastore::BackendResult<void>> buildVirtualRootListing(std::string& t_folders_json,
         const std::string& t_namespace_prefix, ::sgrn::datastore::services::storage::StorageScope t_scope,
         const std::string& t_organisation, const drogon::orm::DbClientPtr& tsp_db_client);
 
-    drogon::Task<std::pair<int32_t, int32_t>> buildNormalDriveListing(Json::Value& t_folders_array, Json::Value& t_files_array,
+    drogon::Task<std::pair<int32_t, int32_t>> buildNormalDriveListing(std::string& t_folders_json, std::string& t_files_json,
         const std::string& t_namespace_prefix, const std::string& t_current_path, int32_t t_user_id, int32_t t_target_owner_id,
         ::sgrn::datastore::services::storage::StorageScope t_scope, const drogon::orm::DbClientPtr& tsp_db_client, int32_t t_limit,
         int32_t t_page, const std::string& t_search);
@@ -137,7 +152,7 @@ private:
     drogon::Task<drogon::HttpResponsePtr> deleteFolder(
         const drogon::orm::DbClientPtr& tsp_db_client, int64_t t_entity_id, int32_t t_user_id, bool t_is_admin);
 
-    inline static const std::array<IHandler<StorageApiHandler>::route_config, 19> kRoutes = {
+    inline static const std::array<IHandler<StorageApiHandler>::route_config, 20> kRoutes = {
         {{"/api/v1/storage/stats", &StorageApiHandler::handleGetStorageStats, {drogon::Get}, {"sgrn::datastore::filters::UserAuthFilter"}},
 
             {"/api/v1/storage/files/metadata", &StorageApiHandler::handleGetFilesMetadata, {drogon::Get},
@@ -175,6 +190,9 @@ private:
                 {"sgrn::datastore::filters::UserAuthFilter"}},
 
             {"/api/v1/storage/drive/bulk", &StorageApiHandler::handleBulkAction, {drogon::Post},
+                {"sgrn::datastore::filters::UserAuthFilter"}},
+
+            {"/api/v1/storage/files/presign", &StorageApiHandler::handlePresignedUrl, {drogon::Get},
                 {"sgrn::datastore::filters::UserAuthFilter"}},
 
             {"/api/v1/automated-service/objects", &StorageApiHandler::handleCreateObject, {drogon::Post},

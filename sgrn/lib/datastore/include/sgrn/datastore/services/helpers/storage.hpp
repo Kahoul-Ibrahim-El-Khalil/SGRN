@@ -2,6 +2,7 @@
 #include <drogon/HttpAppFramework.h>
 #include <drogon/orm/DbClient.h>
 #include <drogon/utils/coroutine.h>
+#include <fmt/format.h>
 #include <sgrn/datastore/BackendError.hpp>
 #include <sgrn/datastore/plugins/aws/S3Client.hpp>
 #include <sgrn/utils/hashing.hpp>
@@ -84,6 +85,20 @@ struct FileIdentity {
 
     std::string storageExtension() const {
         return extension;
+    }
+
+    // Fast path: emit JSON directly without an intermediate Json::Value tree.
+    // Use this for HTTP responses; toJson() is kept for callers that need
+    // a Json::Value (e.g. audit logging, session serialisation).
+    std::string toJsonString() const {
+        std::string comp_fields;
+        if (compression_algorithm.has_value()) {
+            comp_fields = fmt::format(R"(,"compression_algorithm":"{}","compression_level":{})", *compression_algorithm,
+                compression_level.has_value() ? std::to_string(*compression_level) : "null");
+        }
+        return fmt::format(
+            R"({{"key":"{}","hash":"{}","extension":"{}","mime_type":"{}","is_compressed":{},"original_size":{},"final_size":{},"storage_extension":"{}"{}}})",
+            hash.key, hash.key, extension, mime_type, is_compressed ? "true" : "false", original_size, final_size, extension, comp_fields);
     }
 
     Json::Value toJson() const {
@@ -220,6 +235,11 @@ namespace helpers
 ::sgrn::datastore::BackendResult<FileHash> computeHashFromFile(const fs::path& t_file_path);
 drogon::Task<::sgrn::datastore::BackendResult<FileHash>> computeHashFromFileAsync(fs::path t_file_path);
 
+// SHA-256 (hex) for checksum/ETag
+::sgrn::datastore::BackendResult<std::string> computeSha256InMemory(std::string_view t_data);
+::sgrn::datastore::BackendResult<std::string> computeSha256FromFile(const fs::path& t_file_path);
+drogon::Task<::sgrn::datastore::BackendResult<std::string>> computeSha256FromFileAsync(fs::path t_file_path);
+
 // Compression Utilities
 drogon::Task<::sgrn::datastore::BackendResult<std::string>> compressInMemory(std::string&& t_data, uint8_t t_compression_level);
 ::sgrn::datastore::BackendResult<fs::path> compressFile(
@@ -237,7 +257,7 @@ bool verifyCompressionSignature(std::string_view t_data, std::string_view t_algo
 
 // Database Operations
 drogon::Task<::sgrn::datastore::BackendResult<int64_t>> insertObject(drogon::orm::DbClientPtr tsp_db_client, std::string t_bucket,
-    std::string t_key, size_t t_size, size_t t_original_size, bool t_is_compressed = false,
+    std::string t_key, size_t t_size, size_t t_original_size, std::string t_sha256, bool t_is_compressed = false,
     std::optional<std::string> t_compression_algorithm = std::nullopt, std::optional<uint8_t> t_compression_level = std::nullopt);
 
 // Chunking trace refresh after a successful multipart upload. The object row

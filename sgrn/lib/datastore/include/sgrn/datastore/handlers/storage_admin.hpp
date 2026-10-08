@@ -63,15 +63,17 @@ public:
     drogon::Task<drogon::HttpResponsePtr> handleUpdateSystemConfig(drogon::HttpRequestPtr tsp_req);
 
     // GET /api/v1/admin/storage/formats?search=&allowed=true&limit=500
-    // The formats registry (extension → mime/flags). Uploads auto-register
-    // unknown extensions here; is_allowed=false additionally vetoes uploads
-    // at the service layer (enforced in StorageService::uploadFile).
+    // The formats registry (extension → mime/flags) — the source of truth for
+    // which suffixes count as formats. Files whose suffix has no row here are
+    // stored with a NULL extension (the suffix simply stays part of the name);
+    // is_allowed=false additionally vetoes uploads at the service layer
+    // (enforced in StorageService::uploadFile).
     drogon::Task<drogon::HttpResponsePtr> handleListFormats(drogon::HttpRequestPtr tsp_req);
 
     // POST /api/v1/admin/storage/formats
     // Body: {extension, mime_type, is_compressed?, is_allowed?, description?}.
     // Upsert by extension (lowercased): adds a new format or curates an
-    // auto-registered one. Extension renames propagate to storage.files via
+    // existing one. Extension renames propagate to storage.files via
     // ON UPDATE CASCADE — there is no rename endpoint by design; delete +
     // re-add instead so the blast radius stays explicit.
     drogon::Task<drogon::HttpResponsePtr> handleUpsertFormat(drogon::HttpRequestPtr tsp_req);

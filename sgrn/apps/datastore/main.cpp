@@ -14,6 +14,7 @@
 #include <sgrn/datastore/bootstrap/bootstrap.hpp>
 #include <sgrn/datastore/config/config.hpp>
 #include <sgrn/datastore/init/init.hpp>
+#include <sgrn/datastore/services/upload_cleanup.hpp>
 #include <sgrn/utils/app.hpp>
 
 using namespace sgrn::utils::app;
@@ -31,6 +32,7 @@ inline void init() {
     handlers::initHandlers();
     plugins::initS3();
     ratelimit::initRateLimiting();
+    services::upload_cleanup::startUploadCleanupJob();
 
     drogon::app().run();
 }

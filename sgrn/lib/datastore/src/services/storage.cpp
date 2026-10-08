@@ -1,4 +1,5 @@
 // src/sgrn/services/storage/service.cpp
+#include <sgrn/datastore/services/helpers/magic.hpp>
 #include <sgrn/datastore/services/helpers/storage.hpp>
 #include <sgrn/datastore/services/storage.hpp>
 
@@ -350,8 +351,9 @@ Task<HttpResponsePtr> StorageService::handleCreateObject(const Json::Value& t_js
     }
     drogon::orm::DbClientPtr sp_db_client = db_res.value();
 
+    std::string sha256 = t_json.isMember("sha256") ? t_json["sha256"].asString() : "";
     BackendResult<int64_t> r = co_await helpers::insertObject(sp_db_client, t_json["bucket"].asString(), t_json["key"].asString(),
-        t_json["size"].asInt64(), t_json["original_size"].asInt64(), t_json["is_compressed"].asBool(),
+        t_json["size"].asInt64(), t_json["original_size"].asInt64(), sha256, t_json["is_compressed"].asBool(),
         t_json.isMember("compression_algorithm") ? std::optional<std::string>(t_json["compression_algorithm"].asString()) : std::nullopt);
 
     if (!r.has_value())
@@ -831,8 +833,14 @@ Task<BackendResult<void>> StorageService::executeInMemoryUpload(drogon::orm::DbC
     t_context.identity = std::move(proc_res->first);
     std::string final_data = std::move(proc_res->second);
 
+    BackendResult<std::string> sha256_res = helpers::computeSha256InMemory(final_data);
+    if (sha256_res.hasError()) {
+        co_return std::move(sha256_res).error();
+    }
+    std::string sha256 = *sha256_res;
+
     BackendResult<int64_t> obj_res = co_await helpers::insertObject(tsp_transaction, t_context.bucket, t_context.identity.hash.key,
-        t_context.identity.final_size, t_context.identity.original_size, t_context.identity.is_compressed,
+        t_context.identity.final_size, t_context.identity.original_size, std::move(sha256), t_context.identity.is_compressed,
         t_context.identity.compression_algorithm, t_context.identity.compression_level);
     if (obj_res.hasError()) {
         co_return obj_res.error();
@@ -888,8 +896,14 @@ Task<BackendResult<void>> StorageService::executeStreamingUpload(drogon::orm::Db
     fs::path upload_path = std::move(proc_res->second);
     TempFileGuard guard(upload_path);
 
+    BackendResult<std::string> sha256_res = helpers::computeSha256FromFile(guard.path);
+    if (sha256_res.hasError()) {
+        co_return std::move(sha256_res).error();
+    }
+    std::string sha256 = *sha256_res;
+
     BackendResult<int64_t> obj_res = co_await helpers::insertObject(tsp_transaction, t_context.bucket, t_context.identity.hash.key,
-        t_context.identity.final_size, t_context.identity.original_size, t_context.identity.is_compressed,
+        t_context.identity.final_size, t_context.identity.original_size, std::move(sha256), t_context.identity.is_compressed,
         t_context.identity.compression_algorithm, t_context.identity.compression_level);
     if (obj_res.hasError()) {
         co_return std::move(obj_res).error();
@@ -933,9 +947,47 @@ Task<BackendResult<void>> StorageService::finalizeUpload(drogon::orm::DbClientPt
     }
     t_context.directory_id = *dir_res;
 
+    // -- Content sniffing: read first 4096 bytes from S3 for magic detection.
+    // Skip when the server applied transparent compression: the object on S3
+    // carries zstd magic bytes regardless of the declared extension (e.g. json),
+    // which is correct and expected — sniffing would produce a false positive.
+    std::string declared_ext = t_context.identity.storageExtension();
+    if (!t_context.identity.is_compressed) {
+        BackendResult<plugins::aws::S3Client*> s3_res = S3Client();
+        if (s3_res.has_value()) {
+            auto* s3 = s3_res.value();
+            BackendResult<std::string> content_res = co_await s3->getObjectContent(t_context.bucket, t_context.identity.hash.key);
+            if (content_res.has_value()) {
+                std::string_view data(*content_res);
+                std::string preview(data.substr(0, std::min<size_t>(data.size(), 4096)));
+                auto sniff_res = ::sgrn::datastore::services::helpers::sniffExtension(preview);
+                if (sniff_res.has_value()) {
+                    std::string sniffed_ext = *sniff_res;
+                    // Normalize both to lowercase for comparison
+                    std::string declared_lower = declared_ext;
+                    std::transform(declared_lower.begin(), declared_lower.end(), declared_lower.begin(),
+                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    std::string sniffed_lower = sniffed_ext;
+                    std::transform(sniffed_lower.begin(), sniffed_lower.end(), sniffed_lower.begin(),
+                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    if (declared_lower != sniffed_lower) {
+                        // Check if sniffed extension is a known format in registry
+                        auto format_res = co_await helpers::getFormat(tsp_transaction, sniffed_lower);
+                        if (format_res.has_value()) {
+                            // Sniffed type is a known format but differs from declared → reject
+                            co_return BackendError{BackendErrorKind::Runtime,
+                                fmt::format("Content type mismatch: file content appears to be '{}' but was declared as '{}'",
+                                    sniffed_lower, declared_lower)};
+                        }
+                        // Sniffed type unknown → fall back to declared extension (registry will handle)
+                    }
+                }
+            }
+        }
+    }
+
     BackendResult<int64_t> file_res = co_await helpers::insertFile(tsp_transaction, t_context.original_filename, *t_context.object_id,
-        t_context.user_id, t_context.automated_service_id, t_context.session_id, t_context.identity.storageExtension(),
-        t_context.directory_id, t_context.domain);
+        t_context.user_id, t_context.automated_service_id, t_context.session_id, declared_ext, t_context.directory_id, t_context.domain);
     if (file_res.hasError()) {
         co_return std::move(file_res).error();
     }

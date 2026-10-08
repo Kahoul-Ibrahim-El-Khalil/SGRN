@@ -51,6 +51,8 @@ struct DriveFileInfo {
     int64_t size{};
     int64_t original_size{};
     std::string created_at{};
+    std::string sha256{};
+    std::string etag{};
 };
 
 struct DriveListing {
@@ -295,6 +297,12 @@ inline DriveFileInfo parseDriveFileInfo(const rapidjson::Value& t_value) {
     }
     if (t_value.HasMember("created_at") && t_value["created_at"].IsString()) {
         file.created_at = t_value["created_at"].GetString();
+    }
+    if (t_value.HasMember("sha256") && t_value["sha256"].IsString()) {
+        file.sha256 = t_value["sha256"].GetString();
+    }
+    if (t_value.HasMember("etag") && t_value["etag"].IsString()) {
+        file.etag = t_value["etag"].GetString();
     }
     return file;
 }

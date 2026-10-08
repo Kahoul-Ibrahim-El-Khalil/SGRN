@@ -129,8 +129,10 @@ private:
     // Formats-registry veto: an explicitly disallowed format (is_allowed=false
     // in storage.formats, tunable from the admin dashboard) blocks the upload
     // even when the config allowlists would permit it. Unknown extensions (no
-    // registry row) fall through to the config lists. Single + batch uploads
-    // both funnel through uploadFile(), so one check covers every entry path.
+    // registry row) fall through to the config lists and are later stored with
+    // a NULL extension — the suffix stays part of the name. Single + batch
+    // uploads both funnel through uploadFile(), so one check covers every
+    // entry path.
     drogon::Task<::sgrn::datastore::BackendResult<void>> enforceFormatAllowed(
         drogon::orm::DbClientPtr tsp_db_client, std::string_view t_filename);
 

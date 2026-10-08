@@ -12,11 +12,16 @@ With the datastore **stopped**, as a superuser, in numeric order:
 ```bash
 psql -h /tmp -U <superuser> -d sgrn -v ON_ERROR_STOP=1 \
   -f sgrn/lib/datastore/migrations/001_garage_provider_and_chunking_trace.sql
+
+psql -h /tmp -U <superuser> -d sgrn -v ON_ERROR_STOP=1 \
+  -f sgrn/lib/datastore/migrations/002_sha256_checksum.sql
 ```
 
-Then boot the new binary. (New code and new schema move together: e.g. the
-10-argument `upsert_object` only exists after 001, and the new binary is the
-only caller with 10 arguments.)
+Then boot the new binary. New code and schema move together: the current
+upload path passes a SHA-256 checksum to `upsert_object`, so deployments that
+install that binary must apply `002` first. Otherwise PostgreSQL interprets
+the literal provider (`'GARAGE'`) as the old function's boolean compression
+argument and rejects uploads.
 
 ## Conventions
 

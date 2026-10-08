@@ -3,6 +3,7 @@
 #include <drogon/HttpResponse.h>
 #include <drogon/drogon.h>
 #include <fmt/core.h>
+#include <fmt/format.h>
 #include <sgrn/Result.hpp>
 #include <sgrn/datastore/BackendError.hpp>
 #include <sgrn/datastore/ResultJson.hpp>
@@ -22,6 +23,38 @@ namespace sgrn
 
 constexpr const char json_content_type[] = "application/json";
 constexpr const char plain_content_type[] = "text/plain";
+
+// =========================================================
+// JSON string escaping (for dynamic values in fmt responses)
+// Only escapes characters that would break a JSON string literal.
+// Literal error-message constants need no escaping at the call site.
+// =========================================================
+inline std::string jsonEscape(std::string_view s) {
+    std::string out;
+    out.reserve(s.size() + 4);
+    for (unsigned char c : s) {
+        switch (c) {
+            case '"':
+                out += "\\\"";
+                break;
+            case '\\':
+                out += "\\\\";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\r':
+                out += "\\r";
+                break;
+            case '\t':
+                out += "\\t";
+                break;
+            default:
+                out += static_cast<char>(c);
+        }
+    }
+    return out;
+}
 
 // =========================================================
 // 1. Core Response Factory
@@ -172,11 +205,11 @@ inline drogon::HttpResponsePtr createErrorResponse(
         msg = "Referenced entity does not exist.";
     }
 
-    Json::Value error_json;
-    error_json["error"] = std::move(msg);
-    error_json["scope"] = std::string(t_scope);
-    auto resp = drogon::HttpResponse::newHttpJsonResponse(std::move(error_json));
+    // Emit JSON directly — no intermediate Json::Value tree needed for two fields.
+    auto resp = drogon::HttpResponse::newHttpResponse();
     resp->setStatusCode(t_http_code);
+    resp->addHeader("Content-Type", ::sgrn::json_content_type);
+    resp->setBody(fmt::format(R"({{"error":"{}","scope":"{}"}})", jsonEscape(msg), jsonEscape(t_scope)));
     return resp;
 }
 

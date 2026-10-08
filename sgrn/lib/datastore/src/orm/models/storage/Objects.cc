@@ -16,6 +16,7 @@ using namespace drogon_model::sgrn::storage;
 const std::string Objects::Cols::_id = "\"id\"";
 const std::string Objects::Cols::_bucket = "\"bucket\"";
 const std::string Objects::Cols::_key = "\"key\"";
+const std::string Objects::Cols::_sha256 = "\"sha256\"";
 const std::string Objects::Cols::_size = "\"size\"";
 const std::string Objects::Cols::_original_size = "\"original_size\"";
 const std::string Objects::Cols::_is_compressed = "\"is_compressed\"";
@@ -35,6 +36,7 @@ const std::vector<typename Objects::MetaData> Objects::metaData_={
 {"id","int64_t","bigint",8,1,1,1},
 {"bucket","std::string","text",0,0,0,1},
 {"key","std::string","text",0,0,0,1},
+{"sha256","std::string","character",0,0,0,1},
 {"size","int64_t","bigint",8,0,0,1},
 {"original_size","int64_t","bigint",8,0,0,1},
 {"is_compressed","bool","boolean",1,0,0,1},
@@ -67,6 +69,10 @@ Objects::Objects(const Row &r, const ssize_t indexOffset) noexcept
         if(!r["key"].isNull())
         {
             key_=std::make_shared<std::string>(r["key"].as<std::string>());
+        }
+        if(!r["sha256"].isNull())
+        {
+            sha256_=std::make_shared<std::string>(r["sha256"].as<std::string>());
         }
         if(!r["size"].isNull())
         {
@@ -152,7 +158,7 @@ Objects::Objects(const Row &r, const ssize_t indexOffset) noexcept
     else
     {
         size_t offset = (size_t)indexOffset;
-        if(offset + 14 > r.size())
+        if(offset + 15 > r.size())
         {
             LOG_FATAL << "Invalid SQL result for this model";
             return;
@@ -176,49 +182,54 @@ Objects::Objects(const Row &r, const ssize_t indexOffset) noexcept
         index = offset + 3;
         if(!r[index].isNull())
         {
-            size_=std::make_shared<int64_t>(r[index].as<int64_t>());
+            sha256_=std::make_shared<std::string>(r[index].as<std::string>());
         }
         index = offset + 4;
         if(!r[index].isNull())
         {
-            originalSize_=std::make_shared<int64_t>(r[index].as<int64_t>());
+            size_=std::make_shared<int64_t>(r[index].as<int64_t>());
         }
         index = offset + 5;
         if(!r[index].isNull())
         {
-            isCompressed_=std::make_shared<bool>(r[index].as<bool>());
+            originalSize_=std::make_shared<int64_t>(r[index].as<int64_t>());
         }
         index = offset + 6;
         if(!r[index].isNull())
         {
-            compressionAlgorithm_=std::make_shared<std::string>(r[index].as<std::string>());
+            isCompressed_=std::make_shared<bool>(r[index].as<bool>());
         }
         index = offset + 7;
         if(!r[index].isNull())
         {
-            compressionLevel_=std::make_shared<int32_t>(r[index].as<int32_t>());
+            compressionAlgorithm_=std::make_shared<std::string>(r[index].as<std::string>());
         }
         index = offset + 8;
         if(!r[index].isNull())
         {
-            provider_=std::make_shared<std::string>(r[index].as<std::string>());
+            compressionLevel_=std::make_shared<int32_t>(r[index].as<int32_t>());
         }
         index = offset + 9;
         if(!r[index].isNull())
         {
-            uploadMode_=std::make_shared<std::string>(r[index].as<std::string>());
+            provider_=std::make_shared<std::string>(r[index].as<std::string>());
         }
         index = offset + 10;
         if(!r[index].isNull())
         {
-            partCount_=std::make_shared<int32_t>(r[index].as<int32_t>());
+            uploadMode_=std::make_shared<std::string>(r[index].as<std::string>());
         }
         index = offset + 11;
         if(!r[index].isNull())
         {
-            partSizeBytes_=std::make_shared<int64_t>(r[index].as<int64_t>());
+            partCount_=std::make_shared<int32_t>(r[index].as<int32_t>());
         }
         index = offset + 12;
+        if(!r[index].isNull())
+        {
+            partSizeBytes_=std::make_shared<int64_t>(r[index].as<int64_t>());
+        }
+        index = offset + 13;
         if(!r[index].isNull())
         {
             auto timeStr = r[index].as<std::string>();
@@ -241,7 +252,7 @@ Objects::Objects(const Row &r, const ssize_t indexOffset) noexcept
                 deletedAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
             }
         }
-        index = offset + 13;
+        index = offset + 14;
         if(!r[index].isNull())
         {
             auto timeStr = r[index].as<std::string>();
@@ -270,7 +281,7 @@ Objects::Objects(const Row &r, const ssize_t indexOffset) noexcept
 
 Objects::Objects(const Json::Value &pJson, const std::vector<std::string> &pMasqueradingVector) noexcept(false)
 {
-    if(pMasqueradingVector.size() != 14)
+    if(pMasqueradingVector.size() != 15)
     {
         LOG_ERROR << "Bad masquerading vector";
         return;
@@ -304,7 +315,7 @@ Objects::Objects(const Json::Value &pJson, const std::vector<std::string> &pMasq
         dirtyFlag_[3] = true;
         if(!pJson[pMasqueradingVector[3]].isNull())
         {
-            size_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[3]].asInt64());
+            sha256_=std::make_shared<std::string>(pJson[pMasqueradingVector[3]].asString());
         }
     }
     if(!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4]))
@@ -312,7 +323,7 @@ Objects::Objects(const Json::Value &pJson, const std::vector<std::string> &pMasq
         dirtyFlag_[4] = true;
         if(!pJson[pMasqueradingVector[4]].isNull())
         {
-            originalSize_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[4]].asInt64());
+            size_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[4]].asInt64());
         }
     }
     if(!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5]))
@@ -320,7 +331,7 @@ Objects::Objects(const Json::Value &pJson, const std::vector<std::string> &pMasq
         dirtyFlag_[5] = true;
         if(!pJson[pMasqueradingVector[5]].isNull())
         {
-            isCompressed_=std::make_shared<bool>(pJson[pMasqueradingVector[5]].asBool());
+            originalSize_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[5]].asInt64());
         }
     }
     if(!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6]))
@@ -328,7 +339,7 @@ Objects::Objects(const Json::Value &pJson, const std::vector<std::string> &pMasq
         dirtyFlag_[6] = true;
         if(!pJson[pMasqueradingVector[6]].isNull())
         {
-            compressionAlgorithm_=std::make_shared<std::string>(pJson[pMasqueradingVector[6]].asString());
+            isCompressed_=std::make_shared<bool>(pJson[pMasqueradingVector[6]].asBool());
         }
     }
     if(!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7]))
@@ -336,7 +347,7 @@ Objects::Objects(const Json::Value &pJson, const std::vector<std::string> &pMasq
         dirtyFlag_[7] = true;
         if(!pJson[pMasqueradingVector[7]].isNull())
         {
-            compressionLevel_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[7]].asInt64());
+            compressionAlgorithm_=std::make_shared<std::string>(pJson[pMasqueradingVector[7]].asString());
         }
     }
     if(!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8]))
@@ -344,7 +355,7 @@ Objects::Objects(const Json::Value &pJson, const std::vector<std::string> &pMasq
         dirtyFlag_[8] = true;
         if(!pJson[pMasqueradingVector[8]].isNull())
         {
-            provider_=std::make_shared<std::string>(pJson[pMasqueradingVector[8]].asString());
+            compressionLevel_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[8]].asInt64());
         }
     }
     if(!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9]))
@@ -352,7 +363,7 @@ Objects::Objects(const Json::Value &pJson, const std::vector<std::string> &pMasq
         dirtyFlag_[9] = true;
         if(!pJson[pMasqueradingVector[9]].isNull())
         {
-            uploadMode_=std::make_shared<std::string>(pJson[pMasqueradingVector[9]].asString());
+            provider_=std::make_shared<std::string>(pJson[pMasqueradingVector[9]].asString());
         }
     }
     if(!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10]))
@@ -360,7 +371,7 @@ Objects::Objects(const Json::Value &pJson, const std::vector<std::string> &pMasq
         dirtyFlag_[10] = true;
         if(!pJson[pMasqueradingVector[10]].isNull())
         {
-            partCount_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[10]].asInt64());
+            uploadMode_=std::make_shared<std::string>(pJson[pMasqueradingVector[10]].asString());
         }
     }
     if(!pMasqueradingVector[11].empty() && pJson.isMember(pMasqueradingVector[11]))
@@ -368,7 +379,7 @@ Objects::Objects(const Json::Value &pJson, const std::vector<std::string> &pMasq
         dirtyFlag_[11] = true;
         if(!pJson[pMasqueradingVector[11]].isNull())
         {
-            partSizeBytes_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[11]].asInt64());
+            partCount_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[11]].asInt64());
         }
     }
     if(!pMasqueradingVector[12].empty() && pJson.isMember(pMasqueradingVector[12]))
@@ -376,7 +387,15 @@ Objects::Objects(const Json::Value &pJson, const std::vector<std::string> &pMasq
         dirtyFlag_[12] = true;
         if(!pJson[pMasqueradingVector[12]].isNull())
         {
-            auto timeStr = pJson[pMasqueradingVector[12]].asString();
+            partSizeBytes_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[12]].asInt64());
+        }
+    }
+    if(!pMasqueradingVector[13].empty() && pJson.isMember(pMasqueradingVector[13]))
+    {
+        dirtyFlag_[13] = true;
+        if(!pJson[pMasqueradingVector[13]].isNull())
+        {
+            auto timeStr = pJson[pMasqueradingVector[13]].asString();
             struct tm stm;
             memset(&stm,0,sizeof(stm));
             auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
@@ -397,12 +416,12 @@ Objects::Objects(const Json::Value &pJson, const std::vector<std::string> &pMasq
             }
         }
     }
-    if(!pMasqueradingVector[13].empty() && pJson.isMember(pMasqueradingVector[13]))
+    if(!pMasqueradingVector[14].empty() && pJson.isMember(pMasqueradingVector[14]))
     {
-        dirtyFlag_[13] = true;
-        if(!pJson[pMasqueradingVector[13]].isNull())
+        dirtyFlag_[14] = true;
+        if(!pJson[pMasqueradingVector[14]].isNull())
         {
-            auto timeStr = pJson[pMasqueradingVector[13]].asString();
+            auto timeStr = pJson[pMasqueradingVector[14]].asString();
             struct tm stm;
             memset(&stm,0,sizeof(stm));
             auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
@@ -451,9 +470,17 @@ Objects::Objects(const Json::Value &pJson) noexcept(false)
             key_=std::make_shared<std::string>(pJson["key"].asString());
         }
     }
-    if(pJson.isMember("size"))
+    if(pJson.isMember("sha256"))
     {
         dirtyFlag_[3]=true;
+        if(!pJson["sha256"].isNull())
+        {
+            sha256_=std::make_shared<std::string>(pJson["sha256"].asString());
+        }
+    }
+    if(pJson.isMember("size"))
+    {
+        dirtyFlag_[4]=true;
         if(!pJson["size"].isNull())
         {
             size_=std::make_shared<int64_t>((int64_t)pJson["size"].asInt64());
@@ -461,7 +488,7 @@ Objects::Objects(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("original_size"))
     {
-        dirtyFlag_[4]=true;
+        dirtyFlag_[5]=true;
         if(!pJson["original_size"].isNull())
         {
             originalSize_=std::make_shared<int64_t>((int64_t)pJson["original_size"].asInt64());
@@ -469,7 +496,7 @@ Objects::Objects(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("is_compressed"))
     {
-        dirtyFlag_[5]=true;
+        dirtyFlag_[6]=true;
         if(!pJson["is_compressed"].isNull())
         {
             isCompressed_=std::make_shared<bool>(pJson["is_compressed"].asBool());
@@ -477,7 +504,7 @@ Objects::Objects(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("compression_algorithm"))
     {
-        dirtyFlag_[6]=true;
+        dirtyFlag_[7]=true;
         if(!pJson["compression_algorithm"].isNull())
         {
             compressionAlgorithm_=std::make_shared<std::string>(pJson["compression_algorithm"].asString());
@@ -485,7 +512,7 @@ Objects::Objects(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("compression_level"))
     {
-        dirtyFlag_[7]=true;
+        dirtyFlag_[8]=true;
         if(!pJson["compression_level"].isNull())
         {
             compressionLevel_=std::make_shared<int32_t>((int32_t)pJson["compression_level"].asInt64());
@@ -493,7 +520,7 @@ Objects::Objects(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("provider"))
     {
-        dirtyFlag_[8]=true;
+        dirtyFlag_[9]=true;
         if(!pJson["provider"].isNull())
         {
             provider_=std::make_shared<std::string>(pJson["provider"].asString());
@@ -501,7 +528,7 @@ Objects::Objects(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("upload_mode"))
     {
-        dirtyFlag_[9]=true;
+        dirtyFlag_[10]=true;
         if(!pJson["upload_mode"].isNull())
         {
             uploadMode_=std::make_shared<std::string>(pJson["upload_mode"].asString());
@@ -509,7 +536,7 @@ Objects::Objects(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("part_count"))
     {
-        dirtyFlag_[10]=true;
+        dirtyFlag_[11]=true;
         if(!pJson["part_count"].isNull())
         {
             partCount_=std::make_shared<int32_t>((int32_t)pJson["part_count"].asInt64());
@@ -517,7 +544,7 @@ Objects::Objects(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("part_size_bytes"))
     {
-        dirtyFlag_[11]=true;
+        dirtyFlag_[12]=true;
         if(!pJson["part_size_bytes"].isNull())
         {
             partSizeBytes_=std::make_shared<int64_t>((int64_t)pJson["part_size_bytes"].asInt64());
@@ -525,7 +552,7 @@ Objects::Objects(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("deleted_at"))
     {
-        dirtyFlag_[12]=true;
+        dirtyFlag_[13]=true;
         if(!pJson["deleted_at"].isNull())
         {
             auto timeStr = pJson["deleted_at"].asString();
@@ -551,7 +578,7 @@ Objects::Objects(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("created_at"))
     {
-        dirtyFlag_[13]=true;
+        dirtyFlag_[14]=true;
         if(!pJson["created_at"].isNull())
         {
             auto timeStr = pJson["created_at"].asString();
@@ -580,7 +607,7 @@ Objects::Objects(const Json::Value &pJson) noexcept(false)
 void Objects::updateByMasqueradedJson(const Json::Value &pJson,
                                             const std::vector<std::string> &pMasqueradingVector) noexcept(false)
 {
-    if(pMasqueradingVector.size() != 14)
+    if(pMasqueradingVector.size() != 15)
     {
         LOG_ERROR << "Bad masquerading vector";
         return;
@@ -613,7 +640,7 @@ void Objects::updateByMasqueradedJson(const Json::Value &pJson,
         dirtyFlag_[3] = true;
         if(!pJson[pMasqueradingVector[3]].isNull())
         {
-            size_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[3]].asInt64());
+            sha256_=std::make_shared<std::string>(pJson[pMasqueradingVector[3]].asString());
         }
     }
     if(!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4]))
@@ -621,7 +648,7 @@ void Objects::updateByMasqueradedJson(const Json::Value &pJson,
         dirtyFlag_[4] = true;
         if(!pJson[pMasqueradingVector[4]].isNull())
         {
-            originalSize_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[4]].asInt64());
+            size_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[4]].asInt64());
         }
     }
     if(!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5]))
@@ -629,7 +656,7 @@ void Objects::updateByMasqueradedJson(const Json::Value &pJson,
         dirtyFlag_[5] = true;
         if(!pJson[pMasqueradingVector[5]].isNull())
         {
-            isCompressed_=std::make_shared<bool>(pJson[pMasqueradingVector[5]].asBool());
+            originalSize_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[5]].asInt64());
         }
     }
     if(!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6]))
@@ -637,7 +664,7 @@ void Objects::updateByMasqueradedJson(const Json::Value &pJson,
         dirtyFlag_[6] = true;
         if(!pJson[pMasqueradingVector[6]].isNull())
         {
-            compressionAlgorithm_=std::make_shared<std::string>(pJson[pMasqueradingVector[6]].asString());
+            isCompressed_=std::make_shared<bool>(pJson[pMasqueradingVector[6]].asBool());
         }
     }
     if(!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7]))
@@ -645,7 +672,7 @@ void Objects::updateByMasqueradedJson(const Json::Value &pJson,
         dirtyFlag_[7] = true;
         if(!pJson[pMasqueradingVector[7]].isNull())
         {
-            compressionLevel_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[7]].asInt64());
+            compressionAlgorithm_=std::make_shared<std::string>(pJson[pMasqueradingVector[7]].asString());
         }
     }
     if(!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8]))
@@ -653,7 +680,7 @@ void Objects::updateByMasqueradedJson(const Json::Value &pJson,
         dirtyFlag_[8] = true;
         if(!pJson[pMasqueradingVector[8]].isNull())
         {
-            provider_=std::make_shared<std::string>(pJson[pMasqueradingVector[8]].asString());
+            compressionLevel_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[8]].asInt64());
         }
     }
     if(!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9]))
@@ -661,7 +688,7 @@ void Objects::updateByMasqueradedJson(const Json::Value &pJson,
         dirtyFlag_[9] = true;
         if(!pJson[pMasqueradingVector[9]].isNull())
         {
-            uploadMode_=std::make_shared<std::string>(pJson[pMasqueradingVector[9]].asString());
+            provider_=std::make_shared<std::string>(pJson[pMasqueradingVector[9]].asString());
         }
     }
     if(!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10]))
@@ -669,7 +696,7 @@ void Objects::updateByMasqueradedJson(const Json::Value &pJson,
         dirtyFlag_[10] = true;
         if(!pJson[pMasqueradingVector[10]].isNull())
         {
-            partCount_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[10]].asInt64());
+            uploadMode_=std::make_shared<std::string>(pJson[pMasqueradingVector[10]].asString());
         }
     }
     if(!pMasqueradingVector[11].empty() && pJson.isMember(pMasqueradingVector[11]))
@@ -677,7 +704,7 @@ void Objects::updateByMasqueradedJson(const Json::Value &pJson,
         dirtyFlag_[11] = true;
         if(!pJson[pMasqueradingVector[11]].isNull())
         {
-            partSizeBytes_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[11]].asInt64());
+            partCount_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[11]].asInt64());
         }
     }
     if(!pMasqueradingVector[12].empty() && pJson.isMember(pMasqueradingVector[12]))
@@ -685,7 +712,15 @@ void Objects::updateByMasqueradedJson(const Json::Value &pJson,
         dirtyFlag_[12] = true;
         if(!pJson[pMasqueradingVector[12]].isNull())
         {
-            auto timeStr = pJson[pMasqueradingVector[12]].asString();
+            partSizeBytes_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[12]].asInt64());
+        }
+    }
+    if(!pMasqueradingVector[13].empty() && pJson.isMember(pMasqueradingVector[13]))
+    {
+        dirtyFlag_[13] = true;
+        if(!pJson[pMasqueradingVector[13]].isNull())
+        {
+            auto timeStr = pJson[pMasqueradingVector[13]].asString();
             struct tm stm;
             memset(&stm,0,sizeof(stm));
             auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
@@ -706,12 +741,12 @@ void Objects::updateByMasqueradedJson(const Json::Value &pJson,
             }
         }
     }
-    if(!pMasqueradingVector[13].empty() && pJson.isMember(pMasqueradingVector[13]))
+    if(!pMasqueradingVector[14].empty() && pJson.isMember(pMasqueradingVector[14]))
     {
-        dirtyFlag_[13] = true;
-        if(!pJson[pMasqueradingVector[13]].isNull())
+        dirtyFlag_[14] = true;
+        if(!pJson[pMasqueradingVector[14]].isNull())
         {
-            auto timeStr = pJson[pMasqueradingVector[13]].asString();
+            auto timeStr = pJson[pMasqueradingVector[14]].asString();
             struct tm stm;
             memset(&stm,0,sizeof(stm));
             auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
@@ -759,9 +794,17 @@ void Objects::updateByJson(const Json::Value &pJson) noexcept(false)
             key_=std::make_shared<std::string>(pJson["key"].asString());
         }
     }
-    if(pJson.isMember("size"))
+    if(pJson.isMember("sha256"))
     {
         dirtyFlag_[3] = true;
+        if(!pJson["sha256"].isNull())
+        {
+            sha256_=std::make_shared<std::string>(pJson["sha256"].asString());
+        }
+    }
+    if(pJson.isMember("size"))
+    {
+        dirtyFlag_[4] = true;
         if(!pJson["size"].isNull())
         {
             size_=std::make_shared<int64_t>((int64_t)pJson["size"].asInt64());
@@ -769,7 +812,7 @@ void Objects::updateByJson(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("original_size"))
     {
-        dirtyFlag_[4] = true;
+        dirtyFlag_[5] = true;
         if(!pJson["original_size"].isNull())
         {
             originalSize_=std::make_shared<int64_t>((int64_t)pJson["original_size"].asInt64());
@@ -777,7 +820,7 @@ void Objects::updateByJson(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("is_compressed"))
     {
-        dirtyFlag_[5] = true;
+        dirtyFlag_[6] = true;
         if(!pJson["is_compressed"].isNull())
         {
             isCompressed_=std::make_shared<bool>(pJson["is_compressed"].asBool());
@@ -785,7 +828,7 @@ void Objects::updateByJson(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("compression_algorithm"))
     {
-        dirtyFlag_[6] = true;
+        dirtyFlag_[7] = true;
         if(!pJson["compression_algorithm"].isNull())
         {
             compressionAlgorithm_=std::make_shared<std::string>(pJson["compression_algorithm"].asString());
@@ -793,7 +836,7 @@ void Objects::updateByJson(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("compression_level"))
     {
-        dirtyFlag_[7] = true;
+        dirtyFlag_[8] = true;
         if(!pJson["compression_level"].isNull())
         {
             compressionLevel_=std::make_shared<int32_t>((int32_t)pJson["compression_level"].asInt64());
@@ -801,7 +844,7 @@ void Objects::updateByJson(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("provider"))
     {
-        dirtyFlag_[8] = true;
+        dirtyFlag_[9] = true;
         if(!pJson["provider"].isNull())
         {
             provider_=std::make_shared<std::string>(pJson["provider"].asString());
@@ -809,7 +852,7 @@ void Objects::updateByJson(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("upload_mode"))
     {
-        dirtyFlag_[9] = true;
+        dirtyFlag_[10] = true;
         if(!pJson["upload_mode"].isNull())
         {
             uploadMode_=std::make_shared<std::string>(pJson["upload_mode"].asString());
@@ -817,7 +860,7 @@ void Objects::updateByJson(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("part_count"))
     {
-        dirtyFlag_[10] = true;
+        dirtyFlag_[11] = true;
         if(!pJson["part_count"].isNull())
         {
             partCount_=std::make_shared<int32_t>((int32_t)pJson["part_count"].asInt64());
@@ -825,7 +868,7 @@ void Objects::updateByJson(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("part_size_bytes"))
     {
-        dirtyFlag_[11] = true;
+        dirtyFlag_[12] = true;
         if(!pJson["part_size_bytes"].isNull())
         {
             partSizeBytes_=std::make_shared<int64_t>((int64_t)pJson["part_size_bytes"].asInt64());
@@ -833,7 +876,7 @@ void Objects::updateByJson(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("deleted_at"))
     {
-        dirtyFlag_[12] = true;
+        dirtyFlag_[13] = true;
         if(!pJson["deleted_at"].isNull())
         {
             auto timeStr = pJson["deleted_at"].asString();
@@ -859,7 +902,7 @@ void Objects::updateByJson(const Json::Value &pJson) noexcept(false)
     }
     if(pJson.isMember("created_at"))
     {
-        dirtyFlag_[13] = true;
+        dirtyFlag_[14] = true;
         if(!pJson["created_at"].isNull())
         {
             auto timeStr = pJson["created_at"].asString();
@@ -951,6 +994,28 @@ void Objects::setKey(std::string &&pKey) noexcept
     dirtyFlag_[2] = true;
 }
 
+const std::string &Objects::getValueOfSha256() const noexcept
+{
+    static const std::string defaultValue = std::string();
+    if(sha256_)
+        return *sha256_;
+    return defaultValue;
+}
+const std::shared_ptr<std::string> &Objects::getSha256() const noexcept
+{
+    return sha256_;
+}
+void Objects::setSha256(const std::string &pSha256) noexcept
+{
+    sha256_ = std::make_shared<std::string>(pSha256);
+    dirtyFlag_[3] = true;
+}
+void Objects::setSha256(std::string &&pSha256) noexcept
+{
+    sha256_ = std::make_shared<std::string>(std::move(pSha256));
+    dirtyFlag_[3] = true;
+}
+
 const int64_t &Objects::getValueOfSize() const noexcept
 {
     static const int64_t defaultValue = int64_t();
@@ -965,7 +1030,7 @@ const std::shared_ptr<int64_t> &Objects::getSize() const noexcept
 void Objects::setSize(const int64_t &pSize) noexcept
 {
     size_ = std::make_shared<int64_t>(pSize);
-    dirtyFlag_[3] = true;
+    dirtyFlag_[4] = true;
 }
 
 const int64_t &Objects::getValueOfOriginalSize() const noexcept
@@ -982,7 +1047,7 @@ const std::shared_ptr<int64_t> &Objects::getOriginalSize() const noexcept
 void Objects::setOriginalSize(const int64_t &pOriginalSize) noexcept
 {
     originalSize_ = std::make_shared<int64_t>(pOriginalSize);
-    dirtyFlag_[4] = true;
+    dirtyFlag_[5] = true;
 }
 
 const bool &Objects::getValueOfIsCompressed() const noexcept
@@ -999,7 +1064,7 @@ const std::shared_ptr<bool> &Objects::getIsCompressed() const noexcept
 void Objects::setIsCompressed(const bool &pIsCompressed) noexcept
 {
     isCompressed_ = std::make_shared<bool>(pIsCompressed);
-    dirtyFlag_[5] = true;
+    dirtyFlag_[6] = true;
 }
 
 const std::string &Objects::getValueOfCompressionAlgorithm() const noexcept
@@ -1016,17 +1081,17 @@ const std::shared_ptr<std::string> &Objects::getCompressionAlgorithm() const noe
 void Objects::setCompressionAlgorithm(const std::string &pCompressionAlgorithm) noexcept
 {
     compressionAlgorithm_ = std::make_shared<std::string>(pCompressionAlgorithm);
-    dirtyFlag_[6] = true;
+    dirtyFlag_[7] = true;
 }
 void Objects::setCompressionAlgorithm(std::string &&pCompressionAlgorithm) noexcept
 {
     compressionAlgorithm_ = std::make_shared<std::string>(std::move(pCompressionAlgorithm));
-    dirtyFlag_[6] = true;
+    dirtyFlag_[7] = true;
 }
 void Objects::setCompressionAlgorithmToNull() noexcept
 {
     compressionAlgorithm_.reset();
-    dirtyFlag_[6] = true;
+    dirtyFlag_[7] = true;
 }
 
 const int32_t &Objects::getValueOfCompressionLevel() const noexcept
@@ -1043,12 +1108,12 @@ const std::shared_ptr<int32_t> &Objects::getCompressionLevel() const noexcept
 void Objects::setCompressionLevel(const int32_t &pCompressionLevel) noexcept
 {
     compressionLevel_ = std::make_shared<int32_t>(pCompressionLevel);
-    dirtyFlag_[7] = true;
+    dirtyFlag_[8] = true;
 }
 void Objects::setCompressionLevelToNull() noexcept
 {
     compressionLevel_.reset();
-    dirtyFlag_[7] = true;
+    dirtyFlag_[8] = true;
 }
 
 const std::string &Objects::getValueOfProvider() const noexcept
@@ -1065,12 +1130,12 @@ const std::shared_ptr<std::string> &Objects::getProvider() const noexcept
 void Objects::setProvider(const std::string &pProvider) noexcept
 {
     provider_ = std::make_shared<std::string>(pProvider);
-    dirtyFlag_[8] = true;
+    dirtyFlag_[9] = true;
 }
 void Objects::setProvider(std::string &&pProvider) noexcept
 {
     provider_ = std::make_shared<std::string>(std::move(pProvider));
-    dirtyFlag_[8] = true;
+    dirtyFlag_[9] = true;
 }
 
 const std::string &Objects::getValueOfUploadMode() const noexcept
@@ -1087,12 +1152,12 @@ const std::shared_ptr<std::string> &Objects::getUploadMode() const noexcept
 void Objects::setUploadMode(const std::string &pUploadMode) noexcept
 {
     uploadMode_ = std::make_shared<std::string>(pUploadMode);
-    dirtyFlag_[9] = true;
+    dirtyFlag_[10] = true;
 }
 void Objects::setUploadMode(std::string &&pUploadMode) noexcept
 {
     uploadMode_ = std::make_shared<std::string>(std::move(pUploadMode));
-    dirtyFlag_[9] = true;
+    dirtyFlag_[10] = true;
 }
 
 const int32_t &Objects::getValueOfPartCount() const noexcept
@@ -1109,12 +1174,12 @@ const std::shared_ptr<int32_t> &Objects::getPartCount() const noexcept
 void Objects::setPartCount(const int32_t &pPartCount) noexcept
 {
     partCount_ = std::make_shared<int32_t>(pPartCount);
-    dirtyFlag_[10] = true;
+    dirtyFlag_[11] = true;
 }
 void Objects::setPartCountToNull() noexcept
 {
     partCount_.reset();
-    dirtyFlag_[10] = true;
+    dirtyFlag_[11] = true;
 }
 
 const int64_t &Objects::getValueOfPartSizeBytes() const noexcept
@@ -1131,12 +1196,12 @@ const std::shared_ptr<int64_t> &Objects::getPartSizeBytes() const noexcept
 void Objects::setPartSizeBytes(const int64_t &pPartSizeBytes) noexcept
 {
     partSizeBytes_ = std::make_shared<int64_t>(pPartSizeBytes);
-    dirtyFlag_[11] = true;
+    dirtyFlag_[12] = true;
 }
 void Objects::setPartSizeBytesToNull() noexcept
 {
     partSizeBytes_.reset();
-    dirtyFlag_[11] = true;
+    dirtyFlag_[12] = true;
 }
 
 const ::trantor::Date &Objects::getValueOfDeletedAt() const noexcept
@@ -1153,12 +1218,12 @@ const std::shared_ptr<::trantor::Date> &Objects::getDeletedAt() const noexcept
 void Objects::setDeletedAt(const ::trantor::Date &pDeletedAt) noexcept
 {
     deletedAt_ = std::make_shared<::trantor::Date>(pDeletedAt);
-    dirtyFlag_[12] = true;
+    dirtyFlag_[13] = true;
 }
 void Objects::setDeletedAtToNull() noexcept
 {
     deletedAt_.reset();
-    dirtyFlag_[12] = true;
+    dirtyFlag_[13] = true;
 }
 
 const ::trantor::Date &Objects::getValueOfCreatedAt() const noexcept
@@ -1175,7 +1240,7 @@ const std::shared_ptr<::trantor::Date> &Objects::getCreatedAt() const noexcept
 void Objects::setCreatedAt(const ::trantor::Date &pCreatedAt) noexcept
 {
     createdAt_ = std::make_shared<::trantor::Date>(pCreatedAt);
-    dirtyFlag_[13] = true;
+    dirtyFlag_[14] = true;
 }
 
 void Objects::updateId(const uint64_t id)
@@ -1187,6 +1252,7 @@ const std::vector<std::string> &Objects::insertColumns() noexcept
     static const std::vector<std::string> inCols={
         "bucket",
         "key",
+        "sha256",
         "size",
         "original_size",
         "is_compressed",
@@ -1228,6 +1294,17 @@ void Objects::outputArgs(drogon::orm::internal::SqlBinder &binder) const
     }
     if(dirtyFlag_[3])
     {
+        if(getSha256())
+        {
+            binder << getValueOfSha256();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
+    if(dirtyFlag_[4])
+    {
         if(getSize())
         {
             binder << getValueOfSize();
@@ -1237,7 +1314,7 @@ void Objects::outputArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[4])
+    if(dirtyFlag_[5])
     {
         if(getOriginalSize())
         {
@@ -1248,7 +1325,7 @@ void Objects::outputArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[5])
+    if(dirtyFlag_[6])
     {
         if(getIsCompressed())
         {
@@ -1259,7 +1336,7 @@ void Objects::outputArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[6])
+    if(dirtyFlag_[7])
     {
         if(getCompressionAlgorithm())
         {
@@ -1270,7 +1347,7 @@ void Objects::outputArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[7])
+    if(dirtyFlag_[8])
     {
         if(getCompressionLevel())
         {
@@ -1281,7 +1358,7 @@ void Objects::outputArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[8])
+    if(dirtyFlag_[9])
     {
         if(getProvider())
         {
@@ -1292,7 +1369,7 @@ void Objects::outputArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[9])
+    if(dirtyFlag_[10])
     {
         if(getUploadMode())
         {
@@ -1303,7 +1380,7 @@ void Objects::outputArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[10])
+    if(dirtyFlag_[11])
     {
         if(getPartCount())
         {
@@ -1314,7 +1391,7 @@ void Objects::outputArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[11])
+    if(dirtyFlag_[12])
     {
         if(getPartSizeBytes())
         {
@@ -1325,7 +1402,7 @@ void Objects::outputArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[12])
+    if(dirtyFlag_[13])
     {
         if(getDeletedAt())
         {
@@ -1336,7 +1413,7 @@ void Objects::outputArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[13])
+    if(dirtyFlag_[14])
     {
         if(getCreatedAt())
         {
@@ -1404,6 +1481,10 @@ const std::vector<std::string> Objects::updateColumns() const
     {
         ret.push_back(getColumnName(13));
     }
+    if(dirtyFlag_[14])
+    {
+        ret.push_back(getColumnName(14));
+    }
     return ret;
 }
 
@@ -1433,6 +1514,17 @@ void Objects::updateArgs(drogon::orm::internal::SqlBinder &binder) const
     }
     if(dirtyFlag_[3])
     {
+        if(getSha256())
+        {
+            binder << getValueOfSha256();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
+    if(dirtyFlag_[4])
+    {
         if(getSize())
         {
             binder << getValueOfSize();
@@ -1442,7 +1534,7 @@ void Objects::updateArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[4])
+    if(dirtyFlag_[5])
     {
         if(getOriginalSize())
         {
@@ -1453,7 +1545,7 @@ void Objects::updateArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[5])
+    if(dirtyFlag_[6])
     {
         if(getIsCompressed())
         {
@@ -1464,7 +1556,7 @@ void Objects::updateArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[6])
+    if(dirtyFlag_[7])
     {
         if(getCompressionAlgorithm())
         {
@@ -1475,7 +1567,7 @@ void Objects::updateArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[7])
+    if(dirtyFlag_[8])
     {
         if(getCompressionLevel())
         {
@@ -1486,7 +1578,7 @@ void Objects::updateArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[8])
+    if(dirtyFlag_[9])
     {
         if(getProvider())
         {
@@ -1497,7 +1589,7 @@ void Objects::updateArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[9])
+    if(dirtyFlag_[10])
     {
         if(getUploadMode())
         {
@@ -1508,7 +1600,7 @@ void Objects::updateArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[10])
+    if(dirtyFlag_[11])
     {
         if(getPartCount())
         {
@@ -1519,7 +1611,7 @@ void Objects::updateArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[11])
+    if(dirtyFlag_[12])
     {
         if(getPartSizeBytes())
         {
@@ -1530,7 +1622,7 @@ void Objects::updateArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[12])
+    if(dirtyFlag_[13])
     {
         if(getDeletedAt())
         {
@@ -1541,7 +1633,7 @@ void Objects::updateArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[13])
+    if(dirtyFlag_[14])
     {
         if(getCreatedAt())
         {
@@ -1579,6 +1671,14 @@ Json::Value Objects::toJson() const
     else
     {
         ret["key"]=Json::Value();
+    }
+    if(getSha256())
+    {
+        ret["sha256"]=getValueOfSha256();
+    }
+    else
+    {
+        ret["sha256"]=Json::Value();
     }
     if(getSize())
     {
@@ -1680,7 +1780,7 @@ Json::Value Objects::toMasqueradedJson(
     const std::vector<std::string> &pMasqueradingVector) const
 {
     Json::Value ret;
-    if(pMasqueradingVector.size() == 14)
+    if(pMasqueradingVector.size() == 15)
     {
         if(!pMasqueradingVector[0].empty())
         {
@@ -1717,9 +1817,9 @@ Json::Value Objects::toMasqueradedJson(
         }
         if(!pMasqueradingVector[3].empty())
         {
-            if(getSize())
+            if(getSha256())
             {
-                ret[pMasqueradingVector[3]]=(Json::Int64)getValueOfSize();
+                ret[pMasqueradingVector[3]]=getValueOfSha256();
             }
             else
             {
@@ -1728,9 +1828,9 @@ Json::Value Objects::toMasqueradedJson(
         }
         if(!pMasqueradingVector[4].empty())
         {
-            if(getOriginalSize())
+            if(getSize())
             {
-                ret[pMasqueradingVector[4]]=(Json::Int64)getValueOfOriginalSize();
+                ret[pMasqueradingVector[4]]=(Json::Int64)getValueOfSize();
             }
             else
             {
@@ -1739,9 +1839,9 @@ Json::Value Objects::toMasqueradedJson(
         }
         if(!pMasqueradingVector[5].empty())
         {
-            if(getIsCompressed())
+            if(getOriginalSize())
             {
-                ret[pMasqueradingVector[5]]=getValueOfIsCompressed();
+                ret[pMasqueradingVector[5]]=(Json::Int64)getValueOfOriginalSize();
             }
             else
             {
@@ -1750,9 +1850,9 @@ Json::Value Objects::toMasqueradedJson(
         }
         if(!pMasqueradingVector[6].empty())
         {
-            if(getCompressionAlgorithm())
+            if(getIsCompressed())
             {
-                ret[pMasqueradingVector[6]]=getValueOfCompressionAlgorithm();
+                ret[pMasqueradingVector[6]]=getValueOfIsCompressed();
             }
             else
             {
@@ -1761,9 +1861,9 @@ Json::Value Objects::toMasqueradedJson(
         }
         if(!pMasqueradingVector[7].empty())
         {
-            if(getCompressionLevel())
+            if(getCompressionAlgorithm())
             {
-                ret[pMasqueradingVector[7]]=getValueOfCompressionLevel();
+                ret[pMasqueradingVector[7]]=getValueOfCompressionAlgorithm();
             }
             else
             {
@@ -1772,9 +1872,9 @@ Json::Value Objects::toMasqueradedJson(
         }
         if(!pMasqueradingVector[8].empty())
         {
-            if(getProvider())
+            if(getCompressionLevel())
             {
-                ret[pMasqueradingVector[8]]=getValueOfProvider();
+                ret[pMasqueradingVector[8]]=getValueOfCompressionLevel();
             }
             else
             {
@@ -1783,9 +1883,9 @@ Json::Value Objects::toMasqueradedJson(
         }
         if(!pMasqueradingVector[9].empty())
         {
-            if(getUploadMode())
+            if(getProvider())
             {
-                ret[pMasqueradingVector[9]]=getValueOfUploadMode();
+                ret[pMasqueradingVector[9]]=getValueOfProvider();
             }
             else
             {
@@ -1794,9 +1894,9 @@ Json::Value Objects::toMasqueradedJson(
         }
         if(!pMasqueradingVector[10].empty())
         {
-            if(getPartCount())
+            if(getUploadMode())
             {
-                ret[pMasqueradingVector[10]]=getValueOfPartCount();
+                ret[pMasqueradingVector[10]]=getValueOfUploadMode();
             }
             else
             {
@@ -1805,9 +1905,9 @@ Json::Value Objects::toMasqueradedJson(
         }
         if(!pMasqueradingVector[11].empty())
         {
-            if(getPartSizeBytes())
+            if(getPartCount())
             {
-                ret[pMasqueradingVector[11]]=(Json::Int64)getValueOfPartSizeBytes();
+                ret[pMasqueradingVector[11]]=getValueOfPartCount();
             }
             else
             {
@@ -1816,9 +1916,9 @@ Json::Value Objects::toMasqueradedJson(
         }
         if(!pMasqueradingVector[12].empty())
         {
-            if(getDeletedAt())
+            if(getPartSizeBytes())
             {
-                ret[pMasqueradingVector[12]]=getDeletedAt()->toDbStringLocal();
+                ret[pMasqueradingVector[12]]=(Json::Int64)getValueOfPartSizeBytes();
             }
             else
             {
@@ -1827,13 +1927,24 @@ Json::Value Objects::toMasqueradedJson(
         }
         if(!pMasqueradingVector[13].empty())
         {
-            if(getCreatedAt())
+            if(getDeletedAt())
             {
-                ret[pMasqueradingVector[13]]=getCreatedAt()->toDbStringLocal();
+                ret[pMasqueradingVector[13]]=getDeletedAt()->toDbStringLocal();
             }
             else
             {
                 ret[pMasqueradingVector[13]]=Json::Value();
+            }
+        }
+        if(!pMasqueradingVector[14].empty())
+        {
+            if(getCreatedAt())
+            {
+                ret[pMasqueradingVector[14]]=getCreatedAt()->toDbStringLocal();
+            }
+            else
+            {
+                ret[pMasqueradingVector[14]]=Json::Value();
             }
         }
         return ret;
@@ -1862,6 +1973,14 @@ Json::Value Objects::toMasqueradedJson(
     else
     {
         ret["key"]=Json::Value();
+    }
+    if(getSha256())
+    {
+        ret["sha256"]=getValueOfSha256();
+    }
+    else
+    {
+        ret["sha256"]=Json::Value();
     }
     if(getSize())
     {
@@ -1981,9 +2100,19 @@ bool Objects::validateJsonForCreation(const Json::Value &pJson, std::string &err
         err="The key column cannot be null";
         return false;
     }
+    if(pJson.isMember("sha256"))
+    {
+        if(!validJsonOfField(3, "sha256", pJson["sha256"], err, true))
+            return false;
+    }
+    else
+    {
+        err="The sha256 column cannot be null";
+        return false;
+    }
     if(pJson.isMember("size"))
     {
-        if(!validJsonOfField(3, "size", pJson["size"], err, true))
+        if(!validJsonOfField(4, "size", pJson["size"], err, true))
             return false;
     }
     else
@@ -1993,7 +2122,7 @@ bool Objects::validateJsonForCreation(const Json::Value &pJson, std::string &err
     }
     if(pJson.isMember("original_size"))
     {
-        if(!validJsonOfField(4, "original_size", pJson["original_size"], err, true))
+        if(!validJsonOfField(5, "original_size", pJson["original_size"], err, true))
             return false;
     }
     else
@@ -2003,47 +2132,47 @@ bool Objects::validateJsonForCreation(const Json::Value &pJson, std::string &err
     }
     if(pJson.isMember("is_compressed"))
     {
-        if(!validJsonOfField(5, "is_compressed", pJson["is_compressed"], err, true))
+        if(!validJsonOfField(6, "is_compressed", pJson["is_compressed"], err, true))
             return false;
     }
     if(pJson.isMember("compression_algorithm"))
     {
-        if(!validJsonOfField(6, "compression_algorithm", pJson["compression_algorithm"], err, true))
+        if(!validJsonOfField(7, "compression_algorithm", pJson["compression_algorithm"], err, true))
             return false;
     }
     if(pJson.isMember("compression_level"))
     {
-        if(!validJsonOfField(7, "compression_level", pJson["compression_level"], err, true))
+        if(!validJsonOfField(8, "compression_level", pJson["compression_level"], err, true))
             return false;
     }
     if(pJson.isMember("provider"))
     {
-        if(!validJsonOfField(8, "provider", pJson["provider"], err, true))
+        if(!validJsonOfField(9, "provider", pJson["provider"], err, true))
             return false;
     }
     if(pJson.isMember("upload_mode"))
     {
-        if(!validJsonOfField(9, "upload_mode", pJson["upload_mode"], err, true))
+        if(!validJsonOfField(10, "upload_mode", pJson["upload_mode"], err, true))
             return false;
     }
     if(pJson.isMember("part_count"))
     {
-        if(!validJsonOfField(10, "part_count", pJson["part_count"], err, true))
+        if(!validJsonOfField(11, "part_count", pJson["part_count"], err, true))
             return false;
     }
     if(pJson.isMember("part_size_bytes"))
     {
-        if(!validJsonOfField(11, "part_size_bytes", pJson["part_size_bytes"], err, true))
+        if(!validJsonOfField(12, "part_size_bytes", pJson["part_size_bytes"], err, true))
             return false;
     }
     if(pJson.isMember("deleted_at"))
     {
-        if(!validJsonOfField(12, "deleted_at", pJson["deleted_at"], err, true))
+        if(!validJsonOfField(13, "deleted_at", pJson["deleted_at"], err, true))
             return false;
     }
     if(pJson.isMember("created_at"))
     {
-        if(!validJsonOfField(13, "created_at", pJson["created_at"], err, true))
+        if(!validJsonOfField(14, "created_at", pJson["created_at"], err, true))
             return false;
     }
     return true;
@@ -2052,7 +2181,7 @@ bool Objects::validateMasqueradedJsonForCreation(const Json::Value &pJson,
                                                  const std::vector<std::string> &pMasqueradingVector,
                                                  std::string &err)
 {
-    if(pMasqueradingVector.size() != 14)
+    if(pMasqueradingVector.size() != 15)
     {
         err = "Bad masquerading vector";
         return false;
@@ -2125,6 +2254,11 @@ bool Objects::validateMasqueradedJsonForCreation(const Json::Value &pJson,
               if(!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, true))
                   return false;
           }
+        else
+        {
+            err="The " + pMasqueradingVector[5] + " column cannot be null";
+            return false;
+        }
       }
       if(!pMasqueradingVector[6].empty())
       {
@@ -2190,6 +2324,14 @@ bool Objects::validateMasqueradedJsonForCreation(const Json::Value &pJson,
                   return false;
           }
       }
+      if(!pMasqueradingVector[14].empty())
+      {
+          if(pJson.isMember(pMasqueradingVector[14]))
+          {
+              if(!validJsonOfField(14, pMasqueradingVector[14], pJson[pMasqueradingVector[14]], err, true))
+                  return false;
+          }
+      }
     }
     catch(const Json::LogicError &e)
     {
@@ -2220,59 +2362,64 @@ bool Objects::validateJsonForUpdate(const Json::Value &pJson, std::string &err)
         if(!validJsonOfField(2, "key", pJson["key"], err, false))
             return false;
     }
+    if(pJson.isMember("sha256"))
+    {
+        if(!validJsonOfField(3, "sha256", pJson["sha256"], err, false))
+            return false;
+    }
     if(pJson.isMember("size"))
     {
-        if(!validJsonOfField(3, "size", pJson["size"], err, false))
+        if(!validJsonOfField(4, "size", pJson["size"], err, false))
             return false;
     }
     if(pJson.isMember("original_size"))
     {
-        if(!validJsonOfField(4, "original_size", pJson["original_size"], err, false))
+        if(!validJsonOfField(5, "original_size", pJson["original_size"], err, false))
             return false;
     }
     if(pJson.isMember("is_compressed"))
     {
-        if(!validJsonOfField(5, "is_compressed", pJson["is_compressed"], err, false))
+        if(!validJsonOfField(6, "is_compressed", pJson["is_compressed"], err, false))
             return false;
     }
     if(pJson.isMember("compression_algorithm"))
     {
-        if(!validJsonOfField(6, "compression_algorithm", pJson["compression_algorithm"], err, false))
+        if(!validJsonOfField(7, "compression_algorithm", pJson["compression_algorithm"], err, false))
             return false;
     }
     if(pJson.isMember("compression_level"))
     {
-        if(!validJsonOfField(7, "compression_level", pJson["compression_level"], err, false))
+        if(!validJsonOfField(8, "compression_level", pJson["compression_level"], err, false))
             return false;
     }
     if(pJson.isMember("provider"))
     {
-        if(!validJsonOfField(8, "provider", pJson["provider"], err, false))
+        if(!validJsonOfField(9, "provider", pJson["provider"], err, false))
             return false;
     }
     if(pJson.isMember("upload_mode"))
     {
-        if(!validJsonOfField(9, "upload_mode", pJson["upload_mode"], err, false))
+        if(!validJsonOfField(10, "upload_mode", pJson["upload_mode"], err, false))
             return false;
     }
     if(pJson.isMember("part_count"))
     {
-        if(!validJsonOfField(10, "part_count", pJson["part_count"], err, false))
+        if(!validJsonOfField(11, "part_count", pJson["part_count"], err, false))
             return false;
     }
     if(pJson.isMember("part_size_bytes"))
     {
-        if(!validJsonOfField(11, "part_size_bytes", pJson["part_size_bytes"], err, false))
+        if(!validJsonOfField(12, "part_size_bytes", pJson["part_size_bytes"], err, false))
             return false;
     }
     if(pJson.isMember("deleted_at"))
     {
-        if(!validJsonOfField(12, "deleted_at", pJson["deleted_at"], err, false))
+        if(!validJsonOfField(13, "deleted_at", pJson["deleted_at"], err, false))
             return false;
     }
     if(pJson.isMember("created_at"))
     {
-        if(!validJsonOfField(13, "created_at", pJson["created_at"], err, false))
+        if(!validJsonOfField(14, "created_at", pJson["created_at"], err, false))
             return false;
     }
     return true;
@@ -2281,7 +2428,7 @@ bool Objects::validateMasqueradedJsonForUpdate(const Json::Value &pJson,
                                                const std::vector<std::string> &pMasqueradingVector,
                                                std::string &err)
 {
-    if(pMasqueradingVector.size() != 14)
+    if(pMasqueradingVector.size() != 15)
     {
         err = "Bad masquerading vector";
         return false;
@@ -2362,6 +2509,11 @@ bool Objects::validateMasqueradedJsonForUpdate(const Json::Value &pJson,
           if(!validJsonOfField(13, pMasqueradingVector[13], pJson[pMasqueradingVector[13]], err, false))
               return false;
       }
+      if(!pMasqueradingVector[14].empty() && pJson.isMember(pMasqueradingVector[14]))
+      {
+          if(!validJsonOfField(14, pMasqueradingVector[14], pJson[pMasqueradingVector[14]], err, false))
+              return false;
+      }
     }
     catch(const Json::LogicError &e)
     {
@@ -2425,7 +2577,7 @@ bool Objects::validJsonOfField(size_t index,
                 err="The " + fieldName + " column cannot be null";
                 return false;
             }
-            if(!pJson.isInt64())
+            if(!pJson.isString())
             {
                 err="Type error in the "+fieldName+" field";
                 return false;
@@ -2449,7 +2601,7 @@ bool Objects::validJsonOfField(size_t index,
                 err="The " + fieldName + " column cannot be null";
                 return false;
             }
-            if(!pJson.isBool())
+            if(!pJson.isInt64())
             {
                 err="Type error in the "+fieldName+" field";
                 return false;
@@ -2458,9 +2610,10 @@ bool Objects::validJsonOfField(size_t index,
         case 6:
             if(pJson.isNull())
             {
-                return true;
+                err="The " + fieldName + " column cannot be null";
+                return false;
             }
-            if(!pJson.isString())
+            if(!pJson.isBool())
             {
                 err="Type error in the "+fieldName+" field";
                 return false;
@@ -2471,7 +2624,7 @@ bool Objects::validJsonOfField(size_t index,
             {
                 return true;
             }
-            if(!pJson.isInt())
+            if(!pJson.isString())
             {
                 err="Type error in the "+fieldName+" field";
                 return false;
@@ -2480,10 +2633,9 @@ bool Objects::validJsonOfField(size_t index,
         case 8:
             if(pJson.isNull())
             {
-                err="The " + fieldName + " column cannot be null";
-                return false;
+                return true;
             }
-            if(!pJson.isString())
+            if(!pJson.isInt())
             {
                 err="Type error in the "+fieldName+" field";
                 return false;
@@ -2504,9 +2656,10 @@ bool Objects::validJsonOfField(size_t index,
         case 10:
             if(pJson.isNull())
             {
-                return true;
+                err="The " + fieldName + " column cannot be null";
+                return false;
             }
-            if(!pJson.isInt())
+            if(!pJson.isString())
             {
                 err="Type error in the "+fieldName+" field";
                 return false;
@@ -2517,7 +2670,7 @@ bool Objects::validJsonOfField(size_t index,
             {
                 return true;
             }
-            if(!pJson.isInt64())
+            if(!pJson.isInt())
             {
                 err="Type error in the "+fieldName+" field";
                 return false;
@@ -2528,13 +2681,24 @@ bool Objects::validJsonOfField(size_t index,
             {
                 return true;
             }
-            if(!pJson.isString())
+            if(!pJson.isInt64())
             {
                 err="Type error in the "+fieldName+" field";
                 return false;
             }
             break;
         case 13:
+            if(pJson.isNull())
+            {
+                return true;
+            }
+            if(!pJson.isString())
+            {
+                err="Type error in the "+fieldName+" field";
+                return false;
+            }
+            break;
+        case 14:
             if(pJson.isNull())
             {
                 err="The " + fieldName + " column cannot be null";

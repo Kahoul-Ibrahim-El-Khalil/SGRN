@@ -69,6 +69,14 @@ BackendResult<FileHash> computeHashInMemory(std::string_view t_data) {
     return result;
 }
 
+BackendResult<std::string> computeSha256InMemory(std::string_view t_data) {
+    Result<std::string> hash = utils::computeSha256Data(t_data, utils::HashEncoding::hex);
+    if (!hash.has_value()) {
+        return BackendResult<std::string>::Error(BackendError(BackendErrorKind::Hashing, std::move(hash.error())));
+    }
+    return std::move(hash.value());
+}
+
 BackendResult<FileHash> computeHashFromFile(const fs::path& t_file_path) {
     FileHash result;
     Result<std::string> hash = utils::computeSha512File(t_file_path, utils::HashEncoding::base64url);
@@ -78,6 +86,14 @@ BackendResult<FileHash> computeHashFromFile(const fs::path& t_file_path) {
     result.key = std::move(hash.value());
     result.original_size = fs::file_size(t_file_path);
     return result;
+}
+
+BackendResult<std::string> computeSha256FromFile(const fs::path& t_file_path) {
+    Result<std::string> hash = utils::computeSha256File(t_file_path, utils::HashEncoding::hex);
+    if (!hash.has_value()) {
+        return BackendResult<std::string>::Error(BackendError(BackendErrorKind::Hashing, std::move(hash.error())));
+    }
+    return std::move(hash.value());
 }
 
 Task<BackendResult<FileHash>> computeHashFromFileAsync(fs::path t_file_path) {
@@ -92,6 +108,22 @@ Task<BackendResult<FileHash>> computeHashFromFileAsync(fs::path t_file_path) {
         } catch (const std::exception& ex) {
             return BackendResult<FileHash>::Error(
                 BackendError(BackendErrorKind::Hashing, std::format("Hash computation failed: {}", ex.what())));
+        }
+    });
+}
+
+drogon::Task<::sgrn::datastore::BackendResult<std::string>> computeSha256FromFileAsync(fs::path t_file_path) {
+    BackendResult<plugins::Threadpool*> tp_res = core::getPlugin<plugins::Threadpool>();
+    if (!tp_res) {
+        co_return BackendResult<std::string>::Error(tp_res.error());
+    }
+    plugins::Threadpool* p_tp = tp_res.value();
+    co_return co_await utils::runInPool(p_tp->getPool(), [t_path = std::move(t_file_path)]() -> BackendResult<std::string> {
+        try {
+            return computeSha256FromFile(t_path);
+        } catch (const std::exception& ex) {
+            return BackendResult<std::string>::Error(
+                BackendError(BackendErrorKind::Hashing, std::format("SHA256 computation failed: {}", ex.what())));
         }
     });
 }
@@ -206,13 +238,14 @@ bool verifyCompressionSignature(std::string_view t_data, std::string_view t_algo
 // ============================================================================
 
 Task<BackendResult<int64_t>> insertObject(drogon::orm::DbClientPtr tsp_db_client, std::string t_bucket, std::string t_key, size_t t_size,
-    size_t t_original_size, bool t_is_compressed, std::optional<std::string> t_compression_algorithm,
+    size_t t_original_size, std::string t_sha256, bool t_is_compressed, std::optional<std::string> t_compression_algorithm,
     std::optional<uint8_t> t_compression_level) {
     try {
-        drogon::orm::Result result = co_await tsp_db_client->execSqlCoro(
-            "SELECT storage.upsert_object($1, $2, $3, $4, 'GARAGE', $5, $6, $7) AS id", std::move(t_bucket), std::move(t_key),
-            static_cast<int64_t>(t_size), static_cast<int64_t>(t_original_size), t_is_compressed, t_compression_algorithm,
-            t_compression_level.has_value() ? std::optional<int32_t>(static_cast<int32_t>(*t_compression_level)) : std::nullopt);
+        drogon::orm::Result result =
+            co_await tsp_db_client->execSqlCoro("SELECT storage.upsert_object($1, $2, $3, $4, $5, 'GARAGE', $6, $7, $8) AS id",
+                std::move(t_bucket), std::move(t_key), static_cast<int64_t>(t_size), static_cast<int64_t>(t_original_size),
+                std::move(t_sha256), t_is_compressed, t_compression_algorithm,
+                t_compression_level.has_value() ? std::optional<int32_t>(static_cast<int32_t>(*t_compression_level)) : std::nullopt);
 
         if (result.empty() || result[0]["id"].isNull()) {
             co_return BackendResult<int64_t>::Error(BackendError(BackendErrorKind::Database, "Failed to upsert object: no ID returned"));
@@ -240,20 +273,21 @@ Task<BackendResult<int64_t>> insertFile(drogon::orm::DbClientPtr tsp_db_client, 
     std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_extension,
     std::optional<int64_t> t_directory_id, std::string t_domain) {
     try {
-        // Ensure the extension exists in the formats table (Safe Auto-Registration)
+        // The formats registry decides what counts as a format: store the
+        // canonical (lowercased) extension only when storage.formats has a row
+        // for the suffix, otherwise NULL — the suffix then simply remains part
+        // of the stored name.
+        std::optional<std::string> stored_extension;
         if (!t_extension.empty()) {
-            co_await tsp_db_client->execSqlCoro(
-                "INSERT INTO storage.formats (extension, mime_type, description, is_compressed, is_allowed) "
-                "VALUES ($1, 'application/octet-stream', 'Automatically registered format', true, true) "
-                "ON CONFLICT (extension) DO NOTHING",
-                t_extension);
+            std::optional<Formats> t_format = co_await getFormat(tsp_db_client, t_extension);
+            if (t_format.has_value() && t_format->getExtension())
+                stored_extension = *t_format->getExtension();
         }
 
         drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro(
             "INSERT INTO storage.files (name, user_id, automated_service_id, session_id, extension, directory_id, domain) "
             "VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
-            std::move(t_name), t_user_id, t_automated_service_id, t_session_id,
-            t_extension.empty() ? std::optional<std::string>(std::nullopt) : std::optional<std::string>(t_extension), t_directory_id,
+            std::move(t_name), t_user_id, t_automated_service_id, t_session_id, std::move(stored_extension), t_directory_id,
             t_domain.empty() ? std::optional<std::string>(std::nullopt) : std::optional<std::string>(t_domain));
 
         if (tp_res.empty()) {
@@ -418,6 +452,10 @@ Task<std::optional<std::string>> getObjectKey(drogon::orm::DbClientPtr tsp_db_cl
 
 Task<std::optional<Formats>> getFormat(drogon::orm::DbClientPtr tsp_db_client, std::string t_extension) {
     try {
+        // storage.formats.extension is lower-case by constraint; callers may
+        // pass the suffix as it appears in the file name.
+        std::transform(t_extension.begin(), t_extension.end(), t_extension.begin(),
+            [](unsigned char t_c) { return static_cast<char>(std::tolower(t_c)); });
         drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro(
             "SELECT id, extension, mime_type, description FROM storage.formats WHERE extension = $1", t_extension);
         if (tp_res.empty())

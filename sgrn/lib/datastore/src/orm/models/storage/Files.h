@@ -135,11 +135,11 @@ public:
 
     /**  For column session_id  */
     /// Get the value of the column session_id, returns the default value if the column is null
-    const int32_t& getValueOfSessionId() const noexcept;
+    const int64_t& getValueOfSessionId() const noexcept;
     /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
-    const std::shared_ptr<int32_t>& getSessionId() const noexcept;
+    const std::shared_ptr<int64_t>& getSessionId() const noexcept;
     /// Set the value of the column session_id
-    void setSessionId(const int32_t& pSessionId) noexcept;
+    void setSessionId(const int64_t& pSessionId) noexcept;
 
     /**  For column directory_id  */
     /// Get the value of the column directory_id, returns the default value if the column is null
@@ -215,7 +215,7 @@ private:
     std::shared_ptr<std::string> name_;
     std::shared_ptr<int32_t> userId_;
     std::shared_ptr<int32_t> automatedServiceId_;
-    std::shared_ptr<int32_t> sessionId_;
+    std::shared_ptr<int64_t> sessionId_;
     std::shared_ptr<int64_t> directoryId_;
     std::shared_ptr<std::string> extension_;
     std::shared_ptr<std::string> fullPath_;
