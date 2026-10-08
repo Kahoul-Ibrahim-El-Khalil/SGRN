@@ -1,6 +1,7 @@
 #include <sgrn/datastore/services/helpers/magic.hpp>
 #include <algorithm>
 #include <cctype>
+#include <unordered_set>
 
 namespace sgrn::datastore::services::helpers
 {
@@ -137,6 +138,24 @@ std::optional<std::string> sniffExtension(const std::string& t_data) {
         }
     }
     return std::nullopt;
+}
+
+bool isCompatibleSniffedFormat(const std::string& t_declared, const std::string& t_sniffed) {
+    if (t_declared.empty())
+        return true; // No declared extension in filename: accept sniffed format
+    if (t_declared == t_sniffed)
+        return true;
+    if (t_sniffed == "zip") {
+        static const std::unordered_set<std::string> zip_formats = {
+            "docx", "xlsx", "pptx", "jar", "apk", "epub", "odt", "ods", "war", "ear", "nupkg", "whl"};
+        if (zip_formats.count(t_declared))
+            return true;
+    }
+    if (t_sniffed == "exe" && (t_declared == "dll" || t_declared == "sys"))
+        return true;
+    if (t_sniffed == "sh" && (t_declared == "bash" || t_declared == "zsh" || t_declared == "ksh"))
+        return true;
+    return false;
 }
 
 } // namespace sgrn::datastore::services::helpers

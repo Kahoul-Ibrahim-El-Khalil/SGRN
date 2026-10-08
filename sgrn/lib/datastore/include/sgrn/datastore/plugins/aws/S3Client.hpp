@@ -83,7 +83,7 @@ public:
     drogon::Task<BackendResult<void>> downloadFileRange(
         std::string t_bucket, std::string t_key, std::string t_download_path, int64_t t_start, int64_t t_end);
 
-    drogon::Task<BackendResult<std::string>> getObjectContent(std::string t_bucket, std::string t_key);
+    drogon::Task<BackendResult<std::string>> getObjectContent(std::string t_bucket, std::string t_key, int64_t t_max_bytes = 0);
 
     drogon::Task<BackendResult<void>> deleteFile(std::string t_bucket, std::string t_key);
 

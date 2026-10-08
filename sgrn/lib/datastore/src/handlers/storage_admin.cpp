@@ -1258,10 +1258,11 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPt
         out["bytes"] = std::move(bytes);
 
         // --- 30-day upload timeseries (day, files, virtual bytes) ---
+        // --- 30-day upload timeseries (day, files, virtual bytes) ---
         auto series = co_await sgrn::datastore::core::execSqlCoroVec(db,
-            "SELECT to_char(date_trunc('day', f.created_at), 'YYYY-MM-DD') AS day, COUNT(*) AS files, "
+            "SELECT to_char(date_trunc('day', f.created_at), 'YYYY-MM-DD') AS day, COUNT(DISTINCT f.id) AS files, "
             "COALESCE(SUM(o.original_size),0) AS bytes_virtual "
-            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o ON o.id = "
+            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
             "fo.object_id "
             "WHERE f.created_at >= now() - interval '30 days' "
             "GROUP BY 1 ORDER BY 1",
@@ -1278,8 +1279,9 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPt
 
         // --- top extensions by file count ---
         auto exts = co_await sgrn::datastore::core::execSqlCoroVec(db,
-            "SELECT COALESCE(f.extension, '(none)') AS ext, COUNT(*) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual "
-            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o ON o.id = "
+            "SELECT COALESCE(f.extension, '(none)') AS ext, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS "
+            "bytes_virtual "
+            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
             "fo.object_id "
             "GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
             {});
@@ -1295,13 +1297,13 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPt
 
         // --- top uploaders (users + services in one list) ---
         auto uploaders = co_await sgrn::datastore::core::execSqlCoroVec(db,
-            "SELECT 'user:' || u.email AS actor, COUNT(*) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual "
-            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o ON o.id = "
+            "SELECT 'user:' || u.email AS actor, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual "
+            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
             "fo.object_id JOIN core.users u ON u.id = f.user_id "
             "GROUP BY 1 "
             "UNION ALL "
-            "SELECT 'service:' || s.name AS actor, COUNT(*) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual "
-            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o ON o.id = "
+            "SELECT 'service:' || s.name AS actor, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual "
+            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
             "fo.object_id JOIN core.automated_services s "
             "ON s.id = f.automated_service_id "
             "GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
@@ -1318,11 +1320,12 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPt
 
         // --- most recent files ---
         auto recent = co_await sgrn::datastore::core::execSqlCoroVec(db,
-            "SELECT f.name, COALESCE(f.extension, '') AS ext, o.original_size, "
+            "SELECT f.name, COALESCE(f.extension, '') AS ext, "
+            "(SELECT COALESCE(SUM(so.original_size), 0) FROM storage.file_objects fo JOIN storage.objects so ON so.id = fo.object_id WHERE "
+            "fo.file_id = f.id) AS original_size, "
             "COALESCE('user:' || u.email, 'service:' || s.name, '(unknown)') AS actor, "
             "to_char(f.created_at, 'YYYY-MM-DD HH24:MI:SS') AS at "
-            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o ON o.id = "
-            "fo.object_id "
+            "FROM storage.files f "
             "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
             "ORDER BY f.id DESC LIMIT 10",
             {});

@@ -192,18 +192,27 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(
         co_return sgrn::createJsonResponse(std::move(record_res));
     }
 
-    BackendResult<std::string> key_res = co_await helpers::resolveObjectKey(sp_db_client, record_res->t_object_id);
-    if (key_res.hasError()) {
-        co_return sgrn::createJsonResponse(std::move(key_res));
+    auto part_rows =
+        co_await sp_db_client->execSqlCoro("SELECT o.key FROM storage.file_objects fo JOIN storage.objects o ON o.id = fo.object_id "
+                                           "WHERE fo.file_id = $1 ORDER BY fo.part_index ASC",
+            record_res->id);
+
+    if (part_rows.empty()) {
+        co_return createJsonErrorResponse("File storage object not found", drogon::k404NotFound);
     }
 
-    BackendResult<std::string> data_res = co_await downloadFile(currentStorageConfig().default_bucket, key_res.value());
-    if (data_res.hasError()) {
-        co_return sgrn::createJsonResponse(std::move(data_res));
+    std::string file_data;
+    const std::string bucket = currentStorageConfig().default_bucket;
+    for (const auto& prow : part_rows) {
+        std::string key = prow["key"].as<std::string>();
+        BackendResult<std::string> chunk_res = co_await downloadFile(bucket, key);
+        if (chunk_res.hasError()) {
+            co_return sgrn::createJsonResponse(std::move(chunk_res));
+        }
+        file_data.append(chunk_res.value());
     }
 
     std::string download_name = record_res->name;
-    std::string file_data = std::move(data_res.value());
 
     // SEC: Strip CR, LF, NUL, and double-quote to prevent HTTP header injection
     download_name.erase(std::remove_if(download_name.begin(), download_name.end(),
@@ -956,7 +965,7 @@ Task<BackendResult<void>> StorageService::finalizeUpload(drogon::orm::DbClientPt
         BackendResult<plugins::aws::S3Client*> s3_res = S3Client();
         if (s3_res.has_value()) {
             auto* s3 = s3_res.value();
-            BackendResult<std::string> content_res = co_await s3->getObjectContent(t_context.bucket, t_context.identity.hash.key);
+            BackendResult<std::string> content_res = co_await s3->getObjectContent(t_context.bucket, t_context.identity.hash.key, 4096);
             if (content_res.has_value()) {
                 std::string_view data(*content_res);
                 std::string preview(data.substr(0, std::min<size_t>(data.size(), 4096)));
@@ -970,7 +979,7 @@ Task<BackendResult<void>> StorageService::finalizeUpload(drogon::orm::DbClientPt
                     std::string sniffed_lower = sniffed_ext;
                     std::transform(sniffed_lower.begin(), sniffed_lower.end(), sniffed_lower.begin(),
                         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                    if (declared_lower != sniffed_lower) {
+                    if (!::sgrn::datastore::services::helpers::isCompatibleSniffedFormat(declared_lower, sniffed_lower)) {
                         // Check if sniffed extension is a known format in registry
                         auto format_res = co_await helpers::getFormat(tsp_transaction, sniffed_lower);
                         if (format_res.has_value()) {

@@ -19,4 +19,6 @@ const std::vector<MagicSignature>& getMagicSignatures();
 
 std::optional<std::string> sniffExtension(const std::string& t_data);
 
+bool isCompatibleSniffedFormat(const std::string& t_declared, const std::string& t_sniffed);
+
 } // namespace sgrn::datastore::services::helpers

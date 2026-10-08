@@ -648,34 +648,36 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
             }
         }
 
-        auto lookup_directory = [sp_db_client = db_client, user_id, target_owner_id, scope, target_domain](
-                                    const std::string& t_path) -> Task<std::optional<drogon::orm::Result>> {
-            if (scope == StorageScope::Domain) {
-                auto res = co_await sp_db_client->execSqlCoro(
-                    "SELECT d.id, d.name, d.path FROM storage.directories d WHERE d.domain = $1 AND d.path = $2", target_domain, t_path);
-                if (res.empty()) {
-                    co_return std::nullopt;
+        // Builds a PostgreSQL text[] literal string from a vector of path strings,
+        // e.g. ["/a", "/a/b"] → '{"/ a","/a/b"}'
+        //
+        // Why a literal string instead of a parameterised array?
+        // drogon's execSqlCoro binds each $N to a single scalar. There is no
+        // built-in way to bind a std::vector<std::string> as a $N parameter.
+        // The alternative — one query per segment — is what this replaces: N RTTs
+        // → 1 RTT. The paths here come from the URL's own path component, not
+        // from user-supplied free-text, so they will never contain '"' or '\'.
+        // The escaping below is kept for correctness anyway.
+        auto make_pg_array = [](const std::vector<std::string>& paths) -> std::string {
+            std::string arr = "{";
+            bool first = true;
+            for (const auto& p : paths) {
+                if (!first)
+                    arr += ',';
+                first = false;
+                arr += '"';
+                for (char c : p) {
+                    if (c == '"')
+                        arr += "\\\"";
+                    else if (c == '\\')
+                        arr += "\\\\";
+                    else
+                        arr += c;
                 }
-                co_return res;
+                arr += '"';
             }
-
-            const int32_t owner_id = (scope == StorageScope::Personal) ? user_id : target_owner_id;
-            if (scope == StorageScope::Personal || scope == StorageScope::Users) {
-                auto res = co_await sp_db_client->execSqlCoro(
-                    "SELECT d.id, d.name, d.path FROM storage.directories d WHERE d.user_id = $1 AND d.path = $2", owner_id, t_path);
-                if (res.empty()) {
-                    co_return std::nullopt;
-                }
-                co_return res;
-            }
-
-            auto res = co_await sp_db_client->execSqlCoro(
-                "SELECT d.id, d.name, d.path FROM storage.directories d WHERE d.automated_service_id = $1 AND d.path = $2", target_owner_id,
-                t_path);
-            if (res.empty()) {
-                co_return std::nullopt;
-            }
-            co_return res;
+            arr += '}';
+            return arr;
         };
 
         auto append_trail_node = [&trail_json](std::string t_path, std::string t_name, std::optional<int64_t> t_id = std::nullopt,
@@ -691,41 +693,100 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
             }
         };
 
-        if (!is_virtual_root) {
+        if (!is_virtual_root && current_path != "/") {
+            // ── Trail resolution (two-pass, one DB round-trip) ────────────────────
+            //
+            // The breadcrumb trail for path "/a/b/c" needs the DB id+name for each
+            // ancestor directory: /a, /a/b, /a/b/c.
+            //
+            // Naïve approach: one SELECT per segment inside the loop below → N RTTs.
+            //
+            // Optimised approach (two passes):
+            //   Pass 1 — collect all prefix paths with no awaits.
+            //   Pass 2 — one SELECT ... WHERE path = ANY($2::text[]) fetches all
+            //             of them at once, result stored in dir_map.
+            //   The trail loop below then does only map lookups — zero DB calls.
+            //
+            // Trade-off: the original loop was shorter and read like English.
+            // This is more complex but avoids O(depth) sequential round-trips.
+
+            // Pass 1: collect prefix paths — e.g. ["/a", "/a/b", "/a/b/c"]
+            std::vector<std::string> trail_paths;
+            {
+                std::string cur;
+                const std::string path_noslash = (current_path.front() == '/') ? current_path.substr(1) : current_path;
+                std::size_t s = 0;
+                while (s < path_noslash.size()) {
+                    auto sl = path_noslash.find('/', s);
+                    std::string seg = (sl == std::string::npos) ? path_noslash.substr(s) : path_noslash.substr(s, sl - s);
+                    if (seg.empty())
+                        break;
+                    cur += '/' + seg;
+                    trail_paths.push_back(cur);
+                    if (sl == std::string::npos)
+                        break;
+                    s = sl + 1;
+                }
+            }
+
+            // Pass 2: one query for all segments.
+            // dir_map: path → (directory_id, display_name)
+            std::unordered_map<std::string, std::pair<int64_t, std::string>> dir_map;
+            if (!trail_paths.empty()) {
+                const std::string pg_arr = make_pg_array(trail_paths);
+                // drogon::orm::Result has no default constructor — use an IIFE.
+                auto batch_res = co_await [&]() -> Task<drogon::orm::Result> {
+                    if (scope == StorageScope::Domain) {
+                        co_return co_await db_client->execSqlCoro("SELECT d.id, d.name, d.path FROM storage.directories d "
+                                                                  "WHERE d.domain = $1 AND d.path = ANY($2::text[])",
+                            target_domain, pg_arr);
+                    }
+                    if (scope == StorageScope::Personal || scope == StorageScope::Users) {
+                        const int32_t trail_owner = (scope == StorageScope::Personal) ? user_id : target_owner_id;
+                        co_return co_await db_client->execSqlCoro("SELECT d.id, d.name, d.path FROM storage.directories d "
+                                                                  "WHERE d.user_id = $1 AND d.path = ANY($2::text[])",
+                            trail_owner, pg_arr);
+                    }
+                    co_return co_await db_client->execSqlCoro("SELECT d.id, d.name, d.path FROM storage.directories d "
+                                                              "WHERE d.automated_service_id = $1 AND d.path = ANY($2::text[])",
+                        target_owner_id, pg_arr);
+                }();
+                for (const auto& row : batch_res) {
+                    dir_map[row["path"].as<std::string>()] = {row["id"].as<int64_t>(), row["name"].as<std::string>()};
+                }
+            }
+
             if (scope != StorageScope::Personal) {
                 append_trail_node(namespace_prefix, namespace_prefix.length() > 1 ? namespace_prefix.substr(1) : namespace_prefix,
                     std::nullopt, scope_res->display_name.empty() ? std::nullopt : std::optional<std::string>(scope_res->display_name));
             }
 
-            if (current_path != "/") {
-                std::string current_relative;
-                std::string path_no_slash = (current_path.front() == '/') ? current_path.substr(1) : current_path;
-
-                std::size_t start = 0;
-                while (start < path_no_slash.size()) {
-                    auto slash_pos = path_no_slash.find('/', start);
-                    std::string segment =
-                        (slash_pos == std::string::npos) ? path_no_slash.substr(start) : path_no_slash.substr(start, slash_pos - start);
-                    if (segment.empty()) {
-                        break;
-                    }
-
-                    current_relative += "/" + segment;
-                    std::string display_path = namespace_prefix.empty() ? current_relative : namespace_prefix + current_relative;
-                    auto dir_lookup = co_await lookup_directory(current_relative);
-                    if (dir_lookup.has_value() && !dir_lookup->empty()) {
-                        const auto& row = (*dir_lookup)[0];
-                        append_trail_node(display_path, row["name"].as<std::string>(), row["id"].as<int64_t>());
-                    } else {
-                        append_trail_node(display_path, segment);
-                    }
-
-                    if (slash_pos == std::string::npos) {
-                        break;
-                    }
-                    start = slash_pos + 1;
+            // Build trail from map — zero DB round-trips in this loop.
+            std::string cur_rel;
+            const std::string path_noslash2 = (current_path.front() == '/') ? current_path.substr(1) : current_path;
+            std::size_t s2 = 0;
+            while (s2 < path_noslash2.size()) {
+                auto sl2 = path_noslash2.find('/', s2);
+                std::string seg2 = (sl2 == std::string::npos) ? path_noslash2.substr(s2) : path_noslash2.substr(s2, sl2 - s2);
+                if (seg2.empty())
+                    break;
+                cur_rel += '/' + seg2;
+                const std::string disp = namespace_prefix.empty() ? cur_rel : namespace_prefix + cur_rel;
+                auto it = dir_map.find(cur_rel);
+                if (it != dir_map.end()) {
+                    append_trail_node(disp, it->second.second, it->second.first);
+                } else {
+                    // Directory not found in DB (e.g. deleted mid-session): fall
+                    // back to using the raw URL segment as the display name.
+                    append_trail_node(disp, seg2);
                 }
+                if (sl2 == std::string::npos)
+                    break;
+                s2 = sl2 + 1;
             }
+        } else if (!is_virtual_root && scope != StorageScope::Personal) {
+            append_trail_node(namespace_prefix, namespace_prefix.length() > 1 ? namespace_prefix.substr(1) : namespace_prefix, std::nullopt,
+                scope_res->display_name.empty() ? std::nullopt : std::optional<std::string>(scope_res->display_name));
         }
 
         // 5. Pagination & Search Parameters
@@ -839,10 +900,128 @@ Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(std
 
     const bool is_domain = (t_scope == StorageScope::Domain);
     const bool is_automated = (t_scope == StorageScope::AutomatedServices);
-    const std::string owner_col = is_domain ? "domain" : (is_automated ? "automated_service_id" : "user_id");
     const int32_t offset = (t_page - 1) * t_limit;
 
-    std::string target_domain = "";
+    // ── Precomputed SQL query strings ─────────────────────────────────────────
+    //
+    // WHY: The original code concatenated `owner_col + " = $1 AND ..."` at
+    // runtime on every request, allocating a new std::string each time.
+    // These static constants are built once at program start and then only
+    // referenced by pointer. The only dynamic part is `LIMIT N OFFSET M`,
+    // which is appended via fmt::format at the call site (search for `+ lo`).
+    //
+    // NAMING SCHEME:
+    //   k<Kind><Scope>[Search]
+    //   Kind   : Count | Folder | File
+    //   Scope  : User (user_id) | Svc (automated_service_id)
+    //   Search : absent = exact-parent query,  Search = ILIKE recursive query
+    //
+    // PARAMETERS (same for all variants in a family):
+    //   Count plain  : $1 = owner_id,  $2 = current_path,  $3 = parent_path
+    //   Count search : $1 = owner_id,  $2 = ILIKE pattern, $3 = LIKE pattern
+    //   Folder/File plain  : same as Count plain  + LIMIT/OFFSET appended
+    //   Folder/File search : same as Count search + LIMIT/OFFSET appended
+    //
+    // TO ADD A NEW COLUMN: edit the SELECT list in the relevant k* constant(s)
+    // and update the row-serialisation loop in section 2/3 of this function.
+    //
+    // Domain queries are NOT here — they use a different ownership column
+    // (text `domain` vs int owner_id) and are written inline below.
+
+    // user_id variants
+    static const std::string kCountUser =
+        "SELECT "
+        "  (SELECT count(*) FROM storage.directories WHERE user_id = $1 AND ((parent_id IS NULL AND $2 = '/') OR (parent_id IN (SELECT id "
+        "FROM storage.directories WHERE user_id = $1 AND path = $3)))) as folders, "
+        "  (SELECT count(*) FROM storage.files        WHERE user_id = $1 AND ((directory_id IS NULL AND $2 = '/') OR (directory_id IN "
+        "(SELECT id FROM storage.directories WHERE user_id = $1 AND path = $3)))) as files";
+    static const std::string kCountUserSearch =
+        "SELECT "
+        "  (SELECT count(*) FROM storage.directories WHERE user_id = $1 AND name ILIKE $2 AND path LIKE $3) as folders, "
+        "  (SELECT count(*) FROM storage.files        WHERE user_id = $1 AND name ILIKE $2 AND full_path LIKE $3) as files";
+    static const std::string kFolderUser =
+        "SELECT id, name, created_at, virtual_size, real_size, count_sub_files, count_sub_directories, path "
+        "FROM storage.directories WHERE user_id = $1 AND "
+        "((parent_id IS NULL AND $2 = '/') OR (parent_id IN (SELECT id FROM storage.directories WHERE user_id = $1 AND path = $3))) "
+        "ORDER BY name "; // LIMIT/OFFSET appended at call site
+    static const std::string kFolderUserSearch =
+        "SELECT id, name, created_at, virtual_size, real_size, count_sub_files, count_sub_directories, path "
+        "FROM storage.directories WHERE user_id = $1 AND name ILIKE $2 AND path LIKE $3 ORDER BY name "; // LIMIT/OFFSET appended
+    static const std::string kFileUser =
+        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, "
+        "(SELECT COALESCE(SUM(so_sum.size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
+        "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS compressed_size, "
+        "(SELECT COALESCE(SUM(so_sum.original_size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
+        "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS original_size, "
+        "so.upload_mode, (SELECT COUNT(*) FROM storage.file_objects WHERE file_id = f.id) AS part_count "
+        "FROM storage.files f JOIN storage.file_objects fo0 ON fo0.file_id = f.id AND fo0.part_index = 0 "
+        "JOIN storage.objects so ON so.id = fo0.object_id "
+        "WHERE f.user_id = $1 AND ((f.directory_id IS NULL AND $2 = '/') OR (f.directory_id IN (SELECT id FROM storage.directories WHERE "
+        "user_id = $1 AND path = $3))) "
+        "ORDER BY f.name "; // LIMIT/OFFSET appended
+    static const std::string kFileUserSearch =
+        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, "
+        "(SELECT COALESCE(SUM(so_sum.size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
+        "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS compressed_size, "
+        "(SELECT COALESCE(SUM(so_sum.original_size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
+        "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS original_size, "
+        "so.upload_mode, (SELECT COUNT(*) FROM storage.file_objects WHERE file_id = f.id) AS part_count "
+        "FROM storage.files f JOIN storage.file_objects fo0 ON fo0.file_id = f.id AND fo0.part_index = 0 "
+        "JOIN storage.objects so ON so.id = fo0.object_id "
+        "WHERE f.user_id = $1 AND f.name ILIKE $2 AND f.full_path LIKE $3 ORDER BY f.name "; // LIMIT/OFFSET appended
+    // automated_service_id variants (same structure, different ownership column)
+    static const std::string kCountSvc =
+        "SELECT "
+        "  (SELECT count(*) FROM storage.directories WHERE automated_service_id = $1 AND ((parent_id IS NULL AND $2 = '/') OR (parent_id "
+        "IN (SELECT id FROM storage.directories WHERE automated_service_id = $1 AND path = $3)))) as folders, "
+        "  (SELECT count(*) FROM storage.files        WHERE automated_service_id = $1 AND ((directory_id IS NULL AND $2 = '/') OR "
+        "(directory_id IN (SELECT id FROM storage.directories WHERE automated_service_id = $1 AND path = $3)))) as files";
+    static const std::string kCountSvcSearch =
+        "SELECT "
+        "  (SELECT count(*) FROM storage.directories WHERE automated_service_id = $1 AND name ILIKE $2 AND path LIKE $3) as folders, "
+        "  (SELECT count(*) FROM storage.files        WHERE automated_service_id = $1 AND name ILIKE $2 AND full_path LIKE $3) as files";
+    static const std::string kFolderSvc =
+        "SELECT id, name, created_at, virtual_size, real_size, count_sub_files, count_sub_directories, path "
+        "FROM storage.directories WHERE automated_service_id = $1 AND "
+        "((parent_id IS NULL AND $2 = '/') OR (parent_id IN (SELECT id FROM storage.directories WHERE automated_service_id = $1 AND path = "
+        "$3))) "
+        "ORDER BY name "; // LIMIT/OFFSET appended
+    static const std::string kFolderSvcSearch =
+        "SELECT id, name, created_at, virtual_size, real_size, count_sub_files, count_sub_directories, path "
+        "FROM storage.directories WHERE automated_service_id = $1 AND name ILIKE $2 AND path LIKE $3 ORDER BY name "; // LIMIT/OFFSET
+                                                                                                                      // appended
+    static const std::string kFileSvc =
+        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, "
+        "(SELECT COALESCE(SUM(so_sum.size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
+        "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS compressed_size, "
+        "(SELECT COALESCE(SUM(so_sum.original_size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
+        "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS original_size, "
+        "so.upload_mode, (SELECT COUNT(*) FROM storage.file_objects WHERE file_id = f.id) AS part_count "
+        "FROM storage.files f JOIN storage.file_objects fo0 ON fo0.file_id = f.id AND fo0.part_index = 0 "
+        "JOIN storage.objects so ON so.id = fo0.object_id "
+        "WHERE f.automated_service_id = $1 AND ((f.directory_id IS NULL AND $2 = '/') OR (f.directory_id IN (SELECT id FROM "
+        "storage.directories WHERE automated_service_id = $1 AND path = $3))) "
+        "ORDER BY f.name "; // LIMIT/OFFSET appended
+    static const std::string kFileSvcSearch =
+        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, "
+        "(SELECT COALESCE(SUM(so_sum.size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
+        "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS compressed_size, "
+        "(SELECT COALESCE(SUM(so_sum.original_size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
+        "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS original_size, "
+        "so.upload_mode, (SELECT COUNT(*) FROM storage.file_objects WHERE file_id = f.id) AS part_count "
+        "FROM storage.files f JOIN storage.file_objects fo0 ON fo0.file_id = f.id AND fo0.part_index = 0 "
+        "JOIN storage.objects so ON so.id = fo0.object_id "
+        "WHERE f.automated_service_id = $1 AND f.name ILIKE $2 AND f.full_path LIKE $3 ORDER BY f.name "; // LIMIT/OFFSET appended
+
+    // Select the right query family for this call.
+    const std::string& kCount = is_automated ? kCountSvc : kCountUser;
+    const std::string& kCountSearch = is_automated ? kCountSvcSearch : kCountUserSearch;
+    const std::string& kFolderBase = is_automated ? kFolderSvc : kFolderUser;
+    const std::string& kFolderSearch = is_automated ? kFolderSvcSearch : kFolderUserSearch;
+    const std::string& kFileBase = is_automated ? kFileSvc : kFileUser;
+    const std::string& kFileSearch = is_automated ? kFileSvcSearch : kFileUserSearch;
+
+    std::string target_domain;
     if (is_domain) {
         std::string path_no_slash = (t_namespace_prefix.front() == '/') ? t_namespace_prefix.substr(1) : t_namespace_prefix;
         if (path_no_slash.rfind("domains/", 0) == 0) {
@@ -856,9 +1035,9 @@ Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(std
     }
 
     const int32_t owner_id = (t_scope == StorageScope::Personal) ? t_user_id : t_target_owner_id;
-    std::string path_for_parent_lookup = (current_path.length() > 1 ? current_path.substr(0, current_path.length() - 1) : "/");
-    std::string search_pattern = t_search.empty() ? "" : "%" + t_search + "%";
-    std::string recursive_pattern = current_path + "%";
+    const std::string path_for_parent_lookup = (current_path.length() > 1 ? current_path.substr(0, current_path.length() - 1) : "/");
+    const std::string search_pattern = t_search.empty() ? "" : "%" + t_search + "%";
+    const std::string recursive_pattern = current_path + "%";
 
     // ── 1. Count Totals ──────────────────────────────────────────────────────
     int32_t total_folders = 0;
@@ -876,17 +1055,7 @@ Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(std
             total_folders = static_cast<int32_t>(count_res[0]["folders"].as<int64_t>());
             total_files = static_cast<int32_t>(count_res[0]["files"].as<int64_t>());
         } else {
-            drogon::orm::Result count_res = co_await tsp_db_client->execSqlCoro(
-                "SELECT "
-                "  (SELECT count(*) FROM storage.directories WHERE " +
-                    owner_col + " = $1 AND ((parent_id IS NULL AND $2 = '/') OR (parent_id IN (SELECT id FROM storage.directories WHERE " +
-                    owner_col +
-                    " = $1 AND path = $3)))) as folders, "
-                    "  (SELECT count(*) FROM storage.files WHERE " +
-                    owner_col +
-                    " = $1 AND ((directory_id IS NULL AND $2 = '/') OR (directory_id IN (SELECT id FROM storage.directories WHERE " +
-                    owner_col + " = $1 AND path = $3)))) as files",
-                owner_id, current_path, path_for_parent_lookup);
+            drogon::orm::Result count_res = co_await tsp_db_client->execSqlCoro(kCount, owner_id, current_path, path_for_parent_lookup);
             total_folders = static_cast<int32_t>(count_res[0]["folders"].as<int64_t>());
             total_files = static_cast<int32_t>(count_res[0]["files"].as<int64_t>());
         }
@@ -900,14 +1069,7 @@ Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(std
             total_folders = static_cast<int32_t>(count_res[0]["folders"].as<int64_t>());
             total_files = static_cast<int32_t>(count_res[0]["files"].as<int64_t>());
         } else {
-            drogon::orm::Result count_res =
-                co_await tsp_db_client->execSqlCoro("SELECT "
-                                                    "  (SELECT count(*) FROM storage.directories WHERE " +
-                                                        owner_col +
-                                                        " = $1 AND name ILIKE $2 AND path LIKE $3) as folders, "
-                                                        "  (SELECT count(*) FROM storage.files WHERE " +
-                                                        owner_col + " = $1 AND name ILIKE $2 AND full_path LIKE $3) as files",
-                    owner_id, search_pattern, recursive_pattern);
+            drogon::orm::Result count_res = co_await tsp_db_client->execSqlCoro(kCountSearch, owner_id, search_pattern, recursive_pattern);
             total_folders = static_cast<int32_t>(count_res[0]["folders"].as<int64_t>());
             total_files = static_cast<int32_t>(count_res[0]["files"].as<int64_t>());
         }
@@ -918,7 +1080,8 @@ Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(std
         if (offset >= total_folders) {
             co_return co_await tsp_db_client->execSqlCoro("SELECT 1 WHERE 1=0");
         }
-        int32_t folder_limit = std::min(t_limit, total_folders - offset);
+        const int32_t folder_limit = std::min(t_limit, total_folders - offset);
+        const std::string lo = fmt::format("LIMIT {} OFFSET {}", folder_limit, offset);
         if (t_search.empty()) {
             if (is_domain) {
                 co_return co_await tsp_db_client->execSqlCoro(
@@ -926,41 +1089,20 @@ Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(std
                     "FROM storage.directories WHERE domain = $1 AND "
                     "((parent_id IS NULL AND $2 = '/') OR (parent_id IN (SELECT id FROM storage.directories WHERE domain = $1 AND path = "
                     "$3))) "
-                    "ORDER BY name LIMIT " +
-                        std::to_string(folder_limit) + " OFFSET " + std::to_string(offset),
+                    "ORDER BY name " +
+                        lo,
                     target_domain, current_path, path_for_parent_lookup);
-            } else {
-                co_return co_await tsp_db_client->execSqlCoro(
-                    "SELECT id, name, created_at, virtual_size, real_size, count_sub_files, count_sub_directories, path "
-                    "FROM storage.directories WHERE " +
-                        owner_col +
-                        " = $1 AND "
-                        "((parent_id IS NULL AND $2 = '/') OR (parent_id IN (SELECT id FROM storage.directories WHERE " +
-                        owner_col +
-                        " = $1 AND path = $3))) "
-                        "ORDER BY name LIMIT " +
-                        std::to_string(folder_limit) + " OFFSET " + std::to_string(offset),
-                    owner_id, current_path, path_for_parent_lookup);
             }
-        } else {
-            if (is_domain) {
-                co_return co_await tsp_db_client->execSqlCoro(
-                    "SELECT id, name, created_at, virtual_size, real_size, count_sub_files, count_sub_directories, path "
-                    "FROM storage.directories WHERE domain = $1 AND name ILIKE $2 AND path LIKE $3 "
-                    "ORDER BY name LIMIT " +
-                        std::to_string(folder_limit) + " OFFSET " + std::to_string(offset),
-                    target_domain, search_pattern, recursive_pattern);
-            } else {
-                co_return co_await tsp_db_client->execSqlCoro(
-                    "SELECT id, name, created_at, virtual_size, real_size, count_sub_files, count_sub_directories, path "
-                    "FROM storage.directories WHERE " +
-                        owner_col +
-                        " = $1 AND name ILIKE $2 AND path LIKE $3 "
-                        "ORDER BY name LIMIT " +
-                        std::to_string(folder_limit) + " OFFSET " + std::to_string(offset),
-                    owner_id, search_pattern, recursive_pattern);
-            }
+            co_return co_await tsp_db_client->execSqlCoro(kFolderBase + lo, owner_id, current_path, path_for_parent_lookup);
         }
+        if (is_domain) {
+            co_return co_await tsp_db_client->execSqlCoro(
+                "SELECT id, name, created_at, virtual_size, real_size, count_sub_files, count_sub_directories, path "
+                "FROM storage.directories WHERE domain = $1 AND name ILIKE $2 AND path LIKE $3 ORDER BY name " +
+                    lo,
+                target_domain, search_pattern, recursive_pattern);
+        }
+        co_return co_await tsp_db_client->execSqlCoro(kFolderSearch + lo, owner_id, search_pattern, recursive_pattern);
     }();
 
     int32_t folders_on_page = 0;
@@ -980,60 +1122,42 @@ Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(std
     int32_t remaining_limit = t_limit - folders_on_page;
 
     if (remaining_limit > 0) {
-        int32_t file_offset = std::max(0, offset - total_folders);
+        const int32_t file_offset = std::max(0, offset - total_folders);
+        const std::string lo2 = fmt::format("LIMIT {} OFFSET {}", remaining_limit, file_offset);
         auto files_res = co_await [&]() -> Task<drogon::orm::Result> {
             if (t_search.empty()) {
                 if (is_domain) {
                     co_return co_await tsp_db_client->execSqlCoro(
-                        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, so.size AS compressed_size, so.original_size, "
-                        "so.upload_mode, so.part_count "
+                        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, "
+                        "(SELECT COALESCE(SUM(so_sum.size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
+                        "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS compressed_size, "
+                        "(SELECT COALESCE(SUM(so_sum.original_size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON "
+                        "so_sum.id = fo_sum.object_id WHERE fo_sum.file_id = f.id) AS original_size, "
+                        "so.upload_mode, (SELECT COUNT(*) FROM storage.file_objects WHERE file_id = f.id) AS part_count "
                         "FROM storage.files f JOIN storage.file_objects fo0 ON fo0.file_id = f.id AND fo0.part_index = 0 JOIN "
                         "storage.objects so ON so.id = fo0.object_id WHERE f.domain = $1 AND "
                         "((f.directory_id IS NULL AND $2 = '/') OR (f.directory_id IN (SELECT id FROM storage.directories WHERE domain = "
-                        "$1 AND path = $3))) "
-                        "ORDER BY f.name LIMIT " +
-                            std::to_string(remaining_limit) + " OFFSET " + std::to_string(file_offset),
+                        "$1 AND path = $3))) ORDER BY f.name " +
+                            lo2,
                         target_domain, current_path, path_for_parent_lookup);
-                } else {
-                    co_return co_await tsp_db_client->execSqlCoro(
-                        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, so.size AS compressed_size, so.original_size, "
-                        "so.upload_mode, so.part_count "
-                        "FROM storage.files f JOIN storage.file_objects fo0 ON fo0.file_id = f.id AND fo0.part_index = 0 JOIN "
-                        "storage.objects so ON so.id = fo0.object_id WHERE f." +
-                            owner_col +
-                            " = $1 AND "
-                            "((f.directory_id IS NULL AND $2 = '/') OR (f.directory_id IN (SELECT id FROM storage.directories WHERE " +
-                            owner_col +
-                            " = $1 AND path = $3))) "
-                            "ORDER BY f.name LIMIT " +
-                            std::to_string(remaining_limit) + " OFFSET " + std::to_string(file_offset),
-                        owner_id, current_path, path_for_parent_lookup);
                 }
-            } else {
-                if (is_domain) {
-                    co_return co_await tsp_db_client->execSqlCoro(
-                        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, so.size AS compressed_size, so.original_size, "
-                        "so.upload_mode, so.part_count "
-                        "FROM storage.files f JOIN storage.file_objects fo0 ON fo0.file_id = f.id AND fo0.part_index = 0 JOIN "
-                        "storage.objects so ON so.id = fo0.object_id WHERE f.domain = $1 AND "
-                        "f.name ILIKE $2 AND f.full_path LIKE $3 "
-                        "ORDER BY f.name LIMIT " +
-                            std::to_string(remaining_limit) + " OFFSET " + std::to_string(file_offset),
-                        target_domain, search_pattern, recursive_pattern);
-                } else {
-                    co_return co_await tsp_db_client->execSqlCoro(
-                        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, so.size AS compressed_size, so.original_size, "
-                        "so.upload_mode, so.part_count "
-                        "FROM storage.files f JOIN storage.file_objects fo0 ON fo0.file_id = f.id AND fo0.part_index = 0 JOIN "
-                        "storage.objects so ON so.id = fo0.object_id WHERE f." +
-                            owner_col +
-                            " = $1 AND "
-                            "f.name ILIKE $2 AND f.full_path LIKE $3 "
-                            "ORDER BY f.name LIMIT " +
-                            std::to_string(remaining_limit) + " OFFSET " + std::to_string(file_offset),
-                        owner_id, search_pattern, recursive_pattern);
-                }
+                co_return co_await tsp_db_client->execSqlCoro(kFileBase + lo2, owner_id, current_path, path_for_parent_lookup);
             }
+            if (is_domain) {
+                co_return co_await tsp_db_client->execSqlCoro(
+                    "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, "
+                    "(SELECT COALESCE(SUM(so_sum.size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
+                    "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS compressed_size, "
+                    "(SELECT COALESCE(SUM(so_sum.original_size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON "
+                    "so_sum.id = fo_sum.object_id WHERE fo_sum.file_id = f.id) AS original_size, "
+                    "so.upload_mode, (SELECT COUNT(*) FROM storage.file_objects WHERE file_id = f.id) AS part_count "
+                    "FROM storage.files f JOIN storage.file_objects fo0 ON fo0.file_id = f.id AND fo0.part_index = 0 JOIN "
+                    "storage.objects so ON so.id = fo0.object_id WHERE f.domain = $1 AND "
+                    "f.name ILIKE $2 AND f.full_path LIKE $3 ORDER BY f.name " +
+                        lo2,
+                    target_domain, search_pattern, recursive_pattern);
+            }
+            co_return co_await tsp_db_client->execSqlCoro(kFileSearch + lo2, owner_id, search_pattern, recursive_pattern);
         }();
 
         for (const auto& row : files_res) {
@@ -1502,32 +1626,40 @@ Task<HttpResponsePtr> StorageApiHandler::handleDelete(HttpRequestPtr tsp_req) {
 
 Task<HttpResponsePtr> StorageApiHandler::deleteFile(
     const drogon::orm::DbClientPtr& tsp_db_client, int64_t t_entity_id, int32_t t_user_id, bool t_is_admin) {
-    auto file_res = co_await tsp_db_client->execSqlCoro(
-        "SELECT f.id, f.user_id, f.automated_service_id, f.domain FROM storage.files f WHERE f.id = $1", t_entity_id);
+
+    // Single query: fetch file ownership + permission in one pass.
+    // LEFT JOINs return NULL columns when the user has no domain permission
+    // or the file has no user_id (domain-owned), both handled below.
+    auto file_res = co_await tsp_db_client->execSqlCoro("SELECT f.id, f.user_id, f.domain, "
+                                                        "       udp.can_delete  AS domain_can_delete, "
+                                                        "       u.can_delete_personal "
+                                                        "FROM storage.files f "
+                                                        "LEFT JOIN core.user_domain_permissions udp "
+                                                        "       ON udp.user_id = $2 AND udp.domain = f.domain "
+                                                        "LEFT JOIN core.users u ON u.id = $2 "
+                                                        "WHERE f.id = $1",
+        t_entity_id, t_user_id);
 
     if (file_res.empty()) {
         co_return createJsonErrorResponse("File not found or access denied", k404NotFound);
     }
 
-    const std::string domain_name = file_res[0]["domain"].isNull() ? "" : file_res[0]["domain"].as<std::string>();
+    const auto& fr = file_res[0];
+    const std::string domain_name = fr["domain"].isNull() ? "" : fr["domain"].as<std::string>();
 
     if (!t_is_admin) {
         if (!domain_name.empty()) {
-            // Shared domain space: check capability matrix
-            auto perm = co_await tsp_db_client->execSqlCoro(
-                "SELECT can_delete FROM core.user_domain_permissions WHERE user_id = $1 AND domain = $2", t_user_id, domain_name);
-            if (perm.empty() || !perm[0]["can_delete"].as<bool>()) {
+            // Shared domain: require explicit can_delete permission
+            if (fr["domain_can_delete"].isNull() || !fr["domain_can_delete"].as<bool>()) {
                 co_return createJsonErrorResponse(
                     "Deletion Denied: Delete capability is not granted for this operational domain.", k403Forbidden);
             }
         } else {
-            // Personal workspace: must be owner + check tamper-proof personal capability
-            if (file_res[0]["user_id"].isNull() || file_res[0]["user_id"].as<int32_t>() != t_user_id) {
+            // Personal workspace: must be owner + can_delete_personal flag
+            if (fr["user_id"].isNull() || fr["user_id"].as<int32_t>() != t_user_id) {
                 co_return createJsonErrorResponse("File not found or access denied", k404NotFound);
             }
-
-            auto user_res = co_await tsp_db_client->execSqlCoro("SELECT can_delete_personal FROM core.users WHERE id = $1", t_user_id);
-            if (user_res.empty() || !user_res[0]["can_delete_personal"].as<bool>()) {
+            if (fr["can_delete_personal"].isNull() || !fr["can_delete_personal"].as<bool>()) {
                 co_return createJsonErrorResponse(
                     "Deletion Denied: Deletion capability is disabled for this personal workspace.", k403Forbidden);
             }
@@ -1575,40 +1707,43 @@ Task<HttpResponsePtr> StorageApiHandler::deleteFile(
 
 Task<HttpResponsePtr> StorageApiHandler::deleteFolder(
     const drogon::orm::DbClientPtr& tsp_db_client, int64_t t_entity_id, int32_t t_user_id, bool t_is_admin) {
-    auto dir_res = co_await tsp_db_client->execSqlCoro(
-        "SELECT d.id, d.user_id, d.automated_service_id, d.domain FROM storage.directories d WHERE d.id = $1", t_entity_id);
+
+    // Single query: ownership + permission in one pass (same pattern as deleteFile).
+    auto dir_res = co_await tsp_db_client->execSqlCoro("SELECT d.id, d.user_id, d.domain, "
+                                                       "       udp.can_delete  AS domain_can_delete, "
+                                                       "       u.can_delete_personal "
+                                                       "FROM storage.directories d "
+                                                       "LEFT JOIN core.user_domain_permissions udp "
+                                                       "       ON udp.user_id = $2 AND udp.domain = d.domain "
+                                                       "LEFT JOIN core.users u ON u.id = $2 "
+                                                       "WHERE d.id = $1",
+        t_entity_id, t_user_id);
 
     if (dir_res.empty()) {
         co_return createJsonErrorResponse("Folder not found or access denied", k404NotFound);
     }
 
-    const std::string domain_name = dir_res[0]["domain"].isNull() ? "" : dir_res[0]["domain"].as<std::string>();
+    const auto& dr = dir_res[0];
+    const std::string domain_name = dr["domain"].isNull() ? "" : dr["domain"].as<std::string>();
 
     if (!t_is_admin) {
         if (!domain_name.empty()) {
-            // Shared domain space: check capability matrix
-            auto perm = co_await tsp_db_client->execSqlCoro(
-                "SELECT can_delete FROM core.user_domain_permissions WHERE user_id = $1 AND domain = $2", t_user_id, domain_name);
-            if (perm.empty() || !perm[0]["can_delete"].as<bool>()) {
+            if (dr["domain_can_delete"].isNull() || !dr["domain_can_delete"].as<bool>()) {
                 co_return createJsonErrorResponse(
                     "Folder Deletion Denied: Delete capability is not granted for this operational domain.", k403Forbidden);
             }
         } else {
-            // Personal workspace: must be owner + check tamper-proof personal capability
-            if (dir_res[0]["user_id"].isNull() || dir_res[0]["user_id"].as<int32_t>() != t_user_id) {
+            if (dr["user_id"].isNull() || dr["user_id"].as<int32_t>() != t_user_id) {
                 co_return createJsonErrorResponse("Folder not found or access denied", k404NotFound);
             }
-
-            auto user_res = co_await tsp_db_client->execSqlCoro("SELECT can_delete_personal FROM core.users WHERE id = $1", t_user_id);
-            if (user_res.empty() || !user_res[0]["can_delete_personal"].as<bool>()) {
+            if (dr["can_delete_personal"].isNull() || !dr["can_delete_personal"].as<bool>()) {
                 co_return createJsonErrorResponse(
                     "Folder Deletion Denied: Deletion capability is disabled for this personal workspace.", k403Forbidden);
             }
         }
     }
 
-    // NOTE: In Postgres, if a directory is deleted, its sub-files and sub-directories are handled
-    // by ON DELETE CASCADE if configured, or it will fail if not.
+    // NOTE: sub-files and sub-directories are removed by ON DELETE CASCADE.
     auto delete_res = co_await tsp_db_client->execSqlCoro("DELETE FROM storage.directories WHERE id = $1", t_entity_id);
     if (delete_res.affectedRows() == 0) {
         co_return createJsonErrorResponse("Folder deletion failed", k404NotFound);
@@ -1903,7 +2038,25 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleInitUploadSession
     std::string target_path = p_json->get("target_path", "/").asString();
     std::string mime_type = p_json->get("mime_type", "application/octet-stream").asString();
     int64_t total_size = p_json->get("total_size", 0).asInt64();
-    int64_t chunk_size = p_json->get("chunk_size", 5 * 1024 * 1024).asInt64(); // default 5MB
+    int64_t chunk_size = 0;
+    if (p_json->isMember("chunk_size") && (*p_json)["chunk_size"].asInt64() > 0) {
+        chunk_size = (*p_json)["chunk_size"].asInt64();
+    } else {
+        // Adaptive chunk negotiation based on file size:
+        // <= 50MB: 5MB chunks (<= 10 HTTP requests)
+        // 50MB - 500MB: 8MB chunks (6 to 63 HTTP requests)
+        // 500MB - 5GB: 16MB chunks (31 to 312 HTTP requests)
+        // > 5GB: 32MB chunks
+        if (total_size > 5ULL * 1024ULL * 1024ULL * 1024ULL) {
+            chunk_size = 32 * 1024 * 1024;
+        } else if (total_size > 500 * 1024 * 1024) {
+            chunk_size = 16 * 1024 * 1024;
+        } else if (total_size > 50 * 1024 * 1024) {
+            chunk_size = 8 * 1024 * 1024;
+        } else {
+            chunk_size = 5 * 1024 * 1024;
+        }
+    }
 
     if (filename.empty() || total_size <= 0 || chunk_size <= 0) {
         co_return createJsonErrorResponse("filename, total_size, and chunk_size are required", k400BadRequest);
@@ -2134,22 +2287,16 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleUploadChunk(drogo
         }
 
         // ── 5. Persist chunk record and update session ───────────────────────
-        // chunk row: object_id = first segment (or null if no segment flushed yet)
-        // For multi-segment chunks, only the last segment's object_id is recorded
-        // against this chunk_index; the full manifest is rebuilt at complete time.
-        std::optional<int64_t> chunk_obj_id;
-        if (!new_segments.empty())
-            chunk_obj_id = new_segments.back().second;
-
-        if (chunk_obj_id.has_value()) {
-            co_await db->execSqlCoro(
-                "INSERT INTO storage.upload_chunks (upload_id, chunk_index, chunk_size, storage_key, object_id, compressed_size) "
-                "VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (upload_id, chunk_index) DO UPDATE "
-                "SET chunk_size = EXCLUDED.chunk_size, object_id = EXCLUDED.object_id, "
-                "    compressed_size = EXCLUDED.compressed_size",
-                upload_id, chunk_index, static_cast<int64_t>(body.size()),
-                "pending/" + upload_id + "/" + std::to_string(new_segments.back().first), *chunk_obj_id,
-                static_cast<int64_t>(kSegmentBytes));
+        if (!new_segments.empty()) {
+            for (const auto& [seg_idx, seg_obj_id] : new_segments) {
+                co_await db->execSqlCoro(
+                    "INSERT INTO storage.upload_chunks (upload_id, chunk_index, chunk_size, storage_key, object_id, compressed_size) "
+                    "VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (upload_id, chunk_index) DO UPDATE "
+                    "SET chunk_size = EXCLUDED.chunk_size, object_id = EXCLUDED.object_id, "
+                    "    compressed_size = EXCLUDED.compressed_size",
+                    upload_id, seg_idx, static_cast<int64_t>(body.size()), "pending/" + upload_id + "/" + std::to_string(seg_idx),
+                    seg_obj_id, static_cast<int64_t>(kSegmentBytes));
+            }
         } else {
             // No segment flushed yet (compressed bytes still buffering)
             co_await db->execSqlCoro("INSERT INTO storage.upload_chunks (upload_id, chunk_index, chunk_size, storage_key) "
@@ -2161,9 +2308,9 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleUploadChunk(drogo
         state->processed_chunks++;
 
         co_await db->execSqlCoro("UPDATE storage.upload_sessions "
-                                 "SET uploaded_chunks_count = (SELECT count(*) FROM storage.upload_chunks WHERE upload_id = $1), "
+                                 "SET uploaded_chunks_count = $2, "
                                  "    updated_at = NOW() WHERE id = $1",
-            upload_id);
+            upload_id, state->processed_chunks);
 
         co_return createJsonResponse(fmt::format(
             R"({{"upload_id":"{}","chunk_index":{},"received":true,"segments_flushed":{}}})", upload_id, chunk_index, new_segments.size()));
@@ -2287,7 +2434,7 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
         }
 
         // -- 4. Flush remaining compressed bytes (zstd endStream)
-        {
+        if (state->server_compressed && state->cstream) {
             const size_t out_buf_size = ZSTD_CStreamOutSize();
             std::vector<char> out_buf(out_buf_size);
             bool done = false;
@@ -2354,7 +2501,7 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
                 // Download first segment to read magic bytes (use existing_segs which has provisional segments)
                 std::string first_key = existing_segs.empty() ? "" : "pending/" + upload_id + "/0";
                 if (!first_key.empty()) {
-                    BackendResult<std::string> content_res = co_await s3_sniff->getObjectContent(bucket, first_key);
+                    BackendResult<std::string> content_res = co_await s3_sniff->getObjectContent(bucket, first_key, 4096);
                     if (content_res.has_value()) {
                         std::string_view data(*content_res);
                         std::string preview(data.substr(0, std::min<size_t>(data.size(), 4096)));
@@ -2376,7 +2523,7 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
             std::string sniffed_lower = sniffed_ext;
             std::transform(sniffed_lower.begin(), sniffed_lower.end(), sniffed_lower.begin(),
                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (declared_lower != sniffed_lower) {
+            if (!::sgrn::datastore::services::helpers::isCompatibleSniffedFormat(declared_lower, sniffed_lower)) {
                 // Check if sniffed extension is a known format in registry
                 auto format_res = co_await services::storage::helpers::getFormat(db, sniffed_lower);
                 if (format_res.has_value()) {

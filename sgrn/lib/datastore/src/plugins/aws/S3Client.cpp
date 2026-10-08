@@ -240,12 +240,17 @@ Task<BackendResult<void>> S3Client::downloadFileRange(
         });
 }
 
-Task<BackendResult<std::string>> S3Client::getObjectContent(std::string t_bucket, std::string t_key) {
+Task<BackendResult<std::string>> S3Client::getObjectContent(std::string t_bucket, std::string t_key, int64_t t_max_bytes) {
     co_return co_await execute<std::string>(
-        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](Aws::S3::S3Client& t_client) -> BackendResult<std::string> {
+        [t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_max_bytes](Aws::S3::S3Client& t_client) -> BackendResult<std::string> {
             Aws::S3::Model::GetObjectRequest req;
             req.SetBucket(t_bucket.c_str());
             req.SetKey(t_key.c_str());
+
+            if (t_max_bytes > 0) {
+                std::string range_hdr = "bytes=0-" + std::to_string(t_max_bytes - 1);
+                req.SetRange(range_hdr.c_str());
+            }
 
             auto outcome = t_client.GetObject(req);
 
@@ -261,7 +266,16 @@ Task<BackendResult<std::string>> S3Client::getObjectContent(std::string t_bucket
             INFO_LOG("[S3Client] getObjectContent: bucket='{}' key='{}' reported_content_length={}", t_bucket, t_key, reported_len);
 
             Aws::IOStream& body_stream = result.GetBody();
-            std::string content((std::istreambuf_iterator<char>(body_stream)), std::istreambuf_iterator<char>());
+            std::string content;
+            if (t_max_bytes > 0) {
+                content.reserve(std::min<size_t>(reported_len, static_cast<size_t>(t_max_bytes)));
+            } else if (reported_len > 0) {
+                content.reserve(reported_len);
+            }
+            content.assign((std::istreambuf_iterator<char>(body_stream)), std::istreambuf_iterator<char>());
+            if (t_max_bytes > 0 && content.size() > static_cast<size_t>(t_max_bytes)) {
+                content.resize(static_cast<size_t>(t_max_bytes));
+            }
             INFO_LOG("[S3Client] getObjectContent: read {} bytes from stream", content.size());
             DEBUG_LOG("[S3Client] Content read - size: {}, ptr: {}", content.size(), (void*)content.data());
             return content;
