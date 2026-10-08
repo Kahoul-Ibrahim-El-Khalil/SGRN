@@ -1112,6 +1112,8 @@ void registerSchemaTypes(sgrn::scripting::ScriptHost& t_host, const PlcSchemaSto
         p_engine->RegisterObjectMethod(t_t, "void put(const string &in, DTL@)", asMETHOD(ScriptDataBlock, putDtl), asCALL_THISCALL);
         // NOTE: write()/setVal()/val() removed — get()/put()/typed properties are
         // the surface (writeDouble/Int/Bool/Dtl C++ stays for FieldProxy).
+        p_engine->RegisterObjectMethod(t_t, "DTL@ lastRequestTime() const", AS_M(ScriptDataBlock, lastRequestTime));
+        p_engine->RegisterObjectMethod(t_t, "DTL@ lastResponseTime() const", AS_M(ScriptDataBlock, lastResponseTime));
         p_engine->RegisterObjectMethod(t_t, "string toJson() const", AS_M(ScriptDataBlock, toJson));
         p_engine->RegisterObjectMethod(t_t, "string diff() const", AS_M(ScriptDataBlock, diff));
         p_engine->RegisterObjectMethod(t_t, "void print() const", AS_M(ScriptDataBlock, print));

@@ -1,5 +1,6 @@
 #include <sgrn/gateway/twin/twin.hpp>
 #include <sgrn/plcsim/runtime/PlcRuntime.hpp>
+#include <sgrn/s7shell/bindings/registration.hpp>
 #include <sgrn/s7shell/connection/S7Connection.hpp>
 #include <sgrn/s7shell/script/ScriptDataBlock.hpp>
 #include <sgrn/s7shell/script/ScriptFieldProxy.hpp>
@@ -7,6 +8,7 @@
 #include <sgrn/s7shell/script/ScriptTagTable.hpp>
 #include <sgrn/s7shell/utils/json_helpers.hpp>
 #include <sgrn/scl/types.hpp>
+#include <sgrn/scl/utils.hpp>
 
 #include <sgrn/s7shell/errors.hpp>
 
@@ -21,6 +23,8 @@
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
+#include <scriptarray/scriptarray.h>
+#include <scriptdictionary/scriptdictionary.h>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -83,14 +87,37 @@ void ScriptDataBlock::notifyConnError(const ::sgrn::wrappers::s7::S7Error& t_err
     }
 }
 
-void ScriptDataBlock::addRef() {
-    ++ref_count_;
+void ScriptDataBlock::stampRequest() {
+    last_req_dtl_ = wallClockDtlString();
 }
 
-void ScriptDataBlock::release() {
-    if (--ref_count_ == 0)
-        delete this;
+void ScriptDataBlock::stampResponse() {
+    last_resp_dtl_ = wallClockDtlString();
 }
+
+ScriptDtl* ScriptDataBlock::lastRequestTime() const {
+    return makeWallClockDtl(last_req_dtl_);
+}
+
+ScriptDtl* ScriptDataBlock::lastResponseTime() const {
+    return makeWallClockDtl(last_resp_dtl_);
+}
+
+namespace
+{
+// Stamps the response wall-clock time when the enclosing get/put returns
+// (all paths — throwScriptException sets without unwinding, so every return
+// runs this).
+struct RespStampDb {
+    explicit RespStampDb(ScriptDataBlock* tp_db)
+        : db_(tp_db) {
+    }
+    ~RespStampDb() {
+        db_->stampResponse();
+    }
+    ScriptDataBlock* db_;
+};
+} // namespace
 
 void ScriptDataBlock::registerSize(size_t t_size) {
     db_size_ = t_size;
@@ -133,6 +160,8 @@ void ScriptDataBlock::addField(const std::string& t_name, const std::string& t_t
 }
 
 ScriptDataBlock* ScriptDataBlock::get() {
+    stampRequest();
+    RespStampDb resp_stamp(this);
     if (db_size_ == 0) {
         // Bug fix: cannot perform a read without knowing the DB size.
         // Silently returning here produced zero/stale data with no indication of failure.
@@ -149,6 +178,8 @@ ScriptDataBlock* ScriptDataBlock::get() {
 }
 
 ScriptDataBlock* ScriptDataBlock::get(size_t t_total_size) {
+    stampRequest();
+    RespStampDb resp_stamp(this);
     db_size_ = t_total_size;
     snapshot_buffer_.assign(t_total_size, 0);
 
@@ -445,92 +476,361 @@ static std::string describeField(const ::sgrn::scl::DbField& t_field) {
     return std::string(tp_type);
 }
 
-void ScriptDataBlock::writeJson(const std::string& t_path, const std::string& t_json_val) {
-    ::sgrn::scl::DbField target_field{};
-    size_t abs_offset = 0;
-    bool found = false;
+// ── Direct AngelScript value staging (no JSON round-trip) ───────────────
+// The encoder walks script arrays/dictionaries alongside the schema field
+// and writes bytes straight into the staging buffer — same rules as
+// put(path, json) (struct merge, exact static-array counts) but without
+// serializing to text and re-parsing.
+
+namespace
+{
+bool isScriptStringType(DataType t_type) {
+    return t_type == DataType::String || t_type == DataType::WString || t_type == DataType::XString || t_type == DataType::XWString;
+}
+
+bool isScriptArrayField(const ::sgrn::scl::DbField& t_field) {
+    // String types are scalar values even with count > 1 (capacity),
+    // mirroring the twin encoder's routing.
+    return t_field.count > 1 && !isScriptStringType(t_field.type);
+}
+
+bool isScriptStructField(const ::sgrn::scl::DbField& t_field) {
+    return t_field.type == DataType::Struct && t_field.count <= 1;
+}
+
+std::string scriptTypeName(asIScriptEngine* tp_engine, int t_type_id) {
+    if (!tp_engine)
+        return "?";
+    if (t_type_id & asTYPEID_OBJHANDLE)
+        t_type_id &= ~asTYPEID_OBJHANDLE;
+    asITypeInfo* p_info = tp_engine->GetTypeInfoById(t_type_id);
+    return p_info != nullptr ? p_info->GetName() : "?";
+}
+} // namespace
+
+bool ScriptDataBlock::stageFieldWrite(const std::string& t_path, StagedFieldWrite& t_out) {
     // Runtime schema is authoritative for staging (same source as
     // writeScalar); fall back to the connection schema for runtime-less
     // file mode.
+    bool found = false;
     if (conn_->runtime_) {
         if (auto loc = conn_->runtime_->getSchema().findField(db_num_, t_path)) {
-            target_field = *loc->field;
-            abs_offset = loc->abs_offset;
+            t_out.field = *loc->field;
+            t_out.abs_offset = static_cast<size_t>(loc->abs_offset);
             found = true;
         }
     } else if (auto loc = conn_->schema_.findField(db_num_, t_path)) {
-        target_field = *loc->field;
-        abs_offset = loc->abs_offset;
+        t_out.field = *loc->field;
+        t_out.abs_offset = static_cast<size_t>(loc->abs_offset);
         found = true;
     }
     if (!found) {
         throwScriptException(fmt::format("DB{}: field '{}' not found in schema", db_num_, t_path), ShellError::NotFound);
-        return;
+        return false;
     }
     if (!t_path.empty() && t_path.back() == ']') {
-        target_field.count = 1;
+        t_out.field.count = 1;
     }
-    // Shape pre-checks with actionable errors (the encoder itself only
-    // reports a bare Generic on mismatch).
-    {
-        rapidjson::Document doc;
-        if (!doc.Parse(t_json_val.c_str()).HasParseError()) {
-            const bool is_struct = target_field.type == DataType::Struct && target_field.count <= 1;
-            const bool is_array = target_field.count > 1 && !target_field.is_dynamic;
-            if (doc.IsObject() && !is_struct) {
-                throwScriptException(
-                    fmt::format("DB{}.'{}' is {} — objects assign only to STRUCT fields", db_num_, t_path, describeField(target_field)),
-                    ShellError::TypeMismatch);
-                return;
-            }
-            if (doc.IsArray() && !is_array && !target_field.is_dynamic) {
-                throwScriptException(
-                    fmt::format("DB{}.'{}' is {} — arrays assign only to ARRAY fields", db_num_, t_path, describeField(target_field)),
-                    ShellError::TypeMismatch);
-                return;
-            }
-            // Static arrays are fixed-size PLC memory: require exactly count
-            // elements (same rule as put(path, json)). Dynamic arrays accept
-            // any length up to capacity; struct dicts merge over existing
-            // bytes.
-            if (is_array && doc.Size() != static_cast<rapidjson::SizeType>(target_field.count)) {
-                throwScriptException(
-                    fmt::format("DB{}.'{}' is {} and needs exactly {} elements, got {} — assign a full-length value (zeros to clear)",
-                        db_num_, t_path, describeField(target_field), target_field.count, doc.Size()),
-                    ShellError::TypeMismatch);
-                return;
-            }
-        }
-    }
-    const int span = ::sgrn::gateway::twin::fieldSpanSize(target_field);
+    const int span = ::sgrn::gateway::twin::fieldSpanSize(t_out.field);
     if (span <= 0) {
-        throwScriptException(
-            fmt::format("DB{}.'{}' has zero span ({})", db_num_, t_path, describeField(target_field)), ShellError::Generic);
-        return;
+        throwScriptException(fmt::format("DB{}.'{}' has zero span ({})", db_num_, t_path, describeField(t_out.field)), ShellError::Generic);
+        return false;
     }
     // Read existing bytes first so partial struct dicts merge and boolean
     // bits in shared bytes are preserved.
-    std::vector<uint8_t> tp_before(static_cast<size_t>(span), 0);
-    std::vector<uint8_t> buf(static_cast<size_t>(span), 0);
-    if (!(conn_->memory_.readDbMemory(db_num_, abs_offset, tp_before.size(), tp_before.data()))) {
+    t_out.before.assign(static_cast<size_t>(span), 0);
+    t_out.buf.assign(static_cast<size_t>(span), 0);
+    if (!(conn_->memory_.readDbMemory(db_num_, t_out.abs_offset, t_out.before.size(), t_out.before.data()))) {
         throwScriptException("readDbMemory failed", ShellError::Generic);
-        return;
+        return false;
     }
-    buf = tp_before;
-    auto res =
-        ::sgrn::gateway::twin::encodeFieldAt(target_field, t_json_val, buf.data(), static_cast<size_t>(span), 0, target_field.endianness);
-    if (res.hasError()) {
-        throwScriptException(fmt::format("DB{}.'{}' rejected the value for {}: {}", db_num_, t_path, describeField(target_field),
-                                 ::sgrn::scl::toString(res.error())),
-            ShellError::TypeMismatch);
-        return;
-    }
-    if (auto r = conn_->memory_.writeDbMemory(db_num_, abs_offset, buf.size(), buf.data()); !r) {
-        throwScriptException(fmt::format("writeDbMemory failed: {}", r.error()), ShellError::Generic);
+    t_out.buf = t_out.before;
+    return true;
+}
+
+void ScriptDataBlock::commitFieldWrite(const std::string& t_path, StagedFieldWrite& t_staged) {
+    if (auto r = conn_->memory_.writeDbMemory(db_num_, t_staged.abs_offset, t_staged.buf.size(), t_staged.buf.data()); !r) {
+        throwScriptException(fmt::format("DB{}.'{}': writeDbMemory failed: {}", db_num_, t_path, r.error()), ShellError::Generic);
         return;
     }
     snapshot_valid_ = true;
-    markDirtyDiff(conn_->runtime_, db_num_, abs_offset, tp_before.data(), buf.data(), buf.size());
+    markDirtyDiff(conn_->runtime_, db_num_, t_staged.abs_offset, t_staged.before.data(), t_staged.buf.data(), t_staged.buf.size());
+}
+
+// Forward declaration for the recursive encoder.
+static void encodeScriptFieldValue(const ::sgrn::scl::DbField& t_field, asIScriptEngine* tp_engine, const void* tp_val, int t_type_id,
+    uint8_t* tp_buf, size_t t_buf_size, const std::string& t_ctx, uint16_t t_db_num);
+
+static s7codec::DecodedValue decodedFromScriptScalar(const ::sgrn::scl::DbField& t_field, asIScriptEngine* tp_engine, const void* tp_val,
+    int t_type_id, const std::string& t_ctx, uint16_t t_db_num) {
+    using s7codec::DecodedValue;
+    if (t_type_id == asTYPEID_BOOL)
+        return DecodedValue::makeBool(*static_cast<const bool*>(tp_val));
+    if (t_type_id == asTYPEID_INT8)
+        return DecodedValue::makeSigned(static_cast<int64_t>(*static_cast<const int8_t*>(tp_val)));
+    if (t_type_id == asTYPEID_INT16)
+        return DecodedValue::makeSigned(static_cast<int64_t>(*static_cast<const int16_t*>(tp_val)));
+    if (t_type_id == asTYPEID_INT32)
+        return DecodedValue::makeSigned(static_cast<int64_t>(*static_cast<const int32_t*>(tp_val)));
+    if (t_type_id == asTYPEID_UINT8)
+        return DecodedValue::makeUnsigned(static_cast<uint64_t>(*static_cast<const uint8_t*>(tp_val)));
+    if (t_type_id == asTYPEID_UINT16)
+        return DecodedValue::makeUnsigned(static_cast<uint64_t>(*static_cast<const uint16_t*>(tp_val)));
+    if (t_type_id == asTYPEID_UINT32)
+        return DecodedValue::makeUnsigned(static_cast<uint64_t>(*static_cast<const uint32_t*>(tp_val)));
+    if (t_type_id == asTYPEID_INT64)
+        return DecodedValue::makeSigned(*static_cast<const int64_t*>(tp_val));
+    if (t_type_id == asTYPEID_UINT64)
+        return DecodedValue::makeUnsigned(*static_cast<const uint64_t*>(tp_val));
+    if (t_type_id == asTYPEID_FLOAT)
+        return DecodedValue::makeDouble(static_cast<double>(*static_cast<const float*>(tp_val)));
+    if (t_type_id == asTYPEID_DOUBLE)
+        return DecodedValue::makeDouble(*static_cast<const double*>(tp_val));
+    const std::string type_name = scriptTypeName(tp_engine, t_type_id);
+    if (type_name == "string") {
+        const std::string val = *static_cast<const std::string*>(tp_val);
+        // Single CHAR/WCHAR takes the first character (mirrors assignString).
+        if ((t_field.type == DataType::Char || t_field.type == DataType::WChar) && !val.empty())
+            return DecodedValue::makeUnsigned(static_cast<uint64_t>(static_cast<uint8_t>(val[0])));
+        return DecodedValue::makeString(val);
+    }
+    if (type_name == "array" || type_name == "dictionary") {
+        throwScriptException(
+            fmt::format("'{}' is {} — cannot assign {} here", t_ctx, describeField(t_field), type_name), ShellError::TypeMismatch);
+        return DecodedValue{};
+    }
+    if (type_name == "DTL") {
+        throwScriptException(fmt::format("'{}': assign DTL members directly (db['...'] = dtl())", t_ctx), ShellError::TypeMismatch);
+        return DecodedValue{};
+    }
+    throwScriptException(fmt::format("'{}': cannot assign {} to {}", t_ctx, type_name, describeField(t_field)), ShellError::TypeMismatch);
+    return DecodedValue{};
+}
+
+static bool hasScriptException() {
+    // NOTE: GetExceptionString() returns "" (not null) when clean.
+    asIScriptContext* p_ctx = asGetActiveContext();
+    const char* p_ex = (p_ctx != nullptr) ? p_ctx->GetExceptionString() : nullptr;
+    return p_ex != nullptr && p_ex[0] != '\0';
+}
+
+static bool scriptValueToBool(asIScriptEngine* tp_engine, const void* tp_val, int t_type_id) {
+    if (t_type_id == asTYPEID_BOOL)
+        return *static_cast<const bool*>(tp_val);
+    // Exact-width reads: array elements are packed at element size, so
+    // widened reads would overrun into the next element.
+    if (t_type_id == asTYPEID_INT8)
+        return *static_cast<const int8_t*>(tp_val) != 0;
+    if (t_type_id == asTYPEID_INT16)
+        return *static_cast<const int16_t*>(tp_val) != 0;
+    if (t_type_id == asTYPEID_INT32)
+        return *static_cast<const int32_t*>(tp_val) != 0;
+    if (t_type_id == asTYPEID_INT64)
+        return *static_cast<const int64_t*>(tp_val) != 0;
+    if (t_type_id == asTYPEID_UINT8)
+        return *static_cast<const uint8_t*>(tp_val) != 0;
+    if (t_type_id == asTYPEID_UINT16)
+        return *static_cast<const uint16_t*>(tp_val) != 0;
+    if (t_type_id == asTYPEID_UINT32)
+        return *static_cast<const uint32_t*>(tp_val) != 0;
+    if (t_type_id == asTYPEID_UINT64)
+        return *static_cast<const uint64_t*>(tp_val) != 0;
+    if (t_type_id == asTYPEID_FLOAT)
+        return *static_cast<const float*>(tp_val) != 0.0f;
+    if (t_type_id == asTYPEID_DOUBLE)
+        return *static_cast<const double*>(tp_val) != 0.0;
+    if (scriptTypeName(tp_engine, t_type_id) == "string") {
+        const std::string val = *static_cast<const std::string*>(tp_val);
+        return val == "true" || val == "1" || val == "TRUE";
+    }
+    return false;
+}
+
+static void encodeScriptArray(const ::sgrn::scl::DbField& t_field, asIScriptEngine* tp_engine, const CScriptArray* tp_arr, uint8_t* tp_buf,
+    size_t t_buf_size, const std::string& t_ctx, uint16_t t_db_num) {
+    const auto arr_size = static_cast<uint32_t>(tp_arr->GetSize());
+    if (!t_field.is_dynamic && arr_size != t_field.count) {
+        throwScriptException(
+            fmt::format("DB{}.'{}' is {} and needs exactly {} elements, got {} — assign a full-length value (zeros to clear)", t_db_num,
+                t_ctx, describeField(t_field), t_field.count, arr_size),
+            ShellError::TypeMismatch);
+        return;
+    }
+    if (t_field.is_dynamic && arr_size > t_field.count) {
+        throwScriptException(fmt::format("DB{}.'{}' is {} and holds at most {} elements, got {}", t_db_num, t_ctx, describeField(t_field),
+                                 t_field.count, arr_size),
+            ShellError::TypeMismatch);
+        return;
+    }
+    const int elem_type_id = tp_arr->GetElementTypeId();
+    if (t_field.type == DataType::Bool) {
+        // Packed bits, mirroring the twin encoder (accepts bool/int/string).
+        for (uint32_t i = 0; i < arr_size && !hasScriptException(); ++i) {
+            const bool b = scriptValueToBool(tp_engine, tp_arr->At(i), elem_type_id);
+            const size_t byte_off = static_cast<size_t>(i) / 8;
+            const int bit_off = static_cast<int>(static_cast<size_t>(i) % 8);
+            if (byte_off >= t_buf_size) {
+                throwScriptException(fmt::format("DB{}.'{}': bool element {} out of range", t_db_num, t_ctx, i), ShellError::TypeMismatch);
+                return;
+            }
+            auto status = s7codec::encodeBool(b, bit_off, tp_buf + byte_off, t_buf_size - byte_off);
+            if (!status.has_value()) {
+                throwScriptException(
+                    fmt::format("DB{}.'{}': bool encode failed at element {}", t_db_num, t_ctx, i), ShellError::TypeMismatch);
+                return;
+            }
+        }
+        return;
+    }
+    const int elem_size = static_cast<int>(::sgrn::scl::fieldElementSpanBytes(t_field));
+    if (elem_size <= 0) {
+        throwScriptException(
+            fmt::format("DB{}.'{}' has zero element span ({})", t_db_num, t_ctx, describeField(t_field)), ShellError::Generic);
+        return;
+    }
+    ::sgrn::scl::DbField element = t_field;
+    element.count = 1;
+    element.offset = 0;
+    element.is_dynamic = false;
+    // throwScriptException sets (does not unwind), so stop at the first
+    // nested failure instead of stacking exceptions.
+    for (uint32_t i = 0; i < arr_size && !hasScriptException(); ++i) {
+        const size_t off = static_cast<size_t>(i) * static_cast<size_t>(elem_size);
+        if (off + static_cast<size_t>(elem_size) > t_buf_size) {
+            throwScriptException(fmt::format("DB{}.'{}': element {} out of range", t_db_num, t_ctx, i), ShellError::TypeMismatch);
+            return;
+        }
+        encodeScriptFieldValue(element, tp_engine, tp_arr->At(i), elem_type_id, tp_buf + off, static_cast<size_t>(elem_size),
+            fmt::format("{}[{}]", t_ctx, i), t_db_num);
+    }
+}
+
+static void encodeScriptDict(const ::sgrn::scl::DbField& t_field, asIScriptEngine* tp_engine, const CScriptDictionary* tp_dict,
+    uint8_t* tp_buf, size_t t_buf_size, const std::string& t_ctx, uint16_t t_db_num) {
+    for (auto it = tp_dict->begin(); it != tp_dict->end() && !hasScriptException(); ++it) {
+        const std::string key = it.GetKey();
+        const DbField* p_child = nullptr;
+        for (const auto& child : t_field.children) {
+            if (child.name == key) {
+                p_child = &child;
+                break;
+            }
+        }
+        if (!p_child)
+            continue; // unknown members are ignored, mirroring put(path, json)
+        if (static_cast<size_t>(p_child->offset) >= t_buf_size) {
+            throwScriptException(fmt::format("DB{}.'{}.{}' is out of range", t_db_num, t_ctx, key), ShellError::TypeMismatch);
+            return;
+        }
+        encodeScriptFieldValue(*p_child, tp_engine, it.GetAddressOfValue(), it.GetTypeId(), tp_buf + static_cast<size_t>(p_child->offset),
+            t_buf_size - static_cast<size_t>(p_child->offset), t_ctx + "." + key, t_db_num);
+    }
+}
+
+static void encodeScriptFieldValue(const ::sgrn::scl::DbField& t_field, asIScriptEngine* tp_engine, const void* tp_val, int t_type_id,
+    uint8_t* tp_buf, size_t t_buf_size, const std::string& t_ctx, uint16_t t_db_num) {
+    // Unwrap object handles (a null handle is an explicit error, never a
+    // silent null).
+    if (t_type_id & asTYPEID_OBJHANDLE) {
+        tp_val = *static_cast<void* const*>(tp_val);
+        t_type_id &= ~asTYPEID_OBJHANDLE;
+        if (!tp_val) {
+            throwScriptException(fmt::format("DB{}.'{}': cannot assign a null value", t_db_num, t_ctx), ShellError::TypeMismatch);
+            return;
+        }
+    }
+    if (isScriptStructField(t_field)) {
+        if (scriptTypeName(tp_engine, t_type_id) == "dictionary") {
+            encodeScriptDict(t_field, tp_engine, static_cast<const CScriptDictionary*>(tp_val), tp_buf, t_buf_size, t_ctx, t_db_num);
+            return;
+        }
+        throwScriptException(fmt::format("DB{}.'{}' is {} — objects assign only to STRUCT fields", t_db_num, t_ctx, describeField(t_field)),
+            ShellError::TypeMismatch);
+        return;
+    }
+    if (isScriptArrayField(t_field)) {
+        if (scriptTypeName(tp_engine, t_type_id) == "array") {
+            encodeScriptArray(t_field, tp_engine, static_cast<const CScriptArray*>(tp_val), tp_buf, t_buf_size, t_ctx, t_db_num);
+            return;
+        }
+        throwScriptException(fmt::format("DB{}.'{}' is {} — arrays assign only to ARRAY fields", t_db_num, t_ctx, describeField(t_field)),
+            ShellError::TypeMismatch);
+        return;
+    }
+    // Scalar (string-typed fields included): reject composites, then encode
+    // straight through s7codec.
+    const std::string type_name = scriptTypeName(tp_engine, t_type_id);
+    if (type_name == "array" || type_name == "dictionary") {
+        throwScriptException(fmt::format("DB{}.'{}' is {} — cannot assign {} here", t_db_num, t_ctx, describeField(t_field), type_name),
+            ShellError::TypeMismatch);
+        return;
+    }
+    auto decoded = decodedFromScriptScalar(t_field, tp_engine, tp_val, t_type_id, t_ctx, t_db_num);
+    if (!decoded.valid())
+        return; // decodedFromScriptScalar already threw
+    auto status = s7codec::encodeScalar(decoded, t_field.type, tp_buf, t_buf_size, t_field.bit_index, t_field.count, t_field.endianness);
+    if (!status.has_value()) {
+        throwScriptException(
+            fmt::format("DB{}.'{}' rejected the value for {}", t_db_num, t_ctx, describeField(t_field)), ShellError::TypeMismatch);
+        return;
+    }
+}
+
+static asIScriptEngine* activeScriptEngine(const std::string& t_ctx, uint16_t t_db_num) {
+    asIScriptContext* p_ctx = asGetActiveContext();
+    if (!p_ctx) {
+        throwScriptException(
+            fmt::format("DB{}.'{}': structured assignment needs an active script context", t_db_num, t_ctx), ShellError::Generic);
+        return nullptr;
+    }
+    return p_ctx->GetEngine();
+}
+
+void ScriptDataBlock::writeScriptArray(const std::string& t_path, void* tp_arr) {
+    if (!tp_arr) {
+        throwScriptException(fmt::format("DB{}.'{}': cannot assign a null array", db_num_, t_path), ShellError::TypeMismatch);
+        return;
+    }
+    StagedFieldWrite staged;
+    if (!stageFieldWrite(t_path, staged))
+        return;
+    if (!isScriptArrayField(staged.field)) {
+        throwScriptException(
+            fmt::format("DB{}.'{}' is {} — arrays assign only to ARRAY fields", db_num_, t_path, describeField(staged.field)),
+            ShellError::TypeMismatch);
+        return;
+    }
+    asIScriptEngine* p_engine = activeScriptEngine(t_path, db_num_);
+    if (!p_engine)
+        return;
+    encodeScriptArray(staged.field, p_engine, static_cast<CScriptArray*>(tp_arr), staged.buf.data(), staged.buf.size(), t_path, db_num_);
+    if (hasScriptException())
+        return; // encoder threw — leave the shadow untouched
+    commitFieldWrite(t_path, staged);
+}
+
+void ScriptDataBlock::writeScriptDict(const std::string& t_path, void* tp_dict) {
+    if (!tp_dict) {
+        throwScriptException(fmt::format("DB{}.'{}': cannot assign a null dictionary", db_num_, t_path), ShellError::TypeMismatch);
+        return;
+    }
+    StagedFieldWrite staged;
+    if (!stageFieldWrite(t_path, staged))
+        return;
+    if (!isScriptStructField(staged.field)) {
+        throwScriptException(
+            fmt::format("DB{}.'{}' is {} — objects assign only to STRUCT fields", db_num_, t_path, describeField(staged.field)),
+            ShellError::TypeMismatch);
+        return;
+    }
+    asIScriptEngine* p_engine = activeScriptEngine(t_path, db_num_);
+    if (!p_engine)
+        return;
+    encodeScriptDict(
+        staged.field, p_engine, static_cast<CScriptDictionary*>(tp_dict), staged.buf.data(), staged.buf.size(), t_path, db_num_);
+    if (hasScriptException())
+        return; // encoder threw — leave the shadow untouched
+    commitFieldWrite(t_path, staged);
 }
 
 std::string ScriptDataBlock::val(const std::string& t_path) {
@@ -552,6 +852,8 @@ std::string ScriptDataBlock::val(const std::string& t_path) {
 }
 
 std::string ScriptDataBlock::get(const std::string& t_path) {
+    stampRequest();
+    RespStampDb resp_stamp(this);
     conn_->memory_.processor()->processCommands();
     auto* p_provider = conn_->getOrCreateDbProvider(db_num_);
     if (!p_provider) {
@@ -689,6 +991,8 @@ void ScriptDataBlock::commitBaseline(const std::string& t_path, const std::strin
 }
 
 void ScriptDataBlock::put(const std::string& t_path, const std::string& t_raw_val) {
+    stampRequest();
+    RespStampDb resp_stamp(this);
     const std::string t_json_val = ::sgrn::gateway::twin::parseRawValuePayload(t_raw_val);
     auto* p_provider = conn_->getOrCreateDbProvider(db_num_);
     if (!p_provider) {
@@ -758,6 +1062,8 @@ void ScriptDataBlock::putDtl(const std::string& t_path, ScriptDtl* tp_dtl_obj) {
 }
 
 void ScriptDataBlock::put() {
+    stampRequest();
+    RespStampDb resp_stamp(this);
     push();
 }
 
@@ -867,6 +1173,8 @@ std::string ScriptDataBlock::diff() const {
 // ── Retry helpers ─────────────────────────────────────────────────────
 
 std::string ScriptDataBlock::getRetry(const std::string& t_path, int t_max_retries) {
+    stampRequest();
+    RespStampDb resp_stamp(this);
     if (t_max_retries <= 0)
         t_max_retries = 1;
     // Offline reads are deterministic local twin reads — one attempt through
@@ -892,6 +1200,8 @@ std::string ScriptDataBlock::getRetry(const std::string& t_path, int t_max_retri
 }
 
 bool ScriptDataBlock::putRetry(const std::string& t_path, const std::string& t_raw_val, int t_max_retries) {
+    stampRequest();
+    RespStampDb resp_stamp(this);
     if (t_max_retries <= 0)
         t_max_retries = 1;
     // Offline writes are deterministic local twin writes — one attempt

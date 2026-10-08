@@ -1,5 +1,6 @@
 #pragma once
 
+#include <sgrn/s7shell/script/AngelScriptObject.hpp>
 #include <string>
 
 namespace sgrn::s7shell::shell
@@ -7,12 +8,9 @@ namespace sgrn::s7shell::shell
 
 struct ScriptS7Connection;
 
-class ScriptS7PlcControl {
+class ScriptS7PlcControl : public AngelScriptObject {
 public:
     explicit ScriptS7PlcControl(ScriptS7Connection* tp_conn);
-
-    void addRef();
-    void release();
 
     void hotStart();
     void coldStart();
@@ -29,7 +27,6 @@ public:
     void compress(int t_timeout_ms);
 
 private:
-    int ref_count_{1};
     ScriptS7Connection* conn_{nullptr};
 };
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <sgrn/Result.hpp>
+#include <sgrn/s7shell/script/AngelScriptObject.hpp>
 #include <sgrn/scl/types.hpp>
 #include <sgrn/wrappers/s7/error.hpp>
 #include <cstdint>
@@ -20,6 +21,7 @@ namespace sgrn::s7shell::shell
 {
 
 struct ScriptS7Connection;
+struct ScriptDtl;
 class S7PathBatch;
 
 using sgrn::gateway::twin::DbIOProvider;
@@ -34,15 +36,12 @@ using S7BatchEngineForTagTableUPtr = std::unique_ptr<S7BatchEngineForTagTable>;
 
 using EngineVariant = std::variant<S7BatchEngineForDbIoUPtr, S7BatchEngineForTagTableUPtr>;
 
-class ScriptTagTable {
+class ScriptTagTable : public AngelScriptObject {
     friend class S7PathBatch;
 
 public:
     explicit ScriptTagTable(ScriptS7Connection* tp_conn);
-    ~ScriptTagTable();
-
-    void addRef();
-    void release();
+    ~ScriptTagTable() override;
 
     std::string get(const std::string& t_path);
     double getReal(const std::string& t_path);
@@ -69,6 +68,15 @@ public:
         return std::string(::sgrn::wrappers::s7::toString(last_op_err_));
     }
 
+    // ── Trip timing (wall-clock DTL strings, updated by every get/put) ──
+    // Request stamped at method entry, response when the trip completes
+    // (success or fail). Empty until the first get/put. Uses real time,
+    // never the sim PLC clock.
+    void stampRequest();
+    void stampResponse();
+    ScriptDtl* lastRequestTime() const;
+    ScriptDtl* lastResponseTime() const;
+
     // ── Retry variants ───────────────────────────────────────────────
     std::string getRetry(const std::string& t_path, int t_max_retries = 3);
     bool putRetry(const std::string& t_path, const std::string& t_raw_val, int t_max_retries = 3);
@@ -77,7 +85,6 @@ public:
     bool putRetryBool(const std::string& t_path, bool t_val, int t_max_retries = 3);
 
 private:
-    int ref_count_{1};
     ScriptS7Connection* conn_{nullptr};
     using EngineVariant = std::variant<std::unique_ptr<::sgrn::s7shell::S7BatchEngine<::sgrn::gateway::twin::DbIOProvider>>,
         std::unique_ptr<::sgrn::s7shell::S7BatchEngine<::sgrn::plcsim::PlcTagTable>>>;
@@ -86,6 +93,9 @@ private:
     // Last-operation error state (cleared on success, set on failure)
     bool last_op_ok_{true};
     sgrn::wrappers::s7::S7Error last_op_err_;
+    // Last trip wall-clock stamps (raw DTL strings, empty until first op)
+    std::string last_req_dtl_;
+    std::string last_resp_dtl_;
 
     void notifyConnError(::sgrn::scl::SclError t_err);
     void notifyConnError(::sgrn::wrappers::s7::S7Error t_err);

@@ -46,6 +46,9 @@ public:
         return params_;
     }
 
+    // NOTE: keeps its own counter on purpose — the class must stay
+    // standard-layout for offsetof()-based property registration below, so
+    // it cannot inherit AngelScriptObject (virtual dtor would add a vptr).
     void addRef() {
         ref_count_++;
     }
@@ -72,7 +75,7 @@ static SimParamsWrapper* SimParams_Factory() {
 // SimEngineWrapper — ref-counted AS handle for SimulationEngine
 // ─────────────────────────────────────────────────────────────────────────────
 
-class SimEngineWrapper {
+class SimEngineWrapper : public AngelScriptObject {
 public:
     SimEngineWrapper(PlcRuntimeWrapper* tp_rt, SimParamsWrapper* tp_params, asIScriptEngine* tp_as_engine)
         : rt_ref_(tp_rt)
@@ -85,14 +88,6 @@ public:
         clearTickFn();
         if (rt_ref_)
             rt_ref_->release();
-    }
-
-    void addRef() {
-        ref_count_++;
-    }
-    void release() {
-        if (--ref_count_ == 0)
-            delete this;
     }
 
     // ── onTick — register the AngelScript tick callback ───────────────────────
@@ -169,7 +164,6 @@ private:
     asIScriptContext* tick_ctx_{nullptr};
     asIScriptFunction* tick_fn_as_{nullptr};
     std::unique_ptr<SimulationEngine> engine_;
-    int ref_count_{1};
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

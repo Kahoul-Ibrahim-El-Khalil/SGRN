@@ -5,9 +5,11 @@
 #include <sgrn/gateway/twin/PlcCommandProcessor.hpp>
 #include <sgrn/plcsim/utils/PlcSimClock.hpp>
 #include <sgrn/s7shell/connection/S7Connection.hpp>
+#include <sgrn/s7shell/script/AngelScriptObject.hpp>
 #include <sgrn/s7shell/script/ScriptDataBlock.hpp>
 #include <sgrn/scl/types.hpp>
 #include <angelscript.h>
+#include <chrono>
 #include <ctime>
 #include <s7codec/codec.hpp>
 #include <snap7.h>
@@ -140,6 +142,31 @@ inline ScriptDtl* makeScriptDtlFromClock() {
 
 inline ScriptDtl* ScriptDtl_now() {
     return makeScriptDtlFromClock();
+}
+
+/// Wall-clock DTL string for request/response trip stamps ("YYYY-MM-DD
+/// HH:MM:SS.nnnnnnnnn", raw like ScriptDtl::timestamp_str_). Deliberately NOT
+/// the PLC sim clock (g_plc_clock can be frozen/advanced/reset) — trip timing
+/// against real PLCs must use real time, comparable with gateway logs.
+inline std::string wallClockDtlString() {
+    using namespace std::chrono;
+    const auto now = system_clock::now();
+    const std::time_t tt = system_clock::to_time_t(now);
+    std::tm tm{};
+    localtime_r(&tt, &tm);
+    s7codec::S7RawDTL d = dtlFromTm(tm);
+    const int64_t ns_total = duration_cast<nanoseconds>(now.time_since_epoch()).count();
+    int64_t ns = ns_total % 1000000000LL;
+    if (ns < 0)
+        ns = 0;
+    d.nanosecond = static_cast<uint32_t>(ns);
+    return dtlToString(d);
+}
+
+inline ScriptDtl* makeWallClockDtl(const std::string& t_raw) {
+    auto* p_obj = new ScriptDtl();
+    p_obj->timestamp_str_ = t_raw; // raw string, no quotes
+    return p_obj;
 }
 
 inline ScriptDtl* ScriptDtl_fromString(const std::string& t_s) {
@@ -281,18 +308,10 @@ inline ScriptS7Client* S7Client_factoryWithSchema(
 ::sgrn::Result<void, std::string> registerS7Types(asIScriptEngine* tp_engine);
 ::sgrn::Result<void, std::string> registerS7Globals(asIScriptEngine* tp_engine);
 
-class PlcRuntimeWrapper {
+class PlcRuntimeWrapper : public AngelScriptObject {
 public:
     explicit PlcRuntimeWrapper(std::shared_ptr<::sgrn::plcsim::runtime::PlcRuntime> tsp_impl)
         : impl_(std::move(tsp_impl)) {
-    }
-
-    void addRef() {
-        ref_count_++;
-    }
-    void release() {
-        if (--ref_count_ == 0)
-            delete this;
     }
 
     void loadSclSchema(const std::string& t_path) {
@@ -742,7 +761,6 @@ private:
 
     ::sgrn::plcsim::runtime::PlcRuntimeSPtr impl_;
     std::unique_ptr<ScriptS7Connection> loopback_conn_;
-    int ref_count_{1};
 };
 
 } // namespace sgrn::s7shell::shell

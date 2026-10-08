@@ -16,8 +16,6 @@
 
 // Forward declarations
 class asIScriptEngine;
-class CScriptDictionary;
-class CScriptArray;
 
 namespace sgrn::s7shell::shell
 {
@@ -57,9 +55,6 @@ bool ok(sgrn::Result<void, ::sgrn::wrappers::s7::S7Error>&& t_res, std::string_v
 
 double jsonScalarDouble(const std::string& t_json, double t_fallback = 0.0);
 int32_t jsonScalarInt(const std::string& t_json, int32_t t_fallback = 0);
-
-std::string convertDictToJson(CScriptDictionary* tp_dict);
-std::string convertArrayToJson(CScriptArray* tp_arr);
 
 inline const char* plcStatusText(::sgrn::wrappers::s7::PlcStatus t_s) {
     switch (t_s) {

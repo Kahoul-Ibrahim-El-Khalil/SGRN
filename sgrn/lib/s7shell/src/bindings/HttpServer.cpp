@@ -51,7 +51,7 @@ using sgrn::gateway::database::GatewayDatabase;
 // Wrapper
 // ─────────────────────────────────────────────────────────────────────────────
 
-class HttpServerWrapper {
+class HttpServerWrapper : public AngelScriptObject {
 public:
     explicit HttpServerWrapper(PlcRuntimeWrapper* tp_rt)
         : runtime_ref_(tp_rt)
@@ -68,14 +68,6 @@ public:
         if (running_)
             stop();
         runtime_ref_->release();
-    }
-
-    void addRef() {
-        ref_count_++;
-    }
-    void release() {
-        if (--ref_count_ == 0)
-            delete this;
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -147,7 +139,6 @@ private:
     std::unique_ptr<HttpAdapter> adapter_;
     bool running_{false};
     uint16_t port_{0};
-    int ref_count_{1};
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

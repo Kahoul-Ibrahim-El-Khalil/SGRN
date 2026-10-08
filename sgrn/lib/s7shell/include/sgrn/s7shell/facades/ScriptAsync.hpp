@@ -1,5 +1,6 @@
 #pragma once
 
+#include <sgrn/s7shell/script/AngelScriptObject.hpp>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -9,12 +10,9 @@ namespace sgrn::s7shell::shell
 
 struct ScriptS7Connection;
 
-class ScriptS7Async {
+class ScriptS7Async : public AngelScriptObject {
 public:
     explicit ScriptS7Async(ScriptS7Connection* tp_conn);
-
-    void addRef();
-    void release();
 
     void reset();
 
@@ -30,7 +28,6 @@ public:
     std::string resultHex() const;
 
 private:
-    int ref_count_{1};
     ScriptS7Connection* conn_{nullptr};
     std::vector<uint8_t> buffer_;
     int io_size_{0};

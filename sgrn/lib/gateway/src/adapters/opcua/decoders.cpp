@@ -116,7 +116,7 @@ Result<UA_DataValue, OpcUaAdapterError> decodeTypedArrayToDataValue(const OpcUaD
         if (t_ctx.p_node_ctx->type == DataType::DTL || t_ctx.p_node_ctx->type == DataType::DateTime ||
             t_ctx.p_node_ctx->type == DataType::LDT || t_ctx.p_node_ctx->type == DataType::LDTL) {
 
-            auto dt = decodeTemporalBytesToUaDateTime(t_ctx.p_node_ctx->type, p_elem_ptr, buf_remaining, s7codec::Endian::Big);
+            auto dt = decodeTemporalBytesToUaDateTime(t_ctx.p_node_ctx->type, p_elem_ptr, buf_remaining, nodeEndian(*t_ctx.p_node_ctx));
 
             if (dt.hasValue()) {
                 static_cast<UA_DateTime*>(p_arr)[i] = dt.value();
@@ -199,7 +199,7 @@ Result<UA_DataValue, OpcUaAdapterError> decodeMemoryBytesToDataValue(const OpcUa
         UA_DateTime ua_dt;
 
         SGRN_ASSIGN_OR_RETURN(
-            ua_dt, decodeTemporalBytesToUaDateTime(t_ctx.p_node_ctx->type, t_ctx.p_raw_data, t_ctx.size, s7codec::Endian::Big));
+            ua_dt, decodeTemporalBytesToUaDateTime(t_ctx.p_node_ctx->type, t_ctx.p_raw_data, t_ctx.size, nodeEndian(*t_ctx.p_node_ctx)));
 
         UA_DataValue out;
         UA_DataValue_init(&out);

@@ -228,6 +228,7 @@ Result<void, std::string> registerS7Globals(asIScriptEngine* tp_engine) {
         tp_engine->RegisterObjectMethod("S7Client", "string lastError() const", asMETHOD(ScriptS7Client, lastError), asCALL_THISCALL));
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "S7Client", "int lastErrorCode() const", asMETHOD(ScriptS7Client, getLastErrorCode), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod("S7Client", "int execTime() const", asMETHOD(ScriptS7Client, execTime), asCALL_THISCALL));
     SGRN_AS_REG(tp_engine->RegisterObjectMethod("S7Client", "bool lastOpOk() const", asMETHOD(ScriptS7Client, lastOpOk), asCALL_THISCALL));
     SGRN_AS_REG(
         tp_engine->RegisterObjectMethod("S7Client", "void clearLastError()", asMETHOD(ScriptS7Client, clearLastError), asCALL_THISCALL));
@@ -290,6 +291,8 @@ Result<void, std::string> registerS7Globals(asIScriptEngine* tp_engine) {
         asMETHOD(ScriptS7Diagnostics, diagnosticBuffer), asCALL_THISCALL));
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "S7Diagnostics", "string szl(int id, int index) const", asMETHOD(ScriptS7Diagnostics, szl), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "S7Diagnostics", "string szlList() const", asMETHOD(ScriptS7Diagnostics, szlList), asCALL_THISCALL));
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "S7Diagnostics", "string listBlocks() const", asMETHOD(ScriptS7Diagnostics, listBlocks), asCALL_THISCALL));
     SGRN_AS_REG(tp_engine->RegisterObjectMethod("S7Diagnostics", "string listBlocksOfType(int block_type) const",

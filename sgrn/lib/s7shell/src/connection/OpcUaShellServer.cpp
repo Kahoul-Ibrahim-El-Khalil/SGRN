@@ -20,15 +20,6 @@ ScriptOpcUaServer::~ScriptOpcUaServer() {
     stopServer();
 }
 
-void ScriptOpcUaServer::addRef() {
-    ++ref_count_;
-}
-
-void ScriptOpcUaServer::release() {
-    if (--ref_count_ == 0)
-        delete this;
-}
-
 ::sgrn::plcsim::runtime::PlcRuntimeSPtr ScriptOpcUaServer::getRuntime() const {
     return runtime_;
 }

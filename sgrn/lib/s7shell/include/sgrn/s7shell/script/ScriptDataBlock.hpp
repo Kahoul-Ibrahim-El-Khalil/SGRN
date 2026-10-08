@@ -2,6 +2,7 @@
 
 #include <sgrn/Result.hpp>
 #include <sgrn/gateway/twin/DbIoError.hpp>
+#include <sgrn/s7shell/script/AngelScriptObject.hpp>
 #include <sgrn/scl/errors.hpp>
 #include <sgrn/scl/types.hpp>
 #include <sgrn/wrappers/s7/error.hpp>
@@ -22,19 +23,10 @@ struct ScriptS7Connection;
 class S7PathBatch;
 class ScriptFieldProxy;
 
-struct ScriptDtl {
+struct ScriptDtl : public ::sgrn::s7shell::AngelScriptObject {
     /// Raw timestamp string e.g. "2026-06-21 22:00:00.000000000"
     /// NOT JSON-encoded — no surrounding quotes stored here.
     std::string timestamp_str_;
-    int ref_count_{1};
-
-    void addRef() {
-        ++ref_count_;
-    }
-    void release() {
-        if (--ref_count_ == 0)
-            delete this;
-    }
     /// Returns the timestamp wrapped in JSON quotes for serialization.
     std::string toString() const {
         return "\"" + timestamp_str_ + "\"";
@@ -63,15 +55,12 @@ struct ScriptDtl {
 // 4. A single `push()` or `put()` syncs only the dirty byte ranges back over
 //    the network to the PLC, minimizing PDU footprint and PLC cycle time impact.
 // ─────────────────────────────────────────────────────────────────────────────
-class ScriptDataBlock {
+class ScriptDataBlock : public ::sgrn::s7shell::AngelScriptObject {
     friend class S7PathBatch;
 
 public:
     ScriptDataBlock(ScriptS7Connection* tp_conn, uint16_t t_db_num);
-    ~ScriptDataBlock();
-
-    void addRef();
-    void release();
+    ~ScriptDataBlock() override;
 
     // ── Read field values ────────────────────────────────────────────────
     std::string val(const std::string& t_path);
@@ -87,12 +76,27 @@ public:
     void writeDouble(const std::string& t_path, double t_val);
     void writeInt(const std::string& t_path, int32_t t_val);
     void writeBool(const std::string& t_path, bool t_val);
-    /// Encode a JSON document into the field at t_path and mark it dirty.
-    /// C++-only staging helper for FieldProxy array/dict assignment — the
-    /// same encode as put(path, json) but without the network trip. Struct
+    /// Stage an AngelScript array/dictionary into the field at t_path.
+    /// C++-only helpers for FieldProxy structured assignment — encode
+    /// directly from script objects to field bytes (no JSON round-trip),
+    /// same rules as put(path, json) but without the network trip. Struct
     /// dicts merge over existing bytes (missing members preserved); static
     /// arrays need exactly count elements.
-    void writeJson(const std::string& t_path, const std::string& t_json_val);
+    void writeScriptArray(const std::string& t_path, void* tp_arr);
+    void writeScriptDict(const std::string& t_path, void* tp_dict);
+
+    /// Staging buffer for one structured write (resolved field + pre-read
+    /// bytes for merging + output buffer).
+    struct StagedFieldWrite {
+        ::sgrn::scl::DbField field{};
+        size_t abs_offset{0};
+        std::vector<uint8_t> before;
+        std::vector<uint8_t> buf;
+    };
+    /// Resolve + pre-read; false after throwing. Commit writes the buffer,
+    /// refreshes the snapshot and marks dirty bytes.
+    bool stageFieldWrite(const std::string& t_path, StagedFieldWrite& t_out);
+    void commitFieldWrite(const std::string& t_path, StagedFieldWrite& t_staged);
 
     // ── Sync to/from PLC ─────────────────────────────────────────────────
     void put(); // flush dirty segments to PLC
@@ -118,6 +122,15 @@ public:
     std::string lastOpErrorStr() const {
         return std::string(::sgrn::gateway::twin::toString(last_op_err_));
     }
+
+    // ── Trip timing (wall-clock DTL strings, updated by every get/put) ──
+    // Request stamped at method entry, response when the trip completes
+    // (success or fail — failure latency is visible too). Empty until the
+    // first get/put. Uses real time, never the sim PLC clock.
+    void stampRequest();
+    void stampResponse();
+    ScriptDtl* lastRequestTime() const;
+    ScriptDtl* lastResponseTime() const;
 
     // ── Retry variants ───────────────────────────────────────────────
     /// Read field from PLC, retrying up to maxRetries times on failure.
@@ -163,7 +176,6 @@ public:
 
 private:
     friend class ScriptFieldProxy;
-    int ref_count_{1};
     ScriptS7Connection* conn_{nullptr};
     uint16_t db_num_{0};
     size_t db_size_{0};
@@ -174,6 +186,9 @@ private:
     // Last-operation error state (cleared on success, set on failure)
     bool last_op_ok_{true};
     sgrn::gateway::twin::DbIoError last_op_err_;
+    // Last trip wall-clock stamps (raw DTL strings, empty until first op)
+    std::string last_req_dtl_;
+    std::string last_resp_dtl_;
 
     void notifyConnError(const ::sgrn::scl::SclError& t_err);
     void notifyConnError(const ::sgrn::wrappers::s7::S7Error& t_err);

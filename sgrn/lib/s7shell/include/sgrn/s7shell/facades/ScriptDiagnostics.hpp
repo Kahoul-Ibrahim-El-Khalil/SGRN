@@ -1,5 +1,6 @@
 #pragma once
 
+#include <sgrn/s7shell/script/AngelScriptObject.hpp>
 #include <cstdint>
 #include <string>
 
@@ -8,12 +9,9 @@ namespace sgrn::s7shell::shell
 
 struct ScriptS7Connection;
 
-class ScriptS7Diagnostics {
+class ScriptS7Diagnostics : public AngelScriptObject {
 public:
     explicit ScriptS7Diagnostics(ScriptS7Connection* tp_conn);
-
-    void addRef();
-    void release();
 
     // Level 0 — connection / transport
     std::string connectionInfo() const;
@@ -34,6 +32,8 @@ public:
     // Level 3 — diagnostic buffer & SZL
     std::string diagnosticBuffer(int t_count = 10) const;
     std::string szl(int t_id, int t_index) const;
+    /// SZL catalogue: "count=N ids=[0x0011, ...]" (empty/Error string on failure).
+    std::string szlList() const;
 
     // Level 4 — block directory (PG view)
     std::string listBlocks() const;
@@ -44,7 +44,6 @@ public:
     std::string protection() const;
 
 private:
-    int ref_count_{1};
     ScriptS7Connection* conn_{nullptr};
 };
 

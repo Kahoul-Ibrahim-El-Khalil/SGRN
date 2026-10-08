@@ -1,6 +1,7 @@
 #pragma once
 
 #include <sgrn/plcsim/runtime/PlcRuntime.hpp>
+#include <sgrn/s7shell/script/AngelScriptObject.hpp>
 #include <sgrn/wrappers/s7/S7Server.hpp>
 
 #include <memory>
@@ -9,13 +10,12 @@
 namespace sgrn::s7shell::shell
 {
 
-class ScriptS7Server : public ::sgrn::wrappers::s7::S7Server {
+class ScriptS7Server
+    : public ::sgrn::wrappers::s7::S7Server
+    , public AngelScriptObject {
 public:
     ScriptS7Server(::sgrn::plcsim::runtime::PlcRuntimeSPtr tsp_rt, const std::string& t_ip, uint16_t t_port);
     ~ScriptS7Server() override;
-
-    void addRef();
-    void release();
 
     ::sgrn::plcsim::runtime::PlcRuntimeSPtr getRuntime() const;
 
@@ -35,7 +35,6 @@ protected:
 private:
     static int S7API s7RequestCallback(void* tp_usr_ptr, int t_sender, int t_operation, PS7Tag t_tag, void* tp_data);
 
-    int ref_count_{1};
     ::sgrn::plcsim::runtime::PlcRuntimeSPtr runtime_;
     std::string ip_;
     uint16_t port_;

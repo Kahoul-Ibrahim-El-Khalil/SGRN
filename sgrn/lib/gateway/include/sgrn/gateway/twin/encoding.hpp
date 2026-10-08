@@ -30,9 +30,10 @@ std::string parseRawValuePayload(const std::string& t_raw);
 // same value as base_offset for full-DB buffers, or the span start for
 // request windows). Symmetric: the same call converts back. Only
 // fully-covered elements are swapped; partial edge elements are left
-// untouched. Skips 1-byte units, bit-packed bools, strings and
-// BCD-structured temporals (DateTime/DTL/LDTL). Big-endian fields are left
-// as-is, so big-endian blocks cost only the walk.
+// untouched. Covers multi-byte numerics, floats, LDT/LDTL and DTL (year U16
+// + nanosecond U32). Skips 1-byte units, bit-packed bools, strings and
+// DateTime (fixed BCD byte order, endian-invariant). Big-endian fields are
+// left as-is, so big-endian blocks cost only the walk.
 void swapRangeToBigEndian(
     const std::vector<::sgrn::scl::DbField>& t_fields, uint8_t* tp_buf, size_t t_buf_base_offset, size_t t_base_offset, size_t t_len);
 // Whole-buffer variant for field-aligned wire payloads (DbIOProvider

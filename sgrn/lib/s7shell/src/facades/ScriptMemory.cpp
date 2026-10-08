@@ -128,15 +128,6 @@ ScriptS7Memory::ScriptS7Memory(ScriptS7Connection* tp_conn)
     : conn_(tp_conn) {
 }
 
-void ScriptS7Memory::addRef() {
-    ++ref_count_;
-}
-
-void ScriptS7Memory::release() {
-    if (--ref_count_ == 0)
-        delete this;
-}
-
 std::string ScriptS7Memory::readArea(int t_area, uint16_t t_db, int t_start, int t_size, int t_word_len) {
     if (!conn_ || !conn_->client_.isConnected())
         return {};

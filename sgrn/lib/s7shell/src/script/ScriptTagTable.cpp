@@ -1,4 +1,5 @@
 #include <sgrn/s7shell/S7BatchEngine.hpp>
+#include <sgrn/s7shell/bindings/registration.hpp>
 #include <sgrn/s7shell/connection/S7Connection.hpp>
 #include <sgrn/s7shell/script/ScriptPathBatch.hpp>
 #include <sgrn/s7shell/script/ScriptTagTable.hpp>
@@ -41,9 +42,35 @@ void ScriptTagTable::notifyConnError(S7Error t_err) {
         conn_->setLastError(t_err);
 }
 
-void ScriptTagTable::addRef() {
-    ++ref_count_;
+void ScriptTagTable::stampRequest() {
+    last_req_dtl_ = wallClockDtlString();
 }
+
+void ScriptTagTable::stampResponse() {
+    last_resp_dtl_ = wallClockDtlString();
+}
+
+ScriptDtl* ScriptTagTable::lastRequestTime() const {
+    return makeWallClockDtl(last_req_dtl_);
+}
+
+ScriptDtl* ScriptTagTable::lastResponseTime() const {
+    return makeWallClockDtl(last_resp_dtl_);
+}
+
+namespace
+{
+// Stamps the response wall-clock time when the enclosing get/put returns.
+struct RespStampTags {
+    explicit RespStampTags(ScriptTagTable* tp_tags)
+        : tags_(tp_tags) {
+    }
+    ~RespStampTags() {
+        tags_->stampResponse();
+    }
+    ScriptTagTable* tags_;
+};
+} // namespace
 
 void ScriptTagTable::markStaleIfDropped() {
     if (conn_ && !conn_->client_.isConnected() && conn_->wasConnected()) {
@@ -53,14 +80,11 @@ void ScriptTagTable::markStaleIfDropped() {
     }
 }
 
-void ScriptTagTable::release() {
-    if (--ref_count_ == 0)
-        delete this;
-}
-
 // get performs an immediate, synchronous network read from the PLC for a single tag,
 // updates the shadow cache, and returns the retrieved value.
 std::string ScriptTagTable::get(const std::string& t_path) {
+    stampRequest();
+    RespStampTags resp_stamp(this);
     if (conn_->hasRuntimeTag(t_path)) {
         auto res = conn_->runtimeTagGet(t_path);
         setOpResult(res);
@@ -105,6 +129,8 @@ bool ScriptTagTable::getBool(const std::string& t_path) {
 
 // put (string overload) performs an immediate, synchronous write of a single tag to the PLC.
 void ScriptTagTable::put(const std::string& t_path, const std::string& t_raw_val) {
+    stampRequest();
+    RespStampTags resp_stamp(this);
     const std::string t_json_val = ::sgrn::gateway::twin::parseRawValuePayload(t_raw_val);
     if (conn_->hasRuntimeTag(t_path)) {
         auto res = conn_->runtimeTagPut(t_path, t_json_val);
@@ -124,6 +150,8 @@ void ScriptTagTable::put(const std::string& t_path, const std::string& t_raw_val
 
 // put (double overload) performs an immediate, synchronous write of a float/double tag to the PLC.
 void ScriptTagTable::put(const std::string& t_path, double t_val) {
+    stampRequest();
+    RespStampTags resp_stamp(this);
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
     writer.Double(t_val);
@@ -145,6 +173,8 @@ void ScriptTagTable::put(const std::string& t_path, double t_val) {
 
 // put (int32 overload) performs an immediate, synchronous write of an integer tag to the PLC.
 void ScriptTagTable::put(const std::string& t_path, int32_t t_val) {
+    stampRequest();
+    RespStampTags resp_stamp(this);
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
     writer.Int(t_val);
@@ -166,6 +196,8 @@ void ScriptTagTable::put(const std::string& t_path, int32_t t_val) {
 
 // put (bool overload) performs an immediate, synchronous write of a boolean tag to the PLC.
 void ScriptTagTable::put(const std::string& t_path, bool t_val) {
+    stampRequest();
+    RespStampTags resp_stamp(this);
     if (conn_->hasRuntimeTag(t_path)) {
         auto res = conn_->runtimeTagPut(t_path, t_val ? "true" : "false");
         setOpResult(res);
@@ -183,6 +215,8 @@ void ScriptTagTable::put(const std::string& t_path, bool t_val) {
 }
 
 void ScriptTagTable::put() {
+    stampRequest();
+    RespStampTags resp_stamp(this);
     sgrn::Result<void, SclError> res = {};
     if (std::visit([&](const auto& e) { return e != nullptr; }, engine_) && !std::visit([&](auto& e) { return e->empty(); }, engine_)) {
         res = std::visit([&](auto& e) { return e->put(conn_->client_); }, engine_);
@@ -205,6 +239,8 @@ void ScriptTagTable::put() {
 
 // get performs a complete pull of all registered symbolic tags from the PLC.
 void ScriptTagTable::get() {
+    stampRequest();
+    RespStampTags resp_stamp(this);
     const bool has_file_tags = conn_->tag_table_ != nullptr;
     const bool has_rt_tags = conn_->runtime_ && !conn_->runtime_->tagNames().empty();
     if (!has_file_tags && !has_rt_tags) {
@@ -237,6 +273,8 @@ S7PathBatch* ScriptTagTable::getPath(const std::string& t_p) {
 }
 
 std::string ScriptTagTable::getRetry(const std::string& t_path, int t_max_retries) {
+    stampRequest();
+    RespStampTags resp_stamp(this);
     if (t_max_retries <= 0)
         t_max_retries = 1;
     if (!conn_->tag_table_ && !conn_->hasRuntimeTag(t_path)) {
@@ -267,6 +305,8 @@ std::string ScriptTagTable::getRetry(const std::string& t_path, int t_max_retrie
 }
 
 bool ScriptTagTable::putRetry(const std::string& t_path, const std::string& t_raw_val, int t_max_retries) {
+    stampRequest();
+    RespStampTags resp_stamp(this);
     if (t_max_retries <= 0)
         t_max_retries = 1;
     if (!conn_->tag_table_ && !conn_->hasRuntimeTag(t_path)) {

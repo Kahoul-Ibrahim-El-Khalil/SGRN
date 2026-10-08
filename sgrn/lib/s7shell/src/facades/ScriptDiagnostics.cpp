@@ -14,15 +14,6 @@ ScriptS7Diagnostics::ScriptS7Diagnostics(ScriptS7Connection* tp_conn)
     : conn_(tp_conn) {
 }
 
-void ScriptS7Diagnostics::addRef() {
-    ++ref_count_;
-}
-
-void ScriptS7Diagnostics::release() {
-    if (--ref_count_ == 0)
-        delete this;
-}
-
 std::string ScriptS7Diagnostics::connectionInfo() const {
     if (!conn_)
         return "Error: no connection";
@@ -136,6 +127,25 @@ std::string ScriptS7Diagnostics::szl(int t_id, int t_index) const {
             out += "...";
         out += "\n";
     }
+    return out;
+}
+
+std::string ScriptS7Diagnostics::szlList() const {
+    if (!conn_ || !conn_->client_.isConnected())
+        return "Error: not connected";
+    auto r = conn_->client_.readSzlList();
+    if (r.hasError())
+        return fmt::format("Error: {}", toString(r.error()));
+    const auto& list = r.value();
+    // Snap7 byte-adjusts List items to host order — use directly.
+    const int count = list.Header.N_DR;
+    std::string out = fmt::format("count={} ids=[", count);
+    for (int i = 0; i < count; ++i) {
+        if (i > 0)
+            out += ", ";
+        out += fmt::format("0x{:04X}", list.List[i]);
+    }
+    out += "]";
     return out;
 }
 

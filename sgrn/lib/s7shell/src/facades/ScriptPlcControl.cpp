@@ -14,15 +14,6 @@ ScriptS7PlcControl::ScriptS7PlcControl(ScriptS7Connection* tp_conn)
     : conn_(tp_conn) {
 }
 
-void ScriptS7PlcControl::addRef() {
-    ++ref_count_;
-}
-
-void ScriptS7PlcControl::release() {
-    if (--ref_count_ == 0)
-        delete this;
-}
-
 void ScriptS7PlcControl::hotStart() {
     if (!conn_)
         return;

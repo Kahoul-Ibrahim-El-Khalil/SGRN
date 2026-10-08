@@ -1,5 +1,6 @@
 #pragma once
 
+#include <sgrn/s7shell/script/AngelScriptObject.hpp>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -20,14 +21,11 @@ class ScriptDataBlock;
 class ScriptTagTable;
 struct ScriptS7Connection;
 
-class S7PathBatch {
+class S7PathBatch : public AngelScriptObject {
 public:
     explicit S7PathBatch(ScriptDataBlock* tp_db);
     explicit S7PathBatch(ScriptTagTable* tp_tags);
-    ~S7PathBatch();
-
-    void addRef();
-    void release();
+    ~S7PathBatch() override;
 
     S7PathBatch* path(const std::string& t_p);
 
@@ -37,7 +35,6 @@ public:
     std::string toJson() const;
 
 private:
-    int ref_count_{1};
     ScriptS7Connection* conn_{nullptr};
     ScriptDataBlock* db_{nullptr};
     ScriptTagTable* tags_{nullptr};

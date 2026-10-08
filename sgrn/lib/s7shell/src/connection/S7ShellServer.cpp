@@ -65,15 +65,6 @@ ScriptS7Server::~ScriptS7Server() {
     stopServer();
 }
 
-void ScriptS7Server::addRef() {
-    ++ref_count_;
-}
-
-void ScriptS7Server::release() {
-    if (--ref_count_ == 0)
-        delete this;
-}
-
 std::shared_ptr<::sgrn::plcsim::runtime::PlcRuntime> ScriptS7Server::getRuntime() const {
     return runtime_;
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sgrn/s7shell/script/AngelScriptObject.hpp>
+
 namespace sgrn::scl
 {
 class PlcSchemaStore;
@@ -8,17 +10,13 @@ class PlcSchemaStore;
 namespace sgrn::s7shell::shell
 {
 
-class ScriptSchemaStore {
+class ScriptSchemaStore : public AngelScriptObject {
 public:
     explicit ScriptSchemaStore(::sgrn::scl::PlcSchemaStore* tp_schema);
-
-    void addRef();
-    void release();
 
     void print();
 
 private:
-    int ref_count_{1};
     ::sgrn::scl::PlcSchemaStore* schema_{nullptr};
 };
 

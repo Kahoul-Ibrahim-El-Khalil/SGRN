@@ -32,7 +32,7 @@ using namespace sgrn::s7shell::shell;
 // Wrapper class — manages lifetime of ScriptS7Client ref-counts alongside the
 // shared_ptr<ProxySession> that owns the background ASIO loop.
 // ─────────────────────────────────────────────────────────────────────────────
-class ProxySessionWrapper {
+class ProxySessionWrapper : public AngelScriptObject {
 public:
     ProxySessionWrapper(ScriptS7Client* tp_src, ScriptS7Client* tp_hub)
         : src_ref_(tp_src)
@@ -48,14 +48,6 @@ public:
             session_->stop();
         src_ref_->release();
         hub_ref_->release();
-    }
-
-    void addRef() {
-        ref_count_++;
-    }
-    void release() {
-        if (--ref_count_ == 0)
-            delete this;
     }
 
     void addMapping(uint16_t t_src_db, uint16_t t_dst_db, int t_interval_ms, uint32_t t_size_bytes) {
@@ -76,7 +68,6 @@ private:
     ScriptS7Client* src_ref_{nullptr};
     ScriptS7Client* hub_ref_{nullptr};
     std::shared_ptr<ProxySession> session_;
-    int ref_count_{1};
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

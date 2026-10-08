@@ -12,15 +12,6 @@ ScriptSchemaStore::ScriptSchemaStore(::sgrn::scl::PlcSchemaStore* tp_schema)
     : schema_(tp_schema) {
 }
 
-void ScriptSchemaStore::addRef() {
-    ++ref_count_;
-}
-
-void ScriptSchemaStore::release() {
-    if (--ref_count_ == 0)
-        delete this;
-}
-
 void ScriptSchemaStore::print() {
     if (!schema_)
         return;

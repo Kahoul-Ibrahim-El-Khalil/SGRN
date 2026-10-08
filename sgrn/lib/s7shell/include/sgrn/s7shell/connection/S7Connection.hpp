@@ -7,6 +7,7 @@
 #include <sgrn/gateway/twin/PlcMemory.hpp>
 #include <sgrn/plcsim/PlcTagTable.hpp>
 #include <sgrn/plcsim/runtime/PlcRuntime.hpp>
+#include <sgrn/s7shell/script/AngelScriptObject.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/scl/types.hpp>
 #include <sgrn/wrappers/s7/error.hpp>
@@ -146,7 +147,7 @@ struct ScriptS7Connection {
 
 class ScriptSchemaStore;
 
-class ScriptS7Client {
+class ScriptS7Client : public ::sgrn::s7shell::AngelScriptObject {
 public:
     ScriptS7Client(const std::string& t_ip, int t_rack, int t_slot, uint16_t t_port = 102);
 
@@ -156,9 +157,6 @@ public:
     /// — observe and mutate the same schema, memory and dirty-region ledger.
     ScriptS7Client(
         const std::string& t_ip, int t_rack, int t_slot, uint16_t t_port, std::shared_ptr<::sgrn::plcsim::runtime::PlcRuntime> tsp_rt);
-
-    void addRef();
-    void release();
 
     /// The PlcRuntime backing this client's schema/memory. Share this with
     /// other S7Client/protocol endpoint constructors to have them operate
@@ -192,6 +190,9 @@ public:
     void disconnect();
     bool isConnected() const;
     bool ping(); ///< lightweight PLC liveness check
+    /// Milliseconds the last PDU/job took on the wire (Snap7 exec time).
+    /// -1 when disconnected or the query itself fails.
+    int execTime() const;
 
     // ── SclError introspection ──────────────────────────────────────────
     std::string lastError() const; ///< last S7 error message (empty = no error)
@@ -233,7 +234,6 @@ public:
     }
 
 private:
-    int ref_count_{1};
     std::unique_ptr<ScriptS7Connection> conn_;
 };
 

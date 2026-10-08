@@ -1,5 +1,6 @@
 #pragma once
 
+#include <sgrn/s7shell/script/AngelScriptObject.hpp>
 #include <string>
 
 namespace sgrn::s7shell::shell
@@ -7,19 +8,15 @@ namespace sgrn::s7shell::shell
 
 class ScriptDataBlock;
 
-class ScriptHexTable {
+class ScriptHexTable : public AngelScriptObject {
 public:
     explicit ScriptHexTable(ScriptDataBlock* tp_db);
-    ~ScriptHexTable();
-
-    void addRef();
-    void release();
+    ~ScriptHexTable() override;
 
     void print() const;
     std::string toString() const;
 
 private:
-    int ref_count_{1};
     ScriptDataBlock* db_{nullptr};
 };
 

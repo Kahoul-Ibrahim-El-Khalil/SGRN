@@ -3,6 +3,7 @@
 #include <sgrn/Result.hpp>
 #include <sgrn/gateway/adapters/opcua.hpp>
 #include <sgrn/plcsim/runtime/PlcRuntime.hpp>
+#include <sgrn/s7shell/script/AngelScriptObject.hpp>
 
 #include <atomic>
 #include <cstddef>
@@ -22,16 +23,13 @@ namespace sgrn::s7shell::shell
 /// PlcMemory::processor()->processCommands()). A UA client such as UaExpert
 /// can therefore write setpoints that immediately appear in the runtime the
 /// rest of s7shell sees (e.g. rt.getJson(db)).
-class ScriptOpcUaServer {
+class ScriptOpcUaServer : public AngelScriptObject {
 public:
     ScriptOpcUaServer(::sgrn::plcsim::runtime::PlcRuntimeSPtr tsp_rt, uint16_t t_port);
-    ~ScriptOpcUaServer();
+    ~ScriptOpcUaServer() override;
 
     ScriptOpcUaServer(const ScriptOpcUaServer&) = delete;
     ScriptOpcUaServer& operator=(const ScriptOpcUaServer&) = delete;
-
-    void addRef();
-    void release();
 
     ::sgrn::plcsim::runtime::PlcRuntimeSPtr getRuntime() const;
 
@@ -45,7 +43,6 @@ public:
     }
 
 private:
-    int ref_count_{1};
     ::sgrn::plcsim::runtime::PlcRuntimeSPtr runtime_;
     uint16_t port_{0};
     std::unique_ptr<::sgrn::gateway::adapters::OpcUaAdapter> adapter_;

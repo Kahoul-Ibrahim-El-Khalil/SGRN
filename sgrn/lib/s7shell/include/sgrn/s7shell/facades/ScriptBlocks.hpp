@@ -1,5 +1,6 @@
 #pragma once
 
+#include <sgrn/s7shell/script/AngelScriptObject.hpp>
 #include <cstdint>
 #include <string>
 
@@ -8,12 +9,9 @@ namespace sgrn::s7shell::shell
 
 struct ScriptS7Connection;
 
-class ScriptS7Blocks {
+class ScriptS7Blocks : public AngelScriptObject {
 public:
     explicit ScriptS7Blocks(ScriptS7Connection* tp_conn);
-
-    void addRef();
-    void release();
 
     std::string upload(int t_block_type, uint16_t t_block_number, int t_max_size = 65536);
     std::string fullUpload(int t_block_type, uint16_t t_block_number, int t_max_size = 65536);
@@ -31,7 +29,6 @@ public:
     bool dbDownloadFromFile(uint16_t t_block_number, const std::string& t_path);
 
 private:
-    int ref_count_{1};
     ScriptS7Connection* conn_{nullptr};
 };
 

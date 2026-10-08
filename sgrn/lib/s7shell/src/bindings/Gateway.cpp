@@ -43,7 +43,7 @@ using sgrn::gateway::adapters::northbound::NorthboundServer;
 using sgrn::gateway::adapters::websocket::WebSocketAdapter;
 using sgrn::gateway::database::GatewayDatabase;
 
-class GatewayWrapper {
+class GatewayWrapper : public AngelScriptObject {
 public:
     explicit GatewayWrapper(PlcRuntimeWrapper* tp_rt)
         : runtime_ref_(tp_rt)
@@ -57,15 +57,6 @@ public:
     ~GatewayWrapper() {
         stop();
         runtime_ref_->release();
-    }
-
-    void addRef() {
-        ref_count_++;
-    }
-
-    void release() {
-        if (--ref_count_ == 0)
-            delete this;
     }
 
     void start(const std::string& t_ip, uint16_t t_port) {
@@ -308,7 +299,6 @@ private:
     bool auto_broadcast_{true};
     size_t dirty_observer_id_{0};
     size_t tag_observer_id_{0};
-    int ref_count_{1};
 };
 
 static GatewayWrapper* Gateway_Factory(PlcRuntimeWrapper* tp_rt) {

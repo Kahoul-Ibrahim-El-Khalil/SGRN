@@ -1,5 +1,6 @@
 #pragma once
 
+#include <sgrn/s7shell/script/AngelScriptObject.hpp>
 #include <cstdint>
 #include <string>
 
@@ -8,12 +9,9 @@ namespace sgrn::s7shell::shell
 
 struct ScriptS7Connection;
 
-class ScriptS7Memory {
+class ScriptS7Memory : public AngelScriptObject {
 public:
     explicit ScriptS7Memory(ScriptS7Connection* tp_conn);
-
-    void addRef();
-    void release();
 
     std::string readArea(int t_area, uint16_t t_db, int t_start, int t_size, int t_word_len = 2); // S7WLByte is 2
     void writeArea(int t_area, uint16_t t_db, int t_start, const std::string& t_hex, int t_word_len = 2);
@@ -55,7 +53,6 @@ public:
     std::string listTags() const;
 
 private:
-    int ref_count_{1};
     ScriptS7Connection* conn_{nullptr};
 };
 

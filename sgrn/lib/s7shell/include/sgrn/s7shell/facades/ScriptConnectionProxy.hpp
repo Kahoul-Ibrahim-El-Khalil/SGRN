@@ -1,5 +1,6 @@
 #pragma once
 
+#include <sgrn/s7shell/script/AngelScriptObject.hpp>
 #include <cstdint>
 #include <string>
 
@@ -8,12 +9,9 @@ namespace sgrn::s7shell::shell
 
 struct ScriptS7Connection;
 
-class ScriptS7ConnectionProxy {
+class ScriptS7ConnectionProxy : public AngelScriptObject {
 public:
     explicit ScriptS7ConnectionProxy(ScriptS7Connection* tp_conn);
-
-    void addRef();
-    void release();
 
     bool connectWithTsap(const std::string& t_ip, uint16_t t_local_tsap, uint16_t t_remote_tsap);
     void useTsap(uint16_t t_local_tsap, uint16_t t_remote_tsap);
@@ -32,7 +30,6 @@ public:
     std::string paramSummary() const;
 
 private:
-    int ref_count_{1};
     ScriptS7Connection* conn_{nullptr};
 };
 

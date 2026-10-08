@@ -33,7 +33,7 @@ using namespace sgrn::s7shell::shell;
 // ─────────────────────────────────────────────────────────────────────────────
 // Wrapper — ref-counted AS object owning a GatewaySync instance
 // ─────────────────────────────────────────────────────────────────────────────
-class GatewaySyncWrapper {
+class GatewaySyncWrapper : public AngelScriptObject {
 public:
     explicit GatewaySyncWrapper(PlcRuntimeWrapper* tp_rt)
         : runtime_ref_(tp_rt) {
@@ -44,14 +44,6 @@ public:
     ~GatewaySyncWrapper() {
         sync_.reset();
         runtime_ref_->release();
-    }
-
-    void addRef() {
-        ref_count_++;
-    }
-    void release() {
-        if (--ref_count_ == 0)
-            delete this;
     }
 
     void subscribeDb(uint16_t t_db) {
@@ -83,7 +75,6 @@ public:
 private:
     PlcRuntimeWrapper* runtime_ref_{nullptr};
     std::unique_ptr<GatewaySync> sync_;
-    int ref_count_{1};
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

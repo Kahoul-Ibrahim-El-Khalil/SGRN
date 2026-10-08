@@ -13,15 +13,6 @@ ScriptS7ConnectionProxy::ScriptS7ConnectionProxy(ScriptS7Connection* tp_conn)
     : conn_(tp_conn) {
 }
 
-void ScriptS7ConnectionProxy::addRef() {
-    ++ref_count_;
-}
-
-void ScriptS7ConnectionProxy::release() {
-    if (--ref_count_ == 0)
-        delete this;
-}
-
 bool ScriptS7ConnectionProxy::connectWithTsap(const std::string& t_ip, uint16_t t_local_tsap, uint16_t t_remote_tsap) {
     if (!conn_)
         return false;

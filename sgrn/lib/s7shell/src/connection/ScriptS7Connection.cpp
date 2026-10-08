@@ -314,15 +314,6 @@ ScriptS7Client::ScriptS7Client(const std::string& t_ip, int t_rack, int t_slot, 
     return conn_->runtime_;
 }
 
-void ScriptS7Client::addRef() {
-    ++ref_count_;
-}
-
-void ScriptS7Client::release() {
-    if (--ref_count_ == 0)
-        delete this;
-}
-
 ScriptDataBlock* ScriptS7Client::db(uint16_t t_db_num) {
     return new ScriptDataBlock(conn_.get(), t_db_num);
 }
@@ -594,6 +585,17 @@ int ScriptS7Client::getLastErrorCode() const {
 
 void ScriptS7Client::clearLastError() {
     conn_->clearLastError();
+}
+
+int ScriptS7Client::execTime() const {
+    if (!conn_ || !conn_->client_.isConnected())
+        return -1;
+    auto r = conn_->client_.getExecTime();
+    if (r.hasError()) {
+        conn_->setLastError(r.error());
+        return -1;
+    }
+    return r.value();
 }
 
 void ScriptS7Client::disconnect() {

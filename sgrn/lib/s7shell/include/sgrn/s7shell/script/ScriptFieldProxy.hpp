@@ -1,5 +1,6 @@
 #pragma once
 
+#include <sgrn/s7shell/script/AngelScriptObject.hpp>
 #include <cstdint>
 #include <string>
 
@@ -12,10 +13,10 @@ namespace sgrn::s7shell::shell
 class ScriptDataBlock;
 struct ScriptDtl;
 
-class ScriptFieldProxy {
+class ScriptFieldProxy : public AngelScriptObject {
 public:
     ScriptFieldProxy(ScriptDataBlock* tp_db, const std::string& t_path);
-    ~ScriptFieldProxy() = default;
+    ~ScriptFieldProxy() override;
 
     ScriptDataBlock* getDb() const {
         return db_;
@@ -23,9 +24,6 @@ public:
     const std::string& getPath() const {
         return path_;
     }
-
-    void addRef();
-    void release();
 
     // ── Typed assignment (AngelScript opAssign overloads) ─────────────
     ScriptFieldProxy& assignFloat(float t_val);
@@ -86,7 +84,6 @@ public:
     ScriptFieldProxy* indexInt(int t_idx);
 
 private:
-    int ref_count_{1};
     ScriptDataBlock* db_;
     std::string path_;
 };

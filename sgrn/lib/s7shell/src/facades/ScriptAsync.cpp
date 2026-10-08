@@ -13,15 +13,6 @@ ScriptS7Async::ScriptS7Async(ScriptS7Connection* tp_conn)
     : conn_(tp_conn) {
 }
 
-void ScriptS7Async::addRef() {
-    ++ref_count_;
-}
-
-void ScriptS7Async::release() {
-    if (--ref_count_ == 0)
-        delete this;
-}
-
 void ScriptS7Async::reset() {
     active_ = false;
     buffer_.clear();

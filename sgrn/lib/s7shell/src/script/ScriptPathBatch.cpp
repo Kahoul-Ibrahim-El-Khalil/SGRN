@@ -38,15 +38,6 @@ S7PathBatch::~S7PathBatch() {
         tags_->release();
 }
 
-void S7PathBatch::addRef() {
-    ++ref_count_;
-}
-
-void S7PathBatch::release() {
-    if (--ref_count_ == 0)
-        delete this;
-}
-
 S7PathBatch* S7PathBatch::path(const std::string& t_p) {
     if (std::visit([&](const auto& e) { return e == nullptr; }, engine_))
         return this;

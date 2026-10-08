@@ -675,6 +675,7 @@ S7Client@ client = S7Client(ip, rack, slot, port, rt)  // attach to shared runti
 client.isConnected() / client.ping() / client.disconnect() / client.reconnect()
 client.reconnectOk() / client.reconnectWithRetry(maxAttempts = 3, delayMs = 500)
 client.lastError() / client.lastErrorCode() / client.lastOpOk() / client.clearLastError()
+client.execTime()                         // ms the last PDU/job took (-1 if unavailable)
 client.read(address) / client.write(address, hex)   // raw, unschematized access
 DataBlock@ db = client.db(42) / client.db("DBName")
 TagTable@ tags = client.tags()
@@ -699,6 +700,7 @@ s7> client.PrimaryCoolant
 ```as
 db.get() / db.put()                       // fetch/flush the whole DB
 db.get(path) / db.put(path, val)          // single field, immediate read/write
+db.lastRequestTime() / db.lastResponseTime()  // wall-clock DTL trip stamps
 db["field.path"]  → FieldProxy@           // opIndex shorthand
 db.path("field.path")  → S7PathBatch@     // fluent access
 db.toJson() / db.diff() / db.number() / db.name() / db.print()
@@ -721,6 +723,10 @@ db["axis"] = ax;                          // struct dicts merge: missing members
 array<dictionary@>@ rows = {{{"pos", 3.0}}, {{"pos", 4.0}}};
 db["axes"] = rows;                        // arrays of UDTs; nesting recurses
 ```
+Assignment encodes straight from script objects to field bytes (no JSON
+round-trip). Use a typed temporary for nested literals — inline
+`{{...}, {...}}` is ambiguous to the AngelScript compiler:
+`array<dictionary@>@ rows = {...}; db["axes"] = rows;`
 Struct dicts merge over existing bytes (partial update); fixed-size arrays
 require exactly `count` elements — assign full-length values (zeros to clear).
 
@@ -731,9 +737,10 @@ Endianness is file/block scoped, never per-field: an optional top-level
 the instantiating block's scope. The twin arena holds block-endian bytes;
 every reader (typed properties, get/toJson, HTTP, OPC-UA, flat deltas)
 decodes with block endianness, and the S7 server / S7 put-commit paths swap
-to big-endian at the wire boundary (S7 wire order is always big-endian).
-Caveats: `DateTime`/`DTL`/`LDTL` structs and string headers are not swapped
-at the S7 boundary; Modbus register mapping assumes big-endian arena bytes.
+to big-endian at the wire boundary (S7 wire order is always big-endian),
+including DTL (year + nanosecond) and LDT/LDTL. DateTime is fixed BCD byte
+order and needs no swap. Caveats: string headers are not swapped at the S7
+boundary; Modbus register mapping assumes big-endian arena bytes.
 
 ###  S7PathBatch (Fluent Batched Access)
 ```as
@@ -747,6 +754,7 @@ b.read()                      // current value → string
 ```as
 S7Diagnostics@ d = client.diagnostics();
 d.cpuInfo() / d.status() / d.diagnosticBuffer(10) / d.listBlocks()
+d.szl(id, index) / d.szlList()            // SZL entry / catalogue of SZL IDs
 
 S7Memory@ m = client.memory();
 m.readArea(Area_DB,db,start,size,wordLen) / m.writeArea(...)

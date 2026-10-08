@@ -13,7 +13,7 @@ namespace sgrn::s7shell::bindings
 using namespace sgrn::s7shell::shell;
 using sgrn::plcsim::replay::WalReplayer;
 
-class WalReplayerWrapper {
+class WalReplayerWrapper : public AngelScriptObject {
 public:
     explicit WalReplayerWrapper(const std::string& t_archive_path) {
         replayer_ = std::make_unique<WalReplayer>(t_archive_path);
@@ -34,14 +34,6 @@ public:
             rt_ref_->release();
     }
 
-    void addRef() {
-        ref_count_++;
-    }
-    void release() {
-        if (--ref_count_ == 0)
-            delete this;
-    }
-
     void speed(double factor) {
         replayer_->speed(factor);
     }
@@ -55,7 +47,6 @@ public:
 private:
     PlcRuntimeWrapper* rt_ref_{nullptr};
     std::unique_ptr<WalReplayer> replayer_;
-    int ref_count_{1};
 };
 
 static WalReplayerWrapper* WalReplayer_Factory(const std::string& t_archive_path) {

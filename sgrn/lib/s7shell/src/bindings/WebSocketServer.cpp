@@ -51,7 +51,7 @@ using sgrn::gateway::adapters::websocket::WebSocketAdapter;
 // Wrapper
 // ─────────────────────────────────────────────────────────────────────────────
 
-class WebSocketServerWrapper {
+class WebSocketServerWrapper : public AngelScriptObject {
 public:
     explicit WebSocketServerWrapper(PlcRuntimeWrapper* tp_rt)
         : runtime_ref_(tp_rt)
@@ -63,14 +63,6 @@ public:
     ~WebSocketServerWrapper() {
         stop();
         runtime_ref_->release();
-    }
-
-    void addRef() {
-        ref_count_++;
-    }
-    void release() {
-        if (--ref_count_ == 0)
-            delete this;
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -260,7 +252,6 @@ private:
     bool auto_broadcast_{true};
     size_t dirty_observer_id_{0};
     size_t tag_observer_id_{0};
-    int ref_count_{1};
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

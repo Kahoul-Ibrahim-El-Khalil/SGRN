@@ -2,7 +2,6 @@
 #include <sgrn/s7shell/errors.hpp>
 #include <sgrn/s7shell/script/ScriptDataBlock.hpp>
 #include <sgrn/s7shell/script/ScriptFieldProxy.hpp>
-#include <sgrn/s7shell/utils/json_helpers.hpp>
 
 #include <fmt/format.h>
 #include <scriptarray/scriptarray.h>
@@ -21,15 +20,8 @@ ScriptFieldProxy::ScriptFieldProxy(ScriptDataBlock* tp_db, const std::string& t_
     db_->addRef(); // prevent DB from being destroyed while proxy is alive
 }
 
-void ScriptFieldProxy::addRef() {
-    ++ref_count_;
-}
-
-void ScriptFieldProxy::release() {
-    if (--ref_count_ == 0) {
-        db_->release(); // release our hold on the parent DB
-        delete this;
-    }
+ScriptFieldProxy::~ScriptFieldProxy() {
+    db_->release(); // release our hold on the parent DB
 }
 
 // ── Typed writes via s7codec::DecodedValue (no JSON) ──────────────────────
@@ -113,7 +105,10 @@ ScriptFieldProxy& ScriptFieldProxy::assignArray(CScriptArray* tp_arr) {
         throwScriptException(fmt::format("FieldProxy('{}'): cannot assign a null array", path_), ShellError::TypeMismatch);
         return *this;
     }
-    db_->writeJson(path_, shell::convertArrayToJson(tp_arr));
+    db_->writeScriptArray(path_, tp_arr);
+    // Naked `@` handle form transfers one reference per call — release it.
+    // (Without this, the GC reports an uncollectable reference per call.)
+    tp_arr->Release();
     return *this;
 }
 
@@ -122,7 +117,9 @@ ScriptFieldProxy& ScriptFieldProxy::assignDict(CScriptDictionary* tp_dict) {
         throwScriptException(fmt::format("FieldProxy('{}'): cannot assign a null dictionary", path_), ShellError::TypeMismatch);
         return *this;
     }
-    db_->writeJson(path_, shell::convertDictToJson(tp_dict));
+    db_->writeScriptDict(path_, tp_dict);
+    // See assignArray: release the transferred handle reference.
+    tp_dict->Release();
     return *this;
 }
 

@@ -16,15 +16,6 @@ ScriptS7Blocks::ScriptS7Blocks(ScriptS7Connection* tp_conn)
     : conn_(tp_conn) {
 }
 
-void ScriptS7Blocks::addRef() {
-    ++ref_count_;
-}
-
-void ScriptS7Blocks::release() {
-    if (--ref_count_ == 0)
-        delete this;
-}
-
 std::string ScriptS7Blocks::upload(int t_block_type, uint16_t t_block_number, int t_max_size) {
     if (!conn_ || !conn_->client_.isConnected())
         return {};

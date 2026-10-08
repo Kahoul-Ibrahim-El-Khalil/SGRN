@@ -590,6 +590,7 @@ size_t swapUnitSize(DataType t_type) {
         case DataType::LTime:
         case DataType::LTimeOfDay:
         case DataType::LDT:
+        case DataType::LDTL:
             return 8;
         default:
             return 0;
@@ -616,6 +617,19 @@ void swapFieldRange(const DbField& t_field, size_t t_abs_off, uint8_t* tp_buf, s
         }
         return;
     }
+    if (t_field.type == DataType::DTL) {
+        // 12-byte layout: year U16 @0, six single bytes @2..7, nanosecond
+        // U32 @8. Only year and nanosecond are endian-sensitive.
+        const uint32_t count = t_field.count > 1 ? t_field.count : 1;
+        for (uint32_t i = 0; i < count; ++i) {
+            const size_t base = t_abs_off + static_cast<size_t>(i) * 12;
+            swapIfCovered(tp_buf, t_buf_base, base, 2, t_range_base, t_range_end);
+            swapIfCovered(tp_buf, t_buf_base, base + 8, 4, t_range_base, t_range_end);
+        }
+        return;
+    }
+    // NOTE: DateTime (DT) is fixed BCD byte order on both encode and decode
+    // regardless of endianness — nothing to swap.
     const size_t unit = swapUnitSize(t_field.type);
     if (unit == 0)
         return;
