@@ -349,6 +349,13 @@ Result<void, std::string> GatewayApplication::startAdapters() {
 
     if (config_.s7.has_value()) {
         s7_adapter_.emplace(memory_port_, security_policy_);
+        // S7 wire order is big-endian; the adapter converts spans for
+        // little-endian blocks using the compiled schema (dbs_ node storage
+        // is stable, so the returned pointers stay valid).
+        s7_adapter_->setSchemaProvider([this](uint16_t t_db) -> const ::sgrn::scl::DbSchema* {
+            auto res = schema().getDb(t_db);
+            return res.hasError() ? nullptr : res.value();
+        });
         s7_adapter_->setMaxClientsConfig(config_.s7->max_clients);
         s7_adapter_->setPduSizeConfig(config_.s7->pdu_size);
 
@@ -416,6 +423,12 @@ Result<void, std::string> GatewayApplication::startAdapters() {
                 security_manager_, &symbolic_store_, [this]() { return server_.getDigitalTwinJsonString(); },
                 [this](uint16_t db, size_t offset, size_t size, uint8_t* out) -> Result<void, std::string> {
                     if (auto r = server_.readDbMemory(db, offset, size, out); !r) {
+                        return std::string(toString(r.error()));
+                    }
+                    return {};
+                },
+                [this](uint16_t db, size_t offset, size_t size, const uint8_t* data) -> Result<void, std::string> {
+                    if (auto r = server_.writeDbMemory(db, offset, size, data); !r) {
                         return std::string(toString(r.error()));
                     }
                     return {};

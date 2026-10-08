@@ -277,6 +277,10 @@ sgrn::Result<void, ::sgrn::scl::SclError> PlcSchemaStore::addDb(DbSchema&& t_reg
         }
     }
 
+    for (auto& t_field : t_reg.fields) {
+        stampDescendantEndianness(t_field);
+    }
+
     dbs_[t_reg.db_number] = std::move(t_reg);
 
     // Core update
@@ -316,6 +320,11 @@ sgrn::Result<void, ::sgrn::scl::SclError> PlcSchemaStore::addUdt(UdtDefinition&&
             return SclError::Conflict;
         }
         udts_.erase(std::remove_if(udts_.begin(), udts_.end(), [&](const UdtDefinition& u) { return &u == p_existing; }), udts_.end());
+    }
+
+    for (auto& t_field : t_udt.fields) {
+        t_field.endianness = t_udt.endianness;
+        stampDescendantEndianness(t_field);
     }
 
     udts_.push_back(std::move(t_udt));

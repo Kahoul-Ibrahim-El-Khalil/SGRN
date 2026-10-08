@@ -30,6 +30,7 @@
 #include <sgrn/scl/types/DbField.hpp>
 #include <sgrn/scl/types/DbSchema.hpp>
 #include <sgrn/scl/types/ParseResult.hpp>
+#include <sgrn/scl/types/PlcTag.hpp>
 #include <sgrn/scl/types/UdtDefinition.hpp>
 #include <sgrn/scl/types/modbus/ModbusArea.hpp>
 #include <sgrn/scl/types/modbus/ModbusVirtualEntry.hpp>
@@ -66,39 +67,13 @@ enum class SecurityPolicy {
     Strict   ///< Enforce IP-based ACLs for write operations
 };
 
-// ---------------------------------------------------------------------------
-// PLC Address Shorthand  (I0.0, IB3, IW6, ID0, QB4, MW10, MD8, T5, C12, Z4)
-// ---------------------------------------------------------------------------
-
-struct PlcAddress {
-    int area{S7AreaMK}; ///< S7AreaPE, S7AreaPA, S7AreaMK, S7AreaTM, S7AreaCT, S7AreaDB
-    uint16_t db_number{0};
-    int byte_offset{0};
-    int bit_index{-1};      ///< -1 = no bit; 0-7 = specific bit position
-    int word_len{S7WLByte}; ///< S7WLBit, S7WLByte, S7WLWord, S7WLDWord, S7WLTimer, S7WLCounter
-    int byte_count{1};      ///< bytes to transfer (1, 2, 4, 8)
-    std::string label;      ///< normalised display label
-};
-
 struct PlcDbRawAddr {
     uint16_t db_number;
     int offset;
 };
 
-/**
- * @brief A single symbolic tag loaded from a TIA Portal tag table XML export.
- *
- * This structure bridges the gap between TIA Portal names and physical S7 addresses.
- * It is used for semantic debugging in the s7shell.
- */
-struct PlcTag {
-    std::string name;              ///< Tag name, e.g. "A", "StartButton"
-    std::string table_name;        ///< Source <Tagtable name="...">
-    std::string type_str;          ///< Original XML type, e.g. "Bool", "Word"
-    std::string remark;            ///< Optional remark
-    PlcAddress addr;               ///< Resolved physical PLC address
-    DataType type{DataType::Bool}; ///< Resolved S7 type
-};
+// PlcAddress + PlcTag live in types/PlcTag.hpp (included above) so that
+// ParseResult.hpp can reference PlcTag without a circular include.
 
 } // namespace sgrn::scl
 

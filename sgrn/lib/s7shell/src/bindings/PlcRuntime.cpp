@@ -101,6 +101,35 @@ Result<void, std::string> registerPlcRuntimeTypes(asIScriptEngine* tp_engine) {
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "PlcRuntime", "bool hasDirty(uint16) const", asMETHOD(PlcRuntimeWrapper, hasDirty), asCALL_THISCALL));
 
+    // ── Dual-mode explicit sync: re-fire dirty observers on demand ──────────
+    // NOTE: sync()/syncDb() are the single spelling (notify()/notifyDb()
+    // removed as exact duplicates).
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod("PlcRuntime", "void sync()", asMETHOD(PlcRuntimeWrapper, sync), asCALL_THISCALL));
+
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod("PlcRuntime", "void syncDb(uint16)", asMETHOD(PlcRuntimeWrapper, syncDb), asCALL_THISCALL));
+
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "PlcRuntime", "string dirtySnapshot() const", asMETHOD(PlcRuntimeWrapper, dirtySnapshot), asCALL_THISCALL));
+
+    // ── TIA-style tag table: one row per tag (name, any scalar/UDT type, address) ──
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod("PlcRuntime", "bool defineTag(const string &in, const string &in, const string &in)",
+        asMETHOD(PlcRuntimeWrapper, defineTag), asCALL_THISCALL));
+
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "PlcRuntime", "bool hasDirtyTags() const", asMETHOD(PlcRuntimeWrapper, hasDirtyTags), asCALL_THISCALL));
+
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "PlcRuntime", "string tagList() const", asMETHODPR(PlcRuntimeWrapper, tagList, () const, std::string), asCALL_THISCALL));
+
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod("PlcRuntime", "string tagList(const string &in) const",
+        asMETHODPR(PlcRuntimeWrapper, tagList, (const std::string&) const, std::string), asCALL_THISCALL));
+
+    SGRN_AS_REG(
+        tp_engine->RegisterObjectMethod("PlcRuntime", "string tagTables() const", asMETHOD(PlcRuntimeWrapper, tagTables), asCALL_THISCALL));
+
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "PlcRuntime", "string tagInfo(const string &in) const", asMETHOD(PlcRuntimeWrapper, tagInfo), asCALL_THISCALL));
+
     // ── Virtual PLC memory manipulation ────────────────────────────────────
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "PlcRuntime", "DataBlock@ db(uint16)", asMETHODPR(PlcRuntimeWrapper, db, (uint16_t), ScriptDataBlock*), asCALL_THISCALL));
@@ -136,9 +165,7 @@ Result<void, std::string> registerPlcRuntimeTypes(asIScriptEngine* tp_engine) {
 
     SGRN_AS_REG(tp_engine->RegisterObjectMethod("PlcRuntime", "void UDTS()", asMETHOD(PlcRuntimeWrapper, UDTS), asCALL_THISCALL));
 
-    SGRN_AS_REG(
-        tp_engine->RegisterObjectMethod("S7Client", "PlcRuntime@ get_rt() const", asFUNCTION(S7Client_getRuntime), asCALL_CDECL_OBJFIRST));
-
+    // NOTE: no get_rt() alias — runtime() is the single spelling.
     SGRN_AS_REG(
         tp_engine->RegisterObjectMethod("S7Client", "PlcRuntime@ runtime() const", asFUNCTION(S7Client_getRuntime), asCALL_CDECL_OBJFIRST));
 

@@ -190,13 +190,15 @@ while (true) {
 
 ###  Use Case 8 — Remote Write Injection via Gateway
 
-Read live state from the Gateway, apply a correction, and publish the delta back through the Gateway's HTTP ingestion path to safely write to the physical PLC.
+Read live state from the Gateway, apply a correction, and publish the delta
+back through the same WebSocket session to safely write to the physical PLC.
 
 ```as
 // override.as — raise motor setpoint by 50 RPM via Gateway
 PlcRuntime@ rt = PlcRuntime("plant.scl");
 GatewaySync@ sync = GatewaySync(rt);
-sync.publishOnDirty(true);      // outbound dirty regions → Gateway HTTP API
+sync.publishOnDirty(true);      // outbound dirty regions → Gateway WebSocket
+sync.useBinary(true);           // optional: raw, low-latency RuntimeSync frames
 sync.connect("ws://192.168.1.1:8080/ws");
 
 sleep(500);   // allow initial sync frame to arrive
@@ -219,6 +221,7 @@ Monitor live telemetry and trigger protective actions if a threshold is breached
 PlcRuntime@ rt = PlcRuntime("plant.scl");
 GatewaySync@ sync = GatewaySync(rt);
 sync.publishOnDirty(true);
+sync.useBinary(true);
 sync.connect("ws://192.168.1.1:8080/ws");
 
 int trip_count = 0;
@@ -390,7 +393,7 @@ Bridges `PlcRuntime` dirty-region observers into the canonical `TelemetryBroker`
 Every time a Data Block region changes — whether from a **field write in a script**, a `SimEngine` tick, or a **live `db.get()`** call that fetches new bytes from a physical PLC — `PlcRuntime` fires a dirty-region notification. `PersistenceBridge` subscribes to those notifications, serialises the changed byte range as a `TelemetryEvent` (DeltaSnapshot), and publishes it to `TelemetryBroker`. `PersistenceService` consumes these events and writes them into a compressed WAL archive (`.bin.zst` or `.jsonl.zst`) under `<out_dir>/unsynced/`.
 
 **What triggers a dirty event:**
-- **Script write** (`db.write(field, val)` / typed property assignment): fires immediately on the changed bytes.
+- **Script write** (`db.put(field, val)` / typed property assignment): fires immediately on the changed bytes.
 - **`db.get()` with a runtime attached**: after fetching fresh bytes from the PLC, the new snapshot is diffed byte-by-byte against the previous one; only the changed regions are fired as dirty events.
 - **`SimEngine.run()`**: each tick applies state mutations that internally call write paths.
 
@@ -597,6 +600,40 @@ pers.stop();    // finalise .bin.zst archive
 | `SimEngine(rt, params)` | Construct bound to a `PlcRuntime` and a `SimParams`.               |
 | `run()`                 | Execute simulation loop until `duration_s` is exhausted. Blocking. |
 
+### Typed ML workflow without a PLC
+
+The schema is the contract shared by simulation, persistence, replay, and
+inference. A data-generation script can write typed schema properties directly,
+record a binary WAL, and hand it to `sgrn_dataset` or the Python ML package:
+
+```as
+PlcRuntime@ rt = PlcRuntime("plant.scl");
+Persistence@ archive = Persistence(rt, "./runs/bearing/");
+archive.configure("./runs/bearing/", "binary", "changes_with_timestamp");
+archive.start();
+
+// The schema scanner exposes typed DB/UDT handles, so the model never uses
+// byte offsets or stringly-typed PLC addresses.
+void tick(PlcRuntime@ rt, double t_s, uint64 step) {
+    db_telemetry.Motor1.SpeedRPM = float(1450.0 + 20.0 * sin(t_s));
+    db_telemetry.Motor1.Bearing.Temperature = float(70.0 + 3.0 * sin(t_s / 10.0));
+    db_telemetry.Motor1.Bearing.HealthScore = float(100.0 - t_s / 60.0);
+}
+
+SimParams@ p = SimParams();
+p.seed = 4219; p.duration_s = 3600; p.timestep_ms = 100;
+SimEngine@ sim = SimEngine(rt, p);
+sim.onTick(@tick);
+sim.run();
+archive.stop();
+```
+
+For online inference, attach `GatewaySync` to the same schema, subscribe to
+the required DBs, and consume the typed runtime state in the script. Use
+`useBinary(true)` when outbound inference/control writes should use raw state
+ranges with minimal serialization overhead; inbound telemetry remains available
+through the existing JSON delta stream and binary DB subscriptions.
+
 ---
 
 ###  WAL Archive Replayer (`WalReplayer`)
@@ -662,16 +699,45 @@ s7> client.PrimaryCoolant
 ```as
 db.get() / db.put()                       // fetch/flush the whole DB
 db.get(path) / db.put(path, val)          // single field, immediate read/write
-db.write(path, val)                       // stage into local buffer, no PLC I/O until put()
 db["field.path"]  → FieldProxy@           // opIndex shorthand
 db.path("field.path")  → S7PathBatch@     // fluent access
 db.toJson() / db.diff() / db.number() / db.name() / db.print()
 ```
 
+###  FieldProxy API (field-level get/put + structured assignment)
+```as
+FieldProxy@ f = db["axis"];
+f.get() / f.put(val)                      // network fetch / shadow + trip, at f's path
+f.put()                                   // flush dirty (whole-DB ranges, like db.put())
+f.lastOpOk() / f.lastOpError()            // error flags (parent DB state)
+f["member"] / f[0]                        // chain into sub-structs / array elements
+
+// Staged assignment (shadow + dirty, push with put()):
+f = 1.5;  f = true;                       // scalars (all int widths, float/double, bool, string, DTL)
+array<double>@ sp = {10.0, 20.0, 30.0, 40.0};
+db["speeds"] = sp;                        // fixed arrays need exactly count elements
+dictionary@ ax = {{"pos", 1.5}, {"enabled", true}};
+db["axis"] = ax;                          // struct dicts merge: missing members preserved
+array<dictionary@>@ rows = {{{"pos", 3.0}}, {{"pos", 4.0}}};
+db["axes"] = rows;                        // arrays of UDTs; nesting recurses
+```
+Struct dicts merge over existing bytes (partial update); fixed-size arrays
+require exactly `count` elements — assign full-length values (zeros to clear).
+
+###  Endianness scoping
+Endianness is file/block scoped, never per-field: an optional top-level
+`#BIG_ENDIAN` / `#LITTLE_ENDIAN` sets the file default, a directive after
+`DATA_BLOCK` / `TYPE` overrides it for that scope, and UDT members inherit
+the instantiating block's scope. The twin arena holds block-endian bytes;
+every reader (typed properties, get/toJson, HTTP, OPC-UA, flat deltas)
+decodes with block endianness, and the S7 server / S7 put-commit paths swap
+to big-endian at the wire boundary (S7 wire order is always big-endian).
+Caveats: `DateTime`/`DTL`/`LDTL` structs and string headers are not swapped
+at the S7 boundary; Modbus register mapping assumes big-endian arena bytes.
+
 ###  S7PathBatch (Fluent Batched Access)
 ```as
 S7PathBatch@ b = db.path("field.path");
-b.write(val).write(val2)...   // chainable, stages one or more values
 b.put()                       // flush staged writes to the PLC
 b.get()                       // refresh from the PLC
 b.read()                      // current value → string
@@ -723,12 +789,16 @@ proxy.start();
 ```
 
 ### Gateway Sync (`GatewaySync`)
-Attaches a runtime to an SGRN Gateway. Inbound Gateway deltas arrive over WebSocket; outbound local dirty regions are published over the Gateway's existing HTTP ingestion path.
+Attaches a runtime to an SGRN Gateway. Inbound deltas and outbound writes use
+the same WebSocket session. `useBinary(true)` selects compact versioned
+RuntimeSync frames; the default JSON command is easier to inspect and remains
+compatible with script/debug tooling.
 ```as
 PlcRuntime@ rt = PlcRuntime("schema.scl");
 GatewaySync@ sync = GatewaySync(rt);
 sync.subscribeDb(1);
 sync.publishOnDirty(true);
+sync.useBinary(true);
 sync.connect("ws://192.168.1.1:8080/ws");
 ```
 
@@ -758,6 +828,41 @@ http.stop();
 | `stop`       | `stop()`                 | Stop the server                                |
 | `isRunning`  | `isRunning() -> bool`    | Returns `true` if server is active             |
 | `loadPolicy` | `loadPolicy(path)`       | Load gateway-compatible security policy script |
+
+---
+
+### Unified Runtime Gateway (`Gateway`)
+
+`Gateway` is the preferred way to expose a scripted `PlcRuntime`. It mounts
+the HTTP REST adapter and the WebSocket adapter on one shared listener, so a
+simulation, data generator, or inference experiment can use the same runtime
+through either protocol without a real PLC or a separate gateway process.
+
+```as
+PlcRuntime@ rt = PlcRuntime("plant.scl");
+Gateway@ gateway = Gateway(rt);
+
+// Optional: use the same policy format as the full gateway.
+gateway.loadPolicy("security.as");
+gateway.start("0.0.0.0", 8080);
+
+// HTTP: http://localhost:8080/data/ and /registry
+// WS:   ws://localhost:8080/ws
+// gateway.broadcast("{\"event\":\"experiment-started\"}");
+```
+
+#### `Gateway` Methods
+| Method       | Signature                | Description                                      |
+| -------------| --------------------------| -------------------------------------------------|
+| Constructor  | `Gateway(rt)`             | Attach to a `PlcRuntime`                         |
+| `start`      | `start(ip, port = 8080)`  | Start HTTP and WebSocket on one listener         |
+| `stop`       | `stop()`                  | Stop the shared listener                         |
+| `isRunning`  | `isRunning() -> bool`     | Returns `true` if the gateway is active          |
+| `broadcast`  | `broadcast(jsonStr)`      | Push an arbitrary JSON message to WS clients     |
+| `loadPolicy` | `loadPolicy(path)`        | Load a gateway-compatible security policy script |
+
+`HttpServer` and `WebSocketServer` remain available when a script needs an
+individual adapter, but new scripts should generally use `Gateway`.
 
 ---
 
@@ -791,7 +896,7 @@ ws.stop();
 ---
 
 ###  Standalone Micro-Gateway Example
-Combine `S7Server`, `HttpServer`, `WebSocketServer`, and `Persistence` in a single script to turn `s7shell` into a complete, standalone gateway environment:
+Combine `S7Server`, the unified `Gateway`, and `Persistence` in a single script to turn `s7shell` into a complete, standalone gateway environment:
 
 ```as
 // Complete standalone Micro-Gateway in s7shell
@@ -801,19 +906,15 @@ PlcRuntime@ rt = PlcRuntime("plant.scl");
 S7Server@ s7 = S7Server(rt, "0.0.0.0");
 s7.start();
 
-// 2. HTTP REST server
-HttpServer@ http = HttpServer(rt);
-http.start("0.0.0.0", 8080);
+// 2. HTTP REST + WebSocket gateway on the same port
+Gateway@ gateway = Gateway(rt);
+gateway.start("0.0.0.0", 8080);
 
 // 3. WAL Recorder
 Persistence@ pers = Persistence(rt, "./wal/");
 pers.start();
 
-// 4. WebSocket live stream server
-WebSocketServer@ ws = WebSocketServer(rt);
-ws.start("0.0.0.0", 9001);
-
-print("[MicroGateway] Running S7:102, HTTP:8080, WS:9001");
+print("[MicroGateway] Running S7:102, HTTP:8080, WS:8080/ws");
 ```
 ```
 

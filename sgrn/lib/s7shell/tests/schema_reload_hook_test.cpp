@@ -12,6 +12,9 @@
 #include <sgrn/s7shell/bindings/registration.hpp>
 
 #include <angelscript.h>
+#include <scriptarray/scriptarray.h>
+#include <scriptdictionary/scriptdictionary.h>
+#include <scriptstdstring/scriptstdstring.h>
 
 #include <cassert>
 #include <filesystem>
@@ -30,6 +33,13 @@ int main() {
 
     asIScriptEngine* p_engine = asCreateScriptEngine(ANGELSCRIPT_VERSION);
     assert(p_engine != nullptr);
+    // registerS7Shell() declares methods using `string` (e.g.
+    // HexTable::toString) and `array<T>`/`dictionary` (FieldProxy structured
+    // assignment) — production engines get them from ScriptHost, so a bare
+    // test engine must register the addon types first.
+    RegisterStdString(p_engine);
+    RegisterScriptArray(p_engine, true);
+    RegisterScriptDictionary(p_engine);
     auto reg = ::sgrn::s7shell::shell::registerS7Shell(p_engine);
     assert(!reg.hasError());
 

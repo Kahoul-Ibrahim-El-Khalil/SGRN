@@ -3,6 +3,7 @@
 #include <sgrn/scl/types/ParseResult.hpp>
 
 #include <sgrn/Result.hpp>
+#include <sgrn/scl/schema/SchemaSerializer.hpp>
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -47,6 +48,13 @@ Result<ParseResult, std::string> fromJson(const rapidjson::Value& t_node) {
     if (t_node.HasMember("udts") && t_node["udts"].IsArray()) {
         for (const auto& udt_node : t_node["udts"].GetArray())
             t_result.udts.push_back(sgrn::scl::udt::fromJson(udt_node));
+    }
+    if (t_node.HasMember("tags") && t_node["tags"].IsArray()) {
+        for (const auto& tag_node : t_node["tags"].GetArray()) {
+            // Lenient like the JSON path: malformed rows are skipped, not fatal.
+            if (auto tag = sgrn::scl::SchemaSerializer::tagFromJson(tag_node); !tag.hasError())
+                t_result.tags.push_back(std::move(tag.value()));
+        }
     }
     if (t_node.HasMember("warnings") && t_node["warnings"].IsArray()) {
         for (const auto& warn : t_node["warnings"].GetArray())

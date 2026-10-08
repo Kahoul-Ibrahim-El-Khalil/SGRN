@@ -1,8 +1,12 @@
 #include <sgrn/s7shell/connection/S7Connection.hpp>
+#include <sgrn/s7shell/errors.hpp>
 #include <sgrn/s7shell/script/ScriptDataBlock.hpp>
 #include <sgrn/s7shell/script/ScriptFieldProxy.hpp>
+#include <sgrn/s7shell/utils/json_helpers.hpp>
 
 #include <fmt/format.h>
+#include <scriptarray/scriptarray.h>
+#include <scriptdictionary/scriptdictionary.h>
 #include <stdexcept>
 #include <string>
 
@@ -102,6 +106,62 @@ ScriptFieldProxy& ScriptFieldProxy::assignString(const std::string& t_val) {
 ScriptFieldProxy& ScriptFieldProxy::assignDtl(ScriptDtl* tp_dtl_obj) {
     db_->writeDtl(path_, tp_dtl_obj);
     return *this;
+}
+
+ScriptFieldProxy& ScriptFieldProxy::assignArray(CScriptArray* tp_arr) {
+    if (!tp_arr) {
+        throwScriptException(fmt::format("FieldProxy('{}'): cannot assign a null array", path_), ShellError::TypeMismatch);
+        return *this;
+    }
+    db_->writeJson(path_, shell::convertArrayToJson(tp_arr));
+    return *this;
+}
+
+ScriptFieldProxy& ScriptFieldProxy::assignDict(CScriptDictionary* tp_dict) {
+    if (!tp_dict) {
+        throwScriptException(fmt::format("FieldProxy('{}'): cannot assign a null dictionary", path_), ShellError::TypeMismatch);
+        return *this;
+    }
+    db_->writeJson(path_, shell::convertDictToJson(tp_dict));
+    return *this;
+}
+
+// ── Field-level network ops ───────────────────────────────────────────────
+
+std::string ScriptFieldProxy::get() {
+    return db_->get(path_);
+}
+
+void ScriptFieldProxy::put() {
+    db_->put();
+}
+
+void ScriptFieldProxy::put(const std::string& t_raw_val) {
+    db_->put(path_, t_raw_val);
+}
+
+void ScriptFieldProxy::put(double t_val) {
+    db_->putDouble(path_, t_val);
+}
+
+void ScriptFieldProxy::put(int32_t t_val) {
+    db_->putInt(path_, t_val);
+}
+
+void ScriptFieldProxy::put(bool t_val) {
+    db_->putBool(path_, t_val);
+}
+
+void ScriptFieldProxy::putDtl(ScriptDtl* tp_dtl_obj) {
+    db_->putDtl(path_, tp_dtl_obj);
+}
+
+bool ScriptFieldProxy::lastOpOk() const {
+    return db_->getLastOpOk();
+}
+
+std::string ScriptFieldProxy::lastOpError() const {
+    return db_->lastOpErrorStr();
 }
 
 // ── Typed reads ───────────────────────────────────────────────────────────

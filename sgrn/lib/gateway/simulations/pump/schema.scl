@@ -11,7 +11,7 @@
 
 // ─── UDT Definitions ────────────────────────────────────────────────────────
 
-TYPE "ValveActuator"
+TYPE "ValveActuator" #LITTLE_ENDIAN
   VAR
     position_pct   : Real;   // 0 = closed, 100 = fully open
     command_pct    : Real;   // demanded position
@@ -22,7 +22,7 @@ TYPE "ValveActuator"
   END_VAR
 END_TYPE
 
-TYPE "PIDLoop"
+TYPE "PIDLoop" #LITTLE_ENDIAN
   VAR
     setpoint       : LReal;
     process_value  : LReal;
@@ -38,7 +38,7 @@ TYPE "PIDLoop"
 END_TYPE
 
 // ─── DB1 "Setpoints" — Operator commands / forced values ────────────────────
-DATA_BLOCK "Setpoints" DB1
+DATA_BLOCK "Setpoints" DB1 #LITTLE_ENDIAN
 VAR
     pump_run             : Bool;
     pump_speed_sp_pct    : Real;    // 0..100
@@ -53,7 +53,7 @@ END_VAR
 END_DATA_BLOCK
 
 // ─── DB2 "Tank" — Process values ────────────────────────────────────────────
-DATA_BLOCK "Tank" DB2
+DATA_BLOCK "Tank" DB2 #LITTLE_ENDIAN
 VAR
     level_pct         : Real;
     volume_l          : Real;
@@ -68,7 +68,7 @@ END_VAR
 END_DATA_BLOCK
 
 // ─── DB3 "Pump" — Feed pump status ───────────────────────────────────────────
-DATA_BLOCK "Pump" DB3
+DATA_BLOCK "Pump" DB3 #LITTLE_ENDIAN
 VAR
     running     : Bool;
     speed_pct   : Real;
@@ -79,7 +79,7 @@ END_VAR
 END_DATA_BLOCK
 
 // ─── DB4 "Valves" — Inlet / outlet valve actuators ──────────────────────────
-DATA_BLOCK "Valves" DB4
+DATA_BLOCK "Valves" DB4 #LITTLE_ENDIAN
 VAR
     inlet     : "ValveActuator";
     outlet    : "ValveActuator";
@@ -88,7 +88,7 @@ END_VAR
 END_DATA_BLOCK
 
 // ─── DB5 "Heater" — Tank temperature control loop ───────────────────────────
-DATA_BLOCK "Heater" DB5
+DATA_BLOCK "Heater" DB5 #LITTLE_ENDIAN
 VAR
     loop      : "PIDLoop";
     timestamp : DTL;
@@ -96,7 +96,7 @@ END_VAR
 END_DATA_BLOCK
 
 // ─── DB6 "Alarms" — Aggregated summary ──────────────────────────────────────
-DATA_BLOCK "Alarms" DB6
+DATA_BLOCK "Alarms" DB6 #LITTLE_ENDIAN
 VAR
     any_active     : Bool;
     active_count   : UInt;

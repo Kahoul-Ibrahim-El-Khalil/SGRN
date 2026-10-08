@@ -40,18 +40,26 @@ WebSocketAdapter::~WebSocketAdapter() {
 }
 
 void WebSocketAdapter::configure(SecurityManagerSptr tsp_security_manager, const PlcSchemaStore* tp_registry,
-    std::function<std::string()> t_full_snapshot_provider, BinaryReadFn t_binary_read_fn) {
+    std::function<std::string()> t_full_snapshot_provider, BinaryReadFn t_binary_read_fn, BinaryWriteFn t_binary_write_fn) {
     security_manager_ = std::move(tsp_security_manager);
     registry_ = tp_registry;
     full_snapshot_provider_ = std::move(t_full_snapshot_provider);
     binary_read_fn_ = std::move(t_binary_read_fn);
+    binary_write_fn_ = std::move(t_binary_write_fn);
+}
+
+void WebSocketAdapter::setAreaWriteFn(AreaWriteFn t_fn) {
+    std::lock_guard<std::mutex> lk(area_write_mutex_);
+    area_write_fn_ = std::move(t_fn);
 }
 
 sgrn::Result<void> WebSocketAdapter::start(const std::string& t_ip, uint16_t t_port, SecurityManagerSptr tsp_security_manager,
-    const PlcSchemaStore* tp_registry, std::function<std::string()> t_full_snapshot_provider, BinaryReadFn t_binary_read_fn) {
+    const PlcSchemaStore* tp_registry, std::function<std::string()> t_full_snapshot_provider, BinaryReadFn t_binary_read_fn,
+    BinaryWriteFn t_binary_write_fn) {
     if (running_.load(std::memory_order_acquire))
         return sgrn::Result<void>::Error("WebSocketAdapter: already running");
-    configure(std::move(tsp_security_manager), tp_registry, std::move(t_full_snapshot_provider), std::move(t_binary_read_fn));
+    configure(std::move(tsp_security_manager), tp_registry, std::move(t_full_snapshot_provider), std::move(t_binary_read_fn),
+        std::move(t_binary_write_fn));
 
     server_ = std::make_unique<northbound::NorthboundServer>();
     registerRoutes(server_->app());
@@ -165,8 +173,9 @@ void WebSocketAdapter::registerRoutes(GatewayApp& t_app) {
         })
         .onmessage([this](crow::websocket::connection& t_conn, const std::string& t_data, bool t_is_binary) {
             if (t_is_binary)
-                return; // text-command protocol only
-            handleClientMessage(t_conn, t_data);
+                handleBinaryMessage(t_conn, t_data);
+            else
+                handleClientMessage(t_conn, t_data);
         })
         .onclose([this](crow::websocket::connection& t_conn, const std::string&, uint16_t) {
             delete static_cast<HandshakeInfo*>(t_conn.userdata());

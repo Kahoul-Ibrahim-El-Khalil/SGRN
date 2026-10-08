@@ -1,5 +1,5 @@
 
-TYPE "MotorDrive"
+TYPE "MotorDrive" #LITTLE_ENDIAN
   VAR
     running        : Bool;
     ready          : Bool;    // true whenever no fault is latched
@@ -17,7 +17,7 @@ TYPE "MotorDrive"
 END_TYPE
 
 // ─── DB1 "MotorCommand" — the OPC-UA control surface ────────────────────────
-DATA_BLOCK "MotorCommand" DB1
+DATA_BLOCK "MotorCommand" DB1 #LITTLE_ENDIAN
 VAR
     start            : Bool;    // rising edge starts the ramp (ignored if faulted)
     stop             : Bool;    // level; stop always wins over start
@@ -33,7 +33,7 @@ END_VAR
 END_DATA_BLOCK
 
 // ─── DB2 "MotorStatus" — drive feedback ──────────────────────────────────────
-DATA_BLOCK "MotorStatus" DB2
+DATA_BLOCK "MotorStatus" DB2 #LITTLE_ENDIAN
 VAR
     drive                 : "MotorDrive";
     direction_actual_rev  : Bool;
@@ -42,7 +42,7 @@ END_VAR
 END_DATA_BLOCK
 
 // ─── DB3 "Alarms" — aggregated summary ──────────────────────────────────────
-DATA_BLOCK "Alarms" DB3
+DATA_BLOCK "Alarms" DB3 #LITTLE_ENDIAN
 VAR
     any_active         : Bool;
     overcurrent_trip   : Bool;

@@ -170,10 +170,23 @@ SIEMENS S7 SCL SYNTAX & INFORMATION MODEL MAPPING MANUAL
        #ALARM(lo, hi)         Acceptable band (surfaced, not evaluated)
        #EVENT_TRIGGER         Enable OPC UA event emission for this node
 
-   C. Retentivity
-      RETAIN / NON_RETAIN    Controls persistence behavior
+    C. Retentivity
+       RETAIN / NON_RETAIN    Controls persistence behavior
 
-4. CANONICAL DIRECTORY LAYOUT
+    D. Discrete Tag Tables (#TAG_TABLE — TIA-style, distinct from DBs)
+       Tags are discrete addressed objects (%I inputs, %Q outputs, %M
+       merkers, DB aliases) — not DataBlocks. One row per tag:
+         #TAG_TABLE "Inputs and Outputs"
+         [
+           on    : BOOL    @ %I0.0,
+           speed : REAL    @ %MD20,
+           motor : "Motor" @ %MB100,
+         ]
+       Type is a primitive keyword or a quoted/bare UDT name. Addresses
+       accept %-prefixed or bare forms (I0.0, IB3, IW6, MD8, DB1.DBX0.0).
+       Tables are organizational (names unique PLC-wide, like TIA).
+
+ 4. CANONICAL DIRECTORY LAYOUT
    When using 'emit-dir', sclc normalizes files to:
      UDT{number}-{name}.udt   (e.g., UDT1-MotorData.udt)
      DB{number}-{name}.db     (e.g., DB10-Motors.db)

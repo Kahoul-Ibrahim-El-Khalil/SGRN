@@ -11,6 +11,7 @@
 #include <open62541/server.h>
 #include <open62541/types_generated.h>
 #include <open62541/types_generated_handling.h>
+#include <optional>
 #include <s7codec/codec.hpp>
 #include <stdexcept>
 #include <string>
@@ -59,18 +60,44 @@ static UA_StatusCode readArrayValue(const NodeContext* tp_ctx, UA_DataValue* tp_
     return UA_STATUSCODE_GOOD;
 }
 
+// Discrete (TIA-style) tag read: scalar tags and scalar UDT members reuse
+// the shared decode path over normalized backing bytes (Bool arrives as one
+// byte, 0/1 at bit 0).
+static UA_StatusCode readTagValue(const NodeContext* tp_ctx, UA_DataValue* tp_data_value, UA_Boolean t_source_time_stamp) {
+    if (!tp_ctx->tag_backing || tp_ctx->field_size == 0)
+        return UA_STATUSCODE_BADINTERNALERROR;
+    auto r = tp_ctx->tag_backing->read_bytes(tp_ctx->tag_name, tp_ctx->tag_byte_offset, tp_ctx->field_size, tp_ctx->tag_bit_index);
+    SGRN_RETURN_IF(r.hasError(), UA_STATUSCODE_BADINTERNALERROR);
+    if (r.value().size() < tp_ctx->field_size)
+        return UA_STATUSCODE_BADINTERNALERROR;
+    OpcUaDecodingContext raw_ctx{.p_node_ctx = tp_ctx, .p_raw_data = r.value().data(), .size = tp_ctx->field_size};
+    auto decoded = decodeMemoryBytesToDataValue(raw_ctx);
+    SGRN_RETURN_IF(decoded.hasError(), toUAStatusCode(decoded.error()));
+    UA_DataValue_init(tp_data_value);
+    *tp_data_value = std::move(decoded).value();
+    if (t_source_time_stamp)
+        setCurrentTimeStamp(tp_data_value);
+    return UA_STATUSCODE_GOOD;
+}
+
 UA_StatusCode readValue(UA_Server* /*server*/, const UA_NodeId* /*sessionId*/, void* /*sessionContext*/, const UA_NodeId* /*nodeId*/,
     void* tp_node_context, UA_Boolean t_source_time_stamp, const UA_NumericRange* /*range*/, UA_DataValue* tp_data_value) {
     auto* p_ctx = static_cast<NodeContext*>(tp_node_context);
-    SGRN_RETURN_IF(!p_ctx || !p_ctx->server, UA_STATUSCODE_BADINTERNALERROR);
+    SGRN_RETURN_IF(!p_ctx || (!p_ctx->server && !p_ctx->is_tag), UA_STATUSCODE_BADINTERNALERROR);
 
     if (p_ctx->security) {
         std::string client_ip = "";
         std::string session_name = "";
-        SGRN_RETURN_IF(!p_ctx->security->authorizeField(
-                           security::Protocol::OpcUA, client_ip, p_ctx->db_number, p_ctx->field_path, false, "", {}, session_name),
+        // Tags live outside DB ACLs: default policy applies (field_path carries
+        // the tag name for audit).
+        const std::optional<uint16_t> db = p_ctx->is_tag ? std::nullopt : std::optional<uint16_t>(p_ctx->db_number);
+        const std::string& path = p_ctx->is_tag ? p_ctx->tag_name : p_ctx->field_path;
+        SGRN_RETURN_IF(!p_ctx->security->authorizeField(security::Protocol::OpcUA, client_ip, db, path, false, "", {}, session_name),
             UA_STATUSCODE_BADUSERACCESSDENIED);
     }
+
+    if (p_ctx->is_tag)
+        return readTagValue(p_ctx, tp_data_value, t_source_time_stamp);
 
     if (p_ctx->array_length == 0 && p_ctx->udt_name.empty())
         return readScalarValue(p_ctx, tp_data_value, t_source_time_stamp);

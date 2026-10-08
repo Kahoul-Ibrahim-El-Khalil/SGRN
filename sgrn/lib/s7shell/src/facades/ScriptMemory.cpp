@@ -416,6 +416,12 @@ std::string ScriptS7Memory::listTags() const {
         for (const auto& n : conn_->tag_table_->tagNames())
             names.insert(n);
     }
+    // Runtime-defined (TIA-style) tags share the schema rows but live past
+    // schema load (manual defineTag) — list them too.
+    if (conn_->runtime_) {
+        for (const auto& n : conn_->runtime_->tagNames())
+            names.insert(n);
+    }
     for (const auto& [n, _] : conn_->schema_.tags())
         names.insert(n);
     if (names.empty())

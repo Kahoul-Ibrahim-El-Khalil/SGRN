@@ -5,12 +5,14 @@
 #include <sgrn/common/json_helper.hpp>
 #include <sgrn/common/path_utils.hpp>
 #include <sgrn/debug.hpp>
+#include <sgrn/gateway/adapters/websocket/RuntimeSyncProtocol.hpp>
 #include <sgrn/gateway/adapters/websocket/WebSocketAdapter.hpp>
 #include <sgrn/gateway/common/SchemaResolver.hpp>
 #include <sgrn/gateway/common/SecurityHelper.hpp>
 #include <sgrn/gateway/common/event_helper.hpp>
 #include <sgrn/gateway/core/TelemetryBroker.hpp>
 #include <sgrn/gateway/twin/LeafDictionary.hpp>
+#include <sgrn/utils/encoding.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <sgrn/utils/time.hpp>
 #include <optional>
@@ -97,7 +99,176 @@ void WebSocketAdapter::handleClientMessage(crow::websocket::connection& t_conn, 
 
     if (doc.HasMember("command") && doc["command"].IsString()) {
         std::string cmd = doc["command"].GetString();
-        if (cmd == "subscribe" && doc.HasMember("path") && doc["path"].IsString()) {
+        if (cmd == "write" && doc.HasMember("updates") && doc["updates"].IsArray()) {
+            // JSON is the inspectable equivalent of the binary RuntimeSync
+            // frame. It is intentionally raw-byte based so typed clients can
+            // use the schema they already negotiated instead of losing PLC
+            // endianness or padding information in JSON conversion.
+            bool ok = binary_write_fn_ != nullptr;
+            std::string error;
+            std::string ip;
+            std::string origin;
+            std::vector<std::string> headers;
+            {
+                std::lock_guard<std::mutex> lk(clients_mutex_);
+                auto client = clients_.find(&t_conn);
+                if (client != clients_.end()) {
+                    ip = client->second.ip;
+                    origin = client->second.origin;
+                    headers = client->second.headers;
+                } else {
+                    ok = false;
+                    error = "unknown WebSocket client";
+                }
+            }
+
+            if (ok) {
+                for (const auto& item : doc["updates"].GetArray()) {
+                    if (!item.IsObject() || !item.HasMember("db") || !item["db"].IsUint() || item["db"].GetUint() > 65535 ||
+                        !item.HasMember("offset") || !item["offset"].IsUint64() || !item.HasMember("size") || !item["size"].IsUint64() ||
+                        !item.HasMember("data") || !item["data"].IsString()) {
+                        ok = false;
+                        error = "invalid RuntimeSync write record";
+                        break;
+                    }
+                    const uint16_t db = static_cast<uint16_t>(item["db"].GetUint());
+                    const uint64_t offset = item["offset"].GetUint64();
+                    const uint64_t size = item["size"].GetUint64();
+                    if (offset > std::numeric_limits<size_t>::max() || size == 0 || size > std::numeric_limits<size_t>::max()) {
+                        ok = false;
+                        error = "RuntimeSync write range is invalid";
+                        break;
+                    }
+                    if (security_manager_) {
+                        auto auth =
+                            SecurityHelper::authorizeWrite(*security_manager_, security::Protocol::WebSocket, ip, db, "", origin, headers);
+                        if (auth.hasError()) {
+                            ok = false;
+                            error = auth.error();
+                            break;
+                        }
+                    }
+                    auto payload = sgrn::utils::encoding::fromBase64(item["data"].GetString());
+                    if (payload.size() < size) {
+                        ok = false;
+                        error = "RuntimeSync write payload is shorter than size";
+                        break;
+                    }
+                    payload.resize(static_cast<size_t>(size));
+                    if (auto result = binary_write_fn_(db, static_cast<size_t>(offset), payload.size(), payload.data());
+                        result.hasError()) {
+                        ok = false;
+                        error = result.error();
+                        break;
+                    }
+                }
+            }
+
+            rapidjson::StringBuffer ack_buffer;
+            rapidjson::Writer<rapidjson::StringBuffer> ack_writer(ack_buffer);
+            ack_writer.StartObject();
+            ack_writer.Key("type");
+            ack_writer.String("write_ack");
+            if (doc.HasMember("sequence") && doc["sequence"].IsUint64()) {
+                ack_writer.Key("sequence");
+                ack_writer.Uint64(doc["sequence"].GetUint64());
+            }
+            ack_writer.Key("ok");
+            ack_writer.Bool(ok);
+            if (!ok && !error.empty()) {
+                ack_writer.Key("error");
+                ack_writer.String(error.c_str());
+            }
+            ack_writer.EndObject();
+            sendText(t_conn, ack_buffer.GetString());
+        } else if (cmd == "write_area" && doc.HasMember("updates") && doc["updates"].IsArray()) {
+            // Discrete-area twin writes (TIA-style tags: PE/PA/MK arenas).
+            // Same shape as "write" but addressed by S7 area code instead of
+            // DB number: {"area":129,"offset":0,"size":1,"data":"base64url"}.
+            // Unknown to older servers (silently ignored, no ack); servers
+            // without an area hook NACK with a clear error.
+            AreaWriteFn area_write_fn;
+            {
+                std::lock_guard<std::mutex> lk(area_write_mutex_);
+                area_write_fn = area_write_fn_;
+            }
+            bool area_ok = area_write_fn != nullptr;
+            std::string area_error = area_ok ? "" : "discrete-area writes not supported by this gateway";
+            std::string ip;
+            std::string origin;
+            std::vector<std::string> headers;
+            if (area_ok) {
+                std::lock_guard<std::mutex> lk(clients_mutex_);
+                auto client = clients_.find(&t_conn);
+                if (client != clients_.end()) {
+                    ip = client->second.ip;
+                    origin = client->second.origin;
+                    headers = client->second.headers;
+                } else {
+                    area_ok = false;
+                    area_error = "unknown WebSocket client";
+                }
+            }
+
+            if (area_ok) {
+                for (const auto& item : doc["updates"].GetArray()) {
+                    if (!item.IsObject() || !item.HasMember("area") || !item["area"].IsUint() || item["area"].GetUint() > 65535 ||
+                        !item.HasMember("offset") || !item["offset"].IsUint64() || !item.HasMember("size") || !item["size"].IsUint64() ||
+                        !item.HasMember("data") || !item["data"].IsString()) {
+                        area_ok = false;
+                        area_error = "invalid RuntimeSync area write record";
+                        break;
+                    }
+                    const uint16_t area = static_cast<uint16_t>(item["area"].GetUint());
+                    const uint64_t offset = item["offset"].GetUint64();
+                    const uint64_t size = item["size"].GetUint64();
+                    if (offset > std::numeric_limits<size_t>::max() || size == 0 || size > std::numeric_limits<size_t>::max()) {
+                        area_ok = false;
+                        area_error = "RuntimeSync area write range is invalid";
+                        break;
+                    }
+                    if (security_manager_) {
+                        auto auth = SecurityHelper::authorizeWrite(
+                            *security_manager_, security::Protocol::WebSocket, ip, std::nullopt, "", origin, headers);
+                        if (auth.hasError()) {
+                            area_ok = false;
+                            area_error = auth.error();
+                            break;
+                        }
+                    }
+                    auto payload = sgrn::utils::encoding::fromBase64(item["data"].GetString());
+                    if (payload.size() < size) {
+                        area_ok = false;
+                        area_error = "RuntimeSync area write payload is shorter than size";
+                        break;
+                    }
+                    payload.resize(static_cast<size_t>(size));
+                    if (auto result = area_write_fn(area, static_cast<size_t>(offset), payload.size(), payload.data()); result.hasError()) {
+                        area_ok = false;
+                        area_error = result.error();
+                        break;
+                    }
+                }
+            }
+
+            rapidjson::StringBuffer area_ack_buffer;
+            rapidjson::Writer<rapidjson::StringBuffer> area_ack_writer(area_ack_buffer);
+            area_ack_writer.StartObject();
+            area_ack_writer.Key("type");
+            area_ack_writer.String("write_ack");
+            if (doc.HasMember("sequence") && doc["sequence"].IsUint64()) {
+                area_ack_writer.Key("sequence");
+                area_ack_writer.Uint64(doc["sequence"].GetUint64());
+            }
+            area_ack_writer.Key("ok");
+            area_ack_writer.Bool(area_ok);
+            if (!area_ok && !area_error.empty()) {
+                area_ack_writer.Key("error");
+                area_ack_writer.String(area_error.c_str());
+            }
+            area_ack_writer.EndObject();
+            sendText(t_conn, area_ack_buffer.GetString());
+        } else if (cmd == "subscribe" && doc.HasMember("path") && doc["path"].IsString()) {
             std::string path = doc["path"].GetString();
             // Catch-up target: subscriptions resolved below; the current
             // values are pushed after the lock is released.
@@ -311,6 +482,68 @@ void WebSocketAdapter::handleClientMessage(crow::websocket::connection& t_conn, 
             if (catchup_conn)
                 sendCatchUp(*catchup_conn, catchup_ranges);
         }
+    }
+}
+
+void WebSocketAdapter::handleBinaryMessage(crow::websocket::connection& t_conn, const std::string& t_message) {
+    using namespace runtime_sync;
+
+    Frame frame;
+    std::string error;
+    if (!decode(t_message, frame, &error) || frame.kind != Kind::Write) {
+        SGRN_WARN_LOG("Rejected WebSocket RuntimeSync binary frame: {}", error.empty() ? "not a write frame" : error);
+        return;
+    }
+    if (!binary_write_fn_ || frame.records.empty())
+        return;
+
+    std::string ip;
+    std::string origin;
+    std::vector<std::string> headers;
+    {
+        std::lock_guard<std::mutex> lk(clients_mutex_);
+        auto client = clients_.find(&t_conn);
+        if (client == clients_.end())
+            return;
+        ip = client->second.ip;
+        origin = client->second.origin;
+        headers = client->second.headers;
+    }
+
+    bool ok = true;
+    for (const auto& record : frame.records) {
+        if (record.bytes.empty()) {
+            ok = false;
+            error = "empty RuntimeSync write record";
+            break;
+        }
+        if (security_manager_) {
+            auto auth =
+                SecurityHelper::authorizeWrite(*security_manager_, security::Protocol::WebSocket, ip, record.db, "", origin, headers);
+            if (auth.hasError()) {
+                ok = false;
+                error = auth.error();
+                break;
+            }
+        }
+        if (auto result = binary_write_fn_(record.db, record.offset, record.bytes.size(), record.bytes.data()); result.hasError()) {
+            ok = false;
+            error = result.error();
+            break;
+        }
+    }
+
+    Frame ack;
+    ack.kind = Kind::Ack;
+    ack.sequence = frame.sequence;
+    ack.timestamp_ms = frame.timestamp_ms;
+    std::string encoded = encode(ack);
+    if (ok && !encoded.empty()) {
+        std::lock_guard<std::mutex> lk(clients_mutex_);
+        if (clients_.find(&t_conn) != clients_.end())
+            sendBinary(t_conn, encoded.data(), encoded.size());
+    } else {
+        SGRN_WARN_LOG("RuntimeSync binary write failed: {}", error);
     }
 }
 

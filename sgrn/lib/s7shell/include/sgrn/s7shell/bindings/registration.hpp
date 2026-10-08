@@ -318,6 +318,78 @@ public:
         return impl_->hasDirty(t_db_num);
     }
 
+    // ── Explicit sync (dual-mode update API) ──────────────────────────────
+    // Auto mode: Gateway/GatewaySync dirty observers fire on every markDirty
+    // (e.g. `runtime.inlet_separation.feed_pressure = 100;` marks dirty
+    // through writeFieldToMemory, DataBlock::write() marks dirty through
+    // markDirtyDiff). Explicit mode: call sync() after a batch of
+    // writes or after DataBlock::put()/push() to re-fire observers for all
+    // currently-dirty DBs so attached gateways broadcast on demand:
+    //   runtime.inlet_separation.feed_pressure = 100;
+    //   runtime.inlet_separation.put();
+    //   runtime.sync();
+    // This re-marks the full DB range (coalesced by markDirty) rather than
+    // consuming the ledger, so GatewaySync retry state stays intact.
+    void sync() {
+        impl_->getMemory().processor()->processCommands();
+        for (const auto& [db_num, db_schema] : impl_->getSchema().dbs()) {
+            if (impl_->hasDirty(db_num)) {
+                const auto size = static_cast<uint32_t>(db_schema.size_bytes);
+                if (size > 0)
+                    impl_->markDirty(db_num, 0, size);
+            }
+        }
+        // Explicit tag sync: re-fire tag observers for dirty tags so
+        // attached gateways broadcast them on demand (dual-mode parity).
+        impl_->renotifyDirtyTags();
+    }
+    void syncDb(uint16_t t_db_num) {
+        impl_->getMemory().processor()->processCommands();
+        if (!impl_->hasDirty(t_db_num))
+            return;
+        if (auto db_res = impl_->getSchema().getDb(t_db_num); !db_res.hasError()) {
+            const auto size = static_cast<uint32_t>(db_res.value()->size_bytes);
+            if (size > 0)
+                impl_->markDirty(t_db_num, 0, size);
+        }
+    }
+    /// Delta JSON for all currently-dirty DBs (nested form:
+    /// {"DbName": {"field": value}}). Returns "{}" when nothing is dirty.
+    /// Does NOT consume the dirty ledger — safe to call before sync().
+    /// Useful for manual pushes: `gt.broadcast(runtime.dirtySnapshot());`
+    std::string dirtySnapshot() const {
+        std::vector<uint16_t> dirty;
+        for (const auto& [db_num, _] : impl_->getSchema().dbs()) {
+            if (impl_->hasDirty(db_num))
+                dirty.push_back(db_num);
+        }
+        if (dirty.empty())
+            return "{}";
+        std::string delta = impl_->getMemory().getDeltaSnapshot(dirty);
+        if (!delta.empty() && delta != "{}")
+            return delta;
+        // Direct writeDbMemory() (typed property setters, DataBlock::write)
+        // bypasses PlcMemory's internal dirty flags, so getDeltaSnapshot()
+        // can come back empty while the PlcRuntime ledger is dirty. Fall
+        // back to per-DB JSON so the snapshot still carries the dirty DBs.
+        std::string out = "{";
+        bool first = true;
+        for (uint16_t db_num : dirty) {
+            auto jr = impl_->getMemory().getDbJson(db_num);
+            if (jr.hasError())
+                continue;
+            auto db_res = impl_->getSchema().getDb(db_num);
+            if (db_res.hasError() || !db_res.value())
+                continue;
+            if (!first)
+                out += ",";
+            out += "\"" + db_res.value()->db_name + "\":" + jr.value();
+            first = false;
+        }
+        out += "}";
+        return first ? "{}" : out;
+    }
+
     // ── Virtual PLC memory manipulation ────────────────────────────────────
     // Scripts can read/write the shared PlcMemory directly, making the
     // runtime behave as a virtual PLC. An S7Server attached to the same
@@ -332,15 +404,18 @@ public:
             fmt::print(stderr, fg(fmt::color::red), "[PlcRuntime] set(DB{}, \"{}\") failed: {}\n", t_db, t_path, res.error());
             return false;
         }
-        if (auto db_res = impl_->getSchema().getDb(t_db); !db_res.hasError())
-            impl_->markDirty(t_db, 0, static_cast<uint32_t>(db_res.value()->size_bytes));
         // `updateField` only enqueues a PlcCommand::WriteField; without a
         // flush the value never reaches the in-memory arena, so getField() /
         // getJson() still return the old data while set() reports success.
         // The gateway's HTTP/OPC-UA handlers and ScriptDataBlock call
         // processCommands() explicitly — mirror that here so the virtual-PLC
         // write is applied synchronously (no background io_context in shell).
+        // Flush BEFORE markDirty: dirty observers (gateway auto-broadcast)
+        // fire synchronously inside markDirty and must snapshot the fresh
+        // value, not the pre-flush state.
         impl_->getMemory().processor()->processCommands();
+        if (auto db_res = impl_->getSchema().getDb(t_db); !db_res.hasError())
+            impl_->markDirty(t_db, 0, static_cast<uint32_t>(db_res.value()->size_bytes));
         return true;
     }
 
@@ -387,6 +462,49 @@ public:
         return res.value();
     }
 
+    // ── TIA-style tag table (discrete areas) ──────────────────────────────
+    // One row per tag: name + type (any scalar or schema UDT) + address
+    // (%I0.0, %Q0.0, IB3, %IW6, %MD8, …). DB areas stay DATA_BLOCK syntax;
+    // the twin memory; %I/%Q/%M tags live in runtime-owned arenas served
+    // to S7 clients, the gateway and tagGet/tagPut — one shared backing.
+
+    /// Define one tag row. Prints the reason and returns false on failure
+    /// (unknown type/address, duplicate name, range overflow, UDT missing).
+    bool defineTag(const std::string& t_name, const std::string& t_type, const std::string& t_addr) {
+        if (auto r = impl_->defineTag(t_name, t_type, t_addr); r.hasError()) {
+            fmt::print(stderr, fg(fmt::color::red), "[PlcRuntime] {}\n", r.error());
+            return false;
+        }
+        return true;
+    }
+    /// True when any discrete tag write is pending broadcast.
+    bool hasDirtyTags() const {
+        return impl_->hasDirtyTags();
+    }
+    /// All defined tag names, comma-separated (empty when none).
+    std::string tagList() const {
+        return joinNames(impl_->tagNames());
+    }
+    /// Tag names in one #TAG_TABLE table ("" lists manual defineTag rows).
+    std::string tagList(const std::string& t_table) const {
+        return joinNames(impl_->tagNamesInTable(t_table));
+    }
+    /// Distinct #TAG_TABLE table names present, comma-separated.
+    std::string tagTables() const {
+        return joinNames(impl_->tagTables());
+    }
+    /// One-line description: name, type, address label and span.
+    /// Empty string (plus stderr note) when the tag does not exist.
+    std::string tagInfo(const std::string& t_name) const {
+        auto r = impl_->describeTag(t_name);
+        if (r.hasError()) {
+            fmt::print(stderr, fg(fmt::color::red), "[PlcRuntime] {}\n", r.error());
+            return {};
+        }
+        const auto& tag = r.value();
+        return fmt::format("{} : {} @ {} ({} bytes)", tag.name, tag.type_str, tag.addr.label, tag.span_bytes);
+    }
+
     /// Write a single bit in a DB's raw memory (byte_offset, bit 0-7).
     bool setBit(uint16_t t_db, uint32_t t_byte_offset, int t_bit_index, bool t_value) {
         auto res = impl_->getMemory().writeBit(t_db, t_byte_offset, t_bit_index, t_value);
@@ -401,6 +519,16 @@ public:
 
     const ::sgrn::plcsim::runtime::PlcRuntimeSPtr& getImpl() const {
         return impl_;
+    }
+
+    static std::string joinNames(const std::vector<std::string>& t_names) {
+        std::string out;
+        for (size_t i = 0; i < t_names.size(); ++i) {
+            if (i)
+                out += ", ";
+            out += t_names[i];
+        }
+        return out;
     }
 
     ScriptDataBlock* db(uint16_t t_db_num) {

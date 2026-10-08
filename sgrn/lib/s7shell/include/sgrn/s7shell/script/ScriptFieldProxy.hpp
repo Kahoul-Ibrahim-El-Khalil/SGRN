@@ -3,6 +3,9 @@
 #include <cstdint>
 #include <string>
 
+class CScriptArray;
+class CScriptDictionary;
+
 namespace sgrn::s7shell::shell
 {
 
@@ -38,6 +41,28 @@ public:
     ScriptFieldProxy& assignBool(bool t_val);
     ScriptFieldProxy& assignString(const std::string& t_val);
     ScriptFieldProxy& assignDtl(ScriptDtl* tp_dtl_obj);
+    /// Structured assignment: `proxy = {1.0, 2.0}` / `proxy = {{"a", 1}}`.
+    /// Arrays encode element-wise (static arrays need exactly count
+    /// elements); struct dicts merge over existing bytes. Nested
+    /// arrays/dicts recurse.
+    ScriptFieldProxy& assignArray(CScriptArray* tp_arr);
+    ScriptFieldProxy& assignDict(CScriptDictionary* tp_dict);
+
+    // ── Field-level network ops (mirror DataBlock::get/put at path_) ──
+    /// Network fetch of this field into shadow; returns the JSON value.
+    std::string get();
+    /// Flush dirty bytes (whole-DB dirty ranges, like db.put()).
+    void put();
+    /// Shadow + trip immediate writes of this field.
+    void put(const std::string& t_raw_val);
+    void put(double t_val);
+    void put(int32_t t_val);
+    void put(bool t_val);
+    void putDtl(ScriptDtl* tp_dtl_obj);
+
+    // ── Error introspection (passthrough to the parent DB) ──────────
+    bool lastOpOk() const;
+    std::string lastOpError() const;
 
     // ── Typed reads ──────────────────────────────────────────────────
     float toFloat() const;

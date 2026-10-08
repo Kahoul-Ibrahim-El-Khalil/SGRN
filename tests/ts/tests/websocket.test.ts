@@ -1,6 +1,126 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { GatewayProcess } from "../src/GatewayProcess";
 
+type WritableByte = { db: number; original: number };
+
+function toBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function findWritableByte(): Promise<WritableByte> {
+  const registryResponse = await fetch("http://localhost:8080/registry");
+  expect(registryResponse.status).toBe(200);
+  const registry = await registryResponse.json();
+  const db = registry.dbs.find((candidate: { db_number: number; size_bytes: number }) => candidate.size_bytes > 0);
+  if (!db) throw new Error("Test gateway has no non-empty DB");
+
+  const memoryResponse = await fetch(
+    `http://localhost:8080/memory/db/${db.db_number}/offset/0/size/1`,
+  );
+  expect(memoryResponse.status).toBe(200);
+  const bytes = new Uint8Array(await memoryResponse.arrayBuffer());
+  expect(bytes.length).toBe(1);
+  return { db: db.db_number, original: bytes[0] };
+}
+
+function waitForOpen(socket: WebSocket): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("WebSocket open timeout")), 5000);
+    socket.addEventListener("open", () => {
+      clearTimeout(timeout);
+      resolve();
+    }, { once: true });
+    socket.addEventListener("error", () => {
+      clearTimeout(timeout);
+      reject(new Error("WebSocket connection failed"));
+    }, { once: true });
+  });
+}
+
+function waitForJsonAck(socket: WebSocket, sequence: number): Promise<{ ok: boolean; sequence: number }> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      socket.removeEventListener("message", onMessage);
+      reject(new Error(`JSON write acknowledgement timeout for sequence ${sequence}`));
+    }, 5000);
+    const onMessage = (event: MessageEvent) => {
+      if (typeof event.data !== "string") return;
+      let message: { type?: string; sequence?: number; ok?: boolean };
+      try {
+        message = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (message.type !== "write_ack" || message.sequence !== sequence) return;
+      clearTimeout(timeout);
+      socket.removeEventListener("message", onMessage);
+      resolve({ ok: message.ok === true, sequence: message.sequence });
+    };
+    socket.addEventListener("message", onMessage);
+  });
+}
+
+function runtimeSyncWriteFrame(db: number, value: number, sequence: bigint): ArrayBuffer {
+  const frame = new ArrayBuffer(39);
+  const bytes = new Uint8Array(frame);
+  bytes.set([0x53, 0x47, 0x52, 0x57], 0); // SGRW
+  const view = new DataView(frame);
+  view.setUint16(4, 1, true); // version
+  view.setUint8(6, 2); // Kind::Write
+  view.setUint8(7, 0); // reserved flags
+  view.setBigUint64(8, sequence, true);
+  view.setBigUint64(16, 1234n, true);
+  view.setUint32(24, 1, true); // record count
+  view.setUint16(28, db, true);
+  view.setUint32(30, 0, true); // offset
+  view.setUint32(34, 1, true); // size
+  view.setUint8(38, value);
+  return frame;
+}
+
+function waitForBinaryAck(socket: WebSocket, sequence: bigint): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      socket.removeEventListener("message", onMessage);
+      reject(new Error(`binary write acknowledgement timeout for sequence ${sequence}`));
+    }, 5000);
+    const onMessage = async (event: MessageEvent) => {
+      if (typeof event.data === "string") return;
+      const buffer = event.data instanceof ArrayBuffer
+        ? event.data
+        : event.data instanceof Blob
+          ? await event.data.arrayBuffer()
+          : null;
+      if (!buffer || buffer.byteLength < 28) return;
+      const bytes = new Uint8Array(buffer);
+      if (bytes[0] !== 0x53 || bytes[1] !== 0x47 || bytes[2] !== 0x52 || bytes[3] !== 0x57 || bytes[6] !== 3) return;
+      const view = new DataView(buffer);
+      if (view.getBigUint64(8, true) !== sequence) return;
+      clearTimeout(timeout);
+      socket.removeEventListener("message", onMessage);
+      resolve();
+    };
+    socket.addEventListener("message", onMessage);
+  });
+}
+
+async function readByte(db: number): Promise<number> {
+  const response = await fetch(`http://localhost:8080/memory/db/${db}/offset/0/size/1`);
+  expect(response.status).toBe(200);
+  return new Uint8Array(await response.arrayBuffer())[0];
+}
+
+async function restoreByte(db: number, value: number): Promise<void> {
+  const response = await fetch(`http://localhost:8080/memory/db/${db}/offset/0/size/1`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: new Uint8Array([value]),
+  });
+  expect(response.status).toBe(200);
+}
+
 describe("WebSocket Telemetry Tests", () => {
   let gateway: GatewayProcess;
   let ws: WebSocket;
@@ -34,6 +154,49 @@ describe("WebSocket Telemetry Tests", () => {
     });
 
     expect(connected).toBe(true);
+  });
+
+  test("RuntimeSync JSON and binary writes update the same runtime memory", async () => {
+    const target = await findWritableByte();
+    const socket = new WebSocket("ws://localhost:8080/ws");
+    await waitForOpen(socket);
+
+    try {
+      const jsonValue = target.original ^ 0xff;
+      const jsonSequence = 7001;
+      const jsonAck = waitForJsonAck(socket, jsonSequence);
+      socket.send(JSON.stringify({
+        command: "write",
+        sequence: jsonSequence,
+        updates: [{
+          db: target.db,
+          offset: 0,
+          size: 1,
+          data: toBase64Url(new Uint8Array([jsonValue])),
+        }],
+      }));
+      expect((await jsonAck).ok).toBe(true);
+      expect(await readByte(target.db)).toBe(jsonValue);
+
+      const binaryValue = jsonValue ^ 0x55;
+      const binarySequence = 7002n;
+      const binaryAck = waitForBinaryAck(socket, binarySequence);
+      socket.send(runtimeSyncWriteFrame(target.db, binaryValue, binarySequence));
+      await binaryAck;
+      expect(await readByte(target.db)).toBe(binaryValue);
+    } finally {
+      await restoreByte(target.db, target.original);
+      socket.close();
+    }
+  });
+
+  test("Malformed RuntimeSync binary frames do not terminate the connection", async () => {
+    const socket = new WebSocket("ws://localhost:8080/ws");
+    await waitForOpen(socket);
+    socket.send(new Uint8Array([0x53, 0x47, 0x52, 0x57, 0x01]).buffer);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+    socket.close();
   });
 
   test("WebSocket receives telemetry data after subscription", async () => {

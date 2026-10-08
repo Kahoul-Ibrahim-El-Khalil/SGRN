@@ -39,6 +39,26 @@ To unsubscribe, or to clear all subscriptions:
 
 If no `subscribe` command is sent, the client stays in **firehose mode** and the gateway pushes every dirty snapshot.
 
+### Full-duplex runtime writes
+
+The same WebSocket session can write raw, schema-compatible DB ranges. JSON is
+the inspectable form:
+
+```json
+{
+  "command": "write",
+  "updates": [
+    {"db": 1, "offset": 12, "size": 4, "data": "AAAAQA"}
+  ]
+}
+```
+
+`data` is base64url-encoded PLC memory. The server validates each range,
+applies the WebSocket write policy, and replies with a `write_ack` message.
+For lower overhead clients, `GatewaySync.useBinary(true)` sends the equivalent
+versioned `SGRW` RuntimeSync binary frame. This live frame format is separate
+from the compressed binary WAL archive format.
+
 ### Message Format
 
 The gateway pushes **delta snapshots** containing only changed fields since the last tick, always rooted at the top-level Data Block name:

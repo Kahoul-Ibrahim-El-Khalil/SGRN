@@ -1,28 +1,23 @@
-import "schema.as"
-
+// NOTE: no `import "schema.as"` — DB/UDT types come from the runtime's
+// native SchemaVM registration, which a script-side redeclaration would
+// collide with ("Name conflict"). schema.as stays IDE-tooling-only.
 const string SCHEMA_PATH = "schema.scl";
 
-const string IP = "127.0.0.1";
-
-S7Client@ plc = null;
+const string GATEWAY_WS_URL = "ws://127.0.0.1:8000/ws";
+PlcRuntime@ plc = PlcRuntime(SCHEMA_PATH);
+GatewaySync@ sync = null;
 
 bool setupEnv(
-    const string&in ip = IP,
-    int rack = 0,
-    int slot = 1
+    const string&in ws_url = GATEWAY_WS_URL
 ) {
     print("================================================================\n");
-    print("  Connecting to PLC at " + ip + " (rack=" + rack + ", slot=" + slot + ")\n");
-
-    @plc = S7Client(ip, rack, slot);
-    plc.loadSclSchema(SCHEMA_PATH);
-
-    bool ok = plc.lastOpOk();
-    if (ok) {
-        print("  Environment ready — all DB handles initialised.\n");
-    } else {
-        print("  WARNING: PLC connection issue: " + plc.lastError() + "\n");
-    }
+    print("  Connecting simulation runtime to gateway at " + ws_url + "\n");
+    @sync = GatewaySync(plc);
+    sync.useBinary(true);
+    sync.publishOnDirty(true);
+    bool ok = sync.connect(ws_url);
+    if (ok) print("  RuntimeSync started — DB updates will flow over WebSocket.\n");
+    else print("  RuntimeSync startup failed: " + sync.lastError() + "\n");
     print("================================================================\n");
     return ok;
 }
@@ -259,7 +254,7 @@ void writeReactorCore(ReactorCore@ db, DTL@ ts) {
     db.boron = float(boron_ppm);
     db.reactor_critical = reactor_power_mw > 10.0;
     db.reactor_tripped = scrammed;
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 
@@ -292,7 +287,7 @@ void writePrimaryCoolant(PrimaryCoolant@ db, DTL@ ts) {
     db.przr_pid.auto_mode = true;
     db.przr_pid.saturated = false;
 
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 
@@ -317,7 +312,7 @@ void writeSteamGenerator(SteamGenerator@ db, DTL@ ts) {
         db.sg_level_pid[p].saturated = false;
     }
 
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 
@@ -340,7 +335,7 @@ void writeTurbine(Turbine@ db, DTL@ ts) {
     db.shaft_vibration_um[2] = 14.2f;
     db.shaft_vibration_um[3] = 15.0f;
 
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 
@@ -366,7 +361,7 @@ void writeSafetySystems(SafetySystems@ db, DTL@ ts) {
         db.alarms[i].timestamp_ms = 0;
     }
 
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 
@@ -404,7 +399,7 @@ void writeRadMonitoring(RadMonitoring@ db, DTL@ ts) {
     }
 
     db.stack_release_bq_s = stack_release;
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 
@@ -412,7 +407,7 @@ void writeWasteProcessing(WasteProcessing@ db, DTL@ ts) {
     db.sfp_temp_c = float(sfp_temp);
     db.sfp_level_m = float(sfp_level);
     db.sfp_boron_ppm = 2400.0f;
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 

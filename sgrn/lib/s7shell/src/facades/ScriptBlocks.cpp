@@ -93,20 +93,6 @@ std::string ScriptS7Blocks::pgBlockInfo(const std::string& t_hex) const {
     return shell::formatBlockInfo(res.value());
 }
 
-bool ScriptS7Blocks::saveHex(const std::string& t_path, const std::string& t_hex) const {
-    return shell::writeHexFile(t_path, t_hex);
-}
-
-std::string ScriptS7Blocks::loadHex(const std::string& t_path) const {
-    const auto content = shell::readHexFile(t_path);
-    if (!content)
-        return {};
-    const auto bytes = ::sgrn::scl::parseHexBytes(*content);
-    if (bytes.hasError())
-        return {};
-    return shell::bytesToHex(bytes.value());
-}
-
 bool ScriptS7Blocks::uploadToFile(int t_block_type, uint16_t t_block_number, const std::string& t_path, bool t_full, int t_max_size) {
     if (!conn_ || !conn_->client_.isConnected())
         return false;

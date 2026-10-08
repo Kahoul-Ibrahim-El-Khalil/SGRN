@@ -1,7 +1,9 @@
 #include <fmt/core.h>
 #include <sgrn/gateway/adapters/s7/S7ProtocolAdapter.hpp>
+#include <sgrn/gateway/twin/encoding.hpp>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 using ::sgrn::wrappers::s7::S7Error;
 
@@ -86,9 +88,17 @@ int S7API S7ProtocolAdapter::s7RequestCallback(void* tp_usr_ptr, int t_sender, i
             return ::evrErrOutOfRange;
         }
 
+        // S7 wire order is big-endian; the arena holds block-endian bytes.
+        // Convert the span when the DB schema is little-endian (symmetric
+        // helper: same call converts both directions).
+        const ::sgrn::scl::DbSchema* p_schema = p_adapter->schema_provider_ ? p_adapter->schema_provider_(db_num) : nullptr;
+        const bool convert = p_schema != nullptr && p_schema->endianness == s7codec::Endian::Little;
         if (t_operation == OperationRead) {
             if (auto r = p_adapter->memory_.readDbMemory(db_num, start, bytes, static_cast<uint8_t*>(tp_data)); !r) {
                 return TypeTranslation::evrCodeForError(r.error());
+            }
+            if (convert) {
+                ::sgrn::gateway::twin::swapRangeToBigEndian(p_schema->fields, static_cast<uint8_t*>(tp_data), start, start, bytes);
             }
         } else {
             if (!p_adapter->security_policy_->authorizeWrite(t_sender, t_tag->Area, db_num)) {
@@ -96,7 +106,16 @@ int S7API S7ProtocolAdapter::s7RequestCallback(void* tp_usr_ptr, int t_sender, i
                 return ::evrErrException;
             }
 
-            if (auto r = p_adapter->memory_.writeDbMemory(db_num, start, bytes, static_cast<const uint8_t*>(tp_data)); r.hasError()) {
+            if (convert) {
+                std::vector<uint8_t> buf(static_cast<const uint8_t*>(tp_data), static_cast<const uint8_t*>(tp_data) + bytes);
+                ::sgrn::gateway::twin::swapRangeToBigEndian(p_schema->fields, buf.data(), start, start, bytes);
+                if (auto r = p_adapter->memory_.writeDbMemory(db_num, start, bytes, buf.data()); r.hasError()) {
+                    fmt::print(stderr, "[ERROR] S7 PUT to DB{} offset={} size={} failed – writeDbMemory failed: {}\n", db_num, start, bytes,
+                        r.error());
+                    return TypeTranslation::evrCodeForError(r.error());
+                }
+            } else if (auto r = p_adapter->memory_.writeDbMemory(db_num, start, bytes, static_cast<const uint8_t*>(tp_data));
+                r.hasError()) {
                 fmt::print(stderr, "[ERROR] S7 PUT to DB{} offset={} size={} failed – writeDbMemory failed: {}\n", db_num, start, bytes,
                     r.error());
                 return TypeTranslation::evrCodeForError(r.error());

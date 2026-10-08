@@ -7,9 +7,6 @@
 #include <memory>
 #include <string>
 
-class CScriptDictionary;
-class CScriptArray;
-
 #include <sgrn/gateway/twin/DbIOProvider.hpp>
 #include <sgrn/plcsim/PlcTagTable.hpp>
 #include <sgrn/s7shell/S7BatchEngine.hpp>
@@ -47,9 +44,6 @@ public:
     void addRef();
     void release();
 
-    std::string getVal(const std::string& t_path);
-    void setVal(const std::string& t_path, const std::string& t_json_val);
-
     std::string get(const std::string& t_path);
     double getReal(const std::string& t_path);
     int32_t getInt(const std::string& t_path);
@@ -60,12 +54,6 @@ public:
     void put(const std::string& t_path, int32_t t_val);
     void put(const std::string& t_path, bool t_val);
 
-    void write(const std::string& t_path, const std::string& t_raw_val);
-    void write(const std::string& t_path, double t_val);
-    void write(const std::string& t_path, int32_t t_val);
-    void write(const std::string& t_path, bool t_val);
-    void write(const std::string& t_path, CScriptDictionary* tp_dict);
-    void write(const std::string& t_path, CScriptArray* tp_arr);
     void put(); // Flush batch and push dirty tags
 
     void get();
@@ -75,8 +63,10 @@ public:
     bool getLastOpOk() const {
         return last_op_ok_;
     }
-    sgrn::wrappers::s7::S7Error getLastError() const {
-        return last_op_err_;
+    /// Script-safe string form (the AS binding declares a string return —
+    /// binding the enum getter directly would corrupt the call frame).
+    std::string lastOpErrorStr() const {
+        return std::string(::sgrn::wrappers::s7::toString(last_op_err_));
     }
 
     // ── Retry variants ───────────────────────────────────────────────
@@ -100,6 +90,13 @@ private:
     void notifyConnError(::sgrn::scl::SclError t_err);
     void notifyConnError(::sgrn::wrappers::s7::S7Error t_err);
 
+    /// Fail-closed staleness for served-shadow reads/writes on dropped links:
+    /// value is served best-effort but lastOpOk() goes false with NotConnected
+    /// so the failed trip stays visible. Virtual (never-connected) use and
+    /// online success are untouched. Call after successful offline ops.
+    /// (Defined in ScriptTagTable.cpp — needs the full connection type.)
+    void markStaleIfDropped();
+
     template <typename T>
     bool setOpResult(const ::sgrn::Result<T, SclError>& t_r) {
         if (t_r.hasError()) {
@@ -122,16 +119,6 @@ private:
         }
         last_op_ok_ = true;
         return true;
-    }
-    inline bool doesEngineHaveAnError() {
-        return std::visit([&](auto& e) { return e->hasError(); }, engine_);
-        ;
-    }
-    inline S7Error getLastS7ErrorFromEngine() {
-        return std::visit([&](auto& e) { return ::sgrn::wrappers::s7::fromSclErrorToS7Error(e->getLastError()); }, engine_);
-    }
-    inline bool isEngineNull() {
-        return std::visit([&](const auto& e) { return e == nullptr; }, engine_);
     }
 }; // class ScriptTagTable
 

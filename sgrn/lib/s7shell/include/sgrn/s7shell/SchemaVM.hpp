@@ -41,6 +41,22 @@ struct UdtArrayMeta {
     int count;
 };
 
+/// Value kind of a tag-table property: selects the AngelScript accessor
+/// signature AND the JSON conversion. Scalar kinds are live, fully typed
+/// properties (tags.x = v type-checks at compile time); Json covers UDT
+/// tags (and anything without a scalar mapping) as a JSON document string.
+enum class TagAsKind { Bool, Int, UInt, Int64, UInt64, Float, Double, String, Json };
+
+/// Per-tag metadata attached as auxiliary to each registered TagTable accessor.
+struct TagMeta {
+    std::string tag_name; ///< runtime/file tag-table row name (unsanitized)
+    TagAsKind kind{TagAsKind::String};
+    /// AS return-slot width for Int/UInt kinds (1/2/4 bytes). The generic
+    /// interface needs width-exact SetReturnByte/Word/DWord — a DWORD write
+    /// into an int16 slot corrupts the call frame.
+    uint32_t as_width{4};
+};
+
 /// All per-engine registration state.
 /// One instance must be owned per asIScriptEngine lifetime.
 /// Storing these as globals caused use-after-free when a second engine
@@ -50,6 +66,7 @@ struct SchemaVMRegistry {
     std::vector<std::unique_ptr<FieldMeta>> field_meta;
     std::vector<std::unique_ptr<UdtArrayMeta>> udt_array_metas;
     std::vector<std::unique_ptr<std::string>> udt_field_names;
+    std::vector<std::unique_ptr<TagMeta>> tag_metas;
     std::unordered_set<std::string> registered_schema_types;
     std::unordered_set<std::string> registered_udt_properties;
 };
@@ -77,6 +94,15 @@ void registerSchemaTypes(
 /// After calling this, `rt.DbName` and `plc.DbName` return ScriptDataBlock@
 /// handles for each DB in the schema store.
 void registerDbPropertyAccessors(
+    sgrn::scripting::ScriptHost& t_host, const sgrn::scl::PlcSchemaStore& t_store, SchemaVMRegistry& t_registry = g_schema_registry);
+
+/// Register per-tag typed accessors on the TagTable type, so a
+/// `TagTable@ tags = cli.tags();` handle exposes `tags.tag_name` with a
+/// compile-time-checked type (bool/int/float/double/string, or a JSON
+/// document string for UDT tags). Backed by the same routed get/put as the
+/// dynamic tags.get()/put() API, so runtime, file-table, online and offline
+/// tags all work through one surface.
+void registerTagPropertyAccessors(
     sgrn::scripting::ScriptHost& t_host, const sgrn::scl::PlcSchemaStore& t_store, SchemaVMRegistry& t_registry = g_schema_registry);
 
 /// Sanitize a field name to valid C identifier.

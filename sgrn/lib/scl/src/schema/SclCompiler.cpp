@@ -6,6 +6,7 @@
 #include <sgrn/scl/schema/TagTable.hpp>
 #include <sgrn/scl/types.hpp>
 #include <sgrn/scl/utils.hpp>
+#include <sgrn/utils/strings.hpp>
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -90,6 +91,15 @@ static Result<void, ::sgrn::scl::SclError> mergeIntoRegistry(PlcSchemaStore& t_r
         t_registry.addDimension(d);
     }
 
+    // Names of UDTs parsed from this unit — collected BEFORE the loop below
+    // moves them into the registry (moved-from names read empty afterwards).
+    // Lets #TAG_TABLE rows reference same-file UDTs without warnings.
+    std::set<std::string> parsed_udt_names;
+    for (const auto& t_udt : t_result.udts) {
+        if (!t_udt.name.empty())
+            parsed_udt_names.insert(t_udt.name);
+    }
+
     for (UdtDefinition& t_udt : t_result.udts) {
         if (t_udt.udt_number == 0 && t_udt_info.number > 0) {
             t_udt.udt_number = t_udt_info.number;
@@ -130,6 +140,45 @@ static Result<void, ::sgrn::scl::SclError> mergeIntoRegistry(PlcSchemaStore& t_r
 
         Result<void, ::sgrn::scl::SclError> r = t_registry.addDb(std::move(t_db), t_force, false);
         if (r.hasError())
+            return Error(r.error());
+    }
+
+    // TIA-style tag tables (#TAG_TABLE blocks): one PlcTag row per
+    // name/type/address. Addresses must parse; scalar types must be known.
+    // UDT references resolve against the merged store at load time, so an
+    // unknown type here is only a warning (cross-file UDTs merge later;
+    // same-file UDTs are covered by parsed_udt_names above).
+    for (PlcTag& t_tag : t_result.tags) {
+        if (t_tag.name.empty())
+            return SclError::ParseError;
+        auto addr = parsePlcAddress(t_tag.addr.label);
+        if (!addr.has_value()) {
+            t_registry.addWarning(fmt::format("[{}] #TAG_TABLE '{}': tag '{}' has unparseable address '{}', skipped.", t_source_name,
+                t_tag.table_name, t_tag.name, t_tag.addr.label));
+            continue;
+        }
+        // The DB area is defined exclusively through DATA_BLOCK syntax —
+        // tag tables cover the discrete areas (PE/PA/MK) only.
+        if (addr->area == S7AreaDB) {
+            t_registry.addWarning(fmt::format("[{}] #TAG_TABLE '{}': tag '{}' uses a DB address '{}', skipped "
+                                              "(define DB fields in DATA_BLOCK syntax).",
+                t_source_name, t_tag.table_name, t_tag.name, t_tag.addr.label));
+            continue;
+        }
+        t_tag.addr = *addr;
+        if (auto t = parseS7Type(t_tag.type_str)) {
+            t_tag.type = *t;
+        } else if (!t_tag.type_str.empty()) {
+            t_tag.udt_name = t_tag.type_str;
+            t_tag.type = DataType::Struct;
+            if (!t_registry.hasUdt(t_tag.type_str) && !parsed_udt_names.count(t_tag.type_str))
+                t_registry.addWarning(fmt::format("[{}] #TAG_TABLE '{}': tag '{}' references unknown UDT '{}' "
+                                                  "(resolves at load if defined in another file).",
+                    t_source_name, t_tag.table_name, t_tag.name, t_tag.type_str));
+        } else {
+            return SclError::ParseError;
+        }
+        if (auto r = t_registry.addTag(std::move(t_tag), t_force); r.hasError())
             return Error(r.error());
     }
 
@@ -398,6 +447,19 @@ Result<void, SclError> SclCompiler::emitScl(const PlcSchemaStore& t_store, const
         t_out << dbToScl(t_db);
     }
 
+    // Emit tag tables (one #TAG_TABLE file per table, TIA-style rows)
+    std::map<std::string, std::vector<PlcTag>> by_table;
+    for (const auto& [_, t_tag] : t_store.tags())
+        by_table[t_tag.table_name].push_back(t_tag);
+    for (const auto& [t_table, t_tags] : by_table) {
+        const std::string stem = t_table.empty() ? "tags-default" : "tags-" + sgrn::utils::strings::sanitizeIdentifier(t_table);
+        std::string t_path = (fs::path(t_output_dir) / (stem + ".scl")).string();
+        std::ofstream t_out(t_path);
+        if (!t_out.is_open())
+            return SclError::IoError;
+        t_out << tagsToScl(t_table, t_tags);
+    }
+
     return {};
 }
 
@@ -512,6 +574,20 @@ std::string SclCompiler::udtToScl(const UdtDefinition& t_udt) {
     emitFieldsScl(t_out, t_udt.fields, 2);
     t_out += "  END_STRUCT;\n\n";
     t_out += "END_TYPE\n";
+    return t_out;
+}
+
+std::string SclCompiler::tagsToScl(const std::string& t_table, const std::vector<PlcTag>& t_tags) {
+    std::string t_out;
+    t_out += fmt::format("#TAG_TABLE \"{}\"\n", t_table);
+    t_out += "[\n";
+    for (const auto& t_tag : t_tags) {
+        // UDT references stay quoted ("Motor"); scalars emit as stored.
+        // Addresses always emit %-prefixed so dotted forms lex whole.
+        const std::string type = !t_tag.udt_name.empty() ? fmt::format("\"{}\"", t_tag.udt_name) : t_tag.type_str;
+        t_out += fmt::format("  {} : {} @ %{},\n", t_tag.name, type, t_tag.addr.label);
+    }
+    t_out += "]\n";
     return t_out;
 }
 

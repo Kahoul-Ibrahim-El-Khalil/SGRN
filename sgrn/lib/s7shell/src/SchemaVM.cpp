@@ -6,10 +6,16 @@
 #include <sgrn/s7shell/SchemaVM.hpp>
 #include <sgrn/s7shell/bindings/registration.hpp>
 #include <sgrn/s7shell/connection/S7Connection.hpp>
+#include <sgrn/s7shell/script/ScriptTagTable.hpp>
 #include <scriptarray/scriptarray.h>
+
+#include <rapidjson/document.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
 
 #include <cctype>
 #include <cstring>
+#include <unordered_set>
 
 #include <fmt/color.h>
 #include <fmt/format.h>
@@ -132,10 +138,23 @@ static void GenericFieldSetter_int(asIScriptGeneric* tp_gen) {
     auto* p_db = static_cast<ScriptDataBlock*>(tp_gen->GetObject());
     auto* p_meta = static_cast<FieldMeta*>(tp_gen->GetAuxiliary());
 
-    // All integer setters are now declared with 'int' parameter in AngelScript
-    // so that hex literals (0x10) work without explicit narrowing casts.
-    // Always read as DWORD; encodeScalar will truncate to the correct width.
-    int32_t val = static_cast<int32_t>(tp_gen->GetArgDWord(0));
+    // All integer setters are declared with 'int' parameter in AngelScript
+    // so that hex literals (0x10) work without explicit narrowing casts…
+    // EXCEPT the sub-32-bit specializations below: GetArgDWord returns 0
+    // unless the declared parameter is exactly 4 bytes wide, so int8/int16
+    // (and uint8/uint16, which share this setter) must be read width-exact.
+    // (Found via tags.setpoint writing 0; same latent bug as the tag setter.)
+    int32_t val = 0;
+    const uint32_t width = static_cast<uint32_t>(s7codec::primitiveSize(p_meta->s7type).value_or(4));
+    const bool is_unsigned = p_meta->s7type == s7codec::Type::Byte || p_meta->s7type == s7codec::Type::Word ||
+                             p_meta->s7type == s7codec::Type::DWord || p_meta->s7type == s7codec::Type::USInt ||
+                             p_meta->s7type == s7codec::Type::UInt || p_meta->s7type == s7codec::Type::UDInt;
+    if (width == 1)
+        val = is_unsigned ? static_cast<int32_t>(tp_gen->GetArgByte(0)) : static_cast<int32_t>(static_cast<int8_t>(tp_gen->GetArgByte(0)));
+    else if (width == 2)
+        val = is_unsigned ? static_cast<int32_t>(tp_gen->GetArgWord(0)) : static_cast<int32_t>(static_cast<int16_t>(tp_gen->GetArgWord(0)));
+    else
+        val = static_cast<int32_t>(tp_gen->GetArgDWord(0));
 
     uint32_t span = static_cast<uint32_t>(s7codec::typeSpanBytes(p_meta->s7type, p_meta->count).value_or(8));
     std::vector<uint8_t> tmp(span, 0);
@@ -1091,13 +1110,8 @@ void registerSchemaTypes(sgrn::scripting::ScriptHost& t_host, const PlcSchemaSto
         p_engine->RegisterObjectMethod(t_t, "void put(const string &in, int)", asMETHOD(ScriptDataBlock, putInt), asCALL_THISCALL);
         p_engine->RegisterObjectMethod(t_t, "void put(const string &in, bool)", asMETHOD(ScriptDataBlock, putBool), asCALL_THISCALL);
         p_engine->RegisterObjectMethod(t_t, "void put(const string &in, DTL@)", asMETHOD(ScriptDataBlock, putDtl), asCALL_THISCALL);
-        p_engine->RegisterObjectMethod(t_t, "void write(const string &in, const string &in)",
-            asMETHODPR(ScriptDataBlock, write, (const std::string&, const std::string&), void), asCALL_THISCALL);
-        p_engine->RegisterObjectMethod(
-            t_t, "void write(const string &in, double)", asMETHOD(ScriptDataBlock, writeDouble), asCALL_THISCALL);
-        p_engine->RegisterObjectMethod(t_t, "void write(const string &in, int)", asMETHOD(ScriptDataBlock, writeInt), asCALL_THISCALL);
-        p_engine->RegisterObjectMethod(t_t, "void write(const string &in, bool)", asMETHOD(ScriptDataBlock, writeBool), asCALL_THISCALL);
-        p_engine->RegisterObjectMethod(t_t, "void write(const string &in, DTL@)", asMETHOD(ScriptDataBlock, writeDtl), asCALL_THISCALL);
+        // NOTE: write()/setVal()/val() removed — get()/put()/typed properties are
+        // the surface (writeDouble/Int/Bool/Dtl C++ stays for FieldProxy).
         p_engine->RegisterObjectMethod(t_t, "string toJson() const", AS_M(ScriptDataBlock, toJson));
         p_engine->RegisterObjectMethod(t_t, "string diff() const", AS_M(ScriptDataBlock, diff));
         p_engine->RegisterObjectMethod(t_t, "void print() const", AS_M(ScriptDataBlock, print));
@@ -1125,6 +1139,235 @@ void registerSchemaTypes(sgrn::scripting::ScriptHost& t_host, const PlcSchemaSto
 
         fmt::print(fg(fmt::color::dark_cyan), "  [schema] registered type '{}' (DB{}, {} bytes)\n", tn, db_num, tp_db.size_bytes);
     }
+
+    // 4. Tag-table properties (tags.tag_name) for schema-declared tags
+    registerTagPropertyAccessors(t_host, t_store, t_registry);
+}
+
+// ── Tag-table typed properties (tags.tag_name) ─────────────────────────────
+// Scalar tags become live, compile-time-checked properties on TagTable
+// (tags.start_button = true); UDT tags become JSON document strings.
+// Backed by ScriptTagTable::get/put, so runtime, file-table, online and
+// offline tags share one surface. Errors raise script exceptions.
+
+static double tagJsonToNumber(const rapidjson::Value& t_v, bool& t_ok) {
+    if (t_v.IsNumber()) {
+        t_ok = true;
+        return t_v.GetDouble();
+    }
+    if (t_v.IsBool()) {
+        t_ok = true;
+        return t_v.GetBool() ? 1.0 : 0.0;
+    }
+    t_ok = false;
+    return 0.0;
+}
+
+static std::string tagJsonToString(const rapidjson::Value& t_v) {
+    if (t_v.IsString())
+        return t_v.GetString();
+    rapidjson::StringBuffer sb;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
+    t_v.Accept(writer);
+    return sb.GetString();
+}
+
+static void tagFail(asIScriptGeneric* tp_gen, const std::string& t_msg) {
+    (void)tp_gen;
+    if (auto* p_ctx = asGetActiveContext())
+        p_ctx->SetException(t_msg.c_str());
+}
+
+static void GenericTagGetter(asIScriptGeneric* tp_gen) {
+    auto* p_tags = static_cast<ScriptTagTable*>(tp_gen->GetObject());
+    auto* p_meta = static_cast<const TagMeta*>(tp_gen->GetAuxiliary());
+    auto fail = [&](const std::string& t_msg) { tagFail(tp_gen, t_msg); };
+    if (!p_tags || !p_meta) {
+        fail("tags: null handle");
+        return;
+    }
+    const std::string json = p_tags->get(p_meta->tag_name);
+    if (!p_tags->getLastOpOk()) {
+        fail("tags." + p_meta->tag_name + ": read failed");
+        return;
+    }
+    rapidjson::Document doc;
+    doc.Parse(json.c_str());
+    if (doc.HasParseError()) {
+        fail("tags." + p_meta->tag_name + ": undecodable value");
+        return;
+    }
+    switch (p_meta->kind) {
+        case TagAsKind::Bool: {
+            bool v = false;
+            if (doc.IsBool())
+                v = doc.GetBool();
+            else if (doc.IsNumber())
+                v = doc.GetDouble() != 0.0;
+            else {
+                fail("tags." + p_meta->tag_name + ": not a boolean");
+                return;
+            }
+            tp_gen->SetReturnByte(v ? 1 : 0);
+            return;
+        }
+        case TagAsKind::Int: {
+            bool ok = false;
+            const double n = tagJsonToNumber(doc, ok);
+            if (!ok) {
+                fail("tags." + p_meta->tag_name + ": not a number");
+                return;
+            }
+            const auto v = static_cast<int32_t>(n);
+            if (p_meta->as_width == 1)
+                tp_gen->SetReturnByte(static_cast<asBYTE>(v));
+            else if (p_meta->as_width == 2)
+                tp_gen->SetReturnWord(static_cast<asWORD>(v));
+            else
+                tp_gen->SetReturnDWord(static_cast<asDWORD>(v));
+            return;
+        }
+        case TagAsKind::UInt: {
+            bool ok = false;
+            const double n = tagJsonToNumber(doc, ok);
+            if (!ok) {
+                fail("tags." + p_meta->tag_name + ": not a number");
+                return;
+            }
+            const auto v = static_cast<uint32_t>(n);
+            if (p_meta->as_width == 1)
+                tp_gen->SetReturnByte(static_cast<asBYTE>(v));
+            else if (p_meta->as_width == 2)
+                tp_gen->SetReturnWord(static_cast<asWORD>(v));
+            else
+                tp_gen->SetReturnDWord(static_cast<asDWORD>(v));
+            return;
+        }
+        case TagAsKind::Int64: {
+            bool ok = false;
+            const double n = tagJsonToNumber(doc, ok);
+            if (!ok) {
+                fail("tags." + p_meta->tag_name + ": not a number");
+                return;
+            }
+            tp_gen->SetReturnQWord(static_cast<asQWORD>(static_cast<int64_t>(n)));
+            return;
+        }
+        case TagAsKind::UInt64: {
+            bool ok = false;
+            const double n = tagJsonToNumber(doc, ok);
+            if (!ok) {
+                fail("tags." + p_meta->tag_name + ": not a number");
+                return;
+            }
+            tp_gen->SetReturnQWord(static_cast<asQWORD>(static_cast<uint64_t>(n)));
+            return;
+        }
+        case TagAsKind::Float: {
+            bool ok = false;
+            const double n = tagJsonToNumber(doc, ok);
+            if (!ok) {
+                fail("tags." + p_meta->tag_name + ": not a number");
+                return;
+            }
+            tp_gen->SetReturnFloat(static_cast<float>(n));
+            return;
+        }
+        case TagAsKind::Double: {
+            bool ok = false;
+            const double n = tagJsonToNumber(doc, ok);
+            if (!ok) {
+                fail("tags." + p_meta->tag_name + ": not a number");
+                return;
+            }
+            tp_gen->SetReturnDouble(n);
+            return;
+        }
+        case TagAsKind::String:
+        case TagAsKind::Json:
+            new (tp_gen->GetAddressOfReturnLocation()) std::string(tagJsonToString(doc));
+            return;
+    }
+    fail("tags." + p_meta->tag_name + ": unsupported type");
+}
+
+static void GenericTagSetter(asIScriptGeneric* tp_gen) {
+    auto* p_tags = static_cast<ScriptTagTable*>(tp_gen->GetObject());
+    auto* p_meta = static_cast<const TagMeta*>(tp_gen->GetAuxiliary());
+    if (!p_tags || !p_meta) {
+        tagFail(tp_gen, "tags: null handle");
+        return;
+    }
+    std::string json;
+    switch (p_meta->kind) {
+        case TagAsKind::Bool:
+            json = tp_gen->GetArgByte(0) != 0 ? "true" : "false";
+            break;
+        // Width-exact reads: GetArgDWord returns 0 unless the declared
+        // parameter is exactly 4 bytes wide (int8/int16/… are narrower).
+        case TagAsKind::Int: {
+            int32_t v = 0;
+            if (p_meta->as_width == 1)
+                v = static_cast<int32_t>(static_cast<int8_t>(tp_gen->GetArgByte(0)));
+            else if (p_meta->as_width == 2)
+                v = static_cast<int32_t>(static_cast<int16_t>(tp_gen->GetArgWord(0)));
+            else
+                v = static_cast<int32_t>(tp_gen->GetArgDWord(0));
+            json = std::to_string(v);
+            break;
+        }
+        case TagAsKind::UInt: {
+            uint32_t v = 0;
+            if (p_meta->as_width == 1)
+                v = static_cast<uint32_t>(tp_gen->GetArgByte(0));
+            else if (p_meta->as_width == 2)
+                v = static_cast<uint32_t>(tp_gen->GetArgWord(0));
+            else
+                v = static_cast<uint32_t>(tp_gen->GetArgDWord(0));
+            json = std::to_string(v);
+            break;
+        }
+        case TagAsKind::Int64:
+            json = std::to_string(static_cast<int64_t>(tp_gen->GetArgQWord(0)));
+            break;
+        case TagAsKind::UInt64:
+            json = std::to_string(static_cast<uint64_t>(tp_gen->GetArgQWord(0)));
+            break;
+        case TagAsKind::Float: {
+            rapidjson::StringBuffer sb;
+            rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
+            writer.Double(static_cast<double>(tp_gen->GetArgFloat(0)));
+            json = sb.GetString();
+            break;
+        }
+        case TagAsKind::Double: {
+            rapidjson::StringBuffer sb;
+            rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
+            writer.Double(tp_gen->GetArgDouble(0));
+            json = sb.GetString();
+            break;
+        }
+        case TagAsKind::String: {
+            const std::string& val = *static_cast<const std::string*>(tp_gen->GetArgAddress(0));
+            rapidjson::StringBuffer sb;
+            rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
+            writer.String(val.c_str(), static_cast<rapidjson::SizeType>(val.size()));
+            json = sb.GetString();
+            break;
+        }
+        case TagAsKind::Json: {
+            json = *static_cast<const std::string*>(tp_gen->GetArgAddress(0));
+            rapidjson::Document doc;
+            if (doc.Parse(json.c_str()).HasParseError()) {
+                tagFail(tp_gen, "tags." + p_meta->tag_name + ": not valid JSON");
+                return;
+            }
+            break;
+        }
+    }
+    p_tags->put(p_meta->tag_name, json);
+    if (!p_tags->getLastOpOk())
+        tagFail(tp_gen, "tags." + p_meta->tag_name + ": write failed");
 }
 
 static void RuntimeDbPropertyGetter(asIScriptGeneric* tp_gen) {
@@ -1145,6 +1388,104 @@ static void ClientDbPropertyGetter(asIScriptGeneric* tp_gen) {
         return;
     }
     tp_gen->SetReturnAddress(p_client->db(db_num));
+}
+
+void registerTagPropertyAccessors(sgrn::scripting::ScriptHost& t_host, const PlcSchemaStore& t_store, SchemaVMRegistry& t_registry) {
+    asIScriptEngine* p_engine = t_host.getEngine();
+    if (!p_engine || !p_engine->GetTypeInfoByName("TagTable"))
+        return;
+
+    // TagTable method/property names — a tag sanitizing to one of these keeps
+    // dynamic-only access (tags.get()/put()) instead of a broken property.
+    static const std::unordered_set<std::string> kReserved = {"get", "put", "write", "val", "read", "setval", "getreal", "getint",
+        "getbool", "getretry", "putretry", "path", "print", "tostring", "tojson", "info", "lastopok", "lastoperror"};
+
+    auto kindFor = [](const scl::PlcTag& t_tag, std::string& t_as_type, uint32_t& t_as_width) -> TagAsKind {
+        t_as_width = 4;
+        if (!t_tag.udt_name.empty()) {
+            t_as_type = "string";
+            return TagAsKind::Json;
+        }
+        const char* as_type = s7TypeToAS(t_tag.type);
+        if (!as_type) {
+            t_as_type = "string";
+            return TagAsKind::Json;
+        }
+        t_as_type = as_type;
+        const std::string t = as_type;
+        if (t == "bool")
+            return TagAsKind::Bool;
+        if (t == "float")
+            return TagAsKind::Float;
+        if (t == "double")
+            return TagAsKind::Double;
+        if (t == "string")
+            return TagAsKind::String;
+        if (t == "int64")
+            return TagAsKind::Int64;
+        if (t == "uint64")
+            return TagAsKind::UInt64;
+        // Sub-32-bit integers need width-exact returns (Byte/Word/DWord).
+        t_as_width = static_cast<uint32_t>(s7codec::primitiveSize(t_tag.type).value_or(4));
+        if (t == "uint" || t == "uint8" || t == "uint16")
+            return TagAsKind::UInt;
+        return TagAsKind::Int;
+    };
+
+    sgrn::scripting::g_suppress_errors = true;
+    for (const auto& [name, tag] : t_store.tags()) {
+        const std::string safe = sgrn::utils::strings::sanitizeIdentifier(name);
+        if (safe.empty())
+            continue;
+        std::string lowered = safe;
+        for (char& c : lowered)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (kReserved.count(lowered))
+            continue;
+
+        std::string as_type;
+        uint32_t as_width = 4;
+        const TagAsKind kind = kindFor(tag, as_type, as_width);
+
+        auto p_meta = std::make_unique<TagMeta>();
+        p_meta->tag_name = name;
+        p_meta->kind = kind;
+        p_meta->as_width = as_width;
+        TagMeta* raw = p_meta.get();
+        t_registry.tag_metas.push_back(std::move(p_meta));
+
+        const std::string getter_sig = fmt::format("{} get_{}() const", as_type, safe);
+        p_engine->RegisterObjectMethod("TagTable", getter_sig.c_str(), asFUNCTION(GenericTagGetter), asCALL_GENERIC, raw);
+        const std::string setter_sig =
+            (as_type == "string") ? fmt::format("void set_{}(const string &in)", safe) : fmt::format("void set_{}({} val)", safe, as_type);
+        p_engine->RegisterObjectMethod("TagTable", setter_sig.c_str(), asFUNCTION(GenericTagSetter), asCALL_GENERIC, raw);
+
+        // snake_case twin when it differs (mirrors the DB accessors).
+        std::string snake = safe;
+        {
+            std::string out;
+            out.reserve(snake.size() + 4);
+            for (size_t i = 0; i < snake.size(); ++i) {
+                char c = snake[i];
+                if (std::isupper(static_cast<unsigned char>(c))) {
+                    if (i > 0)
+                        out += '_';
+                    out += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                } else {
+                    out += c;
+                }
+            }
+            snake = out;
+        }
+        if (snake != safe && !snake.empty() && !kReserved.count(snake)) {
+            const std::string getter_snake = fmt::format("{} get_{}() const", as_type, snake);
+            p_engine->RegisterObjectMethod("TagTable", getter_snake.c_str(), asFUNCTION(GenericTagGetter), asCALL_GENERIC, raw);
+            const std::string setter_snake = (as_type == "string") ? fmt::format("void set_{}(const string &in)", snake)
+                                                                   : fmt::format("void set_{}({} val)", snake, as_type);
+            p_engine->RegisterObjectMethod("TagTable", setter_snake.c_str(), asFUNCTION(GenericTagSetter), asCALL_GENERIC, raw);
+        }
+    }
+    sgrn::scripting::g_suppress_errors = false;
 }
 
 void registerDbPropertyAccessors(sgrn::scripting::ScriptHost& t_host, const PlcSchemaStore& t_store, SchemaVMRegistry& t_registry) {

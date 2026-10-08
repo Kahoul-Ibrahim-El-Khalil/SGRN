@@ -134,13 +134,13 @@ class GatewayTelemetry:
         sub = (t_db, t_offset, t_size)
         self.binary_subscriptions.add(sub)
         if self.connected:
-            self._send_command("subscribeBinary", db=t_db, offset=t_offset, size=t_size)
+            self._send_command("subscribe_binary", db=t_db, offset=t_offset, size=t_size)
 
     def unsubscribeBinary(self, t_db: int, t_offset: int = 0, t_size: Optional[int] = None) -> None:
         sub = (t_db, t_offset, t_size)
         self.binary_subscriptions.discard(sub)
         if self.connected:
-            self._send_command("unsubscribeBinary", db=t_db, offset=t_offset, size=t_size)
+            self._send_command("unsubscribe_binary", db=t_db, offset=t_offset, size=t_size)
 
     def subscribe(self, t_path: str) -> None:
         """Register a local JSON subscription and push it to the gateway."""
@@ -240,7 +240,7 @@ class GatewayTelemetry:
             for path in sorted(self.subscriptions):
                 await ws.send(json.dumps({"command": "subscribe", "path": path}))
             for db, offset, size in sorted(self.binary_subscriptions):
-                payload = {"command": "subscribeBinary", "db": db}
+                payload = {"command": "subscribe_binary", "db": db}
                 if offset is not None: payload["offset"] = offset
                 if size is not None: payload["size"] = size
                 await ws.send(json.dumps(payload))

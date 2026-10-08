@@ -29,6 +29,7 @@
 #include <sgrn/gateway/database/GatewayDatabase.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
 #include <sgrn/s7shell/bindings/registration.hpp>
+#include <sgrn/s7shell/bindings/tag_http.hpp>
 
 #include <fmt/color.h>
 #include <fmt/format.h>
@@ -91,6 +92,9 @@ public:
             return;
         }
 
+        // Discrete tags: /tags and /tags/<name> over the same shared backing.
+        hookHttpTags(adapter_.get(), rt);
+
         auto res = adapter_->start(t_ip, t_port, rt->getSchema(), rt->getMemory(), db_, security_);
 
         if (res.hasError()) {
@@ -106,6 +110,7 @@ public:
         fmt::print("  GET  http://{}:{}/data/<path>   - read field / subtree / full twin\n", t_ip, t_port);
         fmt::print("  POST http://{}:{}/data/<path>   - write via JSON\n", t_ip, t_port);
         fmt::print("  GET  http://{}:{}/registry      - schema registry\n", t_ip, t_port);
+        fmt::print("  GET  http://{}:{}/tags/<name>   - discrete tag read (POST to write)\n", t_ip, t_port);
     }
 
     void stop() {

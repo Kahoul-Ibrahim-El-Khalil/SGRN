@@ -6,8 +6,6 @@
 #include <sgrn/s7shell/utils/json_helpers.hpp>
 
 #include <fmt/format.h>
-#include <scriptarray/scriptarray.h>
-#include <scriptdictionary/scriptdictionary.h>
 #include <stdexcept>
 #include <string>
 
@@ -53,72 +51,6 @@ S7PathBatch* S7PathBatch::path(const std::string& t_p) {
     if (std::visit([&](const auto& e) { return e == nullptr; }, engine_))
         return this;
     std::visit([&](auto& e) { e->path(t_p); }, engine_);
-    addRef();
-    return this;
-}
-
-S7PathBatch* S7PathBatch::write(const std::string& t_json_val) {
-    if (std::visit([&](const auto& e) { return e == nullptr; }, engine_))
-        return this;
-    std::visit([&](auto& e) { e->write(t_json_val); }, engine_);
-    if (std::visit([&](auto& e) { return e->hasError(); }, engine_)) {
-        shell::logError(std::visit([&](auto& e) { return e->getLastError(); }, engine_));
-    }
-    addRef();
-    return this;
-}
-
-S7PathBatch* S7PathBatch::writeDouble(double t_val) {
-    if (std::visit([&](const auto& e) { return e == nullptr; }, engine_))
-        return this;
-    std::visit([&](auto& e) { e->write(t_val); }, engine_);
-    if (std::visit([&](auto& e) { return e->hasError(); }, engine_)) {
-        shell::logError(std::visit([&](auto& e) { return e->getLastError(); }, engine_));
-    }
-    addRef();
-    return this;
-}
-
-S7PathBatch* S7PathBatch::writeInt(int32_t t_val) {
-    if (std::visit([&](const auto& e) { return e == nullptr; }, engine_))
-        return this;
-    std::visit([&](auto& e) { e->write(t_val); }, engine_);
-    if (std::visit([&](auto& e) { return e->hasError(); }, engine_)) {
-        shell::logError(std::visit([&](auto& e) { return e->getLastError(); }, engine_));
-    }
-    addRef();
-    return this;
-}
-
-S7PathBatch* S7PathBatch::writeBool(bool t_val) {
-    if (std::visit([&](const auto& e) { return e == nullptr; }, engine_))
-        return this;
-    std::visit([&](auto& e) { e->write(t_val); }, engine_);
-    if (std::visit([&](auto& e) { return e->hasError(); }, engine_)) {
-        shell::logError(std::visit([&](auto& e) { return e->getLastError(); }, engine_));
-    }
-    addRef();
-    return this;
-}
-
-S7PathBatch* S7PathBatch::writeDict(void* tp_dict) {
-    if (std::visit([&](const auto& e) { return e == nullptr; }, engine_))
-        return this;
-    std::visit([&](auto& e) { e->write(shell::convertDictToJson(static_cast<CScriptDictionary*>(tp_dict))); }, engine_);
-    if (std::visit([&](auto& e) { return e->hasError(); }, engine_)) {
-        shell::logError(std::visit([&](auto& e) { return e->getLastError(); }, engine_));
-    }
-    addRef();
-    return this;
-}
-
-S7PathBatch* S7PathBatch::writeArray(void* tp_arr) {
-    if (std::visit([&](const auto& e) { return e == nullptr; }, engine_))
-        return this;
-    std::visit([&](auto& e) { e->write(shell::convertArrayToJson(static_cast<CScriptArray*>(tp_arr))); }, engine_);
-    if (std::visit([&](auto& e) { return e->hasError(); }, engine_)) {
-        shell::logError(std::visit([&](auto& e) { return e->getLastError(); }, engine_));
-    }
     addRef();
     return this;
 }

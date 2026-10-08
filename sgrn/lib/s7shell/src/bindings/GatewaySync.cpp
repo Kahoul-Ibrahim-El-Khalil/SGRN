@@ -63,6 +63,9 @@ public:
     void publishOnDirty(bool t_enabled) {
         sync_->publishOnDirty(t_enabled);
     }
+    void useBinary(bool t_enabled) {
+        sync_->useBinary(t_enabled);
+    }
 
     bool connect(const std::string& t_ws_url) {
         return sync_->connect(t_ws_url);
@@ -117,6 +120,9 @@ Result<void, std::string> registerGatewaySyncTypes(asIScriptEngine* tp_engine) {
 
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "GatewaySync", "void publishOnDirty(bool)", asMETHOD(GatewaySyncWrapper, publishOnDirty), asCALL_THISCALL));
+
+    SGRN_AS_REG(
+        tp_engine->RegisterObjectMethod("GatewaySync", "void useBinary(bool)", asMETHOD(GatewaySyncWrapper, useBinary), asCALL_THISCALL));
 
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "GatewaySync", "bool connect(const string &in)", asMETHOD(GatewaySyncWrapper, connect), asCALL_THISCALL));

@@ -1,8 +1,12 @@
 #pragma once
 
+#include <sgrn/gateway/adapters/opcua/tag_access.hpp>
 #include <sgrn/scl/types.hpp>
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <open62541/types.h>
 
@@ -60,6 +64,16 @@ struct NodeContext {
     const UA_DataType* enum_type{nullptr};
     std::map<int, std::string> enum_map;
     const twin::PlcNode* resolveSymbol() const;
+
+    /// Discrete-tag projection: when true this node is backed by tag_backing
+    /// (not the twin). Scalar tags — and scalar members of UDT tags — decode
+    /// through the shared scalar path; UDT tags project as folders with one
+    /// node per member. tag_byte_offset addresses tag-relative bytes.
+    bool is_tag{false};
+    std::string tag_name;
+    uint32_t tag_byte_offset{0};
+    int tag_bit_index{-1};
+    std::shared_ptr<const TagBacking> tag_backing;
 };
 
 } // namespace sgrn::gateway::adapters

@@ -37,6 +37,7 @@ Result<void, std::string> registerS7Server(asIScriptEngine* tp_engine);
 Result<void, std::string> registerPersistenceTypes(asIScriptEngine* tp_engine);
 Result<void, std::string> registerSimulationTypes(asIScriptEngine* tp_engine);
 Result<void, std::string> registerReplayTypes(asIScriptEngine* tp_engine);
+Result<void, std::string> registerGatewayTypes(asIScriptEngine* tp_engine);
 Result<void, std::string> registerHttpServerTypes(asIScriptEngine* tp_engine);
 Result<void, std::string> registerWebSocketServerTypes(asIScriptEngine* tp_engine);
 
@@ -72,6 +73,7 @@ Result<void, std::string> registerS7Shell(asIScriptEngine* tp_engine) {
     SGRN_REGISTER_MODULE(sgrn::s7shell::bindings::registerProxyTypes(tp_engine));
     SGRN_REGISTER_MODULE(sgrn::s7shell::bindings::registerGatewaySyncTypes(tp_engine));
     SGRN_REGISTER_MODULE(sgrn::s7shell::bindings::registerS7Server(tp_engine));
+    SGRN_REGISTER_MODULE(sgrn::s7shell::bindings::registerGatewayTypes(tp_engine));
     SGRN_REGISTER_MODULE(sgrn::s7shell::bindings::registerHttpServerTypes(tp_engine));
     SGRN_REGISTER_MODULE(sgrn::s7shell::bindings::registerWebSocketServerTypes(tp_engine));
 #ifdef SGRN_HAS_OPC

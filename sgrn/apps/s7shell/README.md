@@ -75,14 +75,14 @@ mirror `showHelp()`:
   `lastOpOk/lastError/lastErrorCode/clearLastError`, `setConnectionType`,
   TSAP/rack-slot/port tuning passthrough.
 - **DataBlock**: `get/put` (whole DB), `get(path)/put(path, val)`,
-  `getReal/getInt/getBool`, staged `write()` + `put()` flush,
+  `getReal/getInt/getBool`, `put()` + `put(path, val)` writes,
   `getRetry/putRetry`, `lastOpOk/lastOpError`, `db["field.path"]`
   (FieldProxy@), `db.path(...)` (S7PathBatch@), `toJson/diff/number/name/
   print`, `registerSize/addField` (manual authoring), `cast<HexTable>`.
-- **TagTable**: `get/getReal/getInt/getBool`, `put` (immediate) vs `write`
-  (staged), bulk `get()/put()`, retry variants, `lastOpOk/lastOpError`,
+- **TagTable**: `get/getReal/getInt/getBool`, `put` (immediate),
+  bulk `get()/put()`, retry variants, `lastOpOk/lastOpError`,
   `path(name)`.
-- **S7PathBatch** (fluent): `db.path("f").write(a).write(b)…`,
+- **S7PathBatch** (scoped read handle): `db.path("f")`,
   `put/get/read/toJson`.
 - **S7Connection** (low-level tuning): `connectWithTsap/useTsap/
   useRackSlot`, `usesTsap/localTsap/remoteTsap`, `get/setParamInt/UInt16`,

@@ -15,21 +15,19 @@
 //   POST /data/PlantWide {"fault_code": 4}
 
 const string SCHEMA_PATH = "schema.scl";
-const string IP = "127.0.0.1";
+const string GATEWAY_WS_URL = "ws://127.0.0.1:8000/ws";
+PlcRuntime@ plc = PlcRuntime(SCHEMA_PATH);
+GatewaySync@ sync = null;
 
-S7Client@ plc = null;
-
-bool setupEnv(const string &in ip = IP, int rack = 0, int slot = 1) {
+bool setupEnv(const string &in ws_url = GATEWAY_WS_URL) {
     print("================================================================\n");
-    print("  Connecting to PLC at " + ip + " (rack=" + rack + ", slot=" + slot + ")\n");
-    @plc = S7Client(ip, rack, slot);
-    plc.loadSclSchema(SCHEMA_PATH);
-    bool ok = plc.lastOpOk();
-    if (ok) {
-        print("  Environment ready — all DB handles initialised.\n");
-    } else {
-        print("  WARNING: PLC connection issue: " + plc.lastError() + "\n");
-    }
+    print("  Connecting simulation runtime to gateway at " + ws_url + "\n");
+    @sync = GatewaySync(plc);
+    sync.useBinary(true);
+    sync.publishOnDirty(true);
+    bool ok = sync.connect(ws_url);
+    if (ok) print("  RuntimeSync started — DB updates will flow over WebSocket.\n");
+    else print("  RuntimeSync startup failed: " + sync.lastError() + "\n");
     print("================================================================\n");
     return ok;
 }
@@ -127,7 +125,7 @@ void main() {
     while (true) {
         DTL@ ts = dtl();
         // Allow live fault injection from the Gateway twin / operator UI.
-        if (db5 !is null) { db5.get(); fault_code = db5.fault_code; }
+        if (db5 !is null) fault_code = db5.fault_code;
         applyFaultStep();
         regulate();
         tick++;
@@ -174,7 +172,7 @@ void writeReactor(Reactor@ db, DTL@ ts) {
     db.level_pid.output_pct = 50.0f; db.level_pid.enabled = true; db.level_pid.auto_mode = true;
     db.temp_pid.setpoint = 120.0; db.temp_pid.process_value = r_temp;
     db.temp_pid.output_pct = 50.0f; db.temp_pid.enabled = true; db.temp_pid.auto_mode = true;
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 
@@ -197,7 +195,7 @@ void writeSeparator(Separator@ db, DTL@ ts) {
     db.level_pid.output_pct = 50.0f; db.level_pid.enabled = true; db.level_pid.auto_mode = true;
     db.pressure_pid.setpoint = 2600.0; db.pressure_pid.process_value = sep_press;
     db.pressure_pid.output_pct = 50.0f; db.pressure_pid.enabled = true; db.pressure_pid.auto_mode = true;
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 
@@ -216,7 +214,7 @@ void writeStripper(Stripper@ db, DTL@ ts) {
     db.steam_valve.fault = false;
     db.level_pid.setpoint = 50.0; db.level_pid.process_value = str_level;
     db.level_pid.output_pct = 50.0f; db.level_pid.enabled = true; db.level_pid.auto_mode = true;
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 
@@ -226,7 +224,7 @@ void writeCompressor(Compressor@ db, DTL@ ts) {
     db.recycle_valve.position_pct = float(recycle_valve_pos); db.recycle_valve.command_pct = float(recycle_valve_pos);
     db.recycle_valve.fault = false;
     db.agitator_speed = 100.0f;
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 
@@ -259,7 +257,7 @@ void writePlantWide(PlantWide@ db, DTL@ ts) {
     }
     db.active_alarm_count = uint(fault_code == 0 ? 0 : 1);
     db.any_critical = trip;
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 

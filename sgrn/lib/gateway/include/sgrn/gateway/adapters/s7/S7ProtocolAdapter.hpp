@@ -3,10 +3,12 @@
 #include <sgrn/Result.hpp>
 #include <sgrn/common/MemoryPort.hpp>
 #include <sgrn/common/SecurityPort.hpp>
+#include <sgrn/scl/types.hpp>
 #include <sgrn/structures/SharedBuffer.hpp>
 #include <sgrn/wrappers/s7/S7Server.hpp>
 #include <sgrn/wrappers/s7/error.hpp>
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -35,6 +37,13 @@ public:
     }
 
     void configureBeforeStart() override;
+    /// Optional schema lookup for S7-wire byte-order conversion: the twin
+    /// arena holds block-endian bytes while S7 clients speak big-endian.
+    /// Without a provider (or schema entry) spans pass through unconverted
+    /// (legacy behavior, correct for big-endian blocks).
+    void setSchemaProvider(std::function<const ::sgrn::scl::DbSchema*(uint16_t)> t_fn) {
+        schema_provider_ = std::move(t_fn);
+    }
     sgrn::Result<void, S7Error> bindToPlcMemory();
     bool isRequestInSemanticSpace(const TS7Tag& t_tag) const;
     sgrn::Result<void, S7Error> registerSemanticArea(int t_area_code, word t_index, size_t t_size);
@@ -43,6 +52,7 @@ public:
 
 private:
     IMemoryPort& memory_;
+    std::function<const ::sgrn::scl::DbSchema*(uint16_t)> schema_provider_;
     std::shared_ptr<ISecurityPolicy> security_policy_;
     std::map<std::pair<int, word>, std::shared_ptr<sgrn::SharedBuffer>> area_buffers_;
     std::map<std::pair<int, word>, std::vector<std::pair<int, int>>> semantic_spans_;

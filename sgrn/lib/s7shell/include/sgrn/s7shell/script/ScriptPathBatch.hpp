@@ -30,12 +30,6 @@ public:
     void release();
 
     S7PathBatch* path(const std::string& t_p);
-    S7PathBatch* write(const std::string& t_json_val);
-    S7PathBatch* writeDouble(double t_val);
-    S7PathBatch* writeInt(int32_t t_val);
-    S7PathBatch* writeBool(bool t_val);
-    S7PathBatch* writeDict(void* tp_dict);
-    S7PathBatch* writeArray(void* tp_arr);
 
     std::string read() const;
     void put();

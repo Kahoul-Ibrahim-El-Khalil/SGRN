@@ -1,9 +1,8 @@
 // ============================================================================
 // plc_logic.as — "MiniPlant" soft PLC scan cycle
 //
-// This is program #2: it does NOT own the memory. It connects as an S7Client
-// to the sgrn_gateway (program #1) at 127.0.0.1:102, the same as any real
-// SCADA/HMI would. Every scan cycle it:
+// This is program #2: it owns a local PlcRuntime and synchronizes with the
+// gateway over WebSocket. Operator writes arrive as RuntimeSync deltas.
 //
 //   1. pulls Setpoints (whatever program #3 last forced)
 //   2. runs the plant physics (valve travel, pump flow, tank level/temp,
@@ -12,19 +11,13 @@
 //
 // Run with:   s7shell plc_logic.as
 //
-// NOTE: the schema is loaded through a top-level `plc.loadSclSchema(...)`
-// call using the variable name `plc` — s7shell's pre-scanner detects this
-// pattern and auto-injects one global DataBlock@ handle per DB, named after
-// the DB's snake_case name: `setpoints`, `tank`, `pump`, `valves`, `heater`,
-// `alarms`. That's what lets the rest of this script read/write DB fields
-// as plain properties (e.g. tank.level_pct = ...).
 // ============================================================================
 
 const string SCHEMA_PATH = "schema.scl";
-const string GATEWAY_IP = "127.0.0.1";
-const uint16 GATEWAY_PORT = 102;
+const string GATEWAY_WS_URL = "ws://127.0.0.1:8000/ws";
 
-S7Client@ plc = null;
+PlcRuntime@ plc = PlcRuntime(SCHEMA_PATH);
+GatewaySync@ sync = null;
 
 // ─── Plant constants ─────────────────────────────────────────────────────────
 const double TANK_CAPACITY_L = 1000.0;
@@ -38,24 +31,15 @@ const double DT = 1.0 / SCAN_HZ;
 
 // ─── Setup ────────────────────────────────────────────────────────────────
 
-OpcUaServer@ opc = null;
-
 bool setupPlc() {
     print("================================================================\n");
-    print("  MiniPlant PLC — connecting to gateway at " + GATEWAY_IP + ":" + GATEWAY_PORT + "\n");
-
-    @plc = S7Client(GATEWAY_IP, 0, 1, GATEWAY_PORT);
-    plc.loadSclSchema(SCHEMA_PATH);
-
-    if (!plc.isConnected()) {
-        print("  ERROR: could not connect to gateway: " + plc.lastError() + "\n");
+    print("  MiniPlant runtime — connecting to gateway at " + GATEWAY_WS_URL + "\n");
+    @sync = GatewaySync(plc);
+    sync.useBinary(true);
+    sync.publishOnDirty(true);
+    if (!sync.connect(GATEWAY_WS_URL)) {
+        print("  ERROR: RuntimeSync could not start: " + sync.lastError() + "\n");
         return false;
-    }
-
-    // Start embedded OPC-UA Server directly on the s7shell memory
-    @opc = OpcUaServer(plc.runtime(), 4840);
-    if (!opc.start()) {
-        print("  WARNING: Could not start OPC-UA server on 4840.\n");
     }
 
     print("  Connected. Scan rate: " + SCAN_HZ + " Hz\n");
@@ -97,14 +81,7 @@ void main() {
     if (!setupPlc())
         return;
 
-    // We DO NOT sync from gateway inside the loop for process variables.
-    // Instead, the s7shell memory IS the engine, and OPC-UA clients connect to IT.
-    
-    // Seed initial state once
-    tank.get();
-    pump.get();
-    valves.get();
-    heater.get();
+    // The gateway sends initial state and subsequent writes over WebSocket.
 
     double pump_speed = 0.0;
     double runtime_s = double(pump.runtime_s);
@@ -118,10 +95,7 @@ void main() {
         double level_l = double(tank.volume_l);
         double temp_c = double(tank.temp_c) > 0.0 ? double(tank.temp_c) : AMBIENT_C;
         
-        // 1. Pull the latest operator-forced setpoints from Gateway ─────────────────────
-        // (Because Setpoints come from outside HMI via Gateway)
-        setpoints.get();
-
+        // 1. Read the latest gateway-synchronized operator setpoints.
         bool e_stop = setpoints.e_stop;
         bool run_cmd = setpoints.pump_run && !e_stop;
         double speed_sp = double(setpoints.pump_speed_sp_pct);
@@ -131,7 +105,7 @@ void main() {
         double outlet_cmd = e_stop ? 0.0 : double(setpoints.outlet_valve_cmd_pct);
 
         // 2. Valve actuators ────────────────────────────────────────────────
-        // We do NOT call valves.get() here; we use the local shadow so OPC-UA can force position/faults!
+        // Keep local valve state while accepting synchronized gateway setpoints.
         valves.inlet.command_pct = float(inlet_cmd);
         valves.outlet.command_pct = float(outlet_cmd);
         driveValve(valves.inlet, DT);
@@ -195,7 +169,7 @@ void main() {
         }
 
         // 5. Heater PID (simple P loop driving a first-order thermal lag) ────
-        // We do NOT call heater.get() here; we use the local shadow so OPC-UA can force PID states!
+        // Keep local heater state while accepting synchronized gateway writes.
         heater.loop.setpoint = double(setpoints.heater_setpoint_c);
         heater.loop.enabled = setpoints.heater_enable && !e_stop;
         heater.loop.process_value = temp_c;

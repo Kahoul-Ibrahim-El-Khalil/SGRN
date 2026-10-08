@@ -824,12 +824,12 @@ static void serializeScalarOrArrayToWriter(
                 p_elem_ptr = ptr + (i / 8);
                 b_idx = i % 8;
             }
-            auto dv = s7codec::decodeScalar(f.type, p_elem_ptr, buf_size - static_cast<size_t>(p_elem_ptr - ptr), b_idx);
+            auto dv = s7codec::decodeScalar(f.type, p_elem_ptr, buf_size - static_cast<size_t>(p_elem_ptr - ptr), b_idx, 0, f.endianness);
             writeDecodedValue(w, dv, f.type);
         }
         w.EndArray();
     } else {
-        auto dv = s7codec::decodeScalar(f.type, ptr, buf_size, f.bit_index);
+        auto dv = s7codec::decodeScalar(f.type, ptr, buf_size, f.bit_index, 0, f.endianness);
         writeDecodedValue(w, dv, f.type);
     }
 }
@@ -858,10 +858,16 @@ sgrn::Result<std::vector<uint8_t>, SclError> parseHexBytes(const std::string& t_
 }
 
 std::optional<PlcAddress> parsePlcAddress(const std::string& t_tok) {
-    const std::string tok_trimmed = sgrn::utils::strings::trim(t_tok);
+    std::string tok_trimmed = sgrn::utils::strings::trim(t_tok);
     if (tok_trimmed.empty())
         return std::nullopt;
-    const std::string up = sgrn::utils::strings::toUpper(t_tok);
+    // TIA writes %I0.0 / %DB1.DBX0.0; the bare form is I0.0 / DB1.DBX0.0.
+    // Accept both (single strip keeps pre-stripped callers working).
+    if (tok_trimmed[0] == '%')
+        tok_trimmed = sgrn::utils::strings::trim(tok_trimmed.substr(1));
+    if (tok_trimmed.empty())
+        return std::nullopt;
+    const std::string up = sgrn::utils::strings::toUpper(tok_trimmed);
 
     if (up.size() >= 2 && up[0] == 'T' && std::isdigit(static_cast<unsigned char>(up[1]))) {
         std::optional<int> t_n = sgrn::utils::strings::parseInt(up.substr(1));
@@ -886,6 +892,60 @@ std::optional<PlcAddress> parsePlcAddress(const std::string& t_tok) {
         a.byte_count = 2;
         a.label = fmt::format("C{}", t_n.value());
         return a;
+    }
+    // DB forms: DB1.DBX0.0, DB1.DBX0, DB1.DBB2, DB1.DBW4, DB1.DBD8 —
+    // bare or %-prefixed, case-insensitive. Lets TIA-style tag rows address
+    // DataBlock bytes directly (the tag table's discrete-area counterpart).
+    {
+        std::string t = tok_trimmed;
+        if (!t.empty() && t[0] == '%')
+            t = t.substr(1);
+        const std::string u = sgrn::utils::strings::toUpper(t);
+        if (u.size() > 2 && u[0] == 'D' && u[1] == 'B') {
+            const std::string::size_type dot = u.find('.');
+            if (dot != std::string::npos) {
+                std::optional<int> db_n = sgrn::utils::strings::parseInt(u.substr(2, dot - 2));
+                const std::string rest = u.substr(dot + 1);
+                if (db_n.has_value() && db_n.value() > 0 && db_n.value() <= 65535 && rest.size() >= 4) {
+                    PlcAddress a;
+                    a.area = S7AreaDB;
+                    a.db_number = static_cast<uint16_t>(db_n.value());
+                    const std::string kind = rest.substr(0, 3);
+                    if (kind == "DBX") {
+                        const std::string tail = rest.substr(3);
+                        const std::string::size_type bdot = tail.find('.');
+                        std::optional<int> byte_v = sgrn::utils::strings::parseInt(bdot == std::string::npos ? tail : tail.substr(0, bdot));
+                        std::optional<int> bit_v =
+                            bdot == std::string::npos ? std::optional<int>(0) : sgrn::utils::strings::parseInt(tail.substr(bdot + 1));
+                        if (byte_v.has_value() && bit_v.has_value() && bit_v.value() >= 0 && bit_v.value() <= 7) {
+                            a.byte_offset = byte_v.value();
+                            a.bit_index = bit_v.value();
+                            a.word_len = S7WLBit;
+                            a.byte_count = 1;
+                            a.label = fmt::format("DB{}.DBX{}.{}", a.db_number, byte_v.value(), bit_v.value());
+                            return a;
+                        }
+                    } else if (kind == "DBB" || kind == "DBW" || kind == "DBD") {
+                        std::optional<int> off_v = sgrn::utils::strings::parseInt(rest.substr(3));
+                        if (off_v.has_value() && off_v.value() >= 0) {
+                            a.byte_offset = off_v.value();
+                            if (kind == "DBB") {
+                                a.word_len = S7WLByte;
+                                a.byte_count = 1;
+                            } else if (kind == "DBW") {
+                                a.word_len = S7WLWord;
+                                a.byte_count = 2;
+                            } else {
+                                a.word_len = S7WLDWord;
+                                a.byte_count = 4;
+                            }
+                            a.label = fmt::format("DB{}.{}{}", a.db_number, kind, off_v.value());
+                            return a;
+                        }
+                    }
+                }
+            }
+        }
     }
     int area_code = -1;
     std::string area_lbl;

@@ -50,6 +50,9 @@ struct OpcUaAdapterContext {
     ::sgrn::gateway::SecurityManager* p_security_manager;
     wrappers::opcua::TypeRegistry* p_type_registry;
     DeltaPushHandler* p_delta_push_handler;
+    /// Discrete-tag projection (null = DB-only address space). Set from
+    /// OpcUaAdapter::setTagAccess(); owned by the adapter, outlives serving.
+    const TagAccess* p_tag_access{nullptr};
 };
 
 // ── Node registry context ────────────────────────────────────────────────────
@@ -114,8 +117,18 @@ void addLeafVariableNode(const OpcUaAdapterContext& t_adapter_ctx, const OpcUaNo
     const ::sgrn::scl::DbField& t_field, const OpcUaDbContext& t_db);
 
 void addFolderNode(const OpcUaAdapterContext& t_adapter, const OpcUaNodeRegistryContext& t_nodes_ctx, const OpcUaNodePath& t_path,
-    const ::sgrn::scl::DbField& t_field,
-    const OpcUaDbContext& t_db); // ── Information model ───────────────────────────────────────────────────────
+    const ::sgrn::scl::DbField& t_field, const OpcUaDbContext& t_db);
+
+// ── Discrete (TIA-style) tag projection (see node_registration.cpp) ───────
+// A "Tags" folder with one live variable node per scalar tag; UDT tags
+// project as structured folders with one node per member (native OPC UA
+// typing throughout, no JSON strings). No-op without adapter tag access
+// (DB-only behavior kept). Tag nodes are live reads/writes but excluded
+// from delta-push in v1.
+void registerTagsFolder(
+    const OpcUaAdapterContext& t_adapter, const OpcUaNodeRegistryContext& t_nodes, const ::sgrn::scl::PlcSchemaStore& t_registry);
+
+// ── Information model ───────────────────────────────────────────────────────
 
 void registerEnumDataType(UA_Server* tp_raw, const UA_DataType& t_type, const sgrn::wrappers::opcua::EnumTypeDef& t_def);
 

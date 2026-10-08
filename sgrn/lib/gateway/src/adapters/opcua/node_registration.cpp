@@ -3,6 +3,7 @@
 #include <sgrn/gateway/adapters/opcua/scalar_view.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
+#include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/wrappers/opcua/Server.hpp>
 #include <sgrn/wrappers/opcua/TypeRegistry.hpp>
 
@@ -386,6 +387,198 @@ void addLeafVariableNode(const OpcUaAdapterContext& t_adapter_ctx, const OpcUaNo
 
     UA_NodeId_clear(&t_var_id);
 }
+// ── Discrete (TIA-style) tag projection ────────────────────────────────────
+// A "Tags" folder with one live variable node per tag, backed by TagAccess
+// (not the twin). Scalars decode through the shared scalar path over
+// normalized backing bytes; UDT tags are JSON document strings. Tag nodes
+// are intentionally NOT tracked for delta-push (v1): reads/writes are live,
+// subscriptions observe polls. Without adapter tag access this is a no-op.
+
+// One live scalar leaf for a tag (or one UDT member): natively typed,
+// backed by tag-relative bytes. Bool members normalize through bit_index.
+static void addTagScalarNode(const OpcUaAdapterContext& t_adapter, const OpcUaNodeRegistryContext& t_nodes,
+    const wrappers::opcua::NodeId& t_parent_id, const std::string& t_parent_node_id, const std::string& t_tag_name,
+    const std::string& t_member_name, ::sgrn::scl::DataType t_type, uint32_t t_span_bytes, uint32_t t_byte_offset, int t_bit_index,
+    const std::shared_ptr<const TagBacking>& t_backing) {
+    UA_Server* p_raw = t_adapter.p_opcua_server->raw();
+
+    auto ua_res = dataTypeToUaTypeIndex(t_type);
+    if (ua_res.hasError()) {
+        SGRN_WARN_LOG("OPC UA: tag '{}.{}' has unmappable type, skipped", t_tag_name, t_member_name);
+        return;
+    }
+
+    auto p_ctx_owned = std::unique_ptr<NodeContext>(new NodeContext{
+        .server = nullptr, // tag-backed; read/write branches check is_tag first
+        .db_number = 0,
+        .field_path = t_tag_name,
+        .security = t_adapter.p_security_manager,
+        .array_length = 0u,
+        .elem_ua_type_index = ua_res.value(),
+        .udt_name = "",
+        .type_registry = t_adapter.p_type_registry,
+        .trigger_events = false,
+        .field_offset = 0,
+        .field_size = t_span_bytes,
+        .type = t_type,
+        .kind = ::sgrn::scl::FieldKind::Scalar,
+        .string_capacity = 0,
+        .scratch_buf = {},
+        .enum_type = nullptr,
+        .enum_map = {},
+        .is_tag = true,
+        .tag_name = t_tag_name,
+        .tag_byte_offset = t_byte_offset,
+        .tag_bit_index = t_bit_index,
+        .tag_backing = t_backing,
+    });
+    NodeContext* p_ctx = p_ctx_owned.get();
+    p_ctx->scratch_buf.resize(t_span_bytes);
+    t_nodes.p_owned_contexts->push_back(std::move(p_ctx_owned));
+
+    const std::string node_id_str = t_parent_node_id + "." + t_member_name;
+    UA_NodeId t_var_id = UA_NODEID_STRING_ALLOC(1, node_id_str.c_str());
+    UA_VariableAttributes t_v_attr = UA_VariableAttributes_default;
+    t_v_attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", t_member_name.c_str());
+    t_v_attr.accessLevel = UA_ACCESSLEVELMASK_READ | UA_ACCESSLEVELMASK_WRITE;
+    t_v_attr.userAccessLevel = t_v_attr.accessLevel;
+    t_v_attr.valueRank = UA_VALUERANK_SCALAR;
+    t_v_attr.dataType = UA_TYPES[ua_res.value()].typeId;
+
+    UA_Server_addVariableNode(p_raw, t_var_id, t_parent_id.get(), UA_NODEID_NUMERIC(0, UA_NS0ID_HASCOMPONENT),
+        UA_QUALIFIEDNAME_ALLOC(1, t_member_name.c_str()), UA_NODEID_NUMERIC(0, UA_NS0ID_BASEDATAVARIABLETYPE), t_v_attr, p_ctx, nullptr);
+
+    setReadWriteDataSource(p_raw, t_var_id);
+    UA_NodeId_clear(&t_var_id);
+}
+
+// UDT member walk: struct members recurse into sub-folders, scalar leaves
+// become variable nodes, arrays are skipped (v1). Field offsets come from
+// the schema UDT layout; the tag base offset anchors them in tag bytes.
+static void addTagMemberNodes(const OpcUaAdapterContext& t_adapter, const OpcUaNodeRegistryContext& t_nodes,
+    const wrappers::opcua::NodeId& t_parent_id, const std::string& t_parent_node_id, const std::string& t_tag_name,
+    const std::vector<::sgrn::scl::DbField>& t_fields, uint32_t t_base_offset, const std::shared_ptr<const TagBacking>& t_backing,
+    const ::sgrn::scl::PlcSchemaStore& t_registry);
+
+static void addTagStructFolder(const OpcUaAdapterContext& t_adapter, const OpcUaNodeRegistryContext& t_nodes,
+    const wrappers::opcua::NodeId& t_parent_id, const std::string& t_parent_node_id, const std::string& t_tag_name,
+    const std::string& t_member_name, const std::vector<::sgrn::scl::DbField>& t_fields, uint32_t t_base_offset,
+    const std::shared_ptr<const TagBacking>& t_backing, const ::sgrn::scl::PlcSchemaStore& t_registry) {
+    UA_Server* p_raw = t_adapter.p_opcua_server->raw();
+    const std::string node_id_str = t_parent_node_id + "." + t_member_name;
+    UA_NodeId folder_id = UA_NODEID_STRING_ALLOC(1, node_id_str.c_str());
+    UA_ObjectAttributes folder_attr = UA_ObjectAttributes_default;
+    folder_attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", t_member_name.c_str());
+    const UA_StatusCode res = UA_Server_addObjectNode(p_raw, folder_id, t_parent_id.get(), UA_NODEID_NUMERIC(0, UA_NS0ID_ORGANIZES),
+        UA_QUALIFIEDNAME_ALLOC(1, t_member_name.c_str()), UA_NODEID_NUMERIC(0, UA_NS0ID_FOLDERTYPE), folder_attr, nullptr, nullptr);
+    if (res != UA_STATUSCODE_GOOD) {
+        UA_NodeId_clear(&folder_id);
+        return;
+    }
+    wrappers::opcua::NodeId folder_node = wrappers::opcua::nodeIdFromRaw(folder_id);
+    addTagMemberNodes(t_adapter, t_nodes, folder_node, node_id_str, t_tag_name, t_fields, t_base_offset, t_backing, t_registry);
+    UA_NodeId_clear(&folder_id);
+}
+
+static void addTagMemberNodes(const OpcUaAdapterContext& t_adapter, const OpcUaNodeRegistryContext& t_nodes,
+    const wrappers::opcua::NodeId& t_parent_id, const std::string& t_parent_node_id, const std::string& t_tag_name,
+    const std::vector<::sgrn::scl::DbField>& t_fields, uint32_t t_base_offset, const std::shared_ptr<const TagBacking>& t_backing,
+    const ::sgrn::scl::PlcSchemaStore& t_registry) {
+    for (const auto& field : t_fields) {
+        const bool is_struct = field.type == ::sgrn::scl::DataType::Struct;
+        const bool is_array = field.count > 1;
+        if (is_array) {
+            SGRN_WARN_LOG("OPC UA: tag '{}.{}': array members not projected in v1, skipped", t_tag_name, field.name);
+            continue;
+        }
+        const uint32_t abs_offset = t_base_offset + static_cast<uint32_t>(field.offset);
+        if (is_struct) {
+            // Children ride the schema UDT when present; else the inline list.
+            const std::vector<::sgrn::scl::DbField>* p_children = &field.children;
+            std::vector<::sgrn::scl::DbField> empty;
+            if (p_children->empty() && !field.udt_name.empty()) {
+                if (auto u = t_registry.getUdtByName(field.udt_name); !u.hasError() && u.value())
+                    p_children = &u.value()->fields;
+                else
+                    p_children = &empty;
+            }
+            if (p_children->empty()) {
+                SGRN_WARN_LOG("OPC UA: tag '{}.{}': struct without layout, skipped", t_tag_name, field.name);
+                continue;
+            }
+            addTagStructFolder(
+                t_adapter, t_nodes, t_parent_id, t_parent_node_id, t_tag_name, field.name, *p_children, abs_offset, t_backing, t_registry);
+            continue;
+        }
+        // Scalar leaf: span + bit from the schema layout.
+        uint32_t span = 0;
+        if (auto span_opt = s7codec::typeSpanBytes(field.type, 1))
+            span = *span_opt;
+        if (span == 0) {
+            SGRN_WARN_LOG("OPC UA: tag '{}.{}': unsizable type, skipped", t_tag_name, field.name);
+            continue;
+        }
+        const int bit = (field.type == ::sgrn::scl::DataType::Bool) ? static_cast<int>(field.bit_index) : -1;
+        addTagScalarNode(
+            t_adapter, t_nodes, t_parent_id, t_parent_node_id, t_tag_name, field.name, field.type, span, abs_offset, bit, t_backing);
+    }
+}
+
+void registerTagsFolder(
+    const OpcUaAdapterContext& t_adapter, const OpcUaNodeRegistryContext& t_nodes, const ::sgrn::scl::PlcSchemaStore& t_registry) {
+    const TagAccess* p_access = t_adapter.p_tag_access;
+    if (!p_access || !p_access->list || !p_access->backing)
+        return;
+    const TagAccess& t_access = *p_access;
+    // No folder on tagless schemas — keeps tag-free servers byte-identical
+    // in browse results.
+    const std::vector<TagDescriptor> tags = t_access.list();
+    if (tags.empty())
+        return;
+    UA_Server* p_raw = t_adapter.p_opcua_server->raw();
+
+    const std::string folder_name = "Tags";
+    UA_NodeId folder_id = UA_NODEID_STRING_ALLOC(1, folder_name.c_str());
+    UA_ObjectAttributes folder_attr = UA_ObjectAttributes_default;
+    folder_attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", folder_name.c_str());
+    const UA_StatusCode folder_res =
+        UA_Server_addObjectNode(p_raw, folder_id, UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER), UA_NODEID_NUMERIC(0, UA_NS0ID_ORGANIZES),
+            UA_QUALIFIEDNAME_ALLOC(1, folder_name.c_str()), UA_NODEID_NUMERIC(0, UA_NS0ID_FOLDERTYPE), folder_attr, nullptr, nullptr);
+    if (folder_res != UA_STATUSCODE_GOOD) {
+        // A DB literally named "Tags" already claimed the NodeId — skip the
+        // folder rather than shadowing it.
+        SGRN_WARN_LOG("OPC UA: cannot create Tags folder (NodeId taken), tag projection skipped");
+        UA_NodeId_clear(&folder_id);
+        return;
+    }
+
+    wrappers::opcua::NodeId folder_node = wrappers::opcua::nodeIdFromRaw(folder_id);
+    for (const auto& tag : tags) {
+        if (tag.name.empty() || tag.span_bytes <= 0) {
+            SGRN_WARN_LOG("OPC UA: tag with empty name/span skipped");
+            continue;
+        }
+        if (!tag.udt_name.empty()) {
+            // Native structured node: folder + member leaves from the UDT
+            // layout (registry first, inline children as fallback).
+            const std::vector<::sgrn::scl::DbField>* p_fields = nullptr;
+            if (auto u = t_registry.getUdtByName(tag.udt_name); !u.hasError() && u.value())
+                p_fields = &u.value()->fields;
+            if (!p_fields || p_fields->empty()) {
+                SGRN_WARN_LOG("OPC UA: UDT tag '{}' (UDT '{}') has no layout, skipped", tag.name, tag.udt_name);
+                continue;
+            }
+            addTagStructFolder(
+                t_adapter, t_nodes, folder_node, folder_name, tag.name, tag.name, *p_fields, 0, t_access.backing, t_registry);
+            continue;
+        }
+        const int bit = (tag.type == ::sgrn::scl::DataType::Bool) ? tag.bit_index : -1;
+        addTagScalarNode(t_adapter, t_nodes, folder_node, folder_name, tag.name, tag.name, tag.type, static_cast<uint32_t>(tag.span_bytes),
+            0, bit, t_access.backing);
+    }
+    UA_NodeId_clear(&folder_id);
+}
+
 void addFolderNode(const OpcUaAdapterContext& t_adapter, const OpcUaNodeRegistryContext& t_nodes, const OpcUaNodePath& t_path,
     const ::sgrn::scl::DbField& t_field, const OpcUaDbContext& t_db) {
     UA_Server* p_raw = t_adapter.p_opcua_server->raw();

@@ -75,6 +75,9 @@ public:
     /// Generate SCL text for a single DB schema
     static std::string dbToScl(const DbSchema& t_db);
 
+    /// Generate SCL text for one tag table (#TAG_TABLE block, TIA-style rows)
+    static std::string tagsToScl(const std::string& t_table, const std::vector<PlcTag>& t_tags);
+
     // ── C++ code generation (s7codec compatible) ─────────────────────────────
 
     /// Generate a complete s7codec-compatible C++ header for the entire store.

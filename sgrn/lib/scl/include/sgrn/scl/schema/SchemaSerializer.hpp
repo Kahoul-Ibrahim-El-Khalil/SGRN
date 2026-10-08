@@ -21,7 +21,8 @@ inline constexpr char kBinarySchemaMagic[4] = {'S', 'G', 'R', 'S'};
 
 /// Binary schema codec version stamped after the magic. Bump when the
 /// layout below changes; decoders reject anything else.
-inline constexpr uint16_t kBinarySchemaCodecVersion = 1;
+// v2 adds PlcTag.udt_name (TIA-style UDT-typed tag rows from #TAG_TABLE).
+inline constexpr uint16_t kBinarySchemaCodecVersion = 2;
 
 /// True when t_bytes holds a binary-encoded schema (magic sniffing).
 inline bool isBinarySchemaPayload(std::string_view t_bytes) {

@@ -225,6 +225,38 @@ Result<std::vector<uint8_t>, OpcUaAdapterError> encodeBinaryWrite(NodeContext* p
     return cannonical_memory_buf;
 }
 
+// Discrete (TIA-style) tag write: scalars (and scalar UDT members) encode
+// through the shared scalar path; the backing normalizes bits.
+static UA_StatusCode writeTagValue(
+    const NodeContext* tp_ctx, const UA_DataValue* tp_data_value, const std::string& t_client_ip, const std::string& t_cert_subject) {
+    if (!tp_ctx->tag_backing || !tp_data_value || !tp_data_value->hasValue)
+        return UA_STATUSCODE_BADINTERNALERROR;
+    if (tp_ctx->security) {
+        // Tags live outside DB ACLs: default policy applies.
+        if (!tp_ctx->security->authorizeField(
+                security::Protocol::OpcUA, t_client_ip, std::nullopt, tp_ctx->tag_name, true, "", {}, t_cert_subject))
+            return UA_STATUSCODE_BADUSERACCESSDENIED;
+    }
+    const UA_Variant& t_v = tp_data_value->value;
+    if (t_v.arrayLength > 0 || !t_v.type)
+        return UA_STATUSCODE_BADTYPEMISMATCH;
+    if (tp_ctx->field_size == 0)
+        return UA_STATUSCODE_BADINTERNALERROR;
+    std::vector<uint8_t> buf(tp_ctx->field_size, 0);
+    PlcScalarView view;
+    view.type = tp_ctx->type;
+    view.endian = s7codec::Endian::Big;
+    view.size = tp_ctx->field_size;
+    view.count = 1;
+    view.bit_index = 0;
+    OpcUaEncodingContext elem_ctx{t_v.type, static_cast<const uint8_t*>(t_v.data), buf.data(), view};
+    auto enc = encodeScalarOpcUaToMemory(elem_ctx);
+    if (enc.hasError())
+        return toUAStatusCode(enc.error());
+    auto r = tp_ctx->tag_backing->write_bytes(tp_ctx->tag_name, tp_ctx->tag_byte_offset, buf, tp_ctx->tag_bit_index);
+    return r.hasError() ? UA_STATUSCODE_BADINTERNALERROR : UA_STATUSCODE_GOOD;
+}
+
 UA_StatusCode writeValue(UA_Server* tp_ua_server, const UA_NodeId* tp_session_id, void* /*sessionContext*/, const UA_NodeId* /*nodeId*/,
     void* tp_node_context, const UA_NumericRange* /*range*/, const UA_DataValue* tp_data_value) {
 
@@ -240,10 +272,15 @@ UA_StatusCode writeValue(UA_Server* tp_ua_server, const UA_NodeId* tp_session_id
 
     auto* p_ctx = static_cast<NodeContext*>(tp_node_context);
 
-    SGRN_RETURN_IF(!p_ctx || !p_ctx->server || !p_ctx->security, UA_STATUSCODE_BADINTERNALERROR);
+    SGRN_RETURN_IF(!p_ctx || (!p_ctx->server && !p_ctx->is_tag), UA_STATUSCODE_BADINTERNALERROR);
 
     const std::string client_ip = resolveSessionIp(tp_ua_server, tp_session_id);
     const std::string cert_subject = resolveCertSubject(tp_ua_server, tp_session_id);
+
+    if (p_ctx->is_tag)
+        return writeTagValue(p_ctx, tp_data_value, client_ip, cert_subject);
+
+    SGRN_RETURN_IF(!p_ctx->security, UA_STATUSCODE_BADINTERNALERROR);
 
     if (!p_ctx->security->authorizeField(
             security::Protocol::OpcUA, client_ip, p_ctx->db_number, p_ctx->field_path, true, "", {}, cert_subject))

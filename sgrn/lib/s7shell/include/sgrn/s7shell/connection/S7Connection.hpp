@@ -66,6 +66,14 @@ struct ScriptS7Connection {
     std::string conn_ip_;
     int conn_rack_{0};
     int conn_slot_{1};
+    /// True once a connection was successfully established at least once
+    /// (sticky history, never reset). Lets offline reads/writes distinguish
+    /// virtual-PLC use (shadow is truth → clean success) from a dropped link
+    /// (shadow served best-effort + NotConnected flags → fail-closed).
+    bool was_connected_{false};
+    bool wasConnected() const {
+        return was_connected_;
+    }
     uint16_t conn_port_{102};
     uint16_t conn_type_{CONNTYPE_PG};
     bool conn_use_tsap_{false};
@@ -119,6 +127,21 @@ struct ScriptS7Connection {
         const std::string& t_udt_name, const std::string& t_name, const std::string& t_type_str, uint32_t t_offset, uint16_t t_count = 1);
 
     ::sgrn::gateway::twin::DbIOProvider* getOrCreateDbProvider(uint16_t t_db_num);
+
+    // ── Runtime-defined tags (TIA-style, PlcRuntime-owned) ─────────────────
+    // Unified online/offline access: offline hits the shared arenas/twin,
+    // online additionally reads/writes the wire address so the runtime, the
+    // real PLC and S7 clients stay on the same bytes. Legacy file-table tags
+    // remain as fallback when the runtime defines no such tag.
+    bool hasRuntimeTag(const std::string& t_name) const;
+    sgrn::Result<std::string, ::sgrn::wrappers::s7::S7Error> runtimeTagGet(const std::string& t_name);
+    sgrn::Result<void, ::sgrn::wrappers::s7::S7Error> runtimeTagPut(const std::string& t_name, const std::string& t_json_val);
+    /// Push currently-dirty runtime tags onto the wire (no ledger consume —
+    /// only gateways consume via takeDirtyTags). No-op when offline.
+    sgrn::Result<void, ::sgrn::wrappers::s7::S7Error> pushRuntimeTags();
+    /// Wire-write one tag's current backing bytes (used by runtimeTagPut and
+    /// pushRuntimeTags). Assumes the arena/twin already holds the value.
+    sgrn::Result<void, ::sgrn::wrappers::s7::S7Error> wirePushTag(const std::string& t_name);
 };
 
 class ScriptSchemaStore;

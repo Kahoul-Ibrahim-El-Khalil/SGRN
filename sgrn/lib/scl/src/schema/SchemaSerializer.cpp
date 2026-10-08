@@ -44,6 +44,9 @@ static void resolveUdtInField(DbField& t_field, const PlcSchemaStore& t_registry
             const UdtDefinition* p_udt = udt_res.value();
             t_field.children = p_udt->fields;
             t_field.struct_size = p_udt->size_bytes;
+            // Late-attached children keep the UDT's scope — restamp to the
+            // instantiating block's scope (no field-level endianness).
+            stampDescendantEndianness(t_field);
         }
     }
     for (auto& child : t_field.children) {
@@ -676,8 +679,15 @@ sgrn::Result<PlcTag, scl::SclError> SchemaSerializer::tagFromJson(const rapidjso
     t_tag.name = t_node["name"].GetString();
     if (t_node.HasMember("table") && t_node["table"].IsString())
         t_tag.table_name = t_node["table"].GetString();
-    if (t_node.HasMember("type") && t_node["type"].IsString())
+    if (t_node.HasMember("type") && t_node["type"].IsString()) {
         t_tag.type_str = t_node["type"].GetString();
+        // Resolve scalar types now; UDT references (quoted or bare names)
+        // resolve against the schema at load time (see PlcRuntime tags).
+        if (auto t = sgrn::scl::parseS7Type(t_tag.type_str))
+            t_tag.type = *t;
+        else if (!t_tag.type_str.empty())
+            t_tag.udt_name = t_tag.type_str;
+    }
     if (t_node.HasMember("remark") && t_node["remark"].IsString())
         t_tag.remark = t_node["remark"].GetString();
     if (t_node.HasMember("address") && t_node["address"].IsString()) {
@@ -1413,6 +1423,7 @@ void writeTag(Writer& t_w, const PlcTag& t_tag) {
     t_w.i32(t_tag.addr.byte_count);
     t_w.str(t_tag.addr.label);
     t_w.str(s7codec::s7TypeToString(t_tag.type));
+    t_w.str(t_tag.udt_name);
 }
 
 bool readTag(Reader& t_r, PlcTag& t_tag) {
@@ -1425,7 +1436,7 @@ bool readTag(Reader& t_r, PlcTag& t_tag) {
     std::string type_name;
     if (!t_r.str(t_tag.name) || !t_r.str(t_tag.table_name) || !t_r.str(t_tag.type_str) || !t_r.str(t_tag.remark) || !t_r.i32(area) ||
         !t_r.u16(db_number) || !t_r.i32(byte_offset) || !t_r.i32(bit_index) || !t_r.i32(word_len) || !t_r.i32(byte_count) ||
-        !t_r.str(t_tag.addr.label) || !t_r.str(type_name))
+        !t_r.str(t_tag.addr.label) || !t_r.str(type_name) || !t_r.str(t_tag.udt_name))
         return false;
     t_tag.addr.area = area;
     t_tag.addr.db_number = db_number;

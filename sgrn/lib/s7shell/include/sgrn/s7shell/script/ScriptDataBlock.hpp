@@ -75,7 +75,6 @@ public:
 
     // ── Read field values ────────────────────────────────────────────────
     std::string val(const std::string& t_path);
-    void setVal(const std::string& t_path, const std::string& t_json_val);
 
     std::string get(const std::string& t_path);
     s7codec::DecodedValue readScalar(const std::string& t_path);
@@ -84,13 +83,16 @@ public:
     bool getBool(const std::string& t_path);
 
     // ── Write to local cache (staged) ────────────────────────────────────
-    void write(const std::string& t_path, const std::string& t_raw_val);
     void writeScalar(const std::string& t_path, const s7codec::DecodedValue& t_val);
     void writeDouble(const std::string& t_path, double t_val);
     void writeInt(const std::string& t_path, int32_t t_val);
     void writeBool(const std::string& t_path, bool t_val);
-    void writeDict(const std::string& t_path, void* tp_dict);
-    void writeArray(const std::string& t_path, void* tp_arr);
+    /// Encode a JSON document into the field at t_path and mark it dirty.
+    /// C++-only staging helper for FieldProxy array/dict assignment — the
+    /// same encode as put(path, json) but without the network trip. Struct
+    /// dicts merge over existing bytes (missing members preserved); static
+    /// arrays need exactly count elements.
+    void writeJson(const std::string& t_path, const std::string& t_json_val);
 
     // ── Sync to/from PLC ─────────────────────────────────────────────────
     void put(); // flush dirty segments to PLC
@@ -111,8 +113,10 @@ public:
     bool getLastOpOk() const {
         return last_op_ok_;
     }
-    sgrn::gateway::twin::DbIoError getlastOpError() const {
-        return last_op_err_;
+    /// Script-safe string form (the AS binding declares a string return —
+    /// binding the enum getter directly would corrupt the call frame).
+    std::string lastOpErrorStr() const {
+        return std::string(::sgrn::gateway::twin::toString(last_op_err_));
     }
 
     // ── Retry variants ───────────────────────────────────────────────
@@ -173,6 +177,10 @@ private:
 
     void notifyConnError(const ::sgrn::scl::SclError& t_err);
     void notifyConnError(const ::sgrn::wrappers::s7::S7Error& t_err);
+
+    /// Shared post-write bookkeeping for put(): snapshot/baseline write-back
+    /// plus runtime dirty-ledger mark (gateway publish observes it).
+    void commitBaseline(const std::string& t_path, const std::string& t_json_val);
 
     template <typename T>
     bool setOpResult(const ::sgrn::Result<T, SclError>& t_r) {

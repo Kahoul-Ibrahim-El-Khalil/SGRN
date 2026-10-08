@@ -389,6 +389,7 @@ set(GATEWAY_LIB_SOURCES
     src/adapters/http/memory_handlers.cpp
     src/adapters/http/post_handler.cpp
     src/adapters/http/read_handlers.cpp
+    src/adapters/http/tags_handlers.cpp
     src/adapters/http/assets.cpp
     src/adapters/s7/callbacks.cpp
     src/core/snapshot.cpp
@@ -452,6 +453,19 @@ sgrn_target(sgrn_gateway)
 # ========================
 
 if(SGRN_BUILD_TESTS)
+    # Header-only RuntimeSync framing test. This deliberately has no Crow or
+    # network dependency so malformed SGRW frames are cheap to regression-test.
+    sgrn_add_component_executable(
+        TARGET runtime_sync_protocol_test
+        SOURCES tests/runtime_sync_protocol_test.cpp
+        ENABLE_ORIGIN_RPATH
+    )
+    target_include_directories(runtime_sync_protocol_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    add_test(NAME runtime_sync_protocol_test COMMAND runtime_sync_protocol_test)
+    sgrn_target(runtime_sync_protocol_test)
+
     sgrn_add_component_executable(
         TARGET opcua_simulation_enum_projection_test
         SOURCES tests/opcua_simulation_enum_projection_test.cpp
@@ -564,5 +578,4 @@ endif()
 
 # 4.6 Documentation
 # Documentation is now embedded in the binary instead of installed as man pages.
-
 

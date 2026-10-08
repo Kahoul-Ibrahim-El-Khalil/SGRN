@@ -323,6 +323,9 @@ public:
                 std::string_view{"READ_ONLY"},
                 std::string_view{"DB"},
 
+                // Tag tables (TIA-style discrete tags)
+                std::string_view{"#TAG_TABLE"},
+
                 // Semantic attributes
                 std::string_view{"#UNIT"},
                 std::string_view{"#DIMENSION"},
@@ -378,6 +381,30 @@ public:
             return t;
         }
 
+        // TIA-style absolute address literal: %I0.0, %DB1.DBX0.0, … — one
+        // token so dotted DB addresses survive (the '.' splitter below would
+        // otherwise shred them). Only address characters are consumed.
+        if (c == '%') {
+            t.value += advance();
+            bool saw_addr = false;
+            while (std::isalnum(peek()) || peek() == '.' || peek() == '_') {
+                t.value += advance();
+                saw_addr = true;
+            }
+            if (!saw_addr) {
+                t.type = TokenType::Error;
+                return t;
+            }
+            t.type = TokenType::Identifier;
+            return t;
+        }
+
+        if (c == '@') {
+            t.value += advance();
+            t.type = TokenType::Punctuation;
+            return t;
+        }
+
         if (c == ':' || c == ';' || c == '[' || c == ']' || c == '{' || c == '}' || c == '.' || c == '=' || c == ',' || c == '(' ||
             c == ')' || c == '-') {
             t.value += advance();
@@ -401,6 +428,10 @@ class AstParser {
     ParseResult result_;
     std::map<std::string, UdtDefinition> udt_map_;
     uint16_t m_last_db_number_ = 0;
+    // File-scope default endianness (set by a top-level #BIG_ENDIAN /
+    // #LITTLE_ENDIAN directive). Block- and TYPE-level directives override
+    // it for their scope; there is no field-level endianness.
+    s7codec::Endian m_file_endian_ = s7codec::Endian::Big;
 
     bool m_has_error_ = false;
     std::string m_error_msg_;
@@ -612,13 +643,20 @@ public:
     }
 
     Result<ParseResult, SclError> parse() {
+        m_file_endian_ = s7codec::Endian::Big;
         while (!check(TokenType::EndOfFile) && !m_has_error_) {
             if (matchKeyword("TYPE"))
                 parseUdt();
             else if (matchKeyword("DATA_BLOCK"))
                 parseDb();
+            else if (matchKeyword("#TAG_TABLE"))
+                parseTagTable();
             else if (checkKeyword("#DIMENSIONS"))
                 parseDimensions();
+            else if (matchKeyword("#BIG_ENDIAN"))
+                m_file_endian_ = s7codec::Endian::Big;
+            else if (matchKeyword("#LITTLE_ENDIAN"))
+                m_file_endian_ = s7codec::Endian::Little;
             else
                 advance();
         }
@@ -711,6 +749,8 @@ private:
         UdtDefinition udt;
         udt.name = name;
         udt.udt_number = extractNumber(name, "UDT");
+        // File-scope default; a TYPE-level directive overrides it below.
+        udt.endianness = m_file_endian_;
 
         sgrn::scl::ModbusArea unused_modbus{sgrn::scl::ModbusArea::None};
         parseAttributes(udt.endianness, udt.trigger_events, unused_modbus);
@@ -765,7 +805,7 @@ private:
             udt.size_bytes = tracker.getTotalSize();
         } else {
             while (!checkKeyword("END_TYPE") && !check(TokenType::EndOfFile) && !m_has_error_) {
-                if (checkKeyword("DATA_BLOCK") || checkKeyword("TYPE")) {
+                if (checkKeyword("DATA_BLOCK") || checkKeyword("TYPE") || checkKeyword("#TAG_TABLE")) {
                     setError(fmt::format("Line {}:{} - Missing END_TYPE for UDT '{}'", current_.line, current_.col, name));
                     return;
                 }
@@ -787,7 +827,7 @@ private:
         }
 
         while (!checkKeyword("END_TYPE") && !check(TokenType::EndOfFile) && !m_has_error_) {
-            if (checkKeyword("DATA_BLOCK") || checkKeyword("TYPE")) {
+            if (checkKeyword("DATA_BLOCK") || checkKeyword("TYPE") || checkKeyword("#TAG_TABLE")) {
                 setError(fmt::format("Line {}:{} - Missing END_TYPE for UDT '{}'", current_.line, current_.col, name));
                 return;
             }
@@ -808,6 +848,24 @@ private:
         std::string t_name;
         int number = 0;
 
+        // Strict `DB<n>` single-token number (all digits after the prefix).
+        // stoi() alone is lenient ("DB12X" would parse as 12), so validate
+        // digit-by-digit here.
+        auto db_token_number = [](std::string_view t_tok) -> int {
+            std::string up = sgrn::utils::strings::toUpper(std::string(t_tok));
+            if (up.size() <= 2 || up.compare(0, 2, "DB") != 0)
+                return 0;
+            for (size_t i = 2; i < up.size(); ++i) {
+                if (!std::isdigit(static_cast<unsigned char>(up[i])))
+                    return 0;
+            }
+            try {
+                return std::stoi(std::string(up.substr(2)));
+            } catch (...) {
+                return 0;
+            }
+        };
+
         if (match(TokenType::StringLiteral) || match(TokenType::Identifier)) {
             t_name = previous_.value;
             number = extractNumber(t_name, "DB");
@@ -817,12 +875,34 @@ private:
                     number = std::stoi(previous_.value);
                 }
             }
+            // TIA-canonical `DB<n>` arrives as a single token (e.g.
+            // `DATA_BLOCK "Plant" DB1`). Without consuming it here both the
+            // explicit number and any block directive following it (such as
+            // #LITTLE_ENDIAN) are silently skipped.
+            if (number == 0 && (check(TokenType::Identifier) || current_.type == TokenType::Keyword)) {
+                const int tok_num = db_token_number(current_.value);
+                if (tok_num > 0) {
+                    number = tok_num;
+                    advance();
+                }
+            }
         } else if (matchKeyword("DB")) {
             if (match(TokenType::Number)) {
                 number = std::stoi(previous_.value);
                 t_name = "DB" + previous_.value;
             } else {
                 t_name = "DB";
+            }
+        } else if (check(TokenType::Identifier) || check(TokenType::Keyword)) {
+            // Unquoted `DATA_BLOCK DB<n>`: block name and number in one token.
+            const int tok_num = db_token_number(current_.value);
+            if (tok_num > 0) {
+                t_name = current_.value;
+                number = tok_num;
+                advance();
+            } else {
+                setError(fmt::format("Line {}:{} - Expected DB name or 'DB <num>'", current_.line, current_.col));
+                return;
             }
         } else {
             setError(fmt::format("Line {}:{} - Expected DB name or 'DB <num>'", current_.line, current_.col));
@@ -838,6 +918,8 @@ private:
         DbSchema db;
         db.db_name = t_name;
         db.db_number = number;
+        // File-scope default; a block-level directive overrides it below.
+        db.endianness = m_file_endian_;
 
         parseAttributes(db.endianness, db.trigger_events, db.modbus_area);
         if (m_has_error_)
@@ -845,7 +927,7 @@ private:
 
         OffsetTracker t_tracker;
         while (!checkKeyword("BEGIN") && !checkKeyword("END_DATA_BLOCK") && !check(TokenType::EndOfFile) && !m_has_error_) {
-            if (checkKeyword("DATA_BLOCK") || checkKeyword("TYPE")) {
+            if (checkKeyword("DATA_BLOCK") || checkKeyword("TYPE") || checkKeyword("#TAG_TABLE")) {
                 setError(fmt::format("Line {}:{} - Missing BEGIN/END_DATA_BLOCK for DB '{}'", current_.line, current_.col, t_name));
                 return;
             }
@@ -865,7 +947,7 @@ private:
 
         if (matchKeyword("BEGIN")) {
             while (!checkKeyword("END_DATA_BLOCK") && !check(TokenType::EndOfFile) && !m_has_error_) {
-                if (checkKeyword("DATA_BLOCK") || checkKeyword("TYPE")) {
+                if (checkKeyword("DATA_BLOCK") || checkKeyword("TYPE") || checkKeyword("#TAG_TABLE")) {
                     setError(fmt::format("Line {}:{} - Missing END_DATA_BLOCK for DB '{}'", current_.line, current_.col, t_name));
                     return;
                 }
@@ -881,6 +963,95 @@ private:
         result_.dbs.push_back(db);
     }
 
+    // ── TIA-style discrete tag table ──────────────────────────────────────
+    //   #TAG_TABLE "Inputs and Outputs"
+    //   [
+    //     on    : BOOL    @ %I0.0,
+    //     motor : "Motor" @ %MB10,
+    //   ]
+    // One row per discrete addressed object: name + type + address. The type
+    // is a primitive keyword (BOOL, …), a bare UDT name, or a quoted UDT name
+    // ("Motor"). Rows become PlcTag entries (table_name = the block name);
+    // address/type validation happens in SclCompiler::mergeIntoRegistry.
+    void parseTagTable() {
+        std::string table_name;
+        if (match(TokenType::StringLiteral) || match(TokenType::Identifier)) {
+            table_name = previous_.value;
+        } else {
+            setError(fmt::format("Line {}:{} - Expected tag table name after #TAG_TABLE", current_.line, current_.col));
+            return;
+        }
+        expectPunctuation("[", "Expected '[' after #TAG_TABLE name");
+        if (m_has_error_)
+            return;
+
+        while (!checkPunctuation("]") && !check(TokenType::EndOfFile) && !m_has_error_) {
+            std::string tag_name;
+            if (match(TokenType::Identifier) || match(TokenType::StringLiteral)) {
+                tag_name = previous_.value;
+            } else {
+                setError(fmt::format("Line {}:{} - Expected tag name in #TAG_TABLE '{}'", current_.line, current_.col, table_name));
+                return;
+            }
+            expectPunctuation(":", "Expected ':' after tag name");
+            if (m_has_error_)
+                return;
+
+            std::string type_str;
+            bool type_quoted = false;
+            if (match(TokenType::StringLiteral)) {
+                type_str = previous_.value;
+                type_quoted = true;
+            } else if (match(TokenType::Keyword) || match(TokenType::Identifier)) {
+                type_str = previous_.value;
+            } else {
+                setError(
+                    fmt::format("Line {}:{} - Expected tag type after ':' in #TAG_TABLE '{}'", current_.line, current_.col, table_name));
+                return;
+            }
+
+            expectPunctuation("@", "Expected '@' after tag type");
+            if (m_has_error_)
+                return;
+
+            std::string addr_str;
+            if (match(TokenType::Identifier) || match(TokenType::StringLiteral)) {
+                addr_str = previous_.value;
+            } else {
+                setError(
+                    fmt::format("Line {}:{} - Expected tag address after '@' in #TAG_TABLE '{}'", current_.line, current_.col, table_name));
+                return;
+            }
+            // Lexer quirk guard: a bare %-less dotted address lexes as pieces
+            // (DB1 . DBX0 . 0, or I0 . 0). Reassemble dotted tails so both
+            // %-prefixed single tokens and bare dotted forms work.
+            while (checkPunctuation(".")) {
+                matchPunctuation(".");
+                addr_str += ".";
+                if (match(TokenType::Number) || match(TokenType::Identifier)) {
+                    addr_str += previous_.value;
+                } else {
+                    setError(fmt::format("Line {}:{} - Truncated address in #TAG_TABLE '{}'", current_.line, current_.col, table_name));
+                    return;
+                }
+            }
+
+            PlcTag tag;
+            tag.name = tag_name;
+            tag.table_name = table_name;
+            tag.type_str = type_str;
+            tag.addr.label = addr_str;
+            if (type_quoted)
+                tag.udt_name = type_str;
+            result_.tags.push_back(std::move(tag));
+
+            // Comma between rows; trailing comma before ']' is accepted.
+            matchPunctuation(",");
+        }
+
+        expectPunctuation("]", "Expected ']' to close #TAG_TABLE");
+    }
+
     std::vector<DbField> parseStructFields(
         OffsetTracker& t_tracker, const std::string& t_end_keyword, s7codec::Endian t_block_endian, int t_depth = 0) {
         if (t_depth > 1000) {
@@ -890,7 +1061,7 @@ private:
         std::vector<DbField> fields;
 
         while (!checkKeyword(t_end_keyword) && !check(TokenType::EndOfFile) && !m_has_error_) {
-            if (checkKeyword("DATA_BLOCK") || checkKeyword("TYPE")) {
+            if (checkKeyword("DATA_BLOCK") || checkKeyword("TYPE") || checkKeyword("#TAG_TABLE")) {
                 setError(fmt::format("Line {}:{} - Missing '{}', found new block", current_.line, current_.col, t_end_keyword));
                 break;
             }
@@ -1362,7 +1533,7 @@ Result<ParseResult, SclError> DbSymbolsParser::parseString(
             (*tp_global_udts)[udt.name] = udt;
     }
 
-    if (result.value().dbs.empty() && result.value().udts.empty()) {
+    if (result.value().dbs.empty() && result.value().udts.empty() && result.value().tags.empty()) {
         return SclError::ParseError;
     }
 

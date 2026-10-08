@@ -24,6 +24,7 @@
 #include <cassert>
 #include <cctype>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -108,11 +109,13 @@ sgrn::Result<void, SclError> ScriptS7Connection::reconnect() {
         auto res = client_.connectWithTsap(conn_ip_, conn_local_tsap_, conn_remote_tsap_);
         if (res.hasError())
             return proto_bridge(res.error());
+        was_connected_ = true;
         return {};
     }
     auto res = client_.connect(conn_ip_, conn_rack_, conn_slot_, conn_type_, conn_port_);
     if (res.hasError())
         return proto_bridge(res.error());
+    was_connected_ = true;
     return {};
 }
 
@@ -133,6 +136,7 @@ sgrn::Result<void, SclError> ScriptS7Connection::connectWithTsap(const std::stri
     auto res = client_.connectWithTsap(t_ip, t_local_tsap, t_remote_tsap);
     if (res.hasError())
         return proto_bridge(res.error());
+    was_connected_ = true;
     return {};
 }
 
@@ -186,6 +190,114 @@ void ScriptS7Connection::addUdtField(
     return runtime_->getOrCreateDbProvider(t_db_num);
 }
 
+bool ScriptS7Connection::hasRuntimeTag(const std::string& t_name) const {
+    return runtime_ && runtime_->hasTag(t_name);
+}
+
+namespace
+{
+// Build a single-var S7 wire item for a runtime tag address.
+void fillRuntimeTagItem(
+    const ::sgrn::scl::PlcAddress& t_addr, int t_span, ::sgrn::wrappers::s7::S7DataItem& t_item, std::vector<uint8_t>& t_buf) {
+    t_buf.assign(static_cast<size_t>(t_span), 0u);
+    t_item.Area = t_addr.area;
+    t_item.WordLen = t_addr.word_len;
+    t_item.DBNumber = t_addr.db_number;
+    t_item.Start = (t_addr.word_len == S7WLBit) ? t_addr.byte_offset * 8 + t_addr.bit_index : t_addr.byte_offset;
+    t_item.Amount = (t_addr.word_len == S7WLBit) ? 1 : t_span;
+    t_item.pdata = t_buf.data();
+}
+} // namespace
+
+sgrn::Result<std::string, ::sgrn::wrappers::s7::S7Error> ScriptS7Connection::runtimeTagGet(const std::string& t_name) {
+    using ::sgrn::wrappers::s7::S7Error;
+    auto desc = runtime_->describeTag(t_name);
+    if (desc.hasError())
+        return S7Error::ReadError;
+    const auto tag = desc.value();
+
+    if (!client_.isConnected()) {
+        auto r = runtime_->readTagJson(t_name);
+        if (r.hasError())
+            return ::sgrn::wrappers::s7::fromSclErrorToS7Error(r.error());
+        return r.value();
+    }
+
+    ::sgrn::wrappers::s7::S7DataItem item{};
+    std::vector<uint8_t> buf;
+    fillRuntimeTagItem(tag.addr, tag.span_bytes, item, buf);
+    auto rc = client_.readMultiVars(&item, 1);
+    if (rc.hasError() || item.Result != 0)
+        return S7Error::ReadError;
+
+    // Commit wire bytes into the shared backing (dirty only on change, like
+    // the DB get-diff path) so runtime, PLC and S7 clients stay identical.
+    // Tags cover discrete areas only; DBs are defined via DATA_BLOCK syntax.
+    const size_t off = static_cast<size_t>(tag.addr.byte_offset);
+    const size_t span = static_cast<size_t>(tag.span_bytes);
+    {
+        std::vector<uint8_t> cur(span, 0);
+        if (runtime_->readAreaMemory(tag.addr.area, off, span, cur.data()).hasValue() && std::memcmp(cur.data(), buf.data(), span) != 0)
+            (void)runtime_->writeAreaMemory(tag.addr.area, off, span, buf.data());
+    }
+
+    auto r = runtime_->readTagJson(t_name);
+    if (r.hasError())
+        return ::sgrn::wrappers::s7::fromSclErrorToS7Error(r.error());
+    return r.value();
+}
+
+sgrn::Result<void, ::sgrn::wrappers::s7::S7Error> ScriptS7Connection::runtimeTagPut(
+    const std::string& t_name, const std::string& t_json_val) {
+    using ::sgrn::wrappers::s7::S7Error;
+    if (auto r = runtime_->writeTagJson(t_name, t_json_val); r.hasError())
+        return S7Error::WriteError;
+    if (!client_.isConnected())
+        return {};
+
+    // Mirror the same bytes onto the wire so the real PLC follows.
+    return wirePushTag(t_name);
+}
+
+sgrn::Result<void, ::sgrn::wrappers::s7::S7Error> ScriptS7Connection::wirePushTag(const std::string& t_name) {
+    using ::sgrn::wrappers::s7::S7Error;
+    auto desc = runtime_->describeTag(t_name);
+    if (desc.hasError())
+        return S7Error::WriteError;
+    const auto tag = desc.value();
+    const size_t off = static_cast<size_t>(tag.addr.byte_offset);
+    const size_t span = static_cast<size_t>(tag.span_bytes);
+    std::vector<uint8_t> buf(span, 0);
+    if (!runtime_->readAreaMemory(tag.addr.area, off, span, buf.data()).hasValue())
+        return S7Error::WriteError;
+
+    ::sgrn::wrappers::s7::S7DataItem item{};
+    item.Area = tag.addr.area;
+    item.WordLen = tag.addr.word_len;
+    item.DBNumber = tag.addr.db_number;
+    item.Start = (tag.addr.word_len == S7WLBit) ? tag.addr.byte_offset * 8 + tag.addr.bit_index : tag.addr.byte_offset;
+    item.Amount = (tag.addr.word_len == S7WLBit) ? 1 : static_cast<int>(span);
+    item.pdata = buf.data();
+    auto rc = client_.writeMultiVars(&item, 1);
+    if (rc.hasError() || item.Result != 0)
+        return S7Error::WriteError;
+    return {};
+}
+
+sgrn::Result<void, ::sgrn::wrappers::s7::S7Error> ScriptS7Connection::pushRuntimeTags() {
+    using ::sgrn::wrappers::s7::S7Error;
+    if (!client_.isConnected())
+        return {};
+    bool failed = false;
+    // Staged (unpublished) tags: the reliable-uplink ledger, not the
+    // broadcast one — pushing here must not starve gateway broadcasts.
+    for (const auto& name : runtime_->peekPublishTags()) {
+        if (wirePushTag(name).hasError())
+            failed = true;
+    }
+    return failed ? S7Error::WriteError : sgrn::Result<void, S7Error>{};
+}
+
 // ============================================================================
 // ScriptS7Client Implementation
 // ============================================================================
@@ -231,6 +343,11 @@ ScriptTagTable* ScriptS7Client::tags() {
 }
 
 std::string ScriptS7Client::tagGet(const std::string& t_name) {
+    // Runtime-defined (TIA-style) tags first — shared arenas/twin, so shell,
+    // gateway and S7 server all see the same bytes. Legacy file-table tags
+    // remain as fallback.
+    if (conn_->hasRuntimeTag(t_name))
+        return shell::valueOr(conn_->runtimeTagGet(t_name), std::string{"null"});
     if (!conn_->tag_table_)
         return "null";
     return shell::valueOr(conn_->tag_table_->get(conn_->client_, t_name), std::string{"null"});
@@ -249,31 +366,47 @@ bool ScriptS7Client::tagGetBool(const std::string& t_name) {
 }
 
 void ScriptS7Client::tagPut(const std::string& t_name, const std::string& t_raw_val) {
+    const std::string json_val = ::sgrn::gateway::twin::parseRawValuePayload(t_raw_val);
+    if (conn_->hasRuntimeTag(t_name)) {
+        (void)shell::ok(conn_->runtimeTagPut(t_name, json_val));
+        return;
+    }
     if (!conn_->tag_table_)
         return;
-    const std::string json_val = ::sgrn::gateway::twin::parseRawValuePayload(t_raw_val);
     (void)shell::ok(conn_->tag_table_->put(conn_->client_, t_name, json_val));
 }
 
 void ScriptS7Client::tagPutDouble(const std::string& t_name, double t_val) {
-    if (!conn_->tag_table_)
-        return;
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
     writer.Double(t_val);
+    if (conn_->hasRuntimeTag(t_name)) {
+        (void)shell::ok(conn_->runtimeTagPut(t_name, sb.GetString()));
+        return;
+    }
+    if (!conn_->tag_table_)
+        return;
     (void)shell::ok(conn_->tag_table_->put(conn_->client_, t_name, sb.GetString()));
 }
 
 void ScriptS7Client::tagPutInt(const std::string& t_name, int32_t t_val) {
-    if (!conn_->tag_table_)
-        return;
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
     writer.Int(t_val);
+    if (conn_->hasRuntimeTag(t_name)) {
+        (void)shell::ok(conn_->runtimeTagPut(t_name, sb.GetString()));
+        return;
+    }
+    if (!conn_->tag_table_)
+        return;
     (void)shell::ok(conn_->tag_table_->put(conn_->client_, t_name, sb.GetString()));
 }
 
 void ScriptS7Client::tagPutBool(const std::string& t_name, bool t_val) {
+    if (conn_->hasRuntimeTag(t_name)) {
+        (void)shell::ok(conn_->runtimeTagPut(t_name, t_val ? "true" : "false"));
+        return;
+    }
     if (!conn_->tag_table_)
         return;
     rapidjson::StringBuffer sb;

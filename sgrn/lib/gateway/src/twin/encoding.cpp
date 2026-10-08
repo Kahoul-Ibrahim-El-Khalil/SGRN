@@ -1,14 +1,18 @@
 #include <fmt/format.h>
 #include <sgrn/gateway/twin/encoding.hpp>
+#include <sgrn/gateway/twin/path.hpp>
 #include <sgrn/gateway/twin/time_utils.hpp>
 #include <sgrn/utils/encoding.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <sgrn/utils/time.hpp>
+#include <algorithm>
+#include <cstdint>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace sgrn::gateway::twin
 {
@@ -275,7 +279,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             return {};
         }
         case DataType::DTL:
-            return encodeDtlValue(t_value, tp_ptr, t_buffer_size, t_e);
+            return ::sgrn::gateway::twin::encodeDtlValue(t_value, tp_ptr, t_buffer_size, t_e);
         case DataType::String:
         case DataType::XString: {
             if (!t_value.IsString())
@@ -382,7 +386,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeArrayValue(
         element.is_dynamic = false; // The header is already written
 
         sgrn::Result<void, ::sgrn::scl::SclError> status =
-            encodeFieldRapidJson(element, t_value[index], tp_ptr + offset_at, element_size, t_depth + 1, t_e);
+            ::sgrn::gateway::twin::encodeFieldRapidJson(element, t_value[index], tp_ptr + offset_at, element_size, t_depth + 1, t_e);
         if (!status.has_value())
             return status;
     }
@@ -396,7 +400,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeFieldRapidJson(
 
     if (t_field.type == DataType::Struct) {
         if (t_field.count > 1)
-            return encodeArrayValue(t_field, t_value, tp_ptr, t_buffer_size, t_depth, t_e);
+            return ::sgrn::gateway::twin::encodeArrayValue(t_field, t_value, tp_ptr, t_buffer_size, t_depth, t_e);
         if (!t_value.IsObject())
             return SclError::Generic;
         for (const DbField& child : t_field.children) {
@@ -404,7 +408,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeFieldRapidJson(
                 continue;
             if (static_cast<size_t>(child.offset) >= t_buffer_size)
                 return SclError::Generic;
-            sgrn::Result<void, ::sgrn::scl::SclError> status = encodeFieldRapidJson(
+            sgrn::Result<void, ::sgrn::scl::SclError> status = ::sgrn::gateway::twin::encodeFieldRapidJson(
                 child, t_value[child.name.c_str()], tp_ptr + child.offset, t_buffer_size - child.offset, t_depth + 1, t_e);
             if (!status.has_value())
                 return status;
@@ -413,9 +417,9 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeFieldRapidJson(
     }
     if (t_field.count > 1 && t_field.type != DataType::String && t_field.type != DataType::WString && t_field.type != DataType::XString &&
         t_field.type != DataType::XWString) {
-        return encodeArrayValue(t_field, t_value, tp_ptr, t_buffer_size, t_depth, t_e);
+        return ::sgrn::gateway::twin::encodeArrayValue(t_field, t_value, tp_ptr, t_buffer_size, t_depth, t_e);
     }
-    return encodeScalarValue(t_field, t_value, tp_ptr, t_buffer_size, t_e);
+    return ::sgrn::gateway::twin::encodeScalarValue(t_field, t_value, tp_ptr, t_buffer_size, t_e);
 }
 
 sgrn::Result<void, ::sgrn::scl::SclError> encodeFieldAt(
@@ -423,7 +427,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeFieldAt(
     rapidjson::Document doc;
     if (doc.Parse(t_value_json.c_str()).HasParseError())
         return SclError::ParseError;
-    return encodeFieldRapidJson(t_field, doc, tp_ptr, t_buffer_size, t_depth, t_e);
+    return ::sgrn::gateway::twin::encodeFieldRapidJson(t_field, doc, tp_ptr, t_buffer_size, t_depth, t_e);
 }
 
 sgrn::Result<void, ::sgrn::scl::SclError> applyJsonPatchToFields(
@@ -451,12 +455,12 @@ sgrn::Result<void, ::sgrn::scl::SclError> applyJsonPatchToFields(
             rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
             val.Accept(writer);
             sgrn::Result<void, ::sgrn::scl::SclError> status =
-                applyJsonPatchToFields(t_field.children, sb.GetString(), field_ptr, field_buffer_remaining, t_e);
+                ::sgrn::gateway::twin::applyJsonPatchToFields(t_field.children, sb.GetString(), field_ptr, field_buffer_remaining, t_e);
             if (!status.has_value())
                 return status;
         } else {
             sgrn::Result<void, ::sgrn::scl::SclError> status =
-                encodeFieldRapidJson(t_field, val, field_ptr, field_buffer_remaining, 0, t_e);
+                ::sgrn::gateway::twin::encodeFieldRapidJson(t_field, val, field_ptr, field_buffer_remaining, 0, t_e);
             if (!status.has_value())
                 return status;
         }
@@ -555,7 +559,109 @@ std::string parseRawValuePayload(const std::string& t_raw) {
 
 sgrn::Result<void, ::sgrn::scl::SclError> encodeValue(
     const DbField& t_field, const std::string& t_value, uint8_t* tp_buffer_ptr, size_t t_buffer_size) {
-    return encodeFieldAt(t_field, t_value, tp_buffer_ptr, t_buffer_size);
+    return ::sgrn::gateway::twin::encodeFieldAt(t_field, t_value, tp_buffer_ptr, t_buffer_size);
+}
+
+namespace
+{
+// Byte size of one swappable unit, or 0 when the type must not be touched
+// (1-byte units, bit-packed bools, strings, BCD-structured temporals).
+size_t swapUnitSize(DataType t_type) {
+    switch (t_type) {
+        case DataType::Int:
+        case DataType::UInt:
+        case DataType::Word:
+        case DataType::Date:
+        case DataType::WChar:
+        case DataType::Counter:
+        case DataType::Timer:
+            return 2;
+        case DataType::DInt:
+        case DataType::UDInt:
+        case DataType::Real:
+        case DataType::DWord:
+        case DataType::Time:
+        case DataType::TimeOfDay:
+            return 4;
+        case DataType::LInt:
+        case DataType::ULInt:
+        case DataType::LReal:
+        case DataType::LWord:
+        case DataType::LTime:
+        case DataType::LTimeOfDay:
+        case DataType::LDT:
+            return 8;
+        default:
+            return 0;
+    }
+}
+
+void swapIfCovered(uint8_t* tp_buf, size_t t_buf_base, size_t t_elem_off, size_t t_unit, size_t t_range_base, size_t t_range_end) {
+    if (t_unit <= 1 || tp_buf == nullptr)
+        return;
+    if (t_elem_off >= t_range_base && t_elem_off + t_unit <= t_range_end && t_elem_off >= t_buf_base)
+        std::reverse(tp_buf + (t_elem_off - t_buf_base), tp_buf + (t_elem_off - t_buf_base) + t_unit);
+}
+
+void swapFieldRange(const DbField& t_field, size_t t_abs_off, uint8_t* tp_buf, size_t t_buf_base, size_t t_range_base, size_t t_range_end) {
+    if (t_field.endianness != s7codec::Endian::Little)
+        return; // big-endian fields already match S7 wire order
+    if (t_field.type == DataType::Struct) {
+        const size_t elem_span = t_field.struct_size > 0 ? t_field.struct_size : 0;
+        const uint32_t count = t_field.count > 1 ? t_field.count : 1;
+        for (uint32_t i = 0; i < count; ++i) {
+            const size_t base = t_abs_off + static_cast<size_t>(i) * elem_span;
+            for (const auto& child : t_field.children)
+                swapFieldRange(child, base + static_cast<size_t>(child.offset), tp_buf, t_buf_base, t_range_base, t_range_end);
+        }
+        return;
+    }
+    const size_t unit = swapUnitSize(t_field.type);
+    if (unit == 0)
+        return;
+    if (t_field.count > 1 && !t_field.is_dynamic) {
+        for (uint32_t i = 0; i < t_field.count; ++i)
+            swapIfCovered(tp_buf, t_buf_base, t_abs_off + static_cast<size_t>(i) * unit, unit, t_range_base, t_range_end);
+        return;
+    }
+    if (t_field.count > 1 && t_field.is_dynamic) {
+        // Dynamic array: U32 element count header (in field endianness)
+        // followed by the elements.
+        if (t_abs_off + 4 > t_range_end || t_abs_off < t_range_base || t_abs_off < t_buf_base)
+            return;
+        const uint32_t n = s7codec::fromEndian<uint32_t>(tp_buf + (t_abs_off - t_buf_base), t_field.endianness);
+        const uint32_t cap = t_field.count;
+        swapIfCovered(tp_buf, t_buf_base, t_abs_off, 4, t_range_base, t_range_end);
+        for (uint32_t i = 0; i < std::min(n, cap); ++i)
+            swapIfCovered(tp_buf, t_buf_base, t_abs_off + 4 + static_cast<size_t>(i) * unit, unit, t_range_base, t_range_end);
+        return;
+    }
+    swapIfCovered(tp_buf, t_buf_base, t_abs_off, unit, t_range_base, t_range_end);
+}
+} // namespace
+
+void swapFieldToBigEndian(const DbField& t_field, uint8_t* tp_buf, size_t t_size) {
+    if (tp_buf == nullptr || t_size == 0 || t_field.endianness != s7codec::Endian::Little)
+        return;
+    DbField root = t_field;
+    root.offset = 0;
+    swapFieldRange(root, 0, tp_buf, 0, 0, t_size);
+}
+
+void swapRangeToBigEndian(
+    const std::vector<::sgrn::scl::DbField>& t_fields, uint8_t* tp_buf, size_t t_buf_base_offset, size_t t_base_offset, size_t t_len) {
+    if (tp_buf == nullptr || t_len == 0)
+        return;
+    const size_t range_end = t_base_offset + t_len;
+    for (const auto& field : t_fields) {
+        if (field.endianness != s7codec::Endian::Little)
+            continue;
+        const size_t span = static_cast<size_t>(::sgrn::gateway::twin::fieldSpanSize(field));
+        const auto abs_off = static_cast<size_t>(field.offset);
+        if (abs_off >= range_end || abs_off + span <= t_base_offset)
+            continue; // no overlap
+        swapFieldRange(field, abs_off, tp_buf, t_buf_base_offset, t_base_offset, range_end);
+    }
 }
 
 } // namespace sgrn::gateway::twin

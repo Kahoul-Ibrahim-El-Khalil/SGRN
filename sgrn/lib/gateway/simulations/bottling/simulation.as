@@ -1,9 +1,8 @@
 const string SCHEMA_PATH = "schema.scl";
-const string GATEWAY_IP = "127.0.0.1";
-const uint16 GATEWAY_PORT = 102;
+const string GATEWAY_WS_URL = "ws://127.0.0.1:8000/ws";
 
-S7Client@ plc = null;
-OpcUaServer@ opc = null;
+PlcRuntime@ plc = PlcRuntime(SCHEMA_PATH);
+GatewaySync@ sync = null;
 
 // ─── Plant constants ─────────────────────────────────────────────────────────
 
@@ -27,19 +26,13 @@ const double GLYCOL_SP_C = 2.0;
 
 bool setupPlant() {
     print("================================================================\n");
-    print("  Bottling Plant PLC — connecting to gateway at " + GATEWAY_IP + ":" + GATEWAY_PORT + "\n");
-
-    @plc = S7Client(GATEWAY_IP, 0, 1, GATEWAY_PORT);
-    plc.loadSclSchema(SCHEMA_PATH);
-
-    if (!plc.isConnected()) {
-        print("  ERROR: could not connect to gateway: " + plc.lastError() + "\n");
+    print("  Bottling simulation — connecting to gateway at " + GATEWAY_WS_URL + "\n");
+    @sync = GatewaySync(plc);
+    sync.useBinary(true);
+    sync.publishOnDirty(true);
+    if (!sync.connect(GATEWAY_WS_URL)) {
+        print("  ERROR: RuntimeSync could not start: " + sync.lastError() + "\n");
         return false;
-    }
-
-    @opc = OpcUaServer(plc.runtime(), 4840);
-    if (!opc.start()) {
-        print("  WARNING: Could not start OPC-UA server on 4840.\n");
     }
 
     print("  Connected. Scan rate: " + SCAN_HZ + " Hz\n");

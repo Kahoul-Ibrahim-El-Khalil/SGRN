@@ -99,6 +99,7 @@ sgrn::Result<void> OpcUaAdapter::start(const std::string& /*ip*/, uint16_t t_por
                 .p_security_manager = impl_->ps_security_manager.get(),
                 .p_type_registry = &(impl_->type_registry),
                 .p_delta_push_handler = &(impl_->delta_push),
+                .p_tag_access = (tag_access_.list && tag_access_.backing) ? &tag_access_ : nullptr,
             },
         .nodes =
             {

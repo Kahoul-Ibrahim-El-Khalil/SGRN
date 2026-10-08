@@ -3,48 +3,23 @@
 
 const string SCHEMA_PATH = "schema.scl";
 
-const string IP = "127.0.0.1";
-
-S7Client@ plc = null;
-OpcUaServer@ opc = null;
+const string GATEWAY_WS_URL = "ws://127.0.0.1:8000/ws";
+PlcRuntime@ plc = PlcRuntime(SCHEMA_PATH);
+GatewaySync@ sync = null;
 
 bool setupEnv(
-    const string &in ip   = IP,
-    int rack              = 0,
-    int slot              = 1
+    const string &in ws_url = GATEWAY_WS_URL
 ) {
     print("================================================================\n");
-    print("  Connecting to PLC at " + ip + " (rack=" + rack + ", slot=" + slot + ")\n");
-
-    @plc = S7Client(ip, rack, slot);
-    plc.loadSclSchema(SCHEMA_PATH);
-
-    // Start embedded OPC-UA Server directly on the s7shell memory
-    @opc = OpcUaServer(plc.runtime(), 4840);
-    if (!opc.start()) {
-        print("  WARNING: Could not start OPC-UA server on 4840.\n");
-    }
-
-    bool ok = plc.lastOpOk();
-    if (ok) {
-        print("  Environment ready — all DB handles initialised.\n");
-    } else {
-        print("  WARNING: PLC connection issue: " + plc.lastError() + "\n");
-    }
+    print("  Connecting simulation runtime to gateway at " + ws_url + "\n");
+    @sync = GatewaySync(plc);
+    sync.useBinary(true);
+    sync.publishOnDirty(true);
+    bool ok = sync.connect(ws_url);
+    if (ok) print("  RuntimeSync started — DB updates will flow over WebSocket.\n");
+    else print("  RuntimeSync startup failed: " + sync.lastError() + "\n");
     print("================================================================\n");
     return ok;
-}
-
-// ─── Convenience: pull a snapshot of every DB from the PLC ──────────────────
-
-void pullAll() {
-    if (db1 !is null) db1.get();
-    if (db2 !is null) db2.get();
-    if (db3 !is null) db3.get();
-    if (db4 !is null) db4.get();
-    if (db5 !is null) db5.get();
-    if (db6 !is null) db6.get();
-    if (db7 !is null) db7.get();
 }
 
 // ─── Convenience: print every DB ─────────────────────────────────────────────
@@ -292,7 +267,7 @@ void writeInletSeparation(InletSeparation@ db, DTL@ ts) {
     db.fwko_drain_valve.position_pct = 0.0f;
     db.fwko_drain_valve.fault = false;
 
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 
@@ -324,7 +299,7 @@ void writeAdsorberTowers(AdsorberTowers@ db, DTL@ ts) {
     db.total_gas_flow.low_flow_alarm = false;
     db.total_gas_flow.sensor_fault = false;
 
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 
@@ -368,7 +343,7 @@ void writeRegenSystem(RegenSystem@ db, DTL@ ts) {
     db.regen_ko_drain_valve.fault = false;
     db.regen_water_removed_l = regen_water_removed;
 
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 
@@ -407,7 +382,7 @@ void writeSwitchingValves(SwitchingValves@ db, DTL@ ts) {
     db.valve_mismatch_alarm = (online_count != NUM_TOWERS - 1);
     db.any_valve_fault = false;
 
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 
@@ -416,7 +391,7 @@ void writeOutletQuality(OutletQuality@ db, DTL@ ts) {
     db.dew_point_spec = float(DEW_POINT_SPEC);
     db.dew_point_hi_alarm = dew_point_c > DEW_POINT_SPEC;
     db.analyzer_fault = false;
-    db.write("analyzer_last_cal", ts);
+    db.analyzer_last_cal = ts;;
 
     db.dust_filter_dp = float(dust_filter_dp);
     db.dust_filter_bypass = false;
@@ -430,7 +405,7 @@ void writeOutletQuality(OutletQuality@ db, DTL@ ts) {
     db.sales_gas_temp = float(feed_temp);
     db.heating_value = 38.5f;
 
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 
@@ -478,7 +453,7 @@ void writeSafetySystems(SafetySystems@ db, DTL@ ts) {
     db.active_alarm_count = esd_active ? 1 : 0;
     db.any_critical = esd_active;
 
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 
@@ -498,7 +473,7 @@ void writeUtilities(Utilities@ db, DTL@ ts) {
     db.ups_on_battery = false;
     db.control_power_ok = true;
 
-    db.write("timestamp", ts);
+    db.timestamp = ts;;
     db.put();
 }
 

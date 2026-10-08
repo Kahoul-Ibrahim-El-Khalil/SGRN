@@ -6,24 +6,18 @@
 // ramping, current draw, thermal rise, overcurrent/overtemp/stall
 // protection, and an e-stop/fault-reset handshake.
 //
-// The only way to command it is over OPC-UA. The embedded OpcUaServer below
-// exposes this script's own memory directly — an external OPC-UA client
-// (UaExpert, Python `asyncua`, a real PLC, whatever) connects to
-// opc.tcp://<host>:4840 and writes straight into DB1 "MotorCommand" fields
-// (start, stop, speed_sp_pct, accel_time_s, ...) exactly as if wiring into
-// the drive's control terminals. There's no .get()/.put() round trip on the
-// command side: the OPC-UA write lands directly in this VM's memory, and
-// this loop reads it on the very next scan.
+// The script owns its virtual PLC memory and synchronizes it with the gateway
+// over RuntimeSync WebSocket. Gateway clients can write commands into the
+// same state and observe the simulated drive outputs.
 //
 // Run with:   s7shell simulation.as
 // ============================================================================
 
 const string SCHEMA_PATH = "schema.scl";
-const string GATEWAY_IP = "127.0.0.1";
-const uint16 GATEWAY_PORT = 102;
+const string GATEWAY_WS_URL = "ws://127.0.0.1:8000/ws";
 
-S7Client@ plc = null;
-OpcUaServer@ opc = null;
+PlcRuntime@ plc = PlcRuntime(SCHEMA_PATH);
+GatewaySync@ sync = null;
 
 // ─── Drive / motor nameplate constants ──────────────────────────────────────
 const double SCAN_HZ = 10.0; // 10 scans/sec — smooth ramps
@@ -58,22 +52,13 @@ const uint16 FAULT_STALL = 4;
 // ─── Setup ────────────────────────────────────────────────────────────────
 
 bool setupDrive() {
-    print("Motor/VFD controller — connecting to gateway at " + GATEWAY_IP + ":" + GATEWAY_PORT + "\n");
-
-    @plc = S7Client(GATEWAY_IP, 0, 1, GATEWAY_PORT);
-    plc.loadSclSchema(SCHEMA_PATH);
-
-    if (!plc.isConnected()) {
-        print("ERROR: could not connect to gateway: " + plc.lastError() + "\n");
+    print("Motor/VFD controller — connecting runtime to " + GATEWAY_WS_URL + "\n");
+    @sync = GatewaySync(plc);
+    sync.useBinary(true);
+    sync.publishOnDirty(true);
+    if (!sync.connect(GATEWAY_WS_URL)) {
+        print("ERROR: could not start RuntimeSync: " + sync.lastError() + "\n");
         return false;
-    }
-
-    @opc = OpcUaServer(plc.runtime(), 4840);
-    if (!opc.start()) {
-        print("WARNING: Could not start OPC-UA server on 4840.\n");
-    } else {
-        print("OPC-UA control surface live at opc.tcp://" + GATEWAY_IP + ":4840\n");
-        print("Write MotorCommand.start / speed_sp_pct / accel_time_s to drive it.\n");
     }
 
     print("Connected. Scan rate: " + SCAN_HZ + " Hz\n");
@@ -86,9 +71,7 @@ void main() {
     if (!setupDrive())
         return;
 
-    // No .get() here: motor_command is the OPC-UA adapter's own write
-    // target (this VM's memory), and motor_status/alarms are what we
-    // publish into — there's nothing external to seed from.
+    // Gateway commands arrive through RuntimeSync subscriptions.
 
     bool run_latch = false;
     bool prev_start = false;

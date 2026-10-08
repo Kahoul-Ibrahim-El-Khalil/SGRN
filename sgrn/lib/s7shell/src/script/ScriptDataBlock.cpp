@@ -294,47 +294,6 @@ void ScriptDataBlock::push() {
     last_op_ok_ = true;
 }
 
-void ScriptDataBlock::write(const std::string& t_path, const std::string& t_raw_val) {
-    const std::string t_json_val = ::sgrn::gateway::twin::parseRawValuePayload(t_raw_val);
-    // Encode directly into the memory arena using the authoritative schema field.
-    // This bypasses the async PlcCommand queue whose plcNodeToDbField() reconstruction
-    // is unreliable for complex types (DTL, nested structs). Using schema.findField()
-    // is the same path as put() — guarantees push() detects dirty bytes correctly.
-    const auto loc = conn_->schema_.findField(db_num_, t_path);
-    if (!loc) {
-        throwScriptException(fmt::format("DB{}: field '{}' not found in schema", db_num_, t_path), ShellError::NotFound);
-        return;
-    }
-    ::sgrn::scl::DbField target_field = *loc->field;
-    if (!t_path.empty() && t_path.back() == ']') {
-        target_field.count = 1;
-    }
-    const int span = ::sgrn::gateway::twin::fieldSpanSize(target_field);
-    if (span <= 0)
-        return;
-    // Read existing bytes first so boolean bits in shared bytes are preserved,
-    // and so runtime dirty tracking can record the actual changed bytes.
-    std::vector<uint8_t> tp_before(static_cast<size_t>(span), 0);
-    std::vector<uint8_t> buf(static_cast<size_t>(span), 0);
-    if (!(conn_->memory_.readDbMemory(db_num_, loc->abs_offset, tp_before.size(), tp_before.data()))) {
-        throwScriptException("readDbMemory failed", ShellError::Generic);
-        return;
-    }
-    buf = tp_before;
-    auto res =
-        ::sgrn::gateway::twin::encodeFieldAt(target_field, t_json_val, buf.data(), static_cast<size_t>(span), 0, target_field.endianness);
-    if (res.hasError()) {
-        throwScriptException(fmt::format("DB{}.write('{}') failed", db_num_, t_path), fromSclError(res.error()));
-        return;
-    }
-    if (auto r = conn_->memory_.writeDbMemory(db_num_, loc->abs_offset, buf.size(), buf.data()); !r) {
-        throwScriptException(fmt::format("writeDbMemory failed: {}", r.error()), ShellError::Generic);
-        return;
-    }
-    snapshot_valid_ = true;
-    markDirtyDiff(conn_->runtime_, db_num_, loc->abs_offset, tp_before.data(), buf.data(), buf.size());
-}
-
 void ScriptDataBlock::writeScalar(const std::string& t_path, const s7codec::DecodedValue& t_val) {
     if (!conn_->runtime_)
         return;
@@ -373,12 +332,205 @@ void ScriptDataBlock::writeBool(const std::string& t_path, bool t_val) {
     writeScalar(t_path, s7codec::DecodedValue::makeBool(t_val));
 }
 
-void ScriptDataBlock::writeDict(const std::string& t_path, void* tp_dict) {
-    write(t_path, shell::convertDictToJson(static_cast<CScriptDictionary*>(tp_dict)));
+/// Short field descriptor for assignment error messages, e.g.
+/// "ARRAY[4] OF REAL", "STRUCT \"Motor\"", "REAL".
+static std::string describeField(const ::sgrn::scl::DbField& t_field) {
+    const char* tp_type = "???";
+    switch (t_field.type) {
+        case DataType::Bool:
+            tp_type = "BOOL";
+            break;
+        case DataType::Byte:
+            tp_type = "BYTE";
+            break;
+        case DataType::Word:
+            tp_type = "WORD";
+            break;
+        case DataType::DWord:
+            tp_type = "DWORD";
+            break;
+        case DataType::SInt:
+            tp_type = "SINT";
+            break;
+        case DataType::USInt:
+            tp_type = "USINT";
+            break;
+        case DataType::Int:
+            tp_type = "INT";
+            break;
+        case DataType::UInt:
+            tp_type = "UINT";
+            break;
+        case DataType::DInt:
+            tp_type = "DINT";
+            break;
+        case DataType::UDInt:
+            tp_type = "UDINT";
+            break;
+        case DataType::LInt:
+            tp_type = "LINT";
+            break;
+        case DataType::ULInt:
+            tp_type = "ULINT";
+            break;
+        case DataType::LWord:
+            tp_type = "LWORD";
+            break;
+        case DataType::Real:
+            tp_type = "REAL";
+            break;
+        case DataType::LReal:
+            tp_type = "LREAL";
+            break;
+        case DataType::Time:
+            tp_type = "TIME";
+            break;
+        case DataType::LTime:
+            tp_type = "LTIME";
+            break;
+        case DataType::Date:
+            tp_type = "DATE";
+            break;
+        case DataType::TimeOfDay:
+            tp_type = "TOD";
+            break;
+        case DataType::LTimeOfDay:
+            tp_type = "LTOD";
+            break;
+        case DataType::DateTime:
+            tp_type = "DT";
+            break;
+        case DataType::LDT:
+            tp_type = "LDT";
+            break;
+        case DataType::LDTL:
+            tp_type = "LDTL";
+            break;
+        case DataType::DTL:
+            tp_type = "DTL";
+            break;
+        case DataType::Char:
+            tp_type = "CHAR";
+            break;
+        case DataType::WChar:
+            tp_type = "WCHAR";
+            break;
+        case DataType::String:
+            tp_type = "STRING";
+            break;
+        case DataType::WString:
+            tp_type = "WSTRING";
+            break;
+        case DataType::XString:
+            tp_type = "XSTRING";
+            break;
+        case DataType::XWString:
+            tp_type = "XWSTRING";
+            break;
+        case DataType::Counter:
+            tp_type = "COUNTER";
+            break;
+        case DataType::Timer:
+            tp_type = "TIMER";
+            break;
+        case DataType::Struct:
+            tp_type = "STRUCT";
+            break;
+    }
+    if (t_field.type == DataType::Struct && !t_field.udt_name.empty())
+        return t_field.count > 1 ? fmt::format("ARRAY[{}] OF \"{}\"", t_field.count, t_field.udt_name)
+                                 : fmt::format("STRUCT \"{}\"", t_field.udt_name);
+    if (t_field.count > 1)
+        return fmt::format("ARRAY[{}] OF {}", t_field.count, tp_type);
+    return std::string(tp_type);
 }
 
-void ScriptDataBlock::writeArray(const std::string& t_path, void* tp_arr) {
-    write(t_path, shell::convertArrayToJson(static_cast<CScriptArray*>(tp_arr)));
+void ScriptDataBlock::writeJson(const std::string& t_path, const std::string& t_json_val) {
+    ::sgrn::scl::DbField target_field{};
+    size_t abs_offset = 0;
+    bool found = false;
+    // Runtime schema is authoritative for staging (same source as
+    // writeScalar); fall back to the connection schema for runtime-less
+    // file mode.
+    if (conn_->runtime_) {
+        if (auto loc = conn_->runtime_->getSchema().findField(db_num_, t_path)) {
+            target_field = *loc->field;
+            abs_offset = loc->abs_offset;
+            found = true;
+        }
+    } else if (auto loc = conn_->schema_.findField(db_num_, t_path)) {
+        target_field = *loc->field;
+        abs_offset = loc->abs_offset;
+        found = true;
+    }
+    if (!found) {
+        throwScriptException(fmt::format("DB{}: field '{}' not found in schema", db_num_, t_path), ShellError::NotFound);
+        return;
+    }
+    if (!t_path.empty() && t_path.back() == ']') {
+        target_field.count = 1;
+    }
+    // Shape pre-checks with actionable errors (the encoder itself only
+    // reports a bare Generic on mismatch).
+    {
+        rapidjson::Document doc;
+        if (!doc.Parse(t_json_val.c_str()).HasParseError()) {
+            const bool is_struct = target_field.type == DataType::Struct && target_field.count <= 1;
+            const bool is_array = target_field.count > 1 && !target_field.is_dynamic;
+            if (doc.IsObject() && !is_struct) {
+                throwScriptException(
+                    fmt::format("DB{}.'{}' is {} — objects assign only to STRUCT fields", db_num_, t_path, describeField(target_field)),
+                    ShellError::TypeMismatch);
+                return;
+            }
+            if (doc.IsArray() && !is_array && !target_field.is_dynamic) {
+                throwScriptException(
+                    fmt::format("DB{}.'{}' is {} — arrays assign only to ARRAY fields", db_num_, t_path, describeField(target_field)),
+                    ShellError::TypeMismatch);
+                return;
+            }
+            // Static arrays are fixed-size PLC memory: require exactly count
+            // elements (same rule as put(path, json)). Dynamic arrays accept
+            // any length up to capacity; struct dicts merge over existing
+            // bytes.
+            if (is_array && doc.Size() != static_cast<rapidjson::SizeType>(target_field.count)) {
+                throwScriptException(
+                    fmt::format("DB{}.'{}' is {} and needs exactly {} elements, got {} — assign a full-length value (zeros to clear)",
+                        db_num_, t_path, describeField(target_field), target_field.count, doc.Size()),
+                    ShellError::TypeMismatch);
+                return;
+            }
+        }
+    }
+    const int span = ::sgrn::gateway::twin::fieldSpanSize(target_field);
+    if (span <= 0) {
+        throwScriptException(
+            fmt::format("DB{}.'{}' has zero span ({})", db_num_, t_path, describeField(target_field)), ShellError::Generic);
+        return;
+    }
+    // Read existing bytes first so partial struct dicts merge and boolean
+    // bits in shared bytes are preserved.
+    std::vector<uint8_t> tp_before(static_cast<size_t>(span), 0);
+    std::vector<uint8_t> buf(static_cast<size_t>(span), 0);
+    if (!(conn_->memory_.readDbMemory(db_num_, abs_offset, tp_before.size(), tp_before.data()))) {
+        throwScriptException("readDbMemory failed", ShellError::Generic);
+        return;
+    }
+    buf = tp_before;
+    auto res =
+        ::sgrn::gateway::twin::encodeFieldAt(target_field, t_json_val, buf.data(), static_cast<size_t>(span), 0, target_field.endianness);
+    if (res.hasError()) {
+        throwScriptException(fmt::format("DB{}.'{}' rejected the value for {}: {}", db_num_, t_path, describeField(target_field),
+                                 ::sgrn::scl::toString(res.error())),
+            ShellError::TypeMismatch);
+        return;
+    }
+    if (auto r = conn_->memory_.writeDbMemory(db_num_, abs_offset, buf.size(), buf.data()); !r) {
+        throwScriptException(fmt::format("writeDbMemory failed: {}", r.error()), ShellError::Generic);
+        return;
+    }
+    snapshot_valid_ = true;
+    markDirtyDiff(conn_->runtime_, db_num_, abs_offset, tp_before.data(), buf.data(), buf.size());
 }
 
 std::string ScriptDataBlock::val(const std::string& t_path) {
@@ -399,20 +551,39 @@ std::string ScriptDataBlock::val(const std::string& t_path) {
     return res.value();
 }
 
-void ScriptDataBlock::setVal(const std::string& t_path, const std::string& t_json_val) {
-    auto res = conn_->getOrCreateDbProvider(db_num_)->write(t_path, t_json_val);
-    if (res.hasError()) {
-        last_op_ok_ = false;
-        last_op_err_ = res.error();
-        throwScriptException(fmt::format("DB{}.setVal('{}') failed", db_num_, t_path), fromDbIoError(res.error()));
-    } else {
-        last_op_ok_ = true;
-    }
-}
-
 std::string ScriptDataBlock::get(const std::string& t_path) {
     conn_->memory_.processor()->processCommands();
-    auto res = conn_->getOrCreateDbProvider(db_num_)->get(conn_->client_, t_path);
+    auto* p_provider = conn_->getOrCreateDbProvider(db_num_);
+    if (!p_provider) {
+        last_op_ok_ = false;
+        last_op_err_ = DbIoError::LocalMemoryFailed;
+        throwScriptException(fmt::format("DB{}.get('{}') failed: no provider", db_num_, t_path), ShellError::Generic);
+        return "null";
+    }
+    if (!conn_->client_.isConnected()) {
+        // Offline: serve the twin shadow (same source the online path decodes
+        // after committing the wire read) instead of throwing NotConnected —
+        // mirrors tags.get() on runtime tags. A dropped link (vs virtual use
+        // that never connected) still flags NotConnected: the value is
+        // best-effort shadow, and the failed trip must stay visible.
+        auto res = p_provider->read(t_path);
+        if (res.hasError()) {
+            last_op_ok_ = false;
+            last_op_err_ = res.error();
+            throwScriptException(fmt::format("DB{}.get('{}') failed", db_num_, t_path), fromDbIoError(res.error()));
+            return "null";
+        }
+        snapshot_valid_ = true;
+        if (conn_->wasConnected()) {
+            last_op_ok_ = false;
+            last_op_err_ = DbIoError::NotConnected;
+            conn_->setLastError(S7Error::NotConnected);
+        } else {
+            last_op_ok_ = true;
+        }
+        return res.value();
+    }
+    auto res = p_provider->get(conn_->client_, t_path);
     if (res.hasError()) {
         last_op_ok_ = false;
         last_op_err_ = res.error();
@@ -435,9 +606,13 @@ s7codec::DecodedValue ScriptDataBlock::readScalar(const std::string& t_path) {
         return {};
     }
 
-    // Ensure the snapshot is fetched if it hasn't been yet
+    // Ensure the snapshot is fetched if it hasn't been yet (wire refresh when
+    // online; twin memory is already current offline, mirroring get()).
+    // Degraded-trip flag for dropped links (virtual use stays clean).
+    if (!conn_->client_.isConnected() && conn_->wasConnected())
+        conn_->setLastError(S7Error::NotConnected);
     conn_->memory_.processor()->processCommands();
-    if (!snapshot_valid_) {
+    if (!snapshot_valid_ && conn_->client_.isConnected()) {
         auto refresh = conn_->getOrCreateDbProvider(db_num_)->get(conn_->client_, t_path);
         if (refresh.hasError()) {
             throwScriptException(fmt::format("DB{}.readScalar('{}') [S7 read] failed", db_num_, t_path), fromDbIoError(refresh.error()));
@@ -494,13 +669,7 @@ void ScriptDataBlock::writeDtl(const std::string& t_path, ScriptDtl* tp_dtl_obj)
     writeScalar(t_path, s7codec::DecodedValue::makeString(tp_dtl_obj->timestamp_str_));
 }
 
-void ScriptDataBlock::put(const std::string& t_path, const std::string& t_raw_val) {
-    const std::string t_json_val = ::sgrn::gateway::twin::parseRawValuePayload(t_raw_val);
-    auto res = conn_->getOrCreateDbProvider(db_num_)->put(conn_->client_, t_path, t_json_val);
-    if (!setOpResult(res)) {
-        fmt::print("DB{}.put('{}', '{}') failed: Error:: {}", db_num_, t_path, t_raw_val, res.error());
-        return;
-    }
+void ScriptDataBlock::commitBaseline(const std::string& t_path, const std::string& t_json_val) {
     // Write-back: encode the confirmed-written field into this instance's
     // snapshot AND the shared dbSnapshots_ baseline. Future db() instances
     // will start from the confirmed PLC state without a get() roundtrip.
@@ -511,24 +680,74 @@ void ScriptDataBlock::put(const std::string& t_path, const std::string& t_raw_va
             conn_->db_snapshots_[db_num_] = snapshot_buffer_;
         }
     }
+    // Ledger mark so gateway publish / auto-broadcast observe the write.
+    // Full-DB granularity (coalesced by the ledger), mirroring set().
+    if (conn_->runtime_) {
+        if (auto db_res = conn_->schema_.getDb(db_num_); !db_res.hasError() && db_res.value())
+            conn_->runtime_->markDirty(db_num_, 0, static_cast<uint32_t>(db_res.value()->size_bytes));
+    }
+}
+
+void ScriptDataBlock::put(const std::string& t_path, const std::string& t_raw_val) {
+    const std::string t_json_val = ::sgrn::gateway::twin::parseRawValuePayload(t_raw_val);
+    auto* p_provider = conn_->getOrCreateDbProvider(db_num_);
+    if (!p_provider) {
+        last_op_ok_ = false;
+        last_op_err_ = DbIoError::LocalMemoryFailed;
+        fmt::print("DB{}.put('{}', '{}') failed: no provider (unknown DB)", db_num_, t_path, t_raw_val);
+        return;
+    }
+    if (!conn_->client_.isConnected()) {
+        // Offline: twin (shadow) write only, no trip — mirrors tagPut.
+        // Flush the queued command so the arena (and any reader of it)
+        // observes the value synchronously. Dropped links flag NotConnected
+        // (failed trip stays visible); virtual use stays clean.
+        auto res = p_provider->write(t_path, t_json_val);
+        if (!setOpResult(res)) {
+            fmt::print("DB{}.put('{}', '{}') failed: Error:: {}", db_num_, t_path, t_raw_val, res.error());
+            return;
+        }
+        conn_->memory_.processor()->processCommands();
+        commitBaseline(t_path, t_json_val);
+        if (conn_->wasConnected()) {
+            last_op_ok_ = false;
+            last_op_err_ = DbIoError::NotConnected;
+            conn_->setLastError(S7Error::NotConnected);
+        } else {
+            last_op_ok_ = true;
+        }
+        return;
+    }
+    auto res = p_provider->put(conn_->client_, t_path, t_json_val);
+    if (!setOpResult(res)) {
+        fmt::print("DB{}.put('{}', '{}') failed: Error:: {}", db_num_, t_path, t_raw_val, res.error());
+        return;
+    }
+    commitBaseline(t_path, t_json_val);
 }
 
 void ScriptDataBlock::putDouble(const std::string& t_path, double t_val) {
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
     writer.Double(t_val);
-    put(t_path, sb.GetString());
+    // Explicit std::string: a bare const char* would resolve to the
+    // put(string, bool) overload (pointer→bool beats user conversion) and
+    // write "true" instead of the number.
+    put(t_path, std::string(sb.GetString()));
 }
 
 void ScriptDataBlock::putInt(const std::string& t_path, int32_t t_val) {
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
     writer.Int(t_val);
-    put(t_path, sb.GetString());
+    // See putDouble: explicit std::string defeats the bool overload.
+    put(t_path, std::string(sb.GetString()));
 }
 
 void ScriptDataBlock::putBool(const std::string& t_path, bool t_val) {
-    put(t_path, t_val ? "true" : "false");
+    // Explicit strings: there is no put(string, bool) overload — a literal
+    // pair would decay to const char* and misbind.
+    put(t_path, t_val ? std::string("true") : std::string("false"));
 }
 
 void ScriptDataBlock::putDtl(const std::string& t_path, ScriptDtl* tp_dtl_obj) {
@@ -650,6 +869,10 @@ std::string ScriptDataBlock::diff() const {
 std::string ScriptDataBlock::getRetry(const std::string& t_path, int t_max_retries) {
     if (t_max_retries <= 0)
         t_max_retries = 1;
+    // Offline reads are deterministic local twin reads — one attempt through
+    // get() suffices (mirrors tags.getRetry()).
+    if (!conn_->client_.isConnected())
+        return get(t_path);
     for (int attempt = 1; attempt <= t_max_retries; ++attempt) {
         conn_->memory_.processor()->processCommands();
         auto res = conn_->getOrCreateDbProvider(db_num_)->get(conn_->client_, t_path);
@@ -671,16 +894,18 @@ std::string ScriptDataBlock::getRetry(const std::string& t_path, int t_max_retri
 bool ScriptDataBlock::putRetry(const std::string& t_path, const std::string& t_raw_val, int t_max_retries) {
     if (t_max_retries <= 0)
         t_max_retries = 1;
+    // Offline writes are deterministic local twin writes — one attempt
+    // through put() suffices (mirrors tags.putRetry()).
+    if (!conn_->client_.isConnected()) {
+        put(t_path, t_raw_val);
+        return getLastOpOk();
+    }
     const std::string t_json_val = ::sgrn::gateway::twin::parseRawValuePayload(t_raw_val);
     for (int attempt = 1; attempt <= t_max_retries; ++attempt) {
         auto res = conn_->getOrCreateDbProvider(db_num_)->put(conn_->client_, t_path, t_json_val);
         if (!res.hasError()) {
             last_op_ok_ = true;
-            if (auto loc = conn_->schema_.findField(db_num_, t_path)) {
-                (void)::sgrn::gateway::twin::encodeFieldAt(*loc->field, t_json_val, snapshot_buffer_.data() + loc->abs_offset,
-                    db_size_ - loc->abs_offset, 0, loc->field->endianness);
-                conn_->db_snapshots_[db_num_] = snapshot_buffer_;
-            }
+            commitBaseline(t_path, t_json_val);
             return true;
         }
         last_op_ok_ = false;
@@ -698,18 +923,23 @@ bool ScriptDataBlock::putRetryDouble(const std::string& t_path, double t_val, in
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> w(sb);
     w.Double(t_val);
-    return putRetry(t_path, sb.GetString(), t_max_retries);
+    // Explicit std::string (see putDouble): bare const char* would bind the
+    // putRetry(string, bool, int) overload and retry writing "true".
+    return putRetry(t_path, std::string(sb.GetString()), t_max_retries);
 }
 
 bool ScriptDataBlock::putRetryInt(const std::string& t_path, int32_t t_val, int t_max_retries) {
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> w(sb);
     w.Int(t_val);
-    return putRetry(t_path, sb.GetString(), t_max_retries);
+    // See putRetryDouble: explicit std::string defeats the bool overload.
+    return putRetry(t_path, std::string(sb.GetString()), t_max_retries);
 }
 
 bool ScriptDataBlock::putRetryBool(const std::string& t_path, bool t_val, int t_max_retries) {
-    return putRetry(t_path, t_val ? "true" : "false", t_max_retries);
+    // Explicit strings: no putRetry(string, bool, int) overload exists, and a
+    // literal pair would decay to const char* and misbind.
+    return putRetry(t_path, t_val ? std::string("true") : std::string("false"), t_max_retries);
 }
 
 } // namespace sgrn::s7shell::shell

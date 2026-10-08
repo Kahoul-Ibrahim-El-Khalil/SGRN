@@ -13,7 +13,7 @@
 // The Python surrogate in ./../../../demo_model.py generates the same tags.
 // ============================================================================
 
-TYPE "Composition8"
+TYPE "Composition8" #LITTLE_ENDIAN
   VAR
     comp_a : Real #UNIT("mol%");
     comp_b : Real #UNIT("mol%");
@@ -26,7 +26,7 @@ TYPE "Composition8"
   END_VAR
 END_TYPE
 
-TYPE "PIDLoop"
+TYPE "PIDLoop" #LITTLE_ENDIAN
   VAR
     setpoint      : LReal;
     process_value : LReal;
@@ -41,7 +41,7 @@ TYPE "PIDLoop"
   END_VAR
 END_TYPE
 
-TYPE "ValveActuator"
+TYPE "ValveActuator" #LITTLE_ENDIAN
   VAR
     position_pct : Real;
     command_pct  : Real;
@@ -51,7 +51,7 @@ TYPE "ValveActuator"
   END_VAR
 END_TYPE
 
-TYPE "AlarmRecord"
+TYPE "AlarmRecord" #LITTLE_ENDIAN
   VAR
     active         : Bool;
     acknowledged   : Bool;
@@ -63,7 +63,7 @@ TYPE "AlarmRecord"
 END_TYPE
 
 // ─── DB1 "Reactor" — Reaction vessel + fresh feeds ───────────────────────────
-DATA_BLOCK "Reactor" DB 1
+DATA_BLOCK "Reactor" DB 1 #LITTLE_ENDIAN
 
 #MODBUS_HOLDING
 VAR
@@ -100,7 +100,7 @@ END_VAR
 END_DATA_BLOCK
 
 // ─── DB2 "Separator" — Condenser + vapor/liquid separator ────────────────────
-DATA_BLOCK "Separator" DB 2
+DATA_BLOCK "Separator" DB 2 #LITTLE_ENDIAN
 VAR
     purge_rate        : Real #UNIT("kscm");   // XMEAS 10 stream 9
     product_temp      : Real #UNIT("degC");   // XMEAS 11 separator temperature
@@ -125,7 +125,7 @@ END_VAR
 END_DATA_BLOCK
 
 // ─── DB3 "Stripper" — Product stripper ───────────────────────────────────────
-DATA_BLOCK "Stripper" DB 3
+DATA_BLOCK "Stripper" DB 3 #LITTLE_ENDIAN
 VAR
     level             : Real #UNIT("%");      // XMEAS 15 (~50 nominal)
     pressure          : Real #UNIT("kPa");    // XMEAS 16 (~2600 nominal)
@@ -147,7 +147,7 @@ END_VAR
 END_DATA_BLOCK
 
 // ─── DB4 "Compressor" — Recycle compressor + mixing zone ─────────────────────
-DATA_BLOCK "Compressor" DB 4
+DATA_BLOCK "Compressor" DB 4 #LITTLE_ENDIAN
 VAR
     recycle_flow      : Real #UNIT("kscm");   // XMEAS 5  stream 8
     work              : Real #UNIT("kW");     // XMEAS 20 compressor work
@@ -159,7 +159,7 @@ END_VAR
 END_DATA_BLOCK
 
 // ─── DB5 "PlantWide" — Accounting, fault injection, safety envelope ──────────
-DATA_BLOCK "PlantWide" DB 5
+DATA_BLOCK "PlantWide" DB 5 #LITTLE_ENDIAN
 VAR
     // Fault scenario selector: 0 = normal, 1..8 = TE IDV subset (see README.md)
     fault_code        : Int;                  // injected disturbance ID

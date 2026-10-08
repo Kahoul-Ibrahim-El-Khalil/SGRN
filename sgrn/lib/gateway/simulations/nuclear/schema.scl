@@ -1,4 +1,4 @@
-TYPE "ControlRod"
+TYPE "ControlRod" #LITTLE_ENDIAN
   VAR
     position_pct    : Real;     // 0.0 = fully inserted, 100.0 = fully withdrawn
     target_pct      : Real;     // commanded position
@@ -9,7 +9,7 @@ TYPE "ControlRod"
   END_VAR
 END_TYPE
 
-TYPE "CoolantPump"
+TYPE "CoolantPump" #LITTLE_ENDIAN
   VAR
     running         : Bool;
     speed_rpm       : Int;      // 0 – 1800 RPM
@@ -23,7 +23,7 @@ TYPE "CoolantPump"
   END_VAR
 END_TYPE
 
-TYPE "TemperatureSensor"
+TYPE "TemperatureSensor" #LITTLE_ENDIAN
   VAR
     value_c         : Real;
     high_alarm      : Bool;
@@ -32,7 +32,7 @@ TYPE "TemperatureSensor"
   END_VAR
 END_TYPE
 
-TYPE "RadiationSensor"
+TYPE "RadiationSensor" #LITTLE_ENDIAN
   VAR
     dose_rate_usvh  : Real;     // µSv/h
     integrated_msv  : LReal;    // cumulative dose (mSv)
@@ -42,7 +42,7 @@ TYPE "RadiationSensor"
   END_VAR
 END_TYPE
 
-TYPE "PIDLoop"
+TYPE "PIDLoop" #LITTLE_ENDIAN
   VAR
     setpoint        : LReal;
     process_value   : LReal;
@@ -57,7 +57,7 @@ TYPE "PIDLoop"
   END_VAR
 END_TYPE
 
-TYPE "ValveActuator"
+TYPE "ValveActuator" #LITTLE_ENDIAN
   VAR
     position_pct    : Real;     // 0 = closed, 100 = open
     command_pct     : Real;     // setpoint
@@ -68,7 +68,7 @@ TYPE "ValveActuator"
   END_VAR
 END_TYPE
 
-TYPE "AlarmRecord"
+TYPE "AlarmRecord" #LITTLE_ENDIAN
   VAR
     active          : Bool;
     acknowledged    : Bool;
@@ -80,7 +80,7 @@ TYPE "AlarmRecord"
 END_TYPE
 
 // ─── DB1 "ReactorCore" — Neutronics & Thermal-hydraulics ────────────────────
-DATA_BLOCK "ReactorCore" DB 1
+DATA_BLOCK "ReactorCore" DB 1 #LITTLE_ENDIAN
 
 #MODBUS_HOLDING
 VAR
@@ -122,7 +122,7 @@ END_VAR
 END_DATA_BLOCK
 
 // ─── DB11 "PrimaryCoolant" — Reactor Coolant System ──────────────────────────
-DATA_BLOCK "PrimaryCoolant" DB 2
+DATA_BLOCK "PrimaryCoolant" DB 2 #LITTLE_ENDIAN
 VAR
     // ── Hot leg / Cold leg ──
     hot_leg_temp        : Real #UNIT("°C");
@@ -154,7 +154,7 @@ END_VAR
 END_DATA_BLOCK
 
 // ─── DB12 "SteamGenerator" — Secondary Side ──────────────────────────────────
-DATA_BLOCK "SteamGenerator" DB 3
+DATA_BLOCK "SteamGenerator" DB 3 #LITTLE_ENDIAN
 VAR
     // ── Steam generator (2 units) ──
     sg_pressure_bar     : ARRAY [0..1] OF Real;     // ~70 bar
@@ -183,7 +183,7 @@ END_VAR
 END_DATA_BLOCK
 
 // ─── DB13 "Turbine" — Turbine-Generator & Grid ──────────────────────────────
-DATA_BLOCK "Turbine" DB 4
+DATA_BLOCK "Turbine" DB 4 #LITTLE_ENDIAN
 VAR
     // ── HP turbine ──
     hp_speed_rpm        : Real;     // 3000 RPM for 50Hz grid
@@ -225,7 +225,7 @@ END_VAR
 END_DATA_BLOCK
 
 // ─── DB14 "SafetySystems" — Reactor Protection & Emergency ───────────────────
-DATA_BLOCK "SafetySystems" DB 5
+DATA_BLOCK "SafetySystems" DB 5 #LITTLE_ENDIAN
 VAR
     // ── SCRAM (reactor trip) ──
     scram_signal        : Bool;
@@ -272,7 +272,7 @@ END_VAR
 END_DATA_BLOCK
 
 // ─── DB15 "RadMonitoring" — Radiation & Health Physics ───────────────────────
-DATA_BLOCK "RadMonitoring" DB 6
+DATA_BLOCK "RadMonitoring" DB 6 #LITTLE_ENDIAN
 VAR
     // ── Zone monitors (8 zones) ──
     zone_monitors       : ARRAY [0..7] OF "RadiationSensor";
@@ -303,7 +303,7 @@ END_VAR
 END_DATA_BLOCK
 
 // ─── DB16 "WasteProcessing" — Spent Fuel & Waste ─────────────────────────────
-DATA_BLOCK "WasteProcessing" DB 7
+DATA_BLOCK "WasteProcessing" DB 7 #LITTLE_ENDIAN
 VAR
     // ── Spent fuel pool ──
     sfp_temp_c          : Real;     // pool temperature

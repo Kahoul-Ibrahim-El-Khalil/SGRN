@@ -22,11 +22,13 @@
 // that protocol endpoints attach to. Nothing in this class is S7-specific.
 // =============================================================================
 
+#include <sgrn/Result.hpp>
 #include <sgrn/gateway/twin/DbIOProvider.hpp>
 #include <sgrn/gateway/twin/DbSnapshot.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
 #include <sgrn/gateway/twin/PlcState.hpp> // NEW
 #include <sgrn/plcsim/PlcTagTable.hpp>
+#include <sgrn/scl/errors.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/scl/types.hpp>
 #include <atomic>
@@ -35,6 +37,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -135,6 +138,85 @@ public:
     size_t addDirtyObserver(DirtyObserver t_observer);
     void removeDirtyObserver(size_t t_id);
 
+    // ---- Discrete areas + TIA-style tag table -----------------------------
+    // Tags (%I0.0, %Q0.0, %MW10, DB1.DBX0.0, …) are discrete addressed
+    // objects in their own memory areas — a different beast from DataBlocks,
+    // which are whole memory areas. Defined TIA-style as rows of
+    // (name, type, address); a tag may be any scalar type or a UDT.
+    //
+    // Backing: PE/PA/MK live in runtime-owned arenas (auto-sized by
+    // defineTag); discrete tags never alias twin memory — one backing each.
+    // stay bit-identical with S7 traffic and deltas. Every tag write marks
+    // the tag dirty (see takeDirtyTags).
+    struct RuntimeTag {
+        std::string name;
+        std::string table; ///< source table (#TAG_TABLE name, "" for manual defineTag)
+        std::string type_str;
+        ::sgrn::scl::DataType type{::sgrn::scl::DataType::Bool};
+        std::string udt_name;         // non-empty for UDT-typed tags
+        int span_bytes{1};            // encoded size (UDT size for struct tags)
+        ::sgrn::scl::PlcAddress addr; // resolved physical address
+        ::sgrn::scl::DbField field;   // codec descriptor (children for UDTs)
+    };
+
+    /// Define one tag row: name + type + address, e.g.
+    ///   defineTag("StartButton", "Bool", "%I0.0")
+    ///   defineTag("LineSpeed", "Real", "%MD20")
+    ///   defineTag("Drive", "MotorUDT", "DB3.DBB10")
+    /// The address may be %-prefixed or bare. Returns an error string on failure
+    /// (unknown type/address, duplicate name, range overflow, UDT missing).
+    sgrn::Result<void, std::string> defineTag(
+        const std::string& t_name, const std::string& t_type_str, const std::string& t_addr_str, const std::string& t_table = "");
+    /// Same, with a pre-resolved address (schema import path — skips parsing).
+    sgrn::Result<void, std::string> defineTagResolved(
+        const std::string& t_name, const std::string& t_type_str, const ::sgrn::scl::PlcAddress& t_addr, const std::string& t_table = "");
+    bool hasTag(const std::string& t_name) const;
+    std::vector<std::string> tagNames() const;
+    /// Tag names in one table ("" lists manually defined tags).
+    std::vector<std::string> tagNamesInTable(const std::string& t_table) const;
+    /// Distinct table names present (schema #TAG_TABLE blocks).
+    std::vector<std::string> tagTables() const;
+    sgrn::Result<RuntimeTag, std::string> describeTag(const std::string& t_name) const;
+
+    /// Decode the tag's current bytes to JSON (object JSON for UDT tags).
+    sgrn::Result<std::string, ::sgrn::scl::SclError> readTagJson(const std::string& t_name) const;
+    /// Encode JSON into the tag's bytes (write-through + dirty marking).
+    sgrn::Result<void, std::string> writeTagJson(const std::string& t_name, const std::string& t_value_json);
+
+    /// Raw discrete-area access (backing store for tags; also serves the
+    /// virtual S7 server's PE/PA/MK reads/writes). DB numbers are NOT valid
+    /// here — use getMemory().read/writeDbMemory for DB areas.
+    sgrn::Result<void, std::string> readAreaMemory(int t_area, size_t t_offset, size_t t_size, uint8_t* tp_buffer) const;
+    sgrn::Result<void, std::string> writeAreaMemory(
+        int t_area, size_t t_offset, size_t t_size, const uint8_t* tp_data, bool t_mark_dirty = true);
+    sgrn::Result<void, std::string> writeAreaBit(int t_area, size_t t_byte_offset, int t_bit_index, bool t_value);
+    /// Current arena size in bytes (0 when the area was never touched).
+    size_t areaSize(int t_area) const;
+
+    // ---- Tag dirty tracking ------------------------------------------------
+    // Parallel to the DB ledger: tag writes mark the tag name dirty; the
+    // gateways consume it into flat leaf-id deltas (takeDirtyTags) while
+    // GatewaySync-style publishers keep using the DB ledger untouched.
+    void markTagDirty(const std::string& t_name);
+    std::vector<std::string> takeDirtyTags();
+    bool hasDirtyTags() const;
+    // ---- Reliable-uplink ledger ------------------------------------------------
+    // GatewaySync-style publishers need at-least-once delivery with retries,
+    // which take-only ledgers cannot provide (a failed send must be
+    // re-queued). markTagDirty() records into BOTH ledgers; gateways consume
+    // the broadcast ledger via takeDirtyTags(), publishers consume this one
+    // via takePublishTags() and restore on NACK/timeout.
+    std::vector<std::string> takePublishTags();
+    std::vector<std::string> peekPublishTags() const;
+    void restorePublishTags(const std::vector<std::string>& t_names);
+    /// Re-fire tag observers for all currently-dirty tags without consuming
+    /// the ledger (explicit-sync path, cf. sync() in s7shell).
+    void renotifyDirtyTags();
+
+    using TagDirtyObserver = std::function<void(const std::string& t_tag_name)>;
+    size_t addTagDirtyObserver(TagDirtyObserver t_observer);
+    void removeTagDirtyObserver(size_t t_id);
+
 private:
     PlcState state_;
     PlcMemory memory_;
@@ -151,6 +233,33 @@ private:
     std::mutex observer_mutex_;
     std::unordered_map<size_t, DirtyObserver> dirty_observers_;
     std::atomic_size_t next_observer_id_{1};
+
+    // Discrete-area arenas (PE/PA/MK) + TIA-style tag rows. Guarded by
+    // tag_mutex_ (single lock: arenas, tag map and tag-dirty set always
+    // move together, so no lock ordering exists to get wrong).
+    static constexpr size_t kDefaultAreaSize = 1024;
+    static constexpr size_t kMaxAreaSize = 65536;
+    mutable std::mutex tag_mutex_;
+    std::unordered_map<int, std::vector<uint8_t>> areas_;
+    std::unordered_map<std::string, RuntimeTag> tags_;
+    std::set<std::string> dirty_tags_;
+    std::set<std::string> publish_tags_;
+
+    std::mutex tag_observer_mutex_;
+    std::unordered_map<size_t, TagDirtyObserver> tag_observers_;
+    std::atomic_size_t next_tag_observer_id_{1};
+
+    /// Fire tag observers for the given names (no ledger changes).
+    /// Must be called WITHOUT tag_mutex_ held.
+    void notifyTagObservers(const std::vector<std::string>& t_names);
+
+    /// Ensure the arena covers [0, t_min_size); grows (zero-filled) with a
+    /// warning, errors past kMaxAreaSize. DB areas are rejected (twin-owned).
+    sgrn::Result<void, std::string> ensureAreaSize(int t_area, size_t t_min_size);
+    /// (Re)define every schema tag row (#TAG_TABLE blocks, JSON tags, TIA
+    /// XML tags) after a schema load. Clears manual tags first — a schema
+    /// load re-initializes the whole PLC image, tags included.
+    void importSchemaTags();
 };
 
 using PlcRuntimeSPtr = std::shared_ptr<::sgrn::plcsim::runtime::PlcRuntime>;

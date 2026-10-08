@@ -27,14 +27,17 @@
 #include <sgrn/gateway/adapters/websocket/WebSocketAdapter.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
+#include <sgrn/s7shell/bindings/flat_delta.hpp>
 #include <sgrn/s7shell/bindings/registration.hpp>
 
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <angelscript.h>
 #include <memory>
+#include <snap7.h>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace sgrn::s7shell::bindings
 {
@@ -58,8 +61,7 @@ public:
     }
 
     ~WebSocketServerWrapper() {
-        if (running_)
-            stop();
+        stop();
         runtime_ref_->release();
     }
 
@@ -99,7 +101,40 @@ public:
             return sgrn::Result<void>::Error("readDbMemory failed for DB" + std::to_string(t_db));
         };
 
-        auto res = adapter_->start(t_ip, t_port, security_, &rt->getSchema(), std::move(snapshot_fn), std::move(read_fn));
+        WebSocketAdapter::BinaryWriteFn write_fn = [rt](uint16_t t_db, size_t t_offset, size_t t_size,
+                                                       const uint8_t* tp_data) -> sgrn::Result<void> {
+            if (rt->getMemory().writeDbMemory(t_db, t_offset, t_size, tp_data))
+                return {};
+            return sgrn::Result<void>::Error("writeDbMemory failed for DB" + std::to_string(t_db));
+        };
+
+        // Leaf dictionary for flat id-keyed deltas — same wire form as the
+        // full gateway ({"<leaf_id>": value}). Also enables the adapter's
+        // on-connect {"type":"dictionary"} decode frame. Rebuilt here so a
+        // schema reload between runs never serves stale IDs. Discrete tags
+        // follow the schema leaves (tags are discrete areas; DBs sweep separately).
+        // Discrete-area uplink: GatewaySync control writes land in the same
+        // arenas the tags live in (overlapping tags go dirty → broadcast).
+        adapter_->setAreaWriteFn(
+            [rt](uint16_t t_area, size_t t_offset, size_t t_size, const uint8_t* tp_data) -> sgrn::Result<void, std::string> {
+                // Silent apply (see Gateway.cpp): no echo loop.
+                if (auto r = rt->writeAreaMemory(t_area, t_offset, t_size, tp_data, false); r.hasError())
+                    return r.error();
+                return {};
+            });
+
+        leaf_dict_ = ::sgrn::gateway::twin::LeafDictionary::buildFrom(rt->getSchema());
+        for (const auto& name : rt->tagNames()) {
+            if (rt->describeTag(name).hasError())
+                continue;
+            const auto id = static_cast<::sgrn::gateway::twin::LeafId>(leaf_dict_.path_by_id.size());
+            leaf_dict_.path_to_id[name] = id;
+            leaf_dict_.path_by_id.push_back(name);
+        }
+        adapter_->setLeafDictionary(leaf_dict_);
+
+        auto res =
+            adapter_->start(t_ip, t_port, security_, &rt->getSchema(), std::move(snapshot_fn), std::move(read_fn), std::move(write_fn));
         // WebSocketAdapter::start() internally subscribes to TelemetryBroker::instance().
         // From this point, every markDirty event flows:
         //   PersistenceBridge → TelemetryBroker → WebSocketAdapter → WS clients
@@ -113,6 +148,12 @@ public:
 
         running_ = true;
         port_ = t_port;
+        if (dirty_observer_id_ == 0) {
+            dirty_observer_id_ = rt->addDirtyObserver([this](uint16_t t_db, uint32_t, uint32_t) { onRuntimeDirty(t_db); });
+        }
+        if (tag_observer_id_ == 0) {
+            tag_observer_id_ = rt->addTagDirtyObserver([this](const std::string&) { onTagDirty(); });
+        }
         fmt::print(fg(fmt::color::green), "[WebSocketServer] Listening on {}:{}\n", t_ip, t_port);
         fmt::print("  WS clients receive full twin snapshot on connect,\n");
         fmt::print("  then per-field delta frames on every dirty event.\n");
@@ -120,6 +161,16 @@ public:
     }
 
     void stop() {
+        if (dirty_observer_id_ != 0 || tag_observer_id_ != 0) {
+            if (auto rt = runtime_ref_->getImpl()) {
+                if (dirty_observer_id_ != 0)
+                    rt->removeDirtyObserver(dirty_observer_id_);
+                if (tag_observer_id_ != 0)
+                    rt->removeTagDirtyObserver(tag_observer_id_);
+            }
+            dirty_observer_id_ = 0;
+            tag_observer_id_ = 0;
+        }
         if (!running_)
             return;
         adapter_->stop();
@@ -138,6 +189,28 @@ public:
             adapter_->broadcastDelta(t_json);
     }
 
+    /// Explicit push: broadcast a flat leaf-id delta (DBs + tags), or the
+    /// full twin when clean. NOTE: no sync()/notify() here — broadcast() is
+    /// the single spelling (runtime.sync() is the runtime-side verb).
+    void broadcast() {
+        auto rt = runtime_ref_->getImpl();
+        if (!rt || !adapter_)
+            return;
+        rt->getMemory().processor()->processCommands();
+        const std::vector<uint16_t> dirty = collectDirtyDbs(rt);
+        const std::string payload = (dirty.empty() && !rt->hasDirtyTags()) ? rt->getMemory().getDigitalTwinJsonString()
+                                                                           : flatDeltaForDirtyDbs(rt, leaf_dict_, dirty);
+        if (!payload.empty() && payload != "{}")
+            adapter_->broadcastDelta(payload);
+    }
+
+    void setAutoBroadcast(bool t_enabled) {
+        auto_broadcast_ = t_enabled;
+    }
+    bool autoBroadcast() const {
+        return auto_broadcast_;
+    }
+
     // ── Security ──────────────────────────────────────────────────────────────
 
     /// Load a gateway-compatible security policy script (security.as).
@@ -153,11 +226,40 @@ public:
     }
 
 private:
+    void onRuntimeDirty(uint16_t t_db) {
+        if (!auto_broadcast_ || !running_ || !adapter_)
+            return;
+        auto rt = runtime_ref_->getImpl();
+        if (!rt)
+            return;
+        const std::string delta = flatDeltaForDirtyDbs(rt, leaf_dict_, {t_db});
+        if (!delta.empty() && delta != "{}")
+            adapter_->broadcastDelta(delta);
+    }
+
+    void onTagDirty() {
+        if (!auto_broadcast_ || !running_ || !adapter_)
+            return;
+        auto rt = runtime_ref_->getImpl();
+        if (!rt)
+            return;
+        const std::string delta = flatDeltaForDirtyDbs(rt, leaf_dict_, {});
+        if (!delta.empty() && delta != "{}")
+            adapter_->broadcastDelta(delta);
+    }
+
     PlcRuntimeWrapper* runtime_ref_{nullptr};
     SecurityManagerSptr security_;
+    // Dictionary for flat id-keyed deltas, built from the runtime schema on
+    // every start(). Declared before adapter_ so the adapter (which borrows
+    // it via setLeafDictionary) is always destroyed first.
+    ::sgrn::gateway::twin::LeafDictionary leaf_dict_;
     std::unique_ptr<WebSocketAdapter> adapter_;
     bool running_{false};
     uint16_t port_{0};
+    bool auto_broadcast_{true};
+    size_t dirty_observer_id_{0};
+    size_t tag_observer_id_{0};
     int ref_count_{1};
 };
 
@@ -195,8 +297,17 @@ Result<void, std::string> registerWebSocketServerTypes(asIScriptEngine* tp_engin
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "WebSocketServer", "bool isRunning() const", asMETHOD(WebSocketServerWrapper, isRunning), asCALL_THISCALL));
 
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod("WebSocketServer", "void broadcast(const string &in)",
+        asMETHODPR(WebSocketServerWrapper, broadcast, (const std::string&), void), asCALL_THISCALL));
+
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
-        "WebSocketServer", "void broadcast(const string &in)", asMETHOD(WebSocketServerWrapper, broadcast), asCALL_THISCALL));
+        "WebSocketServer", "void broadcast()", asMETHODPR(WebSocketServerWrapper, broadcast, (), void), asCALL_THISCALL));
+
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "WebSocketServer", "void setAutoBroadcast(bool)", asMETHOD(WebSocketServerWrapper, setAutoBroadcast), asCALL_THISCALL));
+
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "WebSocketServer", "bool autoBroadcast() const", asMETHOD(WebSocketServerWrapper, autoBroadcast), asCALL_THISCALL));
 
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "WebSocketServer", "void loadPolicy(const string &in)", asMETHOD(WebSocketServerWrapper, loadPolicy), asCALL_THISCALL));

@@ -384,10 +384,8 @@ Result<void, std::string> registerS7Globals(asIScriptEngine* tp_engine) {
         "S7Blocks", "void dbFill(uint16 db, int fill_char)", asMETHOD(ScriptS7Blocks, dbFill), asCALL_THISCALL));
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "S7Blocks", "string pgBlockInfo(const string &in) const", asMETHOD(ScriptS7Blocks, pgBlockInfo), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
-        "S7Blocks", "bool saveHex(const string &in, const string &in) const", asMETHOD(ScriptS7Blocks, saveHex), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
-        "S7Blocks", "string loadHex(const string &in) const", asMETHOD(ScriptS7Blocks, loadHex), asCALL_THISCALL));
+    // NOTE: no saveHex/loadHex here — S7Memory.saveHexToFile/loadHexFromFile
+    // are the single spelling (identical helpers).
     SGRN_AS_REG(
         tp_engine->RegisterObjectMethod("S7Blocks", "bool uploadToFile(int block_type, uint16 num, const string &in, bool full = true)",
             asMETHOD(ScriptS7Blocks, uploadToFile), asCALL_THISCALL));

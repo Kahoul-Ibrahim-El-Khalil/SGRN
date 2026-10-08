@@ -1,4 +1,4 @@
-TYPE "ValveActuator"
+TYPE "ValveActuator" #LITTLE_ENDIAN
   VAR
     position       : Real #UNIT("%");   // 0 = closed, 100 = fully open
     command        : Real #UNIT("%");
@@ -9,7 +9,7 @@ TYPE "ValveActuator"
   END_VAR
 END_TYPE
 
-TYPE "PIDLoop"
+TYPE "PIDLoop" #LITTLE_ENDIAN
   VAR
     setpoint       : LReal;   // units depend on what the loop is controlling
     process_value  : LReal;   // (see the field this loop instance is stored in)
@@ -24,7 +24,7 @@ TYPE "PIDLoop"
   END_VAR
 END_TYPE
 
-TYPE "MotorDrive"
+TYPE "MotorDrive" #LITTLE_ENDIAN
   VAR
     running        : Bool;
     speed_sp       : Real #UNIT("%");     // VFD speed reference, 0..100
@@ -36,7 +36,7 @@ TYPE "MotorDrive"
   END_VAR
 END_TYPE
 
-TYPE "AccumulationZone"
+TYPE "AccumulationZone" #LITTLE_ENDIAN
   VAR
     fill              : Real #UNIT("%");   // 0 = empty, 100 = full (photoeye-derived)
     upstream_starve   : Bool;   // upstream machine has nothing to send
@@ -45,7 +45,7 @@ TYPE "AccumulationZone"
   END_VAR
 END_TYPE
 
-TYPE "AlarmRecord"
+TYPE "AlarmRecord" #LITTLE_ENDIAN
   VAR
     active          : Bool;
     acknowledged    : Bool;
@@ -56,9 +56,9 @@ TYPE "AlarmRecord"
   END_VAR
 END_TYPE
 
-TYPE "PlantMode" : USInt #ENUM(STOPPED=0, STARTING=1, RUNNING=2, STOPPING=3, FAULT=4, STOP=5, UKNOWN)
+TYPE "PlantMode" #LITTLE_ENDIAN : USInt #ENUM(STOPPED=0, STARTING=1, RUNNING=2, STOPPING=3, FAULT=4, STOP=5, UKNOWN)
 END_TYPE
-DATA_BLOCK "Supervisor" DB1
+DATA_BLOCK "Supervisor" DB1 #LITTLE_ENDIAN
 VAR
     plant_mode           : "PlantMode";
     master_speed_sp      : Real #UNIT("%");   // operator overall demand, 0..100 (% of rated)
@@ -91,7 +91,7 @@ VAR
 END_VAR
 END_DATA_BLOCK
 
-DATA_BLOCK "ProductSupply" DB2
+DATA_BLOCK "ProductSupply" DB2 #LITTLE_ENDIAN
 VAR
   tank: STRUCT
     level             : Real #UNIT("%");
@@ -131,7 +131,7 @@ VAR
 END_VAR
 END_DATA_BLOCK
 
-DATA_BLOCK "Line1Infeed" DB3
+DATA_BLOCK "Line1Infeed" DB3 #LITTLE_ENDIAN
 VAR
     unscrambler                   : "MotorDrive";
     bottles_staged                : UInt;    // bottle count on accumulation table
@@ -144,7 +144,7 @@ VAR
 END_VAR
 END_DATA_BLOCK
 
-DATA_BLOCK "Line1Rinser" DB4
+DATA_BLOCK "Line1Rinser" DB4 #LITTLE_ENDIAN
 VAR
     rinser_turret     : "MotorDrive";
     water_valve       : "ValveActuator";
@@ -158,7 +158,7 @@ VAR
 END_VAR
 END_DATA_BLOCK
 
-DATA_BLOCK "Line1Filler" DB5
+DATA_BLOCK "Line1Filler" DB5 #LITTLE_ENDIAN
 VAR
     carousel          : "MotorDrive";
     valve_count       : UInt;    // 40 filling heads
@@ -186,7 +186,7 @@ VAR
 END_VAR
 END_DATA_BLOCK
 
-DATA_BLOCK "Line1Capper" DB6
+DATA_BLOCK "Line1Capper" DB6 #LITTLE_ENDIAN
 VAR
     capper_turret          : "MotorDrive";
     chuck_heads            : UInt;    // 12 heads
@@ -210,7 +210,7 @@ VAR
 END_VAR
 END_DATA_BLOCK
 
-DATA_BLOCK "Line1Labeler" DB7
+DATA_BLOCK "Line1Labeler" DB7 #LITTLE_ENDIAN
 VAR
     labeler_turret        : "MotorDrive";
 
@@ -232,7 +232,7 @@ VAR
 END_VAR
 END_DATA_BLOCK
 
-DATA_BLOCK "Line1CasePacker" DB8
+DATA_BLOCK "Line1CasePacker" DB8 #LITTLE_ENDIAN
 VAR
     erector               : "MotorDrive";
     packer                : "MotorDrive";
@@ -255,7 +255,7 @@ VAR
 END_VAR
 END_DATA_BLOCK
 
-DATA_BLOCK "Line2Infeed" DB9
+DATA_BLOCK "Line2Infeed" DB9 #LITTLE_ENDIAN
 VAR
     unscrambler                     : "MotorDrive";
     bottles_staged                  : UInt;
@@ -268,7 +268,7 @@ VAR
 END_VAR
 END_DATA_BLOCK
 
-DATA_BLOCK "Line2Filler" DB10
+DATA_BLOCK "Line2Filler" DB10 #LITTLE_ENDIAN
 VAR
     carousel          : "MotorDrive";
     valve_count       : UInt;   // 24 filling heads
@@ -297,7 +297,7 @@ END_VAR
 END_DATA_BLOCK
 
 // ─── DB11 "Line2Capper" — Chuck-head capper, Line 2 ────────────────────────
-DATA_BLOCK "Line2_Capper" DB11
+DATA_BLOCK "Line2_Capper" DB11 #LITTLE_ENDIAN
 VAR
     capper_turret             : "MotorDrive";
     chuck_heads               : UInt;   // 8 heads
@@ -321,7 +321,7 @@ VAR
 END_VAR
 END_DATA_BLOCK
 
-DATA_BLOCK "Line2Labeler" DB12
+DATA_BLOCK "Line2Labeler" DB12 #LITTLE_ENDIAN
 VAR
     labeler_turret        : "MotorDrive";
 
@@ -343,7 +343,7 @@ VAR
 END_VAR
 END_DATA_BLOCK
 
-DATA_BLOCK "Line2CasePacker" DB13
+DATA_BLOCK "Line2CasePacker" DB13 #LITTLE_ENDIAN
 VAR
     erector               : "MotorDrive";
     packer                : "MotorDrive";
@@ -366,7 +366,7 @@ VAR
 END_VAR
 END_DATA_BLOCK
 
-DATA_BLOCK "ConveyorNetwork" DB14
+DATA_BLOCK "ConveyorNetwork" DB14 #LITTLE_ENDIAN
 VAR
   line1 : STRUCT
     rinser_to_filler   : "AccumulationZone";
@@ -393,7 +393,7 @@ VAR
 END_VAR
 END_DATA_BLOCK
 
-DATA_BLOCK "Palletizer" DB15
+DATA_BLOCK "Palletizer" DB15 #LITTLE_ENDIAN
 VAR
   robot : STRUCT
     running               : Bool;
@@ -422,7 +422,7 @@ VAR
 END_VAR
 END_DATA_BLOCK
 
-DATA_BLOCK "Utilities" DB16
+DATA_BLOCK "Utilities" DB16 #LITTLE_ENDIAN
 VAR
   air : STRUCT
     // ── Plant compressed air header ──
@@ -451,7 +451,7 @@ VAR
 END_VAR
 END_DATA_BLOCK
 
-DATA_BLOCK "SafetySystems" DB17
+DATA_BLOCK "SafetySystems" DB17 #LITTLE_ENDIAN
 VAR
     estop_zones            : ARRAY [0..7] OF Bool;  // 0=Infeed1 1=Process1 2=Pack1
                                                      // 3=Infeed2 4=Process2 5=Pack2
@@ -466,7 +466,7 @@ VAR
 END_VAR
 END_DATA_BLOCK
 
-DATA_BLOCK "Alarms" DB18
+DATA_BLOCK "Alarms" DB18 #LITTLE_ENDIAN
 VAR
     active_count            : UInt;
     critical_count          : UInt;

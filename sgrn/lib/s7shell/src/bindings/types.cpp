@@ -29,6 +29,8 @@ namespace sgrn::s7shell::shell
 
 extern ScriptHexTable* DataBlockToHexTableCast(ScriptDataBlock* tp_db);
 
+// NOTE: val()/setVal()/write() were removed (use get()/put()/typed properties).
+
 ::sgrn::Result<void, std::string> registerS7Types(asIScriptEngine* tp_engine) {
     int r = 0;
 
@@ -85,24 +87,8 @@ extern ScriptHexTable* DataBlockToHexTableCast(ScriptDataBlock* tp_db);
 
     SGRN_AS_TYPE(tp_engine, "S7PathBatch");
     SGRN_AS_REFCOUNTED(tp_engine, "S7PathBatch", S7PathBatch);
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod("S7PathBatch", "S7PathBatch@ write(const string &in)",
-        asMETHODPR(S7PathBatch, write, (const std::string&), S7PathBatch*), asCALL_THISCALL));
-    SGRN_AS_REG(
-        tp_engine->RegisterObjectMethod("S7PathBatch", "S7PathBatch@ write(double)", asMETHOD(S7PathBatch, writeDouble), asCALL_THISCALL));
-    SGRN_AS_REG(
-        tp_engine->RegisterObjectMethod("S7PathBatch", "S7PathBatch@ write(int)", asMETHOD(S7PathBatch, writeInt), asCALL_THISCALL));
-    SGRN_AS_REG(
-        tp_engine->RegisterObjectMethod("S7PathBatch", "S7PathBatch@ write(bool)", asMETHOD(S7PathBatch, writeBool), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
-        "S7PathBatch", "S7PathBatch@ write(dictionary@)", asMETHOD(S7PathBatch, writeDict), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
-        "S7PathBatch", "S7PathBatch@ write(array<int>@)", asMETHOD(S7PathBatch, writeArray), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
-        "S7PathBatch", "S7PathBatch@ write(array<double>@)", asMETHOD(S7PathBatch, writeArray), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
-        "S7PathBatch", "S7PathBatch@ write(array<bool>@)", asMETHOD(S7PathBatch, writeArray), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
-        "S7PathBatch", "S7PathBatch@ write(array<dictionary@>@)", asMETHOD(S7PathBatch, writeArray), asCALL_THISCALL));
+    // NOTE: staging write() overloads removed — use db.put(path, value) /
+    // tags.put(name, value) or typed field assignment + put().
     SGRN_AS_REG(tp_engine->RegisterObjectMethod("S7PathBatch", "string read() const", asMETHOD(S7PathBatch, read), asCALL_THISCALL));
     SGRN_AS_REG(tp_engine->RegisterObjectMethod("S7PathBatch", "void put()", asMETHOD(S7PathBatch, put), asCALL_THISCALL));
     SGRN_AS_REG(tp_engine->RegisterObjectMethod("S7PathBatch", "void get()", asMETHOD(S7PathBatch, get), asCALL_THISCALL));
@@ -144,6 +130,32 @@ extern ScriptHexTable* DataBlockToHexTableCast(ScriptDataBlock* tp_db);
         "FieldProxy", "FieldProxy& opAssign(const string &in)", asMETHOD(ScriptFieldProxy, assignString), asCALL_THISCALL));
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "FieldProxy", "FieldProxy& opAssign(DTL@)", asMETHOD(ScriptFieldProxy, assignDtl), asCALL_THISCALL));
+    // Structured assignment — one C++ entry per script array element type.
+    // `const T &in` form throughout: naked `@` handles leak a GC reference
+    // per call for GC-tracked types (observed with dictionary).
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "FieldProxy", "FieldProxy& opAssign(const array<int> &in)", asMETHOD(ScriptFieldProxy, assignArray), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "FieldProxy", "FieldProxy& opAssign(const array<uint> &in)", asMETHOD(ScriptFieldProxy, assignArray), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "FieldProxy", "FieldProxy& opAssign(const array<int64> &in)", asMETHOD(ScriptFieldProxy, assignArray), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "FieldProxy", "FieldProxy& opAssign(const array<uint64> &in)", asMETHOD(ScriptFieldProxy, assignArray), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "FieldProxy", "FieldProxy& opAssign(const array<float> &in)", asMETHOD(ScriptFieldProxy, assignArray), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "FieldProxy", "FieldProxy& opAssign(const array<double> &in)", asMETHOD(ScriptFieldProxy, assignArray), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "FieldProxy", "FieldProxy& opAssign(const array<bool> &in)", asMETHOD(ScriptFieldProxy, assignArray), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "FieldProxy", "FieldProxy& opAssign(const array<string> &in)", asMETHOD(ScriptFieldProxy, assignArray), asCALL_THISCALL));
+    // NOTE: `const dictionary &in`, not naked `dictionary@` — the bare
+    // handle form leaks one GC reference per call in this engine version.
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "FieldProxy", "FieldProxy& opAssign(const dictionary &in)", asMETHOD(ScriptFieldProxy, assignDict), asCALL_THISCALL));
+    // Array of structs (ARRAY OF UDT): element dicts encode per member.
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "FieldProxy", "FieldProxy& opAssign(const array<dictionary@> &in)", asMETHOD(ScriptFieldProxy, assignArray), asCALL_THISCALL));
 
     SGRN_AS_REG(
         tp_engine->RegisterObjectMethod("FieldProxy", "float opCast() const", asMETHOD(ScriptFieldProxy, toFloat), asCALL_THISCALL));
@@ -197,18 +209,31 @@ extern ScriptHexTable* DataBlockToHexTableCast(ScriptDataBlock* tp_db);
     SGRN_AS_REG(
         tp_engine->RegisterObjectMethod("FieldProxy", "FieldProxy@ opIndex(int)", asMETHOD(ScriptFieldProxy, indexInt), asCALL_THISCALL));
 
+    // Field-level network ops (mirror DataBlock::get/put at the proxy path).
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod("FieldProxy", "string get()", asMETHOD(ScriptFieldProxy, get), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod("FieldProxy", "void put()", asMETHOD(ScriptFieldProxy, put), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "FieldProxy", "void put(const string &in)", asMETHODPR(ScriptFieldProxy, put, (const std::string&), void), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "FieldProxy", "void put(double)", asMETHODPR(ScriptFieldProxy, put, (double), void), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "FieldProxy", "void put(int)", asMETHODPR(ScriptFieldProxy, put, (int32_t), void), asCALL_THISCALL));
+    SGRN_AS_REG(
+        tp_engine->RegisterObjectMethod("FieldProxy", "void put(bool)", asMETHODPR(ScriptFieldProxy, put, (bool), void), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod("FieldProxy", "void put(DTL@)", asMETHOD(ScriptFieldProxy, putDtl), asCALL_THISCALL));
+    SGRN_AS_REG(
+        tp_engine->RegisterObjectMethod("FieldProxy", "bool lastOpOk() const", asMETHOD(ScriptFieldProxy, lastOpOk), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "FieldProxy", "string lastOpError() const", asMETHOD(ScriptFieldProxy, lastOpError), asCALL_THISCALL));
+
     // ── DataBlock type registration ───────────
     SGRN_AS_TYPE(tp_engine, "DataBlock");
     SGRN_AS_REFCOUNTED(tp_engine, "DataBlock", ScriptDataBlock);
 
-    SGRN_AS_REG(
-        tp_engine->RegisterObjectMethod("DataBlock", "string val(const string &in)", asMETHOD(ScriptDataBlock, val), asCALL_THISCALL));
-    SGRN_AS_REG(
-        tp_engine->RegisterObjectMethod("DataBlock", "string read(const string &in)", asMETHOD(ScriptDataBlock, val), asCALL_THISCALL));
+    // NOTE: val()/setVal()/write() removed — get()/put()/typed properties are
+    // the single spelling (network fetch into shadow, shadow + trip, live).
     SGRN_AS_REG(
         tp_engine->RegisterObjectMethod("DataBlock", "HexTable@ hex()", asFUNCTION(DataBlockToHexTableCast), asCALL_CDECL_OBJFIRST));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
-        "DataBlock", "void setVal(const string &in, const string &in)", asMETHOD(ScriptDataBlock, setVal), asCALL_THISCALL));
 
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "DataBlock", "string get(const string &in)", asMETHODPR(ScriptDataBlock, get, (const std::string&), std::string), asCALL_THISCALL));
@@ -218,21 +243,6 @@ extern ScriptHexTable* DataBlockToHexTableCast(ScriptDataBlock* tp_db);
         tp_engine->RegisterObjectMethod("DataBlock", "int getInt(const string &in)", asMETHOD(ScriptDataBlock, getInt), asCALL_THISCALL));
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "DataBlock", "bool getBool(const string &in)", asMETHOD(ScriptDataBlock, getBool), asCALL_THISCALL));
-
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod("DataBlock", "void write(const string &in, const string &in)",
-        asMETHODPR(ScriptDataBlock, write, (const std::string&, const std::string&), void), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
-        "DataBlock", "void write(const string &in, double)", asMETHOD(ScriptDataBlock, writeDouble), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
-        "DataBlock", "void write(const string &in, int)", asMETHOD(ScriptDataBlock, writeInt), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
-        "DataBlock", "void write(const string &in, bool)", asMETHOD(ScriptDataBlock, writeBool), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
-        "DataBlock", "void write(const string &in, dictionary@)", asMETHOD(ScriptDataBlock, writeDict), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
-        "DataBlock", "void write(const string &in, array<int>@)", asMETHOD(ScriptDataBlock, writeArray), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
-        "DataBlock", "void write(const string &in, DTL@)", asMETHOD(ScriptDataBlock, writeDtl), asCALL_THISCALL));
 
     SGRN_AS_REG(tp_engine->RegisterObjectMethod("DataBlock", "void put()", asMETHODPR(ScriptDataBlock, put, (), void), asCALL_THISCALL));
     SGRN_AS_REG(tp_engine->RegisterObjectMethod("DataBlock", "void put(const string &in, const string &in)",
@@ -255,7 +265,7 @@ extern ScriptHexTable* DataBlockToHexTableCast(ScriptDataBlock* tp_db);
     SGRN_AS_REG(
         tp_engine->RegisterObjectMethod("DataBlock", "bool lastOpOk() const", asMETHOD(ScriptDataBlock, getLastOpOk), asCALL_THISCALL));
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
-        "DataBlock", "string lastOpError() const", asMETHOD(ScriptDataBlock, getlastOpError), asCALL_THISCALL));
+        "DataBlock", "string lastOpError() const", asMETHOD(ScriptDataBlock, lastOpErrorStr), asCALL_THISCALL));
 
     // ── Retry variants ────────────────────────────────────────────────────
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
@@ -290,15 +300,14 @@ extern ScriptHexTable* DataBlockToHexTableCast(ScriptDataBlock* tp_db);
     SGRN_AS_TYPE(tp_engine, "TagTable");
     SGRN_AS_REFCOUNTED(tp_engine, "TagTable", ScriptTagTable);
 
-    SGRN_AS_REG(
-        tp_engine->RegisterObjectMethod("TagTable", "string val(const string &in)", asMETHOD(ScriptTagTable, getVal), asCALL_THISCALL));
-    SGRN_AS_REG(
-        tp_engine->RegisterObjectMethod("TagTable", "string read(const string &in)", asMETHOD(ScriptTagTable, getVal), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
-        "TagTable", "void setVal(const string &in, const string &in)", asMETHOD(ScriptTagTable, setVal), asCALL_THISCALL));
+    // NOTE: val()/setVal()/write() removed — get()/put()/typed tags.tag_name
+    // are the single spelling (network fetch into shadow, shadow + trip).
 
-    SGRN_AS_REG(
-        tp_engine->RegisterObjectMethod("TagTable", "string get(const string &in)", asMETHOD(ScriptTagTable, get), asCALL_THISCALL));
+    // NOTE: get is overloaded (get(string) vs get()) — bare asMETHOD would
+    // silently bind the void overload under the string declaration and crash
+    // callers with a garbage string ref. asMETHODPR pins the right one.
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "TagTable", "string get(const string &in)", asMETHODPR(ScriptTagTable, get, (const std::string&), std::string), asCALL_THISCALL));
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "TagTable", "double getReal(const string &in)", asMETHOD(ScriptTagTable, getReal), asCALL_THISCALL));
     SGRN_AS_REG(
@@ -316,20 +325,7 @@ extern ScriptHexTable* DataBlockToHexTableCast(ScriptDataBlock* tp_db);
     SGRN_AS_REG(tp_engine->RegisterObjectMethod("TagTable", "void put(const string &in, bool)",
         asMETHODPR(ScriptTagTable, put, (const std::string&, bool), void), asCALL_THISCALL));
 
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod("TagTable", "void write(const string &in, const string &in)",
-        asMETHODPR(ScriptTagTable, write, (const std::string&, const std::string&), void), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod("TagTable", "void write(const string &in, double)",
-        asMETHODPR(ScriptTagTable, write, (const std::string&, double), void), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod("TagTable", "void write(const string &in, int)",
-        asMETHODPR(ScriptTagTable, write, (const std::string&, int32_t), void), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod("TagTable", "void write(const string &in, bool)",
-        asMETHODPR(ScriptTagTable, write, (const std::string&, bool), void), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod("TagTable", "void write(const string &in, dictionary@)",
-        asMETHODPR(ScriptTagTable, write, (const std::string&, CScriptDictionary*), void), asCALL_THISCALL));
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod("TagTable", "void write(const string &in, array<int>@)",
-        asMETHODPR(ScriptTagTable, write, (const std::string&, CScriptArray*), void), asCALL_THISCALL));
-
-    SGRN_AS_REG(tp_engine->RegisterObjectMethod("TagTable", "void get()", asMETHOD(ScriptTagTable, get), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod("TagTable", "void get()", asMETHODPR(ScriptTagTable, get, (), void), asCALL_THISCALL));
     // void push() removed — use put() which calls push() internally
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(
         "TagTable", "S7PathBatch@ path(const string &in)", asMETHOD(ScriptTagTable, getPath), asCALL_THISCALL));
@@ -337,8 +333,8 @@ extern ScriptHexTable* DataBlockToHexTableCast(ScriptDataBlock* tp_db);
     // ── SchemaError introspection ───────────────────────────────────────────────
     SGRN_AS_REG(
         tp_engine->RegisterObjectMethod("TagTable", "bool lastOpOk() const", asMETHOD(ScriptTagTable, getLastOpOk), asCALL_THISCALL));
-    SGRN_AS_REG(
-        tp_engine->RegisterObjectMethod("TagTable", "string lastOpError() const", asMETHOD(ScriptTagTable, getLastError), asCALL_THISCALL));
+    SGRN_AS_REG(tp_engine->RegisterObjectMethod(
+        "TagTable", "string lastOpError() const", asMETHOD(ScriptTagTable, lastOpErrorStr), asCALL_THISCALL));
 
     // ── Retry variants ───────────────────────────────────────────────────
     SGRN_AS_REG(tp_engine->RegisterObjectMethod(

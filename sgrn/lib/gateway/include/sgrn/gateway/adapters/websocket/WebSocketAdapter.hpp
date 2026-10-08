@@ -78,6 +78,17 @@ namespace sgrn::gateway::adapters::websocket
 class WebSocketAdapter {
 public:
     using BinaryReadFn = std::function<sgrn::Result<void, std::string>(uint16_t t_db, size_t t_offset, size_t t_size, uint8_t* tp_out)>;
+    using BinaryWriteFn =
+        std::function<sgrn::Result<void, std::string>(uint16_t t_db, size_t t_offset, size_t t_size, const uint8_t* tp_data)>;
+    /// Discrete-area write (TIA-style tags: PE/PA/MK arenas). The twin is
+    /// DB-only, so this is set only where a PlcRuntime exists (s7shell
+    /// bindings); null keeps DB-only behavior with a clear NACK.
+    using AreaWriteFn =
+        std::function<sgrn::Result<void, std::string>(uint16_t t_area, size_t t_offset, size_t t_size, const uint8_t* tp_data)>;
+
+    /// Install the discrete-area write hook (see AreaWriteFn). May be called
+    /// before or after start()/configure(); read per-message under lock.
+    void setAreaWriteFn(AreaWriteFn t_fn);
 
     WebSocketAdapter();
     ~WebSocketAdapter();
@@ -97,7 +108,7 @@ public:
      */
     sgrn::Result<void> start(const std::string& t_ip, uint16_t t_port, SecurityManagerSptr tsp_security_manager,
         const ::sgrn::scl::PlcSchemaStore* tp_registry = nullptr, std::function<std::string()> t_full_snapshot_provider = {},
-        BinaryReadFn t_binary_read_fn = {});
+        BinaryReadFn t_binary_read_fn = {}, BinaryWriteFn t_binary_write_fn = {});
 
     /**
      * @brief Register the `/ws` route on an externally owned Crow app.
@@ -116,7 +127,7 @@ public:
      * explicitly before registerRoutes().
      */
     void configure(SecurityManagerSptr tsp_security_manager, const ::sgrn::scl::PlcSchemaStore* tp_registry,
-        std::function<std::string()> t_full_snapshot_provider, BinaryReadFn t_binary_read_fn);
+        std::function<std::string()> t_full_snapshot_provider, BinaryReadFn t_binary_read_fn, BinaryWriteFn t_binary_write_fn = {});
 
     void stop();
 
@@ -168,6 +179,7 @@ private:
     std::map<std::tuple<uint16_t, size_t, size_t>, std::vector<crow::websocket::connection*>> collectBinaryTargets(uint16_t t_db);
     bool sendBinaryFrame(crow::websocket::connection* tp_conn, uint16_t t_db, size_t t_offset, size_t t_size, double t_timestamp_seconds);
     void handleClientMessage(crow::websocket::connection& t_conn, const std::string& t_message);
+    void handleBinaryMessage(crow::websocket::connection& t_conn, const std::string& t_message);
     /// Resolve a client's string subscriptions to contiguous leaf-id ranges
     /// using the shared dictionary. Called once at subscribe/unsubscribe time.
     void resolveLeafRanges(ClientContext& t_ctx);
@@ -194,6 +206,9 @@ private:
     // current (possibly persistence-restored) twin state. See start().
     std::function<std::string()> full_snapshot_provider_;
     BinaryReadFn binary_read_fn_;
+    BinaryWriteFn binary_write_fn_;
+    std::mutex area_write_mutex_;
+    AreaWriteFn area_write_fn_;
 
     const twin::LeafDictionary* dict_{nullptr}; ///< shared dictionary for dictionary-mode
 

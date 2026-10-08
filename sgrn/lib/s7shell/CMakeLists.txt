@@ -43,6 +43,7 @@ set(SGRN_S7SHELL_LIB_SOURCES
     src/bindings/Proxy.cpp
     src/bindings/GatewaySync.cpp
     src/bindings/S7Server.cpp
+    src/bindings/Gateway.cpp
     src/bindings/HttpServer.cpp
     src/bindings/WebSocketServer.cpp
     src/connection/ProxySession.cpp

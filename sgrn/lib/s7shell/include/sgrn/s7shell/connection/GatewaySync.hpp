@@ -2,20 +2,30 @@
 // =============================================================================
 // GatewayBinding — client binding for gateway dirty-tag synchronization
 //
-// GatewayBinding connects to a running SGRN Gateway's WebSocket endpoint and
+// GatewaySync connects to a running SGRN Gateway's WebSocket endpoint and
 // listens for DeltaSnapshot events. When a dirty tag event arrives, it
 // decodes the relevant field paths, writes the value through its PlcRuntime
 // (schema-aware field encode, via the same memory path scripts use), and
 // marks the affected DB dirty on that runtime. Local dirty regions are
-// published back to the Gateway over HTTP /memory/batch, because the Gateway
-// WebSocket accepts only subscribe/unsubscribe commands.
+// published back to the Gateway over a full-duplex RuntimeSync WebSocket
+// command. JSON is available for inspection; binary frames preserve raw PLC
+// bytes and avoid an extra HTTP round-trip.
+//
+// Delta wire forms accepted (both directions of the same event stream):
+//   nested  {"DbName": {"field": value, ...}}            (legacy / no-dictionary)
+//   flat    {"<leaf_id>": value, ...}                    (dictionary mode —
+//            the normal form of a full gateway with a LeafDictionary, and of
+//            the s7shell Gateway/WebSocketServer bindings)
+// Flat IDs resolve through the {"type":"dictionary"} frame the server pushes
+// at connect time (authoritative); when no frame has arrived yet they fall
+// back to a locally built LeafDictionary over the runtime schema.
 //
 // Data flow:
-//   Gateway WebSocket (DeltaSnapshot JSON)
-//       ↓  parse field path + value
+//   Gateway WebSocket (DeltaSnapshot JSON, nested or flat)
+//       ↓  parse field path + value (flat IDs expanded via the dictionary)
 //   Schema lookup (byte offset + codec) via the source client's PlcRuntime
 //       ↓  encode value → PlcRuntime memory + mark dirty
-//   HTTP PUT /memory/batch
+//   Gateway WebSocket RuntimeSync write frame
 //       ↓
 //   Gateway twin memory
 //
@@ -31,6 +41,7 @@
 //   // GatewaySync runs in background until sync.disconnect()
 // =============================================================================
 
+#include <sgrn/gateway/twin/LeafDictionary.hpp>
 #include <sgrn/plcsim/runtime/PlcRuntime.hpp>
 #include <atomic>
 #include <condition_variable>
@@ -55,6 +66,9 @@ public:
     void subscribeDb(uint16_t t_db);
     void unsubscribeDb(uint16_t t_db);
     void publishOnDirty(bool t_enabled);
+    /// Select compact bidirectional RuntimeSync binary write frames. When
+    /// false, writes use the equivalent JSON WebSocket command.
+    void useBinary(bool t_enabled);
 
     /// Connect to the gateway WebSocket. Non-blocking — starts background thread.
     bool connect(const std::string& t_ws_url);
@@ -70,10 +84,21 @@ public:
 private:
     void onMessage(const ix::WebSocketMessagePtr& t_msg);
     void handleDeltaSnapshot(const std::string& t_json_payload, uint16_t t_db_hint);
+    /// Store the server's {"type":"dictionary","leaves":[{id,path}]} decode
+    /// table (authoritative ID mapping for flat deltas).
+    void onDictionaryFrame(const std::string& t_json_payload);
+    /// Resolve a flat leaf ID to its dotted path: remote dictionary frame
+    /// first, locally built dictionary second. False when unknown.
+    bool resolveLeafPath(uint32_t t_id, std::string& t_path);
     void onRuntimeDirty(uint16_t t_db, uint32_t t_offset, uint32_t t_length);
+    void onTagDirty(const std::string& t_tag_name);
     void requestPublish();
     void publishWorkerLoop();
     bool publishDirtyBatch();
+    /// Publish pending discrete tags as a JSON write_area command (always
+    /// JSON, even in binary mode — control traffic is low-rate and stays
+    /// inspectable). Falls back to HTTP POST /tags/<name> on ack timeout.
+    bool publishPendingTags();
 
     /// Writes one "DbName.field.subfield" = raw_value pair through the runtime
     /// and marks the owning DB dirty on that runtime. Returns false and leaves
@@ -83,26 +108,44 @@ private:
 
     PlcRuntimeSPtr runtime_;
     size_t dirty_observer_id_{0};
+    size_t tag_observer_id_{0};
     std::string http_base_url_;
 
     ix::WebSocket ws_;
     std::atomic<bool> connected_{false};
     std::atomic<bool> publish_on_dirty_{true};
+    std::atomic<bool> binary_transport_{false};
+    std::atomic<uint64_t> next_sequence_{1};
     std::atomic<bool> publishing_{false};
     static thread_local bool suppress_publish_;
     // markDirty() observers run on the writer's thread: script execution,
     // S7 server callbacks, proxy polling, or the WebSocket callback. Keep
-    // that path non-blocking by waking this worker instead of issuing HTTP
-    // inline. The worker debounces bursts and publishes all runtime dirty
-    // regions in one /memory/batch request.
+    // that path non-blocking by waking this worker instead of writing inline.
+    // The worker debounces bursts and publishes all runtime dirty regions in
+    // one acknowledged RuntimeSync WebSocket frame.
     std::thread publish_worker_;
     std::mutex publish_mutex_;
     std::condition_variable publish_cv_;
     bool publish_requested_{false};
     bool stop_publish_worker_{false};
 
+    std::mutex ack_mutex_;
+    std::condition_variable ack_cv_;
+    uint64_t last_ack_sequence_{0};
+    bool last_ack_ok_{false};
+
     mutable std::mutex subs_mutex_;
     std::set<uint16_t> subscribed_dbs_; ///< empty = all
+
+    /// Flat-delta decode state. The remote table comes from the server's
+    /// dictionary frame; the local one is built from the runtime schema at
+    /// connect() as a fallback for servers that never send the frame.
+    /// Guarded by dict_mutex_ (WebSocket callback vs script threads).
+    mutable std::mutex dict_mutex_;
+    std::vector<std::string> remote_paths_;
+    bool has_remote_dict_{false};
+    ::sgrn::gateway::twin::LeafDictionary local_dict_;
+    bool local_dict_built_{false};
 
     mutable std::mutex err_mutex_;
     std::string last_error_;

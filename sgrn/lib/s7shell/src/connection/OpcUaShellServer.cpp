@@ -1,6 +1,7 @@
 #include "sgrn/s7shell/connection/OpcUaShellServer.hpp"
 
 #include <sgrn/gateway/security/SecurityManager.hpp>
+#include <sgrn/s7shell/bindings/tag_opcua.hpp>
 
 #include <fmt/core.h>
 #include <stdexcept>
@@ -39,6 +40,9 @@ sgrn::Result<void, std::string> ScriptOpcUaServer::startServer() {
     // Reuse the gateway's default Relaxed security policy for the virtual
     // simulation surface. Production gateways load a security.as policy.
     auto sp_security = std::make_shared<::sgrn::gateway::SecurityManager>();
+
+    // Discrete tags: a live "Tags" folder (scalars native, UDTs as JSON).
+    ::sgrn::s7shell::bindings::hookOpcuaTags(adapter_.get(), runtime_);
 
     auto res = adapter_->start("", port_, runtime_->getSchema(), runtime_->getMemory(), sp_security);
     if (res.hasError())

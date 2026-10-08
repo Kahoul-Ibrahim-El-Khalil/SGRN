@@ -24,8 +24,6 @@ public:
     void dbFill(uint16_t t_db_number, int t_fill_char);
 
     std::string pgBlockInfo(const std::string& t_hex) const;
-    bool saveHex(const std::string& t_path, const std::string& t_hex) const;
-    std::string loadHex(const std::string& t_path) const;
 
     bool uploadToFile(int t_block_type, uint16_t t_block_number, const std::string& t_path, bool t_full = true, int t_max_size = 65536);
     bool downloadFromFile(uint16_t t_block_number, const std::string& t_path);

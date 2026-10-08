@@ -4,6 +4,7 @@
 #include <sgrn/gateway/twin/DbIOProvider.hpp>
 #include <sgrn/gateway/twin/DbIoError.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
+#include <sgrn/gateway/twin/encoding.hpp>
 #include <sgrn/gateway/twin/utils.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/wrappers/s7/error.hpp>
@@ -86,6 +87,9 @@ sgrn::Result<void, DbIoError> DbIOProvider::put(S7Client& t_client, const std::s
     sgrn::Result<std::vector<uint8_t>, DbIoError> buf = encodeValue(t_loc.value(), t_json_val);
     SGRN_RETURN_IF(buf.hasError(), buf.error());
 
+    // S7 wire order is big-endian; encodeValue produces block-endian bytes.
+    ::sgrn::gateway::twin::swapFieldToBigEndian(*t_loc.value().field, buf.value().data(), buf.value().size());
+
     S7DataItem t_item{};
     t_item.Area = S7AreaDB;
     t_item.DBNumber = db_num_;
@@ -129,6 +133,9 @@ sgrn::Result<void, DbIoError> DbIOProvider::put(S7Client& t_client, const std::s
     sgrn::Result<std::vector<uint8_t>, DbIoError> buf = encodeValue(t_loc.value(), t_val);
     if (buf.hasError())
         return std::unexpected(buf.error());
+
+    // S7 wire order is big-endian; encodeValue produces block-endian bytes.
+    ::sgrn::gateway::twin::swapFieldToBigEndian(*t_loc.value().field, buf.value().data(), buf.value().size());
 
     S7DataItem t_item{};
     t_item.Area = S7AreaDB;
@@ -319,8 +326,15 @@ void DbIOProvider::commitOneField(const std::string& /*path*/, const scl::FieldL
         }
     } else {
         const int sz = ::sgrn::gateway::twin::fieldSpanSize(*t_loc.field);
-        if (auto r = memory_.writeDbMemory(db_num_, t_loc.abs_offset, sz, static_cast<const uint8_t*>(t_item.pdata)); !r) {
-            SGRN_WARN_LOG("DbIOProvider: writeDbMemory failed for DB{}.{}: {}", db_num_, t_loc.abs_offset, toString(r.error()));
+        // Wire bytes are big-endian; the arena holds block-endian bytes.
+        if (t_loc.field->endianness == s7codec::Endian::Little) {
+            std::vector<uint8_t> buf(static_cast<const uint8_t*>(t_item.pdata), static_cast<const uint8_t*>(t_item.pdata) + sz);
+            ::sgrn::gateway::twin::swapFieldToBigEndian(*t_loc.field, buf.data(), buf.size());
+            if (auto r = memory_.writeDbMemory(db_num_, t_loc.abs_offset, sz, buf.data()); !r) {
+                SGRN_WARN_LOG("DbIOProvider: writeBit failed for DB{}.{}: {}", db_num_, t_loc.abs_offset, toString(r.error()));
+            }
+        } else if (auto r = memory_.writeDbMemory(db_num_, t_loc.abs_offset, sz, static_cast<const uint8_t*>(t_item.pdata)); !r) {
+            SGRN_WARN_LOG("DbIOProvider: writeBit failed for DB{}.{}: {}", db_num_, t_loc.abs_offset, toString(r.error()));
         }
     }
 }

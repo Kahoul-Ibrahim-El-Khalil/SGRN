@@ -88,6 +88,16 @@ void HttpAdapter::registerRoutes(GatewayApp& t_app) {
      *   Full replacement of a field with JSON value.
      *   Payload: JSON value (replaces entire field).
      *
+     * DISCRETE TAGS (TIA-style tag tables; needs runtime hookup, else empty):
+     * [GET] /tags
+     *   Tag table listing: [{"name","table","type","address"}].
+     *
+     * [GET] /tags/{name}
+     *   Current tag value as JSON (404 unknown).
+     *
+     * [POST] /tags/{name}  /  [PUT] /tags/{name}
+     *   Write JSON value (raw scalars accepted; UDT partials merge).
+     *
      * RAW MEMORY OPERATIONS (byte-level, direct DB access via /memory/\*):
      *
      * [GET] /registry
@@ -170,6 +180,23 @@ void HttpAdapter::registerRoutes(GatewayApp& t_app) {
     CROW_ROUTE(t_app, "/data/")
         .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
         .methods("GET"_method, "POST"_method, "PUT"_method, "OPTIONS"_method)(data_root);
+
+    // ── Discrete tags (TIA-style; see tags_handlers.cpp) ────────────────────
+    //   GET  /tags            — tag table listing (name/table/type/address)
+    //   GET  /tags/<name>     — current value as JSON (404 unknown)
+    //   POST /tags/<name>     — write JSON value (UDT partials merge)
+    //   PUT  /tags/<name>     — same write path as POST
+    CROW_ROUTE(t_app, "/tags")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
+        .methods("GET"_method, "OPTIONS"_method)(
+            [serve](const crow::request& t_req) { return serve(t_req, "", &HttpAdapter::handleGetTags); });
+    CROW_ROUTE(t_app, "/tags/<string>")
+        .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
+        .methods("GET"_method, "POST"_method, "PUT"_method, "OPTIONS"_method)([serve](const crow::request& t_req, std::string t_sub) {
+            if (t_req.method == "POST"_method || t_req.method == "PUT"_method)
+                return serve(t_req, std::move(t_sub), &HttpAdapter::handleWriteTag);
+            return serve(t_req, std::move(t_sub), &HttpAdapter::handleGetTag);
+        });
 
     // ── Raw Memory API ───────────────────────────────────────────────────────
     CROW_ROUTE(t_app, "/memory/db/<path>")

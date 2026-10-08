@@ -8,6 +8,7 @@
 #include <sgrn/gateway/tools/replay_control.hpp>
 #include <atomic>
 #include <crow.h>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -96,6 +97,24 @@ public:
         replay_control_ = std::move(t_control);
     }
 
+    /// Discrete (TIA-style) tag access for /tags/*. The twin is DB-only, so
+    /// tag memory lives wherever a PlcRuntime exists (s7shell bindings hook
+    /// these to it); without hookup /tags lists empty and reads 404.
+    struct TagEndpointInfo {
+        std::string name;
+        std::string table;
+        std::string type;
+        std::string address;
+    };
+    using TagListFn = std::function<std::vector<TagEndpointInfo>()>;
+    using TagReadFn = std::function<sgrn::Result<std::string, std::string>(const std::string& t_name)>;
+    using TagWriteFn = std::function<sgrn::Result<void, std::string>(const std::string& t_name, const std::string& t_json)>;
+    void setTagAccess(TagListFn t_list, TagReadFn t_read, TagWriteFn t_write) {
+        tag_list_ = std::move(t_list);
+        tag_read_ = std::move(t_read);
+        tag_write_ = std::move(t_write);
+    }
+
     /// Bound references — set by start()/registerRoutes() before any handler runs.
     struct BoundRefs {
         const PlcSchemaStore* registry{nullptr};
@@ -117,6 +136,11 @@ private:
     void handleGetData(const http::HttpRequest& t_req, http::HttpResponse& t_res);
     void handlePost(const http::HttpRequest& t_req, http::HttpResponse& t_res);
     void handlePut(const http::HttpRequest& t_req, http::HttpResponse& t_res);
+
+    // Discrete tag endpoints: /tags and /tags/<name> (see tags_handlers.cpp)
+    void handleGetTags(const http::HttpRequest& t_req, http::HttpResponse& t_res);
+    void handleGetTag(const http::HttpRequest& t_req, http::HttpResponse& t_res);
+    void handleWriteTag(const http::HttpRequest& t_req, http::HttpResponse& t_res);
 
     // Raw memory endpoints: /memory/*
     // Binary mode (single DB, raw bytes):
@@ -155,6 +179,11 @@ private:
 
     // Modbus virtual map for REST discovery
     const ::sgrn::scl::ModbusVirtualMap* modbus_map_{nullptr};
+
+    // Discrete tag access (optional; hooked by runtime owners)
+    TagListFn tag_list_;
+    TagReadFn tag_read_;
+    TagWriteFn tag_write_;
 
     // Route handlers run against these bound references (no per-request args).
     BoundRefs refs_;

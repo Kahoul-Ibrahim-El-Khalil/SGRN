@@ -16,6 +16,16 @@ using ::sgrn::scl::DataType;
 namespace sgrn::gateway::adapters
 {
 
+namespace
+{
+// Arena bytes carry block-scoped endianness; decode must honor the resolved
+// twin node's value (Big fallback when the symbol isn't resolvable).
+s7codec::Endian nodeEndian(const NodeContext& t_ctx) {
+    const twin::PlcNode* p_node = t_ctx.resolveSymbol();
+    return p_node != nullptr ? p_node->endian_ : s7codec::Endian::Big;
+}
+} // namespace
+
 Result<UA_DataValue, OpcUaAdapterError> decodeScalarToDataValue(const s7codec::DecodedValue& t_dv, const NodeContext& t_ctx) {
 
     UA_DataValue out;
@@ -98,7 +108,7 @@ Result<UA_DataValue, OpcUaAdapterError> decodeTypedArrayToDataValue(const OpcUaD
         const uint32_t decode_count = s7codec::stringDecodeCapacity(t_ctx.p_node_ctx->type, 1, t_ctx.p_node_ctx->string_capacity);
 
         auto decoded =
-            s7codec::decodeScalar(t_ctx.p_node_ctx->type, p_elem_ptr, buf_remaining, bit_idx, decode_count, s7codec::Endian::Big);
+            s7codec::decodeScalar(t_ctx.p_node_ctx->type, p_elem_ptr, buf_remaining, bit_idx, decode_count, nodeEndian(*t_ctx.p_node_ctx));
 
         bool appended = false;
 
@@ -202,7 +212,8 @@ Result<UA_DataValue, OpcUaAdapterError> decodeMemoryBytesToDataValue(const OpcUa
 
     const uint32_t decode_count = s7codec::stringDecodeCapacity(t_ctx.p_node_ctx->type, 1, t_ctx.p_node_ctx->string_capacity);
 
-    auto decoded = s7codec::decodeScalar(t_ctx.p_node_ctx->type, t_ctx.p_raw_data, t_ctx.size, 0, decode_count);
+    auto decoded =
+        s7codec::decodeScalar(t_ctx.p_node_ctx->type, t_ctx.p_raw_data, t_ctx.size, 0, decode_count, nodeEndian(*t_ctx.p_node_ctx));
 
     SGRN_RETURN_ERROR_IF(!decoded.valid(), OpcUaAdapterError::DECODE_FAILED);
 

@@ -26,6 +26,16 @@ class PlcRuntime {
     void loadJsonSchema(const string &in path);
     bool set(uint16 db, const string &in path, const string &in value);
     string get(uint16 db, const string &in path);
+    void sync();
+    void syncDb(uint16 db);
+    string dirtySnapshot() const;
+    bool hasDirty(uint16 db) const;
+    bool defineTag(const string &in name, const string &in type, const string &in addr);
+    string tagList() const;
+    string tagList(const string &in table) const;
+    string tagTables() const;
+    string tagInfo(const string &in name) const;
+    bool hasDirtyTags() const;
 }
 
 class S7Client {
@@ -49,7 +59,19 @@ class S7Server {
     void stop();
     bool isRunning() const;
     int clientsCount() const;
-    string getCpuStatus() const;
+    int getCpuStatus() const;
+}
+
+class Gateway {
+    Gateway(PlcRuntime@ rt);
+    void start(const string &in ip = "0.0.0.0", uint16 port = 8080);
+    void stop();
+    bool isRunning() const;
+    void broadcast(const string &in json);
+    void broadcast();
+    void setAutoBroadcast(bool enable);
+    bool autoBroadcast() const;
+    void loadPolicy(const string &in path);
 }
 
 class HttpServer {
@@ -65,6 +87,9 @@ class WebSocketServer {
     void start(const string &in ip = "0.0.0.0", uint16 port = 9001);
     void stop();
     void broadcast(const string &in json);
+    void broadcast();
+    void setAutoBroadcast(bool enable);
+    bool autoBroadcast() const;
     void loadPolicy(const string &in path);
 }
 
@@ -110,8 +135,13 @@ class S7ProxySession {
 class GatewaySync {
     GatewaySync(PlcRuntime@ rt);
     void subscribeDb(uint16 db);
+    void unsubscribeDb(uint16 db);
     void publishOnDirty(bool enable);
+    void useBinary(bool enable);
     bool connect(const string &in url);
+    void disconnect();
+    bool connected() const;
+    string lastError() const;
 }
 
 void print(const string &in str);

@@ -392,6 +392,9 @@ void buildAddressSpace(const OpcUaAddressSpaceContext& t_context, const ::sgrn::
     for (const auto& [num, db] : t_registry.dbs()) {
         registerDbObjectNode(p_raw, adapter, nodes, num, db);
     }
+
+    // Discrete (TIA-style) tag projection. No-op without adapter tag access.
+    registerTagsFolder(adapter, nodes, t_registry);
 }
 
 void triggerAlarmEvent(Server& t_server, const NodeId& t_alarm_event_type_id, uint16_t t_db_number, const std::string& t_path,

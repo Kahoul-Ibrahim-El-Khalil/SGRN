@@ -1,10 +1,9 @@
 // ============================================================================
 // operator.as — "MiniPlant" operator / forcing station (program #3)
 //
-// This is the third program: another, independent s7shell process. It has
-// no knowledge of the PLC's physics — it only connects to the same gateway
-// (program #1) as an S7Client and forces values into DB1 "Setpoints". The
-// PLC (program #2, plc_logic.as) polls those setpoints every scan and reacts.
+// This operator process owns a typed runtime and sends Setpoints updates to
+// the gateway over RuntimeSync WebSocket. The simulation process receives
+// those writes through its own RuntimeSync connection.
 //
 // Run with:   s7shell operator.as
 //
@@ -14,23 +13,22 @@
 // ============================================================================
 
 const string SCHEMA_PATH = "schema.scl";
-const string GATEWAY_IP = "127.0.0.1";
-const uint16 GATEWAY_PORT = 102;
+const string GATEWAY_WS_URL = "ws://127.0.0.1:8000/ws";
 
-S7Client@ plc = null;
+PlcRuntime@ plc = PlcRuntime(SCHEMA_PATH);
+GatewaySync@ sync = null;
 
 bool setupOperator() {
     print("================================================================\n");
-    print("  Operator station — connecting to gateway at " + GATEWAY_IP + ":" + GATEWAY_PORT + "\n");
-
-    @plc = S7Client(GATEWAY_IP, 0, 1, GATEWAY_PORT);
-    plc.loadSclSchema(SCHEMA_PATH);
-
-    if (!plc.isConnected()) {
-        print("  ERROR: could not connect to gateway: " + plc.lastError() + "\n");
+    print("  Operator station — connecting to gateway at " + GATEWAY_WS_URL + "\n");
+    @sync = GatewaySync(plc);
+    sync.useBinary(true);
+    sync.publishOnDirty(true);
+    if (!sync.connect(GATEWAY_WS_URL)) {
+        print("  ERROR: RuntimeSync could not start: " + sync.lastError() + "\n");
         return false;
     }
-    print("  Connected.\n");
+    print("  RuntimeSync started.\n");
     print("================================================================\n");
     return true;
 }
@@ -78,24 +76,16 @@ void main() {
 // ============================================================================
 // Ad-hoc forcing from the REPL instead of running this script:
 //
-// NOTE: this block is deliberately NOT written as literal `plc.loadSclSchema(...)`
-// source text. s7shell's pre-scanner finds schema loads with a plain regex
-// over the raw file text (it does not understand comments), so writing that
-// exact call pattern inside a comment makes it get scanned TWICE and the
-// script fails to compile with "function already exists". Type the schema
-// load by hand at the prompt instead of pasting it from a comment.
-//
-//   1. Launch:            s7shell
-//   2. Create a client:   S7Client@ plc = S7Client("127.0.0.1", 0, 1, 102);
-//   3. Load the schema on that client (method name: load-Scl-Schema),
-//      pointing it at "schema.scl" — this is what injects the `setpoints`,
-//      `tank`, `pump`, `valves`, `heater`, `alarms` globals into the REPL.
-//   4. Then, e.g.:
+// Interactive use: create PlcRuntime("schema.scl"), then connect a
+// GatewaySync instance to the gateway WebSocket before writing fields.
 //        setpoints.pump_run = true;
 //        setpoints.pump_speed_sp_pct = 80.0;
 //        setpoints.inlet_valve_cmd_pct = 60.0;
 //        setpoints.put();
 //        setpoints.e_stop = true; setpoints.put();   // trip it
 //        tank                                        // bare expr -> auto JSON dump
-//        tank.get(); tank.print();
+//        GatewaySync@ sync = GatewaySync(plc);
+//        sync.useBinary(true); sync.publishOnDirty(true);
+//        sync.connect("ws://127.0.0.1:8000/ws");
+//        tank.print();
 // ============================================================================

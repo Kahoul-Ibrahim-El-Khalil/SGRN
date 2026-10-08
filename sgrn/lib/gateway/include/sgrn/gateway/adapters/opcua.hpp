@@ -1,6 +1,7 @@
 #pragma once
 
 #include <sgrn/Result.hpp>
+#include <sgrn/gateway/adapters/opcua/tag_access.hpp>
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -40,12 +41,21 @@ public:
         ::sgrn::gateway::twin::PlcMemory& t_s7_server, std::shared_ptr<::sgrn::gateway::SecurityManager> tsp_security_manager);
     void stop();
 
+    /// Discrete (TIA-style) tag projection: serves a "Tags" folder with one
+    /// live variable node per tag (scalars native, UDTs as JSON strings).
+    /// Backing lives wherever a PlcRuntime exists. Must be called before
+    /// start(); null (default) keeps the DB-only address space.
+    void setTagAccess(TagAccess t_access) {
+        tag_access_ = std::move(t_access);
+    }
+
     /// Number of currently active OPC-UA sessions (connected clients).
     std::size_t clientsCount() const;
 
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    TagAccess tag_access_;
 };
 
 } // namespace sgrn::gateway::adapters

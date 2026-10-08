@@ -181,26 +181,27 @@ namespace sgrn::gateway::adapters
  */
 static std::tuple<int, size_t, size_t> parseMemoryPath(const std::string& t_path) {
     std::vector<std::string> parts = sgrn::utils::strings::tokenize(t_path, '/');
-    // Accept both:
-    //   "1/offset/0/size/72"   (the route "<path>" capture from /memory/db/<path>)
-    //   "/db/1/offset/0/size/72" (legacy/internal callers)
-    const bool has_db_prefix = parts.size() == 7 && parts[1] == "db" && parts[3] == "offset" && parts[5] == "size";
-    const bool bare_path = parts.size() == 5 && parts[1] == "offset" && parts[3] == "size";
-    if (!has_db_prefix && !bare_path) {
+    // Normalize all equivalent forms before parsing. Crow's <path> capture
+    // normally yields "1/offset/0/size/72", but framework adapters and
+    // legacy callers may pass "/db/1/..." or "/memory/db/1/...".
+    while (!parts.empty() && parts.front().empty())
+        parts.erase(parts.begin());
+    if (!parts.empty() && parts.front() == "memory")
+        parts.erase(parts.begin());
+    if (!parts.empty() && parts.front() == "db")
+        parts.erase(parts.begin());
+
+    if (parts.size() != 5 || parts[1] != "offset" || parts[3] != "size") {
         return std::make_tuple(-1, 0, 0);
     }
 
     try {
-        const size_t db_idx = has_db_prefix ? 2 : 0;
-        const size_t off_idx = has_db_prefix ? 4 : 2;
-        const size_t size_idx = has_db_prefix ? 6 : 4;
-
-        unsigned long db_raw = std::stoul(parts[db_idx]);
+        unsigned long db_raw = std::stoul(parts[0]);
         if (db_raw > 65535U)
             return std::make_tuple(-1, 0, 0);
         int db = static_cast<int>(db_raw);
-        size_t offset = std::stoull(parts[off_idx]);
-        size_t size = std::stoull(parts[size_idx]);
+        size_t offset = std::stoull(parts[2]);
+        size_t size = std::stoull(parts[4]);
         return std::make_tuple(db, offset, size);
     } catch (const std::invalid_argument& e) {
         return std::make_tuple(-1, 0, 0);

@@ -33,6 +33,19 @@ struct LocatedField {
 std::optional<LocatedField> findFieldByPath(const std::vector<DbField>& t_fields, const std::string& t_path, int t_base_offset = 0);
 
 /**
+ * @brief Enforce block-scoped endianness on a field subtree: every descendant
+ * carries the root's value. Endianness is file/block scoped — there is no
+ * field-level endianness — so UDT children copied from a differently-scoped
+ * TYPE must be restamped at instantiation.
+ */
+inline void stampDescendantEndianness(DbField& t_field) {
+    for (auto& child : t_field.children) {
+        child.endianness = t_field.endianness;
+        stampDescendantEndianness(child);
+    }
+}
+
+/**
  * @brief Recursively apply a JSON patch object to a set of schema fields.
  */
 sgrn::Result<void, SclError> applyJsonPatchToFields(const std::vector<DbField>& t_fields, const std::string& t_patch_json, uint8_t* tp_ptr,

@@ -15,7 +15,9 @@ static std::string rewriteReplAutoGlobal(const std::string& t_line) {
 
     if (std::regex_search(t_line, m, kCtorDecl)) {
         const std::string type = m[2];
-        if (type == "S7Client" || type == "PlcRuntime" || type == "GatewaySync" || type == "S7ProxySession") {
+        if (type == "S7Client" || type == "PlcRuntime" || type == "GatewaySync" || type == "S7ProxySession" || type == "Gateway" ||
+            type == "HttpServer" || type == "WebSocketServer" || type == "S7Server" || type == "Persistence" || type == "SimEngine" ||
+            type == "WalReplayer") {
             std::string out = t_line;
             out.replace(0, static_cast<size_t>(m.position(1)), type + "@ ");
             return out;
