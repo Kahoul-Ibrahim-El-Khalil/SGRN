@@ -1,0 +1,37 @@
+{
+  "schema": "./experiments/llm_in_loop/schema.scl",
+  "state_dir": "/tmp/sgrn-gateway-llm-loop",
+  "reconnect_ms": 5000,
+  "security_policy": "permissive",
+  "security_script": "./experiments/llm_in_loop/security.as",
+
+  "northbound": {
+    "http": {
+      "ip": "0.0.0.0",
+      "port": 8000
+    },
+    "websocket": {
+      "ip": "0.0.0.0",
+      "port": 8000
+    }
+  },
+
+  "persistence": {
+    "enabled": true,
+    "mode": "changes_with_timestamp",
+    "format": "binary",
+    "namespaces": [
+      "Setpoints",
+      "Tank",
+      "Pump",
+      "Valves",
+      "Heater",
+      "Alarms",
+      "LLMAnalysis"
+    ],
+    "atomic_window_ms": 10,
+    "max_events": 200,
+    "batch_interval_s": 10,
+    "zstd_level": 9
+  }
+}

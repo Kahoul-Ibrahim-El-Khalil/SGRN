@@ -26,27 +26,56 @@ inline std::optional<std::string> extractSubtree(const std::string& t_json_str, 
 
     ::rapidjson::Document doc;
     doc.Parse(t_json_str.c_str());
-    if (doc.HasParseError())
+    if (doc.HasParseError()) {
+        fprintf(stderr, "extractSubtree: Parse error: %d\n", doc.GetParseError());
         return std::nullopt;
-
-    // Convert our custom path (A/B/C) to a RapidJSON Pointer (/A/B/C)
-    std::string rj_pointer = "/";
-    for (char c : t_path) {
-        if (c == t_separator)
-            rj_pointer += '/';
-        else
-            rj_pointer += c;
     }
 
-    ::rapidjson::Pointer ptr(rj_pointer.c_str());
-    if (const ::rapidjson::Value* p_val = ptr.Get(doc)) {
-        ::rapidjson::StringBuffer sb;
-        ::rapidjson::Writer<::rapidjson::StringBuffer> writer(sb);
-        p_val->Accept(writer);
-        return sb.GetString();
+    std::vector<std::string> segments;
+    size_t start = 0;
+    while (start < t_path.size()) {
+        size_t end = t_path.find(t_separator, start);
+        if (end == std::string::npos) {
+            segments.push_back(t_path.substr(start));
+            break;
+        }
+        segments.push_back(t_path.substr(start, end - start));
+        start = end + 1;
     }
 
-    return std::nullopt;
+    fprintf(stderr, "extractSubtree: path='%s', segments=%zu\n", t_path.c_str(), segments.size());
+
+    const ::rapidjson::Value* current = &doc;
+    for (const auto& segment : segments) {
+        if (!current->IsObject()) {
+            fprintf(stderr, "extractSubtree: not object at segment '%s'\n", segment.c_str());
+            return std::nullopt;
+        }
+
+        const ::rapidjson::Value* found = nullptr;
+        for (auto it = current->MemberBegin(); it != current->MemberEnd(); ++it) {
+            if (strcasecmp(it->name.GetString(), segment.c_str()) == 0) {
+                found = &it->value;
+                break;
+            }
+        }
+        if (!found) {
+            fprintf(stderr, "extractSubtree: field not found: '%s', available: ", segment.c_str());
+            for (auto it = current->MemberBegin(); it != current->MemberEnd(); ++it) {
+                fprintf(stderr, "%s ", it->name.GetString());
+            }
+            fprintf(stderr, "\n");
+            return std::nullopt;
+        }
+        current = found;
+    }
+
+    ::rapidjson::StringBuffer sb;
+    ::rapidjson::Writer<::rapidjson::StringBuffer> writer(sb);
+    current->Accept(writer);
+    std::string result = sb.GetString();
+    fprintf(stderr, "extractSubtree: result length=%zu\n", result.length());
+    return result;
 }
 
 } // namespace sgrn::utils::rapidjson

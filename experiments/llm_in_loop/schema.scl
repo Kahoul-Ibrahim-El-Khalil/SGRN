@@ -1,0 +1,143 @@
+// ============================================================================
+// schema.scl — "LLMInLoop" — Tank/Pump Skid with LLM Analysis Field
+//
+// DB1 "Setpoints"   — operator/HMI-forced commands
+// DB2 "Tank"        — level/temp process values
+// DB3 "Pump"        — feed pump status
+// DB4 "Valves"      — inlet/outlet valve actuators
+// DB5 "Heater"      — tank heater PID loop
+// DB6 "Alarms"      — aggregated alarm summary
+// DB7 "LLMAnalysis" — LLM analysis of plant state & suggested actions
+// ============================================================================
+
+TYPE "SkidStatus"
+  VAR
+    mode_code     : Int;     // 0=OFF, 1=FILLING, 2=HEATING, 3=DISCHARGING, 4=ALARM
+    fault_active  : Bool;
+  END_VAR
+END_TYPE
+
+TYPE "ValveActuator" #LITTLE_ENDIAN
+  VAR
+    position      : Real #UNIT("%");   // 0 = closed, 100 = fully open
+    command       : Real #UNIT("%");   // demanded position
+    travel_time   : Real #UNIT("s");   // full-stroke travel time
+    fault         : Bool;
+    limit_open    : Bool;
+    limit_closed  : Bool;
+  END_VAR
+END_TYPE
+
+TYPE "PIDLoop" #LITTLE_ENDIAN
+  VAR
+    setpoint       : LReal #UNIT("°C");
+    process_value  : LReal #UNIT("°C");
+    output         : Real #UNIT("%");
+    kp             : Real;
+    ki             : Real;
+    kd             : Real;
+    integral_acc   : LReal;
+    enabled        : Bool;
+    auto_mode      : Bool;
+    saturated      : Bool;
+  END_VAR
+END_TYPE
+
+TYPE "LLMResponse" #LITTLE_ENDIAN
+  VAR
+    // LLM-generated analysis of current plant state
+    analysis_text  : String[1024];  // Free-form text analysis
+    // Suggested action from LLM
+    suggested_action : Int;         // 0=HOLD, 1=INCREASE_FILL, 2=DECREASE_FILL, 3=START_HEAT, 4=STOP_HEAT, 5=OPEN_OUTLET, 6=CLOSE_OUTLET, 7=EMERGENCY_STOP
+    action_confidence : Real #UNIT("%");       // 0.0 - 100.0 confidence in suggested action
+    reasoning        : String[512]; // Brief reasoning for the suggested action
+    timestamp_ms     : DInt;        // When the LLM response was generated
+    model_name       : String[64];  // Which LLM model generated this
+  END_VAR
+END_TYPE
+
+// ─── DB1 "Setpoints" — Operator commands / forced values ────────────────────
+DATA_BLOCK "Setpoints" DB1 #LITTLE_ENDIAN
+VAR
+    pump_run             : Bool;
+    pump_speed_sp        : Real #UNIT("%");    // 0..100
+    inlet_valve_cmd      : Real #UNIT("%");    // 0..100
+    outlet_valve_cmd     : Real #UNIT("%");    // 0..100
+    heater_enable        : Bool;
+    heater_setpoint      : Real #UNIT("°C");
+    e_stop               : Bool;    // emergency stop, operator-forced
+    ack_alarms           : Bool;    // momentary ack
+    timestamp            : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB2 "Tank" — Process values ────────────────────────────────────────────
+DATA_BLOCK "Tank" DB2 #LITTLE_ENDIAN
+VAR
+    level         : Real #UNIT("%");
+    volume        : Real #UNIT("L");
+    temperature   : Real #UNIT("°C");
+    inlet_flow    : Real #UNIT("L/min");
+    outlet_flow   : Real #UNIT("L/min");
+    high_level_alarm  : Bool;
+    low_level_alarm   : Bool;
+    overfill_trip     : Bool;
+    timestamp         : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB3 "Pump" — Feed pump status ───────────────────────────────────────────
+DATA_BLOCK "Pump" DB3 #LITTLE_ENDIAN
+VAR
+    running     : Bool;
+    speed       : Real #UNIT("%");
+    fault       : Bool;
+    runtime     : LReal #UNIT("s");
+    timestamp   : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB4 "Valves" — Inlet / outlet valve actuators ──────────────────────────
+DATA_BLOCK "Valves" DB4 #LITTLE_ENDIAN
+VAR
+    inlet     : "ValveActuator";
+    outlet    : "ValveActuator";
+    timestamp : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB5 "Heater" — Tank temperature control loop ───────────────────────────
+DATA_BLOCK "Heater" DB5 #LITTLE_ENDIAN
+VAR
+    loop      : "PIDLoop";
+    timestamp : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB6 "Alarms" — Aggregated summary ──────────────────────────────────────
+DATA_BLOCK "Alarms" DB6 #LITTLE_ENDIAN
+VAR
+    any_active     : Bool;
+    active_count   : UInt;
+    e_stop_active  : Bool;
+    high_level     : Bool;
+    low_level      : Bool;
+    pump_fault     : Bool;
+    timestamp      : DTL;
+END_VAR
+END_DATA_BLOCK
+
+// ─── DB7 "LLMAnalysis" — LLM analysis & suggested actions ───────────────────
+DATA_BLOCK "LLMAnalysis" DB7 #LITTLE_ENDIAN
+VAR
+    response      : "LLMResponse";
+    // Previous response for comparison
+    prev_response : "LLMResponse";
+    // Control flags
+    request_pending : Bool;       // Set by simulation to request LLM analysis
+    request_id      : UInt;       // Monotonic request ID
+    last_error      : String[256]; // Any error from LLM call
+    // Sync heartbeat - incremented by simulation to trigger gateway push
+    sync_counter    : UInt;
+END_VAR
+END_DATA_BLOCK

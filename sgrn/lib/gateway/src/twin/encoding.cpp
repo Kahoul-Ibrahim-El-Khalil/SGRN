@@ -286,12 +286,13 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
                 return SclError::Generic;
             std::string s = t_value.GetString();
             std::expected<void, s7codec::CodecStatus> status;
+            // For strings, max_len comes from string_capacity, not count (which is 1 for scalars)
+            uint32_t max_len = t_field.string_capacity > 0 ? static_cast<uint32_t>(t_field.string_capacity)
+                                                           : (t_field.count > 0 ? static_cast<uint32_t>(t_field.count) : 254);
             if (t_field.type == DataType::String)
-                status =
-                    encodeString(s.c_str(), static_cast<int>(s.length()), (t_field.count > 0 ? t_field.count : 254), tp_ptr, t_buffer_size);
+                status = encodeString(s.c_str(), static_cast<int>(s.length()), max_len, tp_ptr, t_buffer_size);
             else
-                status = encodeXString(
-                    s.c_str(), static_cast<int>(s.length()), (t_field.count > 0 ? t_field.count : 254), tp_ptr, t_buffer_size, t_e);
+                status = encodeXString(s.c_str(), static_cast<int>(s.length()), max_len, tp_ptr, t_buffer_size, t_e);
             if (!status.has_value())
                 return SclError::Generic;
             return {};
@@ -304,12 +305,15 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             if (!wide)
                 return SclError::Generic;
             std::expected<void, s7codec::CodecStatus> status;
+            // For wstrings, max_len comes from string_capacity, not count
+            uint32_t max_len = t_field.string_capacity > 0 ? static_cast<uint32_t>(t_field.string_capacity)
+                                                           : (t_field.count > 0 ? static_cast<uint32_t>(t_field.count) : 16382);
             if (t_field.type == DataType::WString)
-                status = encodeWString(reinterpret_cast<const uint16_t*>(wide->c_str()), static_cast<int>(wide->size()),
-                    (t_field.count > 0 ? t_field.count : 16382), tp_ptr, t_buffer_size, t_e);
+                status = encodeWString(
+                    reinterpret_cast<const uint16_t*>(wide->c_str()), static_cast<int>(wide->size()), max_len, tp_ptr, t_buffer_size, t_e);
             else
-                status = encodeXWString(reinterpret_cast<const uint16_t*>(wide->c_str()), static_cast<int>(wide->size()),
-                    (t_field.count > 0 ? t_field.count : 16382), tp_ptr, t_buffer_size, t_e);
+                status = encodeXWString(
+                    reinterpret_cast<const uint16_t*>(wide->c_str()), static_cast<int>(wide->size()), max_len, tp_ptr, t_buffer_size, t_e);
             if (!status.has_value())
                 return SclError::Generic;
             return {};

@@ -78,7 +78,7 @@ void HttpAdapter::handleGetData(const http::HttpRequest& t_req, http::HttpRespon
         return;
     }
 
-    auto [schema, field_path, array_index] = resolveSemanticPath(sgrn::utils::strings::tokenize(path, '/'), t_registry);
+    auto [schema, field_path, array_rest_path, array_index] = resolveSemanticPath(sgrn::utils::strings::tokenize(path, '/'), t_registry);
 
     // ACL Check
     std::optional<uint16_t> db_num = schema ? std::optional<uint16_t>(schema->db_number) : std::nullopt;
@@ -110,10 +110,51 @@ void HttpAdapter::handleGetData(const http::HttpRequest& t_req, http::HttpRespon
                 if (!arr_doc.Parse(arr_res.value().c_str()).HasParseError() && arr_doc.IsArray()) {
                     const size_t idx = *array_index;
                     if (idx < arr_doc.GetArray().Size()) {
-                        rapidjson::StringBuffer sb;
-                        rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-                        arr_doc[static_cast<rapidjson::SizeType>(idx)].Accept(w);
-                        t_res.set_content(sb.GetString(), "application/json");
+                        rapidjson::Value& element = arr_doc[static_cast<rapidjson::SizeType>(idx)];
+
+                        // If there's a rest path, extract the nested field
+                        if (!array_rest_path.empty()) {
+                            const auto segments = sgrn::gateway::adapters::splitSlashes(array_rest_path);
+                            rapidjson::Value* current = &element;
+                            for (size_t i = 0; i < segments.size(); ++i) {
+                                if (!current->IsObject()) {
+                                    t_res.status = 422;
+                                    t_res.set_content(
+                                        fmt::format(
+                                            R"X({{"error":"Field '{}' not found in array element (not an object)"}})X", array_rest_path),
+                                        "application/json");
+                                    return;
+                                }
+                                // Case-insensitive field lookup
+                                rapidjson::Value* found = nullptr;
+                                for (auto it = current->MemberBegin(); it != current->MemberEnd(); ++it) {
+                                    if (strcasecmp(it->name.GetString(), segments[i].data()) == 0) {
+                                        found = &it->value;
+                                        break;
+                                    }
+                                }
+                                if (!found) {
+                                    t_res.status = 422;
+                                    t_res.set_content(
+                                        fmt::format(R"X({{"error":"Field '{}' not found in array element"}})X", segments[i].data()),
+                                        "application/json");
+                                    return;
+                                }
+                                if (i == segments.size() - 1) {
+                                    rapidjson::StringBuffer sb;
+                                    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+                                    found->Accept(w);
+                                    t_res.set_content(sb.GetString(), "application/json");
+                                } else {
+                                    current = found;
+                                }
+                            }
+                        } else {
+                            rapidjson::StringBuffer sb;
+                            rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+                            element.Accept(w);
+                            t_res.set_content(sb.GetString(), "application/json");
+                        }
                         return;
                     }
                     t_res.status = 416;

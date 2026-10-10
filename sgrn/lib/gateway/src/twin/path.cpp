@@ -95,6 +95,10 @@ DbField plcNodeToDbField(const sgrn::gateway::twin::PlcNode& t_node) {
     // offset=0 because callers pass ptr already positioned at this node;
     // children carry their own relative offsets as stored in PlcNode.
     t_f.offset = 0;
+    if (t_node.type_ == s7codec::Type::String || t_node.type_ == s7codec::Type::WString || t_node.type_ == s7codec::Type::XString ||
+        t_node.type_ == s7codec::Type::XWString) {
+        t_f.string_capacity = static_cast<int>(t_node.string_capacity_);
+    }
     if (t_node.type_ == s7codec::Type::Struct || !t_node.children_.empty()) {
         // struct_size is the PER-ELEMENT byte span (DbField convention, and
         // what PlcNode::serialize assumes for its stride). PlcNode::size_ is

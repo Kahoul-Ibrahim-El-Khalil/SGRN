@@ -103,6 +103,10 @@ void PlcCommandProcessor::processCommands() {
                     field.bit_index = static_cast<int>(node->bit_index_);
                     field.endianness = node->endian_;
                     field.offset = 0;
+                    if (node->type_ == s7codec::Type::String || node->type_ == s7codec::Type::WString ||
+                        node->type_ == s7codec::Type::XString || node->type_ == s7codec::Type::XWString) {
+                        field.string_capacity = static_cast<int>(node->string_capacity_);
+                    }
                 } else {
                     field = plcNodeToDbField(*node);
                 }

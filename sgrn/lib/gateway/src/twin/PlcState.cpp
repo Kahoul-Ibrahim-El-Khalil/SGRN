@@ -119,6 +119,9 @@ std::string PlcState::getScalarString(const std::string& t_path) const {
     int bit_index_ = p_node->bit_index_;
     uint32_t count_ = p_node->count_;
 
+    bool is_s7_string = (p_node->type_ == s7codec::Type::String || p_node->type_ == s7codec::Type::WString ||
+                         p_node->type_ == s7codec::Type::XString || p_node->type_ == s7codec::Type::XWString);
+
     if (array_index >= 0) {
         if (p_node->type_ == s7codec::Type::Bool && p_node->count_ > 1) {
             byte_offset += static_cast<size_t>(array_index / 8);
@@ -132,9 +135,13 @@ std::string PlcState::getScalarString(const std::string& t_path) const {
         count_ = 0; // single element, not the whole array
     }
 
+    // For S7 strings, use string_capacity_ as max_len for decodeScalar
+    int decode_count =
+        is_s7_string ? static_cast<int>(p_node->string_capacity_ > 0 ? p_node->string_capacity_ : count_) : static_cast<int>(count_);
+
     const uint8_t* p_ptr = tree().data() + p_node->cached_slot_->offset + byte_offset;
     size_t remaining = p_node->cached_slot_->size - byte_offset;
-    auto dv = s7codec::decodeScalar(p_node->type_, p_ptr, remaining, bit_index_, count_, p_node->endian_);
+    auto dv = s7codec::decodeScalar(p_node->type_, p_ptr, remaining, bit_index_, decode_count, p_node->endian_);
     if (!dv.valid())
         return "null";
 

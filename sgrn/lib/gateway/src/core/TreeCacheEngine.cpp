@@ -24,9 +24,18 @@ std::shared_ptr<const std::string> TreeCacheEngine::get(const twin::TreePath& t_
 
     // Cache miss or stale
     std::string new_json;
-    if (it->second->children_.empty()) {
+    const auto& node = *it->second;
+
+    // Use getJsonString for struct nodes and array fields (count_ > 1, not scalar strings)
+    bool is_s7_string = (node.type_ == s7codec::Type::String || node.type_ == s7codec::Type::WString ||
+                         node.type_ == s7codec::Type::XString || node.type_ == s7codec::Type::XWString);
+    bool is_array = (node.count_ > 1 && !is_s7_string);
+
+    if (node.children_.empty() && !is_array) {
+        // Scalar leaf
         new_json = t_state.getScalarString(path_str);
     } else {
+        // Struct or array field - use getJsonString for proper serialization
         new_json = t_state.getJsonString(path_str);
     }
 

@@ -304,7 +304,8 @@ LeafWriteOutcome applyLeafWrites(
 
     for (const auto& [leaf_path, leaf_value] : leaves) {
         // Fast path: directly addressable node.
-        if (memory.findSymbol(db, leaf_path) != nullptr) {
+        const twin::PlcNode* node = memory.findSymbol(db, leaf_path);
+        if (node != nullptr) {
             direct_leaves.push_back({leaf_path, leaf_value});
 
             continue;
@@ -544,7 +545,7 @@ void HttpAdapter::handlePost(const http::HttpRequest& request, http::HttpRespons
         return;
     }
 
-    auto [schema, field_path, array_index] = resolveSemanticPath(sgrn::utils::strings::tokenize(url_path, '/'), registry);
+    auto [schema, field_path, array_rest_path, array_index] = resolveSemanticPath(sgrn::utils::strings::tokenize(url_path, '/'), registry);
 
     if (!schema) {
         response.status = 404;
@@ -632,20 +633,65 @@ void HttpAdapter::handlePost(const http::HttpRequest& request, http::HttpRespons
                 return;
             }
 
-            const auto update = replaceArrayElement(array_result.value(), index, document);
-
-            if (!update) {
+            rapidjson::Document array_doc;
+            if (array_doc.Parse(array_result.value().c_str()).HasParseError() || !array_doc.IsArray()) {
                 response.status = 422;
-
-                response.set_content(
-                    fmt::format(R"({{"error":"Field '{}' is not a JSON array or index out of range"}})", field_path), "application/json");
-
+                response.set_content(fmt::format(R"({{"error":"Array field '{}' is not a JSON array"}})", field_path), "application/json");
                 return;
             }
 
+            if (index >= array_doc.Size()) {
+                response.status = 416;
+                response.set_content(
+                    fmt::format(R"X({{"error":"Array index {} out of range (size={})"}})X", index, array_doc.Size()), "application/json");
+                return;
+            }
+
+            // If there's a rest path, update the nested field within the array element
+            if (!array_rest_path.empty()) {
+                rapidjson::Value& element = array_doc[static_cast<rapidjson::SizeType>(index)];
+                const auto segments = sgrn::gateway::adapters::splitSlashes(array_rest_path);
+                rapidjson::Value* current = &element;
+                for (size_t i = 0; i < segments.size(); ++i) {
+                    if (!current->IsObject()) {
+                        response.status = 422;
+                        response.set_content(
+                            fmt::format(R"X({{"error":"Field '{}' not found in array element (not an object)"}})X", array_rest_path),
+                            "application/json");
+                        return;
+                    }
+                    // Case-insensitive field lookup
+                    rapidjson::Value* found = nullptr;
+                    for (auto it = current->MemberBegin(); it != current->MemberEnd(); ++it) {
+                        if (strcasecmp(it->name.GetString(), segments[i].data()) == 0) {
+                            found = &it->value;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        response.status = 422;
+                        response.set_content(fmt::format(R"X({{"error":"Field '{}' not found in array element"}})X", segments[i].data()),
+                            "application/json");
+                        return;
+                    }
+                    if (i == segments.size() - 1) {
+                        found->RemoveMember(segments[i].data());
+                        rapidjson::Value key(segments[i].data(), array_doc.GetAllocator());
+                        found->AddMember(key, document, array_doc.GetAllocator());
+                    } else {
+                        current = found;
+                    }
+                }
+            } else {
+                // Full element replacement
+                array_doc[static_cast<rapidjson::SizeType>(index)].CopyFrom(document, array_doc.GetAllocator());
+            }
+
+            const std::string new_array_json = sgrn::gateway::adapters::serializeJson(array_doc);
+
             const uint64_t timestamp = static_cast<uint64_t>(nowMilliseconds());
 
-            auto write_result = memory.updateFieldWithTimestamp(db_num, field_path, update->serialized_array, timestamp);
+            auto write_result = memory.updateFieldWithTimestamp(db_num, field_path, new_array_json, timestamp);
 
             if (write_result.hasError()) {
                 response.status = http::toHttpStatus(write_result.error());
@@ -659,10 +705,17 @@ void HttpAdapter::handlePost(const http::HttpRequest& request, http::HttpRespons
 
             memory.processor()->processCommands();
 
+            // Read back the element for response
+            rapidjson::Document updated_array_doc;
+            updated_array_doc.Parse(new_array_json.c_str());
+            rapidjson::StringBuffer sb;
+            rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+            rapidjson::Value& element = updated_array_doc[static_cast<rapidjson::SizeType>(index)];
+            element.Accept(w);
+
             response.status = 200;
 
-            response.set_content(
-                fmt::format(R"({{"db":{},"path":"{}","index":{},"value":{}}})", db_num, url_path, index, update->serialized_element),
+            response.set_content(fmt::format(R"({{"db":{},"path":"{}","index":{},"value":{}}})", db_num, url_path, index, sb.GetString()),
                 "application/json");
 
             return;

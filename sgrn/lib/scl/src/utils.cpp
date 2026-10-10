@@ -132,7 +132,10 @@ std::optional<LocatedField> findFieldByPath(const std::vector<DbField>& t_fields
             }
         }
 
-        auto it = std::find_if(t_flds.begin(), t_flds.end(), [&](const auto& t_f) { return t_f.name == field_name; });
+        auto it = std::find_if(t_flds.begin(), t_flds.end(), [&](const auto& t_f) {
+            return std::equal(t_f.name.begin(), t_f.name.end(), field_name.begin(), field_name.end(),
+                [](char a, char b) { return std::tolower(a) == std::tolower(b); });
+        });
         if (it == t_flds.end())
             return std::nullopt;
 
