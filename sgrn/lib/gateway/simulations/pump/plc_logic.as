@@ -84,7 +84,7 @@ void main() {
     // The gateway sends initial state and subsequent writes over WebSocket.
 
     double pump_speed = 0.0;
-    double runtime_s = double(pump.runtime_s);
+    double runtime_s = double(Pump.runtime_s);
 
     int iteration = 0;
 
@@ -92,27 +92,27 @@ void main() {
         DTL@ ts = dtl();
 
         // Sync local variables from the internal shadow memory (so OPC-UA forcing works)
-        double level_l = double(tank.volume_l);
-        double temp_c = double(tank.temp_c) > 0.0 ? double(tank.temp_c) : AMBIENT_C;
+        double level_l = double(Tank.volume_l);
+        double temp_c = double(Tank.temp_c) > 0.0 ? double(Tank.temp_c) : AMBIENT_C;
         
-        // 1. Read the latest gateway-synchronized operator setpoints.
-        bool e_stop = setpoints.e_stop;
-        bool run_cmd = setpoints.pump_run && !e_stop;
-        double speed_sp = double(setpoints.pump_speed_sp_pct);
+        // 1. Read the latest gateway-synchronized operator Setpoints.
+        bool e_stop = Setpoints.e_stop;
+        bool run_cmd = Setpoints.pump_run && !e_stop;
+        double speed_sp = double(Setpoints.pump_speed_sp_pct);
 
         // Emergency stop overrides every command: pump off, both valves shut
-        double inlet_cmd = e_stop ? 0.0 : double(setpoints.inlet_valve_cmd_pct);
-        double outlet_cmd = e_stop ? 0.0 : double(setpoints.outlet_valve_cmd_pct);
+        double inlet_cmd = e_stop ? 0.0 : double(Setpoints.inlet_valve_cmd_pct);
+        double outlet_cmd = e_stop ? 0.0 : double(Setpoints.outlet_valve_cmd_pct);
 
         // 2. Valve actuators ────────────────────────────────────────────────
-        // Keep local valve state while accepting synchronized gateway setpoints.
-        valves.inlet.command_pct = float(inlet_cmd);
-        valves.outlet.command_pct = float(outlet_cmd);
-        driveValve(valves.inlet, DT);
-        driveValve(valves.outlet, DT);
+        // Keep local valve state while accepting synchronized gateway Setpoints.
+        Valves.inlet.command_pct = float(inlet_cmd);
+        Valves.outlet.command_pct = float(outlet_cmd);
+        driveValve(Valves.inlet, DT);
+        driveValve(Valves.outlet, DT);
 
         // 3. Pump ────────────────────────────────────────────────────────────
-        bool pump_fault = pump.fault; // sticky until acked
+        bool pump_fault = Pump.fault; // sticky until acked
         bool pump_running = run_cmd && !pump_fault;
 
         double speed_target_eff = pump_running ? speed_sp : 0.0;
@@ -120,7 +120,7 @@ void main() {
         // ── Cavitation Protection ──
         if (pump_running && (level_l / TANK_CAPACITY_L * 100.0) < 5.0 && speed_target_eff > 50.0) {
             pump_fault = true;
-            pump.fault = true;
+            Pump.fault = true;
             pump_running = false;
             speed_target_eff = 0.0;
         }
@@ -136,7 +136,7 @@ void main() {
 
         // 4. Tank hydraulics ─────────────────────────────────────────────────
         double inlet_flow_lpm =
-            (pump_speed / 100.0) * (double(valves.inlet.position_pct) / 100.0) * MAX_INLET_LPM;
+            (pump_speed / 100.0) * (double(Valves.inlet.position_pct) / 100.0) * MAX_INLET_LPM;
 
         // Gravity drain: Torricelli's Law (scales with square root of head)
         // Ensure non-negative value for sqrt approximation
@@ -152,7 +152,7 @@ void main() {
         if (head_factor > 1.0) head_factor = 1.0;
 
         double outlet_flow_lpm =
-            (double(valves.outlet.position_pct) / 100.0) * head_factor * MAX_OUTLET_LPM;
+            (double(Valves.outlet.position_pct) / 100.0) * head_factor * MAX_OUTLET_LPM;
 
         level_l += (inlet_flow_lpm - outlet_flow_lpm) * (DT / 60.0);
         if (level_l < 0.0) level_l = 0.0;
@@ -163,26 +163,26 @@ void main() {
         // Safety interlock: overfill forces outlet open + trips the pump
         bool overfill = level_pct >= 99.0;
         if (overfill) {
-            valves.outlet.command_pct = 100.0f;
+            Valves.outlet.command_pct = 100.0f;
             pump_running = false;
             pump_speed = 0.0;
         }
 
         // 5. Heater PID (simple P loop driving a first-order thermal lag) ────
         // Keep local heater state while accepting synchronized gateway writes.
-        heater.loop.setpoint = double(setpoints.heater_setpoint_c);
-        heater.loop.enabled = setpoints.heater_enable && !e_stop;
-        heater.loop.process_value = temp_c;
+        Heater.loop.setpoint = double(Setpoints.heater_setpoint_c);
+        Heater.loop.enabled = Setpoints.heater_enable && !e_stop;
+        Heater.loop.process_value = temp_c;
 
         double heater_output = 0.0;
-        if (heater.loop.enabled) {
-            double error = double(heater.loop.setpoint) - temp_c;
+        if (Heater.loop.enabled) {
+            double error = double(Heater.loop.setpoint) - temp_c;
             heater_output = error * 15.0; // Kp
             if (heater_output < 0.0) heater_output = 0.0;
             if (heater_output > 100.0) heater_output = 100.0;
         }
-        heater.loop.output_pct = float(heater_output);
-        heater.loop.saturated = (heater_output >= 100.0);
+        Heater.loop.output_pct = float(heater_output);
+        Heater.loop.saturated = (heater_output >= 100.0);
 
         temp_c += (heater_output / 100.0) * HEATER_GAIN_C_S * DT;
         temp_c -= (temp_c - AMBIENT_C) * COOLING_RATE_C_S * DT;
@@ -198,44 +198,44 @@ void main() {
         if (e_stop) active_count++;
 
         // 7. Publish everything back to the gateway ─────────────────────────
-        tank.level_pct = float(level_pct);
-        tank.volume_l = float(level_l);
-        tank.temp_c = float(temp_c);
-        tank.inlet_flow_lpm = float(inlet_flow_lpm);
-        tank.outlet_flow_lpm = float(outlet_flow_lpm);
-        tank.high_level_alarm = high_level;
-        tank.low_level_alarm = low_level;
-        tank.overfill_trip = overfill;
-        tank.timestamp = ts;
-        tank.put();
+        Tank.level_pct = float(level_pct);
+        Tank.volume_l = float(level_l);
+        Tank.temp_c = float(temp_c);
+        Tank.inlet_flow_lpm = float(inlet_flow_lpm);
+        Tank.outlet_flow_lpm = float(outlet_flow_lpm);
+        Tank.high_level_alarm = high_level;
+        Tank.low_level_alarm = low_level;
+        Tank.overfill_trip = overfill;
+        Tank.timestamp = ts;
+        Tank.put();
 
-        pump.running = pump_running;
-        pump.speed_pct = float(pump_speed);
-        pump.fault = pump_fault;
-        pump.runtime_s = runtime_s;
-        pump.timestamp = ts;
-        pump.put();
+        Pump.running = pump_running;
+        Pump.speed_pct = float(pump_speed);
+        Pump.fault = pump_fault;
+        Pump.runtime_s = runtime_s;
+        Pump.timestamp = ts;
+        Pump.put();
 
-        valves.timestamp = ts;
-        valves.put();
+        Valves.timestamp = ts;
+        Valves.put();
 
-        heater.timestamp = ts;
-        heater.put();
+        Heater.timestamp = ts;
+        Heater.put();
 
-        alarms.any_active = active_count > 0;
-        alarms.active_count = uint16(active_count);
-        alarms.e_stop_active = e_stop;
-        alarms.high_level = high_level;
-        alarms.low_level = low_level;
-        alarms.pump_fault = pump_fault;
-        alarms.timestamp = ts;
-        alarms.put();
+        Alarms.any_active = active_count > 0;
+        Alarms.active_count = uint16(active_count);
+        Alarms.e_stop_active = e_stop;
+        Alarms.high_level = high_level;
+        Alarms.low_level = low_level;
+        Alarms.pump_fault = pump_fault;
+        Alarms.timestamp = ts;
+        Alarms.put();
 
         // 8. Periodic console report ─────────────────────────────────────────
         if (iteration % int(SCAN_HZ * 2.0) == 0) {
             print("[" + ts.toString() + "] level=" + level_pct + "%  temp=" + temp_c +
                 "C  pump=" + (pump_running ? "RUN@" + pump_speed + "%" : "OFF") +
-                    "  inlet_v=" + valves.inlet.position_pct + "%  outlet_v=" + valves.outlet.position_pct +
+                    "  inlet_v=" + Valves.inlet.position_pct + "%  outlet_v=" + Valves.outlet.position_pct +
                         "%  alarms=" + active_count + (e_stop ? "  [E-STOP]" : "") + "\n");
         }
 

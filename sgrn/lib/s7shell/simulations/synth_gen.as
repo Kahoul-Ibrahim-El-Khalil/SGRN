@@ -20,7 +20,7 @@
 // PlcRuntime@ g_rt = PlcRuntime( path-to-schema.scl ). The s7shell
 // pre-scanner only recognises that single-line shape (declaration +
 // construction together); a split declaration/assignment falls back to a
-// `plc` client variable that does not exist and the injected db_telemetry
+// `plc` client variable that does not exist and the injected DbTelemetry
 // accessors fail to compile.
 // (The same applies inside comments: never write a quoted path inside the
 // constructor call in a comment — the pre-scanner scans comments too and
@@ -28,7 +28,7 @@
 // =============================================================================
 
 // Global runtime handle — single-line form so the pre-scanner binds the
-// injected `db_telemetry` / `db1` accessors to g_rt.
+// injected `DbTelemetry` / `db1` accessors to g_rt.
 PlcRuntime@ g_rt = PlcRuntime("@SCHEMA@");
 SimEngine@  g_sim;
 
@@ -48,7 +48,7 @@ double clamp(double v, double lo, double hi) {
 // ─────────────────────────────────────────────────────────────────────────────
 // motorTick — writes one UdtMotorState subtree via = operator proxies.
 //
-// proxy   : typed handle to the motor subtree  (e.g. db_telemetry.Motor1)
+// proxy   : typed handle to the motor subtree  (e.g. DbTelemetry.Motor1)
 // rated_* : rated operating point for this motor
 // phase   : unique phase offset (rad) so each motor's load varies differently
 // degrade : bearing degradation 0..100 (non-zero under fault scenario)
@@ -108,7 +108,7 @@ void motorTick(
 // Tick callback — registered with SimEngine.onTick(@simTick)
 // Signature: void SimTickFn(PlcRuntime@ rt, double t_s, uint64 step_idx)
 //
-// `db_telemetry` is a global property injected by the pre-scanner.
+// `DbTelemetry` is a global property injected by the pre-scanner.
 // ─────────────────────────────────────────────────────────────────────────────
 void simTick(PlcRuntime@ rt, double t_s, uint64 step_idx) {
     const double PI = 3.14159265358979;
@@ -124,17 +124,17 @@ void simTick(PlcRuntime@ rt, double t_s, uint64 step_idx) {
                       : 0.0;
 
     // ── System-level fields ───────────────────────────────────────────────────
-    db_telemetry.LineActive  = line_on;
-    db_telemetry.SystemFault = sys_fault;
-    db_telemetry.TickCount   = int(step_idx);
+    DbTelemetry.LineActive  = line_on;
+    DbTelemetry.SystemFault = sys_fault;
+    DbTelemetry.TickCount   = int(step_idx);
 
     // ── Per-motor ticks — pass typed proxy handles directly ───────────────────
     // Motor1: 1450 RPM nominal, bearing_degradation fault injected
-    motorTick(db_telemetry.Motor1, 1450.0, 12.5, 80.0, 0.0,        degrade_m1, ramp, line_on, t_s);
+    motorTick(DbTelemetry.Motor1, 1450.0, 12.5, 80.0, 0.0,        degrade_m1, ramp, line_on, t_s);
     // Motor2: 1460 RPM nominal, phase-shifted load
-    motorTick(db_telemetry.Motor2, 1460.0, 10.8, 70.0, PI / 3.0,   0.0,        ramp, line_on, t_s);
+    motorTick(DbTelemetry.Motor2, 1460.0, 10.8, 70.0, PI / 3.0,   0.0,        ramp, line_on, t_s);
     // Pump1:   960 RPM nominal, slower pump cycle
-    motorTick(db_telemetry.Pump1,   960.0,  8.2, 55.0, PI / 1.5,   0.0,        ramp, line_on, t_s);
+    motorTick(DbTelemetry.Pump1,   960.0,  8.2, 55.0, PI / 1.5,   0.0,        ramp, line_on, t_s);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -146,7 +146,7 @@ void main() {
     print("=================================================================");
 
     // g_rt was constructed at global scope (see top of file) so the
-    // pre-scanner could bind db_telemetry to it. Just validate it here.
+    // pre-scanner could bind DbTelemetry to it. Just validate it here.
     if (g_rt is null) {
         print("[SynthGen] ERROR: runtime failed to initialise, aborting.");
         return;

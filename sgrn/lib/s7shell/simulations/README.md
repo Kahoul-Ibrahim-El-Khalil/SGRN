@@ -16,7 +16,7 @@ the synthetic-data → ML pipeline for generating datasets compatible with
   `@OUT_DIR@` are substituted by the driver — do not run it directly.
   NOTE: the runtime must stay on one line as
   `PlcRuntime@ g_rt = PlcRuntime( ... )`; the s7shell pre-scanner only binds
-  the `db_telemetry` accessors to that single-line shape.
+  the `DbTelemetry` accessors to that single-line shape.
 - **`train_synthetic.py`**: End-to-end pipeline — generate labeled runs with
   `s7shell`, decode them with `sgrn_dataset`, train + evaluate a
   fault-detection classifier and a bearing-health regressor, save champions.

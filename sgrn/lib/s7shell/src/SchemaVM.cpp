@@ -654,7 +654,11 @@ static void registerProxyStructType(sgrn::scripting::ScriptHost& t_host, const s
         const std::string safe_name = sgrn::utils::strings::sanitizeIdentifier(f.name);
 
         // Nested STRUCT / UDT
-        if (!f.children.empty() || !f.udt_name.empty()) {
+        bool is_composite_udt =
+            !f.children.empty() ||
+            (!f.udt_name.empty() && t_registry.registered_schema_types.count(sgrn::utils::strings::sanitizeIdentifier(f.udt_name)) > 0);
+
+        if (is_composite_udt) {
             std::string child_type;
 
             if (!f.udt_name.empty()) {
@@ -725,7 +729,10 @@ static void registerFieldProperties(sgrn::scripting::ScriptHost& t_host, const s
         // ================================================================
         if (f.count > 1 && !is_string) {
 
-            if (!f.udt_name.empty()) {
+            bool is_composite_array =
+                !f.udt_name.empty() && t_registry.registered_schema_types.count(sgrn::utils::strings::sanitizeIdentifier(f.udt_name)) > 0;
+
+            if (is_composite_array) {
                 // --------------------------------------------------------
                 // UDT array
                 // --------------------------------------------------------
@@ -786,7 +793,11 @@ static void registerFieldProperties(sgrn::scripting::ScriptHost& t_host, const s
         // ================================================================
         // STRUCT / UDT / DTL / DateTime
         // ================================================================
-        if (!f.children.empty() || !f.udt_name.empty() || f.type == scl::DataType::DTL || f.type == scl::DataType::DateTime) {
+        bool is_composite_udt =
+            !f.children.empty() ||
+            (!f.udt_name.empty() && t_registry.registered_schema_types.count(sgrn::utils::strings::sanitizeIdentifier(f.udt_name)) > 0);
+
+        if (is_composite_udt || f.type == scl::DataType::DTL || f.type == scl::DataType::DateTime) {
 
             std::string ret_type;
 
@@ -938,7 +949,9 @@ static void registerUdtFieldProperties(sgrn::scripting::ScriptHost& t_host, cons
                           f.type == scl::DataType::XWString);
 
         if (f.count > 1 && !is_string) {
-            if (!f.udt_name.empty()) {
+            bool is_composite_array =
+                !f.udt_name.empty() && t_registry.registered_schema_types.count(sgrn::utils::strings::sanitizeIdentifier(f.udt_name)) > 0;
+            if (is_composite_array) {
                 // UDT array
                 auto p_meta = std::make_unique<UdtArrayMeta>();
                 p_meta->path = f.name;
@@ -960,9 +973,13 @@ static void registerUdtFieldProperties(sgrn::scripting::ScriptHost& t_host, cons
             continue;
         }
 
-        if (!f.children.empty() || f.type == scl::DataType::DTL || f.type == scl::DataType::DateTime) {
+        bool is_composite_udt =
+            !f.children.empty() ||
+            (!f.udt_name.empty() && t_registry.registered_schema_types.count(sgrn::utils::strings::sanitizeIdentifier(f.udt_name)) > 0);
+
+        if (is_composite_udt || f.type == scl::DataType::DTL || f.type == scl::DataType::DateTime) {
             std::string ret_type = "FieldProxy";
-            if (!f.udt_name.empty()) {
+            if (!f.udt_name.empty() && is_composite_udt) {
                 ret_type = sgrn::utils::strings::sanitizeIdentifier(f.udt_name);
             }
 
@@ -1054,6 +1071,8 @@ void registerSchemaTypes(sgrn::scripting::ScriptHost& t_host, const PlcSchemaSto
 
     // 1. Register all UDT types first
     for (const auto& udt : t_store.udts()) {
+        if (udt.is_scalar_alias)
+            continue;
         std::string tn = sgrn::utils::strings::sanitizeIdentifier(udt.name);
         if (p_engine->GetTypeInfoByName(tn.c_str()) != nullptr)
             continue;
@@ -1078,13 +1097,17 @@ void registerSchemaTypes(sgrn::scripting::ScriptHost& t_host, const PlcSchemaSto
 
     // 2. Register fields for all UDT types
     for (const auto& udt : t_store.udts()) {
+        if (udt.is_scalar_alias)
+            continue;
         std::string tn = sgrn::utils::strings::sanitizeIdentifier(udt.name);
         registerUdtFieldProperties(t_host, tn, udt.fields, t_registry);
     }
 
     // 3. Register all DB types
     for (const auto& [db_num, tp_db] : t_store.dbs()) {
-        std::string tn = sgrn::utils::strings::sanitizeIdentifier(tp_db.db_name.empty() ? fmt::format("DB{}", db_num) : tp_db.db_name);
+        std::string raw_name =
+            sgrn::utils::strings::sanitizeIdentifier(tp_db.db_name.empty() ? fmt::format("DB{}", db_num) : tp_db.db_name);
+        std::string tn = "Db_" + raw_name;
 
         if (p_engine->GetTypeInfoByName(tn.c_str()) != nullptr)
             continue;
@@ -1496,76 +1519,31 @@ void registerDbPropertyAccessors(sgrn::scripting::ScriptHost& t_host, const PlcS
         return;
 
     for (const auto& [db_num, tp_db] : t_store.dbs()) {
-        std::string type_name =
+        std::string raw_name =
             sgrn::utils::strings::sanitizeIdentifier(tp_db.db_name.empty() ? fmt::format("DB{}", db_num) : tp_db.db_name);
+        std::string type_name = "Db_" + raw_name;
 
-        // Ensure the DB type itself was registered (or at least some type with this name, could be UDT)
+        // Ensure the DB type itself was registered
         if (!t_registry.registered_schema_types.count(type_name)) {
             continue;
         }
 
-        // If the type name collides with a UDT, the DB type registration was skipped.
-        // We must return a generic DataBlock@ instead of the specific type, otherwise
-        // AngelScript expects a UDT (ScriptFieldProxy*) but we return a ScriptDataBlock*, causing a segfault.
+        // If the DB name collides with a UDT, use generic DataBlock access
         std::string ret_type = type_name;
-        if (t_registry.registered_udt_properties.count(type_name)) {
+        if (t_registry.registered_udt_properties.count(raw_name)) {
             ret_type = "DataBlock";
             fmt::print(stderr, fg(fmt::color::yellow),
-                "[SchemaVM] Warning: DB name '{}' collides with a UDT. Using generic DataBlock access.\n", type_name);
+                "[SchemaVM] Warning: DB name '{}' collides with a UDT. Using generic DataBlock access.\n", raw_name);
         }
-
-        // Convert PascalCase DB name to snake_case for the property accessor (just like injectDbRefs)
-        // Note: we'll register the PascalCase name as well, since user requested it.
-        // E.g., DB name "PrimaryCoolant" becomes property "primary_coolant" and "PrimaryCoolant".
-
-        std::string snake_name = type_name;
-        // Basic snake case conversion (simplified version of toSnakeCase in s7shell_lib.cpp)
-        std::string out;
-        out.reserve(snake_name.size() + 4);
-        for (size_t i = 0; i < snake_name.size(); ++i) {
-            char c = snake_name[i];
-            if (std::isupper(static_cast<unsigned char>(c))) {
-                if (i > 0 && !std::isupper(static_cast<unsigned char>(snake_name[i - 1])) && snake_name[i - 1] != '_')
-                    out += '_';
-                out += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            } else if (std::isalnum(static_cast<unsigned char>(c))) {
-                out += c;
-            } else {
-                out += '_';
-            }
-        }
-        std::string clean;
-        bool prev_us = true;
-        for (char c : out) {
-            if (c == '_') {
-                if (!prev_us)
-                    clean += c;
-                prev_us = true;
-            } else {
-                clean += c;
-                prev_us = false;
-            }
-        }
-        while (!clean.empty() && clean.back() == '_')
-            clean.pop_back();
-        if (clean.empty())
-            clean = "db_" + type_name;
-        snake_name = clean;
 
         void* aux = reinterpret_cast<void*>(static_cast<uintptr_t>(db_num));
 
         sgrn::scripting::g_suppress_errors = true;
-        // Try registering original PascalCase name if it doesn't conflict
-        std::string getter_orig = fmt::format("{}@ get_{}()", ret_type, type_name);
-        p_engine->RegisterObjectMethod("PlcRuntime", getter_orig.c_str(), asFUNCTION(RuntimeDbPropertyGetter), asCALL_GENERIC, aux);
-        p_engine->RegisterObjectMethod("S7Client", getter_orig.c_str(), asFUNCTION(ClientDbPropertyGetter), asCALL_GENERIC, aux);
-
-        // Try registering snake_case name
-        if (snake_name != type_name) {
-            std::string getter_snake = fmt::format("{}@ get_{}()", ret_type, snake_name);
-            p_engine->RegisterObjectMethod("PlcRuntime", getter_snake.c_str(), asFUNCTION(RuntimeDbPropertyGetter), asCALL_GENERIC, aux);
-            p_engine->RegisterObjectMethod("S7Client", getter_snake.c_str(), asFUNCTION(ClientDbPropertyGetter), asCALL_GENERIC, aux);
-        }
+        // Register DB name property getter on PlcRuntime and S7Client:
+        // rt.PrimaryCoolant / client.PrimaryCoolant
+        std::string getter = fmt::format("{}@ get_{}()", ret_type, raw_name);
+        p_engine->RegisterObjectMethod("PlcRuntime", getter.c_str(), asFUNCTION(RuntimeDbPropertyGetter), asCALL_GENERIC, aux);
+        p_engine->RegisterObjectMethod("S7Client", getter.c_str(), asFUNCTION(ClientDbPropertyGetter), asCALL_GENERIC, aux);
         sgrn::scripting::g_suppress_errors = false;
     }
 }

@@ -63,7 +63,7 @@ mirror `showHelp()`:
   `rt.loadSclSchema/JsonSchema/Registry`, `registerDb/registerUdt`,
   `rt.set/get(db, "field.path")`, `getJson`, `setBit`, `hasDirty`.
   After an explicit `loadSclSchema`, DBs appear as properties
-  (`rt.PrimaryCoolant.get("temp_pv")`, snake_case also works).
+  (`rt.PrimaryCoolant.get("temp_pv")`, matching schema).
 - **S7Server** (virtual PLC endpoint): `S7Server(rt, "0.0.0.0"[, port])`,
   `start/stop/isRunning/clientsCount/getCpuStatus`. Pattern: runtime →
   server → `S7Client("127.0.0.1", 0, 1, 102, rt)` loopback.

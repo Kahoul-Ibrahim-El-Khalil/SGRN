@@ -132,6 +132,19 @@ class S7ProxySession {
     void stop();
 }
 
+class GatewayClient {
+    GatewayClient(PlcRuntime@ rt);
+    void subscribeDb(uint16 db);
+    void unsubscribeDb(uint16 db);
+    void publishOnDirty(bool enable);
+    void useBinary(bool enable);
+    bool connect(const string &in url);
+    void sync();
+    void disconnect();
+    bool connected() const;
+    string lastError() const;
+}
+
 class GatewaySync {
     GatewaySync(PlcRuntime@ rt);
     void subscribeDb(uint16 db);
@@ -139,8 +152,18 @@ class GatewaySync {
     void publishOnDirty(bool enable);
     void useBinary(bool enable);
     bool connect(const string &in url);
+    void sync();
     void disconnect();
     bool connected() const;
+    string lastError() const;
+}
+
+class GatewayServer {
+    GatewayServer(PlcRuntime@ rt);
+    bool start(uint16 port = 8000);
+    void stop();
+    bool isRunning() const;
+    void broadcast();
     string lastError() const;
 }
 
@@ -294,20 +317,19 @@ Result<void, std::string> AsApiEmitter::emit(const PlcSchemaStore& store, const 
 
     // DB classes + globals, mirroring exactly what the s7shell runtime
     // registers (SchemaVM) and injects for scripts (injectDbRefs /
-    // buildDbPreamble): bare snake_case global, generic db<N> global, and
+    // buildDbPreamble): Db_<Name> class, bare schema-named global, generic db<N> global, and
     // the get_* accessors — the emitter and engine MUST agree on these.
     std::ostringstream dbs_out;
     std::ostringstream globals_out;
     for (const auto& [num, db] : store.dbs()) {
-        const std::string cls =
+        const std::string name =
             sgrn::utils::strings::sanitizeIdentifier(db.db_name.empty() ? fmt::format("DB{}", db.db_number) : db.db_name);
-        const std::string db_var = db.db_name.empty() ? fmt::format("db{}", db.db_number) : db.db_name;
-        const std::string snake = sgrn::utils::strings::toSnakeCase(db_var);
+        const std::string cls = "Db_" + name;
         emitClass(dbs_out, cls, db.fields, true);
         dbs_out << "\n";
-        globals_out << cls << "@ " << snake << ";\n";
+        globals_out << cls << "@ " << name << ";\n";
         globals_out << cls << "@ db" << db.db_number << ";\n";
-        globals_out << cls << "@ get_" << snake << "();\n";
+        globals_out << cls << "@ get_" << name << "();\n";
         globals_out << cls << "@ get_db" << db.db_number << "();\n";
     }
 

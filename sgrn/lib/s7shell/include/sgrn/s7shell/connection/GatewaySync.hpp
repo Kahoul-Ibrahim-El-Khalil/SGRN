@@ -81,6 +81,14 @@ public:
     }
     std::string getLastError() const;
 
+    /// Explicitly trigger a sync push of dirty state updates to gateway
+    void sync() {
+        requestPublish();
+        publishDirtyBatch();
+    }
+    void requestPublish();
+    bool publishDirtyBatch();
+
 private:
     void onMessage(const ix::WebSocketMessagePtr& t_msg);
     void handleDeltaSnapshot(const std::string& t_json_payload, uint16_t t_db_hint);
@@ -92,9 +100,7 @@ private:
     bool resolveLeafPath(uint32_t t_id, std::string& t_path);
     void onRuntimeDirty(uint16_t t_db, uint32_t t_offset, uint32_t t_length);
     void onTagDirty(const std::string& t_tag_name);
-    void requestPublish();
     void publishWorkerLoop();
-    bool publishDirtyBatch();
     /// Publish pending discrete tags as a JSON write_area command (always
     /// JSON, even in binary mode — control traffic is low-rate and stays
     /// inspectable). Falls back to HTTP POST /tags/<name> on ack timeout.
@@ -147,6 +153,31 @@ private:
     ::sgrn::gateway::twin::LeafDictionary local_dict_;
     bool local_dict_built_{false};
 
+    mutable std::mutex err_mutex_;
+    std::string last_error_;
+};
+
+/// Alias for GatewaySync representing the client role
+using GatewayClient = GatewaySync;
+
+/// GatewayServer: Server interface for hosting and broadcasting PLC runtime memory state
+class GatewayServer {
+public:
+    explicit GatewayServer(PlcRuntimeSPtr tsp_runtime);
+    ~GatewayServer();
+
+    bool start(uint16_t t_port = 8000);
+    void stop();
+    bool isRunning() const {
+        return running_.load();
+    }
+    void broadcast();
+    std::string getLastError() const;
+
+private:
+    PlcRuntimeSPtr runtime_;
+    std::atomic<bool> running_{false};
+    uint16_t port_{8000};
     mutable std::mutex err_mutex_;
     std::string last_error_;
 };

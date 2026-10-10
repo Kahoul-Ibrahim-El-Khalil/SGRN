@@ -92,22 +92,22 @@ void main() {
         DTL@ ts = dtl();
 
         // ── 1. Read commands (written directly by the OPC-UA client) ────────
-        bool start_cmd = motor_command.start;
-        bool stop_cmd = motor_command.stop;
-        bool e_stop = motor_command.e_stop;
-        bool fault_reset_cmd = motor_command.fault_reset;
-        bool direction_rev_cmd = motor_command.direction_rev;
+        bool start_cmd = MotorCommand.start;
+        bool stop_cmd = MotorCommand.stop;
+        bool e_stop = MotorCommand.e_stop;
+        bool fault_reset_cmd = MotorCommand.fault_reset;
+        bool direction_rev_cmd = MotorCommand.direction_rev;
 
-        double speed_sp_pct = double(motor_command.speed_sp_pct);
+        double speed_sp_pct = double(MotorCommand.speed_sp_pct);
         if (speed_sp_pct < 0.0) speed_sp_pct = 0.0;
         if (speed_sp_pct > 100.0) speed_sp_pct = 100.0;
 
-        double accel_time_s = double(motor_command.accel_time_s);
+        double accel_time_s = double(MotorCommand.accel_time_s);
         if (accel_time_s < 0.1) accel_time_s = 0.1;
-        double decel_time_s = double(motor_command.decel_time_s);
+        double decel_time_s = double(MotorCommand.decel_time_s);
         if (decel_time_s < 0.1) decel_time_s = 0.1;
 
-        double torque_limit_pct = double(motor_command.torque_limit_pct);
+        double torque_limit_pct = double(MotorCommand.torque_limit_pct);
         if (torque_limit_pct <= 0.0) torque_limit_pct = 150.0; // unset => no extra limit
 
         // ── 2. Start/stop edge logic ─────────────────────────────────────────
@@ -241,32 +241,32 @@ void main() {
 
         if (running) runtime_h += DT / 3600.0;
 
-        motor_command.timestamp = dtl();
-        motor_command.put();
+        MotorCommand.timestamp = dtl();
+        MotorCommand.put();
         // ── 11. Publish status back over shared memory (OPC-UA reads this) ──
-        motor_status.drive.running = running;
-        motor_status.drive.ready = !fault;
-        motor_status.drive.speed_sp_pct = float(speed_sp_pct);
-        motor_status.drive.speed_fb_pct = float(speed_fb_pct);
-        motor_status.drive.speed_rpm = float(speed_rpm);
-        motor_status.drive.output_freq_hz = float(output_freq_hz);
-        motor_status.drive.current_a = float(current_a);
-        motor_status.drive.torque_pct = float(torque_pct);
-        motor_status.drive.winding_temp_c = float(winding_temp_c);
-        motor_status.drive.fault = fault;
-        motor_status.drive.fault_code = fault_code;
-        motor_status.drive.runtime_h = runtime_h;
-        motor_status.direction_actual_rev = direction_actual_rev;
-        motor_status.timestamp = dtl();
-        motor_status.put();
+        MotorStatus.drive.running = running;
+        MotorStatus.drive.ready = !fault;
+        MotorStatus.drive.speed_sp_pct = float(speed_sp_pct);
+        MotorStatus.drive.speed_fb_pct = float(speed_fb_pct);
+        MotorStatus.drive.speed_rpm = float(speed_rpm);
+        MotorStatus.drive.output_freq_hz = float(output_freq_hz);
+        MotorStatus.drive.current_a = float(current_a);
+        MotorStatus.drive.torque_pct = float(torque_pct);
+        MotorStatus.drive.winding_temp_c = float(winding_temp_c);
+        MotorStatus.drive.fault = fault;
+        MotorStatus.drive.fault_code = fault_code;
+        MotorStatus.drive.runtime_h = runtime_h;
+        MotorStatus.direction_actual_rev = direction_actual_rev;
+        MotorStatus.timestamp = dtl();
+        MotorStatus.put();
 
-        alarms.any_active = fault || e_stop;
-        alarms.overcurrent_trip = (fault_code == FAULT_OVERCURRENT);
-        alarms.overtemp_trip = (fault_code == FAULT_OVERTEMP);
-        alarms.estop_active = e_stop;
-        alarms.stall_trip = (fault_code == FAULT_STALL);
-        alarms.timestamp = dtl();
-        alarms.put();
+        Alarms.any_active = fault || e_stop;
+        Alarms.overcurrent_trip = (fault_code == FAULT_OVERCURRENT);
+        Alarms.overtemp_trip = (fault_code == FAULT_OVERTEMP);
+        Alarms.estop_active = e_stop;
+        Alarms.stall_trip = (fault_code == FAULT_STALL);
+        Alarms.timestamp = dtl();
+        Alarms.put();
 
         iteration++;
         sleep(int(1000.0 / SCAN_HZ));

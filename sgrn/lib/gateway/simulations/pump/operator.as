@@ -35,15 +35,15 @@ bool setupOperator() {
 
 void force(bool pump_run, double pump_speed, double inlet_pct, double outlet_pct,
     bool heater_on, double heater_sp, bool e_stop) {
-    setpoints.pump_run = pump_run;
-    setpoints.pump_speed_sp_pct = float(pump_speed);
-    setpoints.inlet_valve_cmd_pct = float(inlet_pct);
-    setpoints.outlet_valve_cmd_pct = float(outlet_pct);
-    setpoints.heater_enable = heater_on;
-    setpoints.heater_setpoint_c = float(heater_sp);
-    setpoints.e_stop = e_stop;
-    setpoints.timestamp = dtl();
-    setpoints.put();
+    Setpoints.pump_run = pump_run;
+    Setpoints.pump_speed_sp_pct = float(pump_speed);
+    Setpoints.inlet_valve_cmd_pct = float(inlet_pct);
+    Setpoints.outlet_valve_cmd_pct = float(outlet_pct);
+    Setpoints.heater_enable = heater_on;
+    Setpoints.heater_setpoint_c = float(heater_sp);
+    Setpoints.e_stop = e_stop;
+    Setpoints.timestamp = dtl();
+    Setpoints.put();
 }
 
 void main() {
@@ -78,14 +78,14 @@ void main() {
 //
 // Interactive use: create PlcRuntime("schema.scl"), then connect a
 // GatewaySync instance to the gateway WebSocket before writing fields.
-//        setpoints.pump_run = true;
-//        setpoints.pump_speed_sp_pct = 80.0;
-//        setpoints.inlet_valve_cmd_pct = 60.0;
-//        setpoints.put();
-//        setpoints.e_stop = true; setpoints.put();   // trip it
-//        tank                                        // bare expr -> auto JSON dump
+//        Setpoints.pump_run = true;
+//        Setpoints.pump_speed_sp_pct = 80.0;
+//        Setpoints.inlet_valve_cmd_pct = 60.0;
+//        Setpoints.put();
+//        Setpoints.e_stop = true; Setpoints.put();   // trip it
+//        Tank                                        // bare expr -> auto JSON dump
 //        GatewaySync@ sync = GatewaySync(plc);
 //        sync.useBinary(true); sync.publishOnDirty(true);
 //        sync.connect("ws://127.0.0.1:8000/ws");
-//        tank.print();
+//        Tank.print();
 // ============================================================================

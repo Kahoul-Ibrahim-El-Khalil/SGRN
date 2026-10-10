@@ -683,10 +683,10 @@ S7Connection@ conn = client.connection()   // low-level connection tuning
 ```
 
 ###  Typed Property Accessors (Soft PLC & Field PLC)
-After an explicit call to `<var>.loadSclSchema(path)`, all DBs become available as **typed properties** on the `PlcRuntime` or `S7Client` object (both PascalCase and snake_case supported):
+After an explicit call to `<var>.loadSclSchema(path)`, all DBs become available as **typed properties** on the `PlcRuntime` or `S7Client` object (matching schema):
 ```as
 rt.PrimaryCoolant.get("temp_pv")
-client.primary_coolant.set("on", "true")
+client.PrimaryCoolant.put("on", "true")
 
 // In the REPL, bare expressions trigger an automatic memory readout
 s7> client.PrimaryCoolant

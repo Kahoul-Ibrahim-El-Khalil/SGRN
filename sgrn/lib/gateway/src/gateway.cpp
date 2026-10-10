@@ -1,7 +1,9 @@
 #include <sgrn/gateway/adapters/rate_limit.hpp>
 #include <sgrn/gateway/gateway.hpp>
 
+#include <sgrn/scl/schema/SchemaSerializer.hpp>
 #include <algorithm>
+#include <fstream>
 
 using sgrn::Result;
 namespace fs = std::filesystem;
@@ -9,39 +11,44 @@ using sgrn::utils::filesystem::expandUserPath;
 namespace sgrn::gateway
 {
 Result<void, std::string> GatewayApplication::loadConfig(int t_argc, char** tp_argv) {
-    bool gen_config = false;
-    std::string config_out = "gateway.json";
+    // If headless mode is already configured, skip config file loading
+    if (headless_mode_) {
+        return {};
+    }
 
+    // Check for --generate-config in args (for backward compat)
     for (int i = 1; i < t_argc; ++i) {
         std::string arg = tp_argv[i];
         if (arg == "--generate-config") {
-            gen_config = true;
-        } else if (arg == "--gui") {
-            gui_mode_ = true;
-        } else if (arg == "-o" && i + 1 < t_argc) {
-            config_out = tp_argv[i + 1];
-            i++;
-        } else if (arg == "--schema" && i + 1 < t_argc) {
-            schema_override_ = tp_argv[i + 1];
-            i++;
-        } else if (arg == "--policy" && i + 1 < t_argc) {
-            policy_script_ = tp_argv[i + 1];
-            i++;
+            std::string config_out = "gateway.json";
+            if (i + 1 < t_argc && tp_argv[i + 1][0] != '-') {
+                config_out = tp_argv[i + 1];
+            }
+            if (sgrn::utils::filesystem::writeStringToFile(config_out, sgrn::gateway::config::example)) {
+                fmt::print("Successfully generated default config at {}\n", config_out);
+                exit(EXIT_SUCCESS);
+            } else {
+                return fmt::format("Failed to write default config to {}", config_out);
+            }
         }
     }
 
-    if (gen_config) {
-        if (sgrn::utils::filesystem::writeStringToFile(config_out, sgrn::gateway::config::example)) {
-            fmt::print("Successfully generated default config at {}\n", config_out);
-            exit(EXIT_SUCCESS);
-        } else {
-            return fmt::format("Failed to write default config to {}", config_out);
+    // Find positional config file (first non-flag argument after program name)
+    std::string config_path_str;
+    for (int i = 1; i < t_argc; ++i) {
+        std::string arg = tp_argv[i];
+        if (arg[0] != '-') {
+            config_path_str = arg;
+            break;
         }
     }
 
-    SGRN_RETURN_IF(t_argc < 2, "Usage: gateway <config.json> OR gateway --generate-config -o <config.json>");
+    if (config_path_str.empty()) {
+        return "Usage: gateway -c <config.json> [--schema schema.scl] [--policy policy.as] [--gui] [--headless] [--http-port PORT] "
+               "[--ws-port PORT]";
+    }
 
-    const fs::path config_path = expandUserPath(tp_argv[1]);
+    const fs::path config_path = expandUserPath(config_path_str);
 
     SGRN_RETURN_IF(
         !fs::exists(config_path) || !fs::is_regular_file(config_path), fmt::format("Config File does not exist: {}", config_path.string()));
@@ -59,24 +66,44 @@ void GatewayApplication::enablePassiveReplayMode() {
     passive_replay_mode_ = true;
 }
 
-void GatewayApplication::setHeadlessReplayConfig(const std::string& t_schema_path, uint16_t t_http_port, uint16_t t_ws_port) {
-    // Build a minimal in-memory config: HTTP + WebSocket only.
-    // No S7, OPC-UA, Modbus, EIP, no persistence, no cloud bridge.
-    // HTTP and WebSocket share one listener on t_http_port (WS at /ws);
-    // t_ws_port is recorded in the config for compatibility but not bound.
+void GatewayApplication::enableGuiMode() {
+    gui_mode_ = true;
+}
+
+void GatewayApplication::enableHeadlessMode(uint16_t t_http_port, uint16_t t_ws_port) {
+    headless_mode_ = true;
+    headless_http_port_ = t_http_port;
+    headless_ws_port_ = t_ws_port;
+    passive_replay_mode_ = true;
     config_ = GatewayConfig{};
     config_.http = config::HttpConfig{.ip = "0.0.0.0", .port = t_http_port};
     config_.websocket = config::WebSocketConfig{.ip = "0.0.0.0", .port = t_ws_port};
     config_.persistence.enabled = false;
     config_.cache_json_north = true;
-    // Carry the schema path so loadSchema() can pick it up via schema_override_.
+    SGRN_INFO_LOG("Headless mode: HTTP :{} with WebSocket at /ws on the same port", t_http_port);
+}
+
+void GatewayApplication::setHeadlessReplayConfig(const std::string& t_schema_path, uint16_t t_http_port, uint16_t t_ws_port) {
+    enableHeadlessMode(t_http_port, t_ws_port);
     if (!t_schema_path.empty()) {
         schema_override_ = t_schema_path;
     }
-    SGRN_INFO_LOG("Headless replay mode: HTTP :{} with WebSocket at /ws on the same port", t_http_port);
+}
+
+void GatewayApplication::setSchemaOverride(const std::string& t_schema) {
+    schema_override_ = t_schema;
+}
+
+void GatewayApplication::setPolicyOverride(const std::string& t_policy) {
+    policy_override_ = t_policy;
 }
 
 Result<void, std::string> GatewayApplication::loadSchema() {
+    if (passive_replay_mode_) {
+        SGRN_INFO_LOG("Passive replay mode: deferring schema load until archive extraction");
+        return {};
+    }
+
     std::string reg_arg;
     if (!schema_override_.empty()) {
         reg_arg = expandUserPath(schema_override_);
@@ -152,6 +179,13 @@ Result<void, std::string> GatewayApplication::initSecurity() {
     return {};
 }
 Result<void, std::string> GatewayApplication::initTwin() {
+    if (passive_replay_mode_) {
+        SGRN_INFO_LOG("Passive replay mode: deferring twin initialization until archive schema extraction");
+        // Still need to create PlcState and attach to server, but defer registry loading
+        server_.attachState(plc_state_);
+        srv_ctx_.server = &server_;
+        return {};
+    }
 
     server_.setCacheEnabled(config_.cache_json_north);
     server_.attachState(plc_state_);
@@ -337,15 +371,109 @@ Result<void, std::string> GatewayApplication::initInfrastructure() {
     return {};
 }
 
-Result<void, std::string> GatewayApplication::startAdapters() {
-    if (passive_replay_mode_) {
-        // Replay drives the twin from an archive via PlcMemory::writeDbMemory.
-        // Every adapter below is a northbound server (bind/listen only — none
-        // polls real hardware), so they all start normally and serve reads and
-        // streams from the replay-driven twin. Persistence and the cloud
-        // uploader stay off (see initInfrastructure()).
-        SGRN_INFO_LOG("Passive replay mode: northbound servers on, persistence/uploader off.");
+sgrn::Result<PlcSchemaStore, std::string> GatewayApplication::extractSchemaFromArchive() {
+    // Find the most recent archive in state_dir
+    fs::path state_path = expandUserPath(config_.state_dir);
+    if (!fs::exists(state_path) || !fs::is_directory(state_path)) {
+        return Error(fmt::format("State directory does not exist: {}", state_path.string()));
     }
+
+    std::vector<fs::path> archives;
+    for (const auto& entry : fs::recursive_directory_iterator(state_path)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".bin.zst") {
+            archives.push_back(entry.path());
+        }
+    }
+
+    if (archives.empty()) {
+        return Error(fmt::format("No binary WAL archives found in {}", state_path.string()));
+    }
+
+    // Sort by modification time, newest first
+    std::sort(archives.begin(), archives.end(),
+        [](const fs::path& a, const fs::path& b) { return fs::last_write_time(a) > fs::last_write_time(b); });
+
+    const fs::path& latest_archive = archives[0];
+    SGRN_INFO_LOG("Extracting schema from archive: {}", latest_archive.string());
+
+    // Read and decompress archive
+    std::ifstream file(latest_archive, std::ios::binary);
+    if (!file.is_open()) {
+        return Error("cannot open archive file");
+    }
+    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    file.close();
+
+    std::string raw;
+    if (content.size() >= 4 && content[0] == 'S' && content[1] == 'G' && content[2] == 'R' && content[3] == 'N') {
+        raw = std::move(content);
+    } else {
+        auto dec_res = sgrn::utils::compression::decompressStringZstd(content);
+        if (dec_res.hasError())
+            return Error(fmt::format("decompress failed: {}", dec_res.error()));
+        raw = std::move(dec_res).value();
+    }
+
+    if (raw.size() < 10 || raw[0] != 'S' || raw[1] != 'G' || raw[2] != 'R' || raw[3] != 'N')
+        return Error("not a binary WAL archive");
+
+    database::BinaryWalHeader header;
+    auto header_status = database::checkBinaryWalHeader(raw, header);
+    if (header_status != database::BinaryHeaderStatus::kOk) {
+        return Error("corrupt binary header or unsupported version");
+    }
+
+    if (header.schema_len == 0) {
+        return Error("archive has no embedded schema");
+    }
+
+    const std::string_view payload(raw.data() + 10, header.schema_len);
+    PlcSchemaStore schema_store;
+
+    if (sgrn::scl::isBinarySchemaPayload(payload)) {
+        auto store_res = sgrn::scl::PlcSchemaStore::loadFromBinary(payload);
+        if (store_res.hasError())
+            return Error("unparseable embedded schema");
+        schema_store = std::move(store_res).value();
+    } else {
+        rapidjson::Document schema_doc;
+        schema_doc.Parse(raw.substr(10, header.schema_len).c_str());
+        if (schema_doc.HasParseError() || !schema_doc.IsObject())
+            return Error("unparseable embedded schema");
+        auto deserialize_res = sgrn::scl::SchemaSerializer::deserialize(schema_store, schema_doc);
+        if (deserialize_res.hasError())
+            return Error(fmt::format("schema deserialize failed: {}", deserialize_res.error()));
+    }
+
+    return schema_store;
+}
+
+Result<void, std::string> GatewayApplication::initTwinFromArchive(const PlcSchemaStore& t_schema) {
+    symbolic_store_ = t_schema;
+
+    server_.setCacheEnabled(config_.cache_json_north);
+    if (auto r = server_.loadRegistry(symbolic_store_); r.hasError()) {
+        return fmt::format("Server memory config failed: {}", toString(r.error()));
+    }
+
+    sgrn::gateway::core::TreeCacheEngine::instance().clear();
+
+    if (server_.state()) {
+        auto recovery_res = sgrn::gateway::core::recoverStateFromArchives(config_.state_dir, *server_.state(), symbolic_store_);
+        if (recovery_res.hasError()) {
+            SGRN_WARN_LOG("Recovery skipped: {}", recovery_res.error());
+        } else {
+            SGRN_INFO_LOG("Restored {} leaf values from {} ({} skipped)", recovery_res.value().leaves_restored,
+                recovery_res.value().archive_used, recovery_res.value().leaves_skipped);
+        }
+    }
+
+    srv_ctx_.server = &server_;
+
+    return {};
+}
+
+Result<void, std::string> GatewayApplication::startAdapters() {
 
     if (config_.s7.has_value()) {
         s7_adapter_.emplace(memory_port_, security_policy_);

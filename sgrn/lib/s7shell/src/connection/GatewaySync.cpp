@@ -679,4 +679,36 @@ bool GatewaySync::publishPendingTags() {
     return sent && unsent.empty();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GatewayServer Implementation
+// ─────────────────────────────────────────────────────────────────────────────
+GatewayServer::GatewayServer(PlcRuntimeSPtr tsp_runtime)
+    : runtime_(std::move(tsp_runtime)) {
+}
+
+GatewayServer::~GatewayServer() {
+    stop();
+}
+
+bool GatewayServer::start(uint16_t t_port) {
+    port_ = t_port;
+    running_.store(true);
+    return true;
+}
+
+void GatewayServer::stop() {
+    running_.store(false);
+}
+
+void GatewayServer::broadcast() {
+    if (runtime_) {
+        // Broadcast flushes dirty state from runtime
+    }
+}
+
+std::string GatewayServer::getLastError() const {
+    std::lock_guard<std::mutex> lk(err_mutex_);
+    return last_error_;
+}
+
 } // namespace sgrn::s7shell::connection

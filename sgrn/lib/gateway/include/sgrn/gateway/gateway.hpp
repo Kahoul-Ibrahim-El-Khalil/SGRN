@@ -80,6 +80,10 @@ public:
 
     sgrn::Result<void, std::string> loadConfig(int t_argc, char** tp_argv);
     void enablePassiveReplayMode();
+    void enableGuiMode();
+    void enableHeadlessMode(uint16_t t_http_port = 8080, uint16_t t_ws_port = 8081);
+    void setSchemaOverride(const std::string& t_schema);
+    void setPolicyOverride(const std::string& t_policy);
     /// Bypass loadConfig() entirely: build a minimal in-memory GatewayConfig
     /// with HTTP (t_http_port) and WebSocket adapters only. The WebSocket
     /// endpoint (`/ws`) shares the HTTP listener, so t_ws_port is recorded
@@ -91,6 +95,10 @@ public:
     sgrn::Result<void, std::string> initSecurity();
     sgrn::Result<void, std::string> initTwin();
     sgrn::Result<void, std::string> initThreading();
+
+    // Passive replay mode: extract schema from archive and initialize twin
+    sgrn::Result<sgrn::scl::PlcSchemaStore, std::string> extractSchemaFromArchive();
+    sgrn::Result<void, std::string> initTwinFromArchive(const sgrn::scl::PlcSchemaStore& t_schema);
 
     sgrn::Result<void, std::string> wireTelemetry();
     sgrn::Result<void, std::string> initInfrastructure();
@@ -164,6 +172,9 @@ private:
 
     GatewayConfig config_;
     bool gui_mode_{false};
+    bool headless_mode_{false};
+    uint16_t headless_http_port_{8080};
+    uint16_t headless_ws_port_{8081};
     /// When set via enablePassiveReplayMode(), the gateway serves replayed
     /// state but never touches the persistence pipeline: initInfrastructure()
     /// skips PersistenceService and the DatastoreBridge, while startAdapters()
@@ -175,6 +186,7 @@ private:
     /// initialize() failure after initThreading() still joins threads.
     std::atomic<bool> shutdown_done_{false};
     std::string schema_override_;
+    std::string policy_override_;
     std::string policy_script_;
 
     sgrn::scl::PlcSchemaStore symbolic_store_;

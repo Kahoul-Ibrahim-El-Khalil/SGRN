@@ -1,5 +1,7 @@
 // plc_logic.as — Simple Tank & Pump Skid Logic
 
+PlcRuntime@ plc = PlcRuntime("schema.scl");
+
 float level = 30.0f;
 float temp = 22.0f;
 bool pump_on = true;
@@ -34,6 +36,6 @@ void main() {
         TankSkid.pump_running = pump_on;
         TankSkid.heater_on = heater_on;
         
-        sleep_ms(100);
+        sleep(100);
     }
 }

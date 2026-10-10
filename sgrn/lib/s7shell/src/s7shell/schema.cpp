@@ -50,21 +50,20 @@ void injectDbRefs(
 
     fmt::print(fg(fmt::color::gray), "[s7shell] Injecting {} DataBlock reference(s) into REPL:\n", dbs.size());
     for (const auto& [num, db] : dbs) {
-        const std::string snake = sgrn::utils::strings::toSnakeCase(db.db_name.empty() ? fmt::format("db{}", db.db_number) : db.db_name);
-        const std::string as_type = db.db_name.empty() ? fmt::format("Db{}", db.db_number) : db.db_name;
+        const std::string name =
+            sgrn::utils::strings::sanitizeIdentifier(db.db_name.empty() ? fmt::format("DB{}", db.db_number) : db.db_name);
+        const std::string as_type = "Db_" + name;
 
-        // Always inject the bare snake_case name (db_telemetry) so scripts can write:
-        //   db_telemetry.Motor1.SpeedRPM = 1450.0;
-        // Also inject a prefixed variant for multi-client REPL disambiguation.
+        // Bare name matching exact SCL schema declaration (e.g. MotorCommand, Supervisor)
         const std::string prefix = (t_client_var == "plc") ? "" : t_client_var + "_";
 
         // Bare name (always injected)
         const std::string stmt_bare =
-            fmt::format("{}@ get_{}() {{ return cast<{}>({}.db({})); }}", as_type, snake, as_type, t_client_var, db.db_number);
+            fmt::format("{}@ get_{}() {{ return cast<{}>({}.db({})); }}", as_type, name, as_type, t_client_var, db.db_number);
         // Prefixed name (for multi-client REPL)
         const std::string stmt_pfx = prefix.empty() ? ""
-                                                    : fmt::format("{}@ get_{}{}() {{ return cast<{}>({}.db({})); }}", as_type, prefix,
-                                                          snake, as_type, t_client_var, db.db_number);
+                                                    : fmt::format("{}@ get_{}{}() {{ return cast<{}>({}.db({})); }}", as_type, prefix, name,
+                                                          as_type, t_client_var, db.db_number);
         // Generic db-number accessor
         const std::string stmt_num =
             fmt::format("{}@ get_db{}() {{ return cast<{}>({}.db({})); }}", as_type, db.db_number, as_type, t_client_var, db.db_number);
@@ -77,7 +76,7 @@ void injectDbRefs(
         sgrn::scripting::g_suppress_errors = false;
 
         if (r >= 0)
-            fmt::print(fg(fmt::color::gray), "  \u2713 DataBlock@ {} (DB{})\n", snake, db.db_number);
+            fmt::print(fg(fmt::color::gray), "  \u2713 DataBlock@ {} (DB{})\n", name, db.db_number);
     }
 }
 
@@ -87,21 +86,19 @@ void injectDbRefs(
 // ─────────────────────────────────────────────────────────────────────────────
 std::string buildDbPreamble(const sgrn::scl::PlcSchemaStore& t_store, const std::string& t_client_var) {
     std::string out;
-    // Always generate the bare snake_case property so scripts write:
-    //   db_telemetry.Motor1.SpeedRPM = 1450.0;
-    // Also generate a prefixed variant for multi-client REPL disambiguation.
     const std::string prefix = (t_client_var == "plc") ? "" : t_client_var + "_";
     for (const auto& [num, db] : t_store.dbs()) {
-        const std::string snake = sgrn::utils::strings::toSnakeCase(db.db_name.empty() ? fmt::format("db{}", db.db_number) : db.db_name);
-        const std::string as_type = db.db_name.empty() ? fmt::format("Db{}", db.db_number) : db.db_name;
+        const std::string name =
+            sgrn::utils::strings::sanitizeIdentifier(db.db_name.empty() ? fmt::format("DB{}", db.db_number) : db.db_name);
+        const std::string as_type = "Db_" + name;
 
-        // Bare name — primary API: db_telemetry.Motor1.SpeedRPM = 1450.0
-        out += fmt::format("{}@ {} {{ get {{ return ({} !is null) ? cast<{}>({}.db({})) : null; }} }}\n", as_type, snake, t_client_var,
+        // Bare name — primary API matching SCL schema (MotorCommand.start = true;)
+        out += fmt::format("{}@ {} {{ get {{ return ({} !is null) ? cast<{}>({}.db({})) : null; }} }}\n", as_type, name, t_client_var,
             as_type, t_client_var, db.db_number);
 
-        // Prefixed name — multi-client disambiguation (g_rt_db_telemetry, etc.)
+        // Prefixed name — multi-client disambiguation (g_rt_MotorCommand, etc.)
         if (!prefix.empty()) {
-            out += fmt::format("{}@ {}{} {{ get {{ return ({} !is null) ? cast<{}>({}.db({})) : null; }} }}\n", as_type, prefix, snake,
+            out += fmt::format("{}@ {}{} {{ get {{ return ({} !is null) ? cast<{}>({}.db({})) : null; }} }}\n", as_type, prefix, name,
                 t_client_var, as_type, t_client_var, db.db_number);
         }
 

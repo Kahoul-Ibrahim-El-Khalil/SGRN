@@ -389,17 +389,17 @@ void S7Shell::runScript(const std::string& t_filename) {
         fmt::print(stderr, fg(fmt::color::red), "[s7shell] Failed to create module for '{}'\n", t_filename);
         return;
     }
+    // Preamble: auto-generated DataBlock@ handles for every PlcRuntime variable
+    // found during pre-scan.
+    if (!db_preamble_.empty())
+        builder.AddSectionFromMemory("<db_refs>", db_preamble_.c_str());
+
     // Add the modified content from memory to support our rewritten imports
     if (builder.AddSectionFromMemory(t_filename.c_str(), t_content.c_str()) < 0) {
         fmt::print(stderr, fg(fmt::color::red), "[s7shell] Failed to add script section: '{}'\n", t_filename);
         return;
     }
 
-    // Preamble: auto-generated DataBlock@ handles for every PlcRuntime variable
-    // found during pre-scan. The gate no longer checks for the literal word 'plc'
-    // — any PlcRuntime@ variable (rt, g_rt, plc, ...) enables the preamble.
-    if (!db_preamble_.empty())
-        builder.AddSectionFromMemory("<db_refs>", db_preamble_.c_str());
     if (builder.BuildModule() < 0) {
         fmt::print(stderr, fg(fmt::color::red), "[s7shell] Compilation failed: '{}'\n", t_filename);
         return;
@@ -480,6 +480,8 @@ void S7Shell::runScripts(const std::vector<std::string>& t_filenames) {
         fmt::print(stderr, fg(fmt::color::red), "[s7shell] Failed to create merged module\n");
         return;
     }
+    if (!db_preamble_.empty())
+        builder.AddSectionFromMemory("<db_refs>", db_preamble_.c_str());
     for (size_t i = 0; i < t_filenames.size(); ++i) {
         // Write to a temp file so CScriptBuilder can add it by memory
         const std::string section_name = fs::path(t_filenames[i]).filename().string();
@@ -488,11 +490,6 @@ void S7Shell::runScripts(const std::vector<std::string>& t_filenames) {
             return;
         }
     }
-    std::string all_contents;
-    for (const auto& c : contents)
-        all_contents += c + "\n";
-    if (!db_preamble_.empty())
-        builder.AddSectionFromMemory("<db_refs>", db_preamble_.c_str());
     if (builder.BuildModule() < 0) {
         fmt::print(stderr, fg(fmt::color::red), "[s7shell] Compilation failed for merged scripts\n");
         return;
