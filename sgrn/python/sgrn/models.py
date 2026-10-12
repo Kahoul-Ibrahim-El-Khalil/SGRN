@@ -24,7 +24,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 from . import dtypes
 
@@ -50,9 +53,10 @@ __all__ = [
     "asBytes",
 ]
 
-# Anything accepted where raw wire bytes are needed: real bytes, or a NumPy
-# array/scalar that gets serialized via its native buffer.
-BytesLike = Union[bytes, bytearray, memoryview, np.ndarray, np.generic]
+if np is not None:
+    BytesLike = Union[bytes, bytearray, memoryview, np.ndarray, np.generic]
+else:
+    BytesLike = Union[bytes, bytearray, memoryview]
 
 
 def _asInt(t_value: Any, t_default: int = 0) -> int:
@@ -456,7 +460,7 @@ class MemoryReadItem:
             data=_decodeBase64url(t_data.get("data")),
         )
 
-    def asArray(self, t_dtype: Any = np.uint8) -> np.ndarray:
+    def asArray(self, t_dtype: Any = None) -> Any:
         """
         View this item's raw bytes as a NumPy array.
 
@@ -464,6 +468,10 @@ class MemoryReadItem:
         or a structured dtype from ``DbSchema.toDtype``) to interpret the
         bytes semantically instead of as a flat ``uint8`` buffer.
         """
+        if np is None:
+            raise ImportError("numpy is required for asArray()")
+        if t_dtype is None:
+            t_dtype = np.uint8
         return np.frombuffer(self.data, dtype=t_dtype).copy()
 
 
@@ -501,7 +509,11 @@ class MemoryBatchWriteResult:
             written=_decodeBase64url(t_data.get("written")),
         )
 
-    def asArray(self, t_dtype: Any = np.uint8) -> np.ndarray:
+    def asArray(self, t_dtype: Any = None) -> Any:
+        if np is None:
+            raise ImportError("numpy is required for asArray()")
+        if t_dtype is None:
+            t_dtype = np.uint8
         return np.frombuffer(self.written, dtype=t_dtype).copy()
 
 

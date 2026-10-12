@@ -18,7 +18,7 @@ The Datastore is engineered for maximum throughput, state temporal querying, and
 - **Timeline Reconstruction:** Replays Deltas over the nearest Anchor to satisfy temporal queries (*e.g.*, "What was the exact memory map of DB2 at timestamp T?") with minimal storage overhead.
 
 ### 3. Forwarding & Storage Orchestration
-- **TimescaleDB / PostgreSQL:** Dynamic SQL persistence for analytical query models.
+- **PostgreSQL:** Dynamic SQL persistence for analytical query models.
 - **Garage / S3 Object Storage:** Cold storage and immutable Parquet/JSONL block archiving.
 - **Resilience & Queueing:** Automatic local buffer fallback during backend outages with smooth recovery queue draining.
 

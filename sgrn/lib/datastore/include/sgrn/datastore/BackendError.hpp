@@ -15,7 +15,7 @@ namespace sgrn::datastore
 // TAXONOMY DECISION: Option (a) — Two intentionally separate layers
 // =========================================================
 // BackendErrorKind represents resource/infra-level failures
-// (DB, Redis, S3, Auth, Filesystem, etc.).
+// (DB, S3, Auth, Filesystem, etc.).
 // ApiErrors.hpp enums represent request/business-logic-level
 // failures (validation, "already exists", "not found by business
 // rule"). They are two separate layers that are never merged.
@@ -31,7 +31,6 @@ namespace sgrn::datastore
 enum class BackendErrorKind : uint8_t {
     Database,      ///< Postgres / Drogon ORM failures
     AlreadyExists, ///< Entity conflict / unique constraint violation
-    Redis,         ///< Redis operation failures
     Garage,        ///< S3 / Garage operation failures
     Auth,          ///< Authentication / authorisation logic (not an exception)
     Filesystem,    ///< Local file-system I/O errors
@@ -48,8 +47,6 @@ constexpr std::string_view kindToScopeString(BackendErrorKind k) noexcept {
             return "Database";
         case BackendErrorKind::AlreadyExists:
             return "Conflict";
-        case BackendErrorKind::Redis:
-            return "Redis";
         case BackendErrorKind::Garage:
             return "Garage";
         case BackendErrorKind::Auth:

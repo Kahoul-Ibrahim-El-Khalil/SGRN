@@ -13,7 +13,7 @@ All JSON requests should send `Content-Type: application/json` unless explicitly
 
 There are two primary session paradigms, strictly gated by bespoke, natively-developed Drogon filters that intercept the controller paths:
 
-- **Human Workflows:** Gated by the `UserAuthFilter`. This validates high-level React dashboard operators, validating multi-tenancy and extracting their internal role structures through custom, high-performance **Redis schema** caching logic.
+- **Human Workflows:** Gated by the `UserAuthFilter`. This validates high-level React dashboard operators, validating multi-tenancy and extracting their internal role structures through custom, high-performance in-process session caching logic.
 - **Agent Workflows:** Gated by the `AgentAuthFilter`. This focuses solely on IoT data aggregation (`gateway`/automated services), providing strict validation for embedded M2M tokens without bloated web-session overhead.
 
 Session propagation:

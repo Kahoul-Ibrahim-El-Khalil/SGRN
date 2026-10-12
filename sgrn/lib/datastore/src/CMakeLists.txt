@@ -59,6 +59,12 @@ if(BUILD_ORM)
             target_link_libraries(sgrn_datastore_orm PRIVATE "${SGRN_SQLITE3_LIBRARY}")
         endif()
     endif()
+
+    # hiredis (required by Drogon's Redis client when built with Redis support)
+    find_library(SGRN_HIREDIS_LIBRARY NAMES hiredis PATHS "${SGRN_CONDA_PREFIX}/lib" NO_DEFAULT_PATH)
+    if(SGRN_HIREDIS_LIBRARY)
+        target_link_libraries(sgrn_datastore_orm PRIVATE "${SGRN_HIREDIS_LIBRARY}")
+    endif()
 endif()
 
 # 3. SERVICES
@@ -104,7 +110,6 @@ target_link_libraries(sgrn_datastore_lib PUBLIC
     sgrn::drogon
     sgrn::trantor
     sgrn::postgres
-    sgrn::redis
     sgrn::jsoncpp
     sgrn::fmt
     sgrn::openssl
@@ -115,10 +120,6 @@ target_link_libraries(sgrn_datastore_lib PUBLIC
 )
 
 if(UNIX AND NOT APPLE)
-    find_library(SGRN_HIREDIS_LIBRARY NAMES hiredis PATHS "${SGRN_CONDA_PREFIX}/lib" NO_DEFAULT_PATH)
-    if(SGRN_HIREDIS_LIBRARY)
-        target_link_libraries(sgrn_datastore_lib PUBLIC "${SGRN_HIREDIS_LIBRARY}")
-    endif()
 
     find_library(SGRN_SQLITE3_LIBRARY NAMES sqlite3 PATHS "${SGRN_CONDA_PREFIX}/lib" NO_DEFAULT_PATH)
     if(SGRN_SQLITE3_LIBRARY)
@@ -141,6 +142,12 @@ if(UNIX AND NOT APPLE)
     find_library(SGRN_BROTLICOMMON_LIBRARY NAMES brotlicommon PATHS "${SGRN_CONDA_PREFIX}/lib" NO_DEFAULT_PATH)
     if(SGRN_BROTLIDEC_LIBRARY AND SGRN_BROTLIENC_LIBRARY AND SGRN_BROTLICOMMON_LIBRARY)
         target_link_libraries(sgrn_datastore_lib PRIVATE "${SGRN_BROTLIDEC_LIBRARY}" "${SGRN_BROTLIENC_LIBRARY}" "${SGRN_BROTLICOMMON_LIBRARY}")
+    endif()
+
+    # hiredis (required by Drogon's Redis client when built with Redis support)
+    find_library(SGRN_HIREDIS_LIBRARY NAMES hiredis PATHS "${SGRN_CONDA_PREFIX}/lib" NO_DEFAULT_PATH)
+    if(SGRN_HIREDIS_LIBRARY)
+        target_link_libraries(sgrn_datastore_lib PRIVATE "${SGRN_HIREDIS_LIBRARY}")
     endif()
 endif()
 
@@ -295,7 +302,6 @@ add_custom_command(
                 fastcgi.conf
                 fastcgi-php.conf
                 snakeoil.conf
-                SGRN-redis.service
             --level 22
     DEPENDS
         ${CONFIG_DEPS}

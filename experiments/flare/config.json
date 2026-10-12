@@ -1,0 +1,52 @@
+{
+  "scenario": {
+    "normal_days": 30,
+    "fault_day": 31,
+    "ticks_per_day": 24,
+    "fault_injection_tick": 723,
+    "fault_code": 9,
+    "fault_name": "FLARE_BLOCKED",
+    "flare_ramp_rate": 0.15,
+    "feed_ramp_rate": 1.15,
+    "esd_feed_press_limit": 90.0,
+    "tick_sleep_ms": 20
+  },
+  "dataset": {
+    "window_size": 12,
+    "stride": 1,
+    "train_ratio": 0.7,
+    "calibration_ratio": 0.3,
+    "random_seed": 42
+  },
+  "model": {
+    "latent_dim": 16,
+    "hidden_dim": 64,
+    "learning_rate": 0.001,
+    "epochs": 50,
+    "batch_size": 32,
+    "alpha": 0.05,
+    "k_multiplier": 1.4
+  },
+  "features": [
+    "InletSeparation.feed_pressure",
+    "InletSeparation.scrubber_press",
+    "InletSeparation.feed_flow.rate",
+    "InletSeparation.feed_temp",
+    "InletSeparation.coalescer_dp",
+    "AdsorberTowers.system_inlet_press",
+    "AdsorberTowers.system_outlet_press",
+    "AdsorberTowers.total_gas_flow.rate",
+    "RegenSystem.heater_outlet_temp",
+    "RegenSystem.cooler_inlet_temp",
+    "RegenSystem.cooler_outlet_temp",
+    "RegenSystem.blower_flow.rate",
+    "OutletQuality.dew_point",
+    "OutletQuality.sales_gas_press",
+    "OutletQuality.sales_gas_flow.rate",
+    "OutletQuality.sales_gas_temp",
+    "SafetySystems.flare_header_press",
+    "Utilities.fuel_gas_press",
+    "Utilities.inst_air_press",
+    "Utilities.regen_comp_disch_press"
+  ]
+}

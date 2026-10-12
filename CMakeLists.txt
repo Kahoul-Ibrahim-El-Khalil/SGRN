@@ -93,8 +93,6 @@ sgrn_alias(sgrn::modbus)
 sgrn_alias(sgrn::opener)
 
 sgrn_alias(sgrn::postgres)
-
-sgrn_alias(sgrn::redis)
 sgrn_alias(sgrn::aws)
 sgrn_alias(sgrn::unordered_dense)
 

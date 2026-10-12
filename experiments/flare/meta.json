@@ -1,0 +1,25 @@
+{
+  "fault_code": 9,
+  "fault_name": "FLARE_BLOCKED",
+  "scenario": {
+    "normal_days": 30,
+    "fault_day": 31,
+    "ticks_per_day": 24,
+    "fault_injection_tick": 723,
+    "fault_code": 9,
+    "fault_name": "FLARE_BLOCKED",
+    "flare_ramp_rate": 0.15,
+    "feed_ramp_rate": 1.15,
+    "esd_feed_press_limit": 90.0,
+    "tick_sleep_ms": 20
+  },
+  "fault_onset_tick": 723,
+  "fault_onset_ts": 949287600000,
+  "fault_onset_iso": "2000-01-31T03:00:00+00:00",
+  "esd_tick": 742,
+  "esd_ts": 949356000000,
+  "esd_iso": "2000-01-31T22:00:00+00:00",
+  "archive_file": "flare_history.jsonl.zst",
+  "archive_bytes": 91941,
+  "generated_at": "2026-10-12T10:53:34.849157+00:00"
+}

@@ -28,7 +28,6 @@ target_link_libraries(sgrn_datastore_core INTERFACE
     sgrn::jsoncpp
     sgrn::openssl
     sgrn::postgres
-    sgrn::redis
     sgrn::zstd
     sgrn::utils
 )

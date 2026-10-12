@@ -426,7 +426,7 @@ def writeReport(metrics: dict, robust: dict, out_dir: Path, n_train: int, n_test
         str(metrics["cm"]),
         "```",
         "",
-        "## Mapping to the EPFL IMOS proposal",
+        "## Mapping to the project proposal",
         "- Monitor/diagnose/act: detector -> diagnoser -> doer policy -> checker gate -> twin write.",
         "- Physics + twin: surrogate shares nominal point + tags with the SGRN SCL schema; swap in the",
         "  full TE Fortran/Simulink or P&ID-derived constraints without changing the pipeline.",
@@ -577,7 +577,7 @@ def main():
         except Exception as e:
             print(f"      plot skipped ({e})")
 
-    print("=" * 60 + "\n done. Next: open scratch/te_demo/report.md for the 1-page EPFL summary.\n" + "=" * 60)
+    print("=" * 60 + "\n done. Next: open scratch/te_demo/report.md for the 1-page summary.\n" + "=" * 60)
 
 
 if __name__ == "__main__":

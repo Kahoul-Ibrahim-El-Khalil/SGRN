@@ -76,7 +76,7 @@ curl -X POST http://localhost:8000/data/PlantWide \
   -H 'Content-Type: application/json' -d '{"fault_code": 4}'
 ```
 
-Offline / without hardware (used by the EPFL demo):
+Offline / without hardware (used by the demo):
 
 ```bash
 micromamba run -n SGRN python demos/model.py --mode full

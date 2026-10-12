@@ -119,7 +119,6 @@ export interface ApiError {
 export enum ErrorScope {
   Runtime = "Runtime",
   Database = "Database",
-  Redis = "Redis",
   Garage = "Garage",
   Postgrest = "Postgrest",
   Compression = "Compression",

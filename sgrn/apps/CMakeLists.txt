@@ -97,7 +97,6 @@ sgrn_package_runtime_dependencies(
         sgrn::openssl
         sgrn::postgres
         sgrn::zstd
-        sgrn::redis
         sgrn::aws
     COMPONENT backend
 )

@@ -36,7 +36,10 @@ import urllib.parse
 import urllib.request
 from typing import Any, Dict, List, Optional, Union
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 from . import dtypes
 from .models import (

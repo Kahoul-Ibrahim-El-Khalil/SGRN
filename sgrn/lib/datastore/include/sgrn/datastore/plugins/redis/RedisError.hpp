@@ -58,7 +58,7 @@ constexpr std::string_view toString(RedisError e) noexcept {
 /// Convert a RedisError into a BackendError ready for service-layer propagation.
 inline ::sgrn::datastore::BackendError toBackendError(RedisError e, std::string_view detail = "") {
     std::string msg = detail.empty() ? std::string(toString(e)) : std::string(detail);
-    return ::sgrn::datastore::BackendError(::sgrn::datastore::BackendErrorKind::Redis, "Redis", std::move(msg));
+    return ::sgrn::datastore::BackendError(::sgrn::datastore::BackendErrorKind::Generic, "Generic", std::move(msg));
 }
 
 } // namespace sgrn::datastore::plugins

@@ -314,7 +314,7 @@ class BinaryDatasetReader:
     def getFieldNames(self) -> List[str]:
         return [f["full_name"] for f in self.field_meta_list]
 
-    def readDataset(self) -> Tuple[np.ndarray, List[str], np.ndarray]:
+    def readDataset(self) -> Tuple[Any, List[str], Any]:
         """
         Parses all binary archives and returns:
         - timestamps: np.ndarray shape (N,)

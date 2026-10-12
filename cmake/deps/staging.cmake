@@ -258,10 +258,6 @@ if(TARGET drogon)
         DESTINATION "${_INC}/drogon"
         FILES_MATCHING PATTERN "*.h"
     )
-    install(DIRECTORY "${drogon_SOURCE_DIR}/nosql_lib/redis/inc/drogon/"
-        DESTINATION "${_INC}/drogon"
-        FILES_MATCHING PATTERN "*.h"
-    )
     # Generated headers: exports.h, config.h, version.h live in the build tree.
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/drogon/exports/drogon/exports.h"
         DESTINATION "${_INC}/drogon"

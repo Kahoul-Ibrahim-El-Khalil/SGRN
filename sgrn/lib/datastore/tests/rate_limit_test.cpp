@@ -1,11 +1,10 @@
-// Rate limiter unit tests (pure logic only — no Redis, no app singleton).
+// Rate limiter unit tests (pure logic only — no external services, no app singleton).
 //
 // Covers the parts of the pre-routing limiter that don't need I/O:
 // path classification, config defaults/overrides, effective caps (burst
 // applies everywhere except auth), key construction (deterministic,
 // account-separating, never embedding raw secrets), and auth account
-// extraction from signin bodies. The Redis Lua window itself is exercised
-// against live stacks, not here.
+// extraction from signin bodies.
 
 #include <sgrn/datastore/utils/rate_limit.hpp>
 

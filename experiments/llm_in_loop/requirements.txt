@@ -1,0 +1,19 @@
+# LLM-in-the-loop experiment dependencies
+# Install with: pip install -r requirements.txt
+
+# Core LLM integration
+langchain>=0.3.0
+langchain-openai>=0.2.0
+langchain-core>=0.3.0
+
+# OpenAI client (for direct API calls in llm_client.py)
+openai>=1.30.0
+
+# Environment management
+python-dotenv>=1.0.0
+
+# WebSocket client (for llm_client.py)
+websockets>=12.0
+
+# SGRN Python package (install in dev mode: pip install -e ../../sgrn/python)
+# sgrn-python @ file://../../sgrn/python

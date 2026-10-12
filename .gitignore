@@ -41,6 +41,11 @@ yarn-debug.log*
 yarn-error.log*
 build_error.log
 
+# ── Experiment artifacts ───────────────────────────────────────────────────
+experiments/flare/demo_*/
+experiments/flare/capture_*/
+experiments/flare/*.log
+
 backend/data/
 
 # ── IDE / editor files ─────────────────────────────────────────────────────

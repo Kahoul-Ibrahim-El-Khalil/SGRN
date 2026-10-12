@@ -75,8 +75,6 @@ USE_PCH       = py_platform.system() != "Windows"
 DROGON_GIT_URL  = "https://github.com/drogonframework/drogon.git"
 DROGON_GIT_TAG  = "v1.9.10"
 
-TIMESCALEDB_GIT_URL = "https://github.com/timescale/timescaledb.git"
-
 MSYS2_UCRT64_REPO = "https://repo.msys2.org/mingw/ucrt64/"
 
 # ===========================================================================

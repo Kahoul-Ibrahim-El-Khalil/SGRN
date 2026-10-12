@@ -96,7 +96,7 @@ inline InProcWindowStore& windowStore() {
 // In-process sliding-window rate limiting enforced centrally in a pre-routing advice.
 // Every request (API, embedded UI assets, even would-be 404s) is classified by path
 // and checked against a per-key in-memory sliding window.
-// No Redis required; no route table changes needed — generated CRUD views are
+// No route table changes needed — generated CRUD views are
 // covered automatically. Decisions are made in <1µs from the shared_mutex fast path.
 inline void initRateLimiting() {
     RateLimitConfig cfg = RateLimitConfig::fromJson(drogon::app().getCustomConfig());

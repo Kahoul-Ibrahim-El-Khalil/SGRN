@@ -141,7 +141,6 @@ export interface AutomatedServiceSession {
 export const ErrorScope = {
   Runtime: "Runtime",
   Database: "Database",
-  Redis: "Redis",
   Garage: "Garage",
   Compression: "Compression",
   Hashing: "Hashing",

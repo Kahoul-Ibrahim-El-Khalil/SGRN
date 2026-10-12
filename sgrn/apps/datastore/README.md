@@ -1,7 +1,7 @@
 # sgrn_datastore
 
 Self-contained persistence/API platform: HTTP REST-like API over
-PostgreSQL/TimescaleDB, object storage (Garage, S3-compatible), and an embedded
+PostgreSQL, object storage (Garage, S3-compatible), and an embedded
 observability dashboard (Drogon-based). This directory holds the entry
 point; the backend library and asset pipelines live in `sgrn/lib/datastore`.
 
@@ -26,7 +26,7 @@ binary); run `--help` for the full printed guide.
 
 ## Architecture & Optimizations
 
-- **3-Tier Minimal Stack**: HTTP Server (Drogon + Nginx) + Database (PostgreSQL) + Object Storage (Garage). Zero Redis dependencies.
+- **3-Tier Minimal Stack**: HTTP Server (Drogon + Nginx) + Database (PostgreSQL) + Object Storage (Garage).
 - **SessionStore**: In-process C++ RAM cache with PostgreSQL persistence and cross-node cache invalidation via PostgreSQL `LISTEN / NOTIFY`.
 - **Fast-Reject Token Security**:
   - Syntactic UUID token validation (<5ns) filtering malformed/junk requests before task allocation.

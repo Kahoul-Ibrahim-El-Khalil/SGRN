@@ -54,12 +54,24 @@ from sgrn.ml import explainSample, fitMonitorAndDiagnoser
 BASE_DIR = Path(__file__).resolve().parents[1]
 OUT_DEFAULT = BASE_DIR / "scratch" / "gas_demo"
 
-# Sequencer timings (ticks, 1 tick = 1 s, same as simulation.as)
-T_DEPRESS, T_HEAT, T_COOL, T_REPRESS = 5, 15, 10, 5
+# Sequencer timings (ticks, 1 tick = 1 s wall-clock = 1 hour of plant time)
+T_DEPRESS, T_HEAT, T_COOL, T_REPRESS = 0.0, 4.1, 1.9, 2.0
 DEW_SPEC = -100.0
-H = 5               # forecast horizon (ticks ahead)
-T_INJ = 40          # fault injection tick inside every run
-RUN_STEPS = 140
+H = 2               # forecast horizon (ticks ahead)
+T_INJ = 4           # fault injection tick (Hour 4 of 24h cycle)
+RUN_STEPS = 24      # 24 ticks per run = full 24-hour plant day in 24 wall-clock seconds
+
+# ─── Time-scaling factor ───────────────────────────────────────────────────────
+# 1 simulation tick = SIMULATION_TO_REAL seconds of real plant time.
+# • Training features: timestamp_ms = tick * SIMULATION_TO_REAL * 1000
+#   (real-plant milliseconds from midnight 2000-01-01 00:00:00 UTC)
+# • Historian replay at real 1× speed: sleep SIMULATION_TO_REAL s per tick
+#   i.e. divide stored timestamp_ms by 1000 and advance wall clock by that delta.
+# • Replay at N× speed: sleep SIMULATION_TO_REAL / N seconds per tick.
+# • Mirror: simulation.as uses the same constant (SIM_TO_REAL) and writes
+#   synthetic DTL anchored at the same midnight epoch.
+SIMULATION_TO_REAL: int = 3600   # seconds of real plant time per simulation tick
+SIM_EPOCH_S: int = 946684800     # 2000-01-01 00:00:00 UTC (same anchor as simulation.as)
 
 # (twin path, unit, nominal, noise std, categorical?)
 FEATURES: list[tuple[str, str, float, float, bool]] = [
@@ -92,7 +104,7 @@ NOMINAL = {f[0]: f[2] for f in FEATURES}
 TARGET = "OutletQuality.dew_ahead"
 
 FAULTS: dict[int, str] = {
-    0: "normal operation",
+    0: "normal operation (no fault)",
     1: "heater flame-out during Heating",
     2: "regen-tower valve stuck open (stays online)",
     3: "feed pressure surge",
@@ -100,8 +112,9 @@ FAULTS: dict[int, str] = {
     5: "blower failure during regen",
     6: "dew-point analyzer bias +14C (sensor fault)",
     7: "coalescer fast fouling",
+    8: "molecular sieve non-absorption at hour 4",
 }
-TRAIN_FAULTS = [0, 1, 2, 3, 4, 5]   # 6, 7 held out -> unseen / sensor-shift test
+TRAIN_FAULTS = [0, 1, 2, 3, 4, 5, 8]   # 6, 7 held out -> unseen / sensor-shift test
 ENVELOPE = {"heater": 320.0, "feed_press": 90.0, "dew_margin": 5.0}
 ACTIONS = {0: "hold", 1: "force regen switch", 2: "derate feed", 3: "trip ESD", 4: "request analyzer cal"}
 
@@ -167,6 +180,10 @@ def runPlant(fault: int, steps: int, seed: int):
                 if F == 4:
                     load *= 3.5  # overload saturates beds fast
                 moisture[i] = min(95.0, moisture[i] + load)
+                if F == 8:
+                    # Molecular sieve non-absorption fault at Hour 4:
+                    # Active adsorber bed fails to absorb moisture -> rapid humidity breakthrough
+                    moisture[i] = min(95.0, moisture[i] + 18.0)
                 bed_dp[i] = 0.20 + moisture[i] / 100.0 * 0.6 + n(0.02)
 
         # --- feeds ---
@@ -270,7 +287,12 @@ def generateGas(runs_per_fault: int, faults: list[int], seed: int):
     # H-step-ahead measured dew target (within-run shift; tail NaN -> drop)
     df[TARGET] = df.groupby("run")["OutletQuality.dew_point"].shift(-H)
     df = df.dropna(subset=[TARGET]).reset_index(drop=True)
-    df["timestamp_ms"] = (df["tick"] + 1) * 1000
+    # Real-plant timestamps: tick 0 = 2000-01-01 00:00:00 UTC (midnight anchor),
+    # each tick advances by SIMULATION_TO_REAL seconds (= 1 hour).
+    # Stored as milliseconds so they match Gateway historian/DTL resolution.
+    # Replay reversal: real_time_s = timestamp_ms / 1000  (already in real-plant units)
+    df["timestamp_ms"] = (df["tick"] * SIMULATION_TO_REAL * 1000).astype(int)
+    df["sim_hour"] = df["tick"]   # alias: tick == plant hour of day
     return df
 
 
@@ -334,8 +356,8 @@ def predictWithUq(b: Bundle, X: object):
 def doerPolicy(fault: int, dew_pred: float, heater: float, press: float) -> int:
     if dew_pred > DEW_SPEC + 5.0 or heater > 315.0 or press > 89.0:
         return 3  # trip ESD
-    if fault == 2:
-        return 1  # force regen switch (stuck valve)
+    if fault == 2 or fault == 8:
+        return 1  # force regen switch (stuck valve / sieve non-absorption fault)
     if fault == 4:
         return 2  # derate feed (overload)
     if fault == 6:
@@ -471,7 +493,7 @@ def robustnessTests(b: Bundle, df_test):
 def exportSgrn(df_all, b: Bundle, metrics: dict, out_dir: Path):
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_p, man_p = out_dir / "dataset.csv", out_dir / "manifest.json"
-    keep = FEATURE_NAMES + [TARGET, "timestamp_ms", "fault",
+    keep = FEATURE_NAMES + [TARGET, "timestamp_ms", "sim_hour", "fault",
                             "SafetySystems.esd_signal", "tick", "post", "dew_true"]
     df_all[keep].to_csv(csv_p, index=False)
     manifest = {"features": [{"name": n, "unit": u, "is_categorical": bool(c)}
@@ -480,6 +502,9 @@ def exportSgrn(df_all, b: Bundle, metrics: dict, out_dir: Path):
                 "target": TARGET, "fault_map": {str(k): v for k, v in FAULTS.items()},
                 "h_horizon_ticks": H, "dew_spec_C": DEW_SPEC,
                 "det_threshold": b.det_threshold,
+                "simulation_to_real_factor": SIMULATION_TO_REAL,
+                "sim_epoch_utc": "2000-01-01T00:00:00Z",
+                "replay_note": f"real_time_s = timestamp_ms / 1000  (1 tick = {SIMULATION_TO_REAL} s plant time)",
                 "schema": "sgrn/lib/gateway/simulations/gas_processing/schema.scl"}
     man_p.write_text(json.dumps(manifest, indent=2))
     (out_dir / "model_meta.json").write_text(json.dumps({
@@ -1214,7 +1239,7 @@ async def streamLoop(args, url_a: str, url_b: str, b: Bundle, fault: int,
                   f"heat={heat_tw:6.0f}C ESD={int(esd_now)} "
                   f"F{fp} {ACTIONS[a]:18s} -> {'ALLOW' if ok else 'BLOCK'}")
             t_end = _t.time()
-            await _a.sleep(max(0.0, 1.0 / args.speed - (t_end - t0)))
+            await _a.sleep(max(0.0, float(SIMULATION_TO_REAL) / args.speed - (t_end - t0)))
 
         print("\n[twin] run finished.")
         print(f"      subscribed coverage: {fb_total} fallbacks / "

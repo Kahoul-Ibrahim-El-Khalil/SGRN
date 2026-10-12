@@ -23,9 +23,9 @@ namespace sgrn::gateway::adapters
 /// middleware.
 ///
 /// State is in-process memory (mutex-guarded): correct for the shipped
-/// single-instance gateway. Multi-instance deployments must either pin
-/// clients (sticky sessions) or replace this with the shared Redis limiter
-/// the datastore uses. Budgets come from HttpConfig (defaults below) via
+/// single-instance gateway. Multi-instance deployments should either pin
+/// clients (sticky sessions) or front with an API gateway rate limiter.
+/// Budgets come from HttpConfig (defaults below) via
 /// configure(), called once from the application startup path.
 struct RateLimitMiddleware : public crow::ILocalMiddleware {
     struct context {};

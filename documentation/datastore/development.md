@@ -164,7 +164,7 @@ Use a **hand-written** `IHandler` subclass (see `handlers/admin.hpp`,
 | **`storage.*` ownership** | Tenant is `user_id` / `automated_service_id`, not `organisation` — `StorageApiHandler` |
 | **Composite primary keys** | Generator hard-errors |
 | **File upload / streaming / multipart** | Storage and auth paths |
-| **Side effects** (email, Redis, Garage) | Business handlers |
+| **Side effects** (email, notifications, Garage) | Business handlers |
 
 `read_relation` on a view that hides columns is **in scope**. A view that
 **joins** tables for convenience is only in scope if you treat the result as

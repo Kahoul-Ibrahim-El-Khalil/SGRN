@@ -56,7 +56,7 @@ The active/passive boundary is precisely: **s7shell decides to do something; the
 
 datastore is the durable-storage and identity substrate. Framed correctly, it's not "the cloud backend" — it's a **self-hosted replacement** for the storage SaaS a team would otherwise pay a third party for:
 - **General-purpose file/object storage** (S3-compatible semantics) — documents, calibration certs, maintenance SOPs, anything a plant needs to keep alongside its telemetry.
-- **Telemetry dumps / historian archival** — the local per-gateway historian (Postgres/TimescaleDB, see the historian design) is the fast, local, operational store; datastore is where bulk exports/archival dumps land for long-term retention, cross-site aggregation, or reporting, at a scale a single gateway's local disk isn't meant for.
+- **Telemetry dumps / historian archival** — the local per-gateway historian (PostgreSQL, see the historian design) is the fast, local, operational store; datastore is where bulk exports/archival dumps land for long-term retention, cross-site aggregation, or reporting, at a scale a single gateway's local disk isn't meant for.
 - **Multi-tenant identity & permissions** — `Users`/`Organisations`/`Sessions`, the layer that decides who can see which gateway's data, which document, which historical range.
 
 The framing that matters: nothing about datastore is PLC-specific. It's generic large-scale storage infrastructure that happens to also serve the industrial side — which is exactly why it's a separate, independently useful component rather than something bolted onto the gateway.

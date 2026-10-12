@@ -25,13 +25,13 @@ bool setupEnv(
 // ─── Convenience: print every DB ─────────────────────────────────────────────
 
 void printAll() {
-    if (db1 !is null) { print("--- InletSeparation (DB1) ---\n"); db1.print(); }
-    if (db2 !is null) { print("--- AdsorberTowers (DB2) ---\n");   db2.print(); }
-    if (db3 !is null) { print("--- RegenSystem (DB3) ---\n");      db3.print(); }
-    if (db4 !is null) { print("--- SwitchingValves (DB4) ---\n");  db4.print(); }
-    if (db5 !is null) { print("--- OutletQuality (DB5) ---\n");    db5.print(); }
-    if (db6 !is null) { print("--- SafetySystems (DB6) ---\n");    db6.print(); }
-    if (db7 !is null) { print("--- Utilities (DB7) ---\n");        db7.print(); }
+    InletSeparation.print();
+    AdsorberTowers.print();
+    RegenSystem.print();
+    SwitchingValves.print();
+    OutletQuality.print();
+    SafetySystems.print();
+    Utilities.print();
 }
 
 // ─── Simulation State Variables ──────────────────────────────────────────────
@@ -73,10 +73,38 @@ array<double> bed_dp        = {0.35, 0.55, 0.20};
 array<uint> cycles_done     = {142, 141, 140};
 int lead_lag_index = 2; // index currently taken offline for regen
 
-const double T_DEPRESS = 5.0;
-const double T_HEAT    = 15.0;
-const double T_COOL    = 10.0;
-const double T_REPRESS = 5.0;
+// ─── Time-Scaling ────────────────────────────────────────────────────────────
+// SIM_TO_REAL: how many real seconds 1 simulation tick represents.
+// 3600 => 1 tick = 1 hour  =>  24-tick cycle = 24-hour plant day in 24 seconds.
+// To replay at real speed: divide any stored timestamp_s by SIM_TO_REAL.
+// To replay at N× speed:   divide by (SIM_TO_REAL / N).
+const int SIM_TO_REAL = 3600;  // seconds of real plant time per simulation tick
+
+// Scaled sequencer phase durations (in ticks; 1 tick = 1 hour of plant time)
+const double T_DEPRESS = 0.0;
+const double T_HEAT    = 4.1;
+const double T_COOL    = 1.9;
+const double T_REPRESS = 2.0;
+
+// ─── Synthetic time axis ─────────────────────────────────────────────────────
+// All DB timestamps use simulated real time anchored at midnight (00:00:00)
+// of the calendar day the simulation starts, NOT the wall clock.
+// This keeps the historian unambiguous regardless of when the binary runs.
+int tick_count = 0;
+int fault_code = 0;              // 0=normal, 8=molecular sieve non-absorption at hour 4
+int fault_injection_tick = 4;   // Hour 4 of the 24-hour cycle
+
+// Compute a synthetic DTL representing midnight + tick_count hours.
+// DTL is constructed as a fixed date (2000-01-01 00:00:00) plus the
+// elapsed simulated seconds so that datasets are always self-consistent.
+DTL@ simulatedDTL() {
+    int total_hours = tick_count;
+    int hour = total_hours % 24;
+    int day = 1 + (total_hours / 24);
+    setPlcTime(2000, 1, day, hour, 0, 0);
+    DTL ts;
+    return ts;
+}
 
 double system_inlet_press = 68.0;
 double system_outlet_press = 66.5;
@@ -118,35 +146,50 @@ void main() {
         return;
     }
 
+    print("  SIM_TO_REAL factor : " + SIM_TO_REAL + " s/tick (1 tick = " + SIM_TO_REAL + " s of plant time)\n");
+    print("  Tick sleep interval: " + (1000 / SIM_TO_REAL) + " ms wall time per tick\n");
+    print("  Midnight anchor     : 2000-01-01 00:00:00 UTC (epoch 946684800)\n");
+    print("  Replay at real speed: divide timestamp_s by " + SIM_TO_REAL + "\n");
+    print("================================================================\n");
+
     int iteration = 0;
     while (true) {
-        DTL@ ts = dtl();
+        // Use synthetic simulated time — NOT wall clock — so historian
+        // timestamps represent real plant hours regardless of run speed.
+        DTL@ ts = simulatedDTL();
 
         // 1. Process physics simulation step
         simulatePhysics();
 
         // 2. Write states to S7 DataBlocks via properties and the '=' operator
-        writeInletSeparation(db1, ts);
-        writeAdsorberTowers(db2, ts);
-        writeRegenSystem(db3, ts);
-        writeSwitchingValves(db4, ts);
-        writeOutletQuality(db5, ts);
-        writeSafetySystems(db6, ts);
-        writeUtilities(db7, ts);
+        writeInletSeparation(ts);
+        writeAdsorberTowers(ts);
+        writeRegenSystem(ts);
+        writeSwitchingValves(ts);
+        writeOutletQuality(ts);
+        writeSafetySystems(ts);
+        writeUtilities(ts);
 
-        // 3. Periodic report
+        // 3. Periodic report (every 5 simulated hours)
         if (iteration % 5 == 0) {
             printReport(ts, iteration);
         }
 
         iteration++;
-        sleep(1000);
+        // Wall-clock sleep = 1000ms / SIM_TO_REAL  (e.g. ~0.277ms for 3600x)
+        // sleep() minimum is 1ms; for very high speed factors use 1ms.
+        int sleep_ms = 1000 / SIM_TO_REAL;
+        if (sleep_ms < 1) sleep_ms = 1;
+        sleep(sleep_ms);
     }
 }
 
 // ─── Physical Simulation Logic ───────────────────────────────────────────────
 
 void simulatePhysics() {
+    tick_count++;
+    bool fault_active = (fault_code > 0) && (tick_count >= fault_injection_tick);
+
     // ── Tower cycle sequencer ──
     for (int i = 0; i < NUM_TOWERS; i++) {
         time_in_state[i] += 1.0;
@@ -178,6 +221,11 @@ void simulatePhysics() {
         } else {
             // On-stream tower — loading up with moisture
             moisture_pct[i] += 0.05 + (feed_flow > 850.0 ? 0.02 : 0.0);
+            if (fault_active && fault_code == 8) {
+                // Molecular sieve non-absorption fault at Hour 4:
+                // Active adsorber bed fails to absorb moisture -> rapid humidity breakthrough
+                moisture_pct[i] += 18.0;
+            }
             if (moisture_pct[i] > 95.0) moisture_pct[i] = 95.0;
             bed_dp[i] = 0.20 + (moisture_pct[i] / 100.0) * 0.6 + randomNoiseAmp(0.02);
         }
@@ -239,249 +287,250 @@ void simulatePhysics() {
 
 // ─── DataBlock Writers ───────────────────────────────────────────────────────
 
-void writeInletSeparation(InletSeparation@ db, DTL@ ts) {
-    db.feed_pressure = float(feed_press);
-    db.feed_temp = float(feed_temp);
-    db.feed_flow.rate = float(feed_flow);
-    db.feed_flow.totalizer += feed_flow / 3600.0;
-    db.feed_flow.low_flow_alarm = feed_flow < 100.0;
-    db.feed_flow.sensor_fault = false;
-    db.feed_h2s_ppm = float(feed_h2s);
-    db.feed_co2_pct = float(feed_co2);
+void writeInletSeparation(DTL@ts) {
+    InletSeparation.feed_pressure = float(feed_press);
+    InletSeparation.feed_temp = float(feed_temp);
+    InletSeparation.feed_flow.rate = float(feed_flow);
+    InletSeparation.feed_flow.totalizer += feed_flow / 3600.0;
+    InletSeparation.feed_flow.low_flow_alarm = feed_flow < 100.0;
+    InletSeparation.feed_flow.sensor_fault = false;
+    InletSeparation.feed_h2s_ppm = float(feed_h2s);
+    InletSeparation.feed_co2_pct = float(feed_co2);
 
-    db.scrubber_level_pct = float(scrubber_level);
-    db.scrubber_press = float(feed_press - 0.1);
-    db.scrubber_hi_level_trip = scrubber_level > 90.0;
-    db.scrubber_liquid_dump.position_pct = 0.0f;
-    db.scrubber_liquid_dump.command_pct = 0.0f;
-    db.scrubber_liquid_dump.fault = false;
-    db.scrubber_liquid_dump.limit_open = false;
-    db.scrubber_liquid_dump.limit_closed = true;
+    InletSeparation.scrubber_level_pct = float(scrubber_level);
+    InletSeparation.scrubber_press = float(feed_press - 0.1);
+    InletSeparation.scrubber_hi_level_trip = scrubber_level > 90.0;
+    InletSeparation.scrubber_liquid_dump.position_pct = 0.0f;
+    InletSeparation.scrubber_liquid_dump.command_pct = 0.0f;
+    InletSeparation.scrubber_liquid_dump.fault = false;
+    InletSeparation.scrubber_liquid_dump.limit_open = false;
+    InletSeparation.scrubber_liquid_dump.limit_closed = true;
 
-    db.coalescer_dp = float(coalescer_dp);
-    db.coalescer_bypass = false;
-    db.coalescer_change_due = coalescer_dp > 0.8;
+    InletSeparation.coalescer_dp = float(coalescer_dp);
+    InletSeparation.coalescer_bypass = false;
+    InletSeparation.coalescer_change_due = coalescer_dp > 0.8;
 
-    db.fwko_level_pct = float(fwko_level);
-    db.fwko_temp = float(fwko_temp);
-    db.fwko_drain_valve.position_pct = 0.0f;
-    db.fwko_drain_valve.fault = false;
+    InletSeparation.fwko_level_pct = float(fwko_level);
+    InletSeparation.fwko_temp = float(fwko_temp);
+    InletSeparation.fwko_drain_valve.position_pct = 0.0f;
+    InletSeparation.fwko_drain_valve.fault = false;
 
-    db.timestamp = ts;;
-    db.put();
+    InletSeparation.timestamp = ts;;
+    InletSeparation.put();
 }
 
-void writeAdsorberTowers(AdsorberTowers@ db, DTL@ ts) {
+void writeAdsorberTowers(DTL@ts) {
     for (int i = 0; i < NUM_TOWERS; i++) {
-        db.towers[i].cycle_state = uint8(cycle_state[i]);
-        db.towers[i].time_in_state_s = uint(time_in_state[i]);
-        db.towers[i].bed_dp = float(bed_dp[i]);
-        db.towers[i].bed_inlet_temp = float(feed_temp);
-        db.towers[i].bed_outlet_temp = float(feed_temp + 1.5);
-        db.towers[i].moisture_loading = float(moisture_pct[i]);
-        db.towers[i].cycles_completed = cycles_done[i];
-        db.towers[i].breakthrough_alarm = moisture_pct[i] > 90.0 && i != lead_lag_index;
-        db.towers[i].crush_damage_susp = bed_dp[i] > 0.9;
+        AdsorberTowers.towers[i].cycle_state = uint8(cycle_state[i]);
+        AdsorberTowers.towers[i].time_in_state_s = uint(time_in_state[i]);
+        AdsorberTowers.towers[i].bed_dp = float(bed_dp[i]);
+        AdsorberTowers.towers[i].bed_inlet_temp = float(feed_temp);
+        AdsorberTowers.towers[i].bed_outlet_temp = float(feed_temp + 1.5);
+        AdsorberTowers.towers[i].moisture_loading = float(moisture_pct[i]);
+        AdsorberTowers.towers[i].cycles_completed = cycles_done[i];
+        AdsorberTowers.towers[i].breakthrough_alarm = moisture_pct[i] > 90.0 && i != lead_lag_index;
+        AdsorberTowers.towers[i].crush_damage_susp = bed_dp[i] > 0.9;
 
-        db.active_adsorbing[i] = (i != lead_lag_index);
+        AdsorberTowers.active_adsorbing[i] = (i != lead_lag_index);
     }
 
-    db.cycle_time_target_s = 3600;
-    db.lead_lag_index = uint8(lead_lag_index);
-    db.sequence_step = uint16(cycle_state[lead_lag_index]);
-    db.sequence_hold = false;
-    db.sequence_fault = false;
+    AdsorberTowers.cycle_time_target_s = 3600;
+    AdsorberTowers.lead_lag_index = uint8(lead_lag_index);
+    AdsorberTowers.sequence_step = uint16(cycle_state[lead_lag_index]);
+    AdsorberTowers.sequence_hold = false;
+    AdsorberTowers.sequence_fault = false;
 
-    db.system_inlet_press = float(system_inlet_press);
-    db.system_outlet_press = float(system_outlet_press);
-    db.total_gas_flow.rate = float(feed_flow);
-    db.total_gas_flow.totalizer += feed_flow / 3600.0;
-    db.total_gas_flow.low_flow_alarm = false;
-    db.total_gas_flow.sensor_fault = false;
+    AdsorberTowers.system_inlet_press = float(system_inlet_press);
+    AdsorberTowers.system_outlet_press = float(system_outlet_press);
+    AdsorberTowers.total_gas_flow.rate = float(feed_flow);
+    AdsorberTowers.total_gas_flow.totalizer += feed_flow / 3600.0;
+    AdsorberTowers.total_gas_flow.low_flow_alarm = false;
+    AdsorberTowers.total_gas_flow.sensor_fault = false;
 
-    db.timestamp = ts;;
-    db.put();
+    AdsorberTowers.timestamp = ts;;
+    AdsorberTowers.put();
 }
 
-void writeRegenSystem(RegenSystem@ db, DTL@ ts) {
-    db.heater_outlet_temp = float(heater_outlet_temp);
-    db.heater_duty_pct = float(heater_duty);
-    db.heater_fuel_valve.position_pct = float(heater_duty);
-    db.heater_fuel_valve.command_pct = float(heater_duty);
-    db.heater_fuel_valve.fault = false;
-    db.heater_flame_on = heater_flame_on;
-    db.heater_pilot_on = heater_flame_on;
-    db.heater_high_temp_trip = heater_outlet_temp > 320.0;
+void writeRegenSystem(DTL@ts) {
+    RegenSystem.heater_outlet_temp = float(heater_outlet_temp);
+    RegenSystem.heater_duty_pct = float(heater_duty);
+    RegenSystem.heater_fuel_valve.position_pct = float(heater_duty);
+    RegenSystem.heater_fuel_valve.command_pct = float(heater_duty);
+    RegenSystem.heater_fuel_valve.fault = false;
+    RegenSystem.heater_flame_on = heater_flame_on;
+    RegenSystem.heater_pilot_on = heater_flame_on;
+    RegenSystem.heater_high_temp_trip = heater_outlet_temp > 320.0;
 
-    db.heater_temp_pid.setpoint = 290.0;
-    db.heater_temp_pid.process_value = heater_outlet_temp;
-    db.heater_temp_pid.output_pct = float(heater_duty);
-    db.heater_temp_pid.kp = 3.0f;
-    db.heater_temp_pid.ki = 0.03f;
-    db.heater_temp_pid.kd = 0.1f;
-    db.heater_temp_pid.integral_acc = 0.0;
-    db.heater_temp_pid.enabled = true;
-    db.heater_temp_pid.auto_mode = true;
-    db.heater_temp_pid.saturated = false;
+    RegenSystem.heater_temp_pid.setpoint = 290.0;
+    RegenSystem.heater_temp_pid.process_value = heater_outlet_temp;
+    RegenSystem.heater_temp_pid.output_pct = float(heater_duty);
+    RegenSystem.heater_temp_pid.kp = 3.0f;
+    RegenSystem.heater_temp_pid.ki = 0.03f;
+    RegenSystem.heater_temp_pid.kd = 0.1f;
+    RegenSystem.heater_temp_pid.integral_acc = 0.0;
+    RegenSystem.heater_temp_pid.enabled = true;
+    RegenSystem.heater_temp_pid.auto_mode = true;
+    RegenSystem.heater_temp_pid.saturated = false;
 
-    db.cooler_inlet_temp = float(heater_outlet_temp);
-    db.cooler_outlet_temp = float(cooler_outlet_temp);
-    db.cooler_fan_running = cooler_outlet_temp > 45.0;
-    db.cooler_fan_speed_pct = cooler_outlet_temp > 45.0 ? 80.0f : 20.0f;
+    RegenSystem.cooler_inlet_temp = float(heater_outlet_temp);
+    RegenSystem.cooler_outlet_temp = float(cooler_outlet_temp);
+    RegenSystem.cooler_fan_running = cooler_outlet_temp > 45.0;
+    RegenSystem.cooler_fan_speed_pct = cooler_outlet_temp > 45.0 ? 80.0f : 20.0f;
 
-    db.blower_running = blower_running;
-    db.blower_speed = blower_running ? 3550 : 0;
-    db.blower_flow.rate = float(blower_flow);
-    db.blower_flow.totalizer += blower_flow / 3600.0;
-    db.blower_flow.low_flow_alarm = false;
-    db.blower_flow.sensor_fault = false;
-    db.blower_surge_alarm = false;
-    db.blower_motor_temp = blower_running ? 68.0f : 30.0f;
+    RegenSystem.blower_running = blower_running;
+    RegenSystem.blower_speed = blower_running ? 3550 : 0;
+    RegenSystem.blower_flow.rate = float(blower_flow);
+    RegenSystem.blower_flow.totalizer += blower_flow / 3600.0;
+    RegenSystem.blower_flow.low_flow_alarm = false;
+    RegenSystem.blower_flow.sensor_fault = false;
+    RegenSystem.blower_surge_alarm = false;
+    RegenSystem.blower_motor_temp = blower_running ? 68.0f : 30.0f;
 
-    db.regen_ko_level_pct = 25.0f;
-    db.regen_ko_drain_valve.position_pct = 0.0f;
-    db.regen_ko_drain_valve.fault = false;
-    db.regen_water_removed_l = regen_water_removed;
+    RegenSystem.regen_ko_level_pct = 25.0f;
+    RegenSystem.regen_ko_drain_valve.position_pct = 0.0f;
+    RegenSystem.regen_ko_drain_valve.fault = false;
+    RegenSystem.regen_water_removed_l = regen_water_removed;
 
-    db.timestamp = ts;;
-    db.put();
+    RegenSystem.timestamp = ts;;
+    RegenSystem.put();
 }
 
-void writeSwitchingValves(SwitchingValves@ db, DTL@ ts) {
+void writeSwitchingValves(DTL@ts) {
     for (int i = 0; i < NUM_TOWERS; i++) {
         bool online = (i != lead_lag_index);
         int state = cycle_state[i];
 
-        db.inlet_valves[i].position_pct = online ? 100.0f : 0.0f;
-        db.inlet_valves[i].limit_open = online;
-        db.inlet_valves[i].limit_closed = !online;
-        db.inlet_valves[i].fault = false;
+        SwitchingValves.inlet_valves[i].position_pct = online ? 100.0f : 0.0f;
+        SwitchingValves.inlet_valves[i].limit_open = online;
+        SwitchingValves.inlet_valves[i].limit_closed = !online;
+        SwitchingValves.inlet_valves[i].fault = false;
 
-        db.outlet_valves[i].position_pct = online ? 100.0f : 0.0f;
-        db.outlet_valves[i].limit_open = online;
-        db.outlet_valves[i].limit_closed = !online;
-        db.outlet_valves[i].fault = false;
+        SwitchingValves.outlet_valves[i].position_pct = online ? 100.0f : 0.0f;
+        SwitchingValves.outlet_valves[i].limit_open = online;
+        SwitchingValves.outlet_valves[i].limit_closed = !online;
+        SwitchingValves.outlet_valves[i].fault = false;
 
-        db.regen_in_valves[i].position_pct = (state == 2) ? 100.0f : 0.0f;
-        db.regen_in_valves[i].fault = false;
+        SwitchingValves.regen_in_valves[i].position_pct = (state == 2) ? 100.0f : 0.0f;
+        SwitchingValves.regen_in_valves[i].fault = false;
 
-        db.regen_out_valves[i].position_pct = (state == 2 || state == 3) ? 100.0f : 0.0f;
-        db.regen_out_valves[i].fault = false;
+        SwitchingValves.regen_out_valves[i].position_pct = (state == 2 || state == 3) ? 100.0f : 0.0f;
+        SwitchingValves.regen_out_valves[i].fault = false;
 
-        db.depress_valves[i].position_pct = (state == 1) ? 100.0f : 0.0f;
-        db.depress_valves[i].fault = false;
+        SwitchingValves.depress_valves[i].position_pct = (state == 1) ? 100.0f : 0.0f;
+        SwitchingValves.depress_valves[i].fault = false;
 
-        db.repress_valves[i].position_pct = (state == 4) ? 100.0f : 0.0f;
-        db.repress_valves[i].fault = false;
+        SwitchingValves.repress_valves[i].position_pct = (state == 4) ? 100.0f : 0.0f;
+        SwitchingValves.repress_valves[i].fault = false;
     }
 
     int online_count = 0;
     for (int i = 0; i < NUM_TOWERS; i++) {
         if (i != lead_lag_index) online_count++;
     }
-    db.valve_mismatch_alarm = (online_count != NUM_TOWERS - 1);
-    db.any_valve_fault = false;
+    SwitchingValves.valve_mismatch_alarm = (online_count != NUM_TOWERS - 1);
+    SwitchingValves.any_valve_fault = false;
 
-    db.timestamp = ts;;
-    db.put();
+    SwitchingValves.timestamp = ts;;
+    SwitchingValves.put();
 }
 
-void writeOutletQuality(OutletQuality@ db, DTL@ ts) {
-    db.dew_point = float(dew_point_c);
-    db.dew_point_spec = float(DEW_POINT_SPEC);
-    db.dew_point_hi_alarm = dew_point_c > DEW_POINT_SPEC;
-    db.analyzer_fault = false;
-    db.analyzer_last_cal = ts;;
+void writeOutletQuality(DTL@ts) {
+    OutletQuality.dew_point = float(dew_point_c);
+    OutletQuality.dew_point_spec = float(DEW_POINT_SPEC);
+    OutletQuality.dew_point_hi_alarm = dew_point_c > DEW_POINT_SPEC;
+    OutletQuality.analyzer_fault = false;
+    OutletQuality.analyzer_last_cal = ts;;
 
-    db.dust_filter_dp = float(dust_filter_dp);
-    db.dust_filter_bypass = false;
-    db.dust_filter_change_due = dust_filter_dp > 0.5;
+    OutletQuality.dust_filter_dp = float(dust_filter_dp);
+    OutletQuality.dust_filter_bypass = false;
+    OutletQuality.dust_filter_change_due = dust_filter_dp > 0.5;
 
-    db.sales_gas_flow.rate = float(sales_gas_flow);
-    db.sales_gas_flow.totalizer += sales_gas_flow / 3600.0;
-    db.sales_gas_flow.low_flow_alarm = false;
-    db.sales_gas_flow.sensor_fault = false;
-    db.sales_gas_press = float(system_outlet_press);
-    db.sales_gas_temp = float(feed_temp);
-    db.heating_value = 38.5f;
+    OutletQuality.sales_gas_flow.rate = float(sales_gas_flow);
+    OutletQuality.sales_gas_flow.totalizer += sales_gas_flow / 3600.0;
+    OutletQuality.sales_gas_flow.low_flow_alarm = false;
+    OutletQuality.sales_gas_flow.sensor_fault = false;
+    OutletQuality.sales_gas_press = float(system_outlet_press);
+    OutletQuality.sales_gas_temp = float(feed_temp);
+    OutletQuality.heating_value = 38.5f;
 
-    db.timestamp = ts;;
-    db.put();
+    OutletQuality.timestamp = ts;;
+    OutletQuality.put();
 }
 
-void writeSafetySystems(SafetySystems@ db, DTL@ ts) {
-    db.esd_signal = esd_active;
-    db.esd_auto = esd_active;
-    db.esd_reason_code = esd_active ? 4001 : 0;
+void writeSafetySystems(DTL@ts) {
+    SafetySystems.esd_signal = esd_active;
+    SafetySystems.esd_auto = esd_active;
+    SafetySystems.esd_reason_code = esd_active ? 4001 : 0;
 
-    db.trip_high_press = 90.0f;
-    db.trip_low_press = 20.0f;
-    db.trip_high_temp = 320.0f;
-    db.trip_high_dp = 0.9f;
+    SafetySystems.trip_high_press = 90.0f;
+    SafetySystems.trip_low_press = 20.0f;
+    SafetySystems.trip_high_temp = 320.0f;
+    SafetySystems.trip_high_dp = 0.9f;
 
     for (int i = 0; i < NUM_TOWERS; i++) {
-        db.relief_valve_lifted[i] = bed_dp[i] > 0.95;
+        SafetySystems.relief_valve_lifted[i] = bed_dp[i] > 0.95;
     }
-    db.flare_header_press = float(flare_header_press);
-    db.vent_valve.position_pct = esd_active ? 100.0f : 0.0f;
-    db.vent_valve.fault = false;
+    SafetySystems.flare_header_press = float(flare_header_press);
+    SafetySystems.vent_valve.position_pct = esd_active ? 100.0f : 0.0f;
+    SafetySystems.vent_valve.fault = false;
 
     for (int i = 0; i < 8; i++) {
-        db.gas_detectors[i] = 0.5f;
+        SafetySystems.gas_detectors[i] = 0.5f;
     }
     for (int i = 0; i < 4; i++) {
-        db.fire_detectors[i] = false;
+        SafetySystems.fire_detectors[i] = false;
     }
-    db.fg_alarm_active = false;
+    SafetySystems.fg_alarm_active = false;
 
-    db.alarms[0].active = esd_active;
-    db.alarms[0].acknowledged = false;
-    db.alarms[0].code = 4001;
-    db.alarms[0].priority = 3;
-    db.alarms[0].description_id = 20;
-    db.alarms[0].timestamp_ms = 0;
+    SafetySystems.alarms[0].active = esd_active;
+    SafetySystems.alarms[0].acknowledged = false;
+    SafetySystems.alarms[0].code = 4001;
+    SafetySystems.alarms[0].priority = 3;
+    SafetySystems.alarms[0].description_id = 20;
+    SafetySystems.alarms[0].timestamp_ms = 0;
 
     for (int i = 1; i < 8; i++) {
-        db.alarms[i].active = false;
-        db.alarms[i].acknowledged = false;
-        db.alarms[i].code = 0;
-        db.alarms[i].priority = 0;
-        db.alarms[i].description_id = 0;
-        db.alarms[i].timestamp_ms = 0;
+        SafetySystems.alarms[i].active = false;
+        SafetySystems.alarms[i].acknowledged = false;
+        SafetySystems.alarms[i].code = 0;
+        SafetySystems.alarms[i].priority = 0;
+        SafetySystems.alarms[i].description_id = 0;
+        SafetySystems.alarms[i].timestamp_ms = 0;
     }
 
-    db.active_alarm_count = esd_active ? 1 : 0;
-    db.any_critical = esd_active;
+    SafetySystems.active_alarm_count = esd_active ? 1 : 0;
+    SafetySystems.any_critical = esd_active;
 
-    db.timestamp = ts;;
-    db.put();
+    SafetySystems.timestamp = ts;;
+    SafetySystems.put();
 }
 
-void writeUtilities(Utilities@ db, DTL@ ts) {
-    db.fuel_gas_press  = float(fuel_gas_press);
-    db.fuel_gas_low_press_trip = fuel_gas_press < 1.5;
+void writeUtilities(DTL@ts) {
+    Utilities.fuel_gas_press  = float(fuel_gas_press);
+    Utilities.fuel_gas_low_press_trip = fuel_gas_press < 1.5;
 
-    db.inst_air_press = float(inst_air_press);
-    db.inst_air_low_alarm = inst_air_press < 5.0;
-    db.inst_air_dryer_on = true;
+    Utilities.inst_air_press = float(inst_air_press);
+    Utilities.inst_air_low_alarm = inst_air_press < 5.0;
+    Utilities.inst_air_dryer_on = true;
 
-    db.regen_comp_running = regen_comp_running;
-    db.regen_comp_speed = regen_comp_running ? 8200 : 0;
-    db.regen_comp_disch_press = regen_comp_running ? float(feed_press + 1.0) : 0.0f;
-    db.regen_comp_vibration = regen_comp_running ? 2.1f : 0.0f;
+    Utilities.regen_comp_running = regen_comp_running;
+    Utilities.regen_comp_speed = regen_comp_running ? 8200 : 0;
+    Utilities.regen_comp_disch_press = regen_comp_running ? float(feed_press + 1.0) : 0.0f;
+    Utilities.regen_comp_vibration = regen_comp_running ? 2.1f : 0.0f;
 
-    db.ups_on_battery = false;
-    db.control_power_ok = true;
+    Utilities.ups_on_battery = false;
+    Utilities.control_power_ok = true;
 
-    db.timestamp = ts;;
-    db.put();
+    Utilities.timestamp = ts;;
+    Utilities.put();
 }
 
 // ─── Reporting ───────────────────────────────────────────────────────────────
 
 void printReport(DTL@ ts, int iter) {
     print("\n================================================================\n");
-    print("  Time: " + ts.toString() + " | Iteration: " + iter + "\n");
+    print("  Sim Time : " + ts.toString() + "  (Hour " + tick_count + " of plant day)\n");
+    print("  Iteration: " + iter + " | Fault: " + fault_code + (fault_code == 8 && tick_count >= fault_injection_tick ? " ACTIVE" : "") + "\n");
     print("----------------------------------------------------------------\n");
     print("  Feed Pressure:          " + feed_press + " bar\n");
     print("  Tower Offline (regen):  T" + (lead_lag_index + 1) + " (state=" + cycle_state[lead_lag_index] + ")\n");

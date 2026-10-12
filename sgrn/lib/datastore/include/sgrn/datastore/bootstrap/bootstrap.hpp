@@ -379,7 +379,7 @@ inline void stopLegacyServices(const std::string& t_sudo_user, uid_t t_user_uid)
     std::string cmd = fmt::format("sudo -u {} XDG_RUNTIME_DIR=/run/user/{} systemctl --user stop "
                                   "SGRN-nginx.service sgrn.service SGRN-datastore.service "
                                   "SGRN-garage.service SGRN-minio.service SGRN-postgres.service SGRN-postgrest.service "
-                                  "SGRN-redis.service 2>/dev/null || true",
+                                  "2>/dev/null || true",
         t_sudo_user, t_user_uid);
     std::system(cmd.c_str());
 }
@@ -786,7 +786,7 @@ inline void configureSystemd() {
     auto tmpl = buildTemplateResolver(sgrn_data, sudo_user);
     generateSystemdServices(sgrn_data, tmpl);
 
-    // Drop units/files of services that no longer exist (e.g. PostgREST, Redis),
+    // Drop units/files of services that no longer exist (e.g. PostgREST),
     // from both the data dir and the system, before syncing the current set.
     removeObsoleteUnits(sgrn_data);
 

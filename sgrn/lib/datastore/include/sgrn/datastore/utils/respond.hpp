@@ -97,8 +97,6 @@ inline drogon::HttpStatusCode kindToHttpStatusCode(::sgrn::datastore::BackendErr
             return drogon::k500InternalServerError;
         case ::sgrn::datastore::BackendErrorKind::AlreadyExists:
             return drogon::k409Conflict;
-        case ::sgrn::datastore::BackendErrorKind::Redis:
-            return drogon::k500InternalServerError;
         case ::sgrn::datastore::BackendErrorKind::Garage:
             return drogon::k500InternalServerError;
         case ::sgrn::datastore::BackendErrorKind::Auth:

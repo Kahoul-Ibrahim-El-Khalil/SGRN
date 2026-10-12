@@ -1,0 +1,1 @@
+{"schema": "/home/odahim/Studies/Software/SGRN/sgrn/lib/gateway/simulations/gas_processing/schema.scl", "state_dir": "/home/odahim/Studies/Software/SGRN/experiments/flare/test_state", "security_policy": "permissive", "northbound": {"http": {"ip": "127.0.0.1", "port": 18095}, "websocket": {"ip": "127.0.0.1", "port": 18095}}, "persistence": {"enabled": false}}

@@ -78,13 +78,4 @@ if(NOT SGRN_SKIP_HOST_DEPS)
         set(ASIO_INCLUDE_DIRS ${ASIO_INCLUDE_DIR})
         add_compile_definitions(ASIO_STANDALONE)
     endif()
-
-    # Redis / hiredis (transitive link dependency for pre-compiled libdrogon.a)
-    if(NOT TARGET sgrn::redis)
-        add_library(sgrn::redis INTERFACE)
-    endif()
-    find_library(HIREDIS_PATH NAMES hiredis PATHS "${LINUX_PREFIX}/lib")
-    if(HIREDIS_PATH)
-        target_link_libraries(sgrn::redis INTERFACE "${HIREDIS_PATH}")
-    endif()
 endif() # SGRN_SKIP_HOST_DEPS

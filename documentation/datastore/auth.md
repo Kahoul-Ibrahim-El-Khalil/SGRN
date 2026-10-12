@@ -86,7 +86,7 @@ Auth: `Authorization: Bearer <token>` (agent session token)
 Behavior:
 
 - Terminates the `core.sessions` row for the given Session Token.
-- Evicts the token from Redis.
+- Evicts the token from the session cache.
 
 ## Credential Rotation (Database Function)
 

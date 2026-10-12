@@ -59,11 +59,12 @@ Result<void, std::string> GatewayReplayer::initialize() {
             r.hasError(), fmt::format(fg(fmt::color::red), "[sgrn_replay] Failed to load gateway config: {}\n", r.error()));
     }
 
-    // Passive mode from the start: initInfrastructure() must already know that
-    // persistence and the cloud uploader stay off, and no southbound traffic
-    // may happen — the twin is driven from the archive via writeDbMemory().
-    gateway_app_->enablePassiveReplayMode();
-
+    // loadSchema()/initTwin() must run in NORMAL mode: passive replay mode makes
+    // both defer, which leaves the twin without a registry and makes every
+    // archived DB frame unplaceable ("unknown DB n"). Passive mode is enabled
+    // below, once the twin is populated but before any adapter starts, so
+    // persistence, cloud upload and southbound traffic stay off while the twin
+    // is driven purely from the archive via writeDbMemory().
     SGRN_RETURN_IF(auto r = gateway_app_->loadSchema();
         r.hasError(), fmt::format(fg(fmt::color::red), "[sgrn_replay] Failed to load schema: {}\n", r.error()));
 
@@ -72,6 +73,8 @@ Result<void, std::string> GatewayReplayer::initialize() {
 
     SGRN_RETURN_IF(auto r = gateway_app_->initTwin();
         r.hasError(), fmt::format(fg(fmt::color::red), "[sgrn_replay] Twin memory init failed: {}\n", r.error()));
+
+    gateway_app_->enablePassiveReplayMode();
 
     plc_memory_ = &gateway_app_->memory();
     schema_store_ = &gateway_app_->schema();

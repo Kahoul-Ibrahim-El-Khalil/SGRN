@@ -1206,7 +1206,7 @@ port (all under `include/sgrn/datastore/`):
 | Needed by the runtime | Provides | Fork option |
 |---|---|---|
 | `utils/respond.hpp` | `createJsonResponse` / `createErrorResponse` | port (small), or rewrite the ~10 call sites to raw `drogon::HttpResponse` |
-| `utils/safe_access.hpp` (`core::getDbClient`) | default `DbClientPtr` from `drogon::app()` | 5-line shim; note the SGRN header also pulls Redis helpers you can drop |
+| `utils/safe_access.hpp` (`core::getDbClient`) | default `DbClientPtr` from `drogon::app()` | 5-line shim |
 | `BackendError` / `Result` (`sgrn/Result.hpp` et al.) | error plumbing | port the two tiny headers, or typedef onto your own error type |
 | auth filter *name* (string in the template) | request gate | keep the string, register your own filter under that name |
 | session contract | tenant value | `CrudViewHandler::tenantOf()` reads attribute `session_json["user"]["organisation"]` — adapt that one function to your session shape |

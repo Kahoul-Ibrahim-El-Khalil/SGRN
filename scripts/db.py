@@ -12,7 +12,7 @@ from scripts.common import (
 )
 from scripts.config import (
     POSTGRES_PORT, POSTGRES_HOST, POSTGRES_STARTUP_TIMEOUT,
-    DEFAULT_DB_PASSWORD, TIMESCALEDB_GIT_URL, PARALLEL_JOBS,
+    DEFAULT_DB_PASSWORD, PARALLEL_JOBS,
     PG_DATA_DIR, POSTGRES_DIR, ORM_GEN_SCRIPT, EXTERN_DIR_NAME,
     BACKEND_DIR
 )
@@ -53,8 +53,7 @@ def temporaryPostgres(pg_data: Path, conda_prefix: str = "", port: int | None = 
     with open(log_path, "w") as log_file:
         proc = subprocess.Popen(
             [postgres_exe, "-D", str(pg_data), "-p", str(postgres_port),
-             "-c", f"listen_addresses={POSTGRES_HOST}", "-c", "fsync=off",
-             "-c", "shared_preload_libraries=timescaledb"],
+             "-c", f"listen_addresses={POSTGRES_HOST}", "-c", "fsync=off"],
             stdout=log_file, stderr=subprocess.STDOUT, text=True,
         )
         ready = False
@@ -94,12 +93,6 @@ def dbInit(root: Path, conda_prefix: str) -> bool:
         if not run([initdb_exe, "-D", str(pg_data)], label="initdb"):
             return False
 
-    conf_file = pg_data / "postgresql.conf"
-    if conf_file.exists():
-        content = conf_file.read_text()
-        if "shared_preload_libraries" not in content or "timescaledb" not in content:
-            with open(conf_file, "a") as f:
-                f.write("\n# Added by SGRN db-init\nshared_preload_libraries = 'timescaledb'\n")
 
     db_pass = loadEnv(root).get("DATABASE_PASSWORD", DEFAULT_DB_PASSWORD)
     pg_ctl_exe = get_exe("pg_ctl", conda_prefix)
@@ -143,19 +136,3 @@ def buildOrm(root: Path, conda_prefix: str = ""):
                 run([sys.executable, str(gen_script), "--clean", "--host", POSTGRES_HOST, "--port", str(postgres_port)],
                     cwd=str(BACKEND_DIR),
                     label="generate_orm")
-
-def buildTimescaleDB(root: Path, conda_prefix: str) -> bool:
-    print("[TimescaleDB] Building TimescaleDB from source...")
-    ts_dir = root / EXTERN_DIR_NAME / "timescaledb"
-    if not ts_dir.exists():
-        if not run(["git", "clone", "--depth", "1", TIMESCALEDB_GIT_URL, str(ts_dir)], label="clone timescaledb"):
-            return False
-    
-    build_dir = ts_dir / "build"
-    if build_dir.exists(): rmtree(build_dir)
-    pg_config = get_exe("pg_config", conda_prefix)
-    env = os.environ.copy(); env["CC"] = "gcc"
-    
-    if not run(["./bootstrap", "-DREGRESS_CHECKS=OFF", f"-DPG_CONFIG={pg_config}"], cwd=str(ts_dir), env=env, label="timescaledb bootstrap"): return False
-    if not run(["make", "-j", str(PARALLEL_JOBS)], cwd=str(build_dir), label="timescaledb make"): return False
-    return run(["make", "install"], cwd=str(build_dir), label="timescaledb install")

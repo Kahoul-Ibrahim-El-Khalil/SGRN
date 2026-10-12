@@ -23,7 +23,7 @@ Every generated view route listed in the current manifest uses
 | Requirement | Value |
 |---|---|
 | Header | `Authorization: Bearer <session-token>` |
-| Session store | Redis (validated before the handler runs) |
+| Session store | SessionStore (RAM cache + PostgreSQL, validated before handler) |
 | Tenant source | `session_json["user"]["organisation"]` (string) |
 | Tenant in SQL | Bound server-side as `$1` on every query — **never** accepted from the client |
 
@@ -309,7 +309,7 @@ Common scopes:
 | `Database` | 500 | SQL/driver failure |
 
 Filter failures (before the handler) use the same JSON shape with scope
-`Authentication` or `503` when Redis is unavailable.
+`Authentication` or `503` when the session store is unavailable.
 
 ---
 

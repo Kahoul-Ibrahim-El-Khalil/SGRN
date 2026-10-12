@@ -8,7 +8,7 @@
 // =========================================================
 // ApiErrors.hpp enums represent request/business-logic-level failures
 // (validation, "already exists", "not found by business rule") and
-// BackendErrorKind represents resource/infra-level failures (DB, Redis,
+// BackendErrorKind represents resource/infra-level failures (DB,
 // S3). They are two separate layers that are never merged.
 // Both must always produce the SAME wire shape:
 //   { error, scope, code?, metadata? }
@@ -279,7 +279,6 @@ enum class UploadApiError {
     InvalidJsonStructure,
     MissingUploadKey,
     InvalidUploadKey,
-    RedisError,
     DuplicateFile,
     InvalidHashFormat,
     DbDeduplicationError,
@@ -310,8 +309,6 @@ inline HttpError makeHttpError(UploadApiError e) {
             return {"UPLOAD_API_MISSING_UPLOAD_KEY", "Upload API error: Missing SGRN-Upload-Key.", drogon::k401Unauthorized};
         case UploadApiError::InvalidUploadKey:
             return {"UPLOAD_API_INVALID_UPLOAD_KEY", "Upload API error: Invalid upload key.", drogon::k401Unauthorized};
-        case UploadApiError::RedisError:
-            return {"UPLOAD_API_REDIS_ERROR", "Upload API error: Redis operation failed.", drogon::k500InternalServerError};
         case UploadApiError::DuplicateFile:
             return {"UPLOAD_API_DUPLICATE_FILE", "Upload API error: File already exists.", drogon::k409Conflict};
         case UploadApiError::InvalidHashFormat:

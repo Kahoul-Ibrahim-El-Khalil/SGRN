@@ -60,7 +60,7 @@ Modern APIs rely on Protobuf or OpenAPI to ensure clients and servers never disa
 High-traffic API gateways (like Envoy or Nginx) are built to route massive concurrency without garbage collection pauses. Our `gateway` is built the same way. Relying on C++ RAII and deterministic memory arenas isn't just about hardware constraints—it's how you guarantee that handling massive throughput won't result in memory bloat or latency spikes.
 
 **Shadow Memory (The API Caching Pattern)**
-We protect the physical controller by serving reads from a local shadow of its memory. In API design, this is the equivalent of an in-memory cache (like Redis). You do not query the slow, critical primary resource for every read. You serve it deterministically from an ultra-fast cache, isolating the core system from external load.
+We protect the physical controller by serving reads from a local shadow of its memory. In API design, this is the equivalent of an in-memory cache. You do not query the slow, critical primary resource for every read. You serve it deterministically from an ultra-fast cache, isolating the core system from external load.
 
 **Strictly Typed Payloads**
 A major source of bugs in REST APIs is relying on loosely typed JSON payloads. We enforce strict data types (`Real`, `Bool`, `DTL`) at the boundaries. Much like GraphQL, we ensure that payloads have strict, enforced types before the system attempts to process them. A type mismatch is a hard error, not a silent misread.

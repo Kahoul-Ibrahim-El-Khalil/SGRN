@@ -5,7 +5,7 @@
 
 const string SCHEMA_PATH = "schema.scl";
 const string GATEWAY_WS_URL = "ws://127.0.0.1:8000/ws";
-const int LLM_ANALYSIS_INTERVAL_S = 10;  // Request LLM analysis every 10 seconds
+const int LLM_ANALYSIS_INTERVAL_S = 10; // Request LLM analysis every 10 seconds
 
 PlcRuntime@ plc = PlcRuntime(SCHEMA_PATH);
 GatewaySync@ sync = null;
@@ -25,16 +25,16 @@ double clamp(double val, double min, double max) {
 }
 
 // ─── Base operating point ─────────────────────────────────────────────────────
-double tank_level = 50.0;      // %
-double tank_volume = 500.0;    // L
-double tank_temp = 25.0;       // °C
-double inlet_flow = 0.0;       // L/min
-double outlet_flow = 0.0;      // L/min
-double pump_speed = 0.0;       // %
+double tank_level = 50.0; // %
+double tank_volume = 500.0; // L
+double tank_temp = 25.0; // °C
+double inlet_flow = 0.0; // L/min
+double outlet_flow = 0.0; // L/min
+double pump_speed = 0.0; // %
 bool pump_running = false;
-double pump_runtime = 0.0;     // s
-double inlet_valve = 0.0;      // %
-double outlet_valve = 0.0;     // %
+double pump_runtime = 0.0; // s
+double inlet_valve = 0.0; // %
+double outlet_valve = 0.0; // %
 bool heater_on = false;
 double heater_setpoint = 60.0; // °C
 double heater_kp = 2.0;
@@ -48,7 +48,7 @@ bool overfill_trip = false;
 bool pump_fault = false;
 bool e_stop = false;
 
-int skid_mode = 0;  // 0=OFF, 1=FILLING, 2=HEATING, 3=DISCHARGING, 4=ALARM
+int skid_mode = 0; // 0=OFF, 1=FILLING, 2=HEATING, 3=DISCHARGING, 4=ALARM
 bool fault_active = false;
 
 bool gateway_connected = false;
@@ -57,7 +57,7 @@ int iteration = 0;
 int llm_request_counter = 0;
 int last_llm_request_iter = -100;
 
-bool setupEnv(const string &in ws_url = GATEWAY_WS_URL) {
+bool setupEnv(const string&in ws_url = GATEWAY_WS_URL) {
     print("================================================================\n");
     print("  Connecting LLM-in-loop simulation to gateway at " + ws_url + "\n");
     @sync = GatewaySync(plc);
@@ -119,8 +119,7 @@ void updatePhysics() {
         skid_mode = (tank_temp < heater_setpoint - 2.0) ? 2 : 1;
     } else {
         inlet_flow = 0.0;
-        if (!pump_running && tank_level > 10.0) skid_mode = 3;
-        else if (!pump_running) skid_mode = 0;
+        if (!pump_running && tank_level > 10.0) skid_mode = 3; else if (!pump_running) skid_mode = 0;
     }
     
     outlet_flow = (outlet_valve / 100.0) * 30.0;
@@ -135,7 +134,7 @@ void updatePhysics() {
     
     if (heater_enabled && heater_on && tank_volume > 50.0) {
         double temp_error = heater_setpoint - tank_temp;
-        heater_integral += temp_error * (1.0/60.0);
+        heater_integral += temp_error * (1.0 / 60.0);
         heater_integral = clamp(heater_integral, -100.0, 100.0);
         double heater_power = heater_kp * temp_error + heater_ki * heater_integral;
         heater_power = clamp(heater_power, 0.0, 100.0);
@@ -154,7 +153,8 @@ void updatePhysics() {
     }
     
     if (high_level_alarm || low_level_alarm || pump_fault || e_stop) {
-        skid_mode = 4; fault_active = true;
+        skid_mode = 4;
+        fault_active = true;
     } else if (heater_enabled && tank_temp < heater_setpoint - 1.0) {
         skid_mode = 2;
     } else if (pump_running && inlet_flow > 1.0) {
@@ -184,44 +184,44 @@ void applyLLMAction() {
         if (confidence > 70.0) {
             print("[SIM] Applying LLM action: " + action + " (confidence: " + confidence + "%)\n");
             
-            switch (action) {
-                case 1: // INCREASE_FILL
-                    if (db1 !is null) {
-                        db1.pump_run = true;
-                        db1.pump_speed_sp = clamp(db1.pump_speed_sp + 10.0, 0.0, 100.0);
-                        db1.inlet_valve_cmd = clamp(db1.inlet_valve_cmd + 10.0, 0.0, 100.0);
-                    }
-                    break;
-                case 2: // DECREASE_FILL
-                    if (db1 !is null) {
-                        db1.pump_speed_sp = clamp(db1.pump_speed_sp - 10.0, 0.0, 100.0);
-                        db1.inlet_valve_cmd = clamp(db1.inlet_valve_cmd - 10.0, 0.0, 100.0);
-                        if (db1.pump_speed_sp <= 10.0) db1.pump_run = false;
-                    }
-                    break;
-                case 3: // START_HEAT
-                    if (db1 !is null) {
-                        db1.heater_enable = true;
-                        db1.heater_setpoint = 60.0;
-                    }
-                    break;
-                case 4: // STOP_HEAT
-                    if (db1 !is null) { db1.heater_enable = false; }
-                    break;
-                case 5: // OPEN_OUTLET
-                    if (db1 !is null) {
-                        db1.outlet_valve_cmd = clamp(db1.outlet_valve_cmd + 20.0, 0.0, 100.0);
-                    }
-                    break;
-                case 6: // CLOSE_OUTLET
-                    if (db1 !is null) {
-                        db1.outlet_valve_cmd = clamp(db1.outlet_valve_cmd - 20.0, 0.0, 100.0);
-                    }
-                    break;
-                case 7: // EMERGENCY_STOP
-                    if (db1 !is null) { db1.e_stop = true; }
-                    break;
-                default: break;
+            switch(action) {
+            case 1: // INCREASE_FILL
+                if (db1 !is null) {
+                    db1.pump_run = true;
+                    db1.pump_speed_sp = clamp(db1.pump_speed_sp + 10.0, 0.0, 100.0);
+                    db1.inlet_valve_cmd = clamp(db1.inlet_valve_cmd + 10.0, 0.0, 100.0);
+                }
+                break;
+            case 2: // DECREASE_FILL
+                if (db1 !is null) {
+                    db1.pump_speed_sp = clamp(db1.pump_speed_sp - 10.0, 0.0, 100.0);
+                    db1.inlet_valve_cmd = clamp(db1.inlet_valve_cmd - 10.0, 0.0, 100.0);
+                    if (db1.pump_speed_sp <= 10.0) db1.pump_run = false;
+                }
+                break;
+            case 3: // START_HEAT
+                if (db1 !is null) {
+                    db1.heater_enable = true;
+                    db1.heater_setpoint = 60.0;
+                }
+                break;
+            case 4: // STOP_HEAT
+                if (db1 !is null) { db1.heater_enable = false; }
+                break;
+            case 5: // OPEN_OUTLET
+                if (db1 !is null) {
+                    db1.outlet_valve_cmd = clamp(db1.outlet_valve_cmd + 20.0, 0.0, 100.0);
+                }
+                break;
+            case 6: // CLOSE_OUTLET
+                if (db1 !is null) {
+                    db1.outlet_valve_cmd = clamp(db1.outlet_valve_cmd - 20.0, 0.0, 100.0);
+                }
+                break;
+            case 7: // EMERGENCY_STOP
+                if (db1 !is null) { db1.e_stop = true; }
+                break;
+            default: break;
             }
         }
         db7.response.suggested_action = 0;
@@ -299,7 +299,7 @@ void writeHeater(Heater@ db, DTL@ ts) {
 
 void writeAlarms(Alarms@ db, DTL@ ts) {
     db.any_active = high_level_alarm || low_level_alarm || pump_fault || e_stop;
-    db.active_count = uint((high_level_alarm?1:0) + (low_level_alarm?1:0) + (pump_fault?1:0) + (e_stop?1:0));
+    db.active_count = uint((high_level_alarm ? 1 : 0) + (low_level_alarm ? 1 : 0) + (pump_fault ? 1 : 0) + (e_stop ? 1 : 0));
     db.e_stop_active = e_stop;
     db.high_level = high_level_alarm;
     db.low_level = low_level_alarm;
@@ -333,10 +333,10 @@ void printReport(DTL@ ts, int iter) {
     print("----------------------------------------------------------------\n");
     print("  Tank:       " + tank_level + "% (" + tank_volume + "L) | " + tank_temp + "°C\n");
     print("  Flows:      In=" + inlet_flow + " L/min | Out=" + outlet_flow + " L/min\n");
-    print("  Pump:       " + (pump_running?"RUN":"STOP") + " @ " + pump_speed + "%\n");
+    print("  Pump:       " + (pump_running ? "RUN" : "STOP") + " @ " + pump_speed + "%\n");
     print("  Valves:     In=" + inlet_valve + "% | Out=" + outlet_valve + "%\n");
-    print("  Heater:     " + (heater_enabled?"ON":"OFF") + " SP=" + heater_setpoint + "°C\n");
-    print("  Alarms:     HL=" + (high_level_alarm?"Y":"N") + " LL=" + (low_level_alarm?"Y":"N") + " EStop=" + (e_stop?"Y":"N") + "\n");
+    print("  Heater:     " + (heater_enabled ? "ON" : "OFF") + " SP=" + heater_setpoint + "°C\n");
+    print("  Alarms:     HL=" + (high_level_alarm ? "Y" : "N") + " LL=" + (low_level_alarm ? "Y" : "N") + " EStop=" + (e_stop ? "Y" : "N") + "\n");
     if (gateway_connected && db7 !is null && iteration > 20) {
         if (db7.response !is null && db7.response.analysis_text.length() > 0) {
             string analysis = db7.response.analysis_text;
@@ -394,3 +394,4 @@ void main() {
         sleep(1000);
     }
 }
+

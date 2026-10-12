@@ -196,8 +196,6 @@ macro(sgrn_stage_to_prefix)
             "libstdc++.so*" "libgcc_s.so*"
             # PostgreSQL (datastore)
             "libpq.so*" "libpqxx.so*"
-            # Redis (datastore)
-            "libhiredis.so*"
             # AWS SDK (datastore)
             "libaws-cpp-sdk-s3.so*" "libaws-cpp-sdk-core.so*"
             "libaws-crt-cpp.so*"

@@ -1,19 +1,31 @@
 """
-sgrn — Python bindings for the SGRN Gateway.
+sgrn — Python bindings & Trustworthy AI toolkit for SGRN Digital Twin.
 
 Public surface:
 
     Gateway / GatewayClient      typed HTTP REST client (all current endpoints)
-    GatewayTelemetry             asyncio WebSocket telemetry client (built on ``websockets``)
-    TelemetryEngine              flatten/filter/buffer telemetry pipeline
-    NumpyHistory                 rolling NumPy ring buffer for telemetry
-    dtypes.*                     S7 <-> NumPy dtype bridge (registry schema -> structured dtype)
-    models.*                     dataclasses for every gateway JSON shape
-
-See ``sgrn/python/README.md`` for the full reference.
+    GatewayTelemetry             asyncio WebSocket telemetry client
+    SemanticSchema / FieldMetadata  SCL schema semantic metadata layer
+    ConformalAnomalyDetector     PyTorch Autoencoder + Split-Conformal Anomaly Detector
+    LLMDoer / MockDoer           Grounded AI Doer Agent for fault recovery
+    SchemaChecker                Tiered T1/T2 Safety Verification Layer
+    ActionCompiler               Action compilation to s7shell AngelScript / WebSocket payloads
 """
 
-from . import dtypes
+try:
+    from . import dtypes
+except ImportError:
+    dtypes = None
+
+try:
+    from .telemetry import GatewayTelemetry, NumpyHistory, TelemetryBatch, TelemetryEngine, TelemetryUpdate
+except ImportError:
+    GatewayTelemetry = None
+    NumpyHistory = None
+    TelemetryBatch = None
+    TelemetryEngine = None
+    TelemetryUpdate = None
+
 from .gateway import Gateway, GatewayClient, GatewayError, GatewayHTTPError
 from .models import (
     ConnectionInfo,
@@ -35,7 +47,9 @@ from .models import (
     asBytes,
     toBase64url,
 )
-from .telemetry import GatewayTelemetry, NumpyHistory, TelemetryBatch, TelemetryEngine, TelemetryUpdate
+from .semantic import SemanticSchema, FieldMetadata
+from .ml.anomaly import ConformalAnomalyDetector, SplitConformalCalibrator
+from .ai import LLMDoer, MockDoer, PlantDoer, SchemaChecker, ValidationResult, ActionCompiler
 
 __version__ = "0.2.0"
 
@@ -48,29 +62,22 @@ __all__ = [
     # Telemetry
     "GatewayTelemetry",
     "TelemetryEngine",
-    "TelemetryUpdate",
-    "TelemetryBatch",
     "NumpyHistory",
-    # NumPy bridge
+    "TelemetryBatch",
+    "TelemetryUpdate",
+    # Semantic Interoperability
+    "SemanticSchema",
+    "FieldMetadata",
+    # ML Anomaly & Drift Detection
+    "ConformalAnomalyDetector",
+    "SplitConformalCalibrator",
+    # Agentic AI & Trustworthy Verification
+    "LLMDoer",
+    "MockDoer",
+    "PlantDoer",
+    "SchemaChecker",
+    "ValidationResult",
+    "ActionCompiler",
+    # Submodules
     "dtypes",
-    # Models
-    "DbField",
-    "DbSchema",
-    "UdtSchema",
-    "SymbolTag",
-    "RegistryResponse",
-    "MemorySpan",
-    "MemoryReadItem",
-    "MemoryBatchWriteItem",
-    "MemoryBatchWriteResult",
-    "DataWriteResult",
-    "EndpointInfo",
-    "ConnectionInfo",
-    "SessionInfo",
-    "LogEntry",
-    "SecurityRule",
-    "SecurityPolicyResponse",
-    "toBase64url",
-    "asBytes",
-    "__version__",
 ]
