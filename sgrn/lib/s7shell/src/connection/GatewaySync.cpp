@@ -94,6 +94,8 @@ void GatewaySync::subscribeDb(uint16_t t_db) {
     {
         std::lock_guard<std::mutex> lk(subs_mutex_);
         subscribed_dbs_.insert(t_db);
+        // Any explicit subscription cancels receive-mute (see unsubscribeDb).
+        mute_when_empty_ = false;
     }
     if (connected_ && runtime_) {
         auto schema = runtime_->getSchema().getDb(t_db);
@@ -105,15 +107,30 @@ void GatewaySync::subscribeDb(uint16_t t_db) {
 }
 
 void GatewaySync::unsubscribeDb(uint16_t t_db) {
+    bool now_muted = false;
     {
         std::lock_guard<std::mutex> lk(subs_mutex_);
         subscribed_dbs_.erase(t_db);
+        // Unsubscribing everything must NOT leave the server in firehose mode
+        // (empty subscription set = "send everything" per event_filter): a
+        // publish-only client would then receive its own writes back and
+        // re-apply them, churning the dirty ledger and regressing memory with
+        // stale echoes under load. Hold one reserved, never-matching
+        // subscription instead so the server sends nothing.
+        if (subscribed_dbs_.empty()) {
+            mute_when_empty_ = true;
+            now_muted = true;
+        }
     }
     if (connected_ && runtime_) {
         auto schema = runtime_->getSchema().getDb(t_db);
         if (!schema.hasError() && schema.value()) {
             const std::string command = R"({"command":"unsubscribe","path":)" + jsonString(schema.value()->db_name) + "}";
             (void)ws_.sendText(command);
+        }
+        if (now_muted) {
+            const std::string mute = R"({"command":"subscribe","path":)" + jsonString(kMutedPath) + "}";
+            (void)ws_.sendText(mute);
         }
     }
 }
@@ -166,15 +183,24 @@ void GatewaySync::onMessage(const ix::WebSocketMessagePtr& t_msg) {
             connected_ = true;
             if (runtime_) {
                 std::set<uint16_t> selected;
+                bool muted = false;
                 {
                     std::lock_guard<std::mutex> lk(subs_mutex_);
                     selected = subscribed_dbs_;
+                    muted = mute_when_empty_;
                 }
-                for (const auto& [db_num, db_schema] : runtime_->getSchema().dbs()) {
-                    if (!selected.empty() && !selected.contains(db_num))
-                        continue;
-                    const std::string command = R"({"command":"subscribe","path":)" + jsonString(db_schema.db_name) + "}";
-                    (void)ws_.sendText(command);
+                if (selected.empty() && muted) {
+                    // Receive-muted (see unsubscribeDb): hold the reserved
+                    // non-matching subscription instead of firehose.
+                    const std::string mute = R"({"command":"subscribe","path":)" + jsonString(kMutedPath) + "}";
+                    (void)ws_.sendText(mute);
+                } else {
+                    for (const auto& [db_num, db_schema] : runtime_->getSchema().dbs()) {
+                        if (!selected.empty() && !selected.contains(db_num))
+                            continue;
+                        const std::string command = R"({"command":"subscribe","path":)" + jsonString(db_schema.db_name) + "}";
+                        (void)ws_.sendText(command);
+                    }
                 }
             }
             requestPublish();
@@ -516,16 +542,48 @@ bool GatewaySync::publishDirtyBatch() {
         // RuntimeSync WebSocket write command. Preserve interoperability without
         // paying the HTTP round-trip on the normal acknowledged path.
         if (!sent && acknowledgement_timed_out && !http_base_url_.empty()) {
-            httplib::Client client(http_base_url_);
-            client.set_connection_timeout(2, 0);
-            client.set_read_timeout(5, 0);
-            client.set_write_timeout(5, 0);
-            auto response = client.Put("/memory/batch", body, "application/json");
-            if (response && response->status >= 200 && response->status < 300) {
-                sent = true;
+            // Order safety: the WS batch above carried memory as of take-time
+            // (up to ~5 s old after an ack timeout). Pushing those stale bytes
+            // through the second (HTTP) channel could apply them AFTER newer
+            // batches already acked over WS, regressing the gateway twin.
+            // Re-read the same regions fresh: the fallback then carries the
+            // newest known state, which is always safe to apply last. Old
+            // gateways without WS write support still converge over their only
+            // channel. On re-read failure, keep the batch for retry instead of
+            // pushing possibly-torn state.
+            rapidjson::Document fresh;
+            fresh.SetArray();
+            auto& fresh_alloc = fresh.GetAllocator();
+            bool fresh_ok = !attempted_regions.empty();
+            for (const auto& [db_num, region] : attempted_regions) {
+                std::vector<uint8_t> fresh_bytes(region.length, 0);
+                if (auto r = runtime_->getMemory().readDbMemory(db_num, region.offset, region.length, fresh_bytes.data()); !r) {
+                    fresh_ok = false;
+                    break;
+                }
+                rapidjson::Value item(rapidjson::kObjectType);
+                item.AddMember("db", db_num, fresh_alloc);
+                item.AddMember("offset", region.offset, fresh_alloc);
+                item.AddMember("size", region.length, fresh_alloc);
+                std::string data = sgrn::utils::encoding::toBase64Url(fresh_bytes.data(), fresh_bytes.size());
+                item.AddMember("data", rapidjson::Value(data.c_str(), fresh_alloc), fresh_alloc);
+                fresh.PushBack(item, fresh_alloc);
+            }
+            if (!fresh_ok || fresh.Empty()) {
+                send_error = "RuntimeSync fallback re-read failed; batch kept for retry";
             } else {
-                send_error = response ? fmt::format("RuntimeSync fallback failed: HTTP {} {}", response->status, response->body)
-                                      : "RuntimeSync fallback failed: no HTTP response";
+                const std::string fresh_body = sgrn::utils::json::serializeCompact(fresh);
+                httplib::Client client(http_base_url_);
+                client.set_connection_timeout(2, 0);
+                client.set_read_timeout(5, 0);
+                client.set_write_timeout(5, 0);
+                auto response = client.Put("/memory/batch", fresh_body, "application/json");
+                if (response && response->status >= 200 && response->status < 300) {
+                    sent = true;
+                } else {
+                    send_error = response ? fmt::format("RuntimeSync fallback failed: HTTP {} {}", response->status, response->body)
+                                          : "RuntimeSync fallback failed: no HTTP response";
+                }
             }
         }
 

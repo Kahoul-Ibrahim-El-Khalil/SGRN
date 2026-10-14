@@ -35,12 +35,13 @@ if str(ROOT / "sgrn/python") not in sys.path:
 from sgrn.gateway import Gateway, GatewayError
 
 from agent import FlareMonitoringAgent
+from config_loader import load_config, get_config_path
 from dataset import SCL_SCHEMA
 from langchain_tools import GLOBAL_STORE
 from model import FlareDetector
 
 FLARE_DIR = Path(__file__).parent
-CONFIG_PATH = FLARE_DIR / "config.json"
+CONFIG_PATH = get_config_path(FLARE_DIR)
 META_PATH = FLARE_DIR / "meta.json"
 ARCHIVE_PATH = FLARE_DIR / "flare_history.jsonl.zst"
 
@@ -168,7 +169,7 @@ def extract_features_from_state(gw: Gateway, features: list[str]) -> Tuple[Dict[
 
 
 def run_live_demo(args) -> int:
-    config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    config = load_config(CONFIG_PATH)
     meta = json.loads(META_PATH.read_text(encoding="utf-8")) if META_PATH.is_file() else {}
 
     run_dir = FLARE_DIR / f"demo_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"

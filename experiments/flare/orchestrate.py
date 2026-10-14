@@ -9,9 +9,12 @@ Orchestrates the entire research lifecycle with rich tqdm progress visualization
   [5/5] Executive Diagnostic Report Generation (report.md)
 
 Usage:
-  python experiments/flare/orchestrate.py --output-dir scratch/flare_run
-  python experiments/flare/orchestrate.py --output-dir experiments/flare --epochs 50
-  python experiments/flare/orchestrate.py --capture --output-dir scratch/fresh_run
+  python3 experiments/flare run
+  python3 experiments/flare run --output-dir scratch/flare_run --epochs 50
+  python3 experiments/flare run --capture
+
+  # Direct (same as above):
+  python3 experiments/flare/orchestrate.py --output-dir scratch/flare_run
 """
 
 from __future__ import annotations
@@ -36,6 +39,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "sgrn/python") not in sys.path:
     sys.path.insert(0, str(ROOT / "sgrn/python"))
 
+from config_loader import load_config, get_config_path
+
 from sgrn.ml import (
     Scaler,
     WindowAutoencoder,
@@ -55,6 +60,14 @@ BASE_CONFIG_PATH = FLARE_DIR / "config.json"
 BASE_META_PATH = FLARE_DIR / "meta.json"
 BASE_ARCHIVE_PATH = FLARE_DIR / "flare_history.jsonl.zst"
 SCL_SCHEMA_PATH = ROOT / "sgrn/lib/gateway/simulations/gas_processing/schema.scl"
+
+
+def _get_window_size(config: dict) -> int:
+    """Extract window_size from config, supporting both legacy int and new dict format."""
+    ws = config.get("dataset", {}).get("window_size", 12)
+    if isinstance(ws, dict):
+        return int(ws.get("size", 12))
+    return int(ws)
 
 
 def print_banner(output_dir: Path, device: torch.device, hw_info: dict) -> None:
@@ -121,7 +134,7 @@ from dataset import get_splits_and_windows, load_dataset_df
 def stage_2_dataset(archive_path: Path, output_dir: Path, config: dict) -> Tuple[pd.DataFrame, pd.Series, dict]:
     """Convert WAL archive to CSV and extract chronological sliding windows."""
     print("\n▶ [2/5] SCL Schema Parsing & Sliding Window Extraction")
-    csv_path = output_dir / "dataset.csv"
+    csv_path = output_dir / "dataset" / "dataset.csv"
 
     meta_path = output_dir / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else json.loads(BASE_META_PATH.read_text(encoding="utf-8"))
@@ -163,7 +176,7 @@ def stage_3_train_and_calibrate(
     X_cal = splits["X_cal"]
     scaler = splits["scaler"]
     features = splits["features"]
-    window_size = config.get("dataset", {}).get("window_size", 12)
+    window_size = _get_window_size(config)
 
     # Derive dimensions from SCL schema
     schema_ast = parseSclSchema(SCL_SCHEMA_PATH)
@@ -244,11 +257,11 @@ def stage_3_train_and_calibrate(
         feature_subsystems=feature_subs,
     )
 
-    detector.save(output_dir)
+    detector.save(output_dir / "model")
     print(f"  ✓ Split-Conformal Calibration complete:")
     print(f"    - Bounded Threshold q_alpha (1 - alpha = {1 - alpha:.2f}): {q_alpha:.4f}")
     print(f"    - Upper Safety Bound q_upper (k={k_mult:.1f}):            {q_upper:.4f}")
-    print(f"  ✓ Model weights & metadata saved to {output_dir}")
+    print(f"  ✓ Model weights & metadata saved to {output_dir / 'model'}")
     return detector
 
 
@@ -486,10 +499,16 @@ def main() -> int:
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    config_path = output_dir / "config.json"
+    # Create subdirectories for datasets and models
+    dataset_dir = output_dir / "dataset"
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    model_dir = output_dir / "model"
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    config_path = get_config_path(output_dir)
     if not config_path.is_file() and BASE_CONFIG_PATH.is_file():
         shutil.copy2(BASE_CONFIG_PATH, config_path)
-    config = json.loads(config_path.read_text(encoding="utf-8")) if config_path.is_file() else json.loads(BASE_CONFIG_PATH.read_text(encoding="utf-8"))
+    config = load_config(config_path) if config_path.is_file() else load_config(BASE_CONFIG_PATH)
 
     device = resolveDevice(args.device)
     hw_info = getHardwareInfo()

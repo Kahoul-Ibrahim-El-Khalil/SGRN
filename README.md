@@ -143,7 +143,8 @@ Access the embedded dashboard in your browser at `http://localhost:8000/`.
 ### Run Autonomous Supervision Benchmark
 To run the full end-to-end plant anomaly detection experiment with live progress visualization:
 ```bash
-python3 experiments/flare/orchestrate.py --output-dir scratch/quick_test
+python3 experiments/flare check
+python3 experiments/flare run --output-dir scratch/quick_test
 ```
 
 ---

@@ -1,6 +1,6 @@
 {
-  "calibration_windows": 88,
-  "false_alarm_rate_total": 0.03409090909090909,
+  "calibration_windows": 70,
+  "false_alarm_rate_total": 0.02857142857142857,
   "false_alarm_rate_abnormal_only": 0.0,
   "fault_onset_iso": "2000-01-31T03:00:00+00:00",
   "first_abnormal_iso": "2000-01-31T04:00:00",
@@ -15,17 +15,129 @@
   "flare_header_press_in_top3": true,
   "feed_pressure_in_top3": true,
   "primary_fault_identified": true,
-  "primary_dimension": "pressure",
+  "primary_dimension": "SafetySystems.flare_header_press",
   "dimension_breakdown": {
-    "pressure": {
-      "error_sum": 69.6873,
-      "percentage": 91.8
+    "SafetySystems.flare_header_press": {
+      "error": 22.1031,
+      "percentage": 58.64,
+      "subsystem": "SafetySystems",
+      "unit": "pressure"
     },
-    "General": {
-      "error_sum": 6.2229,
-      "percentage": 8.2
+    "InletSeparation.feed_pressure": {
+      "error": 2.5999,
+      "percentage": 6.9,
+      "subsystem": "InletSeparation",
+      "unit": "pressure"
+    },
+    "InletSeparation.scrubber_press": {
+      "error": 2.447,
+      "percentage": 6.49,
+      "subsystem": "InletSeparation",
+      "unit": "pressure"
+    },
+    "AdsorberTowers.system_inlet_press": {
+      "error": 1.6161,
+      "percentage": 4.29,
+      "subsystem": "AdsorberTowers",
+      "unit": "pressure"
+    },
+    "InletSeparation.feed_flow.rate": {
+      "error": 1.1921,
+      "percentage": 3.16,
+      "subsystem": "InletSeparation",
+      "unit": "General"
+    },
+    "AdsorberTowers.total_gas_flow.rate": {
+      "error": 1.1828,
+      "percentage": 3.14,
+      "subsystem": "AdsorberTowers",
+      "unit": "General"
+    },
+    "AdsorberTowers.system_outlet_press": {
+      "error": 1.1784,
+      "percentage": 3.13,
+      "subsystem": "AdsorberTowers",
+      "unit": "pressure"
+    },
+    "Utilities.regen_comp_disch_press": {
+      "error": 1.152,
+      "percentage": 3.06,
+      "subsystem": "Utilities",
+      "unit": "pressure"
+    },
+    "InletSeparation.coalescer_dp": {
+      "error": 0.9772,
+      "percentage": 2.59,
+      "subsystem": "InletSeparation",
+      "unit": "General"
+    },
+    "OutletQuality.sales_gas_press": {
+      "error": 0.8963,
+      "percentage": 2.38,
+      "subsystem": "OutletQuality",
+      "unit": "pressure"
+    },
+    "RegenSystem.blower_flow.rate": {
+      "error": 0.6698,
+      "percentage": 1.78,
+      "subsystem": "RegenSystem",
+      "unit": "General"
+    },
+    "RegenSystem.cooler_outlet_temp": {
+      "error": 0.5303,
+      "percentage": 1.41,
+      "subsystem": "RegenSystem",
+      "unit": "General"
+    },
+    "RegenSystem.heater_outlet_temp": {
+      "error": 0.4908,
+      "percentage": 1.3,
+      "subsystem": "RegenSystem",
+      "unit": "General"
+    },
+    "RegenSystem.cooler_inlet_temp": {
+      "error": 0.4481,
+      "percentage": 1.19,
+      "subsystem": "RegenSystem",
+      "unit": "General"
+    },
+    "OutletQuality.dew_point": {
+      "error": 0.1701,
+      "percentage": 0.45,
+      "subsystem": "OutletQuality",
+      "unit": "General"
+    },
+    "OutletQuality.sales_gas_flow.rate": {
+      "error": 0.0097,
+      "percentage": 0.03,
+      "subsystem": "OutletQuality",
+      "unit": "General"
+    },
+    "Utilities.fuel_gas_press": {
+      "error": 0.0083,
+      "percentage": 0.02,
+      "subsystem": "Utilities",
+      "unit": "pressure"
+    },
+    "Utilities.inst_air_press": {
+      "error": 0.0082,
+      "percentage": 0.02,
+      "subsystem": "Utilities",
+      "unit": "pressure"
+    },
+    "OutletQuality.sales_gas_temp": {
+      "error": 0.0052,
+      "percentage": 0.01,
+      "subsystem": "OutletQuality",
+      "unit": "General"
+    },
+    "InletSeparation.feed_temp": {
+      "error": 0.005,
+      "percentage": 0.01,
+      "subsystem": "InletSeparation",
+      "unit": "General"
     }
   },
-  "q_alpha": 0.6903430819511414,
-  "q_upper": 0.9664803147315978
+  "q_alpha": 0.7416442632675171,
+  "q_upper": 1.0383019685745238
 }

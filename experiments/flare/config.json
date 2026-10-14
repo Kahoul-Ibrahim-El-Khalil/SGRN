@@ -12,7 +12,7 @@
     "tick_sleep_ms": 20
   },
   "dataset": {
-    "window_size": 12,
+    "window_size": { "unit": "minutes", "size": 12 },
     "stride": 1,
     "train_ratio": 0.7,
     "calibration_ratio": 0.3,

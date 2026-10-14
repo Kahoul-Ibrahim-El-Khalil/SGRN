@@ -1,5 +1,25 @@
 # Minimal Partial-Loop Prototype: Flare Blocked Anomaly Detection
 
+## Start here
+
+All commands assume your current working directory is the **SGRN repository root**.
+
+| Goal | Command |
+|:---|:---|
+| Check Python deps, config, and artifacts | `python3 experiments/flare check` |
+| **Full pipeline** (dataset → train → evaluate → report) | `python3 experiments/flare run` |
+| Metrics + plot only (needs `model.pt`) | `python3 experiments/flare evaluate` |
+| Live replay demo (no API key) | `python3 experiments/flare demo` |
+| Regenerate telemetry WAL from simulation (slow; needs built binaries) | `python3 experiments/flare capture` |
+
+Install Python deps once (in your env): `pip install -r experiments/flare/requirements.txt`
+
+**Config:** If both `config.yaml` and `config.json` are present, **YAML wins**. Keep `dataset.window_size.size` in sync (default **12** simulated hours).
+
+**Advanced:** `python3 experiments/flare run --help` forwards to `orchestrate.py` (e.g. `--output-dir scratch/run`, `--capture`, `--epochs 20`).
+
+---
+
 This document provides a comprehensive specification and execution guide for the **Flare Blocked (`fault_code 9`)** experiment within the SGRN framework.
 
 The experiment validates a fundamental slice of autonomous plant supervision:
@@ -258,7 +278,11 @@ The PyTorch autoencoder learns an empirical coordinate chart and non-linear proj
 
 ```
 experiments/flare/
+├── cli.py                    # Unified launcher (python3 experiments/flare <command>)
 ├── config.json               # Master experiment parameters, splits, and features
+├── config.yaml               # Optional YAML config (preferred over JSON if present)
+├── requirements.txt          # pip dependencies for this experiment
+├── orchestrate.py            # Full 5-stage pipeline (used by `flare run`)
 ├── run_capture.py            # Stage 1: Simulation capture generating WAL archive
 ├── dataset.py                # Dataset extraction, standardisation, and windowing
 ├── model.py                  # PyTorch Autoencoder and FlareDetector inference class
@@ -278,18 +302,16 @@ experiments/flare/
 
 ---
 
-## 7. End-to-End Execution Flow (The 4 Stages)
+## 7. End-to-End Execution Flow
 
-All commands execute in the `SGRN` micromamba environment:
-```bash
-export PYTHON=/home/odahim/micromamba/envs/SGRN/bin/python
-```
+Prefer the unified launcher (`python3 experiments/flare …`) from the repo root. The sections below describe individual scripts for debugging.
 
-### Stage 1: Telemetry Capture (`run_capture.py`)
+### Stage 1: Telemetry Capture (`run_capture.py` or `flare capture`)
 - Runs isolated `s7shell` executing `simulation.as` for 30 normal days + Day 31 fault progression.
 - Telemetry streams to the recording Gateway and is persisted into `flare_history.jsonl.zst`.
 ```bash
-$PYTHON experiments/flare/run_capture.py
+python3 experiments/flare capture
+# or: python3 experiments/flare/run_capture.py
 ```
 *Outputs*: `experiments/flare/flare_history.jsonl.zst` (91,941 bytes), `meta.json`.
 
@@ -300,7 +322,8 @@ $PYTHON experiments/flare/run_capture.py
   - Nominal 95% threshold: $q_{0.05} = 0.7056$
   - Upper uncertain threshold: $q_{\text{upper}} = 1.4 \times q_{0.05} = 0.9878$
 ```bash
-$PYTHON experiments/flare/train_detector.py
+python3 experiments/flare train
+# or: python3 experiments/flare/run
 ```
 *Outputs*: `model.pt`, `model_meta.json`.
 
@@ -311,7 +334,7 @@ $PYTHON experiments/flare/train_detector.py
   - **Lead Time**: Hours from first `ABNORMAL` state until the 90 bar ESD trip.
   - **Attribution**: Confirms whether flare header and feed pressure appear in top-3 error drivers.
 ```bash
-$PYTHON experiments/flare/evaluate.py
+python3 experiments/flare evaluate
 ```
 *Outputs*: `evaluation_metrics.json`, `evaluation_plot.png`.
 
@@ -320,11 +343,12 @@ $PYTHON experiments/flare/evaluate.py
 - Agent monitors plant state tick-by-tick and triggers operator advisories on state transitions (`NORMAL` $\to$ `ABNORMAL`).
 ```bash
 # Fast deterministic mode (no LLM key required):
-$PYTHON experiments/flare/run_demo.py --speed 5.0 --no-llm
+python3 experiments/flare demo
 
-# Full LLM advisory mode:
+# Slower replay or LLM advisories:
+python3 experiments/flare demo --speed 10
 export OPENAI_API_KEY="your-key"
-$PYTHON experiments/flare/run_demo.py --speed 1.0
+python3 experiments/flare demo --speed 1 --llm
 ```
 
 ---

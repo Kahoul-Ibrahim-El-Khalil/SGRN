@@ -20,6 +20,6 @@
   "esd_ts": 949356000000,
   "esd_iso": "2000-01-31T22:00:00+00:00",
   "archive_file": "flare_history.jsonl.zst",
-  "archive_bytes": 91941,
-  "generated_at": "2026-10-12T10:53:34.849157+00:00"
+  "archive_bytes": 87915,
+  "generated_at": "2026-10-14T09:18:26.563598+00:00"
 }

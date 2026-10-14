@@ -26,18 +26,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from config_loader import load_config, get_config_path
 from dataset import load_dataset_df, ensure_dataset_csv, SCL_SCHEMA
 from model import FlareDetector
 
+
 FLARE_DIR = Path(__file__).parent
-CONFIG_PATH = FLARE_DIR / "config.json"
+CONFIG_PATH = get_config_path(FLARE_DIR)
 META_PATH = FLARE_DIR / "meta.json"
 ARCHIVE_PATH = FLARE_DIR / "flare_history.jsonl.zst"
 CSV_PATH = FLARE_DIR / "dataset.csv"
 
 
 def run_evaluation(save_plot: bool = True) -> dict:
-    config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    config = load_config(CONFIG_PATH)
     meta = json.loads(META_PATH.read_text(encoding="utf-8"))
 
     ensure_dataset_csv(ARCHIVE_PATH, CSV_PATH)

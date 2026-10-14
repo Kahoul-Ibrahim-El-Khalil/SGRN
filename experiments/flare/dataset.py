@@ -23,9 +23,11 @@ from typing import Tuple
 import numpy as np
 import pandas as pd
 
+from config_loader import load_config, get_config_path, _get_window_size
+
 ROOT = Path(__file__).resolve().parents[2]
 SCL_SCHEMA = ROOT / "sgrn/lib/gateway/simulations/gas_processing/schema.scl"
-CONFIG_PATH = Path(__file__).with_name("config.json")
+CONFIG_PATH = get_config_path(Path(__file__).parent)
 META_PATH = Path(__file__).with_name("meta.json")
 
 
@@ -134,7 +136,7 @@ def get_splits_and_windows(
     meta: dict | None = None,
 ):
     if config is None:
-        config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        config = load_config(CONFIG_PATH)
     if meta is None:
         meta = json.loads(META_PATH.read_text(encoding="utf-8"))
 
@@ -179,7 +181,7 @@ def get_splits_and_windows(
     cal_norm = scaler.transform(cal_raw)
     test_norm = scaler.transform(test_raw)
 
-    window_size = config.get("dataset", {}).get("window_size", 12)
+    window_size = _get_window_size(config)
     stride = config.get("dataset", {}).get("stride", 1)
 
     X_train = create_sliding_windows(train_norm, window_size, stride)

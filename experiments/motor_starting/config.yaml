@@ -1,0 +1,53 @@
+# Motor Starting Experiment Configuration
+# ----------------------------------------
+
+simulation:
+  duration_s: 30
+  sample_rate_hz: 100
+  dt: 0.01
+
+motor:
+  rated_voltage: 480
+  rated_current: 10
+  rated_speed: 1800
+  poles: 4
+  frequency: 60
+  inertia: 0.1
+  load_torque: 5
+  inrush_multiplier: 6
+
+scenario:
+  normal_starts: 20
+  fault_starts: 5
+  fault_types:
+    - overcurrent
+    - stall
+    - phase_imbalance
+    - bearing_fault
+
+dataset:
+  window_size:
+    unit: "samples"
+    size: 50
+  stride: 1
+  train_ratio: 0.7
+  calibration_ratio: 0.3
+  random_seed: 42
+
+model:
+  latent_dim: 8
+  hidden_dim: 32
+  learning_rate: 0.001
+  epochs: 100
+  batch_size: 32
+  alpha: 0.05
+  k_multiplier: 1.4
+
+features:
+  - "voltage"
+  - "current"
+  - "speed"
+  - "torque"
+  - "slip"
+  - "power"
+  - "vibration"

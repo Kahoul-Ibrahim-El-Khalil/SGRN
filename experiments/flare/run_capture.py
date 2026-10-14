@@ -27,13 +27,10 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
 SIM_DIR = ROOT / "sgrn/lib/gateway/simulations/gas_processing"
-CONFIG_PATH = Path(__file__).with_name("config.json")
 
+from config_loader import load_config, get_config_path
 
-def load_config() -> dict:
-    if CONFIG_PATH.is_file():
-        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    return {}
+CONFIG_PATH = get_config_path(Path(__file__).parent)
 
 
 def find_binary(name: str) -> Path:
@@ -249,8 +246,8 @@ int esd_trip_tick = -1;
     loop_start_marker = "    int iteration = 0;\n    while (true) {"
     new_loop = f"""    int iteration = 0;
     while (iteration < MAX_SIM_ITERATIONS) {{
-        DTL@ ts = simulatedDTL();
         simulatePhysics();
+        DTL@ ts = simulatedDTL();
         writeInletSeparation(ts);
         writeAdsorberTowers(ts);
         writeRegenSystem(ts);
@@ -318,7 +315,7 @@ def write_gateway_config(path: Path, state_dir: Path, http_port: int, schema_pat
 
 
 def run_capture(args) -> tuple[Path, Path]:
-    cfg = load_config()
+    cfg = load_config(get_config_path(Path(__file__).parent))
     out_dir = Path(args.out).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 

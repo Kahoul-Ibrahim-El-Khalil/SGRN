@@ -44,17 +44,25 @@ flowchart TD
 
 ---
 
-## Quickstart: Unified End-to-End Orchestrator
+## Quickstart
 
-To execute the entire 5-stage pipeline in a single command with rich `tqdm` progress visualization and configurable artifact output:
+From the repository root:
 
 ```bash
-# Run end-to-end pipeline and save artifacts to a custom directory:
-python3 experiments/flare/orchestrate.py --output-dir scratch/my_experiment_run
-
-# Or run within the default experiments/flare/ directory:
-python3 experiments/flare/orchestrate.py --epochs 40
+python3 experiments/flare check          # deps, config, bundled WAL, binaries
+python3 experiments/flare run            # full 5-stage pipeline (default: experiments/flare/)
+python3 experiments/flare evaluate       # offline metrics + plot
+python3 experiments/flare demo           # live replay (template advisories, no API key)
 ```
+
+Custom output directory or fresh simulation capture:
+
+```bash
+python3 experiments/flare run --output-dir scratch/my_experiment_run --epochs 40
+python3 experiments/flare run --capture   # slow: rebuild flare_history.jsonl.zst
+```
+
+See [`experiments/flare/README.md`](./flare/README.md) for architecture and metrics.
 
 The orchestrator executes and displays live progress bars for:
 1. **[1/5] Process Telemetry & WAL Ingestion** (`flare_history.jsonl.zst`)

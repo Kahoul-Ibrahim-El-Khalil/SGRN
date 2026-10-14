@@ -21,6 +21,14 @@ from dataset import get_splits_and_windows
 from model import train_autoencoder
 
 
+def _get_window_size(config: dict) -> int:
+    """Extract window_size from config, supporting both legacy int and new dict format."""
+    ws = config.get("dataset", {}).get("window_size", 12)
+    if isinstance(ws, dict):
+        return int(ws.get("size", 12))
+    return int(ws)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--save-dir", default=str(Path(__file__).parent), help="Directory to save model artifacts")
@@ -28,6 +36,8 @@ def main() -> int:
     args = parser.parse_args()
 
     save_dir = Path(args.save_dir).resolve()
+    model_dir = save_dir / "model"
+    model_dir.mkdir(parents=True, exist_ok=True)
     print(f"[train] Loading dataset splits from {save_dir}...")
     splits = get_splits_and_windows()
 
@@ -41,16 +51,16 @@ def main() -> int:
         seed=args.seed,
     )
 
-    detector.save(save_dir)
-    print(f"[train] Detector successfully saved to {save_dir}")
+    detector.save(model_dir)
+    print(f"[train] Detector successfully saved to {model_dir}")
 
     # Sanity check detect on a normal window and a test window
-    normal_sample = splits["cal_raw"][:splits["config"]["dataset"]["window_size"]]
+    window_size = _get_window_size(splits["config"])
+    normal_sample = splits["cal_raw"][:window_size]
     normal_result = detector.detect(normal_sample)
     print(f"[sanity] Normal sample detection: state={normal_result['state']} score={normal_result['score']:.5f}")
 
     # Test sample with preceding context to form full window_size
-    window_size = splits["config"]["dataset"]["window_size"]
     test_context_raw = np.vstack([splits["cal_raw"][-(window_size - len(splits["test_raw"])):], splits["test_raw"]]) if len(splits["test_raw"]) < window_size else splits["test_raw"][-window_size:]
     test_result = detector.detect(test_context_raw)
     print(f"[sanity] Fault sample detection:  state={test_result['state']} score={test_result['score']:.5f}")

@@ -140,6 +140,7 @@ class GatewaySync {
     void publishOnDirty(bool enable);
     void useBinary(bool enable);
     bool connect(const string &in url);
+    void sync();
     void disconnect();
     bool connected() const;
     string lastError() const;

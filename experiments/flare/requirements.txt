@@ -1,0 +1,10 @@
+# Python dependencies for experiments/flare (install in your SGRN venv)
+numpy
+pandas
+torch
+tqdm
+matplotlib
+PyYAML
+
+# Optional — live demo with LLM advisories
+# langchain-openai

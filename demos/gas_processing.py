@@ -68,7 +68,7 @@ RUN_STEPS = 24      # 24 ticks per run = full 24-hour plant day in 24 wall-clock
 # • Historian replay at real 1× speed: sleep SIMULATION_TO_REAL s per tick
 #   i.e. divide stored timestamp_ms by 1000 and advance wall clock by that delta.
 # • Replay at N× speed: sleep SIMULATION_TO_REAL / N seconds per tick.
-# • Mirror: simulation.as uses the same constant (SIM_TO_REAL) and writes
+# • Mirror: simulation.as uses the same factor (SIM_SECONDS_PER_TICK) and writes
 #   synthetic DTL anchored at the same midnight epoch.
 SIMULATION_TO_REAL: int = 3600   # seconds of real plant time per simulation tick
 SIM_EPOCH_S: int = 946684800     # 2000-01-01 00:00:00 UTC (same anchor as simulation.as)

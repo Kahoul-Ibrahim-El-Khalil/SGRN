@@ -142,6 +142,14 @@ private:
 
     mutable std::mutex subs_mutex_;
     std::set<uint16_t> subscribed_dbs_; ///< empty = all
+    /// Path that never matches a real dirty path. Held as the sole server-side
+    /// subscription when a client explicitly unsubscribes everything, so the
+    /// gateway (empty set = firehose) sends nothing back. Publish filtering
+    /// is unaffected: isDbSubscribed() still treats the empty local set as all.
+    static constexpr const char* kMutedPath = "__sgrn_receive_muted__";
+    /// True once unsubscribeDb() has emptied the set; cleared by any
+    /// subscribeDb(). Guarded by subs_mutex_ with subscribed_dbs_.
+    bool mute_when_empty_{false};
 
     /// Flat-delta decode state. The remote table comes from the server's
     /// dictionary frame; the local one is built from the runtime schema at
