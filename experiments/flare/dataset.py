@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Tuple
@@ -63,21 +64,52 @@ def ensureDatasetCsv(archive_path: Path, csv_path: Path) -> Path:
     return csv_path
 
 
-def loadDatasetDf(csv_path: Path, features: Optional[list[str]] = None) -> Tuple[pd.DataFrame, pd.Series]:
+def resolveModelDir(model_dir: Path) -> Path:
+    """Locate model.pt + model_meta.json under ``model_dir`` or its ``model/`` subfolder."""
+    model_dir = Path(model_dir)
+    if (model_dir / "model_meta.json").is_file():
+        if model_dir.name != "model":
+            print(f"[flare] NOTE: using flat artifact layout at {model_dir}")
+        return model_dir
+    sub = model_dir / "model"
+    if (sub / "model_meta.json").is_file():
+        print(f"[flare] NOTE: artifacts live in the 'model/' subfolder: {sub}")
+        return sub
+    raise FileNotFoundError(
+        f"No model_meta.json under {model_dir} nor {sub}; "
+        "train first (train_detector.py --save-dir <dir> writes <dir>/model/).")
+
+
+def loadDatasetDf(csv_path: Path, features: Optional[list[str]] = None,
+                    fillLimit: Optional[int] = 5) -> Tuple[pd.DataFrame, pd.Series]:
+    df = pd.read_csv(csv_path)
+    # Drop startup empty frame (row 0)
+    df = df.iloc[1:].reset_index(drop=True)
     df = pd.read_csv(csv_path)
     # Drop startup empty frame (row 0)
     df = df.iloc[1:].reset_index(drop=True)
 
-    # Simulated timestamps
+    # Simulated timestamps. Unset DTL fields render as year-0 strings
+    # ("0000-00-00 ...") which no datetime parser accepts: coerce those to
+    # NaT and drop the rows — a sample with no time has no temporal
+    # position and cannot enter chronological modeling.
     if "InletSeparation.timestamp" in df.columns:
-        sim_timestamps = pd.to_datetime(df["InletSeparation.timestamp"])
+        sim_timestamps = pd.to_datetime(df["InletSeparation.timestamp"], errors="coerce")
     elif "timestamp_ms" in df.columns:
-        sim_timestamps = pd.to_datetime(df["timestamp_ms"], unit="ms")
+        sim_timestamps = pd.to_datetime(df["timestamp_ms"], unit="ms", errors="coerce")
     elif "_time" in df.columns:
-        sim_timestamps = pd.to_datetime(df["_time"])
+        sim_timestamps = pd.to_datetime(df["_time"], errors="coerce")
     else:
         ts_col = next((c for c in df.columns if c.endswith(".timestamp")), df.columns[0])
-        sim_timestamps = pd.to_datetime(df[ts_col])
+        sim_timestamps = pd.to_datetime(df[ts_col], errors="coerce")
+    n_bad_ts = int(sim_timestamps.isna().sum())
+    if n_bad_ts:
+        print(f"  Dropping {n_bad_ts} rows with unparseable timestamps (unset DTL renders as year 0)")
+        keep = sim_timestamps.notna().to_numpy()
+        df = df[keep].reset_index(drop=True)
+        sim_timestamps = sim_timestamps[keep].reset_index(drop=True)
+    if len(df) == 0:
+        raise ValueError(f"No rows with usable timestamps in {csv_path}")
 
     control_blacklist = {
         "timestamp", "esd_signal", "model_trip_advice", "model_anomaly",
@@ -110,7 +142,11 @@ def loadDatasetDf(csv_path: Path, features: Optional[list[str]] = None) -> Tuple
         features = resolved_features
 
     feature_df = df[features].copy()
-    feature_df = feature_df.ffill().bfill()
+    # Time-aware fill: bounded forward-fill only. Backward fill would copy
+    # future observations into the past (temporal leak in replay scoring),
+    # so leading gaps are left as NaN here and resolved split-aware below
+    # with train-split medians (no test data involved).
+    feature_df = feature_df.ffill(limit=fillLimit)
     return feature_df, sim_timestamps
 
 
@@ -132,7 +168,8 @@ def getSplitsAndWindows(
         csv_path = flare_dir / "dataset.csv"
 
     features_cfg = config.get("features")
-    feature_df, sim_timestamps = loadDatasetDf(csv_path, features_cfg)
+    fill_limit = config.get("dataset", {}).get("fill_limit", 5)
+    feature_df, sim_timestamps = loadDatasetDf(csv_path, features_cfg, fillLimit=fill_limit)
     features = list(feature_df.columns)
 
     # Split chronologically around fault onset
@@ -152,13 +189,56 @@ def getSplitsAndWindows(
     train_ratio = config.get("dataset", {}).get("train_ratio", 0.70)
     n_train = int(n_pre * train_ratio)
 
-    train_raw = pre_fault_values[:n_train]
-    cal_raw = pre_fault_values[n_train:]
-    test_raw = fault_values
+    if n_pre == 0:
+        raise ValueError("No pre-fault rows before fault onset; check fault_onset_iso vs dataset range")
+    if n_train == 0:
+        raise ValueError(f"Empty training split (n_pre={n_pre}, train_ratio={train_ratio})")
 
-    # Fit scaler strictly on train_raw
-    mean = np.mean(train_raw, axis=0)
-    std = np.std(train_raw, axis=0)
+    # Boolean-mask slices may be read-only views; take owning copies for filling.
+    train_raw = np.array(pre_fault_values[:n_train], dtype=np.float32, copy=True)
+    cal_raw = np.array(pre_fault_values[n_train:], dtype=np.float32, copy=True)
+    test_raw = np.array(fault_values, dtype=np.float32, copy=True)
+
+    # Leading gaps (unfilled by the bounded ffill) resolve against the
+    # TRAIN split median only — test/calibration data never leaks in.
+    # Residual NaNs (outages longer than the fill limit) are left in place
+    # and counted in the fill report instead of being paved over.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        train_median = np.nanmedian(train_raw, axis=0)
+    dead = [features[j] for j in range(len(features)) if np.isnan(train_median[j])]
+    if dead:
+        raise ValueError(f"Features with no valid training samples (dead sensors?): {dead}")
+
+    def _fill_leading(block: np.ndarray) -> int:
+        """Fill leading NaNs per column with the train median; return filled count."""
+        filled = 0
+        for j in range(block.shape[1]):
+            col = block[:, j]
+            valid = np.nonzero(~np.isnan(col))[0]
+            if len(valid) == 0:
+                continue  # all-NaN block column: left visible (train dead already rejected)
+            n_lead = int(valid[0])
+            if n_lead:
+                col[:n_lead] = train_median[j]
+                filled += n_lead
+        return filled
+
+    train_leading = _fill_leading(train_raw)
+    _fill_leading(cal_raw)
+    _fill_leading(test_raw)
+    fill_report = {
+        "fill_limit": config.get("dataset", {}).get("fill_limit", 5),
+        "train_leading_filled": train_leading,
+        "residual_nans": int(np.isnan(train_raw).sum() + np.isnan(cal_raw).sum()
+                             + np.isnan(test_raw).sum()),
+    }
+
+    # Fit scaler strictly on train_raw (NaN-aware: residual NaNs skipped)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        mean = np.nanmean(train_raw, axis=0)
+        std = np.nanstd(train_raw, axis=0)
     std = np.where(std < 1e-4, 1.0, std)  # guard against constant features
     scaler = Scaler(mean=mean, std=std, feature_names=features)
 
@@ -191,15 +271,17 @@ def getSplitsAndWindows(
         "cal_raw": cal_raw,
         "test_raw": test_raw,
         "test_timestamps": test_timestamps,
+        "fill_report": fill_report,
         "meta": meta,
         "config": config,
     }
 
 
 if __name__ == "__main__":
-    splits = get_splits_and_windows()
+    splits = getSplitsAndWindows()
     print("Dataset processed successfully:")
     print(f"  Features: {len(splits['features'])}")
+    print(f"  Fill report: {splits['fill_report']}")
     print(f"  X_train windows: {splits['X_train'].shape}")
     print(f"  X_cal windows:   {splits['X_cal'].shape}")
     print(f"  X_test windows:  {splits['X_test'].shape}")

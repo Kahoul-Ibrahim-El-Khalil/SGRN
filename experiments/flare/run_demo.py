@@ -36,7 +36,7 @@ from sgrn.gateway import Gateway, GatewayError
 
 from agent import FlareMonitoringAgent
 from config_loader import loadConfig, getConfigPath
-from dataset import SCL_SCHEMA
+from dataset import SCL_SCHEMA, resolveModelDir
 from langchain_tools import GLOBAL_STORE
 from model import FlareDetector
 
@@ -183,7 +183,7 @@ def runLiveDemo(args) -> int:
     gateway_bin = findBinary("gateway")
 
     # Load trained detector
-    detector = FlareDetector.load(FLARE_DIR, config)
+    detector = FlareDetector.load(resolveModelDir(args.model_dir), config)
     features = detector.features
     window_size = detector.window_size
 
@@ -364,6 +364,8 @@ def runLiveDemo(args) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--archive", help="Path to .jsonl.zst archive (default: flare_history.jsonl.zst)")
+    parser.add_argument("--model-dir", default=str(FLARE_DIR / "model"),
+                        help="Directory holding model.pt + model_meta.json")
     parser.add_argument("--speed", type=float, default=60.0, help="Replay speed multiplier (default: 60x)")
     parser.add_argument("--port-a", type=int, default=18080, help="Replay gateway HTTP port")
     parser.add_argument("--port-b", type=int, default=18082, help="Prediction gateway HTTP port")

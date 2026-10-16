@@ -730,6 +730,7 @@ def fitManifoldPipelineStream(
     modeHeadConfig: Optional[Dict[str, Any]] = None,
     shuffleBuffer: int = 2048,
     trainBatchSize: int = 32,
+    fillLimit: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Train a manifold detector by streaming archive rows — O(window) memory.
 
@@ -750,6 +751,11 @@ def fitManifoldPipelineStream(
     unsupported here (archives stream in stored order); filter upstream or
     use the batch path. ``splits`` in the return carries counts, not window
     arrays (they were never materialised).
+
+    Missing continuous samples forward-fill up to ``fillLimit`` rows
+    (``None`` = one window: staleness bounded by the model's own horizon)
+    and leading gaps resolve to the fitted scaler mean — no future data is
+    ever involved. Longer outages stay NaN and visible in scores.
     """
     from .manifold import HAS_TORCH
 
@@ -975,7 +981,11 @@ def fitManifoldPipelineStream(
     is_bool_head = {f"h{h}": (e["kind"] == "bool") for h, e in enumerate(ctx_layout)}
 
     # Row decode helpers (closure over resolved specs/scaler/strata).
-    last_good = [0.0] * F
+    # Bounded forward-fill + scaler-mean cold start: no future data, and
+    # outages longer than the limit stay NaN instead of going stale.
+    eff_fill = windowSize if fillLimit is None else max(0, fillLimit)
+    last_good = [float(v) for v in np.asarray(scaler.mean, dtype=np.float64)]
+    gap_runs = [0] * F
 
     def _decodeRow(row: Dict[str, Any]):
         cont = []
@@ -983,9 +993,17 @@ def fitManifoldPipelineStream(
             v = row.get(f)
             try:
                 fv = float(v)
-                fv = fv if np.isfinite(fv) else last_good[j]
+                if not np.isfinite(fv):
+                    raise ValueError
             except (TypeError, ValueError):
-                fv = last_good[j]
+                if gap_runs[j] >= eff_fill:
+                    fv = float("nan")  # outage beyond the horizon: stay visible
+                else:
+                    fv = last_good[j]
+                    gap_runs[j] += 1
+                cont.append(fv)
+                continue
+            gap_runs[j] = 0
             last_good[j] = fv
             cont.append(fv)
         raw_vals = [row.get(f) for f in (contextFeatures or [])]
@@ -1062,6 +1080,8 @@ def fitManifoldPipelineStream(
 
     cal_stride = calibrationStride if calibrationStride is not None else calibration_stride
     eff_cal_stride = max(1, int(cal_stride if cal_stride is not None else windowSize))
+    n_dropped_train_win = [0]
+    n_train_windows = [0]
     model.train()
     if mode_model is not None:
         mode_model.train()
@@ -1084,6 +1104,9 @@ def fitManifoldPipelineStream(
                 continue
             if row_idx >= n_train:
                 continue  # calibration/test regions handled in pass D
+            if not np.all(np.isfinite(np.asarray(list(ring_c), dtype=np.float32))):
+                n_dropped_train_win[0] += 1
+                continue  # outage window: excluded, counted, never trained on
             w_cont = _scaleRows(list(ring_c), list(ring_x))
             w_ctx = _encodeCtxRows(list(ring_x))
             flat_c = np.asarray(w_cont, dtype=np.float32).reshape(-1)
@@ -1096,16 +1119,23 @@ def fitManifoldPipelineStream(
                 mode_t = {k: np.asarray(v) for k, v in mode_t.items()}
                 mode_v = {k: np.asarray(v) for k, v in mode_v.items()}
             buf.append((flat_c, flat_x, mode_t, mode_v))
+            n_train_windows[0] += 1
             if len(buf) >= shuffleBuffer:
                 _trainStep(buf, trainBatchSize)
                 buf = []
         if buf:
             _trainStep(buf, trainBatchSize)
+    if n_dropped_train_win[0]:
+        print(f"[manifold_train] Dropped {n_dropped_train_win[0]} NaN training windows "
+              "(unfilled outage gaps, counted per epoch)")
+    if n_train_windows[0] == 0:
+        raise ValueError("No finite training windows; cannot train on all-NaN input")
 
     # ---- Pass D: calibration scores ------------------------------------------
     cal_scores: List[float] = []
     cal_sig: List[List[float]] = []
     cal_pos = -1
+    n_dropped_cal_win = 0
     scorer = ProcessManifoldDetector(
         model=model, scaler=scaler, features=features, window_size=windowSize,
         q_alpha=float("inf"), device=target_device,
@@ -1133,6 +1163,9 @@ def fitManifoldPipelineStream(
         cal_pos += 1
         if (cal_pos % eff_cal_stride) != 0:
             continue
+        if not np.all(np.isfinite(np.asarray(list(ring_c), dtype=np.float32))):
+            n_dropped_cal_win += 1
+            continue  # unscorable outage window: excluded, counted
         w_cont = _scaleRows(list(ring_c), list(ring_x))
         w_ctx = _encodeCtxRows(list(ring_x))
         s, per_sig, _ = scorer.computeWindowError(w_cont, w_ctx)
@@ -1144,7 +1177,7 @@ def fitManifoldPipelineStream(
     ] if cal_sig else [float("inf")] * F
     n_cal_effective = len(cal_scores)
     print(f"[conformal] Streaming calibration windows: {n_cal_effective} "
-          f"(stride {eff_cal_stride}); q={q_alpha:.5f}")
+          f"(stride {eff_cal_stride}; {n_dropped_cal_win} NaN windows excluded); q={q_alpha:.5f}")
 
     # Mode-head bounds on the same calibration pass would need a second read;
     # reuse pass-D windows is impossible post-hoc, so score them streaming too.

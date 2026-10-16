@@ -154,7 +154,20 @@ def _compare_values(expected: Any, actual: Any, path: str = "") -> None:
         assert np.isclose(float(expected), float(actual), rtol=1e-6, atol=1e-6), f"{path}: {expected} != {actual}"
         return
 
+    if _is_unset_instant(expected) or _is_unset_instant(actual):
+        # An undecodable instant (None) and a zero-time rendering mean the
+        # same unset physical truth; anything else must match exactly.
+        assert _is_unset_instant(expected) and _is_unset_instant(actual), \
+            f"{path}: {expected!r} != {actual!r}"
+        return
+
     assert expected == actual, f"{path}: {expected!r} != {actual!r}"
+
+
+def _is_unset_instant(value: Any) -> bool:
+    if value is None:
+        return True
+    return isinstance(value, str) and bool(value.strip()) and not (set(value.strip()) - set("0-:. "))
 
 
 def _capture_summary(name: str, payload: Dict[str, Any]) -> None:

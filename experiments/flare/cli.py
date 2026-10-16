@@ -26,8 +26,8 @@ REPO_ROOT = FLARE_DIR.parents[1]
 
 ARCHIVE = FLARE_DIR / "flare_history.jsonl.zst"
 META = FLARE_DIR / "meta.json"
-MODEL = FLARE_DIR / "model.pt"
-MODEL_META = FLARE_DIR / "model_meta.json"
+MODEL = FLARE_DIR / "model" / "model.pt"
+MODEL_META = FLARE_DIR / "model" / "model_meta.json"
 
 BINARY_NAMES = ("gateway", "s7shell", "sgrn_replay", "sgrn_dataset")
 
@@ -179,12 +179,18 @@ def cmdEvaluate(args: argparse.Namespace) -> int:
     extra: List[str] = []
     if args.no_plot:
         extra.append("--no-plot")
+    if args.model_dir:
+        extra.extend(["--model-dir", args.model_dir])
+    if args.output_dir:
+        extra.extend(["--output-dir", args.output_dir])
     extra.extend(args.extra)
     return _runScript("evaluate.py", extra)
 
 
 def cmdDemo(args: argparse.Namespace) -> int:
     extra: List[str] = ["--speed", str(args.speed)]
+    if args.model_dir:
+        extra.extend(["--model-dir", args.model_dir])
     if not args.llm:
         extra.append("--no-llm")
     if args.verbose:
@@ -269,15 +275,22 @@ Examples:
     p_run.add_argument("extra", nargs=argparse.REMAINDER, help="Extra args passed to orchestrate.py")
 
     p_train = sub.add_parser("train", help="Train autoencoder + conformal calibration only")
-    p_train.add_argument("--save-dir", default=None, help="Where to write model.pt")
+    p_train.add_argument("--save-dir", default=None,
+                         help="Parent dir receiving a 'model/' subfolder with model.pt + model_meta.json")
     p_train.add_argument("extra", nargs=argparse.REMAINDER, help="Extra args for train_detector.py")
 
     p_eval = sub.add_parser("evaluate", help="Offline metrics and plot (requires model.pt)")
     p_eval.add_argument("--no-plot", action="store_true")
+    p_eval.add_argument("--model-dir", default=None,
+                        help="Directory holding model.pt + model_meta.json (default: flare model/)")
+    p_eval.add_argument("--output-dir", default=None,
+                        help="Directory for evaluation_metrics.json and evaluation_plot.png")
     p_eval.add_argument("extra", nargs=argparse.REMAINDER)
 
     p_demo = sub.add_parser("demo", help="Live replay + detector + advisory agent")
     p_demo.add_argument("--speed", type=float, default=60.0, help="Replay speed multiplier (default: 60)")
+    p_demo.add_argument("--model-dir", default=None,
+                        help="Directory holding model.pt + model_meta.json (default: flare model/)")
     p_demo.add_argument("--llm", action="store_true", help="Call OpenAI (requires OPENAI_API_KEY); default is template-only")
     p_demo.add_argument("--verbose", action="store_true", help="Log gateway/replay subprocess output")
     p_demo.add_argument("extra", nargs=argparse.REMAINDER)

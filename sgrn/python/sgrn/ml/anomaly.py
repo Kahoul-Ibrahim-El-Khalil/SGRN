@@ -6,7 +6,6 @@ to guarantee a user-defined false-alarm rate (1 - alpha) on nominal process base
 """
 
 from typing import Dict, Any, List, Tuple, Optional
-import math
 
 try:
     import torch
@@ -49,23 +48,18 @@ class SplitConformalCalibrator:
     """Split-conformal prediction calibrator for anomaly thresholding with statistical guarantees."""
 
     def __init__(self, alpha: float = 0.05):
+        if not isinstance(alpha, (int, float)) or isinstance(alpha, bool) \
+                or not (0.0 < alpha < 1.0):
+            raise ValueError(f"alpha must lie strictly in (0, 1); got {alpha!r}")
         self.alpha = alpha  # Significance level (e.g., 0.05 -> 95% nominal coverage)
         self.quantile_threshold: float = float("inf")
         self.feature_names: List[str] = []
 
     def calibrate(self, nonconformity_scores: List[float]) -> float:
         """Calibrate quantile threshold q_hat on calibration nonconformity scores."""
-        n = len(nonconformity_scores)
-        if n == 0:
-            self.quantile_threshold = float("inf")
-            return self.quantile_threshold
+        from .manifold import _conformalQuantile
 
-        k = int(math.ceil((n + 1) * (1 - self.alpha)))
-        if k > n:
-            # Too few calibration samples for the requested coverage: never flag.
-            self.quantile_threshold = float("inf")
-        else:
-            self.quantile_threshold = sorted(nonconformity_scores)[k - 1]
+        self.quantile_threshold = _conformalQuantile(list(nonconformity_scores), self.alpha)
         return self.quantile_threshold
 
     def evaluateSample(

@@ -43,17 +43,17 @@ from config_loader import loadConfig, getConfigPath
 
 from sgrn.ml import (
     Scaler,
-    WindowAutoencoder,
+    configureModelFromSchema,
     createSlidingWindows,
     getHardwareInfo,
-    parseSclSchema,
     resolveDevice,
+    trainManifoldDetector,
 )
 from sgrn.ml.manifold import ProcessManifoldDetector
+from evaluate import computeEvaluationMetrics, epochMsUtc
+from evaluate import computeEvaluationMetrics, epochMsUtc
 
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
 
 FLARE_DIR = Path(__file__).resolve().parent
 BASE_CONFIG_PATH = FLARE_DIR / "config.json"
@@ -128,7 +128,7 @@ def stage1Ingestion(output_dir: Path, run_capture: bool) -> Tuple[Path, Path]:
     return archive_out, meta_out
 
 
-from dataset import getSplitsAndWindows, loadDatasetDf
+from dataset import ensureDatasetCsv, getSplitsAndWindows, loadDatasetDf
 
 
 def stage2Dataset(archive_path: Path, output_dir: Path, config: dict) -> Tuple[pd.DataFrame, pd.Series, dict]:
@@ -139,6 +139,9 @@ def stage2Dataset(archive_path: Path, output_dir: Path, config: dict) -> Tuple[p
     meta_path = output_dir / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else json.loads(BASE_META_PATH.read_text(encoding="utf-8"))
 
+    from dataset import ensureDatasetCsv
+
+    ensureDatasetCsv(archive_path, csv_path)
     splits = getSplitsAndWindows(archive_path=archive_path, csv_path=csv_path, config=config, meta=meta)
 
     features = splits["features"]
@@ -178,91 +181,35 @@ def stage3TrainAndCalibrate(
     features = splits["features"]
     window_size = _getWindowSize(config)
 
-    # Derive dimensions from SCL schema
-    schema_ast = parseSclSchema(SCL_SCHEMA_PATH)
-    feature_dims = {}
-    feature_subs = {}
-    for feat in features:
-        db_name, leaf_name = feat.split(".", 1) if "." in feat else ("General", feat)
-        feature_subs[feat] = db_name
-        tag_meta = schema_ast.get("tags", {}).get(feat, {})
-        feature_dims[feat] = tag_meta.get("dimension") or ("pressure" if "press" in feat else "General")
+    # Physical dimensions/subsystems from the authoritative schema parse.
+    schema_cfg = configureModelFromSchema(SCL_SCHEMA_PATH, windowSize=window_size)
+    schema_dims = schema_cfg.get("featureDimensions", {})
+    schema_subs = schema_cfg.get("featureSubsystems", {})
+    feature_dims = {f: schema_dims.get(f, "General") for f in features}
+    feature_subs = {f: schema_subs.get(f, f.split(".", 1)[0] if "." in f else "General")
+                    for f in features}
 
-    num_windows, win_len, num_feat = X_train.shape
-    input_dim = win_len * num_feat
-    hidden_dim = config.get("model", {}).get("hidden_dim", 64)
-    latent_dim = config.get("model", {}).get("latent_dim", 16)
-    alpha = config.get("model", {}).get("alpha", 0.05)
-    k_mult = config.get("model", {}).get("k_multiplier", 1.4)
-
-    X_train_flat = torch.from_numpy(X_train.reshape(num_windows, input_dim)).float()
-    dataset = TensorDataset(X_train_flat, X_train_flat)
-    is_cuda = device.type == "cuda"
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, pin_memory=is_cuda)
-
-    model = WindowAutoencoder(input_dim=input_dim, hidden_dim=hidden_dim, latent_dim=latent_dim).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
-    criterion = nn.MSELoss()
-
-    model.train()
-    pbar = tqdm(total=epochs, desc="  Training Autoencoder", unit="epoch", bar_format="{l_bar}{bar:30}{r_bar}")
-    for epoch in range(epochs):
-        epoch_loss = 0.0
-        for batch_x, _ in loader:
-            batch_x = batch_x.to(device, non_blocking=is_cuda)
-            optimizer.zero_grad()
-            recon = model(batch_x)
-            loss = criterion(recon, batch_x)
-            loss.backward()
-            optimizer.step()
-            epoch_loss += loss.item() * len(batch_x)
-        epoch_loss /= len(X_train_flat)
-        pbar.set_postfix({"MSE": f"{epoch_loss:.5f}"})
-        pbar.update(1)
-    pbar.close()
-
-    # Split-conformal calibration on held-out X_cal
-    model.eval()
-    n_cal = len(X_cal)
-    X_cal_flat = torch.from_numpy(X_cal.reshape(n_cal, input_dim)).float()
-    cal_scores = []
-
-    with torch.no_grad():
-        cal_loader = DataLoader(X_cal_flat, batch_size=min(128, n_cal), shuffle=False)
-        for b_cal in cal_loader:
-            b_cal = b_cal.to(device, non_blocking=is_cuda)
-            recon = model(b_cal)
-            b_recon = recon.view(-1, window_size, len(features))
-            b_orig = b_cal.view(-1, window_size, len(features))
-            batch_mse = torch.mean((b_orig - b_recon) ** 2, dim=(1, 2))
-            cal_scores.extend(batch_mse.cpu().tolist())
-
-    n_scores = len(cal_scores)
-    idx_alpha = int(np.ceil((n_scores + 1) * (1.0 - alpha))) - 1
-    idx_alpha = min(max(idx_alpha, 0), n_scores - 1)
-    sorted_scores = np.sort(cal_scores)
-    q_alpha = float(sorted_scores[idx_alpha])
-    q_upper = float(q_alpha * k_mult)
-
-    detector = ProcessManifoldDetector(
-        model=model,
+    model_cfg = dict(config.get("model", {}))
+    model_cfg.update({"epochs": epochs, "batch_size": batch_size, "learning_rate": lr})
+    detector = trainManifoldDetector(
+        X_train=X_train,
+        X_cal=X_cal,
         scaler=scaler,
         features=features,
-        window_size=window_size,
-        q_alpha=q_alpha,
-        k_multiplier=k_mult,
-        alpha=alpha,
+        config={"model": model_cfg},
+        seed=seed,
         device=device,
-        feature_dimensions=feature_dims,
-        feature_subsystems=feature_subs,
+        featureDimensions=feature_dims,
+        featureSubsystems=feature_subs,
     )
 
     detector.save(output_dir / "model")
     print(f"  ✓ Split-Conformal Calibration complete:")
-    print(f"    - Bounded Threshold q_alpha (1 - alpha = {1 - alpha:.2f}): {q_alpha:.4f}")
-    print(f"    - Upper Safety Bound q_upper (k={k_mult:.1f}):            {q_upper:.4f}")
+    print(f"    - Bounded Threshold q_alpha (1 - alpha = {1 - detector.alpha:.2f}): {detector.q_alpha:.4f}")
+    print(f"    - Upper Safety Bound q_upper (k={detector.k_multiplier:.1f}, heuristic): {detector.q_upper:.4f}")
     print(f"  ✓ Model weights & metadata saved to {output_dir / 'model'}")
     return detector
+
 
 
 def stage4EvaluateAndPlot(
@@ -280,7 +227,12 @@ def stage4EvaluateAndPlot(
     meta = splits["meta"]
     window_size = detector.window_size
 
-    fault_onset_dt = pd.to_datetime(meta["fault_onset_iso"]).tz_localize(None)
+    try:
+        fault_onset_dt = pd.to_datetime(meta["fault_onset_iso"])
+        fault_onset_dt = (fault_onset_dt.tz_convert(None) if getattr(fault_onset_dt, "tzinfo", None)
+                          else fault_onset_dt.tz_localize(None))
+    except (KeyError, TypeError, ValueError) as e:
+        raise ValueError(f"Invalid experiment metadata for evaluation: {e}") from e
     naive_ts = sim_timestamps.dt.tz_localize(None)
     pre_mask = naive_ts < fault_onset_dt
     pre_indices = np.where(pre_mask)[0]
@@ -305,6 +257,7 @@ def stage4EvaluateAndPlot(
     # 2. Sliding window scan across full 742-hour timeline
     total_eval_windows = len(raw_values) - window_size + 1
     all_scores = []
+    all_states = []
     all_results = []
     all_times = []
 
@@ -314,64 +267,67 @@ def stage4EvaluateAndPlot(
         res = detector.detect(win)
         ts = sim_timestamps.iloc[i + window_size - 1]
         all_scores.append(res["score"])
+        all_states.append(res["state"])
         all_results.append(res)
         all_times.append(ts)
         pbar.update(1)
     pbar.close()
 
-    # 3. Detection delay & ESD lead time
-    fault_onset_ts = meta["fault_onset_ts"]
+    # 3. Detection delay & ESD lead time (shared core: None-safe, empty-safe).
+    # fault_onset_dt/ts and esd_ts were validated at the top of this stage.
+    try:
+        fault_onset_ts = int(meta["fault_onset_ts"])
+    except (KeyError, TypeError, ValueError) as e:
+        raise ValueError(f"Invalid experiment metadata for evaluation: {e}") from e
     esd_ts = meta.get("esd_ts")
-    first_abnormal_idx = None
-    first_abnormal_time = None
-    first_abnormal_res = None
-
-    for idx, (res, t) in enumerate(zip(all_results, all_times)):
-        if t >= fault_onset_dt and res["state"] == "abnormal":
-            first_abnormal_idx = idx
-            first_abnormal_time = t
-            first_abnormal_res = res
-            break
-
-    first_abnormal_epoch_ms = int(first_abnormal_time.timestamp() * 1000) if first_abnormal_time else None
-    ms_per_hour = 3600 * 1000.0
-
-    detection_delay_hours = ((first_abnormal_epoch_ms - fault_onset_ts) / ms_per_hour) if first_abnormal_epoch_ms else None
-    lead_time_hours = ((esd_ts - first_abnormal_epoch_ms) / ms_per_hour) if (esd_ts and first_abnormal_epoch_ms) else None
-
-    # Attribution
-    top_signals_at_det = [s["signal"] for s in first_abnormal_res["top_signals"]] if first_abnormal_res else []
-    flare_in_top3 = any("flare_header_press" in s for s in top_signals_at_det)
-    feed_in_top3 = any("feed_pressure" in s for s in top_signals_at_det)
-    primary_fault_identified = flare_in_top3 or feed_in_top3
-
-    metrics = {
+    if esd_ts is not None:
+        try:
+            esd_ts = int(esd_ts)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Invalid esd_ts {esd_ts!r}: {e}") from e
+    metrics = computeEvaluationMetrics(
+        all_scores, all_states, all_times, all_results,
+        fault_onset_dt, fault_onset_ts, esd_ts,
+        esd_iso=meta.get("esd_iso"), fault_onset_iso=meta.get("fault_onset_iso"),
+        q_alpha=detector.q_alpha, q_upper=detector.q_upper,
+    )
+    metrics.update({
         "calibration_windows": cal_total,
         "false_alarm_rate_total": float(far_total),
         "false_alarm_rate_abnormal_only": float(far_abnormal_only),
-        "fault_onset_iso": meta["fault_onset_iso"],
-        "first_abnormal_iso": first_abnormal_time.isoformat() if first_abnormal_time else None,
-        "detection_delay_hours": float(detection_delay_hours) if detection_delay_hours is not None else None,
-        "esd_iso": meta.get("esd_iso"),
-        "lead_time_before_esd_hours": float(lead_time_hours) if lead_time_hours is not None else None,
-        "top_signals_at_detection": top_signals_at_det,
-        "flare_header_press_in_top3": flare_in_top3,
-        "feed_pressure_in_top3": feed_in_top3,
-        "primary_fault_identified": primary_fault_identified,
-        "primary_dimension": first_abnormal_res.get("primary_dimension") if first_abnormal_res else None,
-        "dimension_breakdown": first_abnormal_res.get("dimension_breakdown") if first_abnormal_res else {},
-        "q_alpha": detector.q_alpha,
-        "q_upper": detector.q_upper,
-    }
+        "primary_dimension": None,
+        "dimension_breakdown": {},
+    })
+    first_abnormal_iso = metrics["first_abnormal_iso"]
+    if first_abnormal_iso:
+        for res, iso in zip(all_results, [t.isoformat() for t in all_times]):
+            if iso == first_abnormal_iso:
+                metrics["primary_dimension"] = res.get("primary_dimension")
+                metrics["dimension_breakdown"] = res.get("dimension_breakdown", {})
+                break
 
     metrics_path = output_dir / "evaluation_metrics.json"
     metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print(f"  ✓ Metrics saved: {metrics_path.name}")
 
     if make_plot:
+        if not all_scores or len(sim_timestamps) == 0:
+            print("  ✓ Diagnostic Plot skipped: no scored windows.")
+            return metrics
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+
+        first_iso = metrics["first_abnormal_iso"]
+        first_abnormal_time = (pd.to_datetime(first_iso) if first_iso else None)
+        first_abnormal_res = None
+        first_score = None
+        if first_iso:
+            for res, t in zip(all_results, all_times):
+                if t.isoformat() == first_iso:
+                    first_abnormal_res = res
+                    first_score = res.get("score")
+                    break
 
         plot_path = output_dir / "evaluation_plot.png"
         fig, ax = plt.subplots(figsize=(14, 6), dpi=150)
@@ -382,7 +338,7 @@ def stage4EvaluateAndPlot(
         ax.axhline(detector.q_alpha, color="#ff7f0e", linestyle="--", linewidth=1.2, label=f"q_alpha ({detector.q_alpha:.3f})")
         ax.axhline(detector.q_upper, color="#d62728", linestyle="--", linewidth=1.2, label=f"q_upper ({detector.q_upper:.3f})")
 
-        max_y = min(150.0, max(all_scores) * 1.1)
+        max_y = min(150.0, max(all_scores) * 1.1) if all_scores else 1.0
         ax.set_ylim(-0.1, max_y)
         ax.axhspan(-0.1, detector.q_alpha, color="green", alpha=0.08, label="Normal Zone")
         ax.axhspan(detector.q_alpha, detector.q_upper, color="orange", alpha=0.10, label="Uncertain Zone")
@@ -392,11 +348,14 @@ def stage4EvaluateAndPlot(
         ax.axvline(fault_elapsed, color="purple", linestyle="-.", linewidth=1.5, label=f"Fault Onset (t={fault_elapsed:.0f}h)")
 
         if esd_ts and first_abnormal_time:
-            esd_dt = pd.to_datetime(meta["esd_iso"]).tz_localize(None)
+            esd_dt = pd.to_datetime(meta.get("esd_iso"))
+            esd_dt = (esd_dt.tz_convert(None) if getattr(esd_dt, "tzinfo", None)
+                      else esd_dt.tz_localize(None))
             esd_elapsed = (esd_dt - start_t).total_seconds() / 3600.0
             ax.axvline(esd_elapsed, color="black", linestyle=":", linewidth=1.8, label=f"ESD Trip (t={esd_elapsed:.0f}h)")
+
             det_elapsed = (first_abnormal_time - start_t).total_seconds() / 3600.0
-            ax.scatter([det_elapsed], [first_abnormal_res["score"]], color="red", marker="*", s=220, zorder=5, label=f"Detection (t={det_elapsed:.0f}h)")
+            ax.scatter([det_elapsed], [first_score], color="red", marker="*", s=220, zorder=5, label=f"Detection (t={det_elapsed:.0f}h)")
 
         ax.set_title("Flare Blocked Anomaly Detection — Reconstruction Score vs Time", fontsize=14, fontweight="bold", pad=12)
         ax.set_xlabel("Elapsed Simulation Time (Hours)", fontsize=11)
@@ -422,8 +381,20 @@ def stage5Report(metrics: dict, output_dir: Path) -> Path:
         sub_name = info.get("subsystem", "General")
         dim_breakdown_rows += f"| `{feat}` | {err_val:.4f} | {info['percentage']:.2f}% | {sub_name} |\n"
 
+    def _status(ok: bool) -> str:
+        return "**PASS**" if ok else "**FAIL**"
+
+    def _hours(value) -> str:
+        return f"{value:.1f} hours" if value is not None else "n/a (no detection)"
+
+    far = metrics["false_alarm_rate_abnormal_only"]
+    delay = metrics["detection_delay_hours"]
+    lead = metrics["lead_time_before_esd_hours"]
     primary_feat = metrics.get("primary_dimension", "N/A")
     primary_sub = metrics.get("primary_subsystem", "SafetySystems")
+    flare_top3 = bool(metrics["flare_header_press_in_top3"])
+    feed_top3 = bool(metrics["feed_pressure_in_top3"])
+    detected = metrics["first_abnormal_iso"] is not None
 
     report_md = f"""# SGRN Autonomous Supervision — Flare Blocked Anomaly Detection Report
 
@@ -438,21 +409,21 @@ The physics-informed split-conformal manifold detector was evaluated across the 
 
 | Metric | Result | Target Benchmark | Status |
 |:---|:---:|:---:|:---:|
-| **False Alarm Rate (Abnormal Only)** | **{metrics['false_alarm_rate_abnormal_only'] * 100:.2f}%** | < 0.01% | **PASS** |
-| **Detection Delay** | **{metrics['detection_delay_hours']:.1f} hours** | <= 2.0 hours | **PASS** |
-| **Lead Time Before Emergency Shutdown (ESD)** | **{metrics['lead_time_before_esd_hours']:.1f} hours** | >= 12.0 hours | **PASS** |
-| **Primary Drifting Feature Dimension** | **`{primary_feat}`** | `SafetySystems.flare_header_press` | **PASS** |
-| **Primary Subsystem / Device** | **`{primary_sub}`** | `SafetySystems` | **PASS** |
-| **Flare Header in Top-3 Deviations** | **{metrics['flare_header_press_in_top3']}** | True | **PASS** |
-| **Feed Pressure in Top-3 Deviations** | **{metrics['feed_pressure_in_top3']}** | True | **PASS** |
+| **False Alarm Rate (Abnormal Only)** | **{far * 100:.2f}%** | < 0.01% | {_status(far < 0.0001)} |
+| **Detection Delay** | **{_hours(delay)}** | <= 2.0 hours | {_status(detected and delay is not None and delay <= 2.0)} |
+| **Lead Time Before Emergency Shutdown (ESD)** | **{_hours(lead)}** | >= 12.0 hours | {_status(lead is not None and lead >= 12.0)} |
+| **Primary Drifting Feature Dimension** | **`{primary_feat}`** | `SafetySystems.flare_header_press` | {_status(primary_feat == "SafetySystems.flare_header_press")} |
+| **Primary Subsystem / Device** | **`{primary_sub}`** | `SafetySystems` | {_status(primary_sub == "SafetySystems")} |
+| **Flare Header in Top-3 Deviations** | **{flare_top3}** | True | {_status(flare_top3)} |
+| **Feed Pressure in Top-3 Deviations** | **{feed_top3}** | True | {_status(feed_top3)} |
 
 ---
 
 ## Split-Conformal Calibration Thresholds
 
 - **Calibration Sample Size (n_cal)**: {metrics['calibration_windows']} 12-hour temporal windows
-- **Conformal Threshold (q_alpha, 1 - alpha = 0.95)**: `{metrics['q_alpha']:.4f}`
-- **Upper Safety Bound (q_upper, k = 1.4)**: `{metrics['q_upper']:.4f}`
+- **Conformal Threshold (q_alpha)**: `{metrics['q_alpha']:.4f}`
+- **Upper Safety Bound (q_upper, heuristic multiplier, not a calibrated level)**: `{metrics['q_upper']:.4f}`
 
 ---
 

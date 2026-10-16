@@ -94,6 +94,13 @@ We structure operational output into a 3-State Uncertainty Framework:
   3. ABNORMAL:   score > k * q_alpha
                  Statistically significant departure from M. Unambiguous physical fault.
 
+The upper bound ``q_upper = k * q_alpha`` is an OPERATIONAL HEURISTIC, not a
+second conformal guarantee: no coverage statement backs the k-multiplier,
+and the NORMAL/UNCERTAIN boundary inherits only the (approximate,
+exchangeability-dependent) validity of ``q_alpha`` itself. Tune ``k`` as an
+alerting trade-off (smaller k = more sensitive, more false trips), and
+report it as such — never as a calibrated confidence level.
+
 
 5. Multi-Dimensional Error Decomposition (Closing the Loop)
 -----------------------------------------------------------
@@ -1152,16 +1159,30 @@ def _conformalQuantile(scores: List[float], alpha: float) -> float:
     ``k = ceil((n+1)(1-alpha))``; ``q = sorted[k-1]``, or ``+inf`` when
     ``k > n`` (too few samples to guarantee coverage — never flag rather
     than fake a guarantee). No interpolation, no clamping to the max.
+
+    Coverage basis: for exchangeable calibration/test scores,
+    ``P(s_new <= q) >= 1 - alpha``. Sliding time-series windows are NOT
+    exchangeable (see the module note); with non-overlapping-block
+    calibration the level is approximate, not a distribution-free
+    temporal guarantee. Process drift additionally voids the guarantee —
+    recalibrate on new nominal regimes instead of assuming coverage.
     """
     import math as _math
 
-    n = len(scores)
+    if not isinstance(alpha, (int, float)) or isinstance(alpha, bool) \
+            or not (0.0 < alpha < 1.0):
+        raise ValueError(f"alpha must lie strictly in (0, 1); got {alpha!r}")
+    vals = [float(s) for s in scores]
+    if any(not _math.isfinite(v) for v in vals):
+        raise ValueError("non-finite calibration scores (NaN/inf usually mean "
+                         "a diverged model or corrupt input); refusing to calibrate")
+    n = len(vals)
     if n == 0:
         return float("inf")
     k = int(_math.ceil((n + 1) * (1.0 - alpha)))
     if k > n:
         return float("inf")
-    return float(sorted(scores)[k - 1])
+    return float(sorted(vals)[k - 1])
 
 
 def trainManifoldDetector(
@@ -1203,6 +1224,11 @@ def trainManifoldDetector(
     conditions the encoder without entering the reconstruction loss: the
     same continuous physics can score differently per mode, and unseen
     modes escalate to ``uncertain`` at detect time.
+
+    Windows containing NaN (unfilled outage gaps) are excluded from both
+    training and calibration and counted in the log — training on NaN
+    would silently diverge the weights, and calibrating on NaN would
+    silently poison the thresholds. An all-NaN training set raises.
     """
     if not HAS_TORCH:
         raise ImportError("PyTorch is required to train manifold detectors.")
@@ -1245,6 +1271,19 @@ def trainManifoldDetector(
             f"Expected X_ctx_train shape (*, {window_size}, {ctx_dim}), "
             f"got {X_ctx_train.shape}"
         )
+    # Outage windows carry NaN: exclude from training (NaN loss would
+    # silently diverge the weights) and count them.
+    train_ok = np.all(np.isfinite(X_train.reshape(num_windows, -1)), axis=1)
+    n_dropped_train = int(num_windows - train_ok.sum())
+    if n_dropped_train:
+        print(f"[manifold_train] Dropping {n_dropped_train}/{num_windows} "
+              "NaN training windows (unfilled outage gaps)")
+    if not train_ok.any():
+        raise ValueError("No finite training windows; cannot train on all-NaN input")
+    X_train = X_train[train_ok]
+    if X_ctx_train is not None:
+        X_ctx_train = X_ctx_train[train_ok]
+    num_windows = len(X_train)
     input_dim = cont_dim + (window_size * ctx_dim if ctx_dim else 0)
 
     X_train_flat = torch.from_numpy(
@@ -1296,6 +1335,16 @@ def trainManifoldDetector(
     cal_stride = max(1, int(cal_stride))
     X_cal_eff = X_cal[::cal_stride] if len(X_cal) else X_cal
     X_ctx_eff = X_ctx_cal[::cal_stride] if X_ctx_cal is not None and len(X_ctx_cal) else X_ctx_cal
+    # NaN calibration windows are unscorable: exclude (counted below) rather
+    # than letting NaN poison the thresholds.
+    cal_ok = np.all(np.isfinite(X_cal_eff.reshape(len(X_cal_eff), -1)), axis=1) \
+        if len(X_cal_eff) else np.empty(0, dtype=bool)
+    n_dropped_cal = int(len(X_cal_eff) - cal_ok.sum())
+    if n_dropped_cal:
+        print(f"[conformal] Dropping {n_dropped_cal}/{len(X_cal_eff)} NaN calibration windows")
+    X_cal_eff = X_cal_eff[cal_ok]
+    if X_ctx_eff is not None:
+        X_ctx_eff = X_ctx_eff[cal_ok]
     n_cal = len(X_cal_eff)
     X_cal_flat = (
         torch.from_numpy(X_cal_eff.reshape(n_cal, cont_dim)).float()

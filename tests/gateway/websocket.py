@@ -57,6 +57,10 @@ def both_zero_temporal(t_json_value, t_bin_value):
         return False
     if set(t_json_value.strip()) - set("0-:. "):
         return False
+    if t_bin_value is None:
+        # decodeRecord yields None for an undecodable instant; against a
+        # zero-time JSON string that is the same unset physical truth.
+        return True
     if isinstance(t_bin_value, (bytes, bytearray, memoryview)):
         raw = bytes(t_bin_value)
         return len(raw) > 0 and all(c == 0 for c in raw)

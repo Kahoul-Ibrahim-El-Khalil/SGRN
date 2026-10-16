@@ -121,14 +121,29 @@ def filterProcessTimeline(
 def extractFeatureMatrix(
     data: Any,
     features: list[str],
+    fillLimit: Optional[int] = None,
+    allowBackfill: bool = True,
 ) -> np.ndarray:
-    """Extract and validate continuous numeric process feature matrix in float32."""
+    """Extract and validate continuous numeric process feature matrix in float32.
+
+    Missing-data policy (DataFrame input): forward-fill up to ``fillLimit``
+    rows (``None`` = unbounded, legacy), then backward-fill leading gaps
+    only when ``allowBackfill`` is true (legacy default). Backward fill
+    copies FUTURE observations into the past: harmless for offline training
+    matrices but a temporal leak in replay/online scoring — pass
+    ``allowBackfill=False`` there and handle leading NaNs explicitly
+    (e.g. train-split medians fitted without test data). Gaps longer than
+    ``fillLimit`` are left as NaN so long outages stay visible instead of
+    being silently paved over.
+    """
     if HAS_PANDAS and isinstance(data, pd.DataFrame):
         missing = [f for f in features if f not in data.columns]
         if missing:
             raise KeyError(f"Requested features missing from dataset: {missing}")
         feature_df = data[features].copy()
-        feature_df = feature_df.ffill().bfill()
+        feature_df = feature_df.ffill(limit=fillLimit)
+        if allowBackfill:
+            feature_df = feature_df.bfill()
         return feature_df.to_numpy(dtype=np.float32)
 
     if isinstance(data, dict):
