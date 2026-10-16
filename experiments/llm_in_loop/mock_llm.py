@@ -32,19 +32,19 @@ class MockLLMProvider:
         self.request_id = 0
         self.last_response = ""
         self.gw = Gateway(GATEWAY_URL)
-        self._init_schema()
+        self._initSchema()
         
-    def _init_schema(self):
+    def _initSchema(self):
         """Initialize schema for binary writes."""
         reg = self.gw.registry()
         self.db_schema = reg.dbByName('LLMAnalysis')
         self.dt = self.db_schema.toDtype(t_udts=reg.udtsByName())
         
-    def read_db(self, db_name: str) -> dict:
+    def readDb(self, db_name: str) -> dict:
         """Read DB via REST API."""
         return self.gw.readData(db_name)
     
-    def write_db_binary(self, data: dict) -> bool:
+    def writeDbBinary(self, data: dict) -> bool:
         """Write LLMAnalysis DB via binary memory interface to support String fields."""
         try:
             # Read current state
@@ -153,7 +153,7 @@ class MockLLMProvider:
         
         while True:
             try:
-                llm_db = self.read_db("LLMAnalysis")
+                llm_db = self.readDb("LLMAnalysis")
                 if not llm_db:
                     await asyncio.sleep(POLL_INTERVAL)
                     continue
@@ -165,7 +165,7 @@ class MockLLMProvider:
                     # Read all plant state
                     state = {}
                     for db in ["Tank", "Pump", "Valves", "Heater", "Alarms", "Setpoints"]:
-                        state[db] = self.read_db(db)
+                        state[db] = self.readDb(db)
                     
                     # Generate response
                     result = self.analyze(state)
@@ -184,7 +184,7 @@ class MockLLMProvider:
                         "last_error": ""
                     }
                     
-                    success = self.write_db_binary(response_data)
+                    success = self.writeDbBinary(response_data)
                     if success:
                         self.last_response = f"Action {result['action']} ({result['confidence']}%)"
                         print(f"[MockLLM] Response sent: {self.last_response}")

@@ -6,8 +6,10 @@ from SCL schemas and projects raw memory state into typed, human-and-LLM-readabl
 """
 
 import json
+import math
 import os
 from dataclasses import dataclass, field
+from numbers import Real
 from typing import Dict, Any, List, Optional, Tuple, Union
 
 
@@ -33,22 +35,28 @@ class FieldMetadata:
         if self.read_only:
             return False, f"Field '{self.db_name}.{self.name}' is READ_ONLY"
 
-        if isinstance(val, (int, float)):
-            if self.min_value is not None and val < self.min_value:
-                return False, f"Value {val} below minimum range boundary {self.min_value} for '{self.name}'"
-            if self.max_value is not None and val > self.max_value:
-                return False, f"Value {val} exceeds maximum range boundary {self.max_value} for '{self.name}'"
-
         if self.enum_map:
             if isinstance(val, str):
                 if val not in self.enum_map:
-                    allowed = list(self.enum_map.keys())
-                    return False, f"Enum string '{val}' not in allowed set {allowed} for '{self.name}'"
-            elif isinstance(val, int):
-                if val not in self.inv_enum_map:
-                    allowed_indices = list(self.inv_enum_map.keys())
-                    return False, f"Enum index {val} not in allowed set {allowed_indices} for '{self.name}'"
+                    return False, f"Enum string '{val}' not in allowed set {list(self.enum_map.keys())} for '{self.name}'"
+                return True, None
+            if isinstance(val, bool) or not isinstance(val, Real) or not math.isfinite(val) or int(val) != val:
+                return False, f"Enum value {val!r} is not an integer index for '{self.name}'"
+            if int(val) not in self.inv_enum_map:
+                return False, f"Enum index {val} not in allowed set {list(self.inv_enum_map.keys())} for '{self.name}'"
+            return True, None
 
+        if self.data_type.lower() == "bool":
+            if isinstance(val, bool) or val in (0, 1):
+                return True, None
+            return False, f"Value {val!r} is not a boolean for '{self.name}'"
+
+        if isinstance(val, bool) or not isinstance(val, Real) or not math.isfinite(val):
+            return False, f"Value {val!r} is not a finite number for '{self.name}'"
+        if self.min_value is not None and val < self.min_value:
+            return False, f"Value {val} below minimum range boundary {self.min_value} for '{self.name}'"
+        if self.max_value is not None and val > self.max_value:
+            return False, f"Value {val} exceeds maximum range boundary {self.max_value} for '{self.name}'"
         return True, None
 
 
@@ -119,17 +127,78 @@ class SemanticSchema:
                 self._extract_fields(db_name, db_num, f["children"], prefix=full_path)
 
     def _parse_scl_text(self, text: str) -> None:
-        """Fallback parser for bare SCL declarations."""
-        current_db = "Supervisor"
-        db_num = 1
-        for line in text.splitlines():
-            line = line.strip()
-            if line.startswith("DATA_BLOCK"):
-                parts = line.split('"')
-                if len(parts) >= 2:
-                    current_db = parts[1]
-                    self.dbs[db_num] = current_db
-                    db_num += 1
+        """Minimal SCL text parser: DB names plus leaf field declarations.
+
+        Understands ``DATA_BLOCK "Name" DB<n>`` … ``VAR`` … ``END_VAR``
+        with lines of the form ``name : Type #UNIT("u") #RANGE(lo, hi);
+// comment`` and ``#ENUM(A, B, C)``. Pragmas match case-insensitively.
+        Anything unparseable is skipped — but the checker is fail-closed,
+        so a schema that yields zero fields still refuses every action
+        instead of approving it.
+        """
+        import re
+
+        current_db: Optional[str] = None
+        db_num = 0
+        in_var = False
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("//"):
+                continue
+            db_m = re.match(r'DATA_BLOCK\s+"([^"]+)"(?:\s+DB\s*(\d+))?', line)
+            if db_m:
+                current_db = db_m.group(1)
+                db_num = int(db_m.group(2)) if db_m.group(2) else db_num + 1
+                self.dbs[db_num] = current_db
+                in_var = False
+                continue
+            if line == "VAR":
+                in_var = True
+                continue
+            if line in ("END_VAR", "END_DATA_BLOCK"):
+                if line == "END_DATA_BLOCK":
+                    current_db = None
+                in_var = False
+                continue
+            if not in_var or current_db is None:
+                continue
+            fm = re.match(r"([A-Za-z0-9_]+)\s*:\s*([^;]+);(?:\s*//\s*(.*))?", line)
+            if not fm:
+                continue
+            fname, ftype_str, comment = fm.groups()
+            if fname.upper() in ("VAR", "END_VAR"):
+                continue
+            unit_m = re.search(r'#unit\(\"([^\"]+)\"\)', ftype_str, re.IGNORECASE)
+            unit = unit_m.group(1) if unit_m else None
+            min_v = max_v = None
+            range_m = re.search(r'#range\(\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\)', ftype_str, re.IGNORECASE)
+            if range_m:
+                try:
+                    min_v, max_v = float(range_m.group(1)), float(range_m.group(2))
+                except ValueError:
+                    pass
+            enum_map: Dict[str, int] = {}
+            enum_m = re.search(r'#enum\(\s*([^)]+)\)', ftype_str, re.IGNORECASE)
+            if enum_m:
+                for idx, token in enumerate(enum_m.group(1).split(",")):
+                    token = token.strip().strip('"')
+                    if token:
+                        enum_map[token] = idx
+            clean_type = re.sub(r"#.*", "", ftype_str).strip().strip('"') or "Real"
+            key = f"{current_db}.{fname}"
+            self.fields[key] = FieldMetadata(
+                name=fname,
+                db_name=current_db,
+                db_number=db_num,
+                data_type=clean_type,
+                offset=0,
+                unit=unit,
+                min_value=min_v,
+                max_value=max_v,
+                enum_map=enum_map,
+                inv_enum_map={v: k for k, v in enum_map.items()},
+                description=(comment or "").strip() or None,
+            )
 
     def get_field(self, db_name: str, field_path: str) -> Optional[FieldMetadata]:
         return self.fields.get(f"{db_name}.{field_path}")

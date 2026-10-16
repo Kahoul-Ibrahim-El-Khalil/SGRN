@@ -60,22 +60,23 @@ class SplitConformalCalibrator:
             self.quantile_threshold = float("inf")
             return self.quantile_threshold
 
-        sorted_scores = sorted(nonconformity_scores)
-        # Conformal quantile index: ceil((n + 1) * (1 - alpha)) / n
-        q_idx = int(math.ceil((n + 1) * (1 - self.alpha))) - 1
-        q_idx = min(max(0, q_idx), n - 1)
-        self.quantile_threshold = sorted_scores[q_idx]
+        k = int(math.ceil((n + 1) * (1 - self.alpha)))
+        if k > n:
+            # Too few calibration samples for the requested coverage: never flag.
+            self.quantile_threshold = float("inf")
+        else:
+            self.quantile_threshold = sorted(nonconformity_scores)[k - 1]
         return self.quantile_threshold
 
-    def evaluate_sample(
-        self, raw_sample: List[float], recon_sample: List[float]
+    def evaluateSample(
+        self, rawSample: List[float], reconSample: List[float]
     ) -> Tuple[bool, float, Dict[str, float]]:
         """Evaluate a single test sample for anomaly status, uncertainty score, and feature attribution."""
-        errors = [abs(r - c) for r, c in zip(raw_sample, recon_sample)]
+        errors = [abs(r - c) for r, c in zip(rawSample, reconSample)]
         score = sum(e ** 2 for e in errors) ** 0.5  # L2 nonconformity score
 
         is_anomaly = score > self.quantile_threshold
-        
+
         # Feature attribution (% of total reconstruction error)
         total_err = sum(errors) if sum(errors) > 0 else 1.0
         attribution = {}
@@ -87,7 +88,13 @@ class SplitConformalCalibrator:
 
 
 class ConformalAnomalyDetector:
-    """High-level PyTorch + Split-Conformal Anomaly & Drift Detection Pipeline."""
+    """High-level PyTorch + Split-Conformal Anomaly & Drift Detection Pipeline.
+
+    Detector interface: ``fit`` (train on nominal baseline), ``calibrate``
+    (conformal threshold on held-out nominal data), ``predict`` (anomaly
+    flag + score + attribution), ``explain`` (human-readable evidence
+    report).
+    """
 
     def __init__(self, feature_names: List[str], alpha: float = 0.05, latent_dim: int = 8):
         self.feature_names = feature_names
@@ -102,14 +109,14 @@ class ConformalAnomalyDetector:
         else:
             self.model = None
 
-    def train_baseline(self, train_data: List[List[float]], epochs: int = 50, batch_size: int = 32) -> float:
+    def fit(self, trainData: List[List[float]], epochs: int = 50, batchSize: int = 32) -> float:
         """Train autoencoder on normal baseline operating data (e.g. motor start / nominal scan)."""
         if not HAS_TORCH or self.model is None:
             return 0.0
 
-        tensor_data = torch.tensor(train_data, dtype=torch.float32)
+        tensor_data = torch.tensor(trainData, dtype=torch.float32)
         dataset = torch.utils.data.TensorDataset(tensor_data)
-        loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=batchSize, shuffle=True)
 
         self.model.train()
         last_loss = 0.0
@@ -122,18 +129,18 @@ class ConformalAnomalyDetector:
                 loss.backward()
                 self.optimizer.step()
                 total_loss += loss.item() * len(batch)
-            last_loss = total_loss / len(train_data)
+            last_loss = total_loss / len(trainData)
         return last_loss
 
-    def calibrate_conformal(self, calib_data: List[List[float]]) -> float:
-        """Calibrate conformal prediction threshold on calibration data."""
+    def calibrate(self, calibData: List[List[float]]) -> float:
+        """Calibrate conformal prediction threshold on held-out nominal data."""
         if not HAS_TORCH or self.model is None:
             # Fallback score if torch not installed
-            scores = [sum(x**2 for x in sample)**0.5 for sample in calib_data]
+            scores = [sum(x**2 for x in sample)**0.5 for sample in calibData]
             return self.calibrator.calibrate(scores)
 
         self.model.eval()
-        tensor_data = torch.tensor(calib_data, dtype=torch.float32)
+        tensor_data = torch.tensor(calibData, dtype=torch.float32)
         with torch.no_grad():
             recon = self.model(tensor_data)
             errors = torch.norm(tensor_data - recon, dim=1).numpy().tolist()
@@ -154,4 +161,24 @@ class ConformalAnomalyDetector:
             recon_tensor = self.model(tensor_sample)
             recon = recon_tensor[0].numpy().tolist()
 
-        return self.calibrator.evaluate_sample(sample, recon)
+        return self.calibrator.evaluateSample(sample, recon)
+
+    def explain(self, sample: List[float]) -> Dict[str, Any]:
+        """Evidence report for one sample: verdict, score vs threshold, attribution.
+
+        Attribution here is reconstruction-error share per feature — a
+        correlation-style pointer to suspect signals, not a causal
+        explanation of the fault.
+        """
+        is_anomaly, score, attribution = self.predict(sample)
+        ranked = sorted(attribution.items(), key=lambda kv: kv[1], reverse=True)
+        return {
+            "anomaly": bool(is_anomaly),
+            "score": float(score),
+            "threshold": float(self.calibrator.quantile_threshold),
+            "alpha": float(self.calibrator.alpha),
+            "top_features": [name for name, _ in ranked[:3]],
+            "attribution": attribution,
+            "note": ("Reconstruction-error shares are correlational evidence; "
+                     "they do not identify a causal root cause."),
+        }

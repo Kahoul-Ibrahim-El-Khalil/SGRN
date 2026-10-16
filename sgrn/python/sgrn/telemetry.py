@@ -6,7 +6,7 @@ Two layers, mirroring the client side of the embedded Svelte dashboard:
 ``GatewayTelemetry``
     A thin asyncio wrapper around the gateway's WebSocket stream, built on
     the ``websockets`` library (RFC 6455 handshake, framing, ping/pong, and
-    reconnection are all handled there — nothing hand-rolled here). It
+    reconnection are all handled there — this client hand-rolls nothing).
     speaks the wire protocol ``{"command": "subscribe"|"unsubscribe"|
     "clearSubscriptions", "path": <DbName or DbName/field>}``, seeds
     subscriptions on (re)connect, auto-reconnects, and dispatches parsed
@@ -36,7 +36,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, Callable, Dict, Optional, Set
+from typing import Any, Callable, Dict, Optional, Set, Tuple
 
 import numpy as np
 import websockets
@@ -239,7 +239,10 @@ class GatewayTelemetry:
             # Re-seed the server with our subscription set after every (re)connect.
             for path in sorted(self.subscriptions):
                 await ws.send(json.dumps({"command": "subscribe", "path": path}))
-            for db, offset, size in sorted(self.binary_subscriptions):
+            for db, offset, size in sorted(
+                self.binary_subscriptions,
+                key=lambda s: (s[0], s[1] or 0, -1 if s[2] is None else s[2]),
+            ):
                 payload = {"command": "subscribe_binary", "db": db}
                 if offset is not None: payload["offset"] = offset
                 if size is not None: payload["size"] = size

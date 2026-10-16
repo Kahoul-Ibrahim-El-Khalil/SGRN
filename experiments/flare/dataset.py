@@ -23,19 +23,19 @@ from typing import Tuple
 import numpy as np
 import pandas as pd
 
-from config_loader import load_config, get_config_path, _get_window_size
+from config_loader import loadConfig, getConfigPath, _getWindowSize
 
 ROOT = Path(__file__).resolve().parents[2]
 SCL_SCHEMA = ROOT / "sgrn/lib/gateway/simulations/gas_processing/schema.scl"
-CONFIG_PATH = get_config_path(Path(__file__).parent)
+CONFIG_PATH = getConfigPath(Path(__file__).parent)
 META_PATH = Path(__file__).with_name("meta.json")
 
 
-from sgrn.ml import Scaler
+from sgrn.ml import Scaler, createSlidingWindows
 
 
 
-def find_sgrn_dataset_bin() -> Path:
+def findSgrnDatasetBin() -> Path:
     paths = (
         ROOT / ".dist/linux-static-release/sgrn_dataset",
         ROOT / ".dist/linux-static/sgrn_dataset",
@@ -47,10 +47,10 @@ def find_sgrn_dataset_bin() -> Path:
     raise FileNotFoundError("sgrn_dataset binary not found")
 
 
-def ensure_dataset_csv(archive_path: Path, csv_path: Path) -> Path:
+def ensureDatasetCsv(archive_path: Path, csv_path: Path) -> Path:
     if csv_path.is_file() and csv_path.stat().st_size > 0:
         return csv_path
-    bin_path = find_sgrn_dataset_bin()
+    bin_path = findSgrnDatasetBin()
     cmd = [
         str(bin_path),
         "-s", str(SCL_SCHEMA),
@@ -63,7 +63,7 @@ def ensure_dataset_csv(archive_path: Path, csv_path: Path) -> Path:
     return csv_path
 
 
-def load_dataset_df(csv_path: Path, features: Optional[list[str]] = None) -> Tuple[pd.DataFrame, pd.Series]:
+def loadDatasetDf(csv_path: Path, features: Optional[list[str]] = None) -> Tuple[pd.DataFrame, pd.Series]:
     df = pd.read_csv(csv_path)
     # Drop startup empty frame (row 0)
     df = df.iloc[1:].reset_index(drop=True)
@@ -114,29 +114,14 @@ def load_dataset_df(csv_path: Path, features: Optional[list[str]] = None) -> Tup
     return feature_df, sim_timestamps
 
 
-def create_sliding_windows(
-    arr: np.ndarray,
-    window_size: int,
-    stride: int = 1,
-) -> np.ndarray:
-    """Create sliding windows of shape (num_windows, window_size, num_features)."""
-    n, d = arr.shape
-    if n < window_size:
-        return np.empty((0, window_size, d), dtype=np.float32)
-    windows = []
-    for i in range(0, n - window_size + 1, stride):
-        windows.append(arr[i : i + window_size])
-    return np.asarray(windows, dtype=np.float32)
-
-
-def get_splits_and_windows(
+def getSplitsAndWindows(
     archive_path: Path | None = None,
     csv_path: Path | None = None,
     config: dict | None = None,
     meta: dict | None = None,
 ):
     if config is None:
-        config = load_config(CONFIG_PATH)
+        config = loadConfig(CONFIG_PATH)
     if meta is None:
         meta = json.loads(META_PATH.read_text(encoding="utf-8"))
 
@@ -147,7 +132,7 @@ def get_splits_and_windows(
         csv_path = flare_dir / "dataset.csv"
 
     features_cfg = config.get("features")
-    feature_df, sim_timestamps = load_dataset_df(csv_path, features_cfg)
+    feature_df, sim_timestamps = loadDatasetDf(csv_path, features_cfg)
     features = list(feature_df.columns)
 
     # Split chronologically around fault onset
@@ -181,15 +166,19 @@ def get_splits_and_windows(
     cal_norm = scaler.transform(cal_raw)
     test_norm = scaler.transform(test_raw)
 
-    window_size = _get_window_size(config)
+    window_size = _getWindowSize(config)
     stride = config.get("dataset", {}).get("stride", 1)
 
-    X_train = create_sliding_windows(train_norm, window_size, stride)
-    X_cal = create_sliding_windows(cal_norm, window_size, stride)
+    X_train = createSlidingWindows(train_norm, window_size, stride)
+    X_cal = createSlidingWindows(cal_norm, window_size, stride)
 
-    # For test: include calibration tail so test windows start from the very first fault observation
-    test_context = np.vstack([cal_norm[-(window_size - 1) :], test_norm])
-    X_test = create_sliding_windows(test_context, window_size, stride)
+    # For test: include calibration tail so test windows start from the very first fault observation.
+    # Note: cal_norm[-(window_size - 1):] with window_size=1 is the WHOLE array — slice explicitly.
+    if window_size > 1 and len(cal_norm) > 0:
+        test_context = np.vstack([cal_norm[max(0, len(cal_norm) - (window_size - 1)) :], test_norm])
+    else:
+        test_context = test_norm
+    X_test = createSlidingWindows(test_context, window_size, stride)
     test_timestamps = fault_ts.tolist()
 
     return {

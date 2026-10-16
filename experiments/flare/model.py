@@ -15,7 +15,7 @@ from sgrn.ml.manifold import (
     ProcessManifoldDetector as FlareDetector,
     Scaler,
     WindowAutoencoder,
-    train_manifold_detector as train_autoencoder,
+    trainManifoldDetector as train_autoencoder,
 )
 
 __all__ = [

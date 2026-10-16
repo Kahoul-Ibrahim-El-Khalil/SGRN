@@ -43,13 +43,13 @@ def _script(name: str) -> Path:
     return path
 
 
-def _run_script(script: str, extra: Sequence[str], *, cwd: Optional[Path] = None) -> int:
+def _runScript(script: str, extra: Sequence[str], *, cwd: Optional[Path] = None) -> int:
     cmd = [_python(), str(_script(script)), *extra]
     print(f"[flare] {' '.join(cmd)}")
     return subprocess.call(cmd, cwd=str(cwd or REPO_ROOT))
 
 
-def _find_binary(name: str) -> Optional[Path]:
+def _findBinary(name: str) -> Optional[Path]:
     app_name = {"sgrn_replay": "replay"}.get(name, name)
     candidates = (
         REPO_ROOT / ".dist/linux-static-release" / name,
@@ -63,18 +63,18 @@ def _find_binary(name: str) -> Optional[Path]:
     return None
 
 
-def _active_config_path() -> Path:
-    from config_loader import get_config_path
+def _activeConfigPath() -> Path:
+    from config_loader import getConfigPath
 
-    return get_config_path(FLARE_DIR)
+    return getConfigPath(FLARE_DIR)
 
 
-def _module_available(name: str) -> bool:
+def _moduleAvailable(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
 
-def cmd_check(_args: argparse.Namespace) -> int:
-    from config_loader import get_config_path, load_config
+def cmdCheck(_args: argparse.Namespace) -> int:
+    from config_loader import getConfigPath, loadConfig
 
     ok = True
     print("SGRN flare experiment — environment check")
@@ -88,10 +88,10 @@ def cmd_check(_args: argparse.Namespace) -> int:
     else:
         print("  ✓ Repository layout")
 
-    cfg_path = get_config_path(FLARE_DIR)
+    cfg_path = getConfigPath(FLARE_DIR)
     if cfg_path.is_file():
         try:
-            cfg = load_config(cfg_path)
+            cfg = loadConfig(cfg_path)
             ws = cfg.get("dataset", {}).get("window_size", 12)
             if isinstance(ws, dict):
                 ws = ws.get("size", ws)
@@ -109,12 +109,12 @@ def cmd_check(_args: argparse.Namespace) -> int:
         print("  ℹ Both config.yaml and config.json exist; YAML is used at runtime.")
 
     for mod in ("torch", "numpy", "pandas", "tqdm", "matplotlib"):
-        if _module_available(mod):
+        if _moduleAvailable(mod):
             print(f"  ✓ Python: {mod}")
         else:
             print(f"  ✗ Python: {mod} (install in your env)")
             ok = False
-    if not _module_available("yaml"):
+    if not _moduleAvailable("yaml"):
         print("  ⚠ Python: PyYAML optional (needed only for config.yaml)")
 
     if ARCHIVE.is_file():
@@ -136,7 +136,7 @@ def cmd_check(_args: argparse.Namespace) -> int:
     print()
     print("  Native binaries (capture / demo):")
     for name in BINARY_NAMES:
-        path = _find_binary(name)
+        path = _findBinary(name)
         if path:
             print(f"  ✓ {name}: {path.relative_to(REPO_ROOT)}")
         else:
@@ -153,7 +153,7 @@ def cmd_check(_args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
-def cmd_run(args: argparse.Namespace) -> int:
+def cmdRun(args: argparse.Namespace) -> int:
     extra: List[str] = []
     if args.output_dir:
         extra.extend(["--output-dir", args.output_dir])
@@ -164,44 +164,44 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.no_plot:
         extra.append("--no-plot")
     extra.extend(args.extra)
-    return _run_script("orchestrate.py", extra)
+    return _runScript("orchestrate.py", extra)
 
 
-def cmd_train(args: argparse.Namespace) -> int:
+def cmdTrain(args: argparse.Namespace) -> int:
     extra: List[str] = []
     if args.save_dir:
         extra.extend(["--save-dir", args.save_dir])
     extra.extend(args.extra)
-    return _run_script("train_detector.py", extra)
+    return _runScript("train_detector.py", extra)
 
 
-def cmd_evaluate(args: argparse.Namespace) -> int:
+def cmdEvaluate(args: argparse.Namespace) -> int:
     extra: List[str] = []
     if args.no_plot:
         extra.append("--no-plot")
     extra.extend(args.extra)
-    return _run_script("evaluate.py", extra)
+    return _runScript("evaluate.py", extra)
 
 
-def cmd_demo(args: argparse.Namespace) -> int:
+def cmdDemo(args: argparse.Namespace) -> int:
     extra: List[str] = ["--speed", str(args.speed)]
     if not args.llm:
         extra.append("--no-llm")
     if args.verbose:
         extra.append("--verbose")
     extra.extend(args.extra)
-    return _run_script("run_demo.py", extra)
+    return _runScript("run_demo.py", extra)
 
 
-def cmd_capture(args: argparse.Namespace) -> int:
+def cmdCapture(args: argparse.Namespace) -> int:
     extra: List[str] = []
     if args.out:
         extra.extend(["--out", args.out])
     extra.extend(args.extra)
-    return _run_script("run_capture.py", extra)
+    return _runScript("run_capture.py", extra)
 
 
-def build_parser() -> argparse.ArgumentParser:
+def buildParser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="experiments/flare",
         description="FLARE_BLOCKED anomaly detection experiment — one entry point for check, train, evaluate, demo, and full pipeline.",
@@ -293,19 +293,19 @@ Examples:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(FLARE_DIR))
-    parser = build_parser()
+    parser = buildParser()
     args = parser.parse_args(list(argv) if argv is not None else None)
     if not args.command:
         parser.print_help()
         return 0
 
     handlers = {
-        "check": cmd_check,
-        "run": cmd_run,
-        "train": cmd_train,
-        "evaluate": cmd_evaluate,
-        "demo": cmd_demo,
-        "capture": cmd_capture,
+        "check": cmdCheck,
+        "run": cmdRun,
+        "train": cmdTrain,
+        "evaluate": cmdEvaluate,
+        "demo": cmdDemo,
+        "capture": cmdCapture,
     }
     return handlers[args.command](args)
 

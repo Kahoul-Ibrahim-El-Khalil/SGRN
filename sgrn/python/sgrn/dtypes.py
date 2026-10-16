@@ -29,9 +29,11 @@ __all__ = [
     "S7TypeError",
     "s7ScalarDtype",
     "s7FieldDtype",
-    "build_dtype",
+    "buildDtype",
     "unpackBool",
     "unpackString",
+    "unpackDtl",
+    "unpackLdtl",
 ]
 
 
@@ -203,6 +205,10 @@ def buildDtype(
     return _buildDtype(t_fields, t_itemsize, t_udts=t_udts)
 
 
+# Legacy snake_case alias (the previous ``__all__`` advertised this name).
+build_dtype = buildDtype
+
+
 def unpackBool(t_byte_value: int, t_bit_index: int) -> bool:
     """Extract a single S7 BOOL bit from the byte NumPy read back for its offset."""
     return bool((int(t_byte_value) >> (t_bit_index & 0x7)) & 0x1)
@@ -219,6 +225,34 @@ def unpackString(t_raw: bytes, *, t_wide: bool = False) -> str:
         return ""
     cur_len = int.from_bytes(t_raw[2:4], "big")
     return bytes(t_raw[4 : 4 + cur_len * 2]).decode("utf-16-be", errors="replace")
+
+
+def unpackDtl(t_raw: bytes, *, t_little_endian: bool = False) -> int:
+    """Decode a 12-byte S7 DTL struct to integer nanoseconds since the Unix epoch.
+
+    Mirrors ``s7codec::encodeDtl`` (``s7codec/codec.hpp``): year u16 in DB
+    byte order, month/day/weekday/hour/min/sec raw bytes, nanoseconds u32
+    in DB byte order. PLC wall-clock is interpreted as UTC; callers needing
+    local-time semantics must offset explicitly.
+    """
+    import calendar
+
+    if len(t_raw) != 12:
+        raise S7TypeError(f"DTL needs exactly 12 bytes, got {len(t_raw)}")
+    order = "little" if t_little_endian else "big"
+    year = int.from_bytes(t_raw[0:2], order)
+    month, day = t_raw[2], t_raw[3]
+    hour, minute, second = t_raw[5], t_raw[6], t_raw[7]
+    nanosecond = int.from_bytes(t_raw[8:12], order)
+    seconds = calendar.timegm((year, month, day, hour, minute, second))
+    return seconds * 1_000_000_000 + nanosecond
+
+
+def unpackLdtl(t_raw: bytes, *, t_little_endian: bool = False) -> int:
+    """Decode an 8-byte S7 LDTL (signed ns since 1970) to integer nanoseconds."""
+    if len(t_raw) != 8:
+        raise S7TypeError(f"LDTL needs exactly 8 bytes, got {len(t_raw)}")
+    return int.from_bytes(t_raw, "little" if t_little_endian else "big", signed=True)
 
 
 def decodeRecord(
@@ -276,6 +310,16 @@ def _decodeValue(t_val: Any, t_field: "DbField", t_udts: Optional[Dict[str, "Udt
         return unpackBool(int(t_val), t_field.bit_index)
     elif t in ("STRING", "WSTRING", "XSTRING", "XWSTRING"):
         return unpackString(bytes(t_val), t_wide=("W" in t))
+    elif t in ("DTL", "LDTL", "LDT"):
+        import datetime as _dt
+
+        little = str(t_field.endianness or "").lower().startswith("l")
+        try:
+            ns = unpackDtl(bytes(t_val), t_little_endian=little) if t == "DTL" else unpackLdtl(
+                bytes(t_val), t_little_endian=little)
+        except (S7TypeError, ValueError, OverflowError):
+            return None
+        return _dt.datetime.fromtimestamp(ns / 1e9, tz=_dt.timezone.utc).isoformat()
     elif "TIME" in t or t == "DATE" or t == "TOD" or "DT" in t:
         if isinstance(t_val, (bytes, memoryview, np.ndarray, np.void)):
             return bytes(t_val).hex()

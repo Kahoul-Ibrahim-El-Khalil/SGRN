@@ -35,18 +35,18 @@ if str(ROOT / "sgrn/python") not in sys.path:
 from sgrn.gateway import Gateway, GatewayError
 
 from agent import FlareMonitoringAgent
-from config_loader import load_config, get_config_path
+from config_loader import loadConfig, getConfigPath
 from dataset import SCL_SCHEMA
 from langchain_tools import GLOBAL_STORE
 from model import FlareDetector
 
 FLARE_DIR = Path(__file__).parent
-CONFIG_PATH = get_config_path(FLARE_DIR)
+CONFIG_PATH = getConfigPath(FLARE_DIR)
 META_PATH = FLARE_DIR / "meta.json"
 ARCHIVE_PATH = FLARE_DIR / "flare_history.jsonl.zst"
 
 
-def find_binary(name: str) -> Path:
+def findBinary(name: str) -> Path:
     app_name = {"sgrn_replay": "replay"}.get(name, name)
     paths = (
         ROOT / ".dist/linux-static-release" / name,
@@ -61,7 +61,7 @@ def find_binary(name: str) -> Path:
     raise FileNotFoundError(f"Binary {name} not found")
 
 
-def wait_http(url: str, proc: subprocess.Popen, timeout: float = 30.0) -> None:
+def waitHttp(url: str, proc: subprocess.Popen, timeout: float = 30.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if proc.poll() is not None:
@@ -74,7 +74,7 @@ def wait_http(url: str, proc: subprocess.Popen, timeout: float = 30.0) -> None:
     raise TimeoutError(f"Gateway did not become ready at {url}")
 
 
-def stop_process(proc: subprocess.Popen | None, timeout: float = 10.0) -> None:
+def stopProcess(proc: subprocess.Popen | None, timeout: float = 10.0) -> None:
     if proc is None or proc.poll() is not None:
         return
     proc.terminate()
@@ -85,7 +85,7 @@ def stop_process(proc: subprocess.Popen | None, timeout: float = 10.0) -> None:
         proc.wait()
 
 
-def write_gateway_config(path: Path, state_dir: Path, http_port: int, schema: Path) -> None:
+def writeGatewayConfig(path: Path, state_dir: Path, http_port: int, schema: Path) -> None:
     config = {
         "schema": str(schema),
         "state_dir": str(state_dir),
@@ -105,7 +105,7 @@ def write_gateway_config(path: Path, state_dir: Path, http_port: int, schema: Pa
     path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 
-def set_replay_speed(base_url: str, speed: float) -> bool:
+def setReplaySpeed(base_url: str, speed: float) -> bool:
     try:
         req = urllib.request.Request(
             f"{base_url}/replay/speed",
@@ -119,7 +119,7 @@ def set_replay_speed(base_url: str, speed: float) -> bool:
         return False
 
 
-def extract_features_from_state(gw: Gateway, features: list[str]) -> Tuple[Dict[str, float], str]:
+def extractFeaturesFromState(gw: Gateway, features: list[str]) -> Tuple[Dict[str, float], str]:
     """Read DBs and extract values for each configured feature."""
     values = {}
     sim_time = "N/A"
@@ -168,8 +168,8 @@ def extract_features_from_state(gw: Gateway, features: list[str]) -> Tuple[Dict[
     return values, sim_time
 
 
-def run_live_demo(args) -> int:
-    config = load_config(CONFIG_PATH)
+def runLiveDemo(args) -> int:
+    config = loadConfig(CONFIG_PATH)
     meta = json.loads(META_PATH.read_text(encoding="utf-8")) if META_PATH.is_file() else {}
 
     run_dir = FLARE_DIR / f"demo_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
@@ -179,8 +179,8 @@ def run_live_demo(args) -> int:
     if not archive.is_file():
         raise FileNotFoundError(f"Archive not found: {archive}; run run_capture.py first.")
 
-    replay_bin = find_binary("sgrn_replay")
-    gateway_bin = find_binary("gateway")
+    replay_bin = findBinary("sgrn_replay")
+    gateway_bin = findBinary("gateway")
 
     # Load trained detector
     detector = FlareDetector.load(FLARE_DIR, config)
@@ -190,8 +190,8 @@ def run_live_demo(args) -> int:
     # Setup configurations
     cfg_a = run_dir / "replay_gw.json"
     cfg_b = run_dir / "pred_gw.json"
-    write_gateway_config(cfg_a, run_dir / "replay_state", args.port_a, SCL_SCHEMA)
-    write_gateway_config(cfg_b, run_dir / "pred_state", args.port_b, SCL_SCHEMA)
+    writeGatewayConfig(cfg_a, run_dir / "replay_state", args.port_a, SCL_SCHEMA)
+    writeGatewayConfig(cfg_b, run_dir / "pred_state", args.port_b, SCL_SCHEMA)
 
     # Discard verbose subprocess output by default to avoid massive log files.
     # Use DEVNULL for stdout/stderr unless --verbose flag is provided.
@@ -248,8 +248,8 @@ def run_live_demo(args) -> int:
     poll_count = 0
 
     try:
-        wait_http(f"{url_a}/endpoints", replay_proc)
-        wait_http(f"{url_b}/endpoints", pred_proc)
+        waitHttp(f"{url_a}/endpoints", replay_proc)
+        waitHttp(f"{url_b}/endpoints", pred_proc)
         print("[demo] Replay pipeline active. Streaming telemetry to detector and Prediction Gateway...\n")
 
         gw_a = Gateway(url_a)
@@ -260,7 +260,7 @@ def run_live_demo(args) -> int:
         while True:
             time.sleep(args.poll_interval)
             try:
-                feature_dict, sim_time = extract_features_from_state(gw_a, features)
+                feature_dict, sim_time = extractFeaturesFromState(gw_a, features)
             except Exception:
                 continue
 
@@ -338,7 +338,7 @@ def run_live_demo(args) -> int:
 
                 if state_changed or periodic_trigger:
                     print(f"[trigger] {'STATE TRANSITION: ' + previous_state.upper() + ' -> ' + curr_state.upper() if state_changed else 'ROUTINE REPORT (every ' + str(args.report_cycles) + ' cycles)'}")
-                    agent.print_operator_block(det_result)
+                    agent.printOperatorBlock(det_result)
                     previous_state = curr_state
 
                 # Check for ESD termination
@@ -350,8 +350,8 @@ def run_live_demo(args) -> int:
     except KeyboardInterrupt:
         print("\n[demo] Demo interrupted by user.")
     finally:
-        stop_process(replay_proc)
-        stop_process(pred_proc)
+        stopProcess(replay_proc)
+        stopProcess(pred_proc)
         if log_a:
             log_a.close()
         if log_b:
@@ -373,7 +373,7 @@ def main() -> int:
     parser.add_argument("--verbose", action="store_true", help="Enable verbose subprocess logging to files (default: discard output to avoid huge logs)")
     args = parser.parse_args()
 
-    return run_live_demo(args)
+    return runLiveDemo(args)
 
 
 if __name__ == "__main__":

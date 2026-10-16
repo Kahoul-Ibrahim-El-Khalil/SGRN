@@ -17,11 +17,11 @@ from pathlib import Path
 
 import numpy as np
 
-from dataset import get_splits_and_windows
+from dataset import getSplitsAndWindows
 from model import train_autoencoder
 
 
-def _get_window_size(config: dict) -> int:
+def _getWindowSize(config: dict) -> int:
     """Extract window_size from config, supporting both legacy int and new dict format."""
     ws = config.get("dataset", {}).get("window_size", 12)
     if isinstance(ws, dict):
@@ -39,7 +39,7 @@ def main() -> int:
     model_dir = save_dir / "model"
     model_dir.mkdir(parents=True, exist_ok=True)
     print(f"[train] Loading dataset splits from {save_dir}...")
-    splits = get_splits_and_windows()
+    splits = getSplitsAndWindows()
 
     print(f"[train] Training Autoencoder on {len(splits['X_train'])} training windows...")
     detector = train_autoencoder(
@@ -55,7 +55,7 @@ def main() -> int:
     print(f"[train] Detector successfully saved to {model_dir}")
 
     # Sanity check detect on a normal window and a test window
-    window_size = _get_window_size(splits["config"])
+    window_size = _getWindowSize(splits["config"])
     normal_sample = splits["cal_raw"][:window_size]
     normal_result = detector.detect(normal_sample)
     print(f"[sanity] Normal sample detection: state={normal_result['state']} score={normal_result['score']:.5f}")

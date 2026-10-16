@@ -20,6 +20,8 @@ from sgrn.ai.doer import ActionProposal
 # such as "dew point is inside spec" or "a bed is mid-regeneration".
 Interlock = Union[Tuple[str, Any, str, Any, str], Tuple[str, Any, str, str]]
 
+_MISSING = object()
+
 
 @dataclass
 class ValidationResult:
@@ -28,7 +30,7 @@ class ValidationResult:
     tier: Optional[str] = None
     explanation: Optional[str] = None
 
-    def to_json(self) -> str:
+    def toJson(self) -> str:
         import json
         return json.dumps({
             "approved": self.approved,
@@ -60,51 +62,46 @@ class SchemaChecker:
         self, proposal: ActionProposal, current_state: Dict[str, Any]
     ) -> ValidationResult:
         field_key = f"{proposal.target_db}.{proposal.field}"
+
+        if not self.schema.fields:
+            return ValidationResult(False, "T1_EMPTY_SCHEMA", "T1",
+                                    "No schema fields loaded; refusing to approve any action")
+
         meta = self.schema.get_field(proposal.target_db, proposal.field)
+        if meta is None:
+            return ValidationResult(False, f"T1_UNKNOWN_FIELD ({field_key})", "T1",
+                                    f"Field '{field_key}' is not defined in the SCL schema")
 
-        # ─── Tier 1 (T1): Signal-level Schema Constraints ────────────────────
-        if meta:
-            is_valid, err_msg = meta.validate_value(proposal.value)
-            if not is_valid:
-                return ValidationResult(
-                    approved=False,
-                    violated_rule=f"T1_SIGNAL_CONSTRAINT ({field_key})",
-                    tier="T1",
-                    explanation=err_msg
-                )
-        else:
-            # If field is completely unknown to schema
-            if self.schema.fields:  # only if schema was loaded
-                return ValidationResult(
-                    approved=False,
-                    violated_rule=f"T1_UNKNOWN_FIELD ({field_key})",
-                    tier="T1",
-                    explanation=f"Field '{field_key}' is not defined in the SCL schema"
-                )
+        is_valid, err_msg = meta.validate_value(proposal.value)
+        if not is_valid:
+            return ValidationResult(False, f"T1_SIGNAL_CONSTRAINT ({field_key})", "T1", err_msg)
 
-        # ─── Tier 2 (T2): Relational Interlocks & Permissives ────────────────
+        # Normalise enum strings to their numeric index so interlocks compare like with like.
+        value = proposal.value
+        if isinstance(value, str) and meta.enum_map:
+            value = meta.enum_map[value]
+
         for rule in self.relational_interlocks:
             if len(rule) == 5:
                 cond_var, cond_val, target_var, invalid_val, rule_msg = rule
-                if field_key != target_var or proposal.value != invalid_val:
+                if field_key != target_var or value != invalid_val:
                     continue
-                current = current_state.get(cond_var)
-                fired = current == cond_val or (cond_val is True and bool(current))
+                current = current_state.get(cond_var, _MISSING)
+                fired = current is _MISSING or current == cond_val or (cond_val is True and bool(current))
             else:
                 cond_var, cond_predicate, target_var, rule_msg = rule
                 if field_key != target_var:
                     continue
-                fired = bool(cond_predicate(current_state))
+                try:
+                    fired = bool(cond_predicate(current_state))
+                except Exception:
+                    fired = True  # cannot evaluate the permissive -> block
             if fired:
                 return ValidationResult(
-                    approved=False,
-                    violated_rule=f"T2_RELATIONAL_INTERLOCK ({cond_var} -> {target_var})",
-                    tier="T2",
-                    explanation=rule_msg,
+                    False, f"T2_RELATIONAL_INTERLOCK ({cond_var} -> {target_var})", "T2", rule_msg
                 )
 
         return ValidationResult(
-            approved=True,
-            tier="APPROVED",
-            explanation=f"Action proposal '{field_key} = {proposal.value}' verified against all T1/T2 constraints."
+            True, None, "APPROVED",
+            f"Action proposal '{field_key} = {proposal.value}' verified against all T1/T2 constraints."
         )

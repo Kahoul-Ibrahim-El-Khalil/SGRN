@@ -17,10 +17,10 @@ import os
 import sys
 from typing import Any, Dict, Optional, Tuple
 
-from langchain_tools import GLOBAL_STORE, get_flare_tools
+from langchain_tools import GLOBAL_STORE, getFlareTools
 
 
-def format_top_signals_summary(top_signals: list[dict]) -> str:
+def formatTopSignalsSummary(top_signals: list[dict]) -> str:
     lines = []
     for i, s in enumerate(top_signals, 1):
         name = s.get("signal", "Unknown")
@@ -31,7 +31,7 @@ def format_top_signals_summary(top_signals: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def generate_offline_advisory(state_dict: dict) -> Tuple[str, str]:
+def generateOfflineAdvisory(state_dict: dict) -> Tuple[str, str]:
     """Generate deterministically grounded assessment and action text without LLM."""
     state = state_dict.get("state", "normal")
     score = state_dict.get("score", 0.0)
@@ -57,7 +57,7 @@ class FlareMonitoringAgent:
     def __init__(self, use_llm: bool = True):
         self.use_llm = use_llm
         self.executor = None
-        self.tools = get_flare_tools()
+        self.tools = getFlareTools()
 
         if self.use_llm:
             api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -105,9 +105,9 @@ Example action when flare rises: 'Check flare header / vent path; inspect relief
                     print(f"[agent] Warning: Failed to initialize LLM agent ({exc}); using offline template mode.")
                     self.use_llm = False
 
-    def generate_advisory(self, state_dict: dict) -> Tuple[str, str]:
+    def generateAdvisory(self, state_dict: dict) -> Tuple[str, str]:
         if not self.use_llm or self.executor is None:
-            return generate_offline_advisory(state_dict)
+            return generateOfflineAdvisory(state_dict)
 
         sim_time = state_dict.get("sim_time", "N/A")
         state = state_dict.get("state", "normal")
@@ -133,9 +133,9 @@ Example action when flare rises: 'Check flare header / vent path; inspect relief
             return assessment, action
         except Exception as exc:
             print(f"[agent] LLM invocation error ({exc}), falling back to offline template.")
-            return generate_offline_advisory(state_dict)
+            return generateOfflineAdvisory(state_dict)
 
-    def print_operator_block(self, state_dict: dict) -> None:
+    def printOperatorBlock(self, state_dict: dict) -> None:
         sim_time = state_dict.get("sim_time", "N/A")
         state = state_dict.get("state", "normal").upper()
         score = state_dict.get("score", 0.0)
@@ -143,7 +143,7 @@ Example action when flare rises: 'Check flare header / vent path; inspect relief
         q_upper = state_dict.get("q_upper", 0.0)
         top_signals = state_dict.get("top_signals", [])
 
-        assessment, action = self.generate_advisory(state_dict)
+        assessment, action = self.generateAdvisory(state_dict)
 
         state_color = ""
         if state == "NORMAL":
@@ -158,7 +158,7 @@ Example action when flare rises: 'Check flare header / vent path; inspect relief
         print("=" * 80)
         print(f"  State:       {state}  |  Score: {score:.3f}  (q_alpha: {q_alpha:.3f}, q_upper: {q_upper:.3f})")
         print("  Top Signals:")
-        print(format_top_signals_summary(top_signals))
+        print(formatTopSignalsSummary(top_signals))
         print(f"  Assessment:  {assessment}")
         print(f"  Action:      {action}")
         print("=" * 80 + "\n")

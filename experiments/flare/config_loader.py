@@ -14,7 +14,7 @@ except ImportError:
     HAS_YAML = False
 
 
-def load_config(config_path: Path) -> Dict[str, Any]:
+def loadConfig(config_path: Path) -> Dict[str, Any]:
     """Load configuration from JSON or YAML file."""
     if not config_path.is_file():
         raise FileNotFoundError(f"Config file not found: {config_path}")
@@ -37,7 +37,7 @@ def load_config(config_path: Path) -> Dict[str, Any]:
         return json.loads(text)
 
 
-def get_config_path(base_dir: Path) -> Path:
+def getConfigPath(base_dir: Path) -> Path:
     """Find config file, preferring YAML over JSON."""
     yaml_path = base_dir / "config.yaml"
     json_path = base_dir / "config.json"
@@ -50,7 +50,7 @@ def get_config_path(base_dir: Path) -> Path:
     return json_path
 
 
-def _get_window_size(config: dict) -> int:
+def _getWindowSize(config: dict) -> int:
     """Extract window_size from config, supporting both legacy int and new dict format."""
     ws = config.get("dataset", {}).get("window_size", 12)
     if isinstance(ws, dict):
@@ -61,5 +61,5 @@ def _get_window_size(config: dict) -> int:
 if __name__ == "__main__":
     import sys
     path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("config.yaml")
-    cfg = load_config(path)
+    cfg = loadConfig(path)
     print(json.dumps(cfg, indent=2))

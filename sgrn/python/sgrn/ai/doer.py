@@ -65,6 +65,14 @@ DoerLike = Any  # structural type: anything with .propose_action(str, dict) -> A
 class LLMDoer:
     """LLM Doer Agent connecting to free/open LLM inference endpoints.
 
+    EXPERIMENTAL: every network provider (groq, pollinations, huggingface,
+    gemini, ollama-remote) transmits the full semantic plant state +
+    anomaly diagnostic to a third party. The keyless ``pollinations``
+    endpoint in particular sends plant state to a public service with no
+    contract — do not use it for production or sensitive plants. The
+    default provider is ``mock`` (offline, deterministic); opt into a
+    network provider explicitly.
+
     Providers that require no API key (``pollinations``) are tried first so the
     agent works out of the box; ``mock`` is the offline fallback for every
     transport, auth, or malformed-JSON failure.
@@ -72,7 +80,7 @@ class LLMDoer:
 
     def __init__(
         self,
-        provider: str = "groq",
+        provider: str = "mock",
         api_key: Optional[str] = None,
         model_name: Optional[str] = None,
         ollama_url: str = "http://localhost:11434",

@@ -134,7 +134,7 @@ class GetReplayStatusTool(BaseTool):
         return json.dumps(GLOBAL_STORE.replay_status, indent=2)
 
 
-def get_flare_tools() -> List[BaseTool]:
+def getFlareTools() -> List[BaseTool]:
     """Return read-only tools for the flare monitoring agent."""
     return [
         GetLatestDetectorStateTool(),

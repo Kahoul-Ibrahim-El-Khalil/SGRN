@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 # Ensure we can import from sgrn.python
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "sgrn", "python"))
 
-from langchain_tools import create_openrouter_llm, create_agent_executor, get_sgrn_tools
+from langchain_tools import createOpenrouterLlm, createAgentExecutor, getSgrnTools
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -94,7 +94,7 @@ WORKFLOW EACH CYCLE:
 # Agent Loop
 # ──────────────────────────────────────────────────────────────────────────────
 
-def run_agent_loop(poll_interval: float = 2.0, max_cycles: int = 0):
+def runAgentLoop(poll_interval: float = 2.0, max_cycles: int = 0):
     """Run the LLM agent in a continuous control loop."""
     
     load_dotenv()
@@ -111,7 +111,7 @@ def run_agent_loop(poll_interval: float = 2.0, max_cycles: int = 0):
     print(f"[Agent] Using OpenRouter model")
     
     # Create LLM and agent
-    llm = create_openrouter_llm(
+    llm = createOpenrouterLlm(
         model=os.getenv("OPENROUTER_MODEL", "openrouter/auto"),
         temperature=0.1,
     )
@@ -120,7 +120,7 @@ def run_agent_loop(poll_interval: float = 2.0, max_cycles: int = 0):
     from langchain.agents import AgentExecutor, create_openai_tools_agent
     from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
     
-    tools = get_sgrn_tools()
+    tools = getSgrnTools()
     
     prompt = ChatPromptTemplate.from_messages([
         ("system", PROCESS_CONTROL_SYSTEM_PROMPT),
@@ -228,4 +228,4 @@ Use the write_plant_data tool for both writes."""
 
 
 if __name__ == "__main__":
-    run_agent_loop()
+    runAgentLoop()

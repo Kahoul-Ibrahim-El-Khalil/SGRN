@@ -93,12 +93,24 @@ class AutoMLTrainer:
         return result_summary
 
     def saveToDatastore(self, gateway_client: Any, model_name: str, meta_data: Dict[str, Any]) -> bool:
-        """Stores trained model state and metadata directly in the SGRN datastore via Gateway client bindings."""
+        """Stores trained model metadata via the Gateway client bindings.
+
+        Uses the real ``Gateway`` write surface (``writeFields`` /
+        ``writeMultiDb``). There is no ``write_data`` endpoint, so the
+        previous implementation silently returned ``False`` for every
+        client. Returns ``True`` on success, ``False`` otherwise.
+        """
         try:
-            if hasattr(gateway_client, "write_data"):
-                gateway_client.write_data(f"ml_models/{model_name}", meta_data)
+            if hasattr(gateway_client, "writeFields"):
+                gateway_client.writeFields(f"ml_models/{model_name}", meta_data)
                 print(f"[AutoMLTrainer] Persisted model metadata to datastore at ml_models/{model_name}")
                 return True
+            if hasattr(gateway_client, "writeMultiDb"):
+                gateway_client.writeMultiDb({"ml_models": {model_name: meta_data}})
+                print(f"[AutoMLTrainer] Persisted model metadata to datastore at ml_models/{model_name}")
+                return True
+            print("[AutoMLTrainer] Gateway client exposes no supported write method "
+                  "(expected writeFields or writeMultiDb); not persisted")
         except Exception as e:
             print(f"[AutoMLTrainer] Datastore upload failed: {e}")
         return False

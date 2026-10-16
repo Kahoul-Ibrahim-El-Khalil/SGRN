@@ -17,7 +17,6 @@ This is the full reference the package docstring points at.
   (`decodeRecord`, endianness-aware per-field decode).
 - `models.py` — dataclasses: `DbField`, `DbSchema`, `UdtSchema`,
   `DataWriteResult`, `ConnectionInfo`, …
-- `websocket.py`, `telemetry.py` — transport clients.
 - `ml/` — Industrial machine learning and conformal manifold anomaly detection
   (see [sgrn/ml/README.md](file:///home/odahim/Studies/Software/SGRN/sgrn/python/sgrn/ml/README.md)):
   - `ml/device.py` — Hardware accelerator discovery (AMD ROCm/HIP, NVIDIA CUDA, Apple MPS, CPU).
@@ -30,8 +29,10 @@ This is the full reference the package docstring points at.
 
 ## Install / use
 
-Requires Python ≥ 3.9, `numpy>=1.23`, `websockets>=12.0`
-(see `pyproject.toml`; install with `pip install ./sgrn/python`).
+Requires Python ≥ 3.9, `numpy>=1.23`, `websockets>=14.0`
+(see `pyproject.toml`; install with `pip install ./sgrn/python`;
+ML extras with `pip install ./sgrn/python[ml]` for torch, pandas,
+scikit-learn and zstandard).
 
 The repo-root `sgrn/` directory is the C++ tree and must NOT shadow this
 package: test scripts put `sgrn/python` on `sys.path` *before* the repo

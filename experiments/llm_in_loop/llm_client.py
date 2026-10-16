@@ -189,7 +189,7 @@ class LLMSimulationClient:
             else:
                 self.plant_state.skid_mode = 0  # OFF
     
-    def build_llm_prompt(self) -> str:
+    def buildLlmPrompt(self) -> str:
         """Build the prompt for the LLM with current plant state."""
         mode_names = ["OFF", "FILLING", "HEATING", "DISCHARGING", "ALARM"]
         mode_str = mode_names[self.plant_state.skid_mode] if 0 <= self.plant_state.skid_mode < 5 else "UNKNOWN"
@@ -294,7 +294,7 @@ Consider:
             await self.update_plant_state()
             
             # Build prompt and call LLM
-            prompt = self.build_llm_prompt()
+            prompt = self.buildLlmPrompt()
             llm_result = await self.call_llm(prompt)
             
             if llm_result:

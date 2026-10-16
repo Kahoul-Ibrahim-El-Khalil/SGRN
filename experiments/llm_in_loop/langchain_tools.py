@@ -41,7 +41,7 @@ except ImportError:
 _GATEWAY: Optional[Gateway] = None
 
 
-def get_gateway() -> Gateway:
+def getGateway() -> Gateway:
     global _GATEWAY
     if _GATEWAY is None:
         base_url = os.getenv("SGRN_GATEWAY_URL", "http://localhost:8000")
@@ -91,7 +91,7 @@ class GetRegistryTool(BaseTool):
         db_number: Optional[int] = None,
         run_manager: Optional[CallbackManagerForToolRun] = None,
     ) -> str:
-        gw = get_gateway()
+        gw = getGateway()
         try:
             reg = gw.registry(t_headers_only=headers_only, t_db=db_number)
             # Return a concise summary for the LLM (full JSON can be huge)
@@ -132,7 +132,7 @@ class ListDatabasesTool(BaseTool):
     args_schema: Type[BaseModel] = ListDBsInput
 
     def _run(self, run_manager: Optional[CallbackManagerForToolRun] = None) -> str:
-        gw = get_gateway()
+        gw = getGateway()
         try:
             reg = gw.registry(t_headers_only=True)
             dbs = [
@@ -155,7 +155,7 @@ class ReadPlantDataTool(BaseTool):
     args_schema: Type[BaseModel] = ReadDataInput
 
     def _run(self, path: str, run_manager: Optional[CallbackManagerForToolRun] = None) -> str:
-        gw = get_gateway()
+        gw = getGateway()
         try:
             data = gw.readData(path)
             return json.dumps(data, indent=2, default=str)
@@ -177,7 +177,7 @@ class WritePlantDataTool(BaseTool):
     args_schema: Type[BaseModel] = WriteDataInput
 
     def _run(self, path: str, fields: dict, run_manager: Optional[CallbackManagerForToolRun] = None) -> str:
-        gw = get_gateway()
+        gw = getGateway()
         try:
             result = gw.writeFields(path, fields)
             return json.dumps({"success": True, "result": result}, indent=2)
@@ -194,7 +194,7 @@ class GetTypeDictionaryTool(BaseTool):
     args_schema: Type[BaseModel] = ListDBsInput
 
     def _run(self, run_manager: Optional[CallbackManagerForToolRun] = None) -> str:
-        gw = get_gateway()
+        gw = getGateway()
         try:
             types = gw.registryTypes()
             return json.dumps(types, indent=2, default=str)
@@ -209,7 +209,7 @@ class GetModbusMapTool(BaseTool):
     args_schema: Type[BaseModel] = ListDBsInput
 
     def _run(self, run_manager: Optional[CallbackManagerForToolRun] = None) -> str:
-        gw = get_gateway()
+        gw = getGateway()
         try:
             modbus = gw.modbusMap()
             return json.dumps(modbus, indent=2, default=str)
@@ -221,7 +221,7 @@ class GetModbusMapTool(BaseTool):
 # Tool Collection Factory
 # ──────────────────────────────────────────────────────────────────────────────
 
-def get_sgrn_tools() -> list[BaseTool]:
+def getSgrnTools() -> list[BaseTool]:
     """Return all SGRN Gateway tools for use with a LangChain agent."""
     return [
         GetRegistryTool(),
@@ -237,7 +237,7 @@ def get_sgrn_tools() -> list[BaseTool]:
 # Example: Building the LLM Agent with OpenRouter
 # ──────────────────────────────────────────────────────────────────────────────
 
-def create_openrouter_llm(
+def createOpenrouterLlm(
     model: str = "openrouter/auto",  # or specific model like "anthropic/claude-3.5-sonnet"
     temperature: float = 0.1,
 ) -> ChatOpenAI:
@@ -258,12 +258,12 @@ def create_openrouter_llm(
     )
 
 
-def create_agent_executor(llm: ChatOpenAI):
+def createAgentExecutor(llm: ChatOpenAI):
     """Create a LangChain agent executor with SGRN tools."""
     from langchain.agents import AgentExecutor, create_openai_tools_agent
     from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
     
-    tools = get_sgrn_tools()
+    tools = getSgrnTools()
     
     prompt = ChatPromptTemplate.from_messages([
         ("system", """You are an expert process control engineer operating an industrial digital twin via the SGRN Gateway.
@@ -319,8 +319,8 @@ if __name__ == "__main__":
     print("Creating LLM agent with OpenRouter...")
     print("=" * 60)
     
-    llm = create_openrouter_llm()
-    agent = create_agent_executor(llm)
+    llm = createOpenrouterLlm()
+    agent = createAgentExecutor(llm)
     
     # Example task
     task = (

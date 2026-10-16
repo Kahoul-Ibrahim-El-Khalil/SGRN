@@ -26,25 +26,25 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from config_loader import load_config, get_config_path
-from dataset import load_dataset_df, ensure_dataset_csv, SCL_SCHEMA
+from config_loader import loadConfig, getConfigPath
+from dataset import loadDatasetDf, ensureDatasetCsv, SCL_SCHEMA
 from model import FlareDetector
 
 
 FLARE_DIR = Path(__file__).parent
-CONFIG_PATH = get_config_path(FLARE_DIR)
+CONFIG_PATH = getConfigPath(FLARE_DIR)
 META_PATH = FLARE_DIR / "meta.json"
 ARCHIVE_PATH = FLARE_DIR / "flare_history.jsonl.zst"
 CSV_PATH = FLARE_DIR / "dataset.csv"
 
 
-def run_evaluation(save_plot: bool = True) -> dict:
-    config = load_config(CONFIG_PATH)
+def runEvaluation(save_plot: bool = True) -> dict:
+    config = loadConfig(CONFIG_PATH)
     meta = json.loads(META_PATH.read_text(encoding="utf-8"))
 
-    ensure_dataset_csv(ARCHIVE_PATH, CSV_PATH)
+    ensureDatasetCsv(ARCHIVE_PATH, CSV_PATH)
     features = config["features"]
-    feature_df, sim_timestamps = load_dataset_df(CSV_PATH, features)
+    feature_df, sim_timestamps = loadDatasetDf(CSV_PATH, features)
 
     detector = FlareDetector.load(FLARE_DIR, config)
     window_size = detector.window_size
@@ -238,7 +238,7 @@ def main() -> int:
     parser.add_argument("--no-plot", action="store_true", help="Skip saving evaluation plot")
     args = parser.parse_args()
 
-    run_evaluation(save_plot=not args.no_plot)
+    runEvaluation(save_plot=not args.no_plot)
     return 0
 
 

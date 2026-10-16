@@ -20,11 +20,19 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=1.23",
-    "websockets>=12.0",
+    "websockets>=14.0",
+]
+
+[project.optional-dependencies]
+ml = [
+    "torch>=2.0",
+    "pandas>=1.5",
+    "scikit-learn>=1.0",
+    "zstandard>=0.20",
 ]
 
 [project.urls]
-Repository = "https://example.invalid/sgrn"
+Repository = "https://github.com/Kahoul-Ibrahim-El-Khalil/SGRN"
 
 [tool.setuptools.packages.find]
 include = ["sgrn*"]

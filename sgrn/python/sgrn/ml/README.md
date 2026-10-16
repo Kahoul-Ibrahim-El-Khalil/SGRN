@@ -2,6 +2,23 @@
 
 `sgrn.ml` provides a domain-separated, hardware-accelerated machine learning and statistical uncertainty framework designed specifically for continuous industrial plant telemetry, Siemens S7 PLC memory integration, and digital twins.
 
+> **Control boundary.** This package produces predictions, scores and
+> evidence for downstream decision-making. It never writes to PLCs and
+> never bypasses the control layer: the only write path anywhere near it
+> is an explicit user call (`AutoMLTrainer.saveToDatastore(gateway, …)`,
+> `ActionCompiler` after a passed `SchemaChecker`), never an automatic
+> side effect of training or inference.
+
+> **Naming.** Public functions/methods are `camelCase`, classes
+> `PascalCase`, module constants `UPPER_SNAKE_CASE`. Parameters keep
+> their long-published `camelCase` spelling (demos, experiments and
+> tests call them by keyword) — renaming them would break the API for
+> no behavioural gain; every public function additionally ships a
+> `snake_case` alias. Removed pre-convention spellings
+> (`train_baseline`, `calibrate_conformal`, `evaluate_sample`, `to_json`)
+> had zero callers; the snake_case function aliases stay under the
+> compatibility policy.
+
 ---
 
 ## 1. Domain Architecture
@@ -49,19 +66,22 @@ device = resolveDevice()  # Returns torch.device('cuda') or torch.device('cpu')
 
 ### `schema.py` — SCL Schema Parser & Model Auto-Configuration
 
+Source priority: gateway `GET /registry` JSON or `.bin.zst` embedded schema first (`signalsFromRegistry` / `configureModelFromRegistry` — real offsets, resolved enums/aliases, authoritative `dimension`/`min`/`max`/`endianness`), SCL text (`parseSclSchema`) only as the offline fallback. DTL/LDTL fields are reported as `timestampFields` for direct ns normalisation, never as features.
+
 Parses Siemens S7 SCL (`.scl`) source files directly, establishing the SCL schema as the **single source of truth** for both PLC memory layout and AI model architecture:
 
 - **UDT & DB Expansion**: Recursively parses UDT structures (`FlowMeter`, `ValveActuator`, `SieveBed`) and multidimensional arrays to discover fully qualified signal paths (e.g. `InletSeparation.feed_flow.rate`, `AdsorberTowers.towers[0].bed_dp`).
-- **Semantic Pragma Taxonomy**: Maps `#UNIT` pragmas to physical thermodynamic domains:
+- **Semantic Pragma Taxonomy**: Maps `#UNIT`/`#RANGE`/`#ENUM` pragmas (case-insensitive) to physical thermodynamic domains:
   - `bar`, `psi`, `kPa` $\to$ **Pressure**
   - `°C`, `K` $\to$ **Temperature**
   - `dam³/h`, `m³/h`, `kg/h` $\to$ **Flow**
-  - `%`, `pct` $\to$ **Level / Saturation**
+  - `%`, `pct` $\to$ **Percent** (dimensionless ratio; Level vs. valve/speed setpoint comes from the signal name, never the bare unit)
   - `rpm` $\to$ **Rotational Speed**
   - `mm/s` $\to$ **Vibration**
   - `MJ/m³` $\to$ **Energy**
   - `ppm`, `ppmv` $\to$ **Composition**
-- **Automated Topology Derivation**: Automatically calculates neural autoencoder layer dimensions ($W \times S \to \text{hidden} \to \text{latent}$) and filters out discrete flags, timestamps, and model feedback registers (`model_anomaly`, `model_trip_advice`, `model_fault_code`).
+- **Automated Topology Derivation**: Automatically calculates neural autoencoder layer dimensions ($W \times (S + C) \to \text{hidden} \to \text{latent}$) and discovers discrete operating context (`Bool` flags, `#ENUM` modes incl. named scalar aliases like `PlantMode`) alongside continuous features. Model-feedback registers, trip setpoints, forecasts/specs and ESD logic are excluded by role (`_EXCLUDE_*`), not by plant; extend via `excludeSignals`.
+- **Discrete context, not discrete targets**: context signals condition the encoder and define standardisation strata; they are never reconstructed, so enum code distance never pollutes the anomaly score.
 
 #### Key Functions
 ```python
@@ -75,6 +95,8 @@ cfg = configureModelFromSchema("path/to/schema.scl", windowSize=12)
 # cfg["features"]           -> List of continuous process signals
 # cfg["featureDimensions"]  -> Map of signal -> physical dimension
 # cfg["featureSubsystems"]  -> Map of signal -> plant DB name
+# cfg["contextFeatures"]    -> List of discrete conditioning signals (Bool/#ENUM)
+# cfg["contextSpecs"]       -> Map of signal -> {"kind": "bool"|"enum", "categories": [...]}
 # cfg["modelConfig"]        -> Calculated input_dim, hidden_dim, latent_dim
 ```
 
@@ -85,6 +107,9 @@ cfg = configureModelFromSchema("path/to/schema.scl", windowSize=12)
 Handles the data engineering pipeline from raw SCADA tables or WAL streams into normalized sliding temporal tensors:
 
 - **`Scaler`**: Dataclass providing Z-score standardisation ($\widetilde{\mathbf{x}} = \frac{\mathbf{x} - \boldsymbol{\mu}}{\boldsymbol{\sigma}}$) fitted strictly on pre-fault baseline data to prevent temporal data leakage, with near-zero variance safeguards.
+- **`StreamingStats`**: Welford online mean/variance (NaN-skipping, exactly mergeable, bit-parity with `fitProcessScaler`) — the scaler without the matrix.
+- **Discrete context encoding**: `extractRawContextColumns` / `encodeContextMatrix` one-hot encode `Bool`/`#ENUM` modes per timestep (enums carry an extra unknown/other column); `inferContextSpecs` derives specs from nominal training columns when no schema is present.
+- **Mode-stratified standardisation**: `fitStratifiedStats` / `applyStratifiedStats` z-score each timestep by its own mode's nominal mean/std, so a value nominal in one mode but impossible in another scores as a large residual in any model. Under-sampled strata fall back to global statistics.
 - **`filterProcessTimeline`**: Slices data by operational cycle boundaries or timestamp ranges.
 - **`extractFeatureMatrix`**: Validates signal presence, casts to `float32`, and applies forward/backward fill imputation.
 - **`splitProcessTimeline`**: Chronologically partitions nominal pre-fault data into training (70%) and conformal calibration (30%), isolating post-fault test data.
@@ -96,6 +121,8 @@ from sgrn.ml import (
     Scaler,
     filterProcessTimeline,
     extractFeatureMatrix,
+    extractContextMatrix,
+    fitStratifiedStats,
     splitProcessTimeline,
     fitProcessScaler,
     createSlidingWindows,
@@ -108,17 +135,20 @@ from sgrn.ml import (
 
 Implements the physical manifold projection operator and split-conformal statistical uncertainty bounds:
 
-- **`WindowAutoencoder` (`nn.Module`)**: Symmetric MLP autoencoder with parameterized bottleneck compressing flattened sliding windows ($W \cdot S \to 64 \to 16 \to 64 \to W \cdot S$).
+- **`WindowAutoencoder` (`nn.Module`)**: Symmetric MLP autoencoder with parameterized bottleneck compressing flattened sliding windows ($W \cdot (S + C) \to 64 \to 16 \to 64 \to W \cdot S$), where $C$ is the one-hot discrete-context width. Context conditions the encoder; the decoder reconstructs continuous signals only.
+- **`ModePredictor` (`nn.Module`)**: Second head trained on the same nominal windows, answering "which mode does the physics imply?" from the continuous window *alone* (feeding it the actual codes would be a trivial copy). Per-Bool BCE / per-enum cross-entropy nonconformity with its own conformal bounds (`mode_mismatch` names the disagreeing switch).
 - **`ProcessManifoldDetector`**: Production detector wrapper that:
   - Projects incoming windows through the neural autoencoder on GPU/CPU.
-  - Computes orthogonal reconstruction error $e(\mathbf{x}) = \frac{1}{W \cdot S} \|\widetilde{\mathbf{x}} - \widehat{\mathbf{x}}\|^2$.
+  - Computes orthogonal reconstruction error $e(\mathbf{x}) = \frac{1}{W \cdot S} \|\widetilde{\mathbf{x}} - \widehat{\mathbf{x}}\|^2$ on mode-stratified residuals.
   - Evaluates conformal 3-state uncertainty:
     - **`normal`**: $e \le q_\alpha$ (within tolerance tube $\mathcal{T}_\alpha$).
     - **`uncertain`**: $q_\alpha < e \le k \cdot q_\alpha$ (boundary regime; soft operator warning without immediate plant trip).
     - **`abnormal`**: $e > k \cdot q_\alpha$ (statistically significant manifold departure; trip advisory).
+  - Escalates unseen operating modes / unknown categories to at least `uncertain` (`unseen_mode`, `context_unknown`, `context_mode` in every verdict).
+  - Holds per-signal conformal bounds alongside the window-mean bound, so single-sensor faults are not diluted away (`abnormal_signals`).
   - Decomposes projection residual across **Physical Dimensions** and **Plant Subsystems**.
   - Supports high-throughput vectorized GPU batch inference via `detectBatch()`.
-- **`trainManifoldDetector`**: Trains autoencoder on nominal baseline data and calibrates empirical quantile $q_\alpha = \text{Quantile}_{\frac{\lceil(n+1)(1-\alpha)\rceil}{n}}(\{s_i\})$ on held-out calibration split.
+- **`trainManifoldDetector`**: Trains autoencoder on nominal baseline data and calibrates empirical quantile $q_\alpha = \text{Quantile}_{\frac{\lceil(n+1)(1-\alpha)\rceil}{n}}(\{s_i\})$ on held-out calibration split, thinned to non-overlapping blocks (`calibrationStride`, default = window length) for approximate exchangeability.
 
 #### Key Functions
 ```python
@@ -146,8 +176,11 @@ batch_results = detector.detectBatch(raw_windows, batchSize=512)
 
 Provides high-level functional composition tying together schema parsing, data splitting, scaling, training, calibration, and inference into clean single-function calls:
 
-- **`fitManifoldPipeline(...)`**: End-to-end pipeline that takes a dataset (DataFrame or array) and an SCL schema path, automatically deriving features, dimensions, scaling, windowing, and fitting the detector.
-- **`evaluateManifoldSequence(...)`**: Evaluates an entire continuous timeline or test split with GPU-accelerated batch scoring.
+- **`fitManifoldPipeline(...)`**: End-to-end pipeline that takes a dataset (DataFrame or array) and an SCL schema path, automatically deriving continuous features, discrete context, mode strata, scaling, windowing, and fitting the detector (`useContext=False` restores the legacy continuous-only model; `stratifyOn`/`minStratumSamples` control mode stratification; `trainModeHead=False` disables the physics→mode head).
+- **`fitManifoldPipelineStream(reader, ...)`**: Same model and thresholds in O(window) memory — rows stream from `BinaryDatasetReader`/`JsonlDatasetReader.iterRows` through four chronological passes (count+cutoff, Welford stats, ring-buffer training epochs with shuffle buffer, streaming calibration). `schemaSource` defaults to the reader's embedded schema, so an archive trains a detector directly. `splits` carries counts, not window arrays (never materialised).
+- **`evaluateManifoldSequence(...)`**: Evaluates an entire continuous timeline or test split with GPU-accelerated batch scoring (takes matching `contextData` when the detector uses context).
+- **`inferStateAt(detector, data, timestamp, ...)`**: "What was happening then?" — the window ending at a wall-clock time through `detect`, from a DataFrame or straight from an archive reader (O(window) streaming).
+- **`predictFeature(detector, window, feature, ...)`**: Manifold-constrained nowcast of one signal from all the others (masked reconstruction + conformal interval); fault windows land far outside with large `surprise`.
 
 #### Key Functions
 ```python
@@ -173,7 +206,10 @@ eval_res = evaluateManifoldSequence(detector, test_df)
 Provides stream readers for SGRN persistence formats:
 
 - **`BinaryDatasetReader`**: Decodes high-performance binary WAL (`.bin.zst`) frames (full anchor frames, delta runs, and control frames) with CRC32 verification.
-- **`DatasetReader`**: Decodes JSONL streaming replay archives (`.jsonl.zst`).
+  - `readDataset()` — legacy `(timestamps_ms, names, float32 matrix)` view. Numeric fields decode with their schema byte order; DTL/LDTL timestamp fields read as NaN here.
+  - `readPandas()` — preferred: builds the DataFrame **directly from WAL frames, no CSV intermediate** (faithful dtypes: float32/64, bool, int32, datetime64[ns] for DTL/LDTL, plus a `timestamp` column from the frame clock). The `sgrn_dataset` CSV export stringifies floats and bool-maps by string compare — treat CSV as interchange, not a pipeline stage.
+- **`JsonlDatasetReader`**: Decodes gateway JSONL replay archives (`.jsonl.zst` / `.jsonl`) with carried-forward state, file-local leaf dictionaries and nested/legacy shapes — `readPandas()` straight into a DataFrame, same as the binary path.
+- **`DatasetReader`**: Reads `sgrn_dataset` manifest + CSV distribution bundles (interchange format).
 
 ---
 
@@ -181,7 +217,7 @@ Provides stream readers for SGRN persistence formats:
 
 - **`fitMonitorAndDiagnoser`**: Fits normal-only PCA monitors with scikit-learn random forest classifiers for baseline comparison.
 - **`explainSample`**: Explains point feature contributions relative to normal operating envelopes.
-- **`AutoMLTrainer` / `trainModel`**: Tabular model training utilities.
+- **`AutoMLTrainer`**: Tabular model training utilities.
 
 ---
 

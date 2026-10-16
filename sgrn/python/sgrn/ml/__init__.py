@@ -19,39 +19,74 @@ from .device import (
 )
 from .schema import (
     PHYSICAL_DIMENSION_MAP,
+    configureModelFromRegistry,
     configureModelFromSchema,
     inferDimensionFromName,
     inferPhysicalDimension,
     parseSclSchema,
+    signalsFromRegistry,
+    configure_model_from_registry,
     configure_model_from_schema,
     infer_dimension_from_name,
     infer_physical_dimension,
     parse_scl_schema,
+    signals_from_registry,
 )
 from .transform import (
     Scaler,
+    StreamingStats,
+    contextEncodedDim,
+    contextLayout,
+    contextRowKeys,
     createSlidingWindows,
+    encodeContextMatrix,
+    extractContextMatrix,
     extractFeatureMatrix,
+    extractRawContextColumns,
     filterProcessTimeline,
     fitProcessScaler,
+    fitStratifiedStats,
+    applyStratifiedStats,
+    inferContextSpecs,
     splitProcessTimeline,
+    streaming_stats,
+    context_encoded_dim,
+    context_layout,
+    context_row_keys,
     create_sliding_windows,
+    encode_context_matrix,
+    extract_context_matrix,
     extract_feature_matrix,
+    extract_raw_context_columns,
     filter_process_timeline,
     fit_process_scaler,
+    fit_stratified_stats,
+    apply_stratified_stats,
+    infer_context_specs,
     split_process_timeline,
 )
 from .manifold import (
+    ModePredictor,
     ProcessManifoldDetector,
     WindowAutoencoder,
+    modeNLLs,
     trainManifoldDetector,
+    trainModePredictor,
+    mode_nlls,
     train_manifold_detector,
+    train_mode_predictor,
 )
 from .pipeline import (
     evaluateManifoldSequence,
     fitManifoldPipeline,
+    fitManifoldPipelineStream,
+    inferStateAt,
+    predictFeature,
     evaluate_manifold_sequence,
     fit_manifold_pipeline,
+    fit_manifold_pipeline_stream,
+    infer_state_at,
+    predict_feature,
 )
 from .anomaly import (
     ConformalAnomalyDetector,
@@ -59,11 +94,19 @@ from .anomaly import (
 )
 
 try:
-    from .dataset import DatasetReader, BinaryDatasetReader
-    from .diagnostics import explainSample, fitMonitorAndDiagnoser
-    from .trainer import AutoMLTrainer, trainModel
+    from .dataset import DatasetReader, BinaryDatasetReader, JsonlDatasetReader
 except ImportError:
-    pass
+    DatasetReader = BinaryDatasetReader = JsonlDatasetReader = None
+
+try:
+    from .diagnostics import explainSample, fitMonitorAndDiagnoser, scoreDetections
+except ImportError:
+    explainSample = fitMonitorAndDiagnoser = scoreDetections = None
+
+try:
+    from .trainer import AutoMLTrainer
+except ImportError:
+    AutoMLTrainer = None
 
 __all__ = [
     # Device / Hardware
@@ -74,42 +117,78 @@ __all__ = [
     # Schema / Semantics
     "PHYSICAL_DIMENSION_MAP",
     "parseSclSchema",
+    "signalsFromRegistry",
     "configureModelFromSchema",
+    "configureModelFromRegistry",
     "inferPhysicalDimension",
     "inferDimensionFromName",
     "parse_scl_schema",
+    "signals_from_registry",
     "configure_model_from_schema",
+    "configure_model_from_registry",
     "infer_physical_dimension",
     "infer_dimension_from_name",
     # Data / Transforms
     "Scaler",
+    "StreamingStats",
+    "streaming_stats",
     "filterProcessTimeline",
     "extractFeatureMatrix",
     "splitProcessTimeline",
     "fitProcessScaler",
     "createSlidingWindows",
+    "contextLayout",
+    "contextEncodedDim",
+    "contextRowKeys",
+    "extractRawContextColumns",
+    "inferContextSpecs",
+    "fitStratifiedStats",
+    "applyStratifiedStats",
+    "encodeContextMatrix",
+    "extractContextMatrix",
     "filter_process_timeline",
     "extract_feature_matrix",
     "split_process_timeline",
     "fit_process_scaler",
     "create_sliding_windows",
+    "context_layout",
+    "context_encoded_dim",
+    "context_row_keys",
+    "extract_raw_context_columns",
+    "infer_context_specs",
+    "fit_stratified_stats",
+    "apply_stratified_stats",
+    "encode_context_matrix",
+    "extract_context_matrix",
     # Model / Manifold
     "WindowAutoencoder",
+    "ModePredictor",
     "ProcessManifoldDetector",
     "trainManifoldDetector",
     "train_manifold_detector",
+    "trainModePredictor",
+    "train_mode_predictor",
+    "modeNLLs",
+    "mode_nlls",
     "ConformalAnomalyDetector",
     "SplitConformalCalibrator",
     # Pipelines
     "fitManifoldPipeline",
-    "evaluateManifoldSequence",
     "fit_manifold_pipeline",
+    "fitManifoldPipelineStream",
+    "fit_manifold_pipeline_stream",
+    "inferStateAt",
+    "infer_state_at",
+    "predictFeature",
+    "predict_feature",
+    "evaluateManifoldSequence",
     "evaluate_manifold_sequence",
     # Diagnostics & Training
     "explainSample",
     "fitMonitorAndDiagnoser",
+    "scoreDetections",
     "AutoMLTrainer",
-    "trainModel",
     "DatasetReader",
     "BinaryDatasetReader",
+    "JsonlDatasetReader",
 ]

@@ -43,13 +43,13 @@ class MotorSimulator:
         self.motor = motor
         self.cfg = cfg
 
-    def _calculate_slip(self, speed_rpm: float) -> float:
+    def _calculateSlip(self, speed_rpm: float) -> float:
         sync_rpm = 120 * self.motor.frequency / self.motor.poles
         if sync_rpm == 0:
             return 0.0
         return max(0.0, (sync_rpm - speed_rpm) / sync_rpm)
 
-    def _calculate_current(self, slip: float, imbalance: float = 0.0) -> float:
+    def _calculateCurrent(self, slip: float, imbalance: float = 0.0) -> float:
         s_rated = 0.03
         base_current = self.motor.rated_current / math.sqrt(1 + (slip / s_rated) ** 2)
         inrush = self.motor.inrush_multiplier * self.motor.rated_current * math.exp(-50 * slip)
@@ -58,13 +58,13 @@ class MotorSimulator:
             current *= (1 + imbalance)
         return current
 
-    def _calculate_torque(self, slip: float) -> float:
+    def _calculateTorque(self, slip: float) -> float:
         s_rated = 0.03
         t_max = 2 * self.motor.load_torque
         torque = 2 * t_max * slip * s_rated / (slip**2 + s_rated**2)
         return torque
 
-    def simulate_start(self, fault_type: str = "none", imbalance: float = 0.0, seed: int = 0) -> List[Dict[str, Any]]:
+    def simulateStart(self, fault_type: str = "none", imbalance: float = 0.0, seed: int = 0) -> List[Dict[str, Any]]:
         random.seed(seed)
         samples = []
         speed = 0.0
@@ -89,9 +89,9 @@ class MotorSimulator:
             speed += alpha * (target_speed - speed) * self.cfg.dt * 10
             speed += random.gauss(0, 1.0)
 
-            slip = self._calculate_slip(speed)
-            current = self._calculate_current(slip, imbalance if fault_type == "phase_imbalance" else 0.0)
-            torque = self._calculate_torque(slip)
+            slip = self._calculateSlip(speed)
+            current = self._calculateCurrent(slip, imbalance if fault_type == "phase_imbalance" else 0.0)
+            torque = self._calculateTorque(slip)
 
             if fault_type == "overcurrent" and t > 5.0:
                 current *= 1.6
@@ -117,7 +117,7 @@ class MotorSimulator:
         return samples
 
 
-def generate_dataset(output_dir: Path, config: Dict[str, Any]) -> None:
+def generateDataset(output_dir: Path, config: Dict[str, Any]) -> None:
     motor = MotorParams(**config["motor"])
     sim_cfg = SimConfig(
         duration_s=config["simulation"]["duration_s"],
@@ -131,28 +131,28 @@ def generate_dataset(output_dir: Path, config: Dict[str, Any]) -> None:
 
     nominal_data = []
     for i in range(sim_cfg.normal_starts):
-        samples = simulator.simulate_start(fault_type="none", seed=i)
+        samples = simulator.simulateStart(fault_type="none", seed=i)
         nominal_data.extend(samples)
 
     faulty_data = []
     fault_types = sim_cfg.fault_types
     for i in range(sim_cfg.fault_starts):
         fault_type = fault_types[i % len(fault_types)]
-        samples = simulator.simulate_start(fault_type=fault_type, seed=1000 + i)
+        samples = simulator.simulateStart(fault_type=fault_type, seed=1000 + i)
         faulty_data.extend(samples)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     features = config["features"]
 
-    def write_csv(data: List[Dict], path: Path):
+    def writeCsv(data: List[Dict], path: Path):
         fieldnames = ["time"] + features
         with open(path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(data)
 
-    write_csv(nominal_data, output_dir / "nominal_starts.csv")
-    write_csv(faulty_data, output_dir / "faulty_starts.csv")
+    writeCsv(nominal_data, output_dir / "nominal_starts.csv")
+    writeCsv(faulty_data, output_dir / "faulty_starts.csv")
 
     meta = {
         "motor": asdict(motor),
@@ -182,7 +182,7 @@ def main() -> int:
         config = json.loads(config_path.read_text())
 
     output_dir = Path(args.output_dir)
-    generate_dataset(output_dir, config)
+    generateDataset(output_dir, config)
     return 0
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""experiments/flare/run_capture.py — Stage 1: WAL capture for FLARE_BLOCKED scenario.
+"""experiments/flare/runCapture.py — Stage 1: WAL capture for FLARE_BLOCKED scenario.
 
 Runs an isolated copy of simulation.as (Day 31, Hour 3: fault_code = 9) connected to
 an isolated gateway process capturing into .jsonl.zst.
@@ -28,12 +28,12 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[2]
 SIM_DIR = ROOT / "sgrn/lib/gateway/simulations/gas_processing"
 
-from config_loader import load_config, get_config_path
+from config_loader import loadConfig, getConfigPath
 
-CONFIG_PATH = get_config_path(Path(__file__).parent)
+CONFIG_PATH = getConfigPath(Path(__file__).parent)
 
 
-def find_binary(name: str) -> Path:
+def findBinary(name: str) -> Path:
     app_name = {"sgrn_replay": "replay"}.get(name, name)
     paths = (
         ROOT / ".dist/linux-static-release" / name,
@@ -48,7 +48,7 @@ def find_binary(name: str) -> Path:
     raise FileNotFoundError(f"Cannot find binary {name}; check .dist/linux-static-release/")
 
 
-def wait_http(url: str, proc: subprocess.Popen, timeout: float = 30.0) -> None:
+def waitHttp(url: str, proc: subprocess.Popen, timeout: float = 30.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if proc.poll() is not None:
@@ -61,7 +61,7 @@ def wait_http(url: str, proc: subprocess.Popen, timeout: float = 30.0) -> None:
     raise TimeoutError(f"Gateway did not become ready at {url}")
 
 
-def stop_process(proc: subprocess.Popen | None, timeout: float = 10.0) -> None:
+def stopProcess(proc: subprocess.Popen | None, timeout: float = 10.0) -> None:
     if proc is None or proc.poll() is not None:
         return
     proc.terminate()
@@ -72,7 +72,7 @@ def stop_process(proc: subprocess.Popen | None, timeout: float = 10.0) -> None:
         proc.wait()
 
 
-def create_isolated_simulation(
+def createIsolatedSimulation(
     run_dir: Path,
     http_port: int,
     cfg: dict,
@@ -286,7 +286,7 @@ int esd_trip_tick = -1;
     return script_path, max_iterations
 
 
-def write_gateway_config(path: Path, state_dir: Path, http_port: int, schema_path: Path) -> None:
+def writeGatewayConfig(path: Path, state_dir: Path, http_port: int, schema_path: Path) -> None:
     config = {
         "schema": str(schema_path.resolve()),
         "state_dir": str(state_dir.resolve()),
@@ -314,21 +314,21 @@ def write_gateway_config(path: Path, state_dir: Path, http_port: int, schema_pat
     path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 
-def run_capture(args) -> tuple[Path, Path]:
-    cfg = load_config(get_config_path(Path(__file__).parent))
+def runCapture(args) -> tuple[Path, Path]:
+    cfg = loadConfig(getConfigPath(Path(__file__).parent))
     out_dir = Path(args.out).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
     run_dir = out_dir / datetime.now(timezone.utc).strftime("capture_%Y%m%d_%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=False)
 
-    gw_bin = find_binary("gateway")
-    s7_bin = find_binary("s7shell")
+    gw_bin = findBinary("gateway")
+    s7_bin = findBinary("s7shell")
 
-    script_path, max_iterations = create_isolated_simulation(run_dir, args.port, cfg)
+    script_path, max_iterations = createIsolatedSimulation(run_dir, args.port, cfg)
     gw_config_path = run_dir / "gateway.json"
     gw_state_dir = run_dir / "gw_state"
-    write_gateway_config(gw_config_path, gw_state_dir, args.port, script_path.parent / "schema.scl")
+    writeGatewayConfig(gw_config_path, gw_state_dir, args.port, script_path.parent / "schema.scl")
 
     # Discard verbose subprocess output by default to avoid massive log files.
     # Use DEVNULL for stdout/stderr unless --verbose flag is provided.
@@ -355,7 +355,7 @@ def run_capture(args) -> tuple[Path, Path]:
 
     try:
         print(f"[capture] Starting Gateway on http://127.0.0.1:{args.port}...")
-        wait_http(f"http://127.0.0.1:{args.port}/endpoints", gw_proc)
+        waitHttp(f"http://127.0.0.1:{args.port}/endpoints", gw_proc)
         print("[capture] Gateway ready. Starting S7Shell simulation (30 normal days + fault day)...")
 
         sim_proc = subprocess.Popen(
@@ -377,10 +377,10 @@ def run_capture(args) -> tuple[Path, Path]:
 
         print("[capture] Simulation complete.")
     finally:
-        stop_process(sim_proc)
+        stopProcess(sim_proc)
         # Give gateway a moment to finish commit before stopping
         time.sleep(1.0)
-        stop_process(gw_proc, timeout=10)
+        stopProcess(gw_proc, timeout=10)
         if gw_log:
             gw_log.close()
         if sim_log:
@@ -445,7 +445,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        run_capture(args)
+        runCapture(args)
     except Exception as exc:
         print(f"[capture] FAILED: {exc}", file=sys.stderr)
         return 1

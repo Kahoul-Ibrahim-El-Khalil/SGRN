@@ -39,7 +39,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "sgrn/python") not in sys.path:
     sys.path.insert(0, str(ROOT / "sgrn/python"))
 
-from config_loader import load_config, get_config_path
+from config_loader import loadConfig, getConfigPath
 
 from sgrn.ml import (
     Scaler,
@@ -62,7 +62,7 @@ BASE_ARCHIVE_PATH = FLARE_DIR / "flare_history.jsonl.zst"
 SCL_SCHEMA_PATH = ROOT / "sgrn/lib/gateway/simulations/gas_processing/schema.scl"
 
 
-def _get_window_size(config: dict) -> int:
+def _getWindowSize(config: dict) -> int:
     """Extract window_size from config, supporting both legacy int and new dict format."""
     ws = config.get("dataset", {}).get("window_size", 12)
     if isinstance(ws, dict):
@@ -70,7 +70,7 @@ def _get_window_size(config: dict) -> int:
     return int(ws)
 
 
-def print_banner(output_dir: Path, device: torch.device, hw_info: dict) -> None:
+def printBanner(output_dir: Path, device: torch.device, hw_info: dict) -> None:
     print("\n" + "=" * 80)
     print("      SGRN CYBER-PHYSICAL PLANT SUPERVISION — PIPELINE ORCHESTRATOR")
     print("=" * 80)
@@ -81,7 +81,7 @@ def print_banner(output_dir: Path, device: torch.device, hw_info: dict) -> None:
     print("=" * 80 + "\n")
 
 
-def find_sgrn_dataset_bin() -> Path:
+def findSgrnDatasetBin() -> Path:
     paths = (
         ROOT / ".dist/linux-static-release/sgrn_dataset",
         ROOT / ".dist/linux-static/sgrn_dataset",
@@ -93,7 +93,7 @@ def find_sgrn_dataset_bin() -> Path:
     raise FileNotFoundError("sgrn_dataset binary not found; please build SGRN tools.")
 
 
-def stage_1_ingestion(output_dir: Path, run_capture: bool) -> Tuple[Path, Path]:
+def stage1Ingestion(output_dir: Path, run_capture: bool) -> Tuple[Path, Path]:
     """Ensure WAL archive and simulation metadata exist in output_dir."""
     print("▶ [1/5] Process Telemetry & WAL Ingestion")
     archive_out = output_dir / "flare_history.jsonl.zst"
@@ -128,10 +128,10 @@ def stage_1_ingestion(output_dir: Path, run_capture: bool) -> Tuple[Path, Path]:
     return archive_out, meta_out
 
 
-from dataset import get_splits_and_windows, load_dataset_df
+from dataset import getSplitsAndWindows, loadDatasetDf
 
 
-def stage_2_dataset(archive_path: Path, output_dir: Path, config: dict) -> Tuple[pd.DataFrame, pd.Series, dict]:
+def stage2Dataset(archive_path: Path, output_dir: Path, config: dict) -> Tuple[pd.DataFrame, pd.Series, dict]:
     """Convert WAL archive to CSV and extract chronological sliding windows."""
     print("\n▶ [2/5] SCL Schema Parsing & Sliding Window Extraction")
     csv_path = output_dir / "dataset" / "dataset.csv"
@@ -139,10 +139,10 @@ def stage_2_dataset(archive_path: Path, output_dir: Path, config: dict) -> Tuple
     meta_path = output_dir / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else json.loads(BASE_META_PATH.read_text(encoding="utf-8"))
 
-    splits = get_splits_and_windows(archive_path=archive_path, csv_path=csv_path, config=config, meta=meta)
+    splits = getSplitsAndWindows(archive_path=archive_path, csv_path=csv_path, config=config, meta=meta)
 
     features = splits["features"]
-    feature_df, timestamps = load_dataset_df(csv_path, features)
+    feature_df, timestamps = loadDatasetDf(csv_path, features)
     splits["feature_df"] = feature_df
     splits["timestamps"] = timestamps
 
@@ -156,7 +156,7 @@ def stage_2_dataset(archive_path: Path, output_dir: Path, config: dict) -> Tuple
     return feature_df, timestamps, splits
 
 
-def stage_3_train_and_calibrate(
+def stage3TrainAndCalibrate(
     splits: dict,
     output_dir: Path,
     config: dict,
@@ -176,7 +176,7 @@ def stage_3_train_and_calibrate(
     X_cal = splits["X_cal"]
     scaler = splits["scaler"]
     features = splits["features"]
-    window_size = _get_window_size(config)
+    window_size = _getWindowSize(config)
 
     # Derive dimensions from SCL schema
     schema_ast = parseSclSchema(SCL_SCHEMA_PATH)
@@ -265,7 +265,7 @@ def stage_3_train_and_calibrate(
     return detector
 
 
-def stage_4_evaluate_and_plot(
+def stage4EvaluateAndPlot(
     detector: ProcessManifoldDetector,
     splits: dict,
     output_dir: Path,
@@ -411,7 +411,7 @@ def stage_4_evaluate_and_plot(
     return metrics
 
 
-def stage_5_report(metrics: dict, output_dir: Path) -> Path:
+def stage5Report(metrics: dict, output_dir: Path) -> Path:
     """Generate Markdown executive report."""
     print("\n▶ [5/5] Executive Diagnostic Report Generation")
     report_path = output_dir / "report.md"
@@ -505,23 +505,23 @@ def main() -> int:
     model_dir = output_dir / "model"
     model_dir.mkdir(parents=True, exist_ok=True)
 
-    config_path = get_config_path(output_dir)
+    config_path = getConfigPath(output_dir)
     if not config_path.is_file() and BASE_CONFIG_PATH.is_file():
         shutil.copy2(BASE_CONFIG_PATH, config_path)
-    config = load_config(config_path) if config_path.is_file() else load_config(BASE_CONFIG_PATH)
+    config = loadConfig(config_path) if config_path.is_file() else loadConfig(BASE_CONFIG_PATH)
 
     device = resolveDevice(args.device)
     hw_info = getHardwareInfo()
 
-    print_banner(output_dir, device, hw_info)
+    printBanner(output_dir, device, hw_info)
 
     t0 = time.time()
     # Stage 1
-    archive_path, meta_path = stage_1_ingestion(output_dir, run_capture=args.capture)
+    archive_path, meta_path = stage1Ingestion(output_dir, run_capture=args.capture)
     # Stage 2
-    feature_df, timestamps, splits = stage_2_dataset(archive_path, output_dir, config)
+    feature_df, timestamps, splits = stage2Dataset(archive_path, output_dir, config)
     # Stage 3
-    detector = stage_3_train_and_calibrate(
+    detector = stage3TrainAndCalibrate(
         splits=splits,
         output_dir=output_dir,
         config=config,
@@ -532,7 +532,7 @@ def main() -> int:
         device=device,
     )
     # Stage 4
-    metrics = stage_4_evaluate_and_plot(
+    metrics = stage4EvaluateAndPlot(
         detector=detector,
         splits=splits,
         output_dir=output_dir,
@@ -540,7 +540,7 @@ def main() -> int:
         make_plot=not args.no_plot,
     )
     # Stage 5
-    stage_5_report(metrics, output_dir)
+    stage5Report(metrics, output_dir)
 
     elapsed = time.time() - t0
 
