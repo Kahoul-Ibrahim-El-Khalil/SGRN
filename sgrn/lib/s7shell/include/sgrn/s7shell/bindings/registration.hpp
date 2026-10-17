@@ -153,7 +153,11 @@ inline std::string wallClockDtlString() {
     const auto now = system_clock::now();
     const std::time_t tt = system_clock::to_time_t(now);
     std::tm tm{};
+#if defined(_WIN32)
+    localtime_s(&tm, &tt);
+#else
     localtime_r(&tt, &tm);
+#endif
     s7codec::S7RawDTL d = dtlFromTm(tm);
     const int64_t ns_total = duration_cast<nanoseconds>(now.time_since_epoch()).count();
     int64_t ns = ns_total % 1000000000LL;

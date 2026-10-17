@@ -8,6 +8,7 @@ S7Shell* S7Shell::p_s_active_for_completion = nullptr;
 static std::vector<std::string> g_completion_candidates;
 
 char** S7Shell::completionDispatch(const char* tp_text, int /*start*/, int /*end*/) {
+#ifndef _WIN32
     rl_attempted_completion_over = 1; // don't fall back to filename completion
     if (!p_s_active_for_completion)
         return nullptr;
@@ -40,6 +41,10 @@ char** S7Shell::completionDispatch(const char* tp_text, int /*start*/, int /*end
             return strdup(g_completion_candidates[idx++].c_str());
         return nullptr;
     });
+#else
+    (void)tp_text;
+    return nullptr;
+#endif
 }
 
 std::vector<std::string> S7Shell::completeTopLevel(const std::string& t_prefix) const {

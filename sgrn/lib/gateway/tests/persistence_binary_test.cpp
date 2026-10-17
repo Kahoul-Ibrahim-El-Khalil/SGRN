@@ -42,10 +42,16 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
-#include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
+
+#ifdef _WIN32
+#include <process.h>
+#define getpid _getpid
+#else
+#include <unistd.h>
+#endif
 
 namespace
 {

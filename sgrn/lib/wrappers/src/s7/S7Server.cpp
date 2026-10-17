@@ -1,4 +1,3 @@
-#include <sgrn/gateway/twin/utils.hpp>
 #include <sgrn/wrappers/s7/S7Server.hpp>
 
 using sgrn::wrappers::s7::fromSnap7ErrorToS7Error;

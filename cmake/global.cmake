@@ -178,6 +178,7 @@ set(CMAKE_CXX_STANDARD 23 CACHE STRING "C++ standard")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF CACHE BOOL "Disable C++ module scanning" FORCE)
 
 # 4. Global Build Macros & Metadata
 # ------------------------------------------------------------------------------

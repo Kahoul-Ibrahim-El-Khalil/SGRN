@@ -13,9 +13,21 @@ import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    from demos._port_utils import ensure_port_free, read_gateway_port
+except ModuleNotFoundError:
+    from _port_utils import ensure_port_free, read_gateway_port
+
 ROOT = Path(__file__).resolve().parents[1]
 SIMULATIONS = ROOT / "sgrn/lib/gateway/simulations"
 
+BINARY_LOCATION = ""
+
+if os.sys.platform == "win32":
+    BINARY_LOCATION = ROOT / ".dist/win64-native-static"
+else:
+    BINARY_LOCATION = ROOT / ".dist/linux-static-release"
+    
 
 @dataclass
 class DemoRun:
@@ -28,19 +40,31 @@ class DemoRun:
 
 
 def binary(name: str) -> Path:
-    candidates = (
-        ROOT / ".dist/linux-static-release" / name,
-        ROOT / ".dist/linux-static" / name,
-        ROOT / ".prefix/bin" / name,
-        ROOT / ".build/linux-static-release" / name,
+    exts = [".exe", ""] if sys.platform == "win32" else ["", ".exe"]
+    names = [f"{name}{ext}" for ext in exts]
+
+    candidate_dirs = (
+        BINARY_LOCATION,
+        ROOT / ".dist/win64-native-static",
+        ROOT / ".dist/win64-static",
+        ROOT / ".dist/linux-static-release",
+        ROOT / ".dist/linux-static",
+        ROOT / ".prefix/win64-static/bin",
+        ROOT / ".prefix/bin",
+        ROOT / ".build/win64-native-static/sgrn/apps/gateway",
+        ROOT / ".build/win64-native-static/sgrn/apps/s7shell",
+        ROOT / ".build/linux-static-release",
     )
-    for candidate in candidates:
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return candidate
-    found = shutil.which(name)
-    if found:
-        return Path(found)
-    raise FileNotFoundError(f"Cannot find {name}; build/install the Linux binaries first.")
+    for directory in candidate_dirs:
+        for n in names:
+            candidate = directory / n
+            if candidate.is_file() and (sys.platform == "win32" or os.access(candidate, os.X_OK)):
+                return candidate
+    for n in names:
+        found = shutil.which(n)
+        if found:
+            return Path(found)
+    raise FileNotFoundError(f"Cannot find {name}; build/install the binaries first.")
 
 
 def discoverSimulations() -> list[Path]:
@@ -70,6 +94,7 @@ def startSimulation(
     scripts = sorted(p for p in selected_sim.glob("*.as") if p.name != "security.as")
     if not schema.is_file() or not config.is_file() or not scripts:
         raise FileNotFoundError(f"{selected_sim} needs schema.scl, gateway.json, and simulation scripts")
+    ensure_port_free(read_gateway_port(config))
     gateway_args = [str(binary("gateway")), str(config)]
     if open_dashboard:
         gateway_args.append("--gui")
@@ -150,9 +175,11 @@ def main() -> int:
     command = [str(gateway), str(config)]
     if not args.no_gui:
         command.append("--gui")
+    gw_port = read_gateway_port(config)
     print(f"Simulation: {selected.name}")
-    print(f"Dashboard: http://localhost:8000/" + (" (opened by gateway)" if not args.no_gui else ""))
+    print(f"Dashboard: http://localhost:{gw_port}/" + (" (opened by gateway)" if not args.no_gui else ""))
     print("Starting gateway...")
+    ensure_port_free(gw_port)
     processes: list[subprocess.Popen] = []
     try:
         gw = subprocess.Popen(command, cwd=ROOT)
@@ -165,7 +192,7 @@ def main() -> int:
         plc = subprocess.Popen(sim_cmd, cwd=selected)
         processes.append(plc)
         if args.no_gui and not args.no_browser:
-            webbrowser.open("http://localhost:8000/")
+            webbrowser.open(f"http://localhost:{gw_port}/")
         print("Press Ctrl+C to stop the experiment.")
         while all(p.poll() is None for p in processes):
             time.sleep(0.5)

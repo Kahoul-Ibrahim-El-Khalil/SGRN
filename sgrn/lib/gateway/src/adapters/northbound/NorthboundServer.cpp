@@ -25,11 +25,20 @@ constexpr unsigned kCrowConcurrency = 4;
 bool waitUntilListening(const std::string& t_ip, uint16_t t_port) {
     using namespace std::chrono_literals;
     const auto deadline = std::chrono::steady_clock::now() + 2000ms;
+    // On Windows, connecting to 0.0.0.0 or :: fails with WSAEADDRNOTAVAIL (10049).
+    // Probing must connect via loopback.
+    std::string probe_ip = t_ip;
+    if (probe_ip == "0.0.0.0" || probe_ip.empty()) {
+        probe_ip = "127.0.0.1";
+    } else if (probe_ip == "::") {
+        probe_ip = "::1";
+    }
+
     while (std::chrono::steady_clock::now() < deadline) {
         try {
             asio::io_context ctx;
             asio::ip::tcp::socket sock(ctx);
-            asio::ip::tcp::endpoint ep(asio::ip::make_address(t_ip), t_port);
+            asio::ip::tcp::endpoint ep(asio::ip::make_address(probe_ip), t_port);
             std::error_code ec;
             sock.connect(ep, ec);
             if (!ec) {

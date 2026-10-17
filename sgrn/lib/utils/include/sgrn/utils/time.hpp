@@ -141,13 +141,18 @@ inline std::string timePath(int64_t t_ms) {
     std::tm tm{};
 #ifdef _WIN32
     localtime_s(&tm, &tt);
+    // Windows filenames forbid ':'. Use '.' as separator: HH.MM.SS.ms
+    std::ostringstream ss;
+    ss << std::put_time(&tm, "%H.%M.%S");
+    ss << "." << std::setfill('0') << std::setw(3) << (t_ms % 1000);
+    return ss.str();
 #else
     localtime_r(&tt, &tm);
-#endif
     std::ostringstream ss;
     ss << std::put_time(&tm, "%H:%M:%S");
     ss << ":" << std::setfill('0') << std::setw(3) << (t_ms % 1000);
     return ss.str();
+#endif
 }
 
 /**

@@ -17,7 +17,9 @@
 #include <rapidjson/error/en.h>
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
+#ifndef _WIN32
 #include <readline/readline.h>
+#endif
 #include <regex>
 #include <scriptbuilder/scriptbuilder.h>
 #include <scripthelper/scripthelper.h>

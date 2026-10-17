@@ -142,7 +142,7 @@ void main() {
     }
 }
 
-void writeReactor(Reactor@ db, DTL@ ts) {
+void writeReactor(Db_Reactor@ db, DTL@ ts) {
     db.a_feed_flow = float(a_feed + noise(0.004));
     db.d_feed_flow = float(d_feed + noise(0.4));
     db.e_feed_flow = float(e_feed + noise(0.4));
@@ -176,7 +176,7 @@ void writeReactor(Reactor@ db, DTL@ ts) {
     db.put();
 }
 
-void writeSeparator(Separator@ db, DTL@ ts) {
+void writeSeparator(Db_Separator@ db, DTL@ ts) {
     db.purge_rate = float(purge);
     db.product_temp = float(sep_temp);
     db.sep_level = float(sep_level);
@@ -199,7 +199,7 @@ void writeSeparator(Separator@ db, DTL@ ts) {
     db.put();
 }
 
-void writeStripper(Stripper@ db, DTL@ ts) {
+void writeStripper(Db_Stripper@ db, DTL@ ts) {
     db.level = float(str_level);
     db.pressure = float(str_press + noise(2.0));
     db.underflow = float(str_under + noise(0.10));
@@ -218,7 +218,7 @@ void writeStripper(Stripper@ db, DTL@ ts) {
     db.put();
 }
 
-void writeCompressor(Compressor@ db, DTL@ ts) {
+void writeCompressor(Db_Compressor@ db, DTL@ ts) {
     db.recycle_flow = float(recycle);
     db.work = float(comp_work);
     db.recycle_valve.position_pct = float(recycle_valve_pos); db.recycle_valve.command_pct = float(recycle_valve_pos);
@@ -228,7 +228,7 @@ void writeCompressor(Compressor@ db, DTL@ ts) {
     db.put();
 }
 
-void writePlantWide(PlantWide@ db, DTL@ ts) {
+void writePlantWide(Db_PlantWide@ db, DTL@ ts) {
     db.fault_code = fault_code;
     db.fault_active = fault_code != 0;
     db.op_mode = (r_pressure > 3000.0 || r_temp > 150.0) ? 2 : (fault_code != 0 ? 1 : 0);

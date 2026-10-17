@@ -33,7 +33,8 @@
         "FMT_INSTALL": "ON",
         "TRANTOR_USE_TLS": "openssl",
         "FETCHCONTENT_BASE_DIR": "${sourceDir}/.build/_deps",
-        "CPM_SOURCE_CACHE": "$env{HOME}/.cache/CPM"
+        "CPM_SOURCE_CACHE": "$env{HOME}/.cache/CPM",
+        "CMAKE_CXX_SCAN_FOR_MODULES": "OFF"
       },
       "installDir": "${sourceDir}/.dist/${presetName}"
     },
@@ -296,6 +297,74 @@
         "SGRN_BUILD_BACKEND": "OFF",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/.prefix/linux-arm64-static"
       }
+    },
+    {
+      "name": "win64-native-deps",
+      "displayName": "Win64 Native Deps (.prefix/win64-static)",
+      "description": "Native Windows build and install all dependencies into .prefix/win64-static",
+      "inherits": "base-deps",
+      "generator": "Ninja",
+      "installDir": "${sourceDir}/.prefix/win64-static",
+      "environment": {
+        "CONDA_PREFIX": "X:/micromamba/envs/SGRN-WINDOWS",
+        "PATH": "C:/Users/ibrah/.bun/bin;$penv{USERPROFILE}/.bun/bin;X:/micromamba/envs/SGRN-WINDOWS/Library/bin;X:/micromamba/envs/SGRN-WINDOWS/Library/cmd;X:/micromamba/envs/SGRN-WINDOWS/Scripts;X:/micromamba/envs/SGRN-WINDOWS;X:/micromamba/condabin;$penv{PATH}"
+      },
+      "cacheVariables": {
+        "SGRN_PLATFORM": "win64-static",
+        "CMAKE_MAKE_PROGRAM": "X:/micromamba/envs/SGRN-WINDOWS/Library/bin/ninja.exe",
+        "CPM_SOURCE_CACHE": "X:/.cache/CPM",
+        "CMAKE_TOOLCHAIN_FILE": "cmake/toolchain_win64.cmake",
+        "SGRN_WIN64_PREFIX": "X:/micromamba/envs/SGRN-WINDOWS",
+        "Python3_ROOT_DIR": "X:/micromamba/envs/SGRN-WINDOWS",
+        "Python3_EXECUTABLE": "X:/micromamba/envs/SGRN-WINDOWS/python.exe",
+        "BUILD_SHARED_LIBS": "OFF",
+        "SGRN_BUILD_EXTERN_BACKEND": "OFF",
+        "SGRN_BUILD_BACKEND": "OFF",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/.prefix/win64-static"
+      }
+    },
+    {
+      "name": "win64-native-static",
+      "displayName": "Win64 Native (Static)",
+      "description": "Native Windows static build using SGRN-WINDOWS toolchain",
+      "inherits": "base-common",
+      "generator": "Ninja",
+      "environment": {
+        "CONDA_PREFIX": "X:/micromamba/envs/SGRN-WINDOWS",
+        "PATH": "C:/Users/ibrah/.bun/bin;$penv{USERPROFILE}/.bun/bin;X:/micromamba/envs/SGRN-WINDOWS/Library/bin;X:/micromamba/envs/SGRN-WINDOWS/Library/cmd;X:/micromamba/envs/SGRN-WINDOWS/Scripts;X:/micromamba/envs/SGRN-WINDOWS;X:/micromamba/condabin;$penv{PATH}",
+        "CFLAGS": "",
+        "CXXFLAGS": "",
+        "LDFLAGS": ""
+      },
+      "cacheVariables": {
+        "SGRN_PLATFORM": "win64-static",
+        "CMAKE_MAKE_PROGRAM": "X:/micromamba/envs/SGRN-WINDOWS/Library/bin/ninja.exe",
+        "CPM_SOURCE_CACHE": "X:/.cache/CPM",
+        "CMAKE_TOOLCHAIN_FILE": "cmake/toolchain_win64.cmake",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SGRN_BUILD_BACKEND": "OFF",
+        "SGRN_BUILD_UTILS": "ON",
+        "SGRN_BUILD_SDK": "ON",
+        "SGRN_BUILD_S7": "ON",
+        "SGRN_BUILD_S7NODE": "ON",
+        "SGRN_BUILD_OPC": "ON",
+        "SGRN_WIN64_PREFIX": "X:/micromamba/envs/SGRN-WINDOWS",
+        "Python3_ROOT_DIR": "X:/micromamba/envs/SGRN-WINDOWS",
+        "Python3_EXECUTABLE": "X:/micromamba/envs/SGRN-WINDOWS/python.exe",
+        "SGRN_USE_UCRT": "ON",
+        "CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS": "ON",
+        "SGRN_BUILD_STATIC": "ON",
+        "CMAKE_FIND_LIBRARY_SUFFIXES": ".a;.lib",
+        "DROGON_BUILD_STATIC": "ON",
+        "TRANTOR_BUILD_STATIC": "ON",
+        "FMT_INSTALL": "OFF",
+        "JSONCPP_WITH_PKGCONFIG_SUPPORT": "OFF",
+        "BUILD_SHARED_LIBS": "OFF",
+        "JSONCPP_WITH_CMAKE_PACKAGE": "OFF",
+        "AS_BUILD_SHARED": "OFF",
+        "SGRN_LOCAL_PREFIX": "${sourceDir}/.prefix/win64-static",
+        "SGRN_USE_INSTALLED_DEPS": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -376,6 +445,17 @@
       "targets": [
         "install"
       ]
+    },
+    {
+      "name": "win64-native-deps",
+      "configurePreset": "win64-native-deps",
+      "targets": [
+        "install"
+      ]
+    },
+    {
+      "name": "win64-native-static",
+      "configurePreset": "win64-native-static"
     }
   ],
   "testPresets": [
@@ -464,6 +544,19 @@
         {
           "type": "build",
           "name": "linux-arm64-deps-static"
+        }
+      ]
+    },
+    {
+      "name": "win64-native-deps",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "win64-native-deps"
+        },
+        {
+          "type": "build",
+          "name": "win64-native-deps"
         }
       ]
     }

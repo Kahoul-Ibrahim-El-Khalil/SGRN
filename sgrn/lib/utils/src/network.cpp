@@ -1,6 +1,8 @@
 #include <sgrn/utils/network.hpp>
 
+#ifndef _WIN32
 #include <arpa/inet.h>
+#endif
 #include <asio.hpp>
 
 #include <algorithm>
