@@ -20,9 +20,36 @@ dataset:
     unit: "hours"
     size: 12                         # 12-hour windows (must match config.json when both exist)
   stride: 1                          # step between consecutive windows
-  train_ratio: 0.7                   # 70% of pre-fault -> training
-  calibration_ratio: 0.3             # 30% of pre-fault -> conformal calibration
-  random_seed: 42
+  # Three-way chronological split of the PRE-FAULT rows (fault day stays the
+  # test set). Ratios must sum to 1.0 and every part must hold at least one
+  # full window (enforced at runtime, ValueError otherwise).
+  #   train       -> scaler + autoencoder fit
+  #   calibration -> conformal threshold q_alpha ONLY
+  #   heldout     -> false-alarm evaluation ONLY (never used for fitting,
+  #                  scaling or threshold choice)
+  train_ratio: 0.6
+  calibration_ratio: 0.2
+  heldout_ratio: 0.2
+  # Held-out provenance:
+  #   "split"   — chronological last 20% of pre-fault (default; same simulator
+  #               as train/calibration, so NOT an independent process run —
+  #               the evaluation output says so explicitly)
+  #   "capture" — a second, independent pure-normal WAL run (produced with
+  #               `python3 experiments/flare capture --no-fault --out <dir>`)
+  #               is used as the held-out set when the file exists. NOTE: the
+  #               simulator seeds its noise LCG with a fixed start state
+  #               (rand_state = 12345 in simulation.as) and exposes no seed
+  #               override, so a re-capture replays the same trajectory; until
+  #               that changes, "split" is the statistically honest option.
+  heldout_source: "split"
+  heldout_capture:
+    archive: "flare_history_normal.jsonl.zst"
+  # Thins calibration windows before conformal scoring. Fewer than
+  # 1/alpha effective windows (alpha=0.05 → need >= 20... more precisely
+  # n >= (1-alpha)/alpha = 19) pushes q_alpha to INF — the honest
+  # never-flag regime, reported as such. Set to 1 to score every window.
+  calibration_stride: 12
+  random_seed: 42                    # seeds random/numpy/torch for the whole run
 
 model:
   latent_dim: 16                     # bottleneck dimension (manifold dim)
@@ -54,3 +81,15 @@ features:
   - "Utilities.fuel_gas_press"
   - "Utilities.inst_air_press"
   - "Utilities.regen_comp_disch_press"
+
+# Single-signal baselines, computed in the same evaluation as the
+# autoencoder and written to evaluation_metrics.json:
+#   threshold = train mean + k*std of the per-window statistic over
+#   flare_header_press; k is the FIRST value in k_grid whose FAR on the
+#   CALIBRATION split is <= model.alpha (no peeking at held-out or test).
+baselines:
+  signal: "SafetySystems.flare_header_press"
+  # statistics: "level" (window mean of the raw signal) and
+  #             "slope" (mean per-tick difference over the window)
+  k_grid: [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25, 3.5, 3.75,
+           4.0, 4.25, 4.5, 4.75, 5.0, 5.5, 6.0, 6.5, 7.0, 8.0]

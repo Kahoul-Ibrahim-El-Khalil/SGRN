@@ -301,8 +301,10 @@ set(WEB_CONFIG_FILES
     "${WEB_SRC_DIR}/vite.config.ts"
     "${WEB_SRC_DIR}/svelte.config.js"
     "${WEB_SRC_DIR}/package.json"
-    "${WEB_SRC_DIR}/bun.lock"
 )
+if(EXISTS "${WEB_SRC_DIR}/bun.lock")
+    list(APPEND WEB_CONFIG_FILES "${WEB_SRC_DIR}/bun.lock")
+endif()
 
 # Shared TypeScript bindings used by the web app. Any change here must
 # invalidate the web asset build so the embedded bundle stays in sync.
@@ -430,6 +432,9 @@ if(ASIO_FOUND)
 endif()
 
 target_link_libraries(sgrn_gateway PUBLIC extern::sqlite_modern_cpp)
+if(WIN32)
+    target_link_libraries(sgrn_gateway PUBLIC mswsock ws2_32)
+endif()
 # extern::open62541 is now a transitive dependency via sgrn::wrappers::opcua;
 # no need to link it directly here.
 

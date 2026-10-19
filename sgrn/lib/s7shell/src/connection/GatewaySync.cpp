@@ -7,9 +7,11 @@
 
 #include <fmt/color.h>
 #include <fmt/core.h>
+#include <algorithm>
 #include <cctype>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <httplib.h>
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
@@ -64,6 +66,12 @@ static void flattenJson(
 
 GatewaySync::GatewaySync(PlcRuntimeSPtr tsp_runtime)
     : runtime_(std::move(tsp_runtime)) {
+    // Debounce knob for fast-paced captures: SGRN_SYNC_COALESCE_MS lowers
+    // the window so high-rate simulators keep per-tick WAL samples.
+    if (const char* ev = std::getenv("SGRN_SYNC_COALESCE_MS"); ev != nullptr && *ev != '\0') {
+        const uint32_t parsed = static_cast<uint32_t>(std::atoi(ev));
+        publish_coalesce_ms_ = std::clamp(parsed, 0u, 10'000u);
+    }
     if (runtime_) {
         dirty_observer_id_ =
             runtime_->addDirtyObserver([this](uint16_t t_db, uint32_t offset, uint32_t length) { onRuntimeDirty(t_db, offset, length); });
@@ -428,7 +436,7 @@ void GatewaySync::publishWorkerLoop() {
         // Coalesce scan-cycle bursts before touching the dirty ledger. This
         // keeps a group of per-field marks from becoming per-field frames.
         publish_requested_ = false;
-        publish_cv_.wait_for(lk, std::chrono::milliseconds(25), [this]() { return stop_publish_worker_; });
+        publish_cv_.wait_for(lk, std::chrono::milliseconds(publish_coalesce_ms_), [this]() { return stop_publish_worker_; });
         if (stop_publish_worker_)
             break;
 

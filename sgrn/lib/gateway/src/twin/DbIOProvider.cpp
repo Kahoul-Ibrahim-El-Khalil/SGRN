@@ -32,8 +32,7 @@ DbIOProvider::DbIOProvider(
 // read retrieves a field's value directly from the local shadow memory cache (no network).
 sgrn::Result<std::string, DbIoError> DbIOProvider::read(const std::string& t_path) const {
     auto raw = memory_.getFieldValue(db_num_, t_path);
-    if (raw.hasError())
-        return std::unexpected(fromPlcMemoryErrorToDbIoError(raw.error()));
+    SGRN_RETURN_IF(raw.hasError(), fromPlcMemoryErrorToDbIoError(raw.error()));
 
     return std::move(raw).value();
 }
@@ -123,16 +122,13 @@ sgrn::Result<void, DbIoError> DbIOProvider::put(S7Client& t_client, const std::s
 // put (DecodedValue struct variant) performs an immediate synchronous write to the PLC,
 // bypassing the JSON string round trip.
 sgrn::Result<void, DbIoError> DbIOProvider::put(S7Client& t_client, const std::string& t_path, const s7codec::DecodedValue& t_val) {
-    if (!t_client.isConnected())
-        return std::unexpected(DbIoError::NotConnected);
+    SGRN_RETURN_IF(!t_client.isConnected(), DbIoError::NotConnected);
 
     const sgrn::Result<scl::FieldLocation, DbIoError> t_loc = resolveField(t_path);
-    if (t_loc.hasError())
-        return std::unexpected(t_loc.error());
+    SGRN_RETURN_IF(t_loc.hasError(), t_loc.error());
 
     sgrn::Result<std::vector<uint8_t>, DbIoError> buf = encodeValue(t_loc.value(), t_val);
-    if (buf.hasError())
-        return std::unexpected(buf.error());
+    SGRN_RETURN_IF(buf.hasError(), buf.error());
 
     // S7 wire order is big-endian; encodeValue produces block-endian bytes.
     ::sgrn::gateway::twin::swapFieldToBigEndian(*t_loc.value().field, buf.value().data(), buf.value().size());
@@ -165,8 +161,7 @@ sgrn::Result<void, DbIoError> DbIOProvider::put(S7Client& t_client, const std::s
     auto it = pending_writes_.find(db_num_);
     if (it != pending_writes_.end()) {
         auto snap_res = it->second.updateField(t_path, t_json_val);
-        if (snap_res.hasError())
-            return std::unexpected(fromSclErrorToDbIoError(snap_res.error()));
+        SGRN_RETURN_IF(snap_res.hasError(), fromSclErrorToDbIoError(snap_res.error()));
     }
     return {};
 }
@@ -175,8 +170,7 @@ sgrn::Result<void, DbIoError> DbIOProvider::buildGetItems(
     const std::vector<std::string>& t_paths, std::vector<S7DataItem>& t_out_items, std::vector<std::vector<uint8_t>>& t_out_bufs) {
     for (const auto& t_path : t_paths) {
         const sgrn::Result<scl::FieldLocation, DbIoError> t_loc = resolveField(t_path);
-        if (t_loc.hasError())
-            return std::unexpected(t_loc.error());
+        SGRN_RETURN_IF(t_loc.hasError(), t_loc.error());
         t_out_bufs.emplace_back();
         t_out_items.emplace_back();
         buildOneGetItem(t_loc.value(), t_out_items.back(), t_out_bufs.back());
@@ -189,19 +183,16 @@ sgrn::Result<void, DbIoError> DbIOProvider::buildPutItems(const std::vector<std:
     std::vector<std::vector<uint8_t>>& t_out_bufs) {
     for (size_t i = 0; i < t_paths.size(); ++i) {
         const sgrn::Result<scl::FieldLocation, DbIoError> t_loc = resolveField(t_paths[i]);
-        if (t_loc.hasError())
-            return std::unexpected(t_loc.error());
+        SGRN_RETURN_IF(t_loc.hasError(), t_loc.error());
 
         if (std::holds_alternative<std::string>(t_values[i])) {
             sgrn::Result<std::vector<uint8_t>, DbIoError> encoded = encodeValue(t_loc.value(), std::get<std::string>(t_values[i]));
-            if (encoded.hasError())
-                return std::unexpected(encoded.error());
+            SGRN_RETURN_IF(encoded.hasError(), encoded.error());
             t_out_bufs.push_back(std::move(encoded.value()));
         } else {
             sgrn::Result<std::vector<uint8_t>, DbIoError> encoded =
                 encodeValue(t_loc.value(), std::get<s7codec::DecodedValue>(t_values[i]));
-            if (encoded.hasError())
-                return std::unexpected(encoded.error());
+            SGRN_RETURN_IF(encoded.hasError(), encoded.error());
             t_out_bufs.push_back(std::move(encoded.value()));
         }
 

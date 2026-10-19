@@ -289,12 +289,19 @@ def _modeKeyFromEncoded(
 
 class ProcessManifoldDetector:
     """Production-grade anomaly detector combining Manifold Autoencoder with Split-Conformal Bounds.
-    
+
     Supports multi-dimensional error decomposition:
       - Orthogonal residual breakdown across Physical Dimensions (Pressure, Temperature, Flow)
       - Breakdown across Plant Subsystems (InletSeparation, SafetySystems, etc.)
       - High-speed GPU batch evaluation on NVIDIA CUDA and AMD ROCm accelerators
     """
+
+    @property
+    def autoencoder(self):
+        """The reconstruction model (WindowAutoencoder or fallback). Alias of
+        ``model`` — consumers (e.g. manifold_feature_integration) reach into
+        the architecture through this name."""
+        return self.model
 
     def __init__(
         self,
@@ -1185,6 +1192,101 @@ def _conformalQuantile(scores: List[float], alpha: float) -> float:
     return float(sorted(vals)[k - 1])
 
 
+def _validateContextArgs(X_ctx_train: Optional[np.ndarray], X_ctx_cal: Optional[np.ndarray],
+                         ctx_features: List[str], num_windows: int, window_size: int, ctx_dim: int) -> None:
+    """Shape contract between continuous windows and encoded context windows."""
+    if ctx_features and (X_ctx_train is None or X_ctx_cal is None):
+        raise ValueError(
+            "context_features given but X_ctx_train/X_ctx_cal missing; "
+            "pass encoded context windows or leave context empty."
+        )
+    if X_ctx_train is not None and len(X_ctx_train) != num_windows:
+        raise ValueError(
+            f"X_ctx_train rows {len(X_ctx_train)} != X_train windows {num_windows}"
+        )
+    if X_ctx_train is not None and X_ctx_train.shape[1:] != (window_size, ctx_dim):
+        raise ValueError(
+            f"Expected X_ctx_train shape (*, {window_size}, {ctx_dim}), "
+            f"got {X_ctx_train.shape}"
+        )
+
+
+def _conformalScores(model: "WindowAutoencoder", X_cal_eff: np.ndarray, X_ctx_flat: Optional["torch.Tensor"],
+                     cont_dim: int, window_size: int, num_features: int, target_device: Any,
+                     is_cuda: bool) -> Tuple[List[float], List[List[float]]]:
+    """Window-mean + per-signal squared-error scores over the calibration split."""
+    cal_scores: List[float] = []
+    cal_sig_scores: List[List[float]] = []
+    n_cal = len(X_cal_eff)
+    with torch.no_grad():
+        cal_batch_size = min(256, n_cal) if n_cal else 0
+        for i in range(0, n_cal, cal_batch_size or 1):
+            b_cal = X_cal_eff.reshape(n_cal, cont_dim)[i : i + cal_batch_size]
+            b_cal = torch.from_numpy(np.asarray(b_cal, dtype=np.float32)).to(target_device, non_blocking=is_cuda)
+            if X_ctx_flat is not None:
+                b_ctx = X_ctx_flat[i : i + cal_batch_size].to(target_device, non_blocking=is_cuda)
+                b_in = torch.cat([b_cal, b_ctx], dim=1)
+            else:
+                b_in = b_cal
+            b_recon = model(b_in)
+            b_errs = torch.mean((b_cal - b_recon) ** 2, dim=1).cpu().numpy()
+            cal_scores.extend(float(v) for v in b_errs)
+            b_in = b_cal.view(len(b_cal), window_size, num_features)
+            b_out = b_recon.view(len(b_cal), window_size, num_features)
+            b_sig = torch.mean((b_in - b_out) ** 2, dim=1).cpu().numpy()
+            cal_sig_scores.extend([float(v) for v in row] for row in b_sig)
+    return cal_scores, cal_sig_scores
+
+
+def _printConformalDiagnostics(n_cal: int, n_cal_total: int, cal_stride: int, q_alpha: float,
+                               alpha: float, k_mult: float, q_per_signal: List[float],
+                               ctx_dim: int, ctx_features: List[str],
+                               seen_modes: Optional[List[List[str]]]) -> None:
+    print(f"[conformal] Calibration windows evaluated: {n_cal} "
+          f"(from {n_cal_total} at stride {cal_stride})")
+    print(f"[conformal] q_{alpha:.2f} threshold (nominal {100*(1-alpha):.0f}% coverage): {q_alpha:.5f}")
+    print(f"[conformal] Uncertain upper threshold ({k_mult}x multiplier): {q_alpha * k_mult:.5f}")
+    print(f"[conformal] Per-signal bounds: min={min(q_per_signal):.5f} "
+          f"max={max(q_per_signal):.5f} "
+          f"inf_count={sum(1 for q in q_per_signal if not np.isfinite(q))}/{len(q_per_signal)}")
+    if ctx_dim:
+        print(f"[conformal] Context: {len(ctx_features)} signals, "
+              f"{ctx_dim} one-hot dims, {len(seen_modes or [])} nominal modes")
+
+
+def _trainModeHeadWithBounds(X_train: np.ndarray, X_ctx_train: np.ndarray, X_cal_eff: np.ndarray,
+                             X_ctx_eff: Optional[np.ndarray], n_cal: int, ctx_dim: int,
+                             ctx_layout: List[Dict[str, Any]], trainModeHead: bool,
+                             modeHeadConfig: Optional[Dict[str, Any]], seed: int, alpha: float,
+                             target_device: Any) -> Tuple[Optional["ModePredictor"], Dict[str, float]]:
+    """Physics→mode head on the nominal windows, plus per-field conformal bounds.
+
+    Disabled without context (nothing to predict) or on explicit opt-out.
+    """
+    mode_model = None
+    q_mode: Dict[str, float] = {}
+    if not (trainModeHead and ctx_dim and X_ctx_train is not None and len(X_ctx_train)):
+        return mode_model, q_mode
+    mh_cfg = dict(modeHeadConfig or {})
+    mode_model = trainModePredictor(
+        X_train, X_ctx_train, ctx_layout,
+        hidden_dim=int(mh_cfg.get("hidden_dim", 32)),
+        epochs=int(mh_cfg.get("epochs", 20)),
+        batch_size=int(mh_cfg.get("batch_size", 64)),
+        lr=float(mh_cfg.get("learning_rate", 1e-3)),
+        seed=seed,
+        device=target_device,
+    )
+    if n_cal and X_ctx_eff is not None:
+        cal_nlls = modeNLLs(mode_model, X_cal_eff, X_ctx_eff, ctx_layout, target_device)
+        for feat, vals in cal_nlls.items():
+            finite = [v for v in vals if np.isfinite(v)]
+            q_mode[feat] = _conformalQuantile(finite, alpha)
+        n_flag = sum(1 for q in q_mode.values() if np.isfinite(q))
+        print(f"[conformal] Mode head bounds: {n_flag}/{len(q_mode)} finite")
+    return mode_model, q_mode
+
+
 def trainManifoldDetector(
     X_train: np.ndarray,
     X_cal: np.ndarray,
@@ -1257,20 +1359,7 @@ def trainManifoldDetector(
     ctx_specs: Dict[str, Any] = dict(context_specs or {})
     ctx_layout = contextLayout(ctx_features, ctx_specs)
     ctx_dim = sum(e["width"] for e in ctx_layout) if ctx_layout else 0
-    if ctx_features and (X_ctx_train is None or X_ctx_cal is None):
-        raise ValueError(
-            "context_features given but X_ctx_train/X_ctx_cal missing; "
-            "pass encoded context windows or leave context empty."
-        )
-    if X_ctx_train is not None and len(X_ctx_train) != num_windows:
-        raise ValueError(
-            f"X_ctx_train rows {len(X_ctx_train)} != X_train windows {num_windows}"
-        )
-    if X_ctx_train is not None and X_ctx_train.shape[1:] != (window_size, ctx_dim):
-        raise ValueError(
-            f"Expected X_ctx_train shape (*, {window_size}, {ctx_dim}), "
-            f"got {X_ctx_train.shape}"
-        )
+    _validateContextArgs(X_ctx_train, X_ctx_cal, ctx_features, num_windows, window_size, ctx_dim)
     # Outage windows carry NaN: exclude from training (NaN loss would
     # silently diverge the weights) and count them.
     train_ok = np.all(np.isfinite(X_train.reshape(num_windows, -1)), axis=1)
@@ -1346,36 +1435,16 @@ def trainManifoldDetector(
     if X_ctx_eff is not None:
         X_ctx_eff = X_ctx_eff[cal_ok]
     n_cal = len(X_cal_eff)
-    X_cal_flat = (
-        torch.from_numpy(X_cal_eff.reshape(n_cal, cont_dim)).float()
-        if n_cal
-        else torch.empty((0, cont_dim))
-    )
     if ctx_dim and X_ctx_eff is not None:
         X_ctx_flat = torch.from_numpy(
             X_ctx_eff.reshape(n_cal, window_size * ctx_dim)
         ).float()
     else:
         X_ctx_flat = None
-    cal_scores: List[float] = []
-    cal_sig_scores: List[List[float]] = []
 
-    with torch.no_grad():
-        cal_batch_size = min(256, n_cal) if n_cal else 0
-        for i in range(0, n_cal, cal_batch_size or 1):
-            b_cal = X_cal_flat[i : i + cal_batch_size].to(target_device, non_blocking=is_cuda)
-            if X_ctx_flat is not None:
-                b_ctx = X_ctx_flat[i : i + cal_batch_size].to(target_device, non_blocking=is_cuda)
-                b_in = torch.cat([b_cal, b_ctx], dim=1)
-            else:
-                b_in = b_cal
-            b_recon = model(b_in)
-            b_errs = torch.mean((b_cal - b_recon) ** 2, dim=1).cpu().numpy()
-            cal_scores.extend(float(v) for v in b_errs)
-            b_in = b_cal.view(len(b_cal), window_size, num_features)
-            b_out = b_recon.view(len(b_cal), window_size, num_features)
-            b_sig = torch.mean((b_in - b_out) ** 2, dim=1).cpu().numpy()
-            cal_sig_scores.extend([float(v) for v in row] for row in b_sig)
+    cal_scores, cal_sig_scores = _conformalScores(
+        model, X_cal_eff, X_ctx_flat, cont_dim, window_size, num_features,
+        target_device, is_cuda)
 
     if X_ctx_cal is not None and len(X_ctx_cal) != len(X_cal):
         raise ValueError(
@@ -1399,40 +1468,14 @@ def trainManifoldDetector(
                 seen.add(tuple(key))
         seen_modes = sorted([list(m) for m in seen])
 
-    print(f"[conformal] Calibration windows evaluated: {n_cal} "
-          f"(from {len(X_cal)} at stride {cal_stride})")
-    print(f"[conformal] q_{alpha:.2f} threshold (nominal {100*(1-alpha):.0f}% coverage): {q_alpha:.5f}")
-    print(f"[conformal] Uncertain upper threshold ({k_mult}x multiplier): {q_alpha * k_mult:.5f}")
-    print(f"[conformal] Per-signal bounds: min={min(q_per_signal):.5f} "
-          f"max={max(q_per_signal):.5f} "
-          f"inf_count={sum(1 for q in q_per_signal if not np.isfinite(q))}/{len(q_per_signal)}")
-    if ctx_dim:
-        print(f"[conformal] Context: {len(ctx_features)} signals, "
-              f"{ctx_dim} one-hot dims, {len(seen_modes or [])} nominal modes")
+    _printConformalDiagnostics(n_cal, len(X_cal), cal_stride, q_alpha, alpha, k_mult,
+                               q_per_signal, ctx_dim, ctx_features, seen_modes)
 
     # Physics->mode head: same nominal windows, disjoint target. Disabled
     # without context (nothing to predict) or on explicit opt-out.
-    mode_model = None
-    q_mode: Dict[str, float] = {}
-    if trainModeHead and ctx_dim and X_ctx_train is not None and len(X_ctx_train):
-        mh_cfg = dict(modeHeadConfig or {})
-        mode_model = trainModePredictor(
-            X_train, X_ctx_train, ctx_layout,
-            hidden_dim=int(mh_cfg.get("hidden_dim", 32)),
-            epochs=int(mh_cfg.get("epochs", 20)),
-            batch_size=int(mh_cfg.get("batch_size", 64)),
-            lr=float(mh_cfg.get("learning_rate", 1e-3)),
-            seed=seed,
-            device=target_device,
-        )
-        if n_cal and X_ctx_eff is not None:
-            cal_nlls = modeNLLs(mode_model, X_cal_eff, X_ctx_eff, ctx_layout,
-                                target_device)
-            for feat, vals in cal_nlls.items():
-                finite = [v for v in vals if np.isfinite(v)]
-                q_mode[feat] = _conformalQuantile(finite, alpha)
-            n_flag = sum(1 for q in q_mode.values() if np.isfinite(q))
-            print(f"[conformal] Mode head bounds: {n_flag}/{len(q_mode)} finite")
+    mode_model, q_mode = _trainModeHeadWithBounds(
+        X_train, X_ctx_train, X_cal_eff, X_ctx_eff, n_cal, ctx_dim, ctx_layout,
+        trainModeHead, modeHeadConfig, seed, alpha, target_device)
 
     return ProcessManifoldDetector(
         model=model,

@@ -1,36 +1,46 @@
 #!/usr/bin/env python3
 """experiments/flare/runCapture.py — Stage 1: WAL capture for FLARE_BLOCKED scenario.
 
-Runs an isolated copy of simulation.as (Day 31, Hour 3: fault_code = 9) connected to
-an isolated gateway process capturing into .jsonl.zst.
+Runs the stock gas_processing simulation directly — the simulation itself now
+owns the FLARE_BLOCKED fault physics (fault_code 9) and all scenario runtime
+knobs (SGRN_* environment variables: tick grid, fault onset, ramp rates,
+termination, pacing). No source rewriting: schema.scl + simulation.as are
+copied verbatim into an isolated capture dir and scripted via env.
+
+Two telemetry egress paths:
+
+  * default  — deployment-faithful: s7shell publishes via GatewaySync →
+    gateway process → hydrated twin → PersistenceService → WAL (jsonl deltas,
+    one merged line per tick; the format sgrn_dataset/dataset.py expect).
+  * --local  — in-shell capture: s7shell persists the WAL itself through the
+    Persistence binding with full-DB binary images (atomic_window not needed;
+    no hydration of the gateway twin is available in a bare-script process,
+    so the per-leaf JSONL mode is not usable offline).
 
 Produces:
-  experiments/flare/flare_history.jsonl.zst
-  experiments/flare/meta.json
+  <out>/flare_history.jsonl.zst   (WAL archive)
+  <out>/meta.json                 (fault/ESD timestamps for evaluation)
 """
 
 from __future__ import annotations
 
-import argparse
 from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SIM_DIR = ROOT / "sgrn/lib/gateway/simulations/gas_processing"
 
 from config_loader import loadConfig, getConfigPath
-
-CONFIG_PATH = getConfigPath(Path(__file__).parent)
 
 
 def findBinary(name: str) -> Path:
@@ -72,218 +82,42 @@ def stopProcess(proc: subprocess.Popen | None, timeout: float = 10.0) -> None:
         proc.wait()
 
 
-def createIsolatedSimulation(
-    run_dir: Path,
-    http_port: int,
-    cfg: dict,
-) -> tuple[Path, int]:
-    """Create an isolated copy of simulation.as implementing fault_code 9."""
+def stageIsolatedSimulation(run_dir: Path, cfg: dict, noFault: bool = False) -> tuple[Path, int, dict]:
+    """Stage the stock simulation verbatim; the scenario flows via env vars.
+
+    ``noFault`` forces SGRN_FAULT_CODE=0 (pure nominal run): used to capture a
+    second, independent normal run for held-out FAR evaluation
+    (`python3 experiments/flare capture --no-fault`). NOTE: the simulator
+    seeds its noise LCG with a fixed start state and exposes no seed
+    override, so the run is deterministic — see dataset.heldout_source.
+    """
     scenario = cfg.get("scenario", {})
     normal_days = scenario.get("normal_days", 30)
     fault_day = scenario.get("fault_day", 31)
-    fault_injection_tick = scenario.get("fault_injection_tick", normal_days * 24 + 3)
-    flare_ramp_rate = scenario.get("flare_ramp_rate", 0.15)
-    feed_ramp_rate = scenario.get("feed_ramp_rate", 1.15)
+    ticks_per_day = int(scenario.get("ticks_per_day", 24))
+    if ticks_per_day <= 0:
+        raise ValueError(f"scenario.ticks_per_day must be > 0, got {ticks_per_day}")
     tick_sleep_ms = scenario.get("tick_sleep_ms", 10)
-    max_iterations = fault_day * 24
 
     sim_copy = run_dir / "s7shell_simulation"
     sim_copy.mkdir(parents=True, exist_ok=True)
     shutil.copy2(SIM_DIR / "schema.scl", sim_copy / "schema.scl")
+    shutil.copy2(SIM_DIR / "simulation.as", sim_copy / "simulation.as")
 
-    base_source = (SIM_DIR / "simulation.as").read_text(encoding="utf-8")
-
-    # Point WebSocket to the isolated gateway port
-    base_source = base_source.replace(
-        'const string GATEWAY_WS_URL = "ws://127.0.0.1:8000/ws";',
-        f'const string GATEWAY_WS_URL = "ws://127.0.0.1:{http_port}/ws";',
-        1,
-    )
-
-    # Inject fault_code 9 constants and state tracking
-    fault_injection_code = f"""
-// ─── Scenario Constants (Isolated Fault 9: FLARE_BLOCKED) ───
-const int NORMAL_DAYS = {normal_days};
-const int FAULT_DAY = {fault_day};
-const int FAULT_INJECTION_TICK = {fault_injection_tick}; // Day {fault_day}, Hour 3
-const double FLARE_RAMP_RATE = {flare_ramp_rate};
-const double FEED_RAMP_RATE = {feed_ramp_rate};
-const int MAX_SIM_ITERATIONS = {max_iterations};
-const int TICK_SLEEP_MS = {tick_sleep_ms};
-int esd_trip_tick = -1;
-"""
-
-    main_marker = "void main() {"
-    if main_marker not in base_source:
-        raise RuntimeError("Could not find 'void main() {' marker in simulation.as")
-
-    base_source = base_source.replace(main_marker, fault_injection_code + "\n" + main_marker, 1)
-
-    # In simulatePhysics(), implement fault 9 physics
-    physics_marker = "void simulatePhysics() {"
-    physics_impl = f"""void simulatePhysics() {{
-    tick_count++;
-    bool fault_active = (tick_count >= FAULT_INJECTION_TICK);
-
-    // ── Tower cycle sequencer ──
-    for (int i = 0; i < NUM_TOWERS; i++) {{
-        time_in_state[i] += 1.0;
-
-        if (i == lead_lag_index) {{
-            if (cycle_state[i] == 1 && time_in_state[i] >= T_DEPRESS) {{
-                cycle_state[i] = 2;
-                time_in_state[i] = 0.0;
-            }} else if (cycle_state[i] == 2 && time_in_state[i] >= T_HEAT) {{
-                cycle_state[i] = 3;
-                time_in_state[i] = 0.0;
-            }} else if (cycle_state[i] == 3 && time_in_state[i] >= T_COOL) {{
-                cycle_state[i] = 4;
-                time_in_state[i] = 0.0;
-            }} else if (cycle_state[i] == 4 && time_in_state[i] >= T_REPRESS) {{
-                cycle_state[i] = 0;
-                time_in_state[i] = 0.0;
-                moisture_pct[i] = 3.0;
-                bed_dp[i] = 0.20;
-                cycles_done[i]++;
-
-                lead_lag_index = (lead_lag_index + 1) % NUM_TOWERS;
-                cycle_state[lead_lag_index] = 1;
-                time_in_state[lead_lag_index] = 0.0;
-            }}
-        }} else {{
-            moisture_pct[i] += 0.05 + (feed_flow > 850.0 ? 0.02 : 0.0);
-            if (moisture_pct[i] > 95.0) moisture_pct[i] = 95.0;
-            bed_dp[i] = 0.20 + (moisture_pct[i] / 100.0) * 0.6 + randomNoiseAmp(0.02);
-            if (fault_active) {{
-                // Small bed_dp rise under relief blockage
-                bed_dp[i] += 0.003 * double(tick_count - FAULT_INJECTION_TICK);
-            }}
-        }}
-    }}
-
-    // ── Apply random process noise and fault physics ──
-    feed_flow = base_feed_flow + randomNoiseAmp(15.0);
-    coalescer_dp += 0.0001;
-    if (coalescer_dp > 0.8) coalescer_dp = 0.8;
-
-    if (fault_active) {{
-        int elapsed = tick_count - FAULT_INJECTION_TICK;
-        // 1. flare_header_press ramps up from 1.05 bar (+0.15 bar/tick)
-        flare_header_press = 1.05 + FLARE_RAMP_RATE * double(elapsed) + randomNoiseAmp(0.02);
-
-        // 2. Relief is ineffective: feed_press ramps up
-        double ramp = FEED_RAMP_RATE * double(elapsed);
-        feed_press = base_feed_press + ramp + randomNoiseAmp(0.5);
-
-        // 3. Lagged rise on downstream pressures
-        double target_scrubber = feed_press - 0.1;
-        double target_inlet = feed_press - 0.3;
-        system_inlet_press += (target_inlet - system_inlet_press) * 0.65;
-        double target_outlet = system_inlet_press - 1.5 - (bed_dp[0] + bed_dp[1] + bed_dp[2]) / 3.0;
-        system_outlet_press += (target_outlet - system_outlet_press) * 0.65;
-    }} else {{
-        flare_header_press = 1.05 + randomNoiseAmp(0.01);
-        feed_press = base_feed_press + randomNoiseAmp(0.5);
-        system_inlet_press = feed_press - 0.3;
-        system_outlet_press = system_inlet_press - 1.5 - (bed_dp[0] + bed_dp[1] + bed_dp[2]) / 3.0;
-    }}
-
-    // ── Regen gas dynamics ──
-    int regen_state = cycle_state[lead_lag_index];
-    if (regen_state == 2) {{
-        heater_flame_on = true;
-        double error = 290.0 - heater_outlet_temp;
-        heater_duty = 40.0 + error * 1.5 + randomNoiseAmp(2.0);
-        if (heater_duty > 100.0) heater_duty = 100.0;
-        if (heater_duty < 0.0) heater_duty = 0.0;
-        heater_outlet_temp += error * 0.2 + randomNoiseAmp(1.0);
-        blower_running = true;
-        blower_flow = 220.0 + randomNoiseAmp(5.0);
-    }} else if (regen_state == 3) {{
-        heater_flame_on = false;
-        heater_duty = 0.0;
-        heater_outlet_temp -= (heater_outlet_temp - feed_temp) * 0.2 + randomNoiseAmp(0.5);
-        cooler_outlet_temp -= (cooler_outlet_temp - 35.0) * 0.3 + randomNoiseAmp(0.5);
-        blower_running = true;
-        blower_flow = 220.0 + randomNoiseAmp(5.0);
-        regen_water_removed += 0.8;
-    }} else {{
-        heater_flame_on = false;
-        heater_duty = 0.0;
-        blower_running = (regen_state == 1 || regen_state == 4);
-        blower_flow = blower_running ? (150.0 + randomNoiseAmp(2.0)) : 0.0;
-        cooler_outlet_temp += (feed_temp - cooler_outlet_temp) * 0.1;
-    }}
-
-    // ── Dew point tracks worst moisture ──
-    double worst_moisture = 0.0;
-    for (int i = 0; i < NUM_TOWERS; i++) {{
-        if (i != lead_lag_index && moisture_pct[i] > worst_moisture) {{
-            worst_moisture = moisture_pct[i];
-        }}
-    }}
-    dew_point_c = -115.0 + (worst_moisture / 95.0) * 25.0;
-
-    // ── ESD trip logic ──
-    if (feed_press > 90.0 || dew_point_c > DEW_POINT_SPEC + 5.0 || heater_outlet_temp > 320.0) {{
-        esd_active = true;
-        if (esd_trip_tick < 0) {{
-            esd_trip_tick = tick_count;
-        }}
-    }}
-}}
-"""
-    # Replace simulatePhysics body
-    physics_start = base_source.find(physics_marker)
-    if physics_start == -1:
-        raise RuntimeError("Could not find simulatePhysics() in simulation.as")
-    physics_end = base_source.find("void writeInletSeparation", physics_start)
-    if physics_end == -1:
-        raise RuntimeError("Could not find writeInletSeparation marker in simulation.as")
-    base_source = base_source[:physics_start] + physics_impl + "\n" + base_source[physics_end:]
-
-    # Update while loop in main() to run for max_iterations and terminate on ESD
-    loop_start_marker = "    int iteration = 0;\n    while (true) {"
-    new_loop = f"""    int iteration = 0;
-    while (iteration < MAX_SIM_ITERATIONS) {{
-        simulatePhysics();
-        DTL@ ts = simulatedDTL();
-        writeInletSeparation(ts);
-        writeAdsorberTowers(ts);
-        writeRegenSystem(ts);
-        writeSwitchingValves(ts);
-        writeOutletQuality(ts);
-        writeSafetySystems(ts);
-        writeUtilities(ts);
-
-        if (iteration % 24 == 0) {{
-            printReport(ts, iteration);
-        }}
-
-        if (esd_active) {{
-            print("[ESD_EVENT] feed_press=" + feed_press + " bar tripped ESD at tick " + tick_count + " (iteration " + iteration + ")\\n");
-            // Give WebSocket time to flush final dirty state
-            sleep(100);
-            break;
-        }}
-
-        iteration++;
-        sleep(TICK_SLEEP_MS);
-    }}
-    print("[SIMULATION_COMPLETE] Finished at iteration " + iteration + " total ticks " + tick_count + "\\n");
-    return;
-}}
-"""
-    old_loop_pos = base_source.find(loop_start_marker)
-    if old_loop_pos == -1:
-        raise RuntimeError("Could not find simulation loop start in simulation.as")
-    # Replace until end of main()
-    main_end_pos = base_source.find("void simulatePhysics()", old_loop_pos)
-    base_source = base_source[:old_loop_pos] + new_loop + "\n" + base_source[main_end_pos:]
-
-    script_path = sim_copy / "simulation.as"
-    script_path.write_text(base_source, encoding="utf-8")
-    return script_path, max_iterations
+    env = {
+        "SGRN_TICKS_PER_DAY": str(ticks_per_day),
+        "SGRN_TICK_SLEEP_MS": str(tick_sleep_ms),
+        "SGRN_SIM_MAX_ITERATIONS": str(fault_day * ticks_per_day),
+        "SGRN_REPORT_EVERY": str(ticks_per_day),
+        "SGRN_FAULT_CODE": "0" if noFault else str(scenario.get("fault_code", 9)),
+        "SGRN_FAULT_ONSET_HOUR": str(scenario.get("fault_injection_tick", normal_days * 24 + 3)),
+        "SGRN_FLARE_RAMP_RATE": repr(scenario.get("flare_ramp_rate", 0.15)),
+        "SGRN_FEED_RAMP_RATE": repr(scenario.get("feed_ramp_rate", 1.15)),
+        # Keep the sync publish debounce at/below tick pacing so fast-tick
+        # captures keep per-tick WAL samples (default throttle is 25 ms).
+        "SGRN_SYNC_COALESCE_MS": str(min(int(tick_sleep_ms), 5)),
+    }
+    return sim_copy, fault_day * ticks_per_day, env
 
 
 def writeGatewayConfig(path: Path, state_dir: Path, http_port: int, schema_path: Path) -> None:
@@ -314,117 +148,332 @@ def writeGatewayConfig(path: Path, state_dir: Path, http_port: int, schema_path:
     path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 
-def runCapture(args) -> tuple[Path, Path]:
-    cfg = loadConfig(getConfigPath(Path(__file__).parent))
-    out_dir = Path(args.out).resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
+def findFirstTickTs(archive_path: Path) -> int | None:
+    """Timestamp of the first data frame (WAL ms domain), streamed.
 
-    run_dir = out_dir / datetime.now(timezone.utc).strftime("capture_%Y%m%d_%H%M%S")
-    run_dir.mkdir(parents=True, exist_ok=False)
+    The simulation clocks DTLs as absolute wall datetimes (2000-01-01
+    00:00 + ticks) while frame stamps encode the machine's local mktime
+    reading of that wall clock, so meta anchors must come from the archive
+    itself rather than a fixed UTC epoch. Handles both merged formats,
+    raw or zstd-compressed.
+    """
+    try:
+        import zstandard
+    except ImportError:
+        return None
+    k_control_db = 0xFFFF  # control frames carry wall-clock bookkeeping only
 
+    def _first_tick_from_frames(read, prefix=b""):
+        # stream reads may return short chunks — frame alignment demands
+        # an exact-length reader
+        def exact(n):
+            buf = b""
+            while len(buf) < n:
+                chunk = read(n - len(buf))
+                if not chunk:
+                    break
+                buf += chunk
+            return buf
+
+        head = prefix + exact(10 - len(prefix))
+        if len(head) < 10 or head[:4] != b"SGRN":
+            return None
+        exact(struct.unpack_from("<I", head, 6)[0])  # embedded schema blob
+        while True:
+            hdr = exact(14)
+            if len(hdr) < 14:
+                return None
+            ts = struct.unpack_from("<q", hdr, 0)[0]
+            db = struct.unpack_from("<H", hdr, 8)[0]
+            if db != k_control_db:
+                return ts
+            exact(struct.unpack_from("<I", hdr, 10)[0])
+
+    def _first_tick_jsonl(read, prefix=b""):
+        pending = prefix
+        while True:
+            chunk = read(262144)
+            if not chunk:
+                return None
+            pending += chunk
+            while b"\n" in pending:
+                line, pending = pending.split(b"\n", 1)
+                if b'"ts"' not in line:
+                    continue
+                try:
+                    rec = json.loads(line.decode("utf-8", errors="replace"))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+                if rec.get("type") in ("anchor", "delta") and isinstance(rec.get("ts"), (int, float)):
+                    return int(rec["ts"])
+
+    try:
+        def _exact(read, n):
+            buf = b""
+            while len(buf) < n:
+                chunk = read(n - len(buf))
+                if not chunk:
+                    break
+                buf += chunk
+            return buf
+
+        with open(archive_path, "rb") as fh:
+            if _exact(fh.read, 4) == b"\x28\xb5\x2f\xfd":  # zstd archive
+                fh.seek(0)
+                with zstandard.ZstdDecompressor().stream_reader(fh, read_across_frames=True) as zr:
+                    head = zr.read(4)
+                    if head == b"SGRN":
+                        return _first_tick_from_frames(zr.read, head)
+                    return _first_tick_jsonl(zr.read, head)
+            fh.seek(0)
+            if _exact(fh.read, 4) == b"SGRN":
+                fh.seek(0)
+                return _first_tick_from_frames(fh.read)
+            fh.seek(0)
+            return _first_tick_jsonl(fh.read)
+    except OSError:
+        return None
+
+def parseEsdTick(sim_output: str) -> int | None:
+    match = re.search(r"tripped ESD at tick (\d+)", sim_output)
+    return int(match.group(1)) if match else None
+
+
+def runCaptureGateway(args, cfg: dict, run_dir: Path, out_dir: Path, ticks_per_day: int,
+                      noFault: bool = False) -> tuple[Path, str]:
+    """Deployment-faithful capture: gateway + GatewaySync (jsonl deltas)."""
     gw_bin = findBinary("gateway")
     s7_bin = findBinary("s7shell")
 
-    script_path, max_iterations = createIsolatedSimulation(run_dir, args.port, cfg)
+    script_dir, max_iterations, env = stageIsolatedSimulation(run_dir, cfg, noFault=noFault)
     gw_config_path = run_dir / "gateway.json"
     gw_state_dir = run_dir / "gw_state"
-    writeGatewayConfig(gw_config_path, gw_state_dir, args.port, script_path.parent / "schema.scl")
+    writeGatewayConfig(gw_config_path, gw_state_dir, args.port, script_dir / "schema.scl")
+    env["SGRN_GATEWAY_WS_URL"] = f"ws://127.0.0.1:{args.port}/ws"
 
-    # Discard verbose subprocess output by default to avoid massive log files.
-    # Use DEVNULL for stdout/stderr unless --verbose flag is provided.
     if args.verbose:
         gw_log = open(run_dir / "gateway.log", "w", encoding="utf-8")
         sim_log = open(run_dir / "s7shell.log", "w", encoding="utf-8")
         gw_stdout = gw_log
-        gw_stderr = subprocess.STDOUT
         sim_stdout = sim_log
-        sim_stderr = subprocess.STDOUT
     else:
         gw_log = sim_log = None
-        gw_stdout = gw_stderr = subprocess.DEVNULL
-        sim_stdout = sim_stderr = subprocess.DEVNULL
+        gw_stdout = subprocess.DEVNULL
+        sim_stdout = subprocess.PIPE
 
     gw_proc = subprocess.Popen(
         [str(gw_bin), str(gw_config_path)],
-        cwd=ROOT,
+        cwd=str(ROOT),
         stdout=gw_stdout,
-        stderr=gw_stderr,
+        stderr=subprocess.STDOUT,
     )
     sim_proc = None
     sim_output = ""
-
     try:
-        print(f"[capture] Starting Gateway on http://127.0.0.1:{args.port}...")
+        print(f"[capture] Gateway starting on http://127.0.0.1:{args.port}...")
         waitHttp(f"http://127.0.0.1:{args.port}/endpoints", gw_proc)
-        print("[capture] Gateway ready. Starting S7Shell simulation (30 normal days + fault day)...")
+        print(f"[capture] Gateway ready. Starting s7shell simulation — "
+              f"{max_iterations} ticks ({ticks_per_day}/day → {24.0 * 60.0 / ticks_per_day:.1f} min/tick)...")
 
         sim_proc = subprocess.Popen(
-            [str(s7_bin), script_path.name],
-            cwd=script_path.parent,
-            stdout=subprocess.PIPE,
+            [str(s7_bin), "simulation.as"],
+            cwd=str(script_dir),
+            env={**os.environ, **env},
+            stdout=sim_stdout,
             stderr=subprocess.STDOUT,
             text=True,
         )
-
         stdout, _ = sim_proc.communicate()
-        sim_output = stdout
+        sim_output = stdout or ""
         if sim_log:
-            sim_log.write(stdout)
+            sim_log.write(sim_output)
             sim_log.flush()
-
         if sim_proc.returncode != 0:
-            raise RuntimeError(f"S7Shell exited with code {sim_proc.returncode}; inspect {run_dir / 's7shell.log' if args.verbose else 'run with --verbose to see logs'}")
-
+            hint = run_dir / "s7shell.log" if args.verbose else "run with --verbose to generate logs"
+            raise RuntimeError(f"s7shell exited with code {sim_proc.returncode}; inspect {hint}")
         print("[capture] Simulation complete.")
     finally:
         stopProcess(sim_proc)
-        # Give gateway a moment to finish commit before stopping
-        time.sleep(1.0)
+        time.sleep(1.0)  # let the gateway flush the final deltas
         stopProcess(gw_proc, timeout=10)
         if gw_log:
             gw_log.close()
         if sim_log:
             sim_log.close()
 
-    # Locate the generated .jsonl.zst archive
     archives = sorted(gw_state_dir.rglob("*.jsonl.zst"), key=lambda p: p.stat().st_mtime)
+    # Recovery: the gateway's async WAL finalizer can leave the archive as a
+    # .tmp when shutdown posts the rename to a stopped pool. The .tmp holds a
+    # complete WAL (footer included) — promote it for ingestion.
     if not archives:
-        log_hint = run_dir / "gateway.log" if args.verbose else "run with --verbose to generate gateway.log"
+        for tmp in sorted(gw_state_dir.rglob("*.jsonl.zst.tmp"), key=lambda p: p.stat().st_mtime):
+            tmp.rename(tmp.with_name(tmp.name[:-4]))  # strip ".tmp"
+        archives = sorted(gw_state_dir.rglob("*.jsonl.zst"), key=lambda p: p.stat().st_mtime)
+    if not archives:
+        log_hint = run_dir / "gateway.log" if args.verbose else "run with --verbose to generate logs"
         raise RuntimeError(f"No .jsonl.zst archive found under {gw_state_dir}; check {log_hint}")
 
-    # Copy / move the final archive to a canonical location in out_dir
-    raw_archive = archives[-1]
     final_archive = out_dir / "flare_history.jsonl.zst"
-    shutil.copy2(raw_archive, final_archive)
+    shutil.copy2(archives[-1], final_archive)
+
+    esd_output = sim_output
+    if args.verbose and not sim_output:
+        esd_output = (run_dir / "s7shell.log").read_text(encoding="utf-8") if (run_dir / "s7shell.log").exists() else ""
+    return final_archive, esd_output
+
+
+def runCaptureLocal(args, cfg: dict, run_dir: Path, out_dir: Path, ticks_per_day: int,
+                    noFault: bool = False) -> tuple[Path, str]:
+    """In-shell capture: Persistence binding, full-DB binary images, no gateway.
+
+    sgrn_dataset groups the per-DB frames by timestamp into one complete row
+    per tick. The startup WAL anchor (raw, unseeded DB memory) has no
+    timestamp column values — downstream dataset.py drops such rows.
+    """
+    s7_bin = findBinary("s7shell")
+
+    script_dir, max_iterations, env = stageIsolatedSimulation(run_dir, cfg, noFault=noFault)
+    capture_dir = run_dir / "wal"
+    env["SGRN_CAPTURE_DIR"] = str(capture_dir)
+
+    if args.verbose:
+        sim_log = open(run_dir / "s7shell.log", "w", encoding="utf-8")
+        sim_stdout = sim_log
+    else:
+        sim_log = None
+        sim_stdout = subprocess.PIPE
+
+    sim_proc = None
+    sim_output = ""
+    try:
+        print(f"[capture] s7shell in-process capture — "
+              f"{max_iterations} ticks ({ticks_per_day}/day → {24.0 * 60.0 / ticks_per_day:.1f} min/tick)...")
+        sim_proc = subprocess.Popen(
+            [str(s7_bin), "simulation.as"],
+            cwd=str(script_dir),
+            env={**os.environ, **env},
+            stdout=sim_stdout,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        stdout, _ = sim_proc.communicate()
+        sim_output = stdout or ""
+        if sim_log:
+            sim_log.write(sim_output)
+            sim_log.flush()
+        if sim_proc.returncode != 0:
+            hint = run_dir / "s7shell.log" if args.verbose else "run with --verbose to generate logs"
+            raise RuntimeError(f"s7shell exited with code {sim_proc.returncode}; inspect {hint}")
+        print("[capture] Simulation complete.")
+    finally:
+        stopProcess(sim_proc)
+        if sim_log:
+            sim_log.close()
+
+    archives = sorted(capture_dir.rglob("*.bin.zst"), key=lambda p: p.stat().st_mtime)
+    if not archives:
+        archives = sorted(capture_dir.rglob("*.jsonl.zst"), key=lambda p: p.stat().st_mtime)
+    if not archives:
+        log_hint = run_dir / "s7shell.log" if args.verbose else "run with --verbose to generate logs"
+        raise RuntimeError(f"No WAL archive found under {capture_dir}; check {log_hint}")
+
+    # Merge the rotated WAL slices into ONE canonical JSONL archive. The
+    # transcode emitter now expands struct/primitive arrays to full per-element
+    # JSON arrays under the collapsed WAL-dictionary ids, so the merged file
+    # decodes with complete element columns (towers[0..2], valves, detectors)
+    # and stays the single human-inspectable transfer artifact.
+    final_archive = out_dir / "flare_history.jsonl.zst"
+    merge_bin = ROOT / ".dist/linux-static-release/sgrn_dataset"
+    res = subprocess.run(
+        [str(merge_bin), "--merge", str(final_archive), "-f", "jsonl", str(capture_dir)],
+        capture_output=True, text=True,
+    )
+    if res.returncode != 0 or not final_archive.is_file():
+        raise RuntimeError(f"WAL merge failed:\n{res.stdout}\n{res.stderr}")
+    return final_archive, sim_output
+
+
+def runCapture(args) -> tuple[Path, Path]:
+    if args.config:
+        cfg = loadConfig(Path(args.config))
+    else:
+        cfg = loadConfig(getConfigPath(Path(__file__).parent))
+    out_dir = Path(args.out).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    noFault = bool(getattr(args, "no_fault", False))
+    archive_name = getattr(args, "archive_name", None) or (
+        "flare_history_normal.jsonl.zst" if noFault else "flare_history.jsonl.zst")
+
+    run_dir = out_dir / datetime.now(timezone.utc).strftime("capture_%Y%m%d_%H%M%S")
+    run_dir.mkdir(parents=True, exist_ok=False)
+
+    scenario = cfg.get("scenario", {})
+    ticks_per_day = int(scenario.get("ticks_per_day", 24))
+    ms_per_tick = (24 * 3600 * 1000) / ticks_per_day
+    period_scale = ticks_per_day / 24.0
+    epoch_anchor = 946684800000  # ms (2000-01-01 00:00:00 UTC wall)
+
+    if args.local:
+        final_archive, sim_output = runCaptureLocal(args, cfg, run_dir, out_dir, ticks_per_day,
+                                                    noFault=noFault)
+    else:
+        final_archive, sim_output = runCaptureGateway(args, cfg, run_dir, out_dir, ticks_per_day,
+                                                      noFault=noFault)
+    if final_archive.name != archive_name:
+        target = out_dir / archive_name
+        final_archive.rename(target)
+        final_archive = target
     print(f"[capture] Archive generated: {final_archive} ({final_archive.stat().st_size:,} bytes)")
 
-    # Parse ESD and fault onset timestamps
-    epoch_anchor = 946684800000  # ms (2000-01-01 00:00:00 UTC)
-    ms_per_hour = 3600 * 1000
+    # Informational: frame stamps encode the machine-local mktime reading of
+    # the simulated wall clock ("2000-01-01 00:00 + ticks"); the modeling clock
+    # itself comes from the datablocks' DTLs (see rowCacheTs in sgrn_dataset),
+    # which are timezone-free by construction and live in the epoch_anchor
+    # domain below. wal_anchor_ms is kept for diagnostics only.
+    wal_anchor_ms = findFirstTickTs(final_archive)
+    if wal_anchor_ms is None:
+        wal_anchor_ms = epoch_anchor
+        print("[capture] WARNING: could not read first frame ts; wal_anchor falls back to epoch anchor")
+    if wal_anchor_ms != epoch_anchor:
+        print(f"[capture] Note: WAL frame anchor {wal_anchor_ms} ms vs DTL epoch anchor {epoch_anchor} ms")
 
-    fault_tick = cfg.get("scenario", {}).get("fault_injection_tick", 723)
-    fault_onset_ts = epoch_anchor + fault_tick * ms_per_hour
+    # Parse ESD/fault onset in SIM ticks; convert to epoch ms via the tick
+    # grid. Both ts values share the DTL wall domain (epoch_anchor + ticks),
+    # identical to the row timestamps written into the window cache.
+    if noFault:
+        # Pure nominal run: no fault onset/ESD semantics to record, and the
+        # meta.json must not clobber a real scenario anchor in the same dir.
+        print("[capture] --no-fault: pure nominal run; archive only "
+              "(no meta.json written). Usable as held-out capture via "
+              "dataset.heldout_source='capture'.")
+        return final_archive, None
 
-    esd_tick = None
-    esd_ts = None
-    esd_match = re.search(r"tripped ESD at tick (\d+)", sim_output)
-    if esd_match:
-        esd_tick = int(esd_match.group(1))
-        esd_ts = epoch_anchor + esd_tick * ms_per_hour
-        print(f"[capture] ESD detected at tick {esd_tick} (Hour {esd_tick % 24} of Day {1 + esd_tick // 24})")
+    fault_tick = int(round(scenario.get("fault_injection_tick", 723) * period_scale))
+    fault_onset_ts = epoch_anchor + fault_tick * ms_per_tick
+
+    esd_tick = parseEsdTick(sim_output)
+    esd_ts = epoch_anchor + esd_tick * ms_per_tick if esd_tick is not None else None
+    if esd_tick is not None:
+        print(f"[capture] ESD detected at tick {esd_tick} (sim hour {esd_tick / period_scale:.2f})")
     else:
         print("[capture] Run completed without ESD trip.")
-
     meta = {
-        "fault_code": 9,
-        "fault_name": "FLARE_BLOCKED",
-        "scenario": cfg.get("scenario", {}),
+        "fault_code": int(scenario.get("fault_code", 9)),
+        "fault_name": scenario.get("fault_name", "FLARE_BLOCKED"),
+        "scenario": scenario,
+        "ticks_per_day": ticks_per_day,
         "fault_onset_tick": fault_tick,
         "fault_onset_ts": fault_onset_ts,
-        "fault_onset_iso": datetime.fromtimestamp(fault_onset_ts / 1000.0, tz=timezone.utc).isoformat(),
+        # ISO strings: naive render of the DTL wall domain, numerically equal
+        # to fault_onset_ts (2000-01-01 00:00 naive epoch = epoch_anchor).
+        "fault_onset_iso": datetime.fromtimestamp(
+            fault_onset_ts / 1000.0, tz=timezone.utc).isoformat(),
         "esd_tick": esd_tick,
         "esd_ts": esd_ts,
-        "esd_iso": datetime.fromtimestamp(esd_ts / 1000.0, tz=timezone.utc).isoformat() if esd_ts else None,
+        "esd_iso": datetime.fromtimestamp(
+            esd_ts / 1000.0, tz=timezone.utc).isoformat() if esd_ts else None,
+        "wal_anchor_ms": wal_anchor_ms,
         "archive_file": final_archive.name,
         "archive_bytes": final_archive.stat().st_size,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -438,10 +487,22 @@ def runCapture(args) -> tuple[Path, Path]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", default=str(Path(__file__).parent), help="Output directory for archive and meta.json")
-    parser.add_argument("--port", type=int, default=18080, help="Gateway HTTP/WS port for capture")
-    parser.add_argument("--verbose", action="store_true", help="Enable verbose subprocess logging to files (default: discard output to avoid huge logs)")
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="FLARE_BLOCKED WAL capture — verbatim s7shell simulation scripted via env vars")
+    parser.add_argument("--out", required=True, help="Output directory for archive and meta.json")
+    parser.add_argument("--config", default=None,
+                        help="Config file (YAML/JSON); default: experiment dir config.yaml")
+    parser.add_argument("--port", type=int, default=8100 + (os.getpid() % 900),
+                        help="Gateway HTTP/WS port (gateway path)")
+    parser.add_argument("--local", action="store_true",
+                        help="In-shell capture via the Persistence binding (binary WAL, no gateway)")
+    parser.add_argument("--no-fault", action="store_true",
+                        help="Pure nominal run (fault_code forced to 0) for held-out "
+                             "evaluation sets; writes flare_history_normal.jsonl.zst "
+                             "and no scenario meta.json")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Persist subprocess logs (gateway.log / s7shell.log) into the capture dir")
     args = parser.parse_args()
 
     try:

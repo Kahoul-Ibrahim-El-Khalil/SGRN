@@ -19,6 +19,8 @@ int main(int argc, char** argv) {
         "f,format", "Target format for conversion ('binary', 'jsonl', 'csv')", cxxopts::value<std::string>()->default_value("auto"))(
         "d,decompress", "Decompress target file to raw uncompressed stdout/file")("z,compress", "Compress target file with Zstd")(
         "csv", "Output CSV file path for dataset processing", cxxopts::value<std::string>()->default_value("dataset.csv"))(
+        "cache", "Streaming float32 cache output prefix (writes <prefix>.f32, <prefix>.ts.i64, <prefix>.json); empty = off",
+        cxxopts::value<std::string>()->default_value(""))(
         "m,manifest", "Output ML manifest JSON file path", cxxopts::value<std::string>()->default_value("manifest.json"))("merge",
         "Merge all archives under the input path into a single archive file",
         cxxopts::value<std::string>())("man", "Display detailed manual page")("h,help", "Print usage help");
@@ -112,6 +114,10 @@ int main(int argc, char** argv) {
     config.input_dir = input_path;
     config.scl_schema_path = result["scl"].as<std::string>();
     config.output_csv_path = result.count("output") ? result["output"].as<std::string>() : result["csv"].as<std::string>();
+    config.output_cache_prefix = result["cache"].as<std::string>();
+    if (!config.output_csv_path.empty() || !config.output_cache_prefix.empty())
+        fmt::print(fg(fmt::color::cyan), "CSV Output:      {}\nCache Prefix:    {}\n", config.output_csv_path,
+            config.output_cache_prefix.empty() ? "<off>" : config.output_cache_prefix);
     config.manifest_path = result["manifest"].as<std::string>();
 
     fmt::print(fg(fmt::color::cyan), "==================================================\n");

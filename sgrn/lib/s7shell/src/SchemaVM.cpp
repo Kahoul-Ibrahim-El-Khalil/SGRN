@@ -26,6 +26,10 @@
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/utils/strings.hpp>
 
+#ifdef GetObject
+#undef GetObject
+#endif
+
 namespace sgrn::s7shell::shell
 {
 
@@ -984,8 +988,10 @@ static void registerUdtFieldProperties(sgrn::scripting::ScriptHost& t_host, cons
             }
 
             std::string getter_sig = fmt::format("{}@ get_{}() const", ret_type, safe_name);
+            sgrn::scripting::g_suppress_errors = true;
             t_host.getEngine()->RegisterObjectMethod(
                 t_as_type_name.c_str(), getter_sig.c_str(), asFUNCTION(GenericUDTFieldGetter_proxy), asCALL_GENERIC, raw_name);
+            sgrn::scripting::g_suppress_errors = false;
             continue;
         }
 

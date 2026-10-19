@@ -49,7 +49,7 @@ bool setupPlc() {
 
 // ─── Valve helper: ramp position towards command at travel-time rate ───────
 
-void driveValve(ValveActuator@ v, double dt) {
+void driveValve(Db_ValveActuator@ v, double dt) {
     if (v.travel_time_s <= 0.0f)
         v.travel_time_s = 5.0f; // guard against div-by-zero on a fresh/forced record
 

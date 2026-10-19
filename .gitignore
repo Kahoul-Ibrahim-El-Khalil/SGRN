@@ -72,3 +72,8 @@ desktop.ini
 # ── Optional: cache folders ──────────────────────────────────────────────
 .cache/
 compile_commands.json
+
+# flare experiment: generated caches and trained weights (not source)
+experiments/flare/dataset/
+experiments/flare/window_cache/
+experiments/flare/model/

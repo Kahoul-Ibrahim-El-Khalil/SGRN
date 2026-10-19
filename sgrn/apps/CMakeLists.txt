@@ -9,7 +9,7 @@ find_package(Threads REQUIRED)
 # Shared Windows system libs for the gateway/s7shell-family apps below.
 set(WIN_LIBS_LIST
     ws2_32 winmm rpcrt4 crypt32 advapi32 iphlpapi
-    secur32 wldap32 bcrypt userenv
+    secur32 wldap32 bcrypt userenv mswsock
 )
 
 if(SGRN_BUILD_GATEWAY)

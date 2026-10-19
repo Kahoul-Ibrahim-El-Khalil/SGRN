@@ -686,27 +686,50 @@ void GatewayApplication::shutdown() {
     if (shutdown_done_.exchange(true, std::memory_order_acq_rel))
         return;
     SGRN_WARN_LOG("Shutting down...");
-    // Stop the northbound listener first: in-flight HTTP/WS handlers borrow
-    // the adapters, which are destroyed after the server joins.
+
+    // ── Phase 1: Stop inbound sources so no new dirty signals are generated ──
+    // Northbound (HTTP/WS) first — in-flight handlers borrow adapters.
     northbound_server_.stop();
     if (modbus_adapter_.has_value()) {
         modbus_adapter_->stop();
     }
-    if (persistence_service_) {
-        persistence_service_->stop();
-    }
+    // GlobalContext hosts S7/EIP adapter I/O loops; stop those southbound
+    // sources before we disarm the command processor.
     GlobalContext::instance().stop();
+
+    // ── Phase 2: Disarm PlcCommandProcessor ──────────────────────────────────
+    // Null out both context pointers *before* draining the light thread.
+    // signalDirty() / repostDirtyPass() check for null before posting, so
+    // no new tasks will be enqueued on light_ctx_ or heavy_pool_ after this.
+    server_.processor()->stop();
+
+    // ── Phase 3: Drain the light context ─────────────────────────────────────
+    // Reset the work guard and stop the context so run() returns. Any
+    // processDirty() task already queued will execute but post nothing new
+    // (processor is disarmed). Join to guarantee light_ctx_ is fully drained.
     light_work_.reset();
     light_ctx_.stop();
-
     if (light_thread_.joinable()) {
         light_thread_.join();
     }
 
+    // ── Phase 4: Drain the heavy pool ────────────────────────────────────────
+    // All dirty_callback_ lambdas that were posted before Phase 2 have either
+    // already completed or are still running. stop()+join() waits for them.
+    // No new tasks will be posted (light_ctx_ is dead, processor is disarmed).
     if (heavy_pool_) {
         heavy_pool_->stop();
         heavy_pool_->join();
     }
+
+    // ── Phase 5: Stop PersistenceService ─────────────────────────────────────
+    // By now heavy_pool_ is fully drained: pending_tasks_ is zero and no new
+    // tasks can be posted. stop() finalises the open WAL archive and renames
+    // it synchronously (heavy pool is gone, the fallback inline path runs).
+    if (persistence_service_) {
+        persistence_service_->stop();
+    }
+
     SGRN_INFO_LOG("Done.");
 }
 

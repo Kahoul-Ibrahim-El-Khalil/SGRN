@@ -47,7 +47,11 @@ inline struct tm resolveOpcUaLocalTime(UA_DateTime ua_date) {
     // Do NOT divide by 1000 again — that was an off-by-three-orders-of-magnitude bug.
     time_t t_sec = static_cast<time_t>(UA_DateTime_toUnixTime(ua_date));
     struct tm tm_info;
+#if defined(_WIN32)
+    localtime_s(&tm_info, &t_sec);
+#else
     localtime_r(&t_sec, &tm_info);
+#endif
     return tm_info;
 }
 struct ArrayOfBoolsEncodingContext {

@@ -1,0 +1,29 @@
+scenario:
+  normal_days: 30
+  fault_day: 31
+  ticks_per_day: 1440                # 1 tick = 1 simulated minute → 44,640 ticks total
+  fault_injection_tick: 723          # Day 31, Hour 3 — expressed in simulated HOURS
+  fault_code: 9
+  fault_name: "FLARE_BLOCKED"
+  flare_ramp_rate: 0.15              # bar per simulated HOUR
+  feed_ramp_rate: 1.15               # bar per simulated HOUR
+  esd_feed_press_limit: 90.0
+  tick_sleep_ms: 2                   # 44.6k ticks × 2 ms ≈ 90 s wall capture
+
+dataset:
+  window_size:                       # sliding window for autoencoder input
+    unit: "minutes"
+    size: 1                          # 1-minute windows (1 sample each)
+  stride: 1
+  train_ratio: 0.7
+  calibration_ratio: 0.3
+  calibration_stride: 12
+  random_seed: 42
+
+model:
+  latent_dim: 16
+  epochs: 50
+  batch_size: 32
+  learning_rate: 0.001
+  alpha: 0.05
+  k_multiplier: 1.4

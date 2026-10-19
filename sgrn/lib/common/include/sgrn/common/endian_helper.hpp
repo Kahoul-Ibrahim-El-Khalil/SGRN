@@ -1,6 +1,7 @@
 #pragma once
 
 #include <sgrn/scl/types.hpp>
+#include <cstdio>
 #include <cstring>
 #include <s7codec/endian.hpp>
 #include <vector>
@@ -94,6 +95,27 @@ inline std::string loadValue(const uint8_t* tp_buffer, DataType t_type, s7codec:
             if (std::isinf(v) || std::isnan(v))
                 return "null";
             return std::to_string(v);
+        }
+
+        case DataType::DTL: {
+            // S7 DTL (12 bytes): Year u16 | Month | Day | Weekday | Hour |
+            // Minute | Second | Nanoseconds u32. Renders the same ISO-ish
+            // string the gateway twin uses ("2000-01-01 00:04:00.000000000").
+            // Unset (all-zero / out-of-range) DTLs render as "null" so CSV
+            // rows carry an empty column — downstream parsers drop those.
+            const uint16_t year = loadFromBuffer<uint16_t>(tp_buffer, t_endianness);
+            const uint8_t month = tp_buffer[2];
+            const uint8_t hour = tp_buffer[5];
+            const uint32_t nanos = loadFromBuffer<uint32_t>(tp_buffer + 8, t_endianness);
+            if (year < 1 || year > 9999 || tp_buffer[3] < 1 || tp_buffer[3] > 31 || month < 1 || month > 12 || hour > 23 ||
+                tp_buffer[6] > 59 || tp_buffer[7] > 59) {
+                return "null";
+            }
+            char buf[40];
+            std::snprintf(buf, sizeof(buf), "%04u-%02u-%02u %02u:%02u:%02u.%09u", static_cast<unsigned>(year), static_cast<unsigned>(month),
+                static_cast<unsigned>(tp_buffer[3]), static_cast<unsigned>(hour), static_cast<unsigned>(tp_buffer[6]),
+                static_cast<unsigned>(tp_buffer[7]), nanos);
+            return std::string(buf);
         }
 
         default:

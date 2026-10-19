@@ -13,32 +13,50 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 if(NOT DEFINED ENV{CONDA_PREFIX} OR "$ENV{CONDA_PREFIX}" STREQUAL "")
+    if(WIN32)
+        set(_SGRN_WIN_CANDIDATES
+            "$ENV{LOCALAPPDATA}/micromamba/envs/SGRN-WINDOWS"
+            "$ENV{USERPROFILE}/micromamba/envs/SGRN-WINDOWS"
+            "$ENV{USERPROFILE}/miniforge3/envs/SGRN-WINDOWS"
+            "$ENV{USERPROFILE}/miniconda3/envs/SGRN-WINDOWS"
+            "$ENV{ProgramData}/micromamba/envs/SGRN-WINDOWS"
+            "$ENV{HOMEDRIVE}/micromamba/envs/SGRN-WINDOWS"
+        )
+        foreach(_cand IN LISTS _SGRN_WIN_CANDIDATES)
+            if(EXISTS "${_cand}")
+                set(ENV{CONDA_PREFIX} "${_cand}")
+                break()
+            endif()
+        endforeach()
+    endif()
+endif()
+
+if(NOT DEFINED ENV{CONDA_PREFIX} OR "$ENV{CONDA_PREFIX}" STREQUAL "")
     message(FATAL_ERROR
 "[SGRN] No conda (micromamba) environment is active.
 
-The SGRN build must run from inside the 'SGRN' conda environment, which
+The SGRN build must run from inside the 'SGRN' or 'SGRN-WINDOWS' conda environment, which
 provides the compilers, ninja and the target dependency libraries. Activate
 it first, then re-run the exact same command:
 
-    micromamba activate SGRN
-    <re-run your cmake command>
+    micromamba activate SGRN-WINDOWS   (on Windows)
+    micromamba activate SGRN           (on Linux)
 
-(if your manager is conda rather than micromamba:  conda activate SGRN)
+(if your manager is conda rather than micromamba:  conda activate SGRN-WINDOWS)
 
-Do not skip this step: the presets hardcode tool paths into this environment
-and dependency discovery is keyed off $CONDA_PREFIX.")
+Do not skip this step: dependency discovery and tool paths are keyed off $CONDA_PREFIX.")
 endif()
 
 # A gentler warning when a *different* env happens to be active (the usual cause
 # of hard-to-debug "package/library not found" errors).
 if(DEFINED ENV{CONDA_PREFIX})
     get_filename_component(_sgrn_conda_name "$ENV{CONDA_PREFIX}" NAME)
-    if(NOT _sgrn_conda_name STREQUAL "SGRN")
+    if(NOT _sgrn_conda_name MATCHES "^(SGRN|SGRN-WINDOWS)$")
         message(WARNING
-"[SGRN] The active conda environment is '${_sgrn_conda_name}', not 'SGRN'.
-The SGRN presets are built and tested against the 'SGRN' environment. If you
+"[SGRN] The active conda environment is '${_sgrn_conda_name}', not 'SGRN' or 'SGRN-WINDOWS'.
+The SGRN presets are built and tested against 'SGRN' / 'SGRN-WINDOWS'. If you
 run into missing compilers or dependency libraries, switch to it:
 
-    micromamba activate SGRN")
+    micromamba activate SGRN-WINDOWS")
     endif()
 endif()

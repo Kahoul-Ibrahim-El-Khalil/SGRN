@@ -12,6 +12,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <rapidjson/document.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -135,6 +136,18 @@ private:
     // Semantic (schema-aware) endpoints: /data/*
     void handleGetData(const http::HttpRequest& t_req, http::HttpResponse& t_res);
     void handlePost(const http::HttpRequest& t_req, http::HttpResponse& t_res);
+    /// POST /data/ — multi-DB batch write; body is a JSON object keyed by DB name.
+    void handlePostMultiDb(const http::HttpRequest& t_req, http::HttpResponse& t_res);
+    /// POST /data/<DB>/<field>/<N>[/<rest>] — indexed array-of-struct element replacement (object body).
+    void handlePostStructArrayElement(const http::HttpRequest& t_req, http::HttpResponse& t_res, uint16_t t_db_num,
+        const std::string& t_field_path, const std::string& t_rest_path, size_t t_index, const std::string& t_url_path,
+        rapidjson::Document& t_document);
+    /// POST /data/<DB>/<field>/<N> — scalar/primitive array element replacement (non-object body).
+    void handlePostScalarArrayElement(const http::HttpRequest& t_req, http::HttpResponse& t_res, uint16_t t_db_num,
+        const std::string& t_field_path, size_t t_index, const std::string& t_url_path, const rapidjson::Document& t_document);
+    /// POST /data/<DB>[/<field>] — leaf collection, authorization, atomic batch write and readback.
+    void handlePostLeafField(const http::HttpRequest& t_req, http::HttpResponse& t_res, uint16_t t_db_num,
+        const std::string& t_field_path, const std::string& t_url_path, const rapidjson::Document& t_document);
     void handlePut(const http::HttpRequest& t_req, http::HttpResponse& t_res);
 
     // Discrete tag endpoints: /tags and /tags/<name> (see tags_handlers.cpp)

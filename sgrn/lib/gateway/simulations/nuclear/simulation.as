@@ -225,7 +225,7 @@ void simulatePhysics() {
 
 // ─── DataBlock Writers ───────────────────────────────────────────────────────
 
-void writeReactorCore(ReactorCore@ db, DTL@ ts) {
+void writeReactorCore(Db_ReactorCore@ db, DTL@ ts) {
     db.thermal_power = reactor_power_mw;
     db.thermal_power_ratio = float((reactor_power_mw / 3400.0) * 100.0);
     db.neutron_flux = neutron_flux;
@@ -258,7 +258,7 @@ void writeReactorCore(ReactorCore@ db, DTL@ ts) {
     db.put();
 }
 
-void writePrimaryCoolant(PrimaryCoolant@ db, DTL@ ts) {
+void writePrimaryCoolant(Db_PrimaryCoolant@ db, DTL@ ts) {
     db.hot_leg_temp = float(t_outlet);
     db.cold_leg_temp = float(t_inlet);
     db.przr_pressure = float(przr_press);
@@ -291,7 +291,7 @@ void writePrimaryCoolant(PrimaryCoolant@ db, DTL@ ts) {
     db.put();
 }
 
-void writeSteamGenerator(SteamGenerator@ db, DTL@ ts) {
+void writeSteamGenerator(Db_SteamGenerator@ db, DTL@ ts) {
     db.sg_pressure_bar[0] = float(sg1_press);
     db.sg_pressure_bar[1] = float(sg2_press);
     db.sg_level_pct[0] = float(sg1_level);
@@ -316,7 +316,7 @@ void writeSteamGenerator(SteamGenerator@ db, DTL@ ts) {
     db.put();
 }
 
-void writeTurbine(Turbine@ db, DTL@ ts) {
+void writeTurbine(Db_Turbine@ db, DTL@ ts) {
     db.hp_speed_rpm = float(turbine_speed);
     db.gen_power_mw = gen_power_mw;
     db.gen_voltage_kv = 24.0f;
@@ -339,7 +339,7 @@ void writeTurbine(Turbine@ db, DTL@ ts) {
     db.put();
 }
 
-void writeSafetySystems(SafetySystems@ db, DTL@ ts) {
+void writeSafetySystems(Db_SafetySystems@ db, DTL@ ts) {
     db.scram_signal = scrammed;
     db.scram_auto = scrammed;
     db.containment_press_bar = 1.013f;
@@ -365,7 +365,7 @@ void writeSafetySystems(SafetySystems@ db, DTL@ ts) {
     db.put();
 }
 
-void writeRadMonitoring(RadMonitoring@ db, DTL@ ts) {
+void writeRadMonitoring(Db_RadMonitoring@ db, DTL@ ts) {
     db.zone_monitors[0].dose_rate_usvh = 0.12f;
     db.zone_monitors[0].integrated_msv = 12.5;
     db.zone_monitors[0].alarm_high = false;
@@ -403,7 +403,7 @@ void writeRadMonitoring(RadMonitoring@ db, DTL@ ts) {
     db.put();
 }
 
-void writeWasteProcessing(WasteProcessing@ db, DTL@ ts) {
+void writeWasteProcessing(Db_WasteProcessing@ db, DTL@ ts) {
     db.sfp_temp_c = float(sfp_temp);
     db.sfp_level_m = float(sfp_level);
     db.sfp_boron_ppm = 2400.0f;

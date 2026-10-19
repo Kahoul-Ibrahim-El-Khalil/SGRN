@@ -52,6 +52,14 @@ public:
     void processDirty();
     void signalDirty();
 
+    /// Disarm the processor: clear both context pointers so no new tasks can
+    /// be posted to light_ctx_ or heavy_pool_. Must be called before stopping
+    /// those pools to prevent use-after-free in inflight lambdas.
+    void stop() {
+        light_ctx_ = nullptr;
+        heavy_pool_ = nullptr;
+    }
+
     bool hasPendingCommands() const;
 
 private:

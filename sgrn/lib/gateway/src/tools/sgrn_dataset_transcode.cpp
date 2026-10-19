@@ -10,6 +10,8 @@
 #include <sgrn/scl/schema/SchemaSerializer.hpp>
 #include <sgrn/utils/compression.hpp>
 #include <sgrn/utils/time.hpp>
+#include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <rapidjson/document.h>
 #include <rapidjson/prettywriter.h>
@@ -72,6 +74,8 @@ size_t s7TypeByteSize(sgrn::scl::DataType t_type) {
         case DT::LTime:
         case DT::LTimeOfDay:
             return 8;
+        case DT::DTL:
+            return 12;
         default:
             return 1;
     }
@@ -87,6 +91,15 @@ struct TranscodeLeaf {
     sgrn::scl::DataType type;
     int bit; // for Bool
     s7codec::Endian endian;
+    /// Array span of the WAL dictionary leaf (1 = scalar). The dictionary
+    /// collapses struct/primitive arrays to one un-indexed path; emitting
+    /// every element under that one id lets JSONL consumers fan values out
+    /// to the per-element ("a.b[0].c") feature columns.
+    uint32_t count = 1;
+    /// Per-element byte stride for non-Bool arrays (struct: parent
+    /// struct_size; primitive: type width). Bool arrays are bit-packed:
+    /// element i lives in bit (bit + i), encoded as stride = 0.
+    uint32_t stride = 0;
 };
 
 /// Recursively collects leaves from a schema-JSON "fields" array.
@@ -106,9 +119,37 @@ void collectTranscodeLeaves(const rapidjson::Value& t_fields, const std::string&
         const std::string path = t_db_prefix.empty() ? name : t_db_prefix + "." + name;
         const size_t abs_offset = t_base_offset + static_cast<size_t>(rel);
 
+        uint32_t arr_count = 1;
+        uint32_t arr_stride = 0; // 0 = Bit-packed Bool semantics (decoded specially)
+        if (field.HasMember("count") && field["count"].IsUint())
+            arr_count = field["count"].GetUint();
+        if (arr_count > 1) {
+            if (field.HasMember("struct_size") && field["struct_size"].IsUint())
+                arr_stride = field["struct_size"].GetUint();
+        }
+
         const bool has_children = field.HasMember("children") && field["children"].IsArray() && !field["children"].Empty();
         if (has_children) {
+            // Struct (array): child offsets are relative to element 0. Leaves
+            // keep the collapsed path but carry the array span so the decoder
+            // can walk every element with the parent's per-element stride.
+            const size_t before = t_out.size();
             collectTranscodeLeaves(field["children"], path, abs_offset, t_db_endian, t_out);
+            if (arr_count > 1) {
+                // struct_size missing/0 → derive from child extents
+                // (max child offset + width), still an element span.
+                if (arr_stride == 0) {
+                    for (size_t i = before; i < t_out.size(); ++i) {
+                        const size_t end = t_out[i].offset + s7TypeByteSize(t_out[i].type);
+                        arr_stride = std::max(arr_stride, static_cast<uint32_t>(end - abs_offset));
+                    }
+                    arr_stride = std::max(arr_stride, 1u);
+                }
+                for (size_t i = before; i < t_out.size(); ++i) {
+                    t_out[i].count = arr_count;
+                    t_out[i].stride = arr_stride;
+                }
+            }
             continue;
         }
         if (!field.HasMember("type") || !field["type"].IsString())
@@ -122,7 +163,12 @@ void collectTranscodeLeaves(const rapidjson::Value& t_fields, const std::string&
             std::string_view(field["endianness"].GetString()) == "little") {
             endian = s7codec::Endian::Little;
         }
-        t_out.push_back(TranscodeLeaf{path, abs_offset, *type, bit, endian});
+        TranscodeLeaf leaf{path, abs_offset, *type, bit, endian};
+        if (arr_count > 1) {
+            leaf.count = arr_count;
+            leaf.stride = (*type == sgrn::scl::DataType::Bool) ? 0u : s7TypeByteSize(*type);
+        }
+        t_out.push_back(std::move(leaf));
     }
 }
 
@@ -168,7 +214,8 @@ bool buildTranscodeLayout(const rapidjson::Document& t_schema, std::unordered_ma
 /// Decodes one leaf to a typed JSON value (mirrors endian_helper::loadValue
 /// reads, but type-preserving). Returns false when undecodable (out of
 /// range, unsupported type, non-finite float) — caller skips the leaf.
-bool decodeTranscodeLeaf(const uint8_t* t_image, size_t t_image_len, const TranscodeLeaf& t_leaf, rapidjson::Value& t_out) {
+bool decodeTranscodeLeaf(const uint8_t* t_image, size_t t_image_len, const TranscodeLeaf& t_leaf, rapidjson::Value& t_out,
+    rapidjson::Document::AllocatorType& t_alloc) {
     using DT = sgrn::scl::DataType;
     using sgrn::common::endian_helper::loadFromBuffer;
     const size_t width = s7TypeByteSize(t_leaf.type);
@@ -223,6 +270,25 @@ bool decodeTranscodeLeaf(const uint8_t* t_image, size_t t_image_len, const Trans
             if (std::isinf(v) || std::isnan(v))
                 return false;
             t_out.SetDouble(v);
+            return true;
+        }
+        case DT::DTL: {
+            // S7 DTL (12 bytes): Year u16 | Month | Day | Weekday | Hour |
+            // Minute | Second | Nanoseconds u32 → ISO-ish string the gateway
+            // twin emits ("2000-01-31 23:59:00.000000000"). Unset/out-of-range
+            // DTLs are skipped like other undecodable leaves.
+            if (t_leaf.offset + 12 > t_image_len)
+                return false;
+            const uint16_t year = loadFromBuffer<uint16_t>(p, t_leaf.endian);
+            const uint32_t nanos = loadFromBuffer<uint32_t>(p + 8, t_leaf.endian);
+            if (year < 1 || year > 9999 || p[2] < 1 || p[2] > 12 || p[3] < 1 || p[3] > 31 || p[5] > 23 || p[6] > 59 || p[7] > 59)
+                return false;
+            char buf[40];
+            std::snprintf(buf, sizeof(buf), "%04u-%02u-%02u %02u:%02u:%02u.%09u", static_cast<unsigned>(year), static_cast<unsigned>(p[2]),
+                static_cast<unsigned>(p[3]), static_cast<unsigned>(p[5]), static_cast<unsigned>(p[6]), static_cast<unsigned>(p[7]), nanos);
+            // Copy into allocator-owned storage: SetString(buf, len) without
+            // an allocator stores the (stack) pointer — dangling on return.
+            t_out.SetString(buf, static_cast<rapidjson::SizeType>(std::strlen(buf)), t_alloc);
             return true;
         }
         default:
@@ -283,8 +349,10 @@ bool transcodeBinaryToJsonl(const std::string& t_decompressed, const std::string
     // synthetic records (historic behavior), never dropping frames.
     std::unordered_map<uint16_t, std::vector<TranscodeLeaf>> layout;
     bool have_layout = false;
+    // Function scope: decode_image borrows schema_doc's allocator for
+    // allocator-owned (copied) leaf strings (e.g. DTL timestamps).
+    rapidjson::Document schema_doc;
     if (!schema_json.empty()) {
-        rapidjson::Document schema_doc;
         if (!schema_doc.Parse(schema_json.c_str()).HasParseError() && schema_doc.IsObject()) {
             have_layout = buildTranscodeLayout(schema_doc, layout);
         }
@@ -391,11 +459,21 @@ bool transcodeBinaryToJsonl(const std::string& t_decompressed, const std::string
                 auto id_it = path_to_id.find(leaf.path);
                 if (id_it == path_to_id.end())
                     continue;
+                // Tombstone span for one leaf, scaled to its array when the
+                // WAL dictionary leaf fans out over elements. Bool arrays
+                // pack bits starting at leaf.bit (stride 0).
+                auto leaf_span_bytes = [&](const TranscodeLeaf& t_leaf) -> size_t {
+                    if (t_leaf.count <= 1)
+                        return s7TypeByteSize(t_leaf.type);
+                    if (t_leaf.type == sgrn::scl::DataType::Bool && t_leaf.stride == 0)
+                        return static_cast<size_t>(t_leaf.bit + static_cast<int>(t_leaf.count) - 1) / 8 + 1;
+                    return static_cast<size_t>(t_leaf.count) * t_leaf.stride;
+                };
                 if (t_changed_runs != nullptr) {
-                    const size_t width = s7TypeByteSize(leaf.type);
+                    const size_t span = leaf_span_bytes(leaf);
                     bool touched = false;
                     for (const auto& run : *t_changed_runs) {
-                        if (leaf.offset < run.offset + run.len && run.offset < leaf.offset + width) {
+                        if (leaf.offset < run.offset + run.len && run.offset < leaf.offset + span) {
                             touched = true;
                             break;
                         }
@@ -404,8 +482,33 @@ bool transcodeBinaryToJsonl(const std::string& t_decompressed, const std::string
                         continue;
                 }
                 rapidjson::Value val;
-                if (decodeTranscodeLeaf(t_image, t_image_len, leaf, val))
+                auto& alloc = schema_doc.GetAllocator();
+                if (leaf.count > 1) {
+                    // Emit the full array under the collapsed dictionary id:
+                    // readers fan each element into its "a.b[i].c" column.
+                    val.SetArray();
+                    for (uint32_t i = 0; i < leaf.count; ++i) {
+                        TranscodeLeaf el = leaf;
+                        if (leaf.type == sgrn::scl::DataType::Bool && leaf.stride == 0) {
+                            const int total_bit = leaf.bit + static_cast<int>(i);
+                            el.offset += static_cast<size_t>(total_bit / 8);
+                            el.bit = total_bit % 8;
+                        } else {
+                            el.offset += static_cast<size_t>(i) * leaf.stride;
+                        }
+                        rapidjson::Value ev;
+                        if (decodeTranscodeLeaf(t_image, t_image_len, el, ev, alloc))
+                            val.PushBack(std::move(ev), alloc);
+                        else
+                            val.PushBack(rapidjson::Value().SetNull(), alloc);
+                    }
+                } else if (decodeTranscodeLeaf(t_image, t_image_len, leaf, val, alloc)) {
                     entries.emplace_back(std::to_string(id_it->second), std::move(val));
+                    continue;
+                } else {
+                    continue;
+                }
+                entries.emplace_back(std::to_string(id_it->second), std::move(val));
             }
             return entries;
         };

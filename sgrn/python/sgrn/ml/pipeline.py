@@ -12,7 +12,7 @@ Composes:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -47,6 +47,159 @@ from .transform import (
     inferContextSpecs,
     splitProcessTimeline,
 )
+
+
+def classifyFaultOnset(faultOnset: Optional[Any]) -> Tuple[str, Any]:
+    """Classify a fault-onset spec: ``("none", None) | ("index", int) | ("time", value)``.
+
+    Accepts python/numpy integers (but not bools — a bool means "no fault
+    cutoff", the established contract of both fit paths), ISO strings,
+    pandas Timestamps and datetime/date objects. Unknown scalars (e.g.
+    floats) mean no cutoff: they are neither a row index nor a timestamp,
+    so interpreting them would silently pick a semantics.
+    """
+    import numbers as _numbers
+
+    if faultOnset is None or isinstance(faultOnset, bool):
+        return ("none", None)
+    if isinstance(faultOnset, _numbers.Integral):
+        return ("index", int(faultOnset))
+    if HAS_PANDAS and isinstance(faultOnset, pd.Timestamp):
+        return ("time", faultOnset)
+    if isinstance(faultOnset, str):
+        return ("time", faultOnset)
+    try:
+        import datetime as _dt
+
+        if isinstance(faultOnset, (_dt.datetime, _dt.date)):
+            return ("time", faultOnset)
+    except Exception:
+        pass
+    return ("none", None)
+
+
+def faultCutoffRow(faultOnset: Optional[Any], nTotal: int, tsArr: List[int]) -> int:
+    """First row index at/after the fault onset for streaming data.
+
+    Streaming policy of the fault-onset contract: an index onset is a row
+    count (clamped); a time onset excludes every row before the first row
+    whose timestamp (ms) reaches it. Anything else keeps all rows nominal.
+    """
+    kind, value = classifyFaultOnset(faultOnset)
+    if kind == "index":
+        return min(nTotal, value)
+    if kind == "time" and tsArr:
+        try:
+            cutoff_ms = int(pd.to_datetime(value).value // 1_000_000) if HAS_PANDAS else int(value)
+        except Exception:
+            return nTotal
+        for i, t in enumerate(tsArr):
+            if t >= cutoff_ms:
+                return i
+    return nTotal
+
+
+def resolveSchemaFeatures(
+    schemaSource: Optional[Union[str, Path, Dict[str, Any]]],
+    windowSize: int,
+    includeSubsystems: Optional[List[str]],
+    excludeSubsystems: Optional[List[str]],
+    includeDimensions: Optional[List[str]],
+    excludeSignals: Optional[List[str]],
+    features: Optional[List[str]],
+    modelConfig: dict,
+    contextFeatures: Optional[List[str]],
+) -> Tuple[Optional[List[str]], Optional[Dict[str, str]], Optional[Dict[str, str]],
+           Dict[str, Any], List[str], dict, Optional[List[str]]]:
+    """Step 0 of both fit paths: auto-configure from an SCL schema.
+
+    Returns ``(features, featureDimensions, featureSubsystems,
+    schemaContextSpecs, schemaTimestampFields, modelConfig, contextFeatures)``.
+    Explicit features/context win over the schema; model config from the
+    schema is only injected when the caller did not provide a model section.
+    """
+    feature_dimensions = None
+    feature_subsystems = None
+    schema_context_specs: Dict[str, Any] = {}
+    schema_timestamp_fields: List[str] = []
+    if schemaSource is not None:
+        schema_cfg = configureModelFromSchema(
+            schemaSource=schemaSource,
+            windowSize=windowSize,
+            includeSubsystems=includeSubsystems,
+            excludeSubsystems=excludeSubsystems,
+            includeDimensions=includeDimensions,
+            excludeSignals=excludeSignals,
+        )
+        if features is None:
+            features = schema_cfg["features"]
+        feature_dimensions = schema_cfg["featureDimensions"]
+        feature_subsystems = schema_cfg["featureSubsystems"]
+        schema_context_specs = dict(schema_cfg.get("contextSpecs", {}))
+        schema_timestamp_fields = list(schema_cfg.get("timestampFields", []))
+        if contextFeatures is None:
+            contextFeatures = list(schema_cfg.get("contextFeatures", []))
+        if "model" not in modelConfig:
+            modelConfig["model"] = schema_cfg["modelConfig"]
+    return (features, feature_dimensions, feature_subsystems, schema_context_specs,
+            schema_timestamp_fields, modelConfig, contextFeatures)
+
+
+def resolveStratifyFields(stratifyOn: Optional[Any], contextFeatures: Optional[List[str]]) -> List[str]:
+    """Fields whose modes define standardisation strata (see ``stratifyOn``)."""
+    if stratifyOn is False:
+        return []
+    if isinstance(stratifyOn, list):
+        return [f for f in stratifyOn if f in (contextFeatures or [])]
+    return list(contextFeatures or [])
+
+
+def pipelineResultDict(
+    detector: ProcessManifoldDetector,
+    scaler: Scaler,
+    splits: dict,
+    features: List[str],
+    windowSize: int,
+    featureDimensions: Optional[Dict[str, str]],
+    featureSubsystems: Optional[Dict[str, str]],
+    contextFeatures: Optional[List[str]],
+    contextSpecs: Dict[str, Any],
+    timestampFields: List[str],
+    stratifyFields: List[str],
+    strataStats: Dict[str, Any],
+    trainConfig: dict,
+    calibrationStride: int,
+    nCalEffective: int,
+) -> Dict[str, Any]:
+    """Shared result shape of both fit paths (camelCase + snake_case aliases)."""
+    return {
+        "detector": detector,
+        "scaler": scaler,
+        "splits": splits,
+        "device": str(detector.device),
+        "features": features,
+        "windowSize": windowSize,
+        "featureDimensions": featureDimensions,
+        "featureSubsystems": featureSubsystems,
+        "contextFeatures": list(contextFeatures or []),
+        "contextSpecs": dict(contextSpecs),
+        "timestampFields": list(timestampFields),
+        "stratifyFields": list(stratifyFields),
+        "strata": {k: v.get("n", 0) for k, v in strataStats.items()},
+        "trainConfig": trainConfig,
+        "calibrationStride": calibrationStride,
+        "nCalEffective": nCalEffective,
+        # snake_case backward-compatibility keys
+        "window_size": windowSize,
+        "feature_dimensions": featureDimensions,
+        "feature_subsystems": featureSubsystems,
+        "context_features": list(contextFeatures or []),
+        "context_specs": dict(contextSpecs),
+        "stratify_fields": list(stratifyFields),
+        "train_config": trainConfig,
+        "calibration_stride": calibrationStride,
+        "n_cal_effective": nCalEffective,
+    }
 
 
 def fitManifoldPipeline(
@@ -122,31 +275,19 @@ def fitManifoldPipeline(
     if modelConfig is None:
         modelConfig = {}
 
-    feature_dimensions = None
-    feature_subsystems = None
-    schema_context_specs: Dict[str, Any] = {}
-    schema_timestamp_fields: List[str] = []
-
     # Step 0: Auto-configure features and dimensions from SCL schema if provided
-    if schemaSource is not None:
-        schema_cfg = configureModelFromSchema(
-            schemaSource=schemaSource,
-            windowSize=windowSize,
-            includeSubsystems=includeSubsystems,
-            excludeSubsystems=excludeSubsystems,
-            includeDimensions=includeDimensions,
-            excludeSignals=excludeSignals,
-        )
-        if features is None:
-            features = schema_cfg["features"]
-        feature_dimensions = schema_cfg["featureDimensions"]
-        feature_subsystems = schema_cfg["featureSubsystems"]
-        schema_context_specs = dict(schema_cfg.get("contextSpecs", {}))
-        schema_timestamp_fields = list(schema_cfg.get("timestampFields", []))
-        if contextFeatures is None:
-            contextFeatures = list(schema_cfg.get("contextFeatures", []))
-        if "model" not in modelConfig:
-            modelConfig["model"] = schema_cfg["modelConfig"]
+    (features, feature_dimensions, feature_subsystems, schema_context_specs,
+     schema_timestamp_fields, modelConfig, contextFeatures) = resolveSchemaFeatures(
+        schemaSource=schemaSource,
+        windowSize=windowSize,
+        includeSubsystems=includeSubsystems,
+        excludeSubsystems=excludeSubsystems,
+        includeDimensions=includeDimensions,
+        excludeSignals=excludeSignals,
+        features=features,
+        modelConfig=modelConfig,
+        contextFeatures=contextFeatures,
+    )
 
     if features is None:
         raise ValueError("Either 'features' list or 'schemaSource' path must be provided.")
@@ -190,37 +331,10 @@ def fitManifoldPipeline(
 
     # Step 3: Chronological partition into nominal (train, cal) and test
     # Accept plain ints, numpy integers (not bools), and timestamp-like
-    # fault onsets. The previous isinstance(..., int) check silently dropped
-    # numpy integers; the timestamp branch silently dropped faultOnset when
-    # timestamps was None (no cycle filter), leaking faults into train/cal.
-    import numbers as _numbers
-
-    _fault_idx = None
-    _fault_time = None
-    if isinstance(faultOnset, bool):
-        pass
-    elif isinstance(faultOnset, _numbers.Integral):
-        _fault_idx = int(faultOnset)
-    elif isinstance(faultOnset, (str, pd.Timestamp) if HAS_PANDAS else str):
-        _fault_time = faultOnset
-    elif HAS_PANDAS and isinstance(faultOnset, pd.Timestamp):
-        _fault_time = faultOnset
-    else:
-        try:
-            import datetime as _dt
-
-            if isinstance(faultOnset, (_dt.datetime, _dt.date)):
-                _fault_time = faultOnset
-        except Exception:
-            pass
-        if _fault_time is None and faultOnset is not None:
-            try:
-                import numpy as _np
-
-                if isinstance(faultOnset, _np.integer):
-                    _fault_idx = int(faultOnset)
-            except Exception:
-                pass
+    # fault onsets (classifyFaultOnset — shared with the streaming path).
+    _fault_kind, _fault_value = classifyFaultOnset(faultOnset)
+    _fault_idx = _fault_value if _fault_kind == "index" else None
+    _fault_time = _fault_value if _fault_kind == "time" else None
     splits = splitProcessTimeline(
         data=feat_matrix,
         trainRatio=trainRatio,
@@ -295,12 +409,7 @@ def fitManifoldPipeline(
     # Step 5: Standardise splits and create sliding windows. With active
     # strata each row is z-scored by its own mode's nominal stats (closing
     # the conditional-autoencoder bypass); otherwise global scaling.
-    if stratifyOn is False:
-        stratify_fields: List[str] = []
-    elif isinstance(stratifyOn, list):
-        stratify_fields = [f for f in stratifyOn if f in (contextFeatures or [])]
-    else:
-        stratify_fields = list(contextFeatures or [])
+    stratify_fields = resolveStratifyFields(stratifyOn, contextFeatures)
     strata_stats: Dict[str, Any] = {}
     if stratify_fields and ctx_train_raw is not None:
         from .transform import contextRowKeys as _keys, fitStratifiedStats as _fit
@@ -429,34 +538,14 @@ def fitManifoldPipeline(
         "n_context": len(contextFeatures or []),
     }
 
-    return {
-        "detector": detector,
-        "scaler": scaler,
-        "splits": splits,
-        "device": str(detector.device),
-        "features": features,
-        "windowSize": windowSize,
-        "featureDimensions": feature_dimensions,
-        "featureSubsystems": feature_subsystems,
-        "contextFeatures": list(contextFeatures),
-        "contextSpecs": dict(context_specs),
-        "timestampFields": list(schema_timestamp_fields),
-        "stratifyFields": list(stratify_fields),
-        "strata": {k: v.get("n", 0) for k, v in strata_stats.items()},
-        "trainConfig": train_config,
-        "calibrationStride": eff_cal_stride,
-        "nCalEffective": n_cal_effective,
-        # snake_case backward-compatibility keys
-        "window_size": windowSize,
-        "feature_dimensions": feature_dimensions,
-        "feature_subsystems": feature_subsystems,
-        "context_features": list(contextFeatures),
-        "context_specs": dict(context_specs),
-        "stratify_fields": list(stratify_fields),
-        "train_config": train_config,
-        "calibration_stride": eff_cal_stride,
-        "n_cal_effective": n_cal_effective,
-    }
+    return pipelineResultDict(
+        detector=detector, scaler=scaler, splits=splits, features=features,
+        windowSize=windowSize, featureDimensions=feature_dimensions,
+        featureSubsystems=feature_subsystems, contextFeatures=contextFeatures,
+        contextSpecs=context_specs, timestampFields=schema_timestamp_fields,
+        stratifyFields=stratify_fields, strataStats=strata_stats,
+        trainConfig=train_config, calibrationStride=eff_cal_stride,
+        nCalEffective=n_cal_effective)
 
 
 def evaluateManifoldSequence(
@@ -770,28 +859,19 @@ def fitManifoldPipelineStream(
         embedded = getattr(reader, "schema_json", None)
         if embedded:
             resolved_schema = embedded
-    feature_dimensions = feature_subsystems = None
-    schema_context_specs: Dict[str, Any] = {}
-    schema_timestamp_fields: List[str] = []
-    if resolved_schema is not None:
-        schema_cfg = configureModelFromSchema(
-            schemaSource=resolved_schema,
-            windowSize=windowSize,
-            includeSubsystems=includeSubsystems,
-            excludeSubsystems=excludeSubsystems,
-            includeDimensions=includeDimensions,
-            excludeSignals=excludeSignals,
-        )
-        if features is None:
-            features = schema_cfg["features"]
-        feature_dimensions = schema_cfg["featureDimensions"]
-        feature_subsystems = schema_cfg["featureSubsystems"]
-        schema_context_specs = dict(schema_cfg.get("contextSpecs", {}))
-        schema_timestamp_fields = list(schema_cfg.get("timestampFields", []))
-        if contextFeatures is None:
-            contextFeatures = list(schema_cfg.get("contextFeatures", []))
-        if "model" not in modelConfig:
-            modelConfig["model"] = schema_cfg["modelConfig"]
+    # Step 0: Auto-configure from the (embedded or explicit) SCL schema.
+    (features, feature_dimensions, feature_subsystems, schema_context_specs,
+     schema_timestamp_fields, modelConfig, contextFeatures) = resolveSchemaFeatures(
+        schemaSource=resolved_schema,
+        windowSize=windowSize,
+        includeSubsystems=includeSubsystems,
+        excludeSubsystems=excludeSubsystems,
+        includeDimensions=includeDimensions,
+        excludeSignals=excludeSignals,
+        features=features,
+        modelConfig=modelConfig,
+        contextFeatures=contextFeatures,
+    )
     if features is None:
         raise ValueError("Either 'features' list, 'schemaSource' or a reader with embedded schema is required.")
     if not useContext:
@@ -799,42 +879,11 @@ def fitManifoldPipelineStream(
     elif contextFeatures is None:
         contextFeatures = []
     context_specs: Dict[str, Any] = {}
-    stratify_fields: List[str] = []
-    if stratifyOn is False:
-        stratify_fields = []
-    elif isinstance(stratifyOn, list):
-        stratify_fields = [f for f in stratifyOn if f in (contextFeatures or [])]
+    stratify_fields = resolveStratifyFields(stratifyOn, contextFeatures)
 
     columns = list(features) + [c for c in (contextFeatures or []) if c not in features]
-    ts_col_requested = timestampCol
-    if timestampCol is None and schema_timestamp_fields:
-        pass  # resolved per-row below: first present timestamp field wins
     if timestampCol is not None and timestampCol not in columns:
         columns = columns + [timestampCol]
-
-    import numbers as _numbers
-
-    def _fault_cutoff(n_total: int, ts_arr: List[int]) -> int:
-        if isinstance(faultOnset, bool):
-            return n_total
-        if isinstance(faultOnset, _numbers.Integral) and not isinstance(faultOnset, bool):
-            return min(n_total, int(faultOnset))
-        try:
-            import numpy as _np
-
-            if isinstance(faultOnset, _np.integer):
-                return min(n_total, int(faultOnset))
-        except Exception:
-            pass
-        if faultOnset is not None and ts_arr:
-            try:
-                cutoff_ms = int(pd.to_datetime(faultOnset).value // 1_000_000) if HAS_PANDAS else int(faultOnset)
-            except Exception:
-                return n_total
-            for i, t in enumerate(ts_arr):
-                if t >= cutoff_ms:
-                    return i
-        return n_total
 
     # ---- Pass A: count + timestamps + cutoff --------------------------------
     n_total = 0
@@ -844,7 +893,7 @@ def fitManifoldPipelineStream(
         ts_all.append(_rowTimestampMs(ts, _row.get(timestampCol) if timestampCol else None))
     if n_total == 0:
         raise ValueError("Archive yielded no decodable rows.")
-    cutoff = _fault_cutoff(n_total, ts_all)
+    cutoff = faultCutoffRow(faultOnset, n_total, ts_all)
     n_pre = cutoff
     n_train = int(n_pre * trainRatio)
 
@@ -854,12 +903,6 @@ def fitManifoldPipelineStream(
     global_stats = StreamingStats(F)
     strata: Dict[str, StreamingStats] = {}
     cat_sets: Dict[str, set] = {f: set() for f in (contextFeatures or [])}
-    seen_modes: set = set()
-    strat_fields_resolved = list(stratify_fields)
-    if not strat_fields_resolved and stratifyOn is not False and (contextFeatures or []):
-        # Default after specs are known (see below); placeholder resolved post-specs.
-        strat_fields_resolved = []
-    specs_known = dict(schema_context_specs)
     for _i, (_ts, _row) in enumerate(reader.iterRows(columns)):
         if _i >= n_train:
             break
@@ -874,7 +917,7 @@ def fitManifoldPipelineStream(
                 if len(s) < 4 * maxContextCardinality + 8:
                     s.add(v if isinstance(v, (bool, int, float, str)) else str(v))
     # Specs for explicitly requested but schema-unknown fields.
-    missing = [f for f in (contextFeatures or []) if f not in specs_known]
+    missing = [f for f in (contextFeatures or []) if f not in schema_context_specs]
     if missing:
         from .transform import inferContextSpecs as _infer
 
@@ -891,13 +934,8 @@ def fitManifoldPipelineStream(
         inferred = _infer(mat, missing, maxCardinality=maxContextCardinality)
     else:
         inferred = {}
-    context_specs = {**{f: specs_known[f] for f in (contextFeatures or []) if f in specs_known}, **inferred}
-    if stratifyOn is False:
-        stratify_fields = []
-    elif isinstance(stratifyOn, list):
-        stratify_fields = [f for f in stratifyOn if f in (contextFeatures or [])]
-    else:
-        stratify_fields = list(contextFeatures or [])
+    context_specs = {**{f: schema_context_specs[f] for f in (contextFeatures or []) if f in schema_context_specs}, **inferred}
+    stratify_fields = resolveStratifyFields(stratifyOn, contextFeatures)
     # Strata accumulators now that specs exist.
     from .transform import contextRowKeys as _keys
 
@@ -933,13 +971,6 @@ def fitManifoldPipelineStream(
         stratify_fields = []
     elif strata_stats:
         print(f"[stratify] {len(strata_stats)} mode strata over {stratify_fields}")
-    if stratify_fields:
-        seen_key_sets = set()
-        for _i, (_ts, _row) in enumerate(reader.iterRows(columns)):
-            if _i >= n_train:
-                break
-            raw_vals = [_row.get(f) for f in (contextFeatures or [])]
-            seen_key_sets.add(_rowKeys(raw_vals))
 
     scaler = global_stats.toScaler(features)
     if n_train == 0:
@@ -1033,13 +1064,6 @@ def fitManifoldPipelineStream(
 
     # ---- Passes C (train x epochs): ring windows -> shuffle buffer -> steps --
     from collections import deque
-
-    def _rowKeys(raw_vals: List[Any]) -> tuple:
-        arr = np.empty((1, len(contextFeatures or [])), dtype=object)
-        if contextFeatures:
-            arr[0, :] = list(raw_vals)[: len(contextFeatures)]
-        return contextRowKeys(arr, contextFeatures or [], context_specs,
-                              fields=stratify_fields or None)[0]
 
     def _trainStep(buf: List[tuple], batch_size: int) -> None:
         import random as _random
@@ -1267,33 +1291,14 @@ def fitManifoldPipelineStream(
         "n_context": len(contextFeatures or []),
         "streaming": True,
     }
-    return {
-        "detector": detector,
-        "scaler": scaler,
-        "splits": splits,
-        "device": str(detector.device),
-        "features": features,
-        "windowSize": windowSize,
-        "featureDimensions": feature_dimensions,
-        "featureSubsystems": feature_subsystems,
-        "contextFeatures": list(contextFeatures or []),
-        "contextSpecs": dict(context_specs),
-        "timestampFields": list(schema_timestamp_fields),
-        "stratifyFields": list(stratify_fields),
-        "strata": {k: v.get("n", 0) for k, v in strata_stats.items()},
-        "trainConfig": train_config_stream,
-        "calibrationStride": eff_cal_stride,
-        "nCalEffective": n_cal_effective,
-        "window_size": windowSize,
-        "feature_dimensions": feature_dimensions,
-        "feature_subsystems": feature_subsystems,
-        "context_features": list(contextFeatures or []),
-        "context_specs": dict(context_specs),
-        "stratify_fields": list(stratify_fields),
-        "train_config": train_config_stream,
-        "calibration_stride": eff_cal_stride,
-        "n_cal_effective": n_cal_effective,
-    }
+    return pipelineResultDict(
+        detector=detector, scaler=scaler, splits=splits, features=features,
+        windowSize=windowSize, featureDimensions=feature_dimensions,
+        featureSubsystems=feature_subsystems, contextFeatures=contextFeatures,
+        contextSpecs=context_specs, timestampFields=schema_timestamp_fields,
+        stratifyFields=stratify_fields, strataStats=strata_stats,
+        trainConfig=train_config_stream, calibrationStride=eff_cal_stride,
+        nCalEffective=n_cal_effective)
 
 
 # Backward-compatible snake_case aliases

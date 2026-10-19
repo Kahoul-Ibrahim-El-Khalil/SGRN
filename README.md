@@ -1,21 +1,38 @@
 # SGRN
 
-**SGRN** is a high-performance, modular C++ and Python framework for industrial automation, edge digital twins, deterministic soft-PLC simulation, and schema-driven cyber-physical plant supervision.
+**SGRN** is an open-source C++ and Python framework that connects industrial control systems to AI through one typed, schema-driven model of the plant. It provides a multi-protocol gateway with a digital twin, a soft-PLC and plant simulator, and tools for storing, replaying and analysing plant data.
 
-SGRN eliminates the brittle, manual byte-offset mapping traditional in industrial telemetry integration by using **declarative SCL (Structured Control Language) schemas as the single source of truth**. It combines memory-safe, zero-allocation C++ edge runtimes with physics-informed, conformal machine learning for closed-loop plant monitoring.
+SGRN eliminates the brittle, manual byte-offset mapping common in industrial telemetry integration by using **declarative SCL (Structured Control Language) schemas as the single source of truth**. The same schema gives every signal its name, unit, range and permitted operations, so that AI systems built on top can be checked against it.
+
+![SGRN architecture: a deterministic harness (gateway, datastore, S7Shell) with an AI layer that proposes actions and a checker that validates them](documentation/images/architecture.png)
+
+*Solid boxes exist today. Dashed boxes (LLM agent, checker, dispatcher) are the next build.*
 
 > [!TIP]
-> **Research Experiments:** For autonomous plant supervision, physics-constrained manifold anomaly detection, split-conformal uncertainty quantification, and the unified pipeline orchestrator, see [**`experiments/`**](./experiments/README.md) and [**`experiments/flare/`**](./experiments/flare/README.md).
+> **Research experiments:** for plant anomaly detection, split-conformal uncertainty quantification and the pipeline orchestrator, see [**`experiments/`**](./experiments/README.md) and [**`experiments/flare/`**](./experiments/flare/README.md).
+
+---
+
+## Status
+
+| Works today | Not built yet |
+|:---|:---|
+| Gateway with typed digital twin and embedded web dashboard | LLM agent |
+| Datastore (storage and indexing of documents and datasets) | Checker and dispatcher |
+| S7Shell soft-PLC and plant simulator | S7Shell as the runtime through which approved actions reach a plant |
+| Autoencoder and split-conformal detector (simulated data) | Validation on a live plant |
+
+All results so far use simulated plant data and Siemens PLCSIM Advanced. SGRN has not been validated on a live plant.
 
 ---
 
 ## Key Capabilities & Objectives
 
-- **Declarative Memory Coupling**: Parses Siemens S7 SCL schemas into dynamic memory maps and protocol ASTs, completely removing hardcoded byte offsets from edge middleware.
-- **Protocol Convergence**: Ingests and normalizes multi-protocol industrial telemetry (Siemens S7, Modbus, OPC-UA, HTTP/JSON, WebSockets) into an in-memory shadow Digital Twin.
-- **Deterministic Edge Execution**: Provides an AngelScript-driven soft-PLC (`s7shell`) capable of executing control logic, simulating complex thermodynamic processes, and enforcing safety interlocks with sub-millisecond determinism.
-- **High-Throughput Write-Ahead Logging (WAL)**: Records atomic state changes into compressed Zstandard archives for loss-tolerant edge buffering and exact historical replay.
-- **Trustworthy ML & Conformal Calibration**: Integrates real-time PyTorch autoencoders and split-conformal uncertainty quantification (`sgrn.ml`) to detect process drift with provable false-alarm guarantees.
+- **Declarative memory coupling:** parses Siemens S7 SCL schemas into dynamic memory maps and protocol ASTs, removing hardcoded byte offsets from edge middleware.
+- **Protocol convergence:** ingests and normalizes multi-protocol telemetry (Siemens S7, Modbus, OPC-UA, HTTP/JSON, WebSockets) into an in-memory shadow digital twin.
+- **Deterministic edge execution:** an AngelScript-driven soft-PLC (`s7shell`) executes control logic, simulates thermodynamic processes and enforces safety interlocks with low-latency, predictable timing.
+- **High-throughput write-ahead logging (WAL):** records atomic state changes into compressed Zstandard archives for loss-tolerant edge buffering and exact historical replay.
+- **Uncertainty-aware ML:** PyTorch autoencoders with split-conformal calibration (`sgrn.ml`) detect process drift. The conformal guarantee assumes exchangeable data, which industrial time series only approximate.
 
 ---
 
@@ -33,14 +50,14 @@ SGRN/
 │   │   ├── s7shell/            # AngelScript soft-PLC runtime and process simulator
 │   │   ├── datastore/          # Resilient time-series buffer and storage adapters
 │   │   ├── scripting/          # AngelScript C++ bindings and sandboxing
-│   │   ├── core/ & utils/      # Thread pools, zero-allocation allocators, IPC, and logging
+│   │   ├── core/ & utils/      # Thread pools, allocators, IPC, and logging
 │   │   └── sdk/                # C++ client SDK for external IT integrations
 │   └── python/                 # Python package (sgrn)
 │       ├── gateway.py          # Python client bindings for the gateway REST/WS APIs
 │       └── sgrn/ml/            # Manifold ML, device abstraction, conformal UQ, and pipelines
 ├── experiments/                # Research benchmark suite & pipeline orchestrator
-│   ├── flare/                  # Self-contained Gas Dehydration & Flare Blocked experiment
-│   └── orchestrate.py          # Unified tqdm pipeline orchestrator (ingestion -> training -> evaluation)
+│   ├── flare/                  # Self-contained gas dehydration & blocked-flare experiment
+│   └── orchestrate.py          # Pipeline orchestrator (ingestion -> training -> evaluation)
 ├── demos/                      # Interactive gateway scenarios, soft-PLC simulations, and live twins
 ├── documentation/              # Technical specifications, build manuals, and architecture guides
 └── actions/ & scripts/         # Automated database setup, web packaging, and code generation
@@ -54,33 +71,33 @@ Building the project produces several core binaries:
 
 | Utility | Description | Primary Role |
 |:---|:---|:---|
-| **`gateway`** | Real-time Telemetry Hub | Ingests PLC telemetry into a mutex-protected shadow digital twin; exposes OPC-UA, WebSockets, and HTTP APIs; enforces security policies; and serves embedded UI dashboards. |
-| **`s7shell`** | Soft-PLC & Scripting Engine | Standalone execution environment running AngelScript against shadow memory; executes process physics and automates PDU-optimized read/write batching. |
-| **`sgrn_replay`** | Deterministic WAL Replayer | Replays compressed historical `.jsonl.zst` or `.bin.zst` archives into running gateways with adjustable playback speed and pacing controls. |
-| **`sgrn_dataset`** | Feature Extraction Tool | Decodes raw write-ahead logs against an SCL schema directly into structured CSV/Parquet datasets for ML pipelines. |
-| **`datastore`** | Edge Persistence Engine | Local buffer orchestrating spooling and forwarding of telemetry to PostgreSQL or S3-compatible storage. |
+| **`gateway`** | Real-time telemetry hub | Ingests PLC telemetry into a mutex-protected shadow digital twin; exposes OPC-UA, WebSockets and HTTP APIs; enforces security policies; serves embedded web dashboards. |
+| **`s7shell`** | Soft-PLC & scripting engine | Runs AngelScript against shadow memory; executes process physics and PDU-optimized read/write batching. |
+| **`sgrn_replay`** | WAL replayer | Replays compressed `.jsonl.zst` or `.bin.zst` archives into running gateways with adjustable speed and pacing. |
+| **`sgrn_dataset`** | Feature extraction tool | Decodes raw write-ahead logs against an SCL schema into CSV/Parquet datasets for ML pipelines. |
+| **`datastore`** | Edge persistence engine | Buffers, spools and forwards telemetry to PostgreSQL or S3-compatible storage. |
 
 ---
 
 ## Primary Use Cases
 
-### 1. Unified Multi-Protocol Edge Convergence
-Factories frequently suffer from fragmented protocol silos (e.g. S7 for PLCs, Modbus for ancillary sensors, OPC-UA for SCADA). SGRN serves as a single edge hub: it ingests heterogeneous protocol streams, normalizes them into unified shadow memory, and projects this state outwards over standard REST, WebSocket, or OPC-UA endpoints.
+### 1. Unified multi-protocol edge convergence
+Factories often have separate protocol silos (S7 for PLCs, Modbus for ancillary sensors, OPC-UA for SCADA). SGRN serves as a single edge hub: it ingests heterogeneous streams, normalizes them into one shadow memory, and projects the state over standard REST, WebSocket or OPC-UA endpoints.
 
-### 2. Declarative PLC Integration (Zero Recompilation)
-When an automation engineer updates a PLC DataBlock (e.g. adding a sensor or changing a UDT), traditional gateways require code updates, offset recalculations, and redeployments. With SGRN, the engineer updates the `.scl` schema. The runtime dynamically updates memory offsets, REST routes, and OPC-UA node hierarchies without recompiling or restarting edge services.
+### 2. Declarative PLC integration (no recompilation)
+When an automation engineer updates a PLC DataBlock (for example adding a sensor or changing a UDT), traditional gateways need code updates, offset recalculation and redeployment. With SGRN, the engineer updates the `.scl` schema, and the runtime updates memory offsets, REST routes and OPC-UA node hierarchies without recompiling or restarting edge services.
 
-### 3. Edge Intelligence & Soft-PLC Control
-Rather than streaming high-frequency data across network boundaries to a remote server for simple control decisions, `s7shell` executes AngelScript scripts directly against shadow memory. Scripts run with zero polling latency and batch writes into PDU-optimized network packets, enabling deterministic edge-level interlocks and closed-loop control.
+### 3. Edge soft-PLC control
+Instead of streaming high-frequency data to a remote server for simple control decisions, `s7shell` runs AngelScript scripts directly against shadow memory and batches writes into PDU-optimized packets, for edge-level interlocks and closed-loop control.
 
-### 4. Resilient Edge Historian & Replay
-Under network partitions, SGRN buffers atomic process updates to high-throughput compressed write-ahead logs (`.zst`). When connectivity restores, data streams forward without gaps. Furthermore, past operational incidents can be replayed byte-for-byte into twin gateways using `sgrn_replay`.
+### 4. Resilient edge historian and replay
+During network partitions, SGRN buffers process updates into compressed write-ahead logs (`.zst`). When connectivity returns, data streams forward without gaps. Past incidents can be replayed into a twin gateway with `sgrn_replay`.
 
-### 5. Autonomous Plant Supervision & Trustworthy AI
-Coupling SGRN's telemetry with `sgrn.ml` enables unsupervised, physics-constrained manifold anomaly detection. By extracting multi-dimensional process trajectories and calibrating non-conformity scores via split-conformal prediction, the system delivers early fault warnings (e.g., 18.0 hours before emergency shutdown) with provably bounded false-alarm rates.
+### 5. Plant supervision research
+Coupling SGRN's telemetry with `sgrn.ml` enables unsupervised manifold anomaly detection. By extracting multi-dimensional process trajectories and calibrating non-conformity scores with split-conformal prediction, the detector flags faults early. In the simulated blocked-flare scenario it raises a warning well before the simulated shutdown (see `experiments/flare/`).
 
-### 6. Embedded Zero-Dependency Observability
-Both `gateway` and `datastore` embed compiled Web UI dashboards (built with Svelte/React, compressed with Zstandard, and baked directly into C++ binary headers). Pointing a browser to the gateway IP provides instant, live operational visibility without external dependencies or cloud connectivity.
+### 6. Embedded observability
+Both `gateway` and `datastore` embed compiled web dashboards (Svelte/React, compressed with Zstandard, baked into C++ binary headers). Pointing a browser at the gateway gives live visibility without external dependencies or cloud connectivity.
 
 ---
 
@@ -89,20 +106,20 @@ Both `gateway` and `datastore` embed compiled Web UI dashboards (built with Svel
 SGRN uses **CMake Presets** and a unified build environment managed with **Micromamba**.
 
 ### Prerequisites
-- Linux x86_64 (Ubuntu 22.04+ or modern Linux distribution)
+- Linux x86_64 (Ubuntu 22.04+ or a modern Linux distribution)
 - [Micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html) or Conda
 
-### 1. Clone Repository
+### 1. Clone the repository
 ```bash
 git clone <repository-url>
 cd SGRN
 ```
 
 > [!NOTE]
-> SGRN does not require Git submodules. All third-party source dependencies are automatically downloaded directly into the local CMake cache (`~/.cache/CPM/`) on first configure via CMake Presets.
+> SGRN does not require Git submodules. Source-based third-party dependencies are downloaded into the local CMake cache (`~/.cache/CPM/`) during the dependency step below.
 
-### 2. Initialize the Build Environment
-The environment files in `micromamba/` provide compilers (GCC/Clang), Ninja, CMake, and all third-party C++ libraries in an isolated prefix:
+### 2. Initialize the build environment
+The environment files in `micromamba/` provide compilers (GCC/Clang), Ninja, CMake, and the packaged C++ libraries in an isolated prefix:
 
 ```bash
 # Create and activate the primary Linux development environment:
@@ -110,15 +127,27 @@ micromamba create -f micromamba/SGRN.yml
 micromamba activate SGRN
 ```
 
-### 3. Build & Install via CMake Presets
+### 3. Build and install via CMake Presets
 
-All builds must be run with the `SGRN` environment activated. Pre-configured presets are defined in `CMakePresets.json`:
+Run all builds with the `SGRN` environment activated. Presets are defined in `CMakePresets.json`.
+
+First, build and install the dependencies that come as source code:
+
+```bash
+# Clones/downloads the dependency sources into the CPM cache:
+cmake --preset linux-deps-static
+
+# Builds them and installs the libraries into a local prefix:
+cmake --build .build/linux-deps-static --target install
+```
+
+Second, build the project itself:
 
 ```bash
 # Configure using the Linux release preset:
 cmake --preset linux-static-release
 
-# Fast incremental install (builds our binaries and libraries into .dist/):
+# Fast incremental install (our binaries and libraries into .dist/):
 cmake --build .build/linux-static-release --target install-binaries
 
 # Full install (binaries, headers, and dependencies):
@@ -126,22 +155,38 @@ cmake --build .build/linux-static-release --target install
 ```
 
 > [!NOTE]
-> For cross-compiling to **Windows** (`linux-to-win64`) or **ARM64** (`linux-to-arm64`), see the complete instructions in [**`documentation/BUILD.md`**](./documentation/BUILD.md).
+> For cross-compiling to **Windows** (`linux-to-win64`) or **ARM64** (`linux-to-arm64`), see [**`documentation/BUILD.md`**](./documentation/BUILD.md).
 
 ---
 
 ## Quick Verification & Demos
 
-### Run Interactive Gateway Demo
-To verify the build, list and launch one of the built-in soft-PLC simulation skids:
+### Run the interactive gateway demo
+To verify the build, list and launch one of the built-in simulated plants (soft-PLC skids). The data comes from the simulator, not from a live plant:
+
 ```bash
 python3 demos/gateway.py --list
 python3 demos/gateway.py simple_skid
 ```
-Access the embedded dashboard in your browser at `http://localhost:8000/`.
 
-### Run Autonomous Supervision Benchmark
-To run the full end-to-end plant anomaly detection experiment with live progress visualization:
+Open the embedded dashboard at `http://localhost:8000/`, or use the native UI that the launcher opens.
+
+**If the gateway does not start:** in this scenario `s7shell` and the gateway talk over the S7 protocol on port 102, which is a privileged port on Linux. Either run the demo with elevated rights:
+
+```bash
+sudo python3 demos/gateway.py simple_skid
+```
+
+or allow unprivileged programs to bind ports from 102 upward until the next reboot, then run the demo normally:
+
+```bash
+sudo sysctl -w net.ipv4.ip_unprivileged_port_start=102
+python3 demos/gateway.py simple_skid
+```
+
+### Run the anomaly-detection experiment
+To run the end-to-end plant anomaly-detection experiment on simulated data, with live progress:
+
 ```bash
 python3 experiments/flare check
 python3 experiments/flare run --output-dir scratch/quick_test

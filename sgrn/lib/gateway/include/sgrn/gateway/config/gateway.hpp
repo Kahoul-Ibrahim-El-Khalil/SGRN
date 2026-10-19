@@ -15,6 +15,48 @@
 namespace sgrn::gateway::config
 {
 
+#if defined(_WIN32)
+#include <cstdlib>
+#include <filesystem>
+
+inline std::string adaptConfigPath(std::string path) {
+    auto get_win_temp = []() -> std::string {
+        std::error_code ec;
+        auto temp_path = std::filesystem::temp_directory_path(ec);
+        if (!ec && !temp_path.empty()) {
+            std::string s = temp_path.string();
+            while (!s.empty() && (s.back() == '/' || s.back() == '\\')) {
+                s.pop_back();
+            }
+            return s;
+        }
+        const char* env_temp = std::getenv("TEMP");
+        if (env_temp && *env_temp != '\0')
+            return std::string(env_temp);
+        const char* env_tmp = std::getenv("TMP");
+        if (env_tmp && *env_tmp != '\0')
+            return std::string(env_tmp);
+        return "./tmp";
+    };
+
+    if (path == "/tmp" || path == "\\tmp") {
+        return get_win_temp();
+    }
+    if (path.rfind("/tmp/", 0) == 0) {
+        return get_win_temp() + "/" + path.substr(5);
+    }
+    if (path.rfind("\\tmp\\", 0) == 0) {
+        return get_win_temp() + "\\" + path.substr(5);
+    }
+    return path;
+}
+#define SGRN_CONFIG_PATH(p) ::sgrn::gateway::config::adaptConfigPath(p)
+#define SGRN_ADAPT_PATH(p) ::sgrn::gateway::config::adaptConfigPath(p)
+#else
+#define SGRN_CONFIG_PATH(p) (p)
+#define SGRN_ADAPT_PATH(p) (p)
+#endif
+
 struct ModbusConfig {
     std::string ip{"0.0.0.0"};
     uint16_t port{502};

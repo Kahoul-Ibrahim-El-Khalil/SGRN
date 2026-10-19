@@ -102,13 +102,13 @@ sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
         sgrn::utils::strings::toLower(root["security_policy"].GetString()) == "strict")
         cfg.security_policy = ::sgrn::scl::SecurityPolicy::Strict;
     if (root.HasMember("security_script") && root["security_script"].IsString())
-        cfg.security_script = root["security_script"].GetString();
+        cfg.security_script = SGRN_CONFIG_PATH(root["security_script"].GetString());
     if (root.HasMember("state_dir") && root["state_dir"].IsString())
-        cfg.state_dir = root["state_dir"].GetString();
+        cfg.state_dir = SGRN_CONFIG_PATH(root["state_dir"].GetString());
     if (root.HasMember("schema") && root["schema"].IsString())
-        cfg.schema_file = root["schema"].GetString();
+        cfg.schema_file = SGRN_CONFIG_PATH(root["schema"].GetString());
     if (root.HasMember("symbols_dir") && root["symbols_dir"].IsString())
-        cfg.symbols_dir = root["symbols_dir"].GetString();
+        cfg.symbols_dir = SGRN_CONFIG_PATH(root["symbols_dir"].GetString());
     if (root.HasMember("reconnect_ms"))
         cfg.reconnect_ms = root["reconnect_ms"].GetInt();
     if (root.HasMember("cache_json_north"))
@@ -207,7 +207,7 @@ sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
                 if (node.HasMember("allowed_ip") && node["allowed_ip"].IsString())
                     cfg.db_acls[db] = node["allowed_ip"].GetString();
                 if (node.HasMember("dirty_tracker") && node["dirty_tracker"].IsString())
-                    cfg.dirty_trackers[db] = node["dirty_tracker"].GetString();
+                    cfg.dirty_trackers[db] = SGRN_CONFIG_PATH(node["dirty_tracker"].GetString());
             }
         }
     }

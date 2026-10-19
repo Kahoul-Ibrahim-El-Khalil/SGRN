@@ -7,6 +7,8 @@ endif()
 
 sgrn_fetch_source(ixwebsocket)
 set(USE_TLS ON CACHE BOOL "" FORCE)
+set(USE_OPEN_SSL ON CACHE BOOL "" FORCE)
+set(USE_MBED_TLS OFF CACHE BOOL "" FORCE)
 add_subdirectory("${ixwebsocket_SOURCE_DIR}"
     "${CMAKE_CURRENT_BINARY_DIR}/ixwebsocket"
     EXCLUDE_FROM_ALL

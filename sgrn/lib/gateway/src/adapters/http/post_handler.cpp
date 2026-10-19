@@ -433,117 +433,22 @@ std::optional<ArrayUpdateResult> replaceArrayElement(std::string_view array_json
 } // namespace
 
 void HttpAdapter::handlePost(const http::HttpRequest& request, http::HttpResponse& response) {
-    const PlcSchemaStore& registry = *refs_.registry;
-    PlcMemory& memory = *refs_.memory;
-
-    // -------------------------------------------------------------------------
-    // 1. Resolve URL path -> DB schema + relative field path
-    // -------------------------------------------------------------------------
-
     std::string url_path = request.path;
 
     if (!url_path.empty() && url_path.back() == '/')
         url_path.pop_back();
 
     // -------------------------------------------------------------------------
-    // Multi-DB POST
+    // 1. Resolve URL path -> DB schema + relative field path
+    //
+    // POST /data/ has no remaining path segment: dispatch to the multi-DB
+    // mode, whose body is a JSON object keyed by DB name (handlePostMultiDb).
     // -------------------------------------------------------------------------
 
-    if (url_path.empty()) {
-        // The body must be a JSON object where keys are DB names.
-        rapidjson::Document document;
-        document.Parse(request.body.c_str());
+    if (url_path.empty())
+        return handlePostMultiDb(request, response);
 
-        if (document.HasParseError() || !document.IsObject()) {
-            response.status = 400;
-            response.set_content(R"({"error":"POST /data/ requires a JSON object with DB names as keys"})", "application/json");
-
-            return;
-        }
-
-        struct PendingLeaf {
-            uint16_t db;
-            std::string path;
-            std::string value;
-        };
-
-        std::vector<PendingLeaf> all_leaves;
-
-        const std::string& client_ip = request.remote_ip;
-
-        for (auto it = document.MemberBegin(); it != document.MemberEnd(); ++it) {
-            const std::string db_name = it->name.GetString();
-
-            auto result = registry.getDbByName(db_name);
-
-            if (result.hasError() || !result.value()) {
-                response.status = 404;
-
-                response.set_content(fmt::format(R"({{"error":"Unknown DB '{}'"}})", db_name), "application/json");
-
-                return;
-            }
-
-            const uint16_t db_num = result.value()->db_number;
-
-            std::vector<std::pair<std::string, std::string>> db_leaves;
-
-            collectLeaves(it->value, "", db_leaves);
-
-            for (const auto& leaf : db_leaves) {
-                if (!isAuthorizedField(request, db_num, leaf.first, true)) {
-                    response.status = 403;
-
-                    response.set_content(fmt::format(R"({{"error":"Forbidden: IP {} is not authorised to write path '{}' in DB{}"}})",
-                                             client_ip, leaf.first, db_num),
-                        "application/json");
-
-                    return;
-                }
-
-                all_leaves.push_back({db_num, leaf.first, leaf.second});
-            }
-        }
-
-        if (all_leaves.empty()) {
-            response.status = 400;
-
-            response.set_content(R"({"error":"JSON body produced no writable leaves"})", "application/json");
-
-            return;
-        }
-
-        const uint64_t timestamp = static_cast<uint64_t>(nowMilliseconds());
-
-        // Group leaves by DB.
-        std::map<uint16_t, std::vector<std::pair<std::string, std::string>>> leaves_by_db;
-
-        for (const auto& leaf : all_leaves) {
-            leaves_by_db[leaf.db].push_back({leaf.path, leaf.value});
-        }
-
-        int written = 0;
-
-        for (auto& [db_num, db_leaves] : leaves_by_db) {
-            written += applyLeafWrites(memory, db_num, db_leaves, timestamp).written;
-        }
-
-        if (written == 0) {
-            response.status = 422;
-
-            response.set_content(R"({"error":"No fields were written — verify the paths and value types"})", "application/json");
-
-            return;
-        }
-
-        memory.processor()->processCommands();
-
-        response.status = 200;
-
-        response.set_content(fmt::format(R"({{"fields_written":{}}})", written), "application/json");
-
-        return;
-    }
+    const PlcSchemaStore& registry = *refs_.registry;
 
     auto [schema, field_path, array_rest_path, array_index] = resolveSemanticPath(sgrn::utils::strings::tokenize(url_path, '/'), registry);
 
@@ -578,227 +483,386 @@ void HttpAdapter::handlePost(const http::HttpRequest& request, http::HttpRespons
     // POST /data/<DB>/<field>/<N>
     //
     // Scalar body:
-    //     replace element N
+    //     replace element N   (handlePostScalarArrayElement)
     //
     // Object body:
     //     replace an element of an array-of-struct
+    //         (handlePostStructArrayElement)
     // -------------------------------------------------------------------------
 
     if (array_index.has_value()) {
-        const size_t index = *array_index;
+        if (document.IsObject())
+            return handlePostStructArrayElement(request, response, db_num, field_path, array_rest_path, *array_index,
+                url_path, document);
 
-        if (document.IsObject()) {
-            // -------------------------------------------------------------
-            // Array-of-struct element replacement
-            // -------------------------------------------------------------
+        return handlePostScalarArrayElement(request, response, db_num, field_path, *array_index, url_path, document);
+    }
 
-            const twin::PlcNode* array_node = memory.findSymbol(db_num, field_path);
+    // -------------------------------------------------------------------------
+    // 4-7. Leaf collection, authorization, atomic batch write and readback
+    // -------------------------------------------------------------------------
 
-            const bool struct_array = array_node != nullptr && array_node->count_ > 1 && !array_node->children_.empty();
+    return handlePostLeafField(request, response, db_num, field_path, url_path, document);
+}
 
-            if (!struct_array) {
-                response.status = 400;
+// -----------------------------------------------------------------------------
+// Multi-DB POST
+//
+// The body must be a JSON object where keys are DB names.
+// -----------------------------------------------------------------------------
 
-                response.set_content(
-                    R"({"error":"Indexed array write expects a scalar or non-object value, not a JSON object"})", "application/json");
+void HttpAdapter::handlePostMultiDb(const http::HttpRequest& request, http::HttpResponse& response) {
+    const PlcSchemaStore& registry = *refs_.registry;
 
-                return;
-            }
+    PlcMemory& memory = *refs_.memory;
 
-            if (index >= static_cast<size_t>(array_node->count_)) {
-                response.status = 416;
+    // The body must be a JSON object where keys are DB names.
+    rapidjson::Document document;
+    document.Parse(request.body.c_str());
 
-                response.set_content(
-                    fmt::format(R"X({{"error":"Array index {} out of range (size={})"}})X", index, array_node->count_), "application/json");
+    if (document.HasParseError() || !document.IsObject()) {
+        response.status = 400;
+        response.set_content(R"({"error":"POST /data/ requires a JSON object with DB names as keys"})", "application/json");
 
-                return;
-            }
+        return;
+    }
 
-            if (!isAuthorizedField(request, db_num, field_path, true)) {
+    struct PendingLeaf {
+        uint16_t db;
+        std::string path;
+        std::string value;
+    };
+
+    std::vector<PendingLeaf> all_leaves;
+
+    const std::string& client_ip = request.remote_ip;
+
+    for (auto it = document.MemberBegin(); it != document.MemberEnd(); ++it) {
+        const std::string db_name = it->name.GetString();
+
+        auto result = registry.getDbByName(db_name);
+
+        if (result.hasError() || !result.value()) {
+            response.status = 404;
+
+            response.set_content(fmt::format(R"({{"error":"Unknown DB '{}'"}})", db_name), "application/json");
+
+            return;
+        }
+
+        const uint16_t db_num = result.value()->db_number;
+
+        std::vector<std::pair<std::string, std::string>> db_leaves;
+
+        collectLeaves(it->value, "", db_leaves);
+
+        for (const auto& leaf : db_leaves) {
+            if (!isAuthorizedField(request, db_num, leaf.first, true)) {
                 response.status = 403;
 
-                response.set_content(
-                    fmt::format(R"({{"error":"Forbidden: Not authorised to write path '{}'"}})", field_path), "application/json");
-
-                return;
-            }
-
-            auto array_result = memory.getFieldValue(db_num, field_path);
-
-            if (array_result.hasError()) {
-                response.status = http::toHttpStatus(array_result.error());
-
-                response.set_content(fmt::format(R"({{"error":"Array field '{}' not found"}})", field_path), "application/json");
-
-                return;
-            }
-
-            rapidjson::Document array_doc;
-            if (array_doc.Parse(array_result.value().c_str()).HasParseError() || !array_doc.IsArray()) {
-                response.status = 422;
-                response.set_content(fmt::format(R"({{"error":"Array field '{}' is not a JSON array"}})", field_path), "application/json");
-                return;
-            }
-
-            if (index >= array_doc.Size()) {
-                response.status = 416;
-                response.set_content(
-                    fmt::format(R"X({{"error":"Array index {} out of range (size={})"}})X", index, array_doc.Size()), "application/json");
-                return;
-            }
-
-            // If there's a rest path, update the nested field within the array element
-            if (!array_rest_path.empty()) {
-                rapidjson::Value& element = array_doc[static_cast<rapidjson::SizeType>(index)];
-                const auto segments = sgrn::gateway::adapters::splitSlashes(array_rest_path);
-                rapidjson::Value* current = &element;
-                for (size_t i = 0; i < segments.size(); ++i) {
-                    if (!current->IsObject()) {
-                        response.status = 422;
-                        response.set_content(
-                            fmt::format(R"X({{"error":"Field '{}' not found in array element (not an object)"}})X", array_rest_path),
-                            "application/json");
-                        return;
-                    }
-                    // Case-insensitive field lookup
-                    rapidjson::Value* found = nullptr;
-                    for (auto it = current->MemberBegin(); it != current->MemberEnd(); ++it) {
-                        if (strcasecmp(it->name.GetString(), segments[i].data()) == 0) {
-                            found = &it->value;
-                            break;
-                        }
-                    }
-                    if (!found) {
-                        response.status = 422;
-                        response.set_content(fmt::format(R"X({{"error":"Field '{}' not found in array element"}})X", segments[i].data()),
-                            "application/json");
-                        return;
-                    }
-                    if (i == segments.size() - 1) {
-                        found->RemoveMember(segments[i].data());
-                        rapidjson::Value key(segments[i].data(), array_doc.GetAllocator());
-                        found->AddMember(key, document, array_doc.GetAllocator());
-                    } else {
-                        current = found;
-                    }
-                }
-            } else {
-                // Full element replacement
-                array_doc[static_cast<rapidjson::SizeType>(index)].CopyFrom(document, array_doc.GetAllocator());
-            }
-
-            const std::string new_array_json = sgrn::gateway::adapters::serializeJson(array_doc);
-
-            const uint64_t timestamp = static_cast<uint64_t>(nowMilliseconds());
-
-            auto write_result = memory.updateFieldWithTimestamp(db_num, field_path, new_array_json, timestamp);
-
-            if (write_result.hasError()) {
-                response.status = http::toHttpStatus(write_result.error());
-
-                response.set_content(
-                    fmt::format(R"({{"error":"Failed to write array field '{}': {}"}})", field_path, toString(write_result.error())),
+                response.set_content(fmt::format(R"({{"error":"Forbidden: IP {} is not authorised to write path '{}' in DB{}"}})",
+                                         client_ip, leaf.first, db_num),
                     "application/json");
 
                 return;
             }
 
-            memory.processor()->processCommands();
-
-            // Read back the element for response
-            rapidjson::Document updated_array_doc;
-            updated_array_doc.Parse(new_array_json.c_str());
-            rapidjson::StringBuffer sb;
-            rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-            rapidjson::Value& element = updated_array_doc[static_cast<rapidjson::SizeType>(index)];
-            element.Accept(w);
-
-            response.status = 200;
-
-            response.set_content(fmt::format(R"({{"db":{},"path":"{}","index":{},"value":{}}})", db_num, url_path, index, sb.GetString()),
-                "application/json");
-
-            return;
+            all_leaves.push_back({db_num, leaf.first, leaf.second});
         }
+    }
 
-        // ---------------------------------------------------------------------
-        // Scalar / primitive array element replacement
-        // ---------------------------------------------------------------------
+    if (all_leaves.empty()) {
+        response.status = 400;
 
-        if (field_path.empty()) {
-            response.status = 400;
+        response.set_content(R"({"error":"JSON body produced no writable leaves"})", "application/json");
 
-            response.set_content(R"({"error":"Indexed array write requires a non-empty field path"})", "application/json");
+        return;
+    }
 
-            return;
-        }
+    const uint64_t timestamp = static_cast<uint64_t>(nowMilliseconds());
 
-        if (!isAuthorizedField(request, db_num, field_path, true)) {
-            response.status = 403;
+    // Group leaves by DB.
+    std::map<uint16_t, std::vector<std::pair<std::string, std::string>>> leaves_by_db;
 
-            response.set_content(
-                fmt::format(R"({{"error":"Forbidden: Not authorised to write path '{}'"}})", field_path), "application/json");
+    for (const auto& leaf : all_leaves) {
+        leaves_by_db[leaf.db].push_back({leaf.path, leaf.value});
+    }
 
-            return;
-        }
+    int written = 0;
 
-        auto array_result = memory.getFieldValue(db_num, field_path);
+    for (auto& [db_num, db_leaves] : leaves_by_db) {
+        written += applyLeafWrites(memory, db_num, db_leaves, timestamp).written;
+    }
 
-        if (array_result.hasError()) {
-            response.status = http::toHttpStatus(array_result.error());
+    if (written == 0) {
+        response.status = 422;
 
-            response.set_content(fmt::format(R"({{"error":"Array field '{}' not found"}})", field_path), "application/json");
+        response.set_content(R"({"error":"No fields were written — verify the paths and value types"})", "application/json");
 
-            return;
-        }
+        return;
+    }
 
-        const auto update = replaceArrayElement(array_result.value(), index, document);
+    memory.processor()->processCommands();
 
-        if (!update) {
-            // Preserve the original distinction between an invalid array and
-            // an out-of-range index where possible.
-            rapidjson::Document array_document;
+    response.status = 200;
 
-            if (array_document.Parse(array_result.value().c_str()).HasParseError() || !array_document.IsArray()) {
-                response.status = 422;
+    response.set_content(fmt::format(R"({{"fields_written":{}}})", written), "application/json");
 
-                response.set_content(fmt::format(R"({{"error":"Field '{}' is not a JSON array"}})", field_path), "application/json");
+    return;
+}
 
-                return;
-            }
 
-            response.status = 416;
+// -----------------------------------------------------------------------------
+// Indexed array-of-struct element replacement
+//
+// POST /data/<DB>/<array>/<N>[/<rest>] with a JSON object body replaces
+// element N of the struct array (or the nested leaf under /<rest> within it).
+// -----------------------------------------------------------------------------
 
-            response.set_content(
-                fmt::format(R"X({{"error":"Array index {} out of range (size={})"}})X", index, array_document.Size()), "application/json");
+void HttpAdapter::handlePostStructArrayElement(const http::HttpRequest& request, http::HttpResponse& response, uint16_t db_num,
+    const std::string& field_path, const std::string& array_rest_path, size_t index, const std::string& url_path,
+    rapidjson::Document& document) {
+    PlcMemory& memory = *refs_.memory;
 
-            return;
-        }
+    // -------------------------------------------------------------
+    // Array-of-struct element replacement
+    // -------------------------------------------------------------
 
-        const uint64_t timestamp = static_cast<uint64_t>(nowMilliseconds());
+    const twin::PlcNode* array_node = memory.findSymbol(db_num, field_path);
 
-        auto write_result = memory.updateFieldWithTimestamp(db_num, field_path, update->serialized_array, timestamp);
+    const bool struct_array = array_node != nullptr && array_node->count_ > 1 && !array_node->children_.empty();
 
-        if (write_result.hasError()) {
-            response.status = http::toHttpStatus(write_result.error());
-
-            response.set_content(
-                fmt::format(R"({{"error":"Failed to write array field '{}': {}"}})", field_path, toString(write_result.error())),
-                "application/json");
-
-            return;
-        }
-
-        memory.processor()->processCommands();
-
-        response.status = 200;
+    if (!struct_array) {
+        response.status = 400;
 
         response.set_content(
-            fmt::format(R"({{"db":{},"path":"{}","index":{},"value":{}}})", db_num, url_path, index, update->serialized_element),
+            R"({"error":"Indexed array write expects a scalar or non-object value, not a JSON object"})", "application/json");
+
+        return;
+    }
+
+    if (index >= static_cast<size_t>(array_node->count_)) {
+        response.status = 416;
+
+        response.set_content(
+            fmt::format(R"X({{"error":"Array index {} out of range (size={})"}})X", index, array_node->count_), "application/json");
+
+        return;
+    }
+
+    if (!isAuthorizedField(request, db_num, field_path, true)) {
+        response.status = 403;
+
+        response.set_content(
+            fmt::format(R"({{"error":"Forbidden: Not authorised to write path '{}'"}})", field_path), "application/json");
+
+        return;
+    }
+
+    auto array_result = memory.getFieldValue(db_num, field_path);
+
+    if (array_result.hasError()) {
+        response.status = http::toHttpStatus(array_result.error());
+
+        response.set_content(fmt::format(R"({{"error":"Array field '{}' not found"}})", field_path), "application/json");
+
+        return;
+    }
+
+    rapidjson::Document array_doc;
+    if (array_doc.Parse(array_result.value().c_str()).HasParseError() || !array_doc.IsArray()) {
+        response.status = 422;
+        response.set_content(fmt::format(R"({{"error":"Array field '{}' is not a JSON array"}})", field_path), "application/json");
+        return;
+    }
+
+    if (index >= array_doc.Size()) {
+        response.status = 416;
+        response.set_content(
+            fmt::format(R"X({{"error":"Array index {} out of range (size={})"}})X", index, array_doc.Size()), "application/json");
+        return;
+    }
+
+    // If there's a rest path, update the nested field within the array element
+    if (!array_rest_path.empty()) {
+        rapidjson::Value& element = array_doc[static_cast<rapidjson::SizeType>(index)];
+        const auto segments = sgrn::gateway::adapters::splitSlashes(array_rest_path);
+        rapidjson::Value* current = &element;
+        for (size_t i = 0; i < segments.size(); ++i) {
+            if (!current->IsObject()) {
+                response.status = 422;
+                response.set_content(
+                    fmt::format(R"X({{"error":"Field '{}' not found in array element (not an object)"}})X", array_rest_path),
+                    "application/json");
+                return;
+            }
+            // Case-insensitive field lookup
+            rapidjson::Value* found = nullptr;
+            for (auto it = current->MemberBegin(); it != current->MemberEnd(); ++it) {
+                if (strcasecmp(it->name.GetString(), segments[i].data()) == 0) {
+                    found = &it->value;
+                    break;
+                }
+            }
+            if (!found) {
+                response.status = 422;
+                response.set_content(fmt::format(R"X({{"error":"Field '{}' not found in array element"}})X", segments[i].data()),
+                    "application/json");
+                return;
+            }
+            if (i == segments.size() - 1) {
+                found->RemoveMember(segments[i].data());
+                rapidjson::Value key(segments[i].data(), array_doc.GetAllocator());
+                found->AddMember(key, document, array_doc.GetAllocator());
+            } else {
+                current = found;
+            }
+        }
+    } else {
+        // Full element replacement
+        array_doc[static_cast<rapidjson::SizeType>(index)].CopyFrom(document, array_doc.GetAllocator());
+    }
+
+    const std::string new_array_json = sgrn::gateway::adapters::serializeJson(array_doc);
+
+    const uint64_t timestamp = static_cast<uint64_t>(nowMilliseconds());
+
+    auto write_result = memory.updateFieldWithTimestamp(db_num, field_path, new_array_json, timestamp);
+
+    if (write_result.hasError()) {
+        response.status = http::toHttpStatus(write_result.error());
+
+        response.set_content(
+            fmt::format(R"({{"error":"Failed to write array field '{}': {}"}})", field_path, toString(write_result.error())),
             "application/json");
 
         return;
     }
+
+    memory.processor()->processCommands();
+
+    // Read back the element for response
+    rapidjson::Document updated_array_doc;
+    updated_array_doc.Parse(new_array_json.c_str());
+    rapidjson::StringBuffer sb;
+    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+    rapidjson::Value& element = updated_array_doc[static_cast<rapidjson::SizeType>(index)];
+    element.Accept(w);
+
+    response.status = 200;
+
+    response.set_content(fmt::format(R"({{"db":{},"path":"{}","index":{},"value":{}}})", db_num, url_path, index, sb.GetString()),
+        "application/json");
+
+    return;
+}
+
+
+// -----------------------------------------------------------------------------
+// Scalar / primitive array element replacement
+//
+// POST /data/<DB>/<field>/<N> with a scalar (or array) body replaces
+// element N of the JSON array stored at <field>.
+// -----------------------------------------------------------------------------
+
+void HttpAdapter::handlePostScalarArrayElement(const http::HttpRequest& request, http::HttpResponse& response, uint16_t db_num,
+    const std::string& field_path, size_t index, const std::string& url_path, const rapidjson::Document& document) {
+    PlcMemory& memory = *refs_.memory;
+
+    // ---------------------------------------------------------------------
+    // Scalar / primitive array element replacement
+    // ---------------------------------------------------------------------
+
+    if (field_path.empty()) {
+        response.status = 400;
+
+        response.set_content(R"({"error":"Indexed array write requires a non-empty field path"})", "application/json");
+
+        return;
+    }
+
+    if (!isAuthorizedField(request, db_num, field_path, true)) {
+        response.status = 403;
+
+        response.set_content(
+            fmt::format(R"({{"error":"Forbidden: Not authorised to write path '{}'"}})", field_path), "application/json");
+
+        return;
+    }
+
+    auto array_result = memory.getFieldValue(db_num, field_path);
+
+    if (array_result.hasError()) {
+        response.status = http::toHttpStatus(array_result.error());
+
+        response.set_content(fmt::format(R"({{"error":"Array field '{}' not found"}})", field_path), "application/json");
+
+        return;
+    }
+
+    const auto update = replaceArrayElement(array_result.value(), index, document);
+
+    if (!update) {
+        // Preserve the original distinction between an invalid array and
+        // an out-of-range index where possible.
+        rapidjson::Document array_document;
+
+        if (array_document.Parse(array_result.value().c_str()).HasParseError() || !array_document.IsArray()) {
+            response.status = 422;
+
+            response.set_content(fmt::format(R"({{"error":"Field '{}' is not a JSON array"}})", field_path), "application/json");
+
+            return;
+        }
+
+        response.status = 416;
+
+        response.set_content(
+            fmt::format(R"X({{"error":"Array index {} out of range (size={})"}})X", index, array_document.Size()), "application/json");
+
+        return;
+    }
+
+    const uint64_t timestamp = static_cast<uint64_t>(nowMilliseconds());
+
+    auto write_result = memory.updateFieldWithTimestamp(db_num, field_path, update->serialized_array, timestamp);
+
+    if (write_result.hasError()) {
+        response.status = http::toHttpStatus(write_result.error());
+
+        response.set_content(
+            fmt::format(R"({{"error":"Failed to write array field '{}': {}"}})", field_path, toString(write_result.error())),
+            "application/json");
+
+        return;
+    }
+
+    memory.processor()->processCommands();
+
+    response.status = 200;
+
+    response.set_content(
+        fmt::format(R"({{"db":{},"path":"{}","index":{},"value":{}}})", db_num, url_path, index, update->serialized_element),
+        "application/json");
+
+    return;
+}
+
+
+// -----------------------------------------------------------------------------
+// Leaf writes: collect leaves, authorize them, apply them as one coherent
+// timestamped batch, then read back the written value.
+//
+// Struct-array elements such as:
+//
+//     towers/1/moisture_loading
+//
+// are applied using one read-modify-write per array.
+// -----------------------------------------------------------------------------
+
+void HttpAdapter::handlePostLeafField(const http::HttpRequest& request, http::HttpResponse& response, uint16_t db_num,
+    const std::string& field_path, const std::string& url_path, const rapidjson::Document& document) {
+    PlcMemory& memory = *refs_.memory;
 
     // -------------------------------------------------------------------------
     // 4. Collect leaf writes

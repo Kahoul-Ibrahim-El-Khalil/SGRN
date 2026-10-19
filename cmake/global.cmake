@@ -136,9 +136,13 @@ if(NOT SGRN_CONDA_PREFIX)
             "$ENV{HOME}/micromamba/envs/SGRN"
             "$ENV{HOME}/micromamba/envs/sgrn"
             "/opt/micromamba/envs/SGRN"
+            "$ENV{LOCALAPPDATA}/micromamba/envs/SGRN-WINDOWS"
+            "$ENV{USERPROFILE}/micromamba/envs/SGRN-WINDOWS"
+            "$ENV{ProgramData}/micromamba/envs/SGRN-WINDOWS"
+            "$ENV{HOMEDRIVE}/micromamba/envs/SGRN-WINDOWS"
         )
         foreach(_candidate IN LISTS _SGRN_MICROMAMBA_CANDIDATES)
-            if(EXISTS "${_candidate}/lib/cmake" OR EXISTS "${_candidate}/lib")
+            if(EXISTS "${_candidate}/lib/cmake" OR EXISTS "${_candidate}/lib" OR EXISTS "${_candidate}/Library")
                 set(SGRN_CONDA_PREFIX "${_candidate}")
                 message(STATUS "[SGRN] Auto-detected micromamba environment: ${SGRN_CONDA_PREFIX}")
                 break()
@@ -178,6 +182,7 @@ set(CMAKE_CXX_STANDARD 23 CACHE STRING "C++ standard")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF CACHE BOOL "Disable C++ module scanning" FORCE)
 
 # 4. Global Build Macros & Metadata
 # ------------------------------------------------------------------------------

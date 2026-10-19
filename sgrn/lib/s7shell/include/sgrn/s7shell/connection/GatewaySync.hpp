@@ -134,6 +134,10 @@ private:
     std::condition_variable publish_cv_;
     bool publish_requested_{false};
     bool stop_publish_worker_{false};
+    /// Debounce window before a burst is published (ms). Wall-clock paced
+    /// simulators with fast tick loops raise the sample rate by lowering
+    /// this via SGRN_SYNC_COALESCE_MS (default 25 ms ≈ 40 snapshots/s).
+    uint32_t publish_coalesce_ms_{25};
 
     std::mutex ack_mutex_;
     std::condition_variable ack_cv_;

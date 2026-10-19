@@ -40,14 +40,15 @@ flowchart TD
 
     subgraph INGESTION["2. Gateway & Ingestion"]
         SIM -->|"WebSocket Deltas"| GW["SGRN Gateway<br/>(Northbound HTTP/WS)"]
-        GW -->|"Streaming Zstd WAL"| WAL[("flare_history.jsonl.zst<br/>31 Days / 742 Hours")]
+    GW -->|"Streaming Zstd WAL"| WAL[("flare_history.jsonl.zst<br/>31 Days / ~344 persist-on-change rows")]
         GW -.->|"OPC-UA Server (Port 4840)<br/>Objects/SGRN/*"| OPC["OPC-UA Clients / Forcing"]
     end
 
     subgraph DETECTION["3. ML & Uncertainty Quantification"]
         WAL -->|"dataset.py"| DS["dataset.csv<br/>(20 Clean Process Signals)"]
-        DS -->|"Train Split (70%)"| TR["Autoencoder Training<br/>(240 → 64 → 16 → 64 → 240)"]
-        DS -->|"Cal Split (30%)"| CAL["Split-Conformal Calibration<br/>q_alpha = 0.706, q_upper = 0.988"]
+        DS -->|"Train Split (60%)"| TR["Autoencoder Training<br/>(240 → 64 → 16 → 64 → 240)"]
+        DS -->|"Cal Split (20%)<br/>sets q_alpha only"| CAL["Split-Conformal Calibration<br/>(q_upper = k·q_alpha is a heuristic margin)"]
+        DS -->|"Held-Out Normal (20%)<br/>FAR evaluation only"| HO["Held-Out FAR with<br/>Clopper–Pearson CI"]
         TR & CAL --> MODEL[("model.pt & model_meta.json")]
     end
 
@@ -90,7 +91,7 @@ The simulated plant models a **natural gas molecular-sieve dehydration unit** ta
   1. Header pressure (`SafetySystems.flare_header_press`) ramps up linearly from nominal $1.05\text{ bar}$ at $+0.15\text{ bar/tick}$.
   2. Because the relief path is closed, process relief fails, causing feed pressure (`InletSeparation.feed_pressure`) to ramp up at $+1.15\text{ bar/tick}$.
   3. Scrubber pressure and system inlet/outlet pressures track upward with first-order hydraulic lag.
-  4. At $t = 742\text{ hours}$ (Day 31, Hour 22), feed pressure breaches $90.0\text{ bar}$, triggering an automated **Emergency Shutdown (ESD)** trip.
+  4. At $t = 723\text{ hours}$ (Day 31, Hour 3 of a 744-hour, 31-day run), the fault is injected; by the ESD tick (Day 31, Hour 22) feed pressure breaches $90.0\text{ bar}$, triggering an automated **Emergency Shutdown (ESD)** trip. Note the WAL persists only *changes*, so the archive holds ~344 sparse rows (2–4 h gaps), not one row per hour.
 
 ---
 
@@ -133,14 +134,22 @@ Governs scenario timings, split ratios, conformal bounds, and feature selections
     "tick_sleep_ms": 10
   },
   "dataset": {
-    "train_ratio": 0.70,
-    "calibration_ratio": 0.30,
+    "train_ratio": 0.60,
+    "calibration_ratio": 0.20,
+    "heldout_ratio": 0.20,
     "window_size": 12,
-    "stride": 1
+    "stride": 1,
+    "calibration_stride": 12,
+    "random_seed": 42
   },
   "conformal": {
     "alpha": 0.05,
     "uncertain_upper_multiplier": 1.4
+  },
+  "baselines": {
+    "signal": "SafetySystems.flare_header_press",
+    "window": 12,
+    "k_grid": [1.5, 1.75, 2.0, 2.5, 3.0]
   },
   "features": [
     "InletSeparation.feed_pressure",
@@ -228,8 +237,8 @@ Why does the detector ingest a 12-hour sliding window $\mathbf{X}_w = [\mathbf{x
    An instantaneous snapshot captures only static pressures and temperatures. It contains no derivative, rate-of-change, or hysteresis information. Stacking $W = 12$ delayed states reconstructs an unobserved dynamical state space diffeomorphic to the underlying physical manifold. The autoencoder models the **dynamic process trajectory** rather than a memoryless point.
 2. **Spanning Complete Tower Cycle Dynamics**:
    The molecular sieve dehydration towers cycle through distinct phases (adsorption, thermal regeneration at $290^\circ\text{C}$, cooling to $<50^\circ\text{C}$). One full bed cycle takes 12 hours. A 12-hour window guarantees that every observation contains a full periodic cycle, converting periodic non-stationarity into a **cyclically stationary limit cycle in $\mathbb{R}^{240}$**.
-3. **Preserving Conformal Prediction Guarantees (Quasi-Exchangeability)**:
-   Conformal prediction guarantees a $1 - \alpha$ bounded false-alarm rate under **exchangeable** non-conformity scores. Instantaneous raw seconds in an industrial plant are strongly autocorrelated and non-exchangeable. By embedding into full-cycle sliding windows and applying **chronological (non-random) calibration partitioning**, distant window scores behave as quasi-independent draws from the ergodic nominal distribution. This directly produces **0.00% abnormal false alarms** on held-out calibration data.
+3. **Overlapping Windows Do NOT Restore Conformal Guarantees**:
+    Conformal prediction bounds a $1 - \alpha$ false-alarm rate only under **exchangeable** non-conformity scores. Sliding windows with stride 1 share $W-1$ timesteps, so consecutive window scores are strongly autocorrelated and the exchangeability assumption is violated. For calibration we therefore thin to non-overlapping blocks (`dataset.calibration_stride = window size`), which *approximates* block exchangeability — the coverage level is approximate, not a formal finite-sample guarantee, because residual autocorrelation across adjacent blocks and process drift remain. No claim of "quasi-exchangeability" is made for stride-1 windows, and no "0.00% false alarms" figure is a guarantee: false-alarm rates are measured, with raw counts and a Clopper–Pearson confidence interval, on **held-out-normal windows** whose sample size is small enough that the CI, not the point estimate, is the defensible number. (Earlier drafts called the calibration split "held-out"; that was wrong — see the `calibration_rate_*` vs `false_alarm_rate_heldout` split in `evaluation_metrics.json`.)
 4. **Transient Glitch Rejection vs. Monotonic Fault Drift**:
    An instrument glitch or valve travel flutter is transient and affects only a single time tick. A true cyber-physical failure (such as `FLARE_BLOCKED`, which ramps flare header pressure at $+0.15\text{ bar/tick}$) produces a coherent, sustained drift across the entire 12-hour trajectory, eliminating spurious trip alerts.
 
@@ -247,13 +256,17 @@ The PyTorch autoencoder learns an empirical coordinate chart and non-linear proj
 2. **Orthogonal Manifold Distance as Anomaly Score ($e(\mathbf{x})$)**:
    The reconstruction error measures the squared Euclidean distance from the observed plant state to the physical manifold:
    $$e(\mathbf{x}) = \operatorname{dist}^2(\widetilde{\mathbf{x}}, \mathcal{M}) = \frac{1}{240} \|\widetilde{\mathbf{x}} - \operatorname{Proj}_{\mathcal{M}}(\widetilde{\mathbf{x}})\|_2^2 = \frac{1}{240} \sum_{i=1}^{240} (\widetilde{x}_i - \widehat{x}_i)^2$$
-   - **Nominal Plant State**: $\widetilde{\mathbf{x}} \in \mathcal{M} \implies e(\mathbf{x}) \approx 0.15 \text{ to } 0.55$ (attributable to measurement noise and slight turbulence).
-   - **Fault State (`FLARE_BLOCKED`)**: An obstruction prevents relief venting while feed continues to supply mass $\implies$ the physical relationship between header pressure, feed pressure, and valve positions is violated $\implies \widetilde{\mathbf{x}} \notin \mathcal{M} \implies e(\mathbf{x})$ diverges ($e > 27.0$, reaching $>120.0$).
+   - **Nominal Plant State**: $\widetilde{\mathbf{x}} \in \mathcal{M} \implies e(\mathbf{x}) \approx 0.15 \text{ to } 0.55$ in earlier runs (attributable to measurement noise and slight turbulence; exact ranges are configuration-dependent, see `model_meta.json` / `evaluation_metrics.json`).
+   - **Fault State (`FLARE_BLOCKED`)**: An obstruction prevents relief venting while feed continues to supply mass $\implies$ the physical relationship between header pressure, feed pressure, and valve positions is violated $\implies \widetilde{\mathbf{x}} \notin \mathcal{M} \implies e(\mathbf{x})$ sharply exceeds nominal ranges (orders of magnitude above typical normal-window scores in earlier runs).
 
 3. **Conformal Tolerance Tube & 3-State Uncertainty Classification**:
-   Real physical processes possess non-zero turbulence and sensor noise. Therefore, the nominal manifold is surrounded by an empirical conformal tolerance tube $\mathcal{T}_{\alpha}$ calibrated at significance level $\alpha = 0.05$ on held-out normal operation:
-   $$\mathcal{T}_{\alpha} = \left\{ \mathbf{x} \in \mathbb{R}^{240} \;\middle|\; \operatorname{dist}^2(\widetilde{\mathbf{x}}, \mathcal{M}) \le q_{\alpha} \right\}$$
-   Where $q_{\alpha} = 0.7056$ and $q_{\text{upper}} = k \cdot q_{\alpha} = 1.4 \times 0.7056 = 0.9878$:
+   Real physical processes possess non-zero turbulence and sensor noise. Therefore, the nominal manifold is surrounded by an empirical tolerance tube $\mathcal{T}_{\alpha}$ whose centre threshold $q_{\alpha}$ is the split-conformal $(1-\alpha)$ quantile of non-conformity scores on a **dedicated calibration split** (never on training or held-out data), at significance level $\alpha = 0.05$:
+   $$\mathcal{T}_{\alpha} = \left\{ \mathbf{x} \in \mathbb{R}^{240} \;\middle|\; \operatorname{dist}^2(\widetilde{\mathbf{x}}, \mathcal{M}) \le q_{\text{upper}} \right\}$$
+   Two honest caveats about the thresholds actually computed in this experiment:
+   - **`q_alpha` is finite-sample random, not a fixed constant.** Its value depends on the calibration split and is recomputed every run; do not treat previously published numbers as properties of the model. (In the current run $q_{\alpha}$ is not even finite — see below.)
+   - **`q_upper = k · q_alpha` (k = 1.4) is a heuristic margin, not a conformal quantity.** Split-conformal theory provides no coverage guarantee for this multiplied threshold; it exists only to create an intermediate `UNCERTAIN` band for the agent's abstention logic.
+   With `dataset.calibration_stride = 12` (non-overlapping calibration blocks, chosen to reduce autocorrelation), the bundled one-capture dataset yields too few calibration blocks for a finite 95% conformal quantile (which needs ≥ 19 blocks). Under split-conformal's conservative finite-sample rule the quantile is therefore **infinite**, and the detector sits in a **never-flag regime**: it cannot emit `UNCERTAIN` or `ABNORMAL` at all. This is the mathematically conservative outcome, and we report it as such rather than "fixing" it by loosening the rule — see Section 9.
+
    - **`NORMAL`** ($e < q_{\alpha}$): The plant trajectory lies inside the nominal physical tube $\mathcal{T}_{\alpha}$.
    - **`UNCERTAIN`** ($q_{\alpha} \le e < q_{\text{upper}}$): Near the boundary of the tube; the LangChain agent abstains from hasty alarms during heavy tower switching swings.
    - **`ABNORMAL`** ($e \ge q_{\text{upper}}$): Confident excursion outside the physical manifold; physical laws or operational bounds have been breached.
@@ -261,16 +274,14 @@ The PyTorch autoencoder learns an empirical coordinate chart and non-linear proj
 4. **Directional Error Decomposition for Root-Cause Attribution**:
    The residual vector $\mathbf{r} = \widetilde{\mathbf{x}} - \widehat{\mathbf{x}}$ defines the normal vector pointing from the manifold $\mathcal{M}$ to the anomalous point $\widetilde{\mathbf{x}}$. Computing the per-signal projection error over the 12-hour window:
    $$e_j = \frac{1}{12} \sum_{t=1}^{12} (\widetilde{x}_{t,j} - \widehat{x}_{t,j})^2, \quad j \in \{1, \dots, 20\}$$
-   Directly isolates which physical dimensions contributed the greatest displacement from $\mathcal{M}$:
-   - `#1`: `SafetySystems.flare_header_press` ($>80\%$ of total residual vector magnitude).
-   - `#2`: `InletSeparation.feed_pressure` (hydraulic backpressure).
-   - `#3`: `InletSeparation.scrubber_press`.
+   Directly isolates which physical dimensions contributed the greatest displacement from $\mathcal{M}$. **Caveat:** this attribution is only meaningful when the detector actually flags a window. In the current never-flag regime (Section 9) no attribution is produced, and previously published rankings (flare header pressure > 80% of residual mass, etc.) described a different configuration, not this run.
 
 5. **Downstream Twin Inferences**:
-   The resulting state and attribution are translated directly into the SCL schema tags on Gateway B:
+   When a detection occurs, the resulting state and attribution are translated into the SCL schema tags on Gateway B:
    - `SafetySystems.model_anomaly = True`
    - `SafetySystems.model_fault_code = 9`
-   - `SafetySystems.model_trip_advice = True` (issued **18 hours in advance** of the 90 bar ESD trip).
+   - `SafetySystems.model_trip_advice = True`
+   `model_trip_advice` is emitted only on an actual `ABNORMAL` transition; no fixed lead-time (such as "18 hours before ESD") is guaranteed — lead time is a measured outcome of each evaluation run, reported with honesty about what the data shows (Section 9).
 
 ---
 
@@ -286,12 +297,13 @@ experiments/flare/
 ├── run_capture.py            # Stage 1: Simulation capture generating WAL archive
 ├── dataset.py                # Dataset extraction, standardisation, and windowing
 ├── model.py                  # PyTorch Autoencoder and FlareDetector inference class
-├── train_detector.py         # Stage 2: Trains autoencoder & calibrates conformal thresholds
+├── train_detector.py           # Stage 3: Trains autoencoder & calibrates conformal thresholds
 ├── langchain_tools.py        # Schema-grounded read-only LangChain agent tools
 ├── agent.py                  # LangChain advisory agent (LLM + deterministic fallback)
-├── run_demo.py               # Stage 4: Live replay, twin gateway, and advisory demo
-├── evaluate.py               # Stage 3: Quantitative metric calculation & plot generation
-├── flare_history.jsonl.zst   # Captured 31-day, 742-hour plant WAL archive
+├── run_demo.py                 # Demo: Live replay, twin gateway, and advisory demo
+├── evaluate.py                 # Stage 4: Quantitative metric calculation & plot generation
+├── evaluation_common.py        # Shared evaluation primitives (splits→windows, FAR+CP CI, baselines, provenance)
+├── flare_history.jsonl.zst     # Captured 31-day plant WAL archive (~344 persist-on-change rows)
 ├── meta.json                 # Scenario metadata (fault onset, ESD timestamps)
 ├── model.pt                  # Trained PyTorch autoencoder weights
 ├── model_meta.json           # Serialized scaler parameters and conformal cutoffs
@@ -315,30 +327,32 @@ python3 experiments/flare capture
 ```
 *Outputs*: `experiments/flare/flare_history.jsonl.zst` (91,941 bytes), `meta.json`.
 
-### Stage 2: Training & Conformal Calibration (`train_detector.py`)
+### Stage 2: Splitting & Windowing (`dataset.py`, invoked by `orchestrate.py`)
 - Extracts 20 clean process signals into sliding windows ($12 \text{ hours} \times 20 \text{ signals} = 240$ dimensions).
-- Trains an autoencoder ($240 \to 64 \to 16 \to 64 \to 240$) on the **Train Split** (first 70% pre-fault data).
-- Evaluates reconstruction errors on the **Calibration Split** (subsequent 30% pre-fault data) and computes empirical quantiles:
-  - Nominal 95% threshold: $q_{0.05} = 0.7056$
-  - Upper uncertain threshold: $q_{\text{upper}} = 1.4 \times q_{0.05} = 0.9878$
+- Splits the **pre-fault rows chronologically** into train (60%) → calibration (20%) → held-out-normal (20%), with the scaler fitted on the train split only. Held-out rows are reserved exclusively for false-alarm-rate measurement; they never touch training, scaling, or threshold selection. (An optional second independent no-fault capture can be used instead via `dataset.heldout_source: "capture"`, but the bundled WAL comes from a deterministic replay of a hardcoded simulator seed, so a re-capture is a duplicate trajectory, not an independent one.)
+
+### Stage 3: Training & Conformal Calibration (`train_detector.py`)
+- Trains an autoencoder ($240 \to 64 \to 16 \to 64 \to 240$) on the **Train Split** (first 60% of pre-fault data).
+- Evaluates reconstruction errors on the **Calibration Split** (next 20% of pre-fault data, thinned to non-overlapping blocks with `calibration_stride = 12`) and computes the empirical conformal quantile:
+  - Nominal 95% threshold: $q_{\alpha}$ = the $\lceil (n+1)(1-\alpha)\rceil$-th of the calibration scores; with only 5 effective blocks available, the finite-sample rule yields $q_{\alpha} = \infty$ (never-flag regime — see Section 9).
+  - Upper uncertain threshold: $q_{\text{upper}} = k \cdot q_{\alpha}$ ($k = 1.4$) — a heuristic margin, not a conformal quantity.
 ```bash
 python3 experiments/flare train
-# or: python3 experiments/flare/run
+# or: python3 experiments/flare/train_detector.py
 ```
 *Outputs*: `model.pt`, `model_meta.json`.
 
-### Stage 3: Quantitative Offline Evaluation (`evaluate.py`)
-- Runs full trajectory validation and verifies statistical criteria:
-  - **False Alarm Rate**: $\le 5\%$ conformal error budget.
-  - **Detection Delay**: Hours from fault onset until first `ABNORMAL` state.
-  - **Lead Time**: Hours from first `ABNORMAL` state until the 90 bar ESD trip.
-  - **Attribution**: Confirms whether flare header and feed pressure appear in top-3 error drivers.
+### Stage 4: Quantitative Offline Evaluation (`evaluate.py`)
+- Computes metrics **strictly on held-out-normal windows** (raw counts, plus non-overlapping windows with Clopper–Pearson 95% CIs), and evaluates the fault day for delay/lead only:
+  - **False Alarm Rate (held-out)**: total and abnormal-only, as counts and rates; the calibration-window rates are kept separately under `calibration_rate_*` and are circular by construction.
+  - **Detection Delay / Lead Time**: raw counts on the held-out FAR side; delay/lead are reported whether or not the AE beats the simple level/slope baselines on `SafetySystems.flare_header_press` (side-by-side table, Section 9).
+  - **Attribution**: top residual drivers at detection, only if the detector actually flags.
 ```bash
 python3 experiments/flare evaluate
 ```
 *Outputs*: `evaluation_metrics.json`, `evaluation_plot.png`.
 
-### Stage 4: Live Replay & LangChain Advisory Agent (`run_demo.py`)
+### Demo: Live Replay & LangChain Advisory Agent (`run_demo.py`)
 - Spawns `sgrn_replay` (Port 18080) and twin `gateway` (Port 18082).
 - Agent monitors plant state tick-by-tick and triggers operator advisories on state transitions (`NORMAL` $\to$ `ABNORMAL`).
 ```bash
@@ -370,16 +384,41 @@ To test manual signal tampering or emergency overrides:
 
 ## 9. Quantitative Verification Summary
 
-Actual metrics achieved by the implementation:
+Actual metrics from the latest full pipeline run with the bundled WAL (`python3 experiments/flare run`; see `evaluation_metrics.json` for raw counts, the Clopper–Pearson interval, and provenance — seed, git commit, config hash — on every number below).
 
-| Metric | Measured Value | Requirement / Target | Result |
+### Held-out false-alarm behavior (AE detector)
+
+| Metric | Measured Value | Notes / Requirement | Result |
 |:---|:---|:---|:---|
-| **Calibration Windows** | `88` | Pre-fault calibration split | Valid |
-| **False Alarm Rate (Total Uncertain/Abnormal)** | **3.41%** | $\le 5.0\%$ conformal error budget | **PASS** |
-| **False Alarm Rate (Abnormal Only)** | **0.00%** | Zero false critical shutdowns | **PASS** |
-| **Fault Onset** | `2000-01-31 03:00:00` | Day 31, Hour 3 | Verified |
-| **First Detection** | `2000-01-31 04:00:00` | Day 31, Hour 4 | Verified |
-| **Detection Delay** | **1.0 simulated hour** | Immediate notice | **PASS** |
-| **Emergency Shutdown (ESD)** | `2000-01-31 22:00:00` | Feed pressure $> 90.0\text{ bar}$ | Verified |
-| **Lead Time Before ESD** | **18.0 simulated hours** | Actionable operator lead time | **PASS** |
-| **Root Cause Attribution** | `#1: SafetySystems.flare_header_press`<br>`#2: InletSeparation.feed_pressure`<br>`#3: InletSeparation.scrubber_press` | Flare header & feed pressure in top-3 | **PASS** |
+| **Calibration windows (stride-1)** | `55` | sets $q_{\alpha}$ only — **circular for FAR** | Valid |
+| **Effective calibration blocks (stride = 12)** | `5` | finite 95% quantile needs ≥ 19 | **Insufficient → $q_{\alpha} = \infty$** |
+| **Held-out normal windows (stride-1)** | `56` flagged `0` | raw counts on held-out data | FAR point estimate **0.00%** |
+| **Held-out independent windows (stride = 12)** | `5`, flagged `0` | Clopper–Pearson 95% for 0/5 | **[47.8%, 100%]** — the upper bound, not 0.00%, is the defensible number |
+| **Detector regime** | never-flag | $q_{\alpha} = \infty$: by the conservative finite-sample conformal rule the detector cannot emit `UNCERTAIN`/`ABNORMAL` | **Honest negative result, reported as-is** |
+
+### Fault-day detection performance (AE vs. simple baselines)
+
+The baselines use only `SafetySystems.flare_header_press`: a window **level** (mean) and a window **slope** (mean per-tick difference), each thresholded at train-mean $+ k\cdot$std with $k$ chosen so the *calibration*-window FAR $\le \alpha = 0.05$ — no peeking at held-out or fault-day data. Delay is hours from fault onset to the first flag; lead is hours from that flag to the 90 bar ESD trip (2000-01-31 22:00).
+
+| Detector | Calibration FAR ($\le$ 5% budget) | Held-out FAR (abnormal-only) | Delay | Lead before ESD |
+|:---|:---|:---|:---|:---|
+| **Conformal AE** | n/a (never flags) | 0.00% (0/56) | **none — no detection** | none |
+| **Baseline level (window mean), k = 2.5** | 3.64% (2/55) $\checkmark$ | 0.00% (0/56) | **0.0 h** | **19.0 h** |
+| **Baseline slope (mean per-tick diff), k = 1.75** | 3.64% (2/55) $\checkmark$ | 7.14% (4/56) | **0.0 h** | **19.0 h** |
+
+**Plain statement:** the simple level threshold detects the fault as early as — and in this run strictly *better* than — the conformal autoencoder. The AE never flagged at all (its 0.00% FAR is trivially satisfied, not earned), so the baselines win on this scenario.
+
+### Timeline anchors (verified)
+
+| Anchor | Value |
+|:---|:---|
+| Fault onset | `2000-01-31 03:00:00` (Day 31, Hour 3) |
+| Emergency Shutdown (ESD) | `2000-01-31 22:00:00` (feed pressure $> 90.0$ bar) |
+
+### Limitations
+
+- **The held-out split is not an independent run.** The bundled WAL replays a deterministic simulator with a hardcoded seed, so train/calibration/held-out rows come from the same trajectory; the chronological split blocks direct contamination but not cross-split autocorrelation. The `capture --no-fault` option exists, but a re-captured "normal" run is a duplicate, not new physics.
+- **The dataset is small and sparse.** Persist-on-change recording yields ~344 rows over 31 days (2–4 h gaps), not the 742 regular hourly rows an earlier draft claimed. With 12-row windows that leaves only 199/66/67 rows and 5 effective calibration blocks — too few for a finite 95% conformal quantile, hence the never-flag regime.
+- **Delay/lead of 0.0 h / 19.0 h are artifacts of sparse sampling,** not evidence of faster detection; the first flagged window simply ends at the fault-onset tick.
+- **The stride-1 FAR point estimate (0/56) is over-optimistic** because overlapping windows share 11 of 12 timesteps; the stride-12 count (0/5) and its CI upper bound are the defensible numbers, and both are far from the nominal 5% error budget.
+- **`q_upper = k·q_alpha` is a heuristic,** with no conformal coverage guarantee, and attribution output exists only when the detector flags (currently never).

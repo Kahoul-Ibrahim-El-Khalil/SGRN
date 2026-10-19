@@ -417,7 +417,6 @@ if(NOT TARGET JsonCpp::JsonCpp)
         set_target_properties(JsonCpp::JsonCpp PROPERTIES
             IMPORTED_LOCATION "${_jsoncpp_lib}"
             INTERFACE_INCLUDE_DIRECTORIES "${_inc}"
-            INTERFACE_COMPILE_DEFINITIONS "JSONCPP_NO_STRINGVIEW"
         )
     endif()
 endif()
@@ -583,6 +582,9 @@ if(NOT TARGET crow)
     add_library(crow INTERFACE IMPORTED GLOBAL)
     target_include_directories(crow INTERFACE "${_inc}")
     target_compile_definitions(crow INTERFACE ASIO_STANDALONE)
+    if(WIN32)
+        target_link_libraries(crow INTERFACE mswsock ws2_32)
+    endif()
 endif()
 if(NOT TARGET extern::crow)
     add_library(extern::crow ALIAS crow)

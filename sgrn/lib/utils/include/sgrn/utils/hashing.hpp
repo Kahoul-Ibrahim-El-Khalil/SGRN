@@ -31,7 +31,7 @@ namespace sgrn::utils
 using Bytes = std::vector<char>;
 
 // =======================================================
-// 1️⃣ Utility Helpers
+//  Utility Helpers
 // =======================================================
 
 // Helper: Convert Poco's unsigned buffer to our signed buffer
@@ -71,7 +71,7 @@ inline std::string generateSalt(size_t t_length = 16) {
 }
 
 // =======================================================
-// 2️⃣ PBKDF2 Password Hashing
+//  PBKDF2 Password Hashing
 // =======================================================
 
 inline std::string internalPbkdf2(const std::string& t_password, const std::string& t_salt, uint32_t t_iterations) {
@@ -126,14 +126,14 @@ inline ::sgrn::Result<std::string> computeSha512Data(std::string_view t_data, Ha
     DigestContext ctx_;
     if (EVP_DigestInit_ex(ctx_.get(), EVP_sha512(), nullptr) != 1 || EVP_DigestUpdate(ctx_.get(), t_data.data(), t_data.size()) != 1) {
         ERROR_LOG("Digest init/update failed");
-        return ::sgrn::Result<std::string>::Error("Digest init/update failed");
+        return Error("Digest init/update failed");
     }
 
     std::array<unsigned char, EVP_MAX_MD_SIZE> hash{};
     unsigned int len = 0;
 
     if (EVP_DigestFinal_ex(ctx_.get(), hash.data(), &len) != 1) {
-        return ::sgrn::Result<std::string>::Error("Digest final failed");
+        return Error("Digest final failed");
     }
 
     switch (t_enc) {
@@ -144,13 +144,13 @@ inline ::sgrn::Result<std::string> computeSha512Data(std::string_view t_data, Ha
         case sgrn::utils::HashEncoding::hex:
             return sgrn::utils::encoding::toHex(hash.data(), len);
     }
-    return ::sgrn::Result<std::string>::Error("Unknown hash encoding");
+    return Error("Unknown hash encoding");
 }
 
 inline ::sgrn::Result<std::string> computeSha512File(const std::filesystem::path& t_path, HashEncoding t_enc) {
     std::ifstream file(t_path, std::ios::binary);
     if (!file) {
-        return ::sgrn::Result<std::string>::Error("Cannot open file: " + t_path.string());
+        return Error("Cannot open file: " + t_path.string());
     }
     DigestContext ctx_;
 
@@ -177,7 +177,7 @@ inline ::sgrn::Result<std::string> computeSha512File(const std::filesystem::path
     unsigned int len = 0;
 
     if (EVP_DigestFinal_ex(ctx_.get(), hash.data(), &len) != 1) {
-        return ::sgrn::Result<std::string>::Error("Digest final failed");
+        return Error("Digest final failed");
     }
     switch (t_enc) {
         case sgrn::utils::HashEncoding::base64:
@@ -187,25 +187,25 @@ inline ::sgrn::Result<std::string> computeSha512File(const std::filesystem::path
         case sgrn::utils::HashEncoding::hex:
             return sgrn::utils::encoding::toHex(hash.data(), len);
     }
-    return ::sgrn::Result<std::string>::Error("Unknown hash encoding");
+    return Error("Unknown hash encoding");
 }
 
 // =======================================================
-// 6️⃣ SHA256 Convenience Wrappers (Hex - Standard for ETag/Checksum)
+//  SHA256 Convenience Wrappers (Hex - Standard for ETag/Checksum)
 // =======================================================
 
 inline ::sgrn::Result<std::string> computeSha256Data(std::string_view t_data, HashEncoding t_enc) {
     DigestContext ctx_;
     if (EVP_DigestInit_ex(ctx_.get(), EVP_sha256(), nullptr) != 1 || EVP_DigestUpdate(ctx_.get(), t_data.data(), t_data.size()) != 1) {
         ERROR_LOG("SHA256 digest init/update failed");
-        return ::sgrn::Result<std::string>::Error("Digest init/update failed");
+        return Error("Digest init/update failed");
     }
 
     std::array<unsigned char, EVP_MAX_MD_SIZE> hash{};
     unsigned int len = 0;
 
     if (EVP_DigestFinal_ex(ctx_.get(), hash.data(), &len) != 1) {
-        return ::sgrn::Result<std::string>::Error("Digest final failed");
+        return Error("Digest final failed");
     }
 
     switch (t_enc) {
@@ -216,19 +216,19 @@ inline ::sgrn::Result<std::string> computeSha256Data(std::string_view t_data, Ha
         case sgrn::utils::HashEncoding::hex:
             return sgrn::utils::encoding::toHex(hash.data(), len);
     }
-    return ::sgrn::Result<std::string>::Error("Unknown hash encoding");
+    return Error("Unknown hash encoding");
 }
 
 inline ::sgrn::Result<std::string> computeSha256File(const std::filesystem::path& t_path, HashEncoding t_enc) {
     std::ifstream file(t_path, std::ios::binary);
     if (!file) {
-        return ::sgrn::Result<std::string>::Error("Cannot open file: " + t_path.string());
+        return Error("Cannot open file: " + t_path.string());
     }
     DigestContext ctx_;
 
     if (EVP_DigestInit_ex(ctx_.get(), EVP_sha256(), nullptr) != 1) {
         ERROR_LOG("SHA256 digest init failed for file: {}", t_path.string());
-        return ::sgrn::Result<std::string>::Error("Digest init failed");
+        return Error("Digest init failed");
     }
 
     constexpr std::size_t buffer_size = 16 * 1024;
@@ -240,7 +240,7 @@ inline ::sgrn::Result<std::string> computeSha256File(const std::filesystem::path
 
         if (read > 0) {
             if (EVP_DigestUpdate(ctx_.get(), t_buffer.data(), static_cast<std::size_t>(read)) != 1) {
-                return ::sgrn::Result<std::string>::Error("Digest update failed");
+                return Error("Digest update failed");
             }
         }
     }
@@ -249,7 +249,7 @@ inline ::sgrn::Result<std::string> computeSha256File(const std::filesystem::path
     unsigned int len = 0;
 
     if (EVP_DigestFinal_ex(ctx_.get(), hash.data(), &len) != 1) {
-        return ::sgrn::Result<std::string>::Error("Digest final failed");
+        return Error("Digest final failed");
     }
     switch (t_enc) {
         case sgrn::utils::HashEncoding::hex:
@@ -259,7 +259,7 @@ inline ::sgrn::Result<std::string> computeSha256File(const std::filesystem::path
         case sgrn::utils::HashEncoding::base64url:
             return ::sgrn::utils::encoding::toBase64Url(hash.data(), len);
     }
-    return ::sgrn::Result<std::string>::Error("Unknown hash encoding");
+    return Error("Unknown hash encoding");
 }
 
 } // namespace sgrn::utils

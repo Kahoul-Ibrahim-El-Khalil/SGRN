@@ -108,6 +108,44 @@ try:
 except ImportError:
     AutoMLTrainer = None
 
+# ── Phase 1: PyTorch-native AutoML (replaces sklearn AutoMLTrainer) ──
+try:
+    from .pytorch_automl import PyTorchAutoMLTrainer, migrateAutoMLTrainer
+except ImportError as _e:
+    PyTorchAutoMLTrainer = migrateAutoMLTrainer = None
+
+# ── Phase 2: XGBoost emulation via PyTorch (unified lifecycle) ──
+try:
+    from .xgboost_pytorch_emul import (
+        PyXGBoostBooster,
+        PyTorchXGBoostEmulator,
+        getXGBoostCandidate,
+    )
+except ImportError:
+    PyXGBoostBooster = PyTorchXGBoostEmulator = getXGBoostCandidate = None
+
+# ── Phase 3: Manifold reconstruction-error features for AutoML ──
+try:
+    from .manifold_feature_integration import (
+        ManifoldFeatureExtractor,
+        augmentFeaturesWithManifold,
+        getAutoMLAugmentedFeatureNames,
+    )
+except ImportError:
+    ManifoldFeatureExtractor = None
+    augmentFeaturesWithManifold = None
+    getAutoMLAugmentedFeatureNames = None
+
+# ── Phase 4: Unified anomaly pipeline (manifold+conformal+classical) ──
+try:
+    from .unified_anomaly import (
+        UnifiedAnomalyDetector,
+        fitUnifiedAnomalyDetector,
+    )
+except ImportError:
+    UnifiedAnomalyDetector = None
+    fitUnifiedAnomalyDetector = None
+
 __all__ = [
     # Device / Hardware
     "getHardwareInfo",
@@ -191,4 +229,15 @@ __all__ = [
     "DatasetReader",
     "BinaryDatasetReader",
     "JsonlDatasetReader",
+    # PyTorch AutoML / XGBoost emulation / manifold features / unified anomaly
+    "PyTorchAutoMLTrainer",
+    "migrateAutoMLTrainer",
+    "PyXGBoostBooster",
+    "PyTorchXGBoostEmulator",
+    "getXGBoostCandidate",
+    "ManifoldFeatureExtractor",
+    "augmentFeaturesWithManifold",
+    "getAutoMLAugmentedFeatureNames",
+    "UnifiedAnomalyDetector",
+    "fitUnifiedAnomalyDetector",
 ]

@@ -15,6 +15,35 @@
 using sgrn::Result;
 using sgrn::gateway::GatewayApplication;
 
+namespace
+{
+constexpr std::string_view MAN_MESSAGE =
+    "SGRN Gateway — Multi-Protocol Industrial Gateway\n\n"
+    "USAGE:\n"
+    "    gateway -c gateway.json [-s schema.scl] [-p policy.as] [--gui] [--headless]\n\n"
+    "CONFIG FILE:\n"
+    "    gateway.json contains all protocol adapters, security, persistence, and DB mappings.\n"
+    "    See sgrn/gateway/config/example.json for full reference.\n"
+    "    Note: On Windows, paths starting with /tmp/ (such as \"state_dir\": \"/tmp/sgrn-gateway-state\")\n"
+    "    are automatically substituted with the Windows user temporary directory (%TEMP%, e.g.\n"
+    "    C:\\Users\\<user>\\AppData\\Local\\Temp) for seamless cross-platform execution.\n\n"
+    "SCHEMA:\n"
+    "    -s/--schema accepts a .scl file or directory of .scl/.udt files.\n"
+    "    Overrides \"schema\" or \"symbols_dir\" in gateway.json.\n\n"
+    "SECURITY POLICY:\n"
+    "    -p/--policy loads an AngelScript policy script for granular ACLs.\n"
+    "    Overrides \"security_script\" in gateway.json.\n\n"
+    "HEADLESS MODE:\n"
+    "    --headless starts only HTTP+WebSocket adapters (no S7/OPC-UA/Modbus/EIP).\n"
+    "    Useful for replay and simulation. HTTP on --http-port, WebSocket at /ws.\n\n"
+    "EXAMPLES:\n"
+    "    gateway -c gateway.json\n"
+    "    gateway -c gateway.json -s schema.scl --gui\n"
+    "    gateway -c gateway.json --headless --http-port 8080\n"
+    "    gateway --headless -s schema.scl --http-port 8080\n\n"
+    "For full manual: gateway --man\n";
+}
+
 Result<void, std::string> start(int argc, char** argv) {
     cxxopts::Options options("gateway", "SGRN Multi-Protocol Industrial Gateway");
     options.add_options()("c,config", "Path to gateway.json config file", cxxopts::value<std::string>())("s,schema",
@@ -36,44 +65,16 @@ Result<void, std::string> start(int argc, char** argv) {
         }
 
         if (result.count("man")) {
-            fmt::print(R"(SGRN Gateway — Multi-Protocol Industrial Gateway
-
-USAGE:
-    gateway -c gateway.json [-s schema.scl] [-p policy.as] [--gui] [--headless]
-
-CONFIG FILE:
-    gateway.json contains all protocol adapters, security, persistence, and DB mappings.
-    See sgrn/gateway/config/example.json for full reference.
-
-SCHEMA:
-    -s/--schema accepts a .scl file or directory of .scl/.udt files.
-    Overrides "schema" or "symbols_dir" in gateway.json.
-
-SECURITY POLICY:
-    -p/--policy loads an AngelScript policy script for granular ACLs.
-    Overrides "security_script" in gateway.json.
-
-HEADLESS MODE:
-    --headless starts only HTTP+WebSocket adapters (no S7/OPC-UA/Modbus/EIP).
-    Useful for replay and simulation. HTTP on --http-port, WebSocket at /ws.
-
-EXAMPLES:
-    gateway -c gateway.json
-    gateway -c gateway.json -s schema.scl --gui
-    gateway -c gateway.json --headless --http-port 8080
-    gateway --headless -s schema.scl --http-port 8080
-
-For full manual: gateway --man
-)");
+            fmt::print("{}\n", MAN_MESSAGE);
             return {};
         }
 
         GatewayApplication app;
 
         // Build config from flags
-        std::string config_path = result.count("config") ? result["config"].as<std::string>() : "";
-        std::string schema_override = result.count("schema") ? result["schema"].as<std::string>() : "";
-        std::string policy_override = result.count("policy") ? result["policy"].as<std::string>() : "";
+        std::string config_path = result.count("config") ? SGRN_CONFIG_PATH(result["config"].as<std::string>()) : "";
+        std::string schema_override = result.count("schema") ? SGRN_CONFIG_PATH(result["schema"].as<std::string>()) : "";
+        std::string policy_override = result.count("policy") ? SGRN_CONFIG_PATH(result["policy"].as<std::string>()) : "";
         bool gui_mode = result["gui"].as<bool>();
         bool headless = result["headless"].as<bool>();
         uint16_t http_port = result["http-port"].as<uint16_t>();
@@ -83,24 +84,23 @@ For full manual: gateway --man
         if (headless) {
             if (schema_override.empty()) {
                 fmt::print(stderr, "Error: --schema required in headless mode\n");
-                return sgrn::Result<void, std::string>::Error("schema required");
+                return "schema required";
             }
             app.enableHeadlessMode(http_port, ws_port);
             app.setSchemaOverride(schema_override);
         } else if (config_path.empty()) {
             fmt::print(stderr, "Error: -c/--config <gateway.json> required (or use --headless with --schema)\n");
-            return sgrn::Result<void, std::string>::Error("config required");
+            return "config required";
         }
 
         // Load config from file (or minimal headless config)
         if (!headless) {
-            if (auto r = app.loadConfig(argc, argv); r.hasError()) {
-                return r.error();
-            }
+            SGRN_IF_ERROR_PROPAGATE(app.loadConfig(argc, argv));
+
             if (!schema_override.empty()) {
-                // Override schema from command line
                 app.setSchemaOverride(schema_override);
             }
+
             if (!policy_override.empty()) {
                 app.setPolicyOverride(policy_override);
             }
@@ -124,7 +124,7 @@ For full manual: gateway --man
         return {};
     } catch (const std::exception& e) {
         fmt::print(stderr, "Error: {}\n", e.what());
-        return sgrn::Result<void, std::string>::Error(e.what());
+        return e.what();
     }
 }
 

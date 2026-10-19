@@ -14,8 +14,12 @@
   "dataset": {
     "window_size": { "unit": "minutes", "size": 12 },
     "stride": 1,
-    "train_ratio": 0.7,
-    "calibration_ratio": 0.3,
+    "train_ratio": 0.6,
+    "calibration_ratio": 0.2,
+    "heldout_ratio": 0.2,
+    "heldout_source": "split",
+    "heldout_capture": { "archive": "flare_history_normal.jsonl.zst" },
+    "calibration_stride": 12,
     "random_seed": 42
   },
   "model": {
@@ -26,6 +30,11 @@
     "batch_size": 32,
     "alpha": 0.05,
     "k_multiplier": 1.4
+  },
+  "baselines": {
+    "signal": "SafetySystems.flare_header_press",
+    "k_grid": [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25, 3.5, 3.75,
+               4.0, 4.25, 4.5, 4.75, 5.0, 5.5, 6.0, 6.5, 7.0, 8.0]
   },
   "features": [
     "InletSeparation.feed_pressure",

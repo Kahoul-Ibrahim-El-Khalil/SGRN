@@ -6,7 +6,6 @@
 
 #include <fmt/color.h>
 #include <fmt/format.h>
-#include <sgrn/s7shell/SchemaVM.hpp>
 #include <algorithm>
 #include <cstring>
 #include <filesystem>

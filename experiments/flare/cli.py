@@ -96,6 +96,17 @@ def cmdCheck(_args: argparse.Namespace) -> int:
             if isinstance(ws, dict):
                 ws = ws.get("size", ws)
             print(f"  ✓ Config: {cfg_path.name} (window_size={ws})")
+            try:
+                from dataset import normalizeSplitRatios
+
+                train_r, cal_r, held_r = normalizeSplitRatios(cfg.get("dataset", {}))
+                print(f"  ✓ Split ratios: train={train_r} calibration={cal_r} "
+                      f"heldout={held_r} (sum=1)")
+                if str(cfg.get("dataset", {}).get("heldout_source", "split")) != "capture":
+                    print("  ℹ Held-out set: chronological pre-fault split (not an "
+                          "independent capture; see dataset.heldout_source)")
+            except ImportError:
+                print("  ⚠ Split ratios not validated (dataset module unavailable)")
         except Exception as exc:
             print(f"  ✗ Config {cfg_path.name}: {exc}")
             ok = False
@@ -236,12 +247,12 @@ How it works:
   • Stage 5: Executive diagnostic report generation
 
 Typical usage (from repository root):
-  python3 experiments/flare check              # verify environment
-  python3 experiments/flare capture            # regenerate WAL from simulation
-  python3 experiments/flare run                # full ML pipeline (uses bundled WAL)
-  python3 experiments/flare run --output-dir scratch/flare_try --epochs 20
-  python3 experiments/flare evaluate           # metrics + plot only
-  python3 experiments/flare demo               # live replay (needs gateway + replay binaries)
+  python3 experiments/flare --output-dir scratch/flare check           # verify environment
+  python3 experiments/flare --output-dir scratch/flare capture         # regenerate WAL from simulation
+  python3 experiments/flare --output-dir scratch/flare run             # full ML pipeline (uses bundled WAL)
+  python3 experiments/flare --output-dir scratch/flare_try --epochs 20
+  python3 experiments/flare --output-dir scratch/flare evaluate        # metrics + plot only
+  python3 experiments/flare --output-dir scratch/flare demo            # live replay
   python3 experiments/flare demo --speed 10 --llm
 
 The bundled WAL (flare_history.jsonl.zst) is enough for `run` and `evaluate`
@@ -249,13 +260,22 @@ without rebuilding native binaries. `capture` and `demo` need gateway, s7shell,
 and sgrn_replay in .dist/ or .prefix/bin/.
 
 Output directory:
-  --output-dir DIR   Artifact directory (default: experiments/flare/)
+  --output-dir DIR   REQUIRED for `run` (orchestrate.py refuses to start without it).
                    Datasets go to <DIR>/dataset/ and models to <DIR>/model/
-                   Use this to avoid polluting the source tree.
+                   No silent default: an explicit destination avoids polluting
+                   the CWD or source tree.
+
+Config:
+  --config FILE      YAML/JSON config path (default prefers config.yaml over
+                   config.json). The resolved file is copied into <DIR> and
+                   governs the run end-to-end: features, window/stride/ratios,
+                   model hyperparams, alpha, k_multiplier, calibration_stride.
+                   CLI flags (--epochs, --lr, ...) override the YAML only when
+                   explicitly passed.
 
 Examples:
   python3 experiments/flare check
-  python3 experiments/flare run
+  python3 experiments/flare run --output-dir scratch/flare_try
   python3 experiments/flare run --output-dir scratch/flare_try --epochs 20
   python3 experiments/flare evaluate
   python3 experiments/flare demo
@@ -268,9 +288,16 @@ Examples:
     sub.add_parser("check", help="Verify repo, Python deps, config, artifacts, and binaries")
 
     p_run = sub.add_parser("run", help="End-to-end pipeline: dataset → train → evaluate → report (orchestrate.py)")
-    p_run.add_argument("--output-dir", default=None, help=f"Artifact directory (default: {FLARE_DIR.name}/)")
+    p_run.add_argument("--output-dir", default=str(FLARE_DIR),
+                       help="Artifact directory (dataset/, model/, metrics, report). "
+                            "Default: experiments/flare itself, so evaluation_metrics.json "
+                            "and evaluation_plot.png land next to the bundled WAL — "
+                            "from the repo root pass --output-dir scratch/flare_run to "
+                            "keep artifacts out of the source tree.")
+    p_run.add_argument("--config", default=None,
+                       help="YAML/JSON config path (default: config.yaml in the experiment dir)")
     p_run.add_argument("--capture", action="store_true", help="Re-run soft-PLC simulation before training (slow)")
-    p_run.add_argument("--epochs", type=int, default=None, help="Training epochs (default: 40)")
+    p_run.add_argument("--epochs", type=int, default=None, help="Override config.yaml model.epochs")
     p_run.add_argument("--no-plot", action="store_true", help="Skip evaluation plot")
     p_run.add_argument("extra", nargs=argparse.REMAINDER, help="Extra args passed to orchestrate.py")
 

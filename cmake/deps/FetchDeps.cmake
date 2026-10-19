@@ -225,6 +225,11 @@ function(sgrn_harden_snap7 SOURCE_DIR)
     )
 
     if(_snap7_pdulen_pos EQUAL -1)
+        string(FIND "${_snap7_peer_source}" "NegotiatedPDULength" _snap7_already_patched)
+        if(NOT _snap7_already_patched EQUAL -1)
+            message(STATUS "[SGRN] Snap7 already hardened.")
+            return()
+        endif()
 
         message(FATAL_ERROR
             "[SGRN] Snap7 hardening failed: "

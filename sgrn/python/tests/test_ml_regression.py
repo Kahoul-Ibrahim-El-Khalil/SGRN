@@ -423,5 +423,97 @@ class TestStreaming(unittest.TestCase):
             self.assertEqual(str(df["M.stamp"][0])[:10], "2024-01-02")
 
 
+class TestPipelinePathParity(unittest.TestCase):
+    """Contract between the batch and streaming fit paths.
+
+    fitManifoldPipeline and fitManifoldPipelineStream are separate
+    implementations by design (materialised windows vs O(window) streaming
+    passes, nanmean vs Welford statistics) — their trained weights will not
+    match bit-for-bit. What must never drift is everything AROUND the
+    training: schema/context/strata resolution, the fault-cutoff semantics,
+    the nominal scaler statistics, split geometry, and the result shape.
+    """
+
+    def test_batch_stream_semantic_parity(self):
+        if not HAS_TORCH or not HAS_PANDAS:
+            self.skipTest("torch/pandas required")
+        from sgrn.ml.dataset import JsonlDatasetReader
+        from sgrn.ml.pipeline import fitManifoldPipeline, fitManifoldPipelineStream
+
+        d = _tiny_frame(n=200)
+        n = len(d["temp"])
+        fit_cfg = {"model": {"epochs": 1, "hidden_dim": 8, "latent_dim": 4, "alpha": 0.5}}
+        mh_cfg = {"epochs": 1, "hidden_dim": 8}
+        onset = 160  # row-index cutoff: identical meaning in both paths
+
+        df = pd.DataFrame({k: d[k] for k in ("temp", "flow", "heater_on", "ts")})
+        batch_out = fitManifoldPipeline(
+            data=df, features=["temp", "flow"], contextFeatures=["heater_on"],
+            timestampCol="ts", faultOnset=onset, windowSize=8,
+            modelConfig=fit_cfg, modeHeadConfig=mh_cfg, seed=11)
+
+        lines = [{"type": "dictionary",
+                  "leaves": [{"id": i, "path": k} for i, k in
+                             enumerate(["temp", "flow", "heater_on"])]}]
+        for i in range(n):
+            lines.append({"type": "anchor" if i == 0 else "delta",
+                          "ts": d["ts"][i],
+                          "data" if i == 0 else "changes": {
+                              "0": float(d["temp"][i]), "1": float(d["flow"][i]),
+                              "2": bool(d["heater_on"][i])}})
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "t.jsonl")
+            with open(path, "w") as f:
+                f.write("\n".join(json.dumps(line) for line in lines))
+            stream_out = fitManifoldPipelineStream(
+                JsonlDatasetReader(path), features=["temp", "flow"],
+                contextFeatures=["heater_on"], faultOnset=onset, windowSize=8,
+                modelConfig=fit_cfg, modeHeadConfig=mh_cfg, seed=11)
+
+        # Result shape (camelCase + alias keys) is identical.
+        self.assertEqual(set(batch_out.keys()), set(stream_out.keys()))
+
+        # Resolution contract: same features, geometry, strata, cutoffs.
+        self.assertEqual(batch_out["features"], stream_out["features"])
+        self.assertEqual(batch_out["windowSize"], stream_out["windowSize"])
+        self.assertEqual(batch_out["contextFeatures"], stream_out["contextFeatures"])
+        self.assertEqual(batch_out["stratifyFields"], stream_out["stratifyFields"])
+        self.assertEqual(batch_out["calibrationStride"], stream_out["calibrationStride"])
+        self.assertEqual(batch_out["nCalEffective"], stream_out["nCalEffective"])
+        self.assertEqual(batch_out["detector"].window_size,
+                         stream_out["detector"].window_size)
+
+        # Nominal statistics: nanmean/nanstd (batch) vs Welford (stream) over
+        # the same nominal rows must agree to float32 precision.
+        np.testing.assert_allclose(batch_out["scaler"].mean,
+                                   stream_out["scaler"].mean, rtol=1e-3, atol=1e-5)
+        np.testing.assert_allclose(batch_out["scaler"].std,
+                                   stream_out["scaler"].std, rtol=1e-3, atol=1e-5)
+
+        # Strata (when reached): same keys and sizes.
+        self.assertEqual(set(batch_out["strata"].keys()),
+                         set(stream_out["strata"].keys()))
+
+    def test_fault_onset_semantics_agree(self):
+        from sgrn.ml.pipeline import classifyFaultOnset, faultCutoffRow
+
+        self.assertEqual(classifyFaultOnset(None), ("none", None))
+        self.assertEqual(classifyFaultOnset(True), ("none", None))
+        self.assertEqual(classifyFaultOnset(False), ("none", None))
+        self.assertEqual(classifyFaultOnset(160), ("index", 160))
+        self.assertEqual(classifyFaultOnset(np.int64(160)), ("index", 160))
+        self.assertEqual(classifyFaultOnset("2024-01-02T00:00:00"), ("time", "2024-01-02T00:00:00"))
+        self.assertEqual(classifyFaultOnset(1.5), ("none", None))
+        # Index onset = row count; time onset = first row reaching it.
+        ts = [i * 60_000 for i in range(100)]
+        self.assertEqual(faultCutoffRow(80, 100, ts), 80)
+        self.assertEqual(faultCutoffRow(80, 100, ts), min(100, 80))
+        self.assertEqual(faultCutoffRow(9_000_000_000, 100, ts), 100)
+        # Time onsets compare in ms against the row stamps (60 s grid):
+        # 4 min onset first reaches row 4.
+        self.assertEqual(faultCutoffRow("1970-01-01T00:04:00", 100, ts), 4)
+        self.assertEqual(faultCutoffRow(None, 100, ts), 100)
+
+
 if __name__ == "__main__":
     unittest.main()

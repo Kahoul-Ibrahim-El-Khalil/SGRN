@@ -9,7 +9,9 @@
 
 #include <sgrn/utils/network.hpp>
 #include <algorithm>
+#ifndef _WIN32
 #include <arpa/inet.h>
+#endif
 
 namespace sgrn::gateway::security
 {

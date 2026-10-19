@@ -58,7 +58,7 @@ bool isWALArchive(const fs::path& t_path) {
 }
 
 // Filename shape: <start_time>-<end_time>.jsonl.zst[.tmp] (or .bin.zst[.tmp]),
-// both time parts use ':' (never '-'), so the basename splits on exactly one
+// both time parts use '.' or legacy ':' (never '-'), so the basename splits on exactly one
 // '-' (the <start>-<end> separator).
 std::string archiveSortKey(const fs::path& t_path) {
     std::string name = t_path.filename().string();

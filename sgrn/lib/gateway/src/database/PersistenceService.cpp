@@ -178,9 +178,8 @@ Result<void> PersistenceService::configure(const PersistenceConfig& t_cfg, const
 }
 
 void PersistenceService::stop() {
-    if (!active_.load(std::memory_order_relaxed))
+    if (!active_.exchange(false, std::memory_order_acq_rel))
         return;
-    active_.store(false, std::memory_order_relaxed);
     if (broker_sub_id_ != 0) {
         TelemetryBroker::instance().unsubscribe(broker_sub_id_);
         broker_sub_id_ = 0;
@@ -188,6 +187,10 @@ void PersistenceService::stop() {
     // Close any archive still open so the WAL on disk ends with a valid footer.
     if (current_archive_) {
         finalizeArchive(sgrn::utils::time::nowMilliseconds());
+    }
+    // Drain pending tasks so background pool threads don't touch this object after destruction
+    while (pending_tasks_.load(std::memory_order_acquire) > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 }
 
@@ -237,12 +240,18 @@ void PersistenceService::onTelemetryEvent(const TelemetryEvent& t_event) {
             if (std::find(dbs.begin(), dbs.end(), db) == dbs.end())
                 dbs.push_back(db);
         }
-        if (current_archive_ && !dbs.empty()) {
+        if (!dbs.empty()) {
             const uint64_t ts = t_event.timestamp > 0 ? t_event.timestamp : static_cast<uint64_t>(t_now);
             if (read_db_fn_) {
-                for (uint16_t db : dbs)
-                    writeBinaryDbImage(db, ts, t_now);
-            } else if (dbs.size() == 1 && t_event.typed_leaf.bytes && !t_event.typed_leaf.bytes->empty()) {
+                for (uint16_t db : dbs) {
+                    if (!current_archive_) {
+                        (void)openNewArchive(t_now);
+                    }
+                    if (current_archive_) {
+                        writeBinaryDbImage(db, ts, t_now);
+                    }
+                }
+            } else if (current_archive_ && dbs.size() == 1 && t_event.typed_leaf.bytes && !t_event.typed_leaf.bytes->empty()) {
                 // Degraded fallback (no full-DB reader wired): anchors the
                 // per-leaf slice as-is, CRC'd over the stored bytes. Every
                 // data frame self-identifies as delta or anchor; this one is
@@ -892,26 +901,38 @@ void PersistenceService::finalizeArchive(int64_t t_ts_end) {
     const std::string final_path =
         unsynced_dir_ + "/" + sgrn::utils::time::datePath(t_ts_start) + "/" + fmt::format("{}-{}{}", start_file, end_file, ext);
 
-    // The stream is already closed (bounded flush). The remaining work — rename
-    // into place + DB bookkeeping — is the only part that needs the heavy pool.
-    if (pending_tasks_.load(std::memory_order_relaxed) < max_pending_) {
+    auto do_finalize = [db = db_, provisional_path, final_path, t_ts_start, t_ts_end]() {
+        try {
+            std::error_code ec;
+            std::filesystem::create_directories(std::filesystem::path(final_path).parent_path(), ec);
+            std::filesystem::rename(provisional_path, final_path, ec);
+            if (ec) {
+                // If rename failed because destination exists, attempt replace
+                std::filesystem::remove(final_path, ec);
+                ec.clear();
+                std::filesystem::rename(provisional_path, final_path, ec);
+            }
+            if (ec) {
+                fmt::print(fg(fmt::color::red), "[persist] Rename {} -> {} failed: {}\n", provisional_path, final_path, ec.message());
+            } else {
+                fmt::print(fg(fmt::color::green), "[persist] Wrote {}\n", final_path);
+            }
+        } catch (const std::exception& e) {
+            fmt::print(fg(fmt::color::red), "[persist] Rename {} -> {} failed: {}\n", provisional_path, final_path, e.what());
+        }
+        if (db) {
+            (void)db->recordPendingBatch(final_path, t_ts_start, t_ts_end);
+        }
+    };
+
+    if (heavy_pool_ && pending_tasks_.load(std::memory_order_relaxed) < max_pending_) {
         ++pending_tasks_;
-        asio::post(*heavy_pool_, [this, provisional_path, final_path, t_ts_start, t_ts_end]() {
-            try {
-                std::filesystem::rename(provisional_path, final_path);
-            } catch (const std::exception& e) {
-                fmt::print(fg(fmt::color::red), "[persist] Rename {} -> {} failed: {}\n", provisional_path, final_path, e.what());
-            }
-            if (db_) {
-                (void)db_->recordPendingBatch(final_path, t_ts_start, t_ts_end);
-            }
-            fmt::print(fg(fmt::color::green), "[persist] Wrote {}\n", final_path);
+        asio::post(*heavy_pool_, [this, do_finalize]() {
+            do_finalize();
             --pending_tasks_;
         });
     } else {
-        // Queue saturated — the closed archive is still on disk under its
-        // provisional name; RecoveryEngine scans *.jsonl.zst.tmp too.
-        fmt::print(fg(fmt::color::red), "[persist] Finalize queue saturated — archive left at {}\n", provisional_path);
+        do_finalize();
     }
 }
 

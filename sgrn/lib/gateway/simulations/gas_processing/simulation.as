@@ -8,7 +8,7 @@ PlcRuntime@ plc = PlcRuntime(SCHEMA_PATH);
 GatewaySync@ sync = null;
 
 bool setupEnv(
-    const string &in ws_url = GATEWAY_WS_URL
+    const string&in ws_url = GATEWAY_WS_URL
 ) {
     print("================================================================\n");
     print("  Connecting simulation runtime to gateway at " + ws_url + "\n");
@@ -16,11 +16,82 @@ bool setupEnv(
     sync.useBinary(true);
     sync.publishOnDirty(true);
     bool ok = sync.connect(ws_url);
-    if (ok) print("  RuntimeSync started — DB updates will flow over WebSocket.\n");
-    else print("  RuntimeSync startup failed: " + sync.lastError() + "\n");
+    if (ok) print("  RuntimeSync started — DB updates will flow over WebSocket.\n"); else print("  RuntimeSync startup failed: " + sync.lastError() + "\n");
     print("================================================================\n");
     return ok;
 }
+
+// ─── Runtime Scenario Knobs (env-driven; no source rewriting needed) ───────
+// Experiments script the scenario through environment variables instead of
+// rewriting this file. s7shell runs this script directly as the soft-PLC and
+// can persist the WAL itself via the Persistence binding (PersistenceService
+// standalone, no gateway). Defaults reproduce the legacy hourly daemon run.
+//
+//   SGRN_TICKS_PER_DAY       24 → 1 tick = 1 simulated hour (legacy);
+//                            1440 → 1 tick = 1 simulated minute.
+//   SGRN_TICK_SLEEP_MS       wall-clock sleep per tick (pacing only).
+//   SGRN_SIM_MAX_ITERATIONS  hard stop; <=0 → run until killed (legacy).
+//   SGRN_REPORT_EVERY        printReport cadence in ticks.
+//   SGRN_FAULT_CODE          selects the fault library entry (9 = FLARE_BLOCKED).
+//   SGRN_FAULT_ONSET_HOUR    simulated hour of fault onset (e.g. 723).
+//   SGRN_FLARE_RAMP_RATE     bar per simulated hour (flare header press).
+//   SGRN_FEED_RAMP_RATE      bar per simulated hour (feed pressure ramp).
+//   SGRN_CAPTURE_DIR         when set, WAL persist via Persistence — no gateway.
+
+int envInt(const string &in name, int fallback) {
+    string v = getEnv(name);
+    int acc = 0;
+    uint digits = 0;
+    for (uint i = 0; i < v.length(); ++i) {
+        uint c = v[i];
+        if (c >= 48 && c <= 57) { acc = acc * 10 + int(c - 48); ++digits; }
+        else if (digits == 0) return fallback; // junk before first digit
+        else break;
+    }
+    return digits == 0 ? fallback : acc;
+}
+
+double envDouble(const string &in name, double fallback) {
+    string v = getEnv(name);
+    double acc = 0.0;
+    double frac = 0.1;
+    uint digits = 0;
+    bool in_frac = false;
+    for (uint i = 0; i < v.length(); ++i) {
+        uint c = v[i];
+        if (c >= 48 && c <= 57) {
+            if (in_frac) { acc += double(c - 48) * frac; frac *= 0.1; }
+            else acc = acc * 10.0 + double(c - 48);
+            ++digits;
+        } else if (c == 46 && !in_frac && digits > 0) { // '.' starts the fraction
+            in_frac = true;
+        } else if (digits > 0) break;
+        else return fallback;
+    }
+    return digits == 0 ? fallback : acc;
+}
+
+// Tick granularity: 24 ticks/day (1 tick = 1 simulated hour, legacy) or
+// 1440 ticks/day (1 tick = 1 simulated minute) for high-rate captures.
+int TICKS_PER_DAY = envInt("SGRN_TICKS_PER_DAY", 24);
+double PERIOD_SCALE = double(TICKS_PER_DAY) / 24.0; // ticks per simulated hour
+double PERIOD_RATE = 1.0 / PERIOD_SCALE;            // sim-hours per tick (per-tick drift scale)
+
+int tick_sleep_ms = envInt("SGRN_TICK_SLEEP_MS", 16);
+int report_every = envInt("SGRN_REPORT_EVERY", 5);
+int max_sim_iterations = envInt("SGRN_SIM_MAX_ITERATIONS", 0); // 0 = run until killed
+string sgrn_capture_dir = getEnv("SGRN_CAPTURE_DIR");
+bool wal_capture = sgrn_capture_dir.length() > 0;
+
+// Fault-9 (FLARE_BLOCKED) scenario — onset expressed in simulated HOURS so the
+// same constant reads identically on hourly or minute tick grids.
+double flare_ramp_per_hour = envDouble("SGRN_FLARE_RAMP_RATE", 0.15); // bar/sim-hour
+double feed_ramp_per_hour = envDouble("SGRN_FEED_RAMP_RATE", 1.15);   // bar/sim-hour
+int flare_onset_hour = envInt("SGRN_FAULT_ONSET_HOUR", 0);
+double flare_ramp_rate = flare_ramp_per_hour * PERIOD_RATE; // bar/tick
+double feed_ramp_rate = feed_ramp_per_hour * PERIOD_RATE;   // bar/tick
+const double FLARE_BASE_PRESS = 1.05; // bar, nominal flare header pressure
+int esd_trip_tick = -1;
 
 // ─── Convenience: print every DB ─────────────────────────────────────────────
 
@@ -39,16 +110,16 @@ void printAll() {
 // Feed conditions (base values, augmented with noise)
 double base_feed_press = 68.0;
 double base_feed_flow = 850.0;
-double feed_press = 68.0;      // bar
-double feed_temp = 32.0;       // degC
-double feed_flow = 850.0;      // e3m3/h
-double feed_h2s = 2.0;         // ppm
-double feed_co2 = 1.8;         // %
+double feed_press = 68.0; // bar
+double feed_temp = 32.0; // degC
+double feed_flow = 850.0; // e3m3/h
+double feed_h2s = 2.0; // ppm
+double feed_co2 = 1.8; // %
 
-double scrubber_level = 45.0;  // %
-double coalescer_dp = 0.15;    // bar (increases due to fouling)
-double fwko_level = 30.0;      // %
-double fwko_temp = 31.0;       // degC
+double scrubber_level = 45.0; // %
+double coalescer_dp = 0.15; // bar (increases due to fouling)
+double fwko_level = 30.0; // %
+double fwko_temp = 31.0; // degC
 
 // Noise generator helper
 double randomNoise(double amplitude) {
@@ -66,42 +137,47 @@ double randomNoiseAmp(double amplitude) {
 
 // Tower cycle sequencer — 3 towers, one offline (regen) at a time
 const int NUM_TOWERS = 3;
-array<int> cycle_state      = {0, 0, 1};   // 0=Adsorb 1=Depress 2=Heat 3=Cool 4=Repress
-array<double> time_in_state = {0.0, 0.0, 0.0};
-array<double> moisture_pct  = {20.0, 55.0, 5.0};
-array<double> bed_dp        = {0.35, 0.55, 0.20};
-array<uint> cycles_done     = {142, 141, 140};
+array<int> cycle_state = { 0, 0, 1 }; // 0=Adsorb 1=Depress 2=Heat 3=Cool 4=Repress
+array<double> time_in_state = { 0.0, 0.0, 0.0 };
+array<double> moisture_pct = { 20.0, 55.0, 5.0 };
+array<double> bed_dp = { 0.35, 0.55, 0.20 };
+array<uint> cycles_done = { 142, 141, 140 };
 int lead_lag_index = 2; // index currently taken offline for regen
 
 // ─── Time-Scaling ────────────────────────────────────────────────────────────
 // SIM_TO_REAL: how many real seconds 1 simulation tick represents.
-// 3600 => 1 tick = 1 hour  =>  24-tick cycle = 24-hour plant day in 24 seconds.
-// To replay at real speed: divide any stored timestamp_s by SIM_TO_REAL.
-// To replay at N× speed:   divide by (SIM_TO_REAL / N).
-const int SIM_TO_REAL = 3600;  // seconds of real plant time per simulation tick
+// Derived from the tick grid: TICKS_PER_DAY=24 → 3600 s/tick (1 sim hour);
+// TICKS_PER_DAY=1440 → 60 s/tick (1 sim minute). To replay at real speed:
+// divide any stored timestamp_s by SIM_TO_REAL.
+// To replay at N× speed: divide by (SIM_TO_REAL / N).
+const double SIM_TO_REAL = 3600.0 / PERIOD_SCALE; // seconds of real plant time per simulation tick
 
-// Scaled sequencer phase durations (in ticks; 1 tick = 1 hour of plant time)
-const double T_DEPRESS = 0.0;
-const double T_HEAT    = 4.1;
-const double T_COOL    = 1.9;
-const double T_REPRESS = 2.0;
+// Scaled sequencer phase durations (in ticks; 1 tick = 1 simulated hour when
+// TICKS_PER_DAY=24; multiplied by PERIOD_SCALE under higher tick rates so the
+// plant holds the same simulated schedule).
+const double T_DEPRESS = 0.0 * PERIOD_SCALE;
+const double T_HEAT = 4.1 * PERIOD_SCALE;
+const double T_COOL = 1.9 * PERIOD_SCALE;
+const double T_REPRESS = 2.0 * PERIOD_SCALE;
 
 // ─── Synthetic time axis ─────────────────────────────────────────────────────
 // All DB timestamps use simulated real time anchored at midnight (00:00:00)
 // of the calendar day the simulation starts, NOT the wall clock.
 // This keeps the historian unambiguous regardless of when the binary runs.
 int tick_count = 0;
-int fault_code = 0;              // 0=normal, 8=molecular sieve non-absorption at hour 4
-int fault_injection_tick = 4;   // Hour 4 of the 24-hour cycle
+int fault_code = envInt("SGRN_FAULT_CODE", 0); // 0=normal, 8=sieve non-absorption, 9=FLARE_BLOCKED
+int fault_injection_tick = int(flare_onset_hour * PERIOD_SCALE + 0.5); // onset in sim hours → ticks
 
-// Compute a synthetic DTL representing midnight + tick_count hours.
+// Compute a synthetic DTL representing midnight + tick_count ticks.
 // DTL is constructed as a fixed date (2000-01-01 00:00:00) plus the
-// elapsed simulated seconds so that datasets are always self-consistent.
+// elapsed simulated time so that datasets are always self-consistent.
 DTL@ simulatedDTL() {
-    int total_hours = tick_count;
-    int hour = total_hours % 24;
-    int day = 1 + (total_hours / 24);
-    setPlcTime(2000, 1, day, hour, 0, 0);
+    int minutes_per_tick = int(1440.0 / double(TICKS_PER_DAY) + 0.5);
+    int total_minutes = tick_count * minutes_per_tick;
+    int day = 1 + total_minutes / 1440;
+    int hour = (total_minutes / 60) % 24;
+    int minute = total_minutes % 60;
+    setPlcTime(2000, 1, day, hour, minute, 0);
     DTL ts;
     return ts;
 }
@@ -110,10 +186,10 @@ double system_inlet_press = 68.0;
 double system_outlet_press = 66.5;
 
 // Regen gas loop
-double heater_outlet_temp = 35.0;   // degC, ramps to ~290 during Heating
+double heater_outlet_temp = 35.0; // degC, ramps to ~290 during Heating
 double heater_duty = 0.0;
 bool heater_flame_on = false;
-double cooler_outlet_temp = 35.0;   // ramps down to <50 during Cooling
+double cooler_outlet_temp = 35.0; // ramps down to <50 during Cooling
 bool blower_running = false;
 double blower_flow = 0.0;
 double regen_water_removed = 0.0;
@@ -139,21 +215,41 @@ void main() {
     print("================================================================\n");
     print("  SGRN Gas Processing — Molecular Sieve Dehydration Simulator  \n");
     print("================================================================\n");
-
-    // Initialise PLC connection and DB handles via env.as helper.
-    if (!setupEnv()) {
-        print("ERROR: Failed to set up environment. Aborting simulation.\n");
-        return;
-    }
-
-    print("  SIM_TO_REAL factor : " + SIM_TO_REAL + " s/tick (1 tick = " + SIM_TO_REAL + " s of plant time)\n");
-    print("  Tick sleep interval: " + (1000 / SIM_TO_REAL) + " ms wall time per tick\n");
+    print("  Tick grid          : " + TICKS_PER_DAY + " ticks/day ("
+          + int(1440.0 / double(TICKS_PER_DAY) + 0.5) + " min/tick)\n");
+    print("  SIM_TO_REAL factor : " + SIM_TO_REAL + " s/tick\n");
+    print("  Tick sleep interval: " + tick_sleep_ms + " ms wall time per tick\n");
     print("  Midnight anchor     : 2000-01-01 00:00:00 UTC (epoch 946684800)\n");
     print("  Replay at real speed: divide timestamp_s by " + SIM_TO_REAL + "\n");
     print("================================================================\n");
 
+    // Telemetry egress: gateway publishing path via GatewaySync (deployment-
+    // faithful: WS → gateway → hydrated twin → PersistenceService → WAL),
+    // OR local WAL capture (Persistence binding — no gateway, no WebSocket)
+    // when SGRN_CAPTURE_DIR is set. Local format: "binary" (full-DB image
+    // per dirty DB, read straight from PLC memory — authoritative under
+    // bare s7shell) or "jsonl" (per-leaf deltas — requires a hydrated
+    // gateway twin mirror that bare-script runs lack). SGRN_GATEWAY_WS_URL
+    // overrides the gateway endpoint when SGRN_CAPTURE_DIR is unset.
+    Persistence@ pers = null;
+    if (wal_capture) {
+        string sgrn_capture_format = getEnv("SGRN_CAPTURE_FORMAT");
+        if (sgrn_capture_format.length() == 0) sgrn_capture_format = "binary";
+        print("  WAL capture        : " + sgrn_capture_dir + " (" + sgrn_capture_format + ", changes_with_timestamp)\n");
+        @pers = Persistence(plc);
+        pers.configure(sgrn_capture_dir, sgrn_capture_format, "changes_with_timestamp");
+        pers.start();
+    } else {
+        string ws_url = getEnv("SGRN_GATEWAY_WS_URL");
+        if (ws_url.length() == 0) ws_url = GATEWAY_WS_URL;
+        if (!setupEnv(ws_url)) {
+            print("ERROR: Failed to set up environment. Aborting simulation.\n");
+            return;
+        }
+    }
+
     int iteration = 0;
-    while (true) {
+    while (max_sim_iterations <= 0 || iteration < max_sim_iterations) {
         // Use synthetic simulated time — NOT wall clock — so historian
         // timestamps represent real plant hours regardless of run speed.
         DTL@ ts = simulatedDTL();
@@ -170,17 +266,30 @@ void main() {
         writeSafetySystems(ts);
         writeUtilities(ts);
 
-        // 3. Periodic report (every 5 simulated hours)
-        if (iteration % 5 == 0) {
+        // 3. Periodic report
+        if (iteration % report_every == 0) {
             printReport(ts, iteration);
         }
 
+        // 4. Graceful stop shortly after ESD latches (tail flushes downstream lag)
+        if (esd_trip_tick >= 0 && tick_count > esd_trip_tick + int(PERIOD_SCALE * 3.0 + 0.5)) {
+            print("[SIMULATION_COMPLETE] ESD latched — stopping after settle tail\n");
+            break;
+        }
+
         iteration++;
-        // Wall-clock sleep = 1000ms / SIM_TO_REAL  (e.g. ~0.277ms for 3600x)
-        // sleep() minimum is 1ms; for very high speed factors use 1ms.
-        int sleep_ms = 1000 / SIM_TO_REAL;
+        int sleep_ms = tick_sleep_ms;
         if (sleep_ms < 1) sleep_ms = 1;
         sleep(sleep_ms);
+    }
+
+    print("[SIMULATION_COMPLETE] Finished at iteration " + iteration + " total ticks " + tick_count + "\n");
+    if (pers !is null) {
+        pers.flush();
+        pers.stop();
+        print("[WAL_CLOSED] capture=" + sgrn_capture_dir + " ticks=" + tick_count + "\n");
+    } else if (sync !is null) {
+        sync.disconnect();
     }
 }
 
@@ -219,23 +328,43 @@ void simulatePhysics() {
                 time_in_state[lead_lag_index] = 0.0;
             }
         } else {
-            // On-stream tower — loading up with moisture
-            moisture_pct[i] += 0.05 + (feed_flow > 850.0 ? 0.02 : 0.0);
+            // On-stream tower — loading up with moisture (0.05 %/sim-hour)
+            moisture_pct[i] += (0.05 + (feed_flow > 850.0 ? 0.02 : 0.0)) * PERIOD_RATE;
             if (fault_active && fault_code == 8) {
                 // Molecular sieve non-absorption fault at Hour 4:
                 // Active adsorber bed fails to absorb moisture -> rapid humidity breakthrough
-                moisture_pct[i] += 18.0;
+                moisture_pct[i] += 18.0 * PERIOD_RATE;
             }
             if (moisture_pct[i] > 95.0) moisture_pct[i] = 95.0;
             bed_dp[i] = 0.20 + (moisture_pct[i] / 100.0) * 0.6 + randomNoiseAmp(0.02);
         }
     }
 
-    // ── Apply random process noise ──
+    // ── Apply random process noise and fault physics ──
     feed_press = base_feed_press + randomNoiseAmp(0.5);
     feed_flow = base_feed_flow + randomNoiseAmp(15.0);
-    coalescer_dp += 0.0001; // Gradual fouling
+    coalescer_dp += 0.0001 * PERIOD_RATE; // Gradual fouling (0.0001/sim-hour)
     if (coalescer_dp > 0.8) coalescer_dp = 0.8;
+
+    // ── Fault 9 (FLARE_BLOCKED): flare header blocks → header pressure ramps,
+    //    relief is ineffective so feed pressure ramps up, downstream lags. ──
+    if (fault_code == 9) {
+        if (tick_count >= fault_injection_tick) {
+            int elapsed = tick_count - fault_injection_tick;
+            flare_header_press = FLARE_BASE_PRESS + flare_ramp_rate * double(elapsed) + randomNoiseAmp(0.02);
+            feed_press = base_feed_press + feed_ramp_rate * double(elapsed) + randomNoiseAmp(0.5);
+            double target_inlet = feed_press - 0.3;
+            system_inlet_press += (target_inlet - system_inlet_press) * 0.65;
+            double target_outlet = system_inlet_press - 1.5 - (bed_dp[0] + bed_dp[1] + bed_dp[2]) / 3.0;
+            system_outlet_press += (target_outlet - system_outlet_press) * 0.65;
+            for (int i = 0; i < NUM_TOWERS; i++) {
+                if (i != lead_lag_index)
+                    bed_dp[i] += (0.003 * PERIOD_RATE) * double(elapsed);
+            }
+        } else {
+            flare_header_press = FLARE_BASE_PRESS + randomNoiseAmp(0.01);
+        }
+    }
 
     // ── Regen gas heater / cooler dynamics, driven by whichever tower is regenerating ──
     int regen_state = cycle_state[lead_lag_index];
@@ -257,7 +386,7 @@ void simulatePhysics() {
         cooler_outlet_temp -= (cooler_outlet_temp - 35.0) * 0.3 + randomNoiseAmp(0.5);
         blower_running = true;
         blower_flow = 220.0 + randomNoiseAmp(5.0);
-        regen_water_removed += 0.8;
+        regen_water_removed += 0.8 * PERIOD_RATE;
     } else {
         heater_flame_on = false;
         heater_duty = 0.0;
@@ -282,12 +411,16 @@ void simulatePhysics() {
     // ── ESD trip logic ──
     if (dew_point_c > DEW_POINT_SPEC + 5.0 || feed_press > 90.0 || heater_outlet_temp > 320.0) {
         esd_active = true;
+        if (esd_trip_tick < 0) {
+            esd_trip_tick = tick_count;
+            print("[ESD_EVENT] feed_press=" + feed_press + " bar tripped ESD at tick " + tick_count + "\n");
+        }
     }
 }
 
 // ─── DataBlock Writers ───────────────────────────────────────────────────────
 
-void writeInletSeparation(DTL@ts) {
+void writeInletSeparation(DTL@ ts) {
     InletSeparation.feed_pressure = float(feed_press);
     InletSeparation.feed_temp = float(feed_temp);
     InletSeparation.feed_flow.rate = float(feed_flow);
@@ -315,11 +448,12 @@ void writeInletSeparation(DTL@ts) {
     InletSeparation.fwko_drain_valve.position_pct = 0.0f;
     InletSeparation.fwko_drain_valve.fault = false;
 
-    InletSeparation.timestamp = ts;;
+    InletSeparation.timestamp = ts;
+    ;
     InletSeparation.put();
 }
 
-void writeAdsorberTowers(DTL@ts) {
+void writeAdsorberTowers(DTL@ ts) {
     for (int i = 0; i < NUM_TOWERS; i++) {
         AdsorberTowers.towers[i].cycle_state = uint8(cycle_state[i]);
         AdsorberTowers.towers[i].time_in_state_s = uint(time_in_state[i]);
@@ -347,11 +481,12 @@ void writeAdsorberTowers(DTL@ts) {
     AdsorberTowers.total_gas_flow.low_flow_alarm = false;
     AdsorberTowers.total_gas_flow.sensor_fault = false;
 
-    AdsorberTowers.timestamp = ts;;
+    AdsorberTowers.timestamp = ts;
+    ;
     AdsorberTowers.put();
 }
 
-void writeRegenSystem(DTL@ts) {
+void writeRegenSystem(DTL@ ts) {
     RegenSystem.heater_outlet_temp = float(heater_outlet_temp);
     RegenSystem.heater_duty_pct = float(heater_duty);
     RegenSystem.heater_fuel_valve.position_pct = float(heater_duty);
@@ -391,11 +526,12 @@ void writeRegenSystem(DTL@ts) {
     RegenSystem.regen_ko_drain_valve.fault = false;
     RegenSystem.regen_water_removed_l = regen_water_removed;
 
-    RegenSystem.timestamp = ts;;
+    RegenSystem.timestamp = ts;
+    ;
     RegenSystem.put();
 }
 
-void writeSwitchingValves(DTL@ts) {
+void writeSwitchingValves(DTL@ ts) {
     for (int i = 0; i < NUM_TOWERS; i++) {
         bool online = (i != lead_lag_index);
         int state = cycle_state[i];
@@ -430,16 +566,18 @@ void writeSwitchingValves(DTL@ts) {
     SwitchingValves.valve_mismatch_alarm = (online_count != NUM_TOWERS - 1);
     SwitchingValves.any_valve_fault = false;
 
-    SwitchingValves.timestamp = ts;;
+    SwitchingValves.timestamp = ts;
+    ;
     SwitchingValves.put();
 }
 
-void writeOutletQuality(DTL@ts) {
+void writeOutletQuality(DTL@ ts) {
     OutletQuality.dew_point = float(dew_point_c);
     OutletQuality.dew_point_spec = float(DEW_POINT_SPEC);
     OutletQuality.dew_point_hi_alarm = dew_point_c > DEW_POINT_SPEC;
     OutletQuality.analyzer_fault = false;
-    OutletQuality.analyzer_last_cal = ts;;
+    OutletQuality.analyzer_last_cal = ts;
+    ;
 
     OutletQuality.dust_filter_dp = float(dust_filter_dp);
     OutletQuality.dust_filter_bypass = false;
@@ -453,11 +591,12 @@ void writeOutletQuality(DTL@ts) {
     OutletQuality.sales_gas_temp = float(feed_temp);
     OutletQuality.heating_value = 38.5f;
 
-    OutletQuality.timestamp = ts;;
+    OutletQuality.timestamp = ts;
+    ;
     OutletQuality.put();
 }
 
-void writeSafetySystems(DTL@ts) {
+void writeSafetySystems(DTL@ ts) {
     SafetySystems.esd_signal = esd_active;
     SafetySystems.esd_auto = esd_active;
     SafetySystems.esd_reason_code = esd_active ? 4001 : 0;
@@ -501,12 +640,13 @@ void writeSafetySystems(DTL@ts) {
     SafetySystems.active_alarm_count = esd_active ? 1 : 0;
     SafetySystems.any_critical = esd_active;
 
-    SafetySystems.timestamp = ts;;
+    SafetySystems.timestamp = ts;
+    ;
     SafetySystems.put();
 }
 
-void writeUtilities(DTL@ts) {
-    Utilities.fuel_gas_press  = float(fuel_gas_press);
+void writeUtilities(DTL@ ts) {
+    Utilities.fuel_gas_press = float(fuel_gas_press);
     Utilities.fuel_gas_low_press_trip = fuel_gas_press < 1.5;
 
     Utilities.inst_air_press = float(inst_air_press);
@@ -521,7 +661,8 @@ void writeUtilities(DTL@ts) {
     Utilities.ups_on_battery = false;
     Utilities.control_power_ok = true;
 
-    Utilities.timestamp = ts;;
+    Utilities.timestamp = ts;
+    ;
     Utilities.put();
 }
 

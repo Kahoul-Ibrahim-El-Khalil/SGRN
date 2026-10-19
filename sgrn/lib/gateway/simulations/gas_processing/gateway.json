@@ -4,7 +4,6 @@
   "reconnect_ms": 5000,
   "security_policy": "strict",
   "security_script": "./sgrn/lib/gateway/simulations/gas_processing/security.as",
-
   "northbound": {
     "http": {
       "ip": "0.0.0.0",
@@ -15,7 +14,6 @@
       "port": 8000
     }
   },
-
   "persistence": {
     "enabled": true,
     "mode": "changes_with_timestamp",
@@ -27,7 +25,6 @@
     "anchor_interval_s": 300,
     "anchor_change_count": 50,
     "zstd_level": 9,
-
     "cloud_sync": {
       "enabled": true,
       "url": "https://localhost/datastore",

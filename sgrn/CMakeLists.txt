@@ -36,7 +36,9 @@ option(SGRN_BUILD_GATEWAY "Build gateway component" ON)
 add_subdirectory(lib)
 
 # 3.5 CRUD Library
-add_subdirectory(crud)
+if(SGRN_BUILD_DATASTORE)
+    add_subdirectory(crud)
+endif()
 
 # 7. Applications (entry points; libraries first so targets exist)
 add_subdirectory(apps)
