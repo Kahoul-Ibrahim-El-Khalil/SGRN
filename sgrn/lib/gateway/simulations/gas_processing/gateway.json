@@ -20,8 +20,8 @@
     "format": "binary",
     "namespaces": [],
     "atomic_window_ms": 10,
-    "max_events": 200,
-    "batch_interval_s": 30,
+    "max_events": 5000,
+    "batch_interval_s": 60,
     "anchor_interval_s": 300,
     "anchor_change_count": 50,
     "zstd_level": 9,
@@ -30,7 +30,7 @@
       "url": "https://localhost/datastore",
       "public_token": "1e78dbe3-1f5b-404f-89c1-ae0c07e98c5c",
       "private_token": "FEcPKSxEuJzpst-MYcR8OlQWzFYxPoVDK9Sk3qmGn6A",
-      "sync_interval_s": 30
+      "sync_interval_s": 1
     }
   }
 }

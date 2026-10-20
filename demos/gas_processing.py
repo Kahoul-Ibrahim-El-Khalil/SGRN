@@ -653,6 +653,32 @@ def twinWaitReady(base_url: str, timeout_s: float = 25.0) -> None:
     raise RuntimeError(f"gateway at {base_url} not ready after {timeout_s}s")
 
 
+def datastoreConfig() -> dict | None:
+    """Cloud-sync (datastore) block for the Gateway A historian.
+
+    Mirrors sgrn/lib/gateway/simulations/gas_processing/gateway.json so the
+    historian archives land in the backend datastore. Objects live under
+    <vfs_remote_dir>/gateway/snapshots (see DatastoreBridge::uploadRaw).
+    Environment overrides:
+      SGRN_DATASTORE_URL, SGRN_DATASTORE_PUBLIC_TOKEN, SGRN_DATASTORE_PRIVATE_TOKEN
+    Set SGRN_DATASTORE_URL="" to run the twin purely locally (no upload).
+    """
+    import os
+    url = os.environ.get("SGRN_DATASTORE_URL", "https://localhost/datastore")
+    if not url:
+        return None
+    return {
+        "url": url,
+        "public_token": os.environ.get(
+            "SGRN_DATASTORE_PUBLIC_TOKEN",
+            "1e78dbe3-1f5b-404f-89c1-ae0c07e98c5c"),
+        "private_token": os.environ.get(
+            "SGRN_DATASTORE_PRIVATE_TOKEN",
+            "FEcPKSxEuJzpst-MYcR8OlQWzFYxPoVDK9Sk3qmGn6A"),
+        "sync_interval_s": 1,
+    }
+
+
 def twinConfigs(workdir: Path, port_a: int, port_b: int) -> tuple[Path, Path]:
     import shutil
     workdir.mkdir(parents=True, exist_ok=True)
@@ -673,9 +699,14 @@ def twinConfigs(workdir: Path, port_a: int, port_b: int) -> tuple[Path, Path]:
                        "websocket": {"ip": "127.0.0.1", "port": port_a},
                        "opcua": {"ip": "127.0.0.1", "port": 4840}},
         "persistence": {"enabled": True, "mode": "changes_with_timestamp",
-                        "namespaces": namespaces, "max_events": 500,
-                        "batch_interval_s": 2, "zstd_level": 5},
+                        "namespaces": namespaces, "max_events": 5000,
+                        "batch_interval_s": 10, "zstd_level": 5},
     }
+    datastore = datastoreConfig()
+    if datastore:
+        cfg_a["datastore"] = datastore
+    else:
+        print("[twin] SGRN_DATASTORE_URL empty — Gateway A runs local-only (no datastore upload)")
     cfg_b = {  # prediction mirror: northbound only, no historian
         "schema": str(TWIN_SCHEMA),
         "state_dir": str(workdir / "state_B"),

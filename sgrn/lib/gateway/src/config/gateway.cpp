@@ -211,11 +211,12 @@ sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
             }
         }
     }
-    DatastoreConnectionConfig datastore;
-    bool has_datastore_or_buffer = cfg.datastore.has_value();
-
+    // Top-level "datastore" block (optional override). Must NOT clobber a
+    // parsed nested "persistence.cloud_sync" block when it is absent — kill
+    // the old has_datastore_or_buffer logic that replaced cloud_sync values
+    // with a default-constructed config (empty url/tokens -> offline mode).
     if (root.HasMember("datastore") && root["datastore"].IsObject()) {
-        has_datastore_or_buffer = true;
+        DatastoreConnectionConfig datastore;
         const auto& b = root["datastore"];
         if (b.HasMember("url") && b["url"].IsString())
             datastore.url = b["url"].GetString();
@@ -248,9 +249,9 @@ sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
             datastore.enable_aggressive_compression = b["enable_aggressive_compression"].GetBool();
         if (b.HasMember("offline_persistence"))
             datastore.offline_persistence = b["offline_persistence"].GetBool();
-    }
 
-    if (has_datastore_or_buffer) {
+        // The top-level block wins over a nested cloud_sync block if both
+        // are given; when it is absent the cloud_sync-parsed values stand.
         cfg.datastore = datastore;
     }
 

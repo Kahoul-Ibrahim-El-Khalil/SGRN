@@ -96,8 +96,7 @@ Result<std::string, PlcMemoryError> PlcMemory::getFieldValue(uint16_t t_db_numbe
 
     std::string val = p_plc_state_->getScalarString(path);
 
-    if (val == "null")
-        return PlcMemoryError::UNMAPPED_ARENA_REGION;
+    SGRN_RETURN_IF(val == "null", PlcMemoryError::UNMAPPED_ARENA_REGION);
 
     return val;
 }
@@ -108,7 +107,7 @@ const PlcNode* PlcMemory::findSymbol(uint16_t t_db_number, const std::string& t_
 
     const DbEntry* p_entry = p_plc_state_->findSegmentById(t_db_number);
 
-    SGRN_RETURN_IF(!p_entry || p_entry->name.empty(), nullptr);
+    SGRN_RETURN_IF_NULL(p_entry, nullptr);
 
     std::string path = p_entry->name;
 
@@ -163,18 +162,15 @@ Result<std::string, PlcMemoryError> PlcMemory::getSubtreeJson(uint16_t t_db_numb
 
 std::string PlcMemory::getDbJsonString(uint16_t t_db_number) const {
 
-    if (!p_plc_state_)
-        return "{}";
+    SGRN_RETURN_IF_NULL(p_plc_state_, "{}");
 
     const DbEntry* p_entry = p_plc_state_->findSegmentById(t_db_number);
 
-    if (!p_entry || p_entry->name.empty())
-        return "{}";
+    SGRN_RETURN_IF(!p_entry || p_entry->name.empty(), "{}");
 
     const PlcNode* node = p_plc_state_->find(p_entry->name);
 
-    if (!node)
-        return "{}";
+    SGRN_RETURN_IF_NULL(node, "{}");
 
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
@@ -210,13 +206,10 @@ std::vector<uint8_t> PlcMemory::getFullPlantSnapshot() const {
 }
 
 bool PlcMemory::checkDirty() {
-    if (!p_plc_state_)
-        return false;
+    SGRN_RETURN_IF_NULL(p_plc_state_, false);
 
     for (auto& [name_, seg] : p_plc_state_->segments()) {
-        if (seg->is_dirty_.load(std::memory_order_acquire)) {
-            return true;
-        }
+        SGRN_RETURN_IF(seg->is_dirty_.load(std::memory_order_acquire), true);
     }
 
     return false;
@@ -238,8 +231,7 @@ std::vector<FieldUpdateNotification> PlcMemory::collectTypedDirtyLeaves(uint16_t
 std::vector<uint16_t> PlcMemory::getDirtyDbNumbers() const {
     std::vector<uint16_t> out;
 
-    if (!p_plc_state_)
-        return out;
+    SGRN_RETURN_IF_NULL(p_plc_state_, out);
 
     for (auto& [name_, seg] : p_plc_state_->segments()) {
         if (seg->is_dirty_.load(std::memory_order_acquire)) {

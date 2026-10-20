@@ -46,6 +46,11 @@ public:
     // Safe to call from any thread (acquires shared lock internally)
     bool isKnownServiceToken(const std::string& token) const noexcept;
 
+    // O(1) set lookup: returns true if token is a live *session* token (issued at
+    // sign-in). Automated-service endpoints are called with these after signIn(),
+    // so the fast-reject path must accept them alongside public service tokens.
+    bool hasActiveSessionToken(const std::string& token) const noexcept;
+
     // Register a newly created / rotated service public token into the sorted vector.
     // Uses lower_bound insertion to preserve sorted order: O(log n) find + O(n) shift.
     // Call after INSERT into core.automated_services.

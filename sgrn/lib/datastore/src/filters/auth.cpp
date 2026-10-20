@@ -100,11 +100,15 @@ void AutomatedServiceAuthFilter::doFilter(const drogon::HttpRequestPtr& tsp_req,
         return;
     }
 
-    // Fast-path 2: O(log n) binary search against preloaded sorted public service token registry.
-    // If this UUID is not a known registered service public token, reject synchronously (<30ns).
-    // This eliminates ALL DB/async overhead for entirely fabricated or unknown service tokens.
-    if (!sgrn::datastore::session::SessionStore::instance().isKnownServiceToken(t_token)) {
-        SGRN_WARN_LOG("AutomatedServiceAuthFilter: Fast-reject unknown service token: {}", redactToken(t_token));
+    // Fast-path 2: reject fabricated tokens synchronously against preloaded in-RAM
+    // registries. A legitimate caller presents either (a) an automated service
+    // *public* token (O(log n) binary search) or (b) a *session* token issued by
+    // sign-in (O(1) unordered_set lookup — sign-in returns fresh session UUIDs that
+    // will never appear in the public-token registry). Tokens in neither registry
+    // are entirely fabricated — reject with zero DB/async overhead.
+    if (!sgrn::datastore::session::SessionStore::instance().isKnownServiceToken(t_token) &&
+        !sgrn::datastore::session::SessionStore::instance().hasActiveSessionToken(t_token)) {
+        SGRN_WARN_LOG("AutomatedServiceAuthFilter: Fast-reject unknown token: {}", redactToken(t_token));
         respondWithError("Unauthorized: Unknown service token", drogon::k401Unauthorized, tsp_filter_callback);
         return;
     }

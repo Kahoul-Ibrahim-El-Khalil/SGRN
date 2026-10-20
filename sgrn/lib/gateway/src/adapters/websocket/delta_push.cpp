@@ -37,8 +37,7 @@ namespace sgrn::gateway::adapters::websocket
 {
 
 void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
-    if (t_event.type != EventType::DeltaSnapshot)
-        return;
+    SGRN_RETURN_IF(t_event.type != EventType::DeltaSnapshot, ;);
 
     // Feed the last-value cache so late subscribers get current state even
     // when no further deltas arrive (quiet twin, finished replay).
@@ -64,8 +63,7 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
         binary_targets = collectBinaryTargets(t_event.db);
     }
 
-    if (targets.empty() && binary_targets.empty())
-        return;
+    SGRN_RETURN_IF(targets.empty() && binary_targets.empty(), ;);
 
     // ── PERFORMANCE NOTE: Shared JSON Parsing ─────────────────────────────────
     // The TelemetryBroker broadcasts the SAME shared_ptr<string> to all subscribers
@@ -198,8 +196,7 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
         }
     }
 
-    if (binary_targets.empty())
-        return;
+    SGRN_RETURN_IF(binary_targets.empty(), ;);
 
     const double timestamp_seconds = static_cast<double>(t_event.timestamp) / 1000.0;
     struct BinarySend {
@@ -325,8 +322,7 @@ std::map<std::tuple<uint16_t, size_t, size_t>, std::vector<crow::websocket::conn
 
 bool WebSocketAdapter::sendBinaryFrame(
     crow::websocket::connection* tp_conn, uint16_t t_db, size_t t_offset, size_t t_size, double t_timestamp_seconds) {
-    if (!tp_conn)
-        return false;
+    SGRN_RETURN_IF_NULL(tp_conn, false);
 
     if (!registry_) {
         SGRN_WARN_LOG("WebSocket binary frame for DB{} offset {} size {} rejected: registry not available", t_db, t_offset, t_size);
@@ -363,8 +359,7 @@ bool WebSocketAdapter::sendBinaryFrame(
     }
 
     std::lock_guard<std::mutex> lk(clients_mutex_);
-    if (clients_.find(tp_conn) == clients_.end())
-        return true; // disconnected while we were reading; not an error
+    SGRN_RETURN_IF(clients_.find(tp_conn) == clients_.end(), true); // disconnected while we were reading; not an error
     sendBinary(*tp_conn, frame.data(), frame.size());
     return true;
 }
@@ -372,8 +367,7 @@ bool WebSocketAdapter::sendBinaryFrame(
 void WebSocketAdapter::rememberFlatValues(const std::string& t_flat_json) {
     rapidjson::Document doc;
     doc.Parse(t_flat_json.c_str());
-    if (doc.HasParseError() || !doc.IsObject())
-        return;
+    SGRN_RETURN_IF(doc.HasParseError() || !doc.IsObject(), ;);
 
     std::lock_guard<std::mutex> lk(last_values_mutex_);
     for (auto it = doc.MemberBegin(); it != doc.MemberEnd(); ++it) {
@@ -398,15 +392,13 @@ void WebSocketAdapter::rememberFlatValues(const std::string& t_flat_json) {
 }
 
 void WebSocketAdapter::sendCatchUp(crow::websocket::connection& t_conn, const std::vector<ClientContext::LeafRange>& t_ranges) {
-    if (t_ranges.empty())
-        return;
+    SGRN_RETURN_IF(t_ranges.empty(), ;);
 
     rapidjson::Document out;
     out.SetObject();
     {
         std::lock_guard<std::mutex> lk(last_values_mutex_);
-        if (last_flat_values_.empty())
-            return;
+        SGRN_RETURN_IF(last_flat_values_.empty(), ;);
         for (const auto& [id, value_json] : last_flat_values_) {
             bool covered = false;
             for (const auto& range : t_ranges) {
@@ -428,21 +420,18 @@ void WebSocketAdapter::sendCatchUp(crow::websocket::connection& t_conn, const st
         }
     }
 
-    if (out.ObjectEmpty())
-        return;
+    SGRN_RETURN_IF(out.ObjectEmpty(), ;);
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> w(sb);
     out.Accept(w);
     std::lock_guard<std::mutex> lk(clients_mutex_);
-    if (clients_.find(&t_conn) == clients_.end())
-        return; // disconnected while we were assembling the catch-up
+    SGRN_RETURN_IF(clients_.find(&t_conn) == clients_.end(), ;); // disconnected while we were assembling the catch-up
     sendText(t_conn, sb.GetString());
 }
 
 void WebSocketAdapter::resolveLeafRanges(ClientContext& t_ctx) {
     t_ctx.leaf_ranges.clear();
-    if (!dict_ || dict_->path_to_id.empty() || !t_ctx.dictionary_mode)
-        return;
+    SGRN_RETURN_IF(!dict_ || dict_->path_to_id.empty() || !t_ctx.dictionary_mode, ;);
 
     // For each subscription, find all matching leaf ids and collect their ranges.
     // LeafDictionary assigns ids contiguously per DB in DB-ascending order,
@@ -498,8 +487,7 @@ void WebSocketAdapter::broadcastDelta(const std::string& t_json_snapshot, uint64
     (void)t_timestamp_ms;
     // Live while subscribed to the broker (set by start()/registerRoutes(),
     // cleared by stop()) — independent of who owns the listener.
-    if (broker_sub_id_ == 0)
-        return;
+    SGRN_RETURN_IF(broker_sub_id_ == 0, ;);
     std::lock_guard<std::mutex> lk(clients_mutex_);
     for (auto& [conn, ctx] : clients_) {
         (void)ctx;

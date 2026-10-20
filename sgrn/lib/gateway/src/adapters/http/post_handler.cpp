@@ -492,8 +492,7 @@ void HttpAdapter::handlePost(const http::HttpRequest& request, http::HttpRespons
 
     if (array_index.has_value()) {
         if (document.IsObject())
-            return handlePostStructArrayElement(request, response, db_num, field_path, array_rest_path, *array_index,
-                url_path, document);
+            return handlePostStructArrayElement(request, response, db_num, field_path, array_rest_path, *array_index, url_path, document);
 
         return handlePostScalarArrayElement(request, response, db_num, field_path, *array_index, url_path, document);
     }
@@ -611,7 +610,6 @@ void HttpAdapter::handlePostMultiDb(const http::HttpRequest& request, http::Http
     return;
 }
 
-
 // -----------------------------------------------------------------------------
 // Indexed array-of-struct element replacement
 //
@@ -653,8 +651,7 @@ void HttpAdapter::handlePostStructArrayElement(const http::HttpRequest& request,
     if (!isAuthorizedField(request, db_num, field_path, true)) {
         response.status = 403;
 
-        response.set_content(
-            fmt::format(R"({{"error":"Forbidden: Not authorised to write path '{}'"}})", field_path), "application/json");
+        response.set_content(fmt::format(R"({{"error":"Forbidden: Not authorised to write path '{}'"}})", field_path), "application/json");
 
         return;
     }
@@ -706,8 +703,8 @@ void HttpAdapter::handlePostStructArrayElement(const http::HttpRequest& request,
             }
             if (!found) {
                 response.status = 422;
-                response.set_content(fmt::format(R"X({{"error":"Field '{}' not found in array element"}})X", segments[i].data()),
-                    "application/json");
+                response.set_content(
+                    fmt::format(R"X({{"error":"Field '{}' not found in array element"}})X", segments[i].data()), "application/json");
                 return;
             }
             if (i == segments.size() - 1) {
@@ -751,12 +748,11 @@ void HttpAdapter::handlePostStructArrayElement(const http::HttpRequest& request,
 
     response.status = 200;
 
-    response.set_content(fmt::format(R"({{"db":{},"path":"{}","index":{},"value":{}}})", db_num, url_path, index, sb.GetString()),
-        "application/json");
+    response.set_content(
+        fmt::format(R"({{"db":{},"path":"{}","index":{},"value":{}}})", db_num, url_path, index, sb.GetString()), "application/json");
 
     return;
 }
-
 
 // -----------------------------------------------------------------------------
 // Scalar / primitive array element replacement
@@ -784,8 +780,7 @@ void HttpAdapter::handlePostScalarArrayElement(const http::HttpRequest& request,
     if (!isAuthorizedField(request, db_num, field_path, true)) {
         response.status = 403;
 
-        response.set_content(
-            fmt::format(R"({{"error":"Forbidden: Not authorised to write path '{}'"}})", field_path), "application/json");
+        response.set_content(fmt::format(R"({{"error":"Forbidden: Not authorised to write path '{}'"}})", field_path), "application/json");
 
         return;
     }
@@ -847,7 +842,6 @@ void HttpAdapter::handlePostScalarArrayElement(const http::HttpRequest& request,
 
     return;
 }
-
 
 // -----------------------------------------------------------------------------
 // Leaf writes: collect leaves, authorize them, apply them as one coherent

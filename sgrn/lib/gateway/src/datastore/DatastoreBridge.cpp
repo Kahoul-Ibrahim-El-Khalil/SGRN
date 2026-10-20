@@ -1,5 +1,7 @@
 #include <fmt/color.h>
 #include <fmt/core.h>
+#include <algorithm>
+#include <cctype>
 #include <stdexcept>
 #include <string>
 
@@ -232,6 +234,10 @@ void DatastoreBridge::cleanOldSyncedFiles() {
 }
 
 bool DatastoreBridge::uploadRaw(const std::string& t_file_path) {
+    auto detail_lower = [](std::string s) {
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return s;
+    };
     try {
         const std::string remote_dir = cfg_.getEffectiveVfsRemoteDir();
         const std::filesystem::path p(t_file_path);
@@ -242,11 +248,18 @@ bool DatastoreBridge::uploadRaw(const std::string& t_file_path) {
         const auto outcome = client_->storage().upload(remote, t_file_path);
         bool ok = outcome.ok;
         if (!ok) {
-            // Upload failed cleanly with server response (e.g. duplicate file record already stored).
-            // Mark as ok to move on ... to avoid hammering backend.
-            fmt::print(fg(fmt::color::yellow), "[backend] Upload failed for {} ({}) — marking as processed to avoid hammering backend.\n",
-                remote, outcome.detail);
-            ok = true;
+            // Only a duplicate/already-stored server response means "done".
+            // Anything else (401/403/500, quota, ...) must stay pending so the
+            // batch is retried instead of silently discarded — treating auth
+            // failures as "processed" deletes data and hides the real error.
+            const std::string detail = detail_lower(outcome.detail);
+            if (detail.find("duplicate") != std::string::npos || detail.find("already exists") != std::string::npos) {
+                fmt::print(fg(fmt::color::yellow), "[backend] File {} already stored in datastore — marking as processed.\n", remote);
+                ok = true;
+            } else {
+                fmt::print(fg(fmt::color::yellow), "[backend] Upload failed for {} ({}) — batch stays pending for retry.\n", remote,
+                    outcome.detail);
+            }
         } else {
             fmt::print(fg(fmt::color::green), "[backend] Raw upload successful for {}\n", remote);
         }

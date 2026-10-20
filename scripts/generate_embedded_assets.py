@@ -35,6 +35,12 @@ import re
 import sys
 from pathlib import Path
 
+# Ensure UTF-8 output on Windows consoles/subprocesses where cp1252 is default
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import zstandard as zstd
 
 # ---------------------------------------------------------------------------
@@ -142,7 +148,7 @@ def compress_file(path: Path, level: int, kind: str) -> tuple[bytes, int]:
     else:
         raw = path.read_bytes()
     compressed = zstd.ZstdCompressor(level=level).compress(raw)
-    print(f"  Compressing {path.name}: {len(raw):,} → {len(compressed):,} bytes")
+    print(f"  Compressing {path.name}: {len(raw):,} -> {len(compressed):,} bytes")
     return compressed, len(raw)
 
 

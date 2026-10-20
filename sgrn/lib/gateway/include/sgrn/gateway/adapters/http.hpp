@@ -146,8 +146,8 @@ private:
     void handlePostScalarArrayElement(const http::HttpRequest& t_req, http::HttpResponse& t_res, uint16_t t_db_num,
         const std::string& t_field_path, size_t t_index, const std::string& t_url_path, const rapidjson::Document& t_document);
     /// POST /data/<DB>[/<field>] — leaf collection, authorization, atomic batch write and readback.
-    void handlePostLeafField(const http::HttpRequest& t_req, http::HttpResponse& t_res, uint16_t t_db_num,
-        const std::string& t_field_path, const std::string& t_url_path, const rapidjson::Document& t_document);
+    void handlePostLeafField(const http::HttpRequest& t_req, http::HttpResponse& t_res, uint16_t t_db_num, const std::string& t_field_path,
+        const std::string& t_url_path, const rapidjson::Document& t_document);
     void handlePut(const http::HttpRequest& t_req, http::HttpResponse& t_res);
 
     // Discrete tag endpoints: /tags and /tags/<name> (see tags_handlers.cpp)

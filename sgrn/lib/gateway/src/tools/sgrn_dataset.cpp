@@ -209,8 +209,7 @@ std::vector<std::filesystem::path> DatasetProcessor::discoverFiles(const std::st
 /// the string is not a valid settled DTL ("null", year-0 startup rows) so
 /// callers can fall back to the WAL frame stamp.
 static int64_t parseDtlWallEpochMs(const std::string& t_s) {
-    if (t_s.size() != 29 || t_s[4] != '-' || t_s[7] != '-' || t_s[10] != ' ' ||
-        t_s[13] != ':' || t_s[16] != ':' || t_s[19] != '.')
+    if (t_s.size() != 29 || t_s[4] != '-' || t_s[7] != '-' || t_s[10] != ' ' || t_s[13] != ':' || t_s[16] != ':' || t_s[19] != '.')
         return 0;
     auto digits = [&t_s](size_t t_begin, size_t t_end) -> int {
         int v = 0;
@@ -224,23 +223,21 @@ static int64_t parseDtlWallEpochMs(const std::string& t_s) {
     const int year = digits(0, 4), month = digits(5, 7), day = digits(8, 10);
     const int hour = digits(11, 13), minute = digits(14, 16), second = digits(17, 19);
     const int ms = digits(20, 23); // leading ns digits → ms
-    if (year < 1900 || month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 ||
-        minute < 0 || minute > 59 || second < 0 || second > 59 || ms < 0)
+    if (year < 1900 || month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 ||
+        second > 59 || ms < 0)
         return 0;
     // Howard Hinnant's days_from_civil
     int64_t y = year - (month <= 2);
     const int64_t era = (y >= 0 ? y : y - 399) / 400;
     const unsigned yoe = static_cast<unsigned>(y - era * 400);
-    const unsigned doy =
-        (153u * static_cast<unsigned>(month + (month > 2 ? -3 : 9)) + 2) / 5 + static_cast<unsigned>(day) - 1;
+    const unsigned doy = (153u * static_cast<unsigned>(month + (month > 2 ? -3 : 9)) + 2) / 5 + static_cast<unsigned>(day) - 1;
     const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     const int64_t days = era * 146097 + static_cast<int64_t>(doe) - 719468;
     return ((days * 24 + hour) * 60 + minute) * 60000 + second * 1000 + ms;
 }
 
 static bool isBinaryArchiveContent(const std::string& t_content) {
-    return t_content.size() >= 4 && t_content[0] == 'S' && t_content[1] == 'G' && t_content[2] == 'R' &&
-           t_content[3] == 'N';
+    return t_content.size() >= 4 && t_content[0] == 'S' && t_content[1] == 'G' && t_content[2] == 'R' && t_content[3] == 'N';
 }
 
 sgrn::Result<DatasetSummary> DatasetProcessor::process(const DatasetConfig& t_config) {
@@ -375,8 +372,8 @@ void DatasetProcessor::closeWriters(const DatasetConfig& t_config) {
     std::ofstream cache_meta(std::string(t_config.output_cache_prefix) + ".json", std::ios::out | std::ios::trunc);
     if (cache_meta.is_open())
         cache_meta << meta_sb.GetString() << "\n";
-    fmt::print("[sgrn_dataset] Streaming cache written: {}.f32 ({} rows x {} features) + ts + json\n",
-        t_config.output_cache_prefix, cache_rows_, summary_.features.size());
+    fmt::print("[sgrn_dataset] Streaming cache written: {}.f32 ({} rows x {} features) + ts + json\n", t_config.output_cache_prefix,
+        cache_rows_, summary_.features.size());
 }
 
 /// Split a dotted key into its segments ("a.b.c" → {"a","b","c"}).
@@ -683,8 +680,7 @@ void DatasetProcessor::processBinaryArchive(const std::filesystem::path& t_path,
         uint16_t ver = 0;
         if (t_content.size() >= 6)
             std::memcpy(&ver, t_content.data() + 4, sizeof(ver));
-        fmt::print(fg(fmt::color::yellow), "[sgrn_dataset] Unsupported binary version {} in {}, skipping file.\n", ver,
-            t_path.string());
+        fmt::print(fg(fmt::color::yellow), "[sgrn_dataset] Unsupported binary version {} in {}, skipping file.\n", ver, t_path.string());
         return;
     }
     size_t pos = header.frames_start;
@@ -755,8 +751,7 @@ void DatasetProcessor::processBinaryArchive(const std::filesystem::path& t_path,
             size_t anchor_len = 0;
             uint16_t anchor_db = 0;
             if (!sgrn::gateway::database::verifyAnchorFrame(payload, payload_len, anchor_db, anchor_image, anchor_len)) {
-                fmt::print(
-                    fg(fmt::color::yellow), "[sgrn_dataset] Anchor CRC mismatch in {}, seeking resync\n", t_path.string());
+                fmt::print(fg(fmt::color::yellow), "[sgrn_dataset] Anchor CRC mismatch in {}, seeking resync\n", t_path.string());
                 if (resync_or_stop(frame_start))
                     continue;
                 break;
@@ -781,8 +776,7 @@ void DatasetProcessor::processBinaryArchive(const std::filesystem::path& t_path,
             }
             bool frame_ok = false;
             bool corrupt = false;
-            if (have_image &&
-                sgrn::gateway::database::parseDeltaRuns(payload, payload_len, img_it->second.size(), delta_db, runs)) {
+            if (have_image && sgrn::gateway::database::parseDeltaRuns(payload, payload_len, img_it->second.size(), delta_db, runs)) {
                 frame_ok = true;
                 for (const auto& run : runs)
                     std::memcpy(img_it->second.data() + run.offset, payload + run.data_pos, run.len);
@@ -791,8 +785,7 @@ void DatasetProcessor::processBinaryArchive(const std::filesystem::path& t_path,
             }
             if (!frame_ok) {
                 if (corrupt) {
-                    fmt::print(
-                        fg(fmt::color::yellow), "[sgrn_dataset] Corrupt delta frame in {}, seeking resync\n", t_path.string());
+                    fmt::print(fg(fmt::color::yellow), "[sgrn_dataset] Corrupt delta frame in {}, seeking resync\n", t_path.string());
                     if (resync_or_stop(frame_start))
                         continue;
                     break;

@@ -70,11 +70,11 @@
     "jwt_secret": "${JWT_SECRET}",
     "rate_limiting": {
       "enabled": true,
-      "auth_endpoint_limit": 5,
+      "auth_endpoint_limit": 30,
       "auth_endpoint_window_s": 60,
       "general_endpoint_limit": 100,
       "general_endpoint_window_s": 60,
-      "storage_endpoint_limit": 30,
+      "storage_endpoint_limit": 120,
       "storage_endpoint_window_s": 60,
       "page_endpoint_limit": 120,
       "page_endpoint_window_s": 60,

@@ -46,17 +46,17 @@ struct FeatureMeta {
 };
 
 struct DatasetConfig {
-    std::string input_dir;        // /tmp/sgrn-gateway-state/
-    std::string scl_schema_path;  // ./sgrn/gateway/simulations/nuclear/schema.scl
-    std::string output_csv_path;  // dataset.csv or dataset.csv.zst
-    std::string manifest_path;    // manifest.json
-    std::string convert_out_path; // Output path for archive conversion (.bin.zst or .jsonl.zst)
-    std::string target_format;    // "binary" or "jsonl"
+    std::string input_dir;           // /tmp/sgrn-gateway-state/
+    std::string scl_schema_path;     // ./sgrn/gateway/simulations/nuclear/schema.scl
+    std::string output_csv_path;     // dataset.csv or dataset.csv.zst
+    std::string manifest_path;       // manifest.json
+    std::string convert_out_path;    // Output path for archive conversion (.bin.zst or .jsonl.zst)
+    std::string target_format;       // "binary" or "jsonl"
     std::string output_cache_prefix; ///< Streaming float32 cache: <prefix>.f32 (rows × features),
                                      ///< <prefix>.ts.i64 (row timestamps, INT64_MIN = unset) and
                                      ///< <prefix>.json (feature name/order metadata). Empty = off.
-    std::string start_time;       // Optional ISO timestamp filter
-    std::string end_time;         // Optional ISO timestamp filter
+    std::string start_time;          // Optional ISO timestamp filter
+    std::string end_time;            // Optional ISO timestamp filter
     int zstd_compression_level = 5;
 };
 

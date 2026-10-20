@@ -75,19 +75,13 @@ PlcMemory::SegmentLookup PlcMemory::findContainingSegment(size_t t_abs_offset, s
 
 Result<void, PlcMemoryError> PlcMemory::read(size_t t_offset, size_t t_size, uint8_t* tp_buffer) const {
 
-    if (!p_plc_state_)
-        return PlcMemoryError::PLC_STATE_NOT_INITIALIZED;
-
-    if (t_size == 0)
-        return {};
-
-    if (!tp_buffer)
-        return PlcMemoryError::NULL_BUFFER;
+    SGRN_RETURN_IF_NULL(p_plc_state_, PlcMemoryError::PLC_STATE_NOT_INITIALIZED);
+    SGRN_RETURN_IF(t_size == 0, {});
+    SGRN_RETURN_IF_NULL(tp_buffer, PlcMemoryError::NULL_BUFFER);
 
     auto lookup = findContainingSegment(t_offset, t_size);
 
-    if (!lookup.p_entry)
-        return lookup.error;
+    SGRN_RETURN_IF_NULL(lookup.p_entry, lookup.error);
 
     std::shared_lock<std::shared_mutex> lock(lookup.p_entry->mutex_);
 
@@ -98,19 +92,13 @@ Result<void, PlcMemoryError> PlcMemory::read(size_t t_offset, size_t t_size, uin
 
 Result<void, PlcMemoryError> PlcMemory::write(size_t t_offset, size_t t_size, const uint8_t* tp_buffer) {
 
-    if (!p_plc_state_)
-        return PlcMemoryError::PLC_STATE_NOT_INITIALIZED;
-
-    if (t_size == 0)
-        return {};
-
-    if (!tp_buffer)
-        return PlcMemoryError::NULL_BUFFER;
+    SGRN_RETURN_IF_NULL(p_plc_state_, PlcMemoryError::PLC_STATE_NOT_INITIALIZED);
+    SGRN_RETURN_IF(t_size == 0, {});
+    SGRN_RETURN_IF_NULL(tp_buffer, PlcMemoryError::NULL_BUFFER);
 
     auto lookup = findContainingSegment(t_offset, t_size);
 
-    if (!lookup.p_entry)
-        return lookup.error;
+    SGRN_RETURN_IF_NULL(lookup.p_entry, lookup.error);
 
     DbEntry* p_entry = lookup.p_entry;
 
@@ -159,11 +147,8 @@ struct ResolvedSpan {
 
 Result<void, PlcMemoryError> PlcMemory::read(std::span<const MemorySpan> t_spans) const {
 
-    if (!p_plc_state_)
-        return PlcMemoryError::PLC_STATE_NOT_INITIALIZED;
-
-    if (t_spans.empty())
-        return {};
+    SGRN_RETURN_IF_NULL(p_plc_state_, PlcMemoryError::PLC_STATE_NOT_INITIALIZED);
+    SGRN_RETURN_IF(t_spans.empty(), {});
 
     std::vector<ResolvedSpan> resolved;
     resolved.reserve(t_spans.size());
@@ -172,13 +157,11 @@ Result<void, PlcMemoryError> PlcMemory::read(std::span<const MemorySpan> t_spans
         if (s.size == 0)
             continue;
 
-        if (!s.p_buffer)
-            return PlcMemoryError::NULL_BUFFER;
+        SGRN_RETURN_IF_NULL(s.p_buffer, PlcMemoryError::NULL_BUFFER);
 
         auto lookup = findContainingSegment(s.offset, s.size);
 
-        if (!lookup.p_entry)
-            return lookup.error;
+        SGRN_RETURN_IF_NULL(lookup.p_entry, lookup.error);
 
         resolved.push_back({lookup.p_entry, lookup.rel_offset, &s});
     }
@@ -212,11 +195,8 @@ Result<void, PlcMemoryError> PlcMemory::read(std::span<const MemorySpan> t_spans
 
 Result<void, PlcMemoryError> PlcMemory::write(std::span<const MemorySpan> t_spans) {
 
-    if (!p_plc_state_)
-        return PlcMemoryError::PLC_STATE_NOT_INITIALIZED;
-
-    if (t_spans.empty())
-        return {};
+    SGRN_RETURN_IF_NULL(p_plc_state_, PlcMemoryError::PLC_STATE_NOT_INITIALIZED);
+    SGRN_RETURN_IF(t_spans.empty(), {});
 
     std::vector<ResolvedSpan> resolved;
     resolved.reserve(t_spans.size());
@@ -225,13 +205,11 @@ Result<void, PlcMemoryError> PlcMemory::write(std::span<const MemorySpan> t_span
         if (s.size == 0)
             continue;
 
-        if (!s.p_buffer)
-            return PlcMemoryError::NULL_BUFFER;
+        SGRN_RETURN_IF_NULL(s.p_buffer, PlcMemoryError::NULL_BUFFER);
 
         auto lookup = findContainingSegment(s.offset, s.size);
 
-        if (!lookup.p_entry)
-            return lookup.error;
+        SGRN_RETURN_IF_NULL(lookup.p_entry, lookup.error);
 
         resolved.push_back({lookup.p_entry, lookup.rel_offset, &s});
     }
@@ -311,24 +289,17 @@ Result<void, PlcMemoryError> PlcMemory::write(std::span<const MemorySpan> t_span
 
 Result<void, PlcMemoryError> PlcMemory::readDbMemory(uint16_t t_db_number, size_t t_offset, size_t t_size, uint8_t* tp_buffer) const {
 
-    if (!p_plc_state_)
-        return PlcMemoryError::PLC_STATE_NOT_INITIALIZED;
+    SGRN_RETURN_IF_NULL(p_plc_state_, PlcMemoryError::PLC_STATE_NOT_INITIALIZED);
 
-    if (t_size == 0)
-        return {};
+    SGRN_RETURN_IF(t_size == 0, {});
 
-    if (!tp_buffer)
-        return PlcMemoryError::NULL_BUFFER;
+    SGRN_RETURN_IF_NULL(tp_buffer, PlcMemoryError::NULL_BUFFER);
 
     DbEntry* p_entry = p_plc_state_->findSegmentById(t_db_number);
 
-    if (!p_entry)
-        return PlcMemoryError::DB_SEGMENT_NOT_FOUND;
+    SGRN_RETURN_IF_NULL(p_entry, PlcMemoryError::DB_SEGMENT_NOT_FOUND);
 
-    if (t_offset > p_entry->size || t_size > p_entry->size - t_offset) {
-
-        return PlcMemoryError::RANGE_EXCEEDS_ALLOWED_SPACE;
-    }
+    SGRN_RETURN_IF(t_offset > p_entry->size || t_size > p_entry->size - t_offset, PlcMemoryError::RANGE_EXCEEDS_ALLOWED_SPACE);
 
     std::shared_lock<std::shared_mutex> lock(p_entry->mutex_);
 
@@ -447,7 +418,7 @@ Result<void, PlcMemoryError> PlcMemory::readDbMemory(std::span<const DbMemorySpa
 
 Result<void, PlcMemoryError> PlcMemory::writeDbMemory(std::span<const DbMemorySpan> t_spans) {
 
-    SGRN_RETURN_IF(!p_plc_state_, PlcMemoryError::PLC_STATE_NOT_INITIALIZED);
+    SGRN_RETURN_IF_NULL(p_plc_state_, PlcMemoryError::PLC_STATE_NOT_INITIALIZED);
     SGRN_RETURN_IF(t_spans.empty(), {});
 
     struct ResolvedDbSpan {
@@ -539,7 +510,7 @@ Result<void, PlcMemoryError> PlcMemory::writeBit(uint16_t t_db_number, size_t t_
 
     DbEntry* p_entry = p_plc_state_->findSegmentById(t_db_number);
 
-    SGRN_RETURN_IF(!p_entry, PlcMemoryError::DB_SEGMENT_NOT_FOUND);
+    SGRN_RETURN_IF_NULL(p_entry, PlcMemoryError::DB_SEGMENT_NOT_FOUND);
 
     SGRN_RETURN_IF(t_byte_offset >= p_entry->size, PlcMemoryError::RANGE_EXCEEDS_ALLOWED_SPACE);
 

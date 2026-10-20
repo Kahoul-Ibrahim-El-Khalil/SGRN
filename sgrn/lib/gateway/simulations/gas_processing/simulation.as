@@ -266,11 +266,7 @@ void main() {
         writeSafetySystems(ts);
         writeUtilities(ts);
 
-        // 3. Periodic report
-        if (iteration % report_every == 0) {
-            printReport(ts, iteration);
-        }
-
+        
         // 4. Graceful stop shortly after ESD latches (tail flushes downstream lag)
         if (esd_trip_tick >= 0 && tick_count > esd_trip_tick + int(PERIOD_SCALE * 3.0 + 0.5)) {
             print("[SIMULATION_COMPLETE] ESD latched — stopping after settle tail\n");
@@ -413,7 +409,6 @@ void simulatePhysics() {
         esd_active = true;
         if (esd_trip_tick < 0) {
             esd_trip_tick = tick_count;
-            print("[ESD_EVENT] feed_press=" + feed_press + " bar tripped ESD at tick " + tick_count + "\n");
         }
     }
 }
@@ -666,24 +661,3 @@ void writeUtilities(DTL@ ts) {
     Utilities.put();
 }
 
-// ─── Reporting ───────────────────────────────────────────────────────────────
-
-void printReport(DTL@ ts, int iter) {
-    print("\n================================================================\n");
-    print("  Sim Time : " + ts.toString() + "  (Hour " + tick_count + " of plant day)\n");
-    print("  Iteration: " + iter + " | Fault: " + fault_code + (fault_code == 8 && tick_count >= fault_injection_tick ? " ACTIVE" : "") + "\n");
-    print("----------------------------------------------------------------\n");
-    print("  Feed Pressure:          " + feed_press + " bar\n");
-    print("  Tower Offline (regen):  T" + (lead_lag_index + 1) + " (state=" + cycle_state[lead_lag_index] + ")\n");
-    print("  Moisture Loading (T1-3):" + moisture_pct[0] + " / " + moisture_pct[1] + " / " + moisture_pct[2] + " %\n");
-    print("  Regen Heater Outlet:    " + heater_outlet_temp + " C\n");
-    print("  Regen Cooler Outlet:    " + cooler_outlet_temp + " C\n");
-    print("  Dew Point:              " + dew_point_c + " C (spec " + DEW_POINT_SPEC + " C)\n");
-    print("  System Outlet Pressure: " + system_outlet_press + " bar\n");
-    if (esd_active) {
-        print("  Status:                 !!! ESD ACTIVE !!!\n");
-    } else {
-        print("  Status:                 NORMAL OPERATION\n");
-    }
-    print("================================================================\n\n");
-}

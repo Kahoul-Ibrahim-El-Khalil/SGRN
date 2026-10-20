@@ -123,6 +123,11 @@ bool SessionStore::isKnownServiceToken(const std::string& token) const noexcept 
     return std::binary_search(public_service_tokens_.begin(), public_service_tokens_.end(), token);
 }
 
+bool SessionStore::hasActiveSessionToken(const std::string& token) const noexcept {
+    std::shared_lock lock(cache_mutex_);
+    return active_tokens_.find(token) != active_tokens_.end();
+}
+
 void SessionStore::registerServiceToken(const std::string& token) {
     std::unique_lock lock(cache_mutex_);
     // Find the correct sorted insertion position via lower_bound (O(log n)),

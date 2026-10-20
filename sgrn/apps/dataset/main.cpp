@@ -18,8 +18,8 @@ int main(int argc, char** argv) {
         "c,convert", "Convert file to target format (-f jsonl|binary)", cxxopts::value<std::string>())(
         "f,format", "Target format for conversion ('binary', 'jsonl', 'csv')", cxxopts::value<std::string>()->default_value("auto"))(
         "d,decompress", "Decompress target file to raw uncompressed stdout/file")("z,compress", "Compress target file with Zstd")(
-        "csv", "Output CSV file path for dataset processing", cxxopts::value<std::string>()->default_value("dataset.csv"))(
-        "cache", "Streaming float32 cache output prefix (writes <prefix>.f32, <prefix>.ts.i64, <prefix>.json); empty = off",
+        "csv", "Output CSV file path for dataset processing", cxxopts::value<std::string>()->default_value("dataset.csv"))("cache",
+        "Streaming float32 cache output prefix (writes <prefix>.f32, <prefix>.ts.i64, <prefix>.json); empty = off",
         cxxopts::value<std::string>()->default_value(""))(
         "m,manifest", "Output ML manifest JSON file path", cxxopts::value<std::string>()->default_value("manifest.json"))("merge",
         "Merge all archives under the input path into a single archive file",
