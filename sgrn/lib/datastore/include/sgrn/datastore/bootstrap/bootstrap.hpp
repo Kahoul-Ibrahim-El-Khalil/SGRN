@@ -164,7 +164,7 @@ inline void generateDefaultEnvFile(const std::filesystem::path& t_env_path, cons
     std::string bin_dir = currentExeDir();
     if (bin_dir.empty())
         bin_dir = "/usr/local/bin";
-    std::string conda_prefix = envOrDefault("CONDA_PREFIX", "/home/" + t_user + "/micromamba/envs/SGRN");
+    std::string conda_prefix = envOrDefault("CONDA_PREFIX", "$ENV{CONDA_PREFIX}");
 
     std::ofstream env_out(t_env_path);
     env_out << "# ==========================================\n";
@@ -608,7 +608,7 @@ inline std::function<std::string(std::string)> buildTemplateResolver(
     std::string jwt_secret = envOrDefault("JWT_SECRET", "change_me_at_least_32_chars_jwt_secret");
     std::string sgrn_data = envOrDefault("SGRN_DATA_DIR", t_base_dir);
     std::string sgrn_bin = envOrDefault("SGRN_BIN_DIR", "/usr/local/bin");
-    std::string sgrn_deployment_env = envOrDefault("SGRN_DEPLOYMENT_ENV", "/home/" + sgrn_user + "/micromamba/envs/SGRN");
+    std::string sgrn_deployment_env = envOrDefault("SGRN_DEPLOYMENT_ENV", "$ENV{SGRN_DEPLOYMENT_ENV}");
     std::string garage_access = envOrDefault("GARAGE_ACCESS_KEY", "change_me_garage_access_key");
     std::string garage_secret = envOrDefault("GARAGE_SECRET_KEY", "change_me_garage_secret_key");
     std::string garage_rpc = envOrDefault("GARAGE_RPC_SECRET", "change_me_garage_rpc_secret_64_hex_chars");
@@ -682,7 +682,7 @@ inline void initDatabaseOnly(const std::string& t_base_dir) {
     std::string pg_db = envOrDefault("POSTGRES_DB", "sgrn");
     std::string pg_superuser = envOrDefault("POSTGRES_SUPERUSER", "postgres");
     std::string sgrn_user = envOrDefault("SGRN_USER", envOrDefault("USER", "admin"));
-    std::string sgrn_deployment_env = envOrDefault("SGRN_DEPLOYMENT_ENV", "/home/" + sgrn_user + "/micromamba/envs/SGRN");
+    std::string sgrn_deployment_env = envOrDefault("SGRN_DEPLOYMENT_ENV", "$ENV{SGRN_DEPLOYMENT_ENV}");
 
     auto tmpl = buildTemplateResolver(t_base_dir);
 
@@ -745,7 +745,7 @@ inline void configureSystemd() {
 
     // Resolve runtime paths from env (set by --generate-config earlier).
     std::string sgrn_data = envOrDefault("SGRN_DATA_DIR", base_dir.string());
-    std::string sgrn_deployment_env = envOrDefault("SGRN_DEPLOYMENT_ENV", "/home/" + sudo_user + "/micromamba/envs/SGRN");
+    std::string sgrn_deployment_env = envOrDefault("SGRN_DEPLOYMENT_ENV", "$ENV{SGRN_DEPLOYMENT_ENV}");
 
     // Preflight: the units ExecStart ${SGRN_BIN_DIR}/sgrn_datastore. A stale
     // path deploys units that die with systemd 203/EXEC and crash-loop the

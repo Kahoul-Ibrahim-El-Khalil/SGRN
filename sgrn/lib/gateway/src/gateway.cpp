@@ -494,8 +494,10 @@ Result<void, std::string> GatewayApplication::startAdapters() {
         startAdapter("S7 Adapter", config_.s7->port, [this]() { return s7_adapter_->start(config_.s7->ip, config_.s7->port); });
 
         s7_adapter_->setEventsCallback(sgrn::gateway::adapters::s7::onServerEvent, &srv_ctx_);
+    } else if (config_.opcua.has_value() || config_.modbus.has_value() || config_.ethernetip.has_value()) {
+        SGRN_WARN_LOG("Gateway is starting WITHOUT an S7 southbound server; S7 clients will not be able to connect, other southbound adapters remain active.");
     } else {
-        SGRN_WARN_LOG("Gateway is starting WITHOUT a southbound S7 connection. It will act as a northbound-only server.");
+        SGRN_WARN_LOG("Gateway is starting without any southbound adapters. It will act as a northbound-only server.");
     }
 
     if (config_.opcua.has_value()) {

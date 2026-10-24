@@ -38,6 +38,39 @@ sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
                 s7.little_endian = s7_node["little_endian"].GetBool();
             cfg.s7 = s7;
         }
+
+        // ── Adapter protocols under "southbound" ─────────────────────────────
+        // These are adapter servers, historically configurable under either
+        // "southbound" (e.g. simulations/bottling) or "northbound". The
+        // southbound declaration wins; the northbound block below fills any
+        // protocol not already parsed here.
+        if (south.HasMember("opcua") && south["opcua"].IsObject()) {
+            OpcUaConfig opcua;
+            const auto& opc = south["opcua"];
+            if (opc.HasMember("ip") && opc["ip"].IsString())
+                opcua.ip = opc["ip"].GetString();
+            if (opc.HasMember("port"))
+                opcua.port = static_cast<uint16_t>(opc["port"].GetUint());
+            cfg.opcua = opcua;
+        }
+        if (south.HasMember("modbus") && south["modbus"].IsObject()) {
+            ModbusConfig modbus;
+            const auto& mb = south["modbus"];
+            if (mb.HasMember("ip") && mb["ip"].IsString())
+                modbus.ip = mb["ip"].GetString();
+            if (mb.HasMember("port"))
+                modbus.port = static_cast<uint16_t>(mb["port"].GetUint());
+            cfg.modbus = modbus;
+        }
+        if (south.HasMember("ethernetip") && south["ethernetip"].IsObject()) {
+            EthernetIpConfig eip;
+            const auto& ep = south["ethernetip"];
+            if (ep.HasMember("ip") && ep["ip"].IsString())
+                eip.ip = ep["ip"].GetString();
+            if (ep.HasMember("port") && ep["port"].IsUint())
+                eip.port = static_cast<uint16_t>(ep["port"].GetUint());
+            cfg.ethernetip = eip;
+        }
     }
 
     // ── Northbound Protocols ──────────────────────────────────────────────────
@@ -47,7 +80,7 @@ sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
 
     if (p_north) {
         const auto& north = *p_north;
-        if (north.HasMember("opcua") && north["opcua"].IsObject()) {
+        if (!cfg.opcua.has_value() && north.HasMember("opcua") && north["opcua"].IsObject()) {
             OpcUaConfig opcua;
             const auto& opc = north["opcua"];
             if (opc.HasMember("ip") && opc["ip"].IsString())
@@ -78,7 +111,7 @@ sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
                 websocket.port = static_cast<uint16_t>(ws["port"].GetUint());
             cfg.websocket = websocket;
         }
-        if (north.HasMember("modbus") && north["modbus"].IsObject()) {
+        if (!cfg.modbus.has_value() && north.HasMember("modbus") && north["modbus"].IsObject()) {
             ModbusConfig modbus;
             const auto& mb = north["modbus"];
             if (mb.HasMember("ip") && mb["ip"].IsString())
@@ -87,7 +120,7 @@ sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
                 modbus.port = static_cast<uint16_t>(mb["port"].GetUint());
             cfg.modbus = modbus;
         }
-        if (north.HasMember("ethernetip") && north["ethernetip"].IsObject()) {
+        if (!cfg.ethernetip.has_value() && north.HasMember("ethernetip") && north["ethernetip"].IsObject()) {
             EthernetIpConfig eip;
             const auto& ep = north["ethernetip"];
             if (ep.HasMember("ip") && ep["ip"].IsString())

@@ -18,7 +18,7 @@ This is the full reference the package docstring points at.
 - `models.py` — dataclasses: `DbField`, `DbSchema`, `UdtSchema`,
   `DataWriteResult`, `ConnectionInfo`, …
 - `ml/` — Industrial machine learning and conformal manifold anomaly detection
-  (see [sgrn/ml/README.md](file:///home/odahim/Studies/Software/SGRN/sgrn/python/sgrn/ml/README.md)):
+  (see [sgrn/ml/README.md](../ml/README.md):
   - `ml/device.py` — Hardware accelerator discovery (AMD ROCm/HIP, NVIDIA CUDA, Apple MPS, CPU).
   - `ml/schema.py` — SCL schema parser, semantic dimension taxonomy, and model auto-configuration.
   - `ml/transform.py` — Telemetry scaling, timeline cycle filtering, and sliding window construction.

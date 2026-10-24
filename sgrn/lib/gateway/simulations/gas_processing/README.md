@@ -139,7 +139,7 @@ The `GatewaySync` fix requires rebuilding `s7shell` (header + one source
 file; no gateway rebuild needed):
 
 ```bash
-export PATH="$HOME/micromamba/envs/SGRN/bin:$PATH"
+export PATH="$CONDA_PREFIX/micromamba/envs/SGRN/bin:$PATH"
 cmake --build .build/linux-static --target s7shell -j $(nproc)
 python3 tests/gateway/gas_high_speed.py            # full suite (~3 min)
 python3 tests/gateway/gas_high_speed.py --ticks 60 # quick subset

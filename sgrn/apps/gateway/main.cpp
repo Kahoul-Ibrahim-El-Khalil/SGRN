@@ -12,12 +12,13 @@
 #include <thread>
 #include <type_traits>
 #include <vector>
+
 using sgrn::Result;
 using sgrn::gateway::GatewayApplication;
 
 namespace
 {
-constexpr std::string_view MAN_MESSAGE =
+constexpr std::string_view kManPage =
     "SGRN Gateway — Multi-Protocol Industrial Gateway\n\n"
     "USAGE:\n"
     "    gateway -c gateway.json [-s schema.scl] [-p policy.as] [--gui] [--headless]\n\n"
@@ -44,7 +45,7 @@ constexpr std::string_view MAN_MESSAGE =
     "For full manual: gateway --man\n";
 }
 
-Result<void, std::string> start(int argc, char** argv) {
+Result<void, std::string> start(int t_argc, char** tp_argv) {
     cxxopts::Options options("gateway", "SGRN Multi-Protocol Industrial Gateway");
     options.add_options()("c,config", "Path to gateway.json config file", cxxopts::value<std::string>())("s,schema",
         "SCL schema file or directory",
@@ -57,7 +58,7 @@ Result<void, std::string> start(int argc, char** argv) {
     options.parse_positional({"config"});
 
     try {
-        auto result = options.parse(argc, argv);
+        cxxopts::ParseResult result = options.parse(t_argc, tp_argv);
 
         if (result.count("help")) {
             fmt::print("{}\n", options.help());
@@ -65,7 +66,7 @@ Result<void, std::string> start(int argc, char** argv) {
         }
 
         if (result.count("man")) {
-            fmt::print("{}\n", MAN_MESSAGE);
+            fmt::print("{}\n", kManPage);
             return {};
         }
 
@@ -95,7 +96,7 @@ Result<void, std::string> start(int argc, char** argv) {
 
         // Load config from file (or minimal headless config)
         if (!headless) {
-            SGRN_IF_ERROR_PROPAGATE(app.loadConfig(argc, argv));
+            SGRN_IF_ERROR_PROPAGATE(app.loadConfig(t_argc, tp_argv));
 
             if (!schema_override.empty()) {
                 app.setSchemaOverride(schema_override);
@@ -128,14 +129,14 @@ Result<void, std::string> start(int argc, char** argv) {
     }
 }
 
-int main_cb(int argc, char** argv) {
-    if (const Result<void, std::string> r = start(argc, argv); r.hasError()) {
+int mainCb(int t_argc, char** tp_argv) {
+    if (const Result<void, std::string> r = start(t_argc, tp_argv); r.hasError()) {
         fmt::print(stderr, "{}\n", r.error());
         return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;
 }
 
-int main(int t_argc, char** t_argv) {
-    return sgrn::utils::app::runMain(t_argc, t_argv, main_cb, "Gateway");
+int main(int t_argc, char** tp_argv) {
+    return sgrn::utils::app::runMain(t_argc, tp_argv, mainCb, "Gateway");
 }

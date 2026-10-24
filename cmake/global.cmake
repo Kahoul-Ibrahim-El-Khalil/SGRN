@@ -1,5 +1,5 @@
-# cmake/global.cmake — SGRN Global Configuration (Source of Truth)
-# ─────────────────────────────────────────────────────────────────────────────
+﻿# cmake/global.cmake â€” SGRN Global Configuration (Source of Truth)
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Included by: CMakeLists.txt (root), extern/CMakeLists.txt
 # Must be included before any other cmake/* file.
 #
@@ -7,15 +7,15 @@
 #   1. Detect the active platform/architecture (linux, win64, linux-arm64).
 #   2. Define the two-tier sysroot paths:
 #        SGRN_SHARED_PREFIX  = ${SGRN_ROOT}/.prefix
-#          └─ include/       All headers (architecture-neutral, one copy)
+#          â””â”€ include/       All headers (architecture-neutral, one copy)
 #        SGRN_LOCAL_PREFIX   = ${SGRN_ROOT}/.prefix/<platform>
-#          └─ lib/           Compiled archives/shared libs (platform-specific)
+#          â””â”€ lib/           Compiled archives/shared libs (platform-specific)
 #   3. Locate the active Conda/Micromamba environment (SGRN_CONDA_PREFIX).
-#   4. Include cmake/macros.cmake (sgrn_alias, sgrn_link_dependency, …).
-#   5. Include cmake/targets.cmake (sgrn_add_component_library, …).
+#   4. Include cmake/macros.cmake (sgrn_alias, sgrn_link_dependency, â€¦).
+#   5. Include cmake/targets.cmake (sgrn_add_component_library, â€¦).
 #
 # See BUILD_SYSTEM.md for the full sysroot layout and variable reference.
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 include_guard(GLOBAL)
 
@@ -133,8 +133,8 @@ if(NOT SGRN_CONDA_PREFIX)
     if(NOT SGRN_CONDA_PREFIX)
         # Try common micromamba locations
         set(_SGRN_MICROMAMBA_CANDIDATES
-            "$ENV{HOME}/micromamba/envs/SGRN"
-            "$ENV{HOME}/micromamba/envs/sgrn"
+            "$ENV{CONDA_PREFIX}/micromamba/envs/SGRN"
+            "$ENV{CONDA_PREFIX}/micromamba/envs/sgrn"
             "/opt/micromamba/envs/SGRN"
             "$ENV{LOCALAPPDATA}/micromamba/envs/SGRN-WINDOWS"
             "$ENV{USERPROFILE}/micromamba/envs/SGRN-WINDOWS"
