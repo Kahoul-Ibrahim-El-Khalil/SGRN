@@ -28,6 +28,7 @@
 
 #pragma once
 
+#include "buffer.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -128,6 +129,44 @@ inline void toEndian(T val, uint8_t* p, Endian e) {
         detail::reverseBytes(val);
     }
     std::memcpy(p, &val, sizeof(T));
+}
+
+// Span variants of the same primitives. They carry no bounds logic of
+// their own (caller-checked contract: the caller must have validated
+// that the span holds at least sizeof(T) bytes) and simply forward to
+// the pointer versions. Overload resolution stays unambiguous because a
+// bare pointer cannot implicitly construct a std::span, and byte arrays
+// decay to pointers (an exact-match standard conversion) before span's
+// user-defined array constructor can be considered.
+
+template <typename T>
+inline T fromBE(ReadBuffer t_buffer) {
+    return fromBE<T>(t_buffer.data());
+}
+
+template <typename T>
+inline void toBE(T val, WriteBuffer t_buffer) {
+    toBE<T>(val, t_buffer.data());
+}
+
+template <typename T>
+inline T fromLE(ReadBuffer t_buffer) {
+    return fromLE<T>(t_buffer.data());
+}
+
+template <typename T>
+inline void toLE(T val, WriteBuffer t_buffer) {
+    toLE<T>(val, t_buffer.data());
+}
+
+template <typename T>
+inline T fromEndian(ReadBuffer t_buffer, Endian e) {
+    return fromEndian<T>(t_buffer.data(), e);
+}
+
+template <typename T>
+inline void toEndian(T val, WriteBuffer t_buffer, Endian e) {
+    toEndian<T>(val, t_buffer.data(), e);
 }
 
 inline constexpr int bcdToDec(uint8_t bcd) {

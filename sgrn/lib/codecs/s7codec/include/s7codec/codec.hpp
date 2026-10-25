@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "buffer.hpp"
 #include "datetime.hpp"
 #include "endian.hpp"
 #include "types.hpp"
@@ -29,8 +30,11 @@
 #include <cstdio>
 #include <cstring>
 #include <expected>
+#include <span>
 #include <string>
+#include <string_view>
 #include <type_traits>
+#include <utility>
 #include <variant>
 
 namespace s7codec
@@ -191,179 +195,364 @@ inline const char* toString(CodecStatus status) {
     return "unknown codec error";
 }
 
+// --- Options groups ---
+//
+// Aggregate option bundles for the span-based decode/encode entry points.
+// They carry only parameters whose meaning is shared across all types
+// they touch (byte order, Bool bit position, string capacity). Element
+// counts are deliberately NOT folded in here: an options field means the
+// same thing no matter which type the call targets.
+
+struct DecodeOptions {
+    /// Byte order for every multi-byte field read.
+    Endian endian{Endian::Big};
+    /// Bit position for Type::Bool (LSB-first in the first buffer byte).
+    BitOffset bitOffset{};
+    /// Max chars/units for string types; 0 = builtin default.
+    StringCapacity stringCapacity{};
+};
+
+struct EncodeOptions {
+    /// Byte order for every multi-byte field write.
+    Endian endian{Endian::Big};
+    /// Bit position for Type::Bool (LSB-first in the first buffer byte).
+    BitOffset bitOffset{};
+    /// Max chars/units for string types; 0 means the caller's count was 0.
+    StringCapacity stringCapacity{};
+};
+
 // --- Low-level Primitives ---
 
-inline std::expected<void, CodecStatus> encodeBool(bool t_value, uint8_t t_bit_index, uint8_t* t_ptr, size_t t_buffer_size) {
-    if (t_buffer_size < 1)
+// UTF-8 -> UTF-16 code units (no surrogate escaping: code points above
+// BMP are encoded as-is, callers needing surrogate pairs must handle it).
+// Returns false on malformed/truncated input. Extracted verbatim from the
+// two identical encodeScalar cases it used to be duplicated in.
+inline bool utf8ToUtf16(const std::string& t_input, std::u16string& t_out) {
+    t_out.clear();
+    for (size_t i = 0; i < t_input.length(); ++i) {
+        uint32_t cp = 0;
+        uint8_t c = static_cast<uint8_t>(t_input[i]);
+        if (c < 0x80) {
+            cp = c;
+        } else if ((c & 0xe0) == 0xc0) {
+            if (i + 1 >= t_input.length()) {
+                return false;
+            }
+            uint8_t b1 = static_cast<uint8_t>(t_input[++i]);
+            cp = ((c & 0x1f) << 6) | (b1 & 0x3f);
+        } else if ((c & 0xf0) == 0xe0) {
+            if (i + 2 >= t_input.length()) {
+                return false;
+            }
+            uint8_t b1 = static_cast<uint8_t>(t_input[++i]);
+            uint8_t b2 = static_cast<uint8_t>(t_input[++i]);
+            cp = ((c & 0x0f) << 12) | ((b1 & 0x3f) << 6) | (b2 & 0x3f);
+        } else {
+            return false;
+        }
+        t_out.push_back(static_cast<char16_t>(cp));
+    }
+    return true;
+}
+
+// UTF-16 code units (in the given byte order, starting at the front of the
+// view) -> UTF-8 string, including surrogate-pair joining. Extracted
+// verbatim from the two identical decodeScalar cases it used to be
+// duplicated in.
+inline std::string utf16ToUtf8(ReadBuffer t_units, uint32_t t_count, Endian t_endian) {
+    std::string result;
+    result.reserve(static_cast<std::size_t>(t_count) * 3);
+    for (uint32_t i = 0; i < t_count; ++i) {
+        uint16_t ch = fromEndian<uint16_t>(t_units.subspan(i * 2), t_endian);
+        if (ch >= 0xD800u && ch <= 0xDBFFu && i + 1 < t_count) {
+            uint16_t low = fromEndian<uint16_t>(t_units.subspan((i + 1) * 2), t_endian);
+            if (low >= 0xDC00u && low <= 0xDFFFu) {
+                uint32_t cp = 0x10000u + (static_cast<uint32_t>(ch - 0xD800u) << 10) + static_cast<uint32_t>(low - 0xDC00u);
+                result.push_back(static_cast<char>(0xF0u | (cp >> 18)));
+                result.push_back(static_cast<char>(0x80u | ((cp >> 12) & 0x3Fu)));
+                result.push_back(static_cast<char>(0x80u | ((cp >> 6) & 0x3Fu)));
+                result.push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
+                ++i;
+                continue;
+            }
+        }
+        if (ch < 0x80u) {
+            result.push_back(static_cast<char>(ch));
+        } else if (ch < 0x800u) {
+            result.push_back(static_cast<char>(0xC0u | (ch >> 6)));
+            result.push_back(static_cast<char>(0x80u | (ch & 0x3Fu)));
+        } else {
+            result.push_back(static_cast<char>(0xE0u | (ch >> 12)));
+            result.push_back(static_cast<char>(0x80u | ((ch >> 6) & 0x3Fu)));
+            result.push_back(static_cast<char>(0x80u | (ch & 0x3Fu)));
+        }
+    }
+    return result;
+}
+
+// Span primaries. Every primitive bounds-checks the view it is handed —
+// spans are never assumed large.
+
+inline std::expected<void, CodecStatus> encodeBool(bool t_value, BitOffset t_bit_offset, WriteBuffer t_buffer) {
+    if (t_buffer.size() < 1)
         return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
-    if (t_bit_index > 7)
+    if (!t_bit_offset.valid())
         return std::unexpected(CodecStatus::INVALID_BIT_INDEX);
     if (t_value)
-        t_ptr[0] |= static_cast<uint8_t>(1u << t_bit_index);
+        t_buffer[0] |= static_cast<uint8_t>(1u << t_bit_offset.value);
     else
-        t_ptr[0] &= static_cast<uint8_t>(~(1u << t_bit_index));
+        t_buffer[0] &= static_cast<uint8_t>(~(1u << t_bit_offset.value));
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeU8(uint8_t t_value, uint8_t* t_ptr, size_t t_buffer_size) {
-    if (t_buffer_size < 1)
+inline std::expected<void, CodecStatus> encodeU8(uint8_t t_value, WriteBuffer t_buffer) {
+    if (t_buffer.size() < 1)
         return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
-    t_ptr[0] = t_value;
+    t_buffer[0] = t_value;
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeI8(int8_t t_value, uint8_t* t_ptr, size_t t_buffer_size) {
-    if (t_buffer_size < 1)
+inline std::expected<void, CodecStatus> encodeI8(int8_t t_value, WriteBuffer t_buffer) {
+    if (t_buffer.size() < 1)
         return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
-    t_ptr[0] = static_cast<uint8_t>(t_value);
+    t_buffer[0] = static_cast<uint8_t>(t_value);
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeI16(int16_t t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    if (t_buffer_size < 2)
+inline std::expected<void, CodecStatus> encodeI16(int16_t t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+    if (t_buffer.size() < 2)
         return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
-    toEndian<int16_t>(t_value, t_ptr, t_endian);
+    toEndian<int16_t>(t_value, t_buffer.data(), t_endian);
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeU16(uint16_t t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    if (t_buffer_size < 2)
+inline std::expected<void, CodecStatus> encodeU16(uint16_t t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+    if (t_buffer.size() < 2)
         return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
-    toEndian<uint16_t>(t_value, t_ptr, t_endian);
+    toEndian<uint16_t>(t_value, t_buffer.data(), t_endian);
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeI32(int32_t t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    if (t_buffer_size < 4)
+inline std::expected<void, CodecStatus> encodeI32(int32_t t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+    if (t_buffer.size() < 4)
         return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
-    toEndian<int32_t>(t_value, t_ptr, t_endian);
+    toEndian<int32_t>(t_value, t_buffer.data(), t_endian);
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeU32(uint32_t t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    if (t_buffer_size < 4)
+inline std::expected<void, CodecStatus> encodeU32(uint32_t t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+    if (t_buffer.size() < 4)
         return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
-    toEndian<uint32_t>(t_value, t_ptr, t_endian);
+    toEndian<uint32_t>(t_value, t_buffer.data(), t_endian);
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeI64(int64_t t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    if (t_buffer_size < 8)
+inline std::expected<void, CodecStatus> encodeI64(int64_t t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+    if (t_buffer.size() < 8)
         return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
-    toEndian<int64_t>(t_value, t_ptr, t_endian);
+    toEndian<int64_t>(t_value, t_buffer.data(), t_endian);
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeU64(uint64_t t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    if (t_buffer_size < 8)
+inline std::expected<void, CodecStatus> encodeU64(uint64_t t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+    if (t_buffer.size() < 8)
         return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
-    toEndian<uint64_t>(t_value, t_ptr, t_endian);
+    toEndian<uint64_t>(t_value, t_buffer.data(), t_endian);
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeReal(float t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    if (t_buffer_size < 4)
+inline std::expected<void, CodecStatus> encodeReal(float t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+    if (t_buffer.size() < 4)
         return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
-    toEndian<float>(t_value, t_ptr, t_endian);
+    toEndian<float>(t_value, t_buffer.data(), t_endian);
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeLReal(double t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    if (t_buffer_size < 8)
+inline std::expected<void, CodecStatus> encodeLReal(double t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+    if (t_buffer.size() < 8)
         return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
-    toEndian<double>(t_value, t_ptr, t_endian);
+    toEndian<double>(t_value, t_buffer.data(), t_endian);
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeString(
-    const char* t_value, uint32_t t_value_len, uint32_t t_max_len, uint8_t* t_ptr, size_t t_buffer_size) {
-    if (t_buffer_size < static_cast<size_t>(2 + t_max_len))
+inline std::expected<void, CodecStatus> encodeString(std::string_view t_value, StringCapacity t_capacity, WriteBuffer t_buffer) {
+    const uint32_t t_max_len = t_capacity.value;
+    if (t_buffer.size() < static_cast<size_t>(2 + t_max_len))
         return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
-    if (t_value_len > t_max_len)
+    if (t_value.size() > t_max_len)
         return std::unexpected(CodecStatus::STRING_TOO_LONG);
-    t_ptr[0] = static_cast<uint8_t>(t_max_len);
-    t_ptr[1] = static_cast<uint8_t>(t_value_len);
-    std::memcpy(t_ptr + 2, t_value, static_cast<std::size_t>(t_value_len));
+    t_buffer[0] = static_cast<uint8_t>(t_max_len);
+    t_buffer[1] = static_cast<uint8_t>(t_value.size());
+    std::memcpy(t_buffer.data() + 2, t_value.data(), t_value.size());
     // Zero the tail bytes to avoid stale data being sent to the PLC
-    std::memset(t_ptr + 2 + t_value_len, 0, static_cast<size_t>(t_max_len - t_value_len));
+    std::memset(t_buffer.data() + 2 + t_value.size(), 0, static_cast<size_t>(t_max_len - t_value.size()));
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeWString(const uint16_t* t_code_units, uint32_t t_num_units, uint32_t t_max_len,
-    uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    if (t_buffer_size < static_cast<size_t>(4 + t_max_len * 2))
+inline std::expected<void, CodecStatus> encodeWString(std::span<const uint16_t> t_code_units, StringCapacity t_capacity,
+    WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+    const uint32_t t_max_len = t_capacity.value;
+    const uint32_t t_num_units = static_cast<uint32_t>(t_code_units.size());
+    if (t_buffer.size() < static_cast<size_t>(4 + t_max_len * 2))
         return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     if (t_num_units > t_max_len)
         return std::unexpected(CodecStatus::STRING_TOO_LONG);
-    toEndian<uint16_t>(static_cast<uint16_t>(t_max_len), t_ptr, t_endian);
-    toEndian<uint16_t>(static_cast<uint16_t>(t_num_units), t_ptr + 2, t_endian);
+    toEndian<uint16_t>(static_cast<uint16_t>(t_max_len), t_buffer.data(), t_endian);
+    toEndian<uint16_t>(static_cast<uint16_t>(t_num_units), t_buffer.data() + 2, t_endian);
     for (uint32_t i = 0; i < t_num_units; ++i) {
-        toEndian<uint16_t>(t_code_units[i], t_ptr + 4 + (i * 2), t_endian);
+        toEndian<uint16_t>(t_code_units[i], t_buffer.data() + 4 + (i * 2), t_endian);
     }
     uint32_t tail_bytes = (t_max_len - t_num_units) * 2;
     if (tail_bytes > 0)
-        std::memset(t_ptr + 4 + (t_num_units * 2), 0, static_cast<size_t>(tail_bytes));
+        std::memset(t_buffer.data() + 4 + (t_num_units * 2), 0, static_cast<size_t>(tail_bytes));
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeXString(
-    const char* t_value, uint32_t t_value_len, uint32_t t_max_len, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    if (t_buffer_size < static_cast<size_t>(8 + t_max_len))
+inline std::expected<void, CodecStatus> encodeXString(std::string_view t_value, StringCapacity t_capacity, WriteBuffer t_buffer,
+    Endian t_endian = Endian::Big) {
+    const uint32_t t_max_len = t_capacity.value;
+    if (t_buffer.size() < static_cast<size_t>(8 + t_max_len))
         return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
-    if (t_value_len > t_max_len)
+    if (t_value.size() > t_max_len)
         return std::unexpected(CodecStatus::STRING_TOO_LONG);
-    toEndian<uint32_t>(t_max_len, t_ptr, t_endian);
-    toEndian<uint32_t>(t_value_len, t_ptr + 4, t_endian);
-    std::memcpy(t_ptr + 8, t_value, static_cast<std::size_t>(t_value_len));
-    std::memset(t_ptr + 8 + t_value_len, 0, static_cast<size_t>(t_max_len - t_value_len));
+    toEndian<uint32_t>(t_max_len, t_buffer.data(), t_endian);
+    toEndian<uint32_t>(static_cast<uint32_t>(t_value.size()), t_buffer.data() + 4, t_endian);
+    std::memcpy(t_buffer.data() + 8, t_value.data(), t_value.size());
+    std::memset(t_buffer.data() + 8 + t_value.size(), 0, static_cast<size_t>(t_max_len - t_value.size()));
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeXWString(const uint16_t* t_code_units, uint32_t t_num_units, uint32_t t_max_len,
-    uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    if (t_buffer_size < static_cast<size_t>(8 + t_max_len * 2))
+inline std::expected<void, CodecStatus> encodeXWString(std::span<const uint16_t> t_code_units, StringCapacity t_capacity,
+    WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+    const uint32_t t_max_len = t_capacity.value;
+    const uint32_t t_num_units = static_cast<uint32_t>(t_code_units.size());
+    if (t_buffer.size() < static_cast<size_t>(8 + t_max_len * 2))
         return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
     if (t_num_units > t_max_len)
         return std::unexpected(CodecStatus::STRING_TOO_LONG);
-    toEndian<uint32_t>(t_max_len, t_ptr, t_endian);
-    toEndian<uint32_t>(t_num_units, t_ptr + 4, t_endian);
+    toEndian<uint32_t>(t_max_len, t_buffer.data(), t_endian);
+    toEndian<uint32_t>(t_num_units, t_buffer.data() + 4, t_endian);
     for (uint32_t i = 0; i < t_num_units; ++i) {
-        toEndian<uint16_t>(t_code_units[i], t_ptr + 8 + (i * 2), t_endian);
+        toEndian<uint16_t>(t_code_units[i], t_buffer.data() + 8 + (i * 2), t_endian);
     }
     uint32_t tail_bytes = (t_max_len - t_num_units) * 2;
     if (tail_bytes > 0)
-        std::memset(t_ptr + 8 + (t_num_units * 2), 0, static_cast<size_t>(tail_bytes));
+        std::memset(t_buffer.data() + 8 + (t_num_units * 2), 0, static_cast<size_t>(tail_bytes));
     return {};
 }
 
 inline std::expected<void, CodecStatus> encodeDateTime(
-    int t_year, int t_month, int t_day, int t_hour, int t_minute, int t_second, int t_day_of_week, uint8_t* t_ptr, size_t t_buffer_size) {
-    if (t_buffer_size < 8)
+    int t_year, int t_month, int t_day, int t_hour, int t_minute, int t_second, int t_day_of_week, WriteBuffer t_buffer) {
+    if (t_buffer.size() < 8)
         return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
-    t_ptr[0] = decToBcd(t_year % 100);
-    t_ptr[1] = decToBcd(t_month);
-    t_ptr[2] = decToBcd(t_day);
-    t_ptr[3] = decToBcd(t_hour);
-    t_ptr[4] = decToBcd(t_minute);
-    t_ptr[5] = decToBcd(t_second);
-    t_ptr[6] = 0;
-    t_ptr[7] = static_cast<uint8_t>(t_day_of_week);
+    t_buffer[0] = decToBcd(t_year % 100);
+    t_buffer[1] = decToBcd(t_month);
+    t_buffer[2] = decToBcd(t_day);
+    t_buffer[3] = decToBcd(t_hour);
+    t_buffer[4] = decToBcd(t_minute);
+    t_buffer[5] = decToBcd(t_second);
+    t_buffer[6] = 0;
+    t_buffer[7] = static_cast<uint8_t>(t_day_of_week);
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeDtl(
-    const DtlComponents& t_components, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    if (t_buffer_size < 12)
+inline std::expected<void, CodecStatus> encodeDtl(const DtlComponents& t_components, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+    if (t_buffer.size() < 12)
         return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
-    toEndian<uint16_t>(t_components.year, t_ptr, t_endian);
-    t_ptr[2] = t_components.month;
-    t_ptr[3] = t_components.day;
-    t_ptr[4] = t_components.day_of_week;
-    t_ptr[5] = t_components.hour;
-    t_ptr[6] = t_components.minute;
-    t_ptr[7] = t_components.second;
-    toEndian<uint32_t>(t_components.nanosecond, t_ptr + 8, t_endian);
+    toEndian<uint16_t>(t_components.year, t_buffer.data(), t_endian);
+    t_buffer[2] = t_components.month;
+    t_buffer[3] = t_components.day;
+    t_buffer[4] = t_components.day_of_week;
+    t_buffer[5] = t_components.hour;
+    t_buffer[6] = t_components.minute;
+    t_buffer[7] = t_components.second;
+    toEndian<uint32_t>(t_components.nanosecond, t_buffer.data() + 8, t_endian);
     return {};
+}
+
+// Legacy (uint8_t*, size_t) adapters.
+//
+// Kept intentionally without [[deprecated]]: deploying the attribute here
+// would spray warnings over the ~20 existing pointer-based call sites
+// (gateway encoding, opcua adapters, s7shell, plcsim...) while we migrate
+// them to the span API at their own pace. Each adapter forwards 1:1 to
+// the span primary above; no behavior difference.
+
+inline std::expected<void, CodecStatus> encodeBool(bool t_value, uint8_t t_bit_index, uint8_t* t_ptr, size_t t_buffer_size) {
+    return encodeBool(t_value, BitOffset{t_bit_index}, WriteBuffer(t_ptr, t_buffer_size));
+}
+
+inline std::expected<void, CodecStatus> encodeU8(uint8_t t_value, uint8_t* t_ptr, size_t t_buffer_size) {
+    return encodeU8(t_value, WriteBuffer(t_ptr, t_buffer_size));
+}
+
+inline std::expected<void, CodecStatus> encodeI8(int8_t t_value, uint8_t* t_ptr, size_t t_buffer_size) {
+    return encodeI8(t_value, WriteBuffer(t_ptr, t_buffer_size));
+}
+
+inline std::expected<void, CodecStatus> encodeI16(int16_t t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
+    return encodeI16(t_value, WriteBuffer(t_ptr, t_buffer_size), t_endian);
+}
+
+inline std::expected<void, CodecStatus> encodeU16(uint16_t t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
+    return encodeU16(t_value, WriteBuffer(t_ptr, t_buffer_size), t_endian);
+}
+
+inline std::expected<void, CodecStatus> encodeI32(int32_t t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
+    return encodeI32(t_value, WriteBuffer(t_ptr, t_buffer_size), t_endian);
+}
+
+inline std::expected<void, CodecStatus> encodeU32(uint32_t t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
+    return encodeU32(t_value, WriteBuffer(t_ptr, t_buffer_size), t_endian);
+}
+
+inline std::expected<void, CodecStatus> encodeI64(int64_t t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
+    return encodeI64(t_value, WriteBuffer(t_ptr, t_buffer_size), t_endian);
+}
+
+inline std::expected<void, CodecStatus> encodeU64(uint64_t t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
+    return encodeU64(t_value, WriteBuffer(t_ptr, t_buffer_size), t_endian);
+}
+
+inline std::expected<void, CodecStatus> encodeReal(float t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
+    return encodeReal(t_value, WriteBuffer(t_ptr, t_buffer_size), t_endian);
+}
+
+inline std::expected<void, CodecStatus> encodeLReal(double t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
+    return encodeLReal(t_value, WriteBuffer(t_ptr, t_buffer_size), t_endian);
+}
+
+inline std::expected<void, CodecStatus> encodeString(
+    const char* t_value, uint32_t t_value_len, uint32_t t_max_len, uint8_t* t_ptr, size_t t_buffer_size) {
+    return encodeString(std::string_view(t_value, t_value_len), StringCapacity{t_max_len}, WriteBuffer(t_ptr, t_buffer_size));
+}
+
+inline std::expected<void, CodecStatus> encodeWString(const uint16_t* t_code_units, uint32_t t_num_units, uint32_t t_max_len,
+    uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
+    return encodeWString(
+        std::span<const uint16_t>(t_code_units, t_num_units), StringCapacity{t_max_len}, WriteBuffer(t_ptr, t_buffer_size), t_endian);
+}
+
+inline std::expected<void, CodecStatus> encodeXString(
+    const char* t_value, uint32_t t_value_len, uint32_t t_max_len, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
+    return encodeXString(
+        std::string_view(t_value, t_value_len), StringCapacity{t_max_len}, WriteBuffer(t_ptr, t_buffer_size), t_endian);
+}
+
+inline std::expected<void, CodecStatus> encodeXWString(const uint16_t* t_code_units, uint32_t t_num_units, uint32_t t_max_len,
+    uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
+    return encodeXWString(
+        std::span<const uint16_t>(t_code_units, t_num_units), StringCapacity{t_max_len}, WriteBuffer(t_ptr, t_buffer_size), t_endian);
+}
+
+inline std::expected<void, CodecStatus> encodeDateTime(
+    int t_year, int t_month, int t_day, int t_hour, int t_minute, int t_second, int t_day_of_week, uint8_t* t_ptr, size_t t_buffer_size) {
+    return encodeDateTime(t_year, t_month, t_day, t_hour, t_minute, t_second, t_day_of_week, WriteBuffer(t_ptr, t_buffer_size));
+}
+
+inline std::expected<void, CodecStatus> encodeDtl(const DtlComponents& t_components, uint8_t* t_ptr, size_t t_buffer_size,
+    Endian t_endian = Endian::Big) {
+    return encodeDtl(t_components, WriteBuffer(t_ptr, t_buffer_size), t_endian);
 }
 
 inline bool parseTimeString(const char* raw, int64_t& out_ms) {
@@ -429,216 +618,183 @@ inline std::string formatDecodedValue(const DecodedValue& t_decoded_value, Type 
 
 // --- Main API ---
 
-inline DecodedValue decodeScalar(
-    Type t_type, const uint8_t* t_ptr, size_t t_buffer_size, uint8_t t_bit_index = 0, uint32_t t_count = 0, Endian t_endian = Endian::Big) {
-    auto check = [&](size_t needed) -> bool { return t_buffer_size >= needed; };
+/**
+ * @brief Decode one scalar value of t_type from t_buffer.
+ *
+ * Returns an invalid DecodedValue (monostate — NOT a std::expected) on
+ * every failure: bounds violation, unsupported type, everything. The
+ * buffer is never assumed large; every read is guarded by size().
+ * NOTE: unlike the encode side, the Bool bit position is not range
+ * checked on decode — that matches the historical behavior.
+ */
+inline DecodedValue decodeScalar(Type t_type, ReadBuffer t_buffer, const DecodeOptions& t_options = {}) {
+    auto check = [&](size_t needed) -> bool { return t_buffer.size() >= needed; };
     switch (t_type) {
         case Type::Bool:
             if (!check(1))
                 return {};
-            return DecodedValue::makeBool(static_cast<bool>((t_ptr[0] >> t_bit_index) & 0x01));
+            return DecodedValue::makeBool(static_cast<bool>((t_buffer[0] >> t_options.bitOffset.value) & 0x01));
         case Type::Byte:
         case Type::USInt:
         case Type::Char:
             if (!check(1))
                 return {};
-            return DecodedValue::makeUnsigned(static_cast<uint64_t>(t_ptr[0]));
+            return DecodedValue::makeUnsigned(static_cast<uint64_t>(t_buffer[0]));
         case Type::SInt:
             if (!check(1))
                 return {};
-            return DecodedValue::makeSigned(static_cast<int64_t>(static_cast<int8_t>(t_ptr[0])));
+            return DecodedValue::makeSigned(static_cast<int64_t>(static_cast<int8_t>(t_buffer[0])));
         case Type::Int:
             if (!check(2))
                 return {};
-            return DecodedValue::makeSigned(static_cast<int64_t>(fromEndian<int16_t>(t_ptr, t_endian)));
+            return DecodedValue::makeSigned(static_cast<int64_t>(fromEndian<int16_t>(t_buffer.subspan(0), t_options.endian)));
         case Type::UInt:
         case Type::Word:
             if (!check(2))
                 return {};
-            return DecodedValue::makeUnsigned(static_cast<uint64_t>(fromEndian<uint16_t>(t_ptr, t_endian)));
+            return DecodedValue::makeUnsigned(static_cast<uint64_t>(fromEndian<uint16_t>(t_buffer.subspan(0), t_options.endian)));
         case Type::Date:
             if (!check(2))
                 return {};
-            return DecodedValue::makeString(Date(fromEndian<uint16_t>(t_ptr, t_endian)).toString());
+            return DecodedValue::makeString(Date(fromEndian<uint16_t>(t_buffer.subspan(0), t_options.endian)).toString());
         case Type::WChar:
             if (!check(2))
                 return {};
-            return DecodedValue::makeUnsigned(static_cast<uint64_t>(fromEndian<uint16_t>(t_ptr, t_endian)));
+            return DecodedValue::makeUnsigned(static_cast<uint64_t>(fromEndian<uint16_t>(t_buffer.subspan(0), t_options.endian)));
         case Type::DInt:
             if (!check(4))
                 return {};
-            return DecodedValue::makeSigned(static_cast<int64_t>(fromEndian<int32_t>(t_ptr, t_endian)));
+            return DecodedValue::makeSigned(static_cast<int64_t>(fromEndian<int32_t>(t_buffer.subspan(0), t_options.endian)));
         case Type::DateTime: {
             if (!check(8))
                 return {};
             DateTime dt;
-            std::memcpy(dt.data, t_ptr, 8);
+            std::memcpy(dt.data, t_buffer.data(), 8);
             return DecodedValue::makeString(dt.toString());
         }
         case Type::Time:
             if (!check(4))
                 return {};
-            return DecodedValue::makeSigned(static_cast<int64_t>(fromEndian<int32_t>(t_ptr, t_endian)));
+            return DecodedValue::makeSigned(static_cast<int64_t>(fromEndian<int32_t>(t_buffer.subspan(0), t_options.endian)));
         case Type::UDInt:
         case Type::DWord:
             if (!check(4))
                 return {};
-            return DecodedValue::makeUnsigned(static_cast<uint64_t>(fromEndian<uint32_t>(t_ptr, t_endian)));
+            return DecodedValue::makeUnsigned(static_cast<uint64_t>(fromEndian<uint32_t>(t_buffer.subspan(0), t_options.endian)));
         case Type::TimeOfDay:
             if (!check(4))
                 return {};
-            return DecodedValue::makeString(TOD(fromEndian<uint32_t>(t_ptr, t_endian)).toString());
+            return DecodedValue::makeString(TOD(fromEndian<uint32_t>(t_buffer.subspan(0), t_options.endian)).toString());
         case Type::LInt:
             if (!check(8))
                 return {};
-            return DecodedValue::makeSigned(static_cast<int64_t>(fromEndian<int64_t>(t_ptr, t_endian)));
+            return DecodedValue::makeSigned(static_cast<int64_t>(fromEndian<int64_t>(t_buffer.subspan(0), t_options.endian)));
         case Type::ULInt:
         case Type::LWord:
             if (!check(8))
                 return {};
-            return DecodedValue::makeUnsigned(static_cast<uint64_t>(fromEndian<uint64_t>(t_ptr, t_endian)));
+            return DecodedValue::makeUnsigned(static_cast<uint64_t>(fromEndian<uint64_t>(t_buffer.subspan(0), t_options.endian)));
         case Type::LTime:
             if (!check(8))
                 return {};
-            return DecodedValue::makeString(LTime(fromEndian<int64_t>(t_ptr, t_endian)).toString());
+            return DecodedValue::makeString(LTime(fromEndian<int64_t>(t_buffer.subspan(0), t_options.endian)).toString());
         case Type::LTimeOfDay:
             if (!check(8))
                 return {};
-            return DecodedValue::makeString(LTOD(fromEndian<uint64_t>(t_ptr, t_endian)).toString());
+            return DecodedValue::makeString(LTOD(fromEndian<uint64_t>(t_buffer.subspan(0), t_options.endian)).toString());
         case Type::LDT:
         case Type::LDTL:
             if (!check(8))
                 return {};
             // For now, represent LDT/LDTL as int64_t nanoseconds since 1970 for raw access.
             // SGRN OPC UA layer intercepts this to format as UA_DateTime.
-            return DecodedValue::makeSigned(static_cast<int64_t>(fromEndian<int64_t>(t_ptr, t_endian)));
+            return DecodedValue::makeSigned(static_cast<int64_t>(fromEndian<int64_t>(t_buffer.subspan(0), t_options.endian)));
         case Type::Real:
             if (!check(4))
                 return {};
-            return DecodedValue::makeFloat(fromEndian<float>(t_ptr, t_endian));
+            return DecodedValue::makeFloat(fromEndian<float>(t_buffer.subspan(0), t_options.endian));
         case Type::LReal:
             if (!check(8))
                 return {};
-            return DecodedValue::makeDouble(fromEndian<double>(t_ptr, t_endian));
+            return DecodedValue::makeDouble(fromEndian<double>(t_buffer.subspan(0), t_options.endian));
         case Type::DTL: {
             if (!check(12))
                 return {};
             DTL dtl;
-            dtl.year = fromEndian<uint16_t>(t_ptr, t_endian);
-            dtl.month = t_ptr[2];
-            dtl.day = t_ptr[3];
-            dtl.hour = t_ptr[5];
-            dtl.minute = t_ptr[6];
-            dtl.second = t_ptr[7];
-            dtl.nanosecond = fromEndian<uint32_t>(t_ptr + 8, t_endian);
+            dtl.year = fromEndian<uint16_t>(t_buffer.subspan(0), t_options.endian);
+            dtl.month = t_buffer[2];
+            dtl.day = t_buffer[3];
+            dtl.hour = t_buffer[5];
+            dtl.minute = t_buffer[6];
+            dtl.second = t_buffer[7];
+            dtl.nanosecond = fromEndian<uint32_t>(t_buffer.subspan(8), t_options.endian);
             return DecodedValue::makeString(dtl.toString());
         }
         case Type::String: {
             if (!check(2))
                 return {};
-            uint8_t cur_len = t_ptr[1];
-            uint32_t max_len = (t_count > 0 ? t_count : 254);
+            uint8_t cur_len = t_buffer[1];
+            uint32_t max_len = (t_options.stringCapacity.value > 0 ? t_options.stringCapacity.value : 254);
             if (cur_len > max_len)
                 cur_len = static_cast<uint8_t>(max_len);
             if (!check(2 + cur_len))
                 return {};
-            return DecodedValue::makeString(std::string(reinterpret_cast<const char*>(&t_ptr[2]), cur_len));
+            return DecodedValue::makeString(std::string(reinterpret_cast<const char*>(&t_buffer[2]), cur_len));
         }
         case Type::WString: {
             if (!check(4))
                 return {};
-            uint32_t cur_len = static_cast<uint32_t>(fromEndian<uint16_t>(t_ptr + 2, t_endian));
-            uint32_t max_len = (t_count > 0 ? t_count : 16382);
+            uint32_t cur_len = static_cast<uint32_t>(fromEndian<uint16_t>(t_buffer.subspan(2), t_options.endian));
+            uint32_t max_len = (t_options.stringCapacity.value > 0 ? t_options.stringCapacity.value : 16382);
             if (cur_len > max_len)
                 cur_len = max_len;
             if (!check(4 + cur_len * 2))
                 return {};
-            std::string result;
-            result.reserve(static_cast<std::size_t>(cur_len) * 3);
-            for (uint32_t i = 0; i < cur_len; ++i) {
-                uint16_t ch = fromEndian<uint16_t>(t_ptr + 4 + (i * 2), t_endian);
-                if (ch >= 0xD800u && ch <= 0xDBFFu && i + 1 < cur_len) {
-                    uint16_t low = fromEndian<uint16_t>(t_ptr + 4 + ((i + 1) * 2), t_endian);
-                    if (low >= 0xDC00u && low <= 0xDFFFu) {
-                        uint32_t cp = 0x10000u + (static_cast<uint32_t>(ch - 0xD800u) << 10) + static_cast<uint32_t>(low - 0xDC00u);
-                        result.push_back(static_cast<char>(0xF0u | (cp >> 18)));
-                        result.push_back(static_cast<char>(0x80u | ((cp >> 12) & 0x3Fu)));
-                        result.push_back(static_cast<char>(0x80u | ((cp >> 6) & 0x3Fu)));
-                        result.push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
-                        ++i;
-                        continue;
-                    }
-                }
-                if (ch < 0x80u) {
-                    result.push_back(static_cast<char>(ch));
-                } else if (ch < 0x800u) {
-                    result.push_back(static_cast<char>(0xC0u | (ch >> 6)));
-                    result.push_back(static_cast<char>(0x80u | (ch & 0x3Fu)));
-                } else {
-                    result.push_back(static_cast<char>(0xE0u | (ch >> 12)));
-                    result.push_back(static_cast<char>(0x80u | ((ch >> 6) & 0x3Fu)));
-                    result.push_back(static_cast<char>(0x80u | (ch & 0x3Fu)));
-                }
-            }
-            return DecodedValue::makeString(std::move(result));
+            return DecodedValue::makeString(utf16ToUtf8(t_buffer.subspan(4), cur_len, t_options.endian));
         }
         case Type::XString: {
             if (!check(8))
                 return {};
-            uint32_t cur_len = fromEndian<uint32_t>(t_ptr + 4, t_endian);
-            uint32_t max_len = (t_count > 0 ? t_count : fromEndian<uint32_t>(t_ptr, t_endian));
+            uint32_t cur_len = fromEndian<uint32_t>(t_buffer.subspan(4), t_options.endian);
+            uint32_t max_len = (t_options.stringCapacity.value > 0 ? t_options.stringCapacity.value : fromEndian<uint32_t>(t_buffer.subspan(0), t_options.endian));
             if (cur_len > max_len)
                 cur_len = max_len;
             if (!check(8 + cur_len))
                 return {};
-            return DecodedValue::makeString(std::string(reinterpret_cast<const char*>(&t_ptr[8]), cur_len));
+            return DecodedValue::makeString(std::string(reinterpret_cast<const char*>(&t_buffer[8]), cur_len));
         }
         case Type::XWString: {
             if (!check(8))
                 return {};
-            uint32_t cur_len = fromEndian<uint32_t>(t_ptr + 4, t_endian);
-            uint32_t max_len = (t_count > 0 ? t_count : fromEndian<uint32_t>(t_ptr, t_endian));
+            uint32_t cur_len = fromEndian<uint32_t>(t_buffer.subspan(4), t_options.endian);
+            uint32_t max_len = (t_options.stringCapacity.value > 0 ? t_options.stringCapacity.value : fromEndian<uint32_t>(t_buffer.subspan(0), t_options.endian));
             if (cur_len > max_len)
                 cur_len = max_len;
             if (!check(8 + cur_len * 2))
                 return {};
-            std::string result;
-            result.reserve(static_cast<std::size_t>(cur_len) * 3);
-            for (uint32_t i = 0; i < cur_len; ++i) {
-                uint16_t ch = fromEndian<uint16_t>(t_ptr + 8 + (i * 2), t_endian);
-                if (ch >= 0xD800u && ch <= 0xDBFFu && i + 1 < cur_len) {
-                    uint16_t low = fromEndian<uint16_t>(t_ptr + 8 + ((i + 1) * 2), t_endian);
-                    if (low >= 0xDC00u && low <= 0xDFFFu) {
-                        uint32_t cp = 0x10000u + (static_cast<uint32_t>(ch - 0xD800u) << 10) + static_cast<uint32_t>(low - 0xDC00u);
-                        result.push_back(static_cast<char>(0xF0u | (cp >> 18)));
-                        result.push_back(static_cast<char>(0x80u | ((cp >> 12) & 0x3Fu)));
-                        result.push_back(static_cast<char>(0x80u | ((cp >> 6) & 0x3Fu)));
-                        result.push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
-                        ++i;
-                        continue;
-                    }
-                }
-                if (ch < 0x80u) {
-                    result.push_back(static_cast<char>(ch));
-                } else if (ch < 0x800u) {
-                    result.push_back(static_cast<char>(0xC0u | (ch >> 6)));
-                    result.push_back(static_cast<char>(0x80u | (ch & 0x3Fu)));
-                } else {
-                    result.push_back(static_cast<char>(0xE0u | (ch >> 12)));
-                    result.push_back(static_cast<char>(0x80u | ((ch >> 6) & 0x3Fu)));
-                    result.push_back(static_cast<char>(0x80u | (ch & 0x3Fu)));
-                }
-            }
-            return DecodedValue::makeString(std::move(result));
+            return DecodedValue::makeString(utf16ToUtf8(t_buffer.subspan(8), cur_len, t_options.endian));
         }
         case Type::Counter:
         case Type::Timer:
             if (!check(2))
                 return {};
-            return DecodedValue::makeUnsigned(static_cast<uint64_t>(fromBE<uint16_t>(t_ptr)));
+            return DecodedValue::makeUnsigned(static_cast<uint64_t>(fromBE<uint16_t>(t_buffer)));
         default:
             return {};
     }
+}
+
+// Legacy (uint8_t*, size_t) adapter — the original signature of this
+// entry point; kept for the existing pointer-based call sites. The
+// historical t_count parameter is exclusively the string max_len, so it
+// maps to DecodeOptions::stringCapacity.
+inline DecodedValue decodeScalar(
+    Type t_type, const uint8_t* t_ptr, size_t t_buffer_size, uint8_t t_bit_index = 0, uint32_t t_count = 0, Endian t_endian = Endian::Big) {
+    DecodeOptions options;
+    options.endian = t_endian;
+    options.bitOffset = BitOffset{t_bit_index};
+    options.stringCapacity = StringCapacity{t_count};
+    return decodeScalar(t_type, ReadBuffer(t_ptr, t_buffer_size), options);
 }
 
 // Single source of truth for "how many characters can this string field hold".
@@ -652,116 +808,61 @@ inline uint32_t stringDecodeCapacity(Type t_type, uint32_t t_count, uint32_t t_s
     return t_string_capacity > 0 ? t_string_capacity : t_count;
 }
 
-inline std::expected<void, CodecStatus> encodeScalar(const DecodedValue& t_decoded_value, Type t_type, uint8_t* t_ptr, size_t t_buffer_size,
-    uint8_t t_bit_index = 0, uint32_t t_count = 0, Endian t_endian = Endian::Big) {
+/**
+ * @brief Encode t_decoded_value as t_type into t_buffer.
+ *
+ * Returns an error CodecStatus on any failure (invalid variant state,
+ * bounds violation, string too long, invalid UTF-8, ...). The buffer is
+ * never assumed large; every write is guarded by size().
+ */
+inline std::expected<void, CodecStatus> encodeScalar(
+    const DecodedValue& t_decoded_value, Type t_type, WriteBuffer t_buffer, const EncodeOptions& t_options = {}) {
     if (!t_decoded_value.valid())
         return std::unexpected(CodecStatus::INVALID_VALUE);
     switch (t_type) {
         case Type::Bool:
-            return encodeBool(t_decoded_value.asInt64() != 0, t_bit_index, t_ptr, t_buffer_size);
+            return encodeBool(t_decoded_value.asInt64() != 0, t_options.bitOffset, t_buffer);
         case Type::Byte:
         case Type::USInt:
         case Type::Char:
-            return encodeU8(static_cast<uint8_t>(t_decoded_value.asInt64()), t_ptr, t_buffer_size);
+            return encodeU8(static_cast<uint8_t>(t_decoded_value.asInt64()), t_buffer);
         case Type::SInt:
-            return encodeI8(static_cast<int8_t>(t_decoded_value.asInt64()), t_ptr, t_buffer_size);
+            return encodeI8(static_cast<int8_t>(t_decoded_value.asInt64()), t_buffer);
         case Type::Int:
-            return encodeI16(static_cast<int16_t>(t_decoded_value.asInt64()), t_ptr, t_buffer_size, t_endian);
+            return encodeI16(static_cast<int16_t>(t_decoded_value.asInt64()), t_buffer, t_options.endian);
         case Type::UInt:
         case Type::Word:
         case Type::Counter:
         case Type::Timer:
-            return encodeU16(static_cast<uint16_t>(t_decoded_value.asInt64()), t_ptr, t_buffer_size, t_endian);
+            return encodeU16(static_cast<uint16_t>(t_decoded_value.asInt64()), t_buffer, t_options.endian);
         case Type::DInt:
         case Type::Time:
-            return encodeI32(static_cast<int32_t>(t_decoded_value.asInt64()), t_ptr, t_buffer_size, t_endian);
+            return encodeI32(static_cast<int32_t>(t_decoded_value.asInt64()), t_buffer, t_options.endian);
         case Type::UDInt:
         case Type::DWord:
-            return encodeU32(static_cast<uint32_t>(t_decoded_value.asInt64()), t_ptr, t_buffer_size, t_endian);
+            return encodeU32(static_cast<uint32_t>(t_decoded_value.asInt64()), t_buffer, t_options.endian);
         case Type::LInt:
-            return encodeI64(t_decoded_value.asInt64(), t_ptr, t_buffer_size, t_endian);
+            return encodeI64(t_decoded_value.asInt64(), t_buffer, t_options.endian);
         case Type::ULInt:
         case Type::LWord:
-            return encodeU64(static_cast<uint64_t>(t_decoded_value.asInt64()), t_ptr, t_buffer_size, t_endian);
+            return encodeU64(static_cast<uint64_t>(t_decoded_value.asInt64()), t_buffer, t_options.endian);
         case Type::Real:
-            return encodeReal(static_cast<float>(t_decoded_value.asDouble()), t_ptr, t_buffer_size, t_endian);
+            return encodeReal(static_cast<float>(t_decoded_value.asDouble()), t_buffer, t_options.endian);
         case Type::LReal:
-            return encodeLReal(t_decoded_value.asDouble(), t_ptr, t_buffer_size, t_endian);
+            return encodeLReal(t_decoded_value.asDouble(), t_buffer, t_options.endian);
         case Type::String:
-            return encodeString(
-                t_decoded_value.s().c_str(), static_cast<uint32_t>(t_decoded_value.s().length()), t_count, t_ptr, t_buffer_size);
+            return encodeString(t_decoded_value.s(), t_options.stringCapacity, t_buffer);
         case Type::XString:
-            return encodeXString(
-                t_decoded_value.s().c_str(), static_cast<uint32_t>(t_decoded_value.s().length()), t_count, t_ptr, t_buffer_size, t_endian);
-        case Type::WString: {
-            std::u16string utf16;
-            const std::string& input = t_decoded_value.s();
-            bool ok = true;
-            for (size_t i = 0; i < input.length(); ++i) {
-                uint32_t cp = 0;
-                uint8_t c = static_cast<uint8_t>(input[i]);
-                if (c < 0x80) {
-                    cp = c;
-                } else if ((c & 0xe0) == 0xc0) {
-                    if (i + 1 >= input.length()) {
-                        ok = false;
-                        break;
-                    }
-                    uint8_t b1 = static_cast<uint8_t>(input[++i]);
-                    cp = ((c & 0x1f) << 6) | (b1 & 0x3f);
-                } else if ((c & 0xf0) == 0xe0) {
-                    if (i + 2 >= input.length()) {
-                        ok = false;
-                        break;
-                    }
-                    uint8_t b1 = static_cast<uint8_t>(input[++i]);
-                    uint8_t b2 = static_cast<uint8_t>(input[++i]);
-                    cp = ((c & 0x0f) << 12) | ((b1 & 0x3f) << 6) | (b2 & 0x3f);
-                } else {
-                    ok = false;
-                    break;
-                }
-                utf16.push_back(static_cast<char16_t>(cp));
-            }
-            if (!ok)
-                return std::unexpected(CodecStatus::INVALID_UTF8);
-            return encodeWString(reinterpret_cast<const uint16_t*>(utf16.c_str()), static_cast<uint32_t>(utf16.size()), t_count, t_ptr,
-                t_buffer_size, t_endian);
-        }
+            return encodeXString(t_decoded_value.s(), t_options.stringCapacity, t_buffer, t_options.endian);
+        case Type::WString:
         case Type::XWString: {
             std::u16string utf16;
-            const std::string& input = t_decoded_value.s();
-            bool ok = true;
-            for (size_t i = 0; i < input.length(); ++i) {
-                uint32_t cp = 0;
-                uint8_t c = static_cast<uint8_t>(input[i]);
-                if (c < 0x80) {
-                    cp = c;
-                } else if ((c & 0xe0) == 0xc0) {
-                    if (i + 1 >= input.length()) {
-                        ok = false;
-                        break;
-                    }
-                    uint8_t b1 = static_cast<uint8_t>(input[++i]);
-                    cp = ((c & 0x1f) << 6) | (b1 & 0x3f);
-                } else if ((c & 0xf0) == 0xe0) {
-                    if (i + 2 >= input.length()) {
-                        ok = false;
-                        break;
-                    }
-                    uint8_t b1 = static_cast<uint8_t>(input[++i]);
-                    uint8_t b2 = static_cast<uint8_t>(input[++i]);
-                    cp = ((c & 0x0f) << 12) | ((b1 & 0x3f) << 6) | (b2 & 0x3f);
-                } else {
-                    ok = false;
-                    break;
-                }
-                utf16.push_back(static_cast<char16_t>(cp));
-            }
-            if (!ok)
+            if (!utf8ToUtf16(t_decoded_value.s(), utf16))
                 return std::unexpected(CodecStatus::INVALID_UTF8);
-            return encodeXWString(reinterpret_cast<const uint16_t*>(utf16.c_str()), static_cast<uint32_t>(utf16.size()), t_count, t_ptr,
-                t_buffer_size, t_endian);
+            auto units = std::span<const uint16_t>(reinterpret_cast<const uint16_t*>(utf16.c_str()), utf16.size());
+            if (t_type == Type::WString)
+                return encodeWString(units, t_options.stringCapacity, t_buffer, t_options.endian);
+            return encodeXWString(units, t_options.stringCapacity, t_buffer, t_options.endian);
         }
         case Type::DateTime: {
             if (t_decoded_value.kind() != ValueKind::String)
@@ -769,7 +870,7 @@ inline std::expected<void, CodecStatus> encodeScalar(const DecodedValue& t_decod
             int y, m, d, h, min, s, ms;
             if (std::sscanf(t_decoded_value.s().c_str(), "%d-%d-%d %d:%d:%d.%d", &y, &m, &d, &h, &min, &s, &ms) < 6)
                 return std::unexpected(CodecStatus::INVALID_DATETIME_STRING);
-            return encodeDateTime(y, m, d, h, min, s, 0, t_ptr, t_buffer_size);
+            return encodeDateTime(y, m, d, h, min, s, 0, t_buffer);
         }
         case Type::DTL: {
             if (t_decoded_value.kind() != ValueKind::String)
@@ -778,7 +879,7 @@ inline std::expected<void, CodecStatus> encodeScalar(const DecodedValue& t_decod
             if (std::sscanf(t_decoded_value.s().c_str(), "%hu-%hhu-%hhu %hhu:%hhu:%hhu.%u", &c.year, &c.month, &c.day, &c.hour, &c.minute,
                     &c.second, &c.nanosecond) < 6)
                 return std::unexpected(CodecStatus::INVALID_DTL_STRING);
-            return encodeDtl(c, t_ptr, t_buffer_size, t_endian);
+            return encodeDtl(c, t_buffer, t_options.endian);
         }
         case Type::Date: {
             if (t_decoded_value.kind() == ValueKind::String) {
@@ -786,23 +887,36 @@ inline std::expected<void, CodecStatus> encodeScalar(const DecodedValue& t_decod
                 if (std::sscanf(t_decoded_value.s().c_str(), "%d-%d-%d", &ti.tm_year, &ti.tm_mon, &ti.tm_mday) == 3) {
                     ti.tm_year -= 1900;
                     ti.tm_mon -= 1;
-                    return encodeU16(Date(ti).get(), t_ptr, t_buffer_size, t_endian);
+                    return encodeU16(Date(ti).get(), t_buffer, t_options.endian);
                 }
                 return std::unexpected(CodecStatus::INVALID_DATE_STRING);
             }
-            return encodeU16(static_cast<uint16_t>(t_decoded_value.asInt64()), t_ptr, t_buffer_size, t_endian);
+            return encodeU16(static_cast<uint16_t>(t_decoded_value.asInt64()), t_buffer, t_options.endian);
         }
         case Type::TimeOfDay:
-            return encodeU32(static_cast<uint32_t>(t_decoded_value.asInt64()), t_ptr, t_buffer_size, t_endian);
+            return encodeU32(static_cast<uint32_t>(t_decoded_value.asInt64()), t_buffer, t_options.endian);
         case Type::LTimeOfDay:
-            return encodeU64(static_cast<uint64_t>(t_decoded_value.asInt64()), t_ptr, t_buffer_size, t_endian);
+            return encodeU64(static_cast<uint64_t>(t_decoded_value.asInt64()), t_buffer, t_options.endian);
         case Type::LTime:
         case Type::LDT:
         case Type::LDTL:
-            return encodeI64(t_decoded_value.asInt64(), t_ptr, t_buffer_size, t_endian);
+            return encodeI64(t_decoded_value.asInt64(), t_buffer, t_options.endian);
         default:
             return std::unexpected(CodecStatus::UNSUPPORTED_TYPE);
     }
+}
+
+// Legacy (uint8_t*, size_t) adapter — the original signature of this
+// entry point; kept for the existing pointer-based call sites. The
+// historical t_count parameter is exclusively the string max_len, so it
+// maps to EncodeOptions::stringCapacity.
+inline std::expected<void, CodecStatus> encodeScalar(const DecodedValue& t_decoded_value, Type t_type, uint8_t* t_ptr,
+    size_t t_buffer_size, uint8_t t_bit_index = 0, uint32_t t_count = 0, Endian t_endian = Endian::Big) {
+    EncodeOptions options;
+    options.endian = t_endian;
+    options.bitOffset = BitOffset{t_bit_index};
+    options.stringCapacity = StringCapacity{t_count};
+    return encodeScalar(t_decoded_value, t_type, WriteBuffer(t_ptr, t_buffer_size), options);
 }
 
 } // namespace s7codec

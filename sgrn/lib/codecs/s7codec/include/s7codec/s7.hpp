@@ -55,6 +55,7 @@
 
 #pragma once
 
+#include "buffer.hpp"
 #include "codec.hpp"
 #include "datetime.hpp"
 #include "endian.hpp"
