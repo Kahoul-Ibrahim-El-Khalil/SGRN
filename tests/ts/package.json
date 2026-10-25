@@ -5,17 +5,11 @@
   "devDependencies": {
     "@types/bun": "latest"
   },
-  "dependencies": {
-    "ethernet-ip": "^2.0.0",
-    "node-opcua": "^2.175.6",
-    "node-opcua-server": "^2.175.6"
-  },
   "peerDependencies": {
     "typescript": "^5.0.0"
   },
   "scripts": {
     "test": "bun test",
-    "test:opcua": "bun test tests/southbound-opcua.test.ts",
     "test:eip": "bun test tests/southbound-ethernetip.test.ts"
   }
 }

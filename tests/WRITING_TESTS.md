@@ -92,6 +92,44 @@ build dir/binaries) are UNAVAILABLE/`SKIP`, never failed; entries marked
 3. Rebuild before running: the orchestrator never builds, it only checks
    the binary exists (missing binary → UNAVAILABLE/SKIP).
 
+### Shared test-support fixtures (`sgrn/lib/tests/support/`)
+
+Header-only helpers any C++ test can include — no framework, no target:
+
+- `test_util.hpp` — repo-root detection, free-port probing, mkdtemp, and
+  fork/exec child spawning with SIGTERM teardown (`sgrn::test::*`).
+- `pg_fixture.hpp` — disposable PostgreSQL for datastore tests. With
+  `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD` set it creates a scratch database
+  on that server; otherwise it spawns an ephemeral `initdb`/`postgres`
+  cluster (SGRN_PG_BIN, PATH, or the project micromamba env) on OS-assigned
+  ports and replays `sgrn/lib/datastore/postgres/**` into it (psql-subset
+  flattener: recursive `\ir`, `${POSTGRES_*}` substitution, `$$`-safe
+  statement splitting). Unavailable → `skipReason()` + SKIP/exit 0.
+  See `sgrn/lib/datastore/tests/pg_auth_functions_test.cpp`.
+- `gateway_fixture.hpp` — spawns gateway + s7shell from the release build
+  (SGRN_GATEWAY_BIN/SGRN_S7SHELL_BIN override) with a written gateway.json
+  on randomized ports — replacing the fixed 8080/4840/8102 of the Python
+  fixture. Readiness = GET /endpoints → 200 within 15s.
+  See `sgrn/lib/gateway/tests/opcua_discovery_test.cpp`.
+
+  Fixture knobs (C++ tests only — the Python fixture predates these):
+
+  - Simulation selection: `GatewayFixture gw("tennessee")`. A per-test name
+    wins over the `SGRN_SIMULATION` env; the env stays as the orchestrator
+    fallback, defaulting to `gas_processing`.
+  - `GatewayFixtureOptions` second constructor argument:
+    - `spawn_simulation = false` — run the bare gateway only. Southbound
+      wire tests (Modbus/S7) do NOT spawn s7shell so nothing else contends
+      for the DB arena while values are asserted (the stock simulations
+      would otherwise drift values between a write and its cross-check).
+    - `modbus_listener = true` / `eip_listener = true` — also write a
+      `listen.modbus` / `listen.ethernetip` block (randomized port; adapter
+      servers only boot when their `listen.*` block exists). Read the port
+      via `modbusPort()` / `eipPort()` (0 when not opted in).
+  - `SGRN_KEEP_STATE=1` — retain the temp state dir after the run and print
+    `NOTE: state dir retained: <dir>` so a failing test can be replayed by
+    hand (`gateway <dir>/gateway.json`, HTTP port from gateway.json).
+
 ## Checklist before opening a PR
 
 - `python3 tests/run_tests.py --list` shows the new entry under the right

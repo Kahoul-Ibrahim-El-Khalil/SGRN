@@ -71,9 +71,13 @@ Result<UA_DataValue, OpcUaAdapterError> decodeTypedArrayToDataValue(const OpcUaD
     const size_t n = t_ctx.p_node_ctx->array_length;
     const int ua_type_idx = t_ctx.p_node_ctx->elem_ua_type_index;
 
-    SGRN_RETURN_ERROR_IF(n == 0 || ua_type_idx < 0, OpcUaAdapterError::INVALID_ARRAY);
+    SGRN_RETURN_ERROR_IF(n == 0, OpcUaAdapterError::INVALID_ARRAY);
 
     const UA_DataType* p_ua_type = (t_ctx.p_node_ctx->enum_type != nullptr) ? &UA_TYPES[UA_TYPES_INT32] : &UA_TYPES[ua_type_idx];
+
+    // Non-enum arrays need a resolved element type; enum arrays always decode
+    // into the builtin Int32 above.
+    SGRN_RETURN_ERROR_IF(t_ctx.p_node_ctx->enum_type == nullptr && ua_type_idx < 0, OpcUaAdapterError::INVALID_ARRAY);
 
     auto* p_arr = UA_Array_new(n, p_ua_type);
 
@@ -110,6 +114,13 @@ Result<UA_DataValue, OpcUaAdapterError> decodeTypedArrayToDataValue(const OpcUaD
         auto decoded =
             s7codec::decodeScalar(t_ctx.p_node_ctx->type, p_elem_ptr, buf_remaining, bit_idx, decode_count, nodeEndian(*t_ctx.p_node_ctx));
 
+        // Enum arrays are projected as Int32 (the UA encoding of enumeration
+        // values, §Part 6 5.1.5). Match on the enum context, not the element
+        // UA type kind: the variant element type is the builtin Int32, and a
+        // custom Enum-DataType member (kind 26) or an Int32 element both mean
+        // "promote the decoded integer into the slot".
+        const bool is_enum_elem = t_ctx.p_node_ctx->enum_type != nullptr || p_ua_type->typeKind == UA_DATATYPEKIND_ENUM;
+
         bool appended = false;
 
         // Temporal arrays are decoded directly into UA_DateTime.
@@ -124,7 +135,7 @@ Result<UA_DataValue, OpcUaAdapterError> decodeTypedArrayToDataValue(const OpcUaD
             }
         } else if (decoded.valid()) {
 
-            if (p_ua_type->typeKind == UA_DATATYPEKIND_ENUM) {
+            if (is_enum_elem) {
                 static_cast<UA_Int32*>(p_arr)[i] =
                     static_cast<UA_Int32>(decoded.kind() == s7codec::ValueKind::SignedInt ? decoded.i() : decoded.u());
 

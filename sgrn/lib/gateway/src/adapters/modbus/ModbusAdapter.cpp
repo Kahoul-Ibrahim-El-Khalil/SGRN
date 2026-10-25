@@ -7,6 +7,7 @@
 #include <sgrn/gateway/adapters/modbus/ModbusAdapter.hpp>
 #include <sgrn/gateway/adapters/modbus/TypeTranslation.hpp>
 #include <sgrn/gateway/adapters/modbus/errors.hpp>
+#include <sgrn/gateway/twin/encoding.hpp>
 #include <sgrn/scl/types.hpp>
 #include <sgrn/wrappers/modbus/Server.hpp>
 
@@ -19,6 +20,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <unordered_map>
 
 #include <cerrno>
 #include <cmath>
@@ -421,7 +423,28 @@ sgrn::Result<void, ::sgrn::common::ErrorClass> ModbusAdapter::syncArenaToMapping
         }
 
         // Encode all successfully-read buffers
+        // NOTE endianness: the binary arena holds field bytes in the block's
+        // own order (tennessee DBs are little), while the Modbus mapping —
+        // both this pack direction and the FC16/FC06 write path's
+        // decodeRegisters→fromBE* step — always works in big-endian canonical
+        // order. Convert each span with the shared twin walker (same rules
+        // the S7 server adapter applies to LE blocks: multi-byte numerics
+        // swapped, strings/DateTime/1-byte units untouched) before packing.
+        std::unordered_map<uint16_t, const ::sgrn::scl::DbSchema*> schema_cache;
         for (size_t i = 0; i < t_entries.size(); ++i) {
+            const uint16_t db = t_entries[i].db_number;
+            auto it = schema_cache.find(db);
+            if (it == schema_cache.end()) {
+                const ::sgrn::scl::DbSchema* p_schema = nullptr;
+                if (p_store_ != nullptr) {
+                    if (auto s = p_store_->getDb(db); !s.hasError())
+                        p_schema = s.value();
+                }
+                it = schema_cache.emplace(db, p_schema).first;
+            }
+            if (it->second != nullptr)
+                ::sgrn::gateway::twin::swapRangeToBigEndian(
+                    it->second->fields, buffers[i].data(), t_entries[i].byte_offset, t_entries[i].byte_offset, t_entries[i].byte_count);
             encodeToRegisters(t_entries[i], buffers[i].data(), tp_regs + t_entries[i].reg_start);
         }
         return {};

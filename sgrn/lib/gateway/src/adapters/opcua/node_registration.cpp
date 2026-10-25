@@ -346,8 +346,16 @@ void addLeafVariableNode(const OpcUaAdapterContext& t_adapter_ctx, const OpcUaNo
     }
 
     if (!t_field.enum_map.empty()) {
-        const std::string sig = enumTypeSignature(t_ua_type_idx, t_field.enum_map);
-        p_enum_type = t_adapter_ctx.p_type_registry->findEnumBySignature(sig);
+        // Enum fields are custom-UDT-aliased, so is_custom_udt above has
+        // already consumed t_ua_type_idx (left at -1). The registry's enum
+        // signatures are keyed by the UA index of the field's *backing
+        // scalar* type (see schema_type_registry collectEnums), so derive
+        // that directly from t_field.type here.
+        const int sig_base = (t_ua_type_idx >= 0) ? t_ua_type_idx : dataTypeToUaTypeIndex(t_field.type).value_or(-1);
+        if (sig_base >= 0) {
+            const std::string sig = enumTypeSignature(sig_base, t_field.enum_map);
+            p_enum_type = t_adapter_ctx.p_type_registry->findEnumBySignature(sig);
+        }
     }
 
     const uint32_t t_field_size = computeFieldSize(t_field, is_array);

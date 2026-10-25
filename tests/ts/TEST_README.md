@@ -16,10 +16,12 @@ The main runner reports missing Bun or build prerequisites before attempting to 
 - `policy.test.ts`: policy behavior.
 - `websocket.test.ts`: WebSocket telemetry.
 - `dashboard.test.ts`: embedded dashboard response.
-- `southbound-s7.test.ts`, `southbound-modbus.test.ts`, `southbound-opcua.test.ts`, `southbound-ethernetip.test.ts`: protocol views and adapters.
+- `southbound-ethernetip.test.ts`: EtherNet/IP protocol views and adapters.
+  (The S7/Modbus/OPC-UA protocol suites were removed once their coverage
+  moved to the native C++ ctest southbound tests.)
 - `southbound-integration.test.ts`: cross-protocol behavior.
 - `s7shell.test.ts`: s7shell command-line behavior.
 
-Run the protocol files directly with `bun test tests/southbound-opcua.test.ts` or `bun test tests/southbound-ethernetip.test.ts`. From `tests/ts/`, the package shortcuts are `bun run test:opcua` and `bun run test:eip`.
+Run the remaining protocol file directly with `bun test tests/southbound-ethernetip.test.ts`. From `tests/ts/`, the package shortcut is `bun run test:eip`.
 
 The fixture uses HTTP/WebSocket port 8080, S7 port 8102, and OPC-UA port 8480. Those ports must be free. See [`src/GatewayProcess.ts`](src/GatewayProcess.ts) for fixture setup and cleanup.

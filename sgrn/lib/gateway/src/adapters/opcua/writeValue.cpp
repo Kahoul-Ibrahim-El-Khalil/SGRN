@@ -289,6 +289,55 @@ UA_StatusCode writeValue(UA_Server* tp_ua_server, const UA_NodeId* tp_session_id
     SGRN_RETURN_IF(!tp_data_value || !tp_data_value->hasValue, UA_STATUSCODE_BADNODATA);
 
     const UA_Variant& t_v = tp_data_value->value;
+
+    // Enum nodes are backed by their SCL base type, so Int32/enum writes
+    // type-check against the registered enum UA_DataType — the raw member
+    // value must still be one the schema declared, or the write would
+    // smuggle an undeclared constant into PLC memory (the twin's read side
+    // would render it as an opaque number instead of a member label).
+    // Non-int payloads fall through to the normal type-mismatch path.
+    if (!p_ctx->enum_map.empty() && tp_data_value && tp_data_value->hasValue) {
+        const UA_Variant& t_v = tp_data_value->value;
+        if (t_v.data != nullptr && t_v.type != nullptr) {
+            const UA_DataType* t_payload = t_v.type;
+            const auto enumBacked = [&] {
+                return t_payload->typeKind == UA_DATATYPEKIND_ENUM ||
+                       (t_payload->typeKind >= UA_DATATYPEKIND_SBYTE && t_payload->typeKind <= UA_DATATYPEKIND_INT32) ||
+                       (t_payload->typeKind >= UA_DATATYPEKIND_BYTE && t_payload->typeKind <= UA_DATATYPEKIND_UINT32);
+            };
+            if (enumBacked() && t_v.arrayLength == 0) {
+                const unsigned w = t_payload->memSize;
+                const bool unsigned_kind = t_payload->typeKind == UA_DATATYPEKIND_BYTE || t_payload->typeKind == UA_DATATYPEKIND_UINT16 ||
+                                           t_payload->typeKind == UA_DATATYPEKIND_UINT32;
+                int64_t raw_val;
+                switch (w) {
+                    case 1:
+                        raw_val = unsigned_kind ? *static_cast<const uint8_t*>(t_v.data) : *static_cast<const int8_t*>(t_v.data);
+                        break;
+                    case 2:
+                        raw_val = unsigned_kind ? *static_cast<const uint16_t*>(t_v.data) : *static_cast<const int16_t*>(t_v.data);
+                        break;
+                    default:
+                        raw_val = unsigned_kind ? *static_cast<const uint32_t*>(t_v.data) : *static_cast<const int32_t*>(t_v.data);
+                        break;
+                }
+                if (p_ctx->enum_map.find(static_cast<int>(raw_val)) == p_ctx->enum_map.end())
+                    return UA_STATUSCODE_BADINVALIDARGUMENT;
+            } else if (t_v.arrayLength > 0 && (t_v.type == &UA_TYPES[UA_TYPES_INT32] || t_v.type->typeKind == UA_DATATYPEKIND_ENUM)) {
+                // Bare enum-typed scalar array: every element must be a member.
+                const size_t w = t_v.type->memSize;
+                for (size_t i = 0; i < t_v.arrayLength; ++i) {
+                    const int64_t elem = w == 4
+                                             ? *reinterpret_cast<const int32_t*>(static_cast<const uint8_t*>(t_v.data) + i * w)
+                                             : (w == 2 ? *reinterpret_cast<const int16_t*>(static_cast<const uint8_t*>(t_v.data) + i * w)
+                                                       : *reinterpret_cast<const int8_t*>(static_cast<const uint8_t*>(t_v.data) + i * w));
+                    if (p_ctx->enum_map.find(static_cast<int>(elem)) == p_ctx->enum_map.end())
+                        return UA_STATUSCODE_BADINVALIDARGUMENT;
+                }
+            }
+        }
+    }
+
     const PlcNode* p_node = p_ctx->server->findSymbol(p_ctx->db_number, p_ctx->field_path);
 
     SGRN_RETURN_IF_NULL(p_node, UA_STATUSCODE_BADNODATA);

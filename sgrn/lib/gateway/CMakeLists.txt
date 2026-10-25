@@ -72,6 +72,7 @@ target_link_libraries(sgrn_gateway_modbus
     PUBLIC  sgrn::common
     PUBLIC  sgrn_scl
     PUBLIC  sgrn::wrappers::modbus
+    PRIVATE sgrn::gateway::twin # swapRangeToBigEndian (LE arena → BE canonical)
     PRIVATE fmt::fmt
 )
 
@@ -579,6 +580,139 @@ if(SGRN_BUILD_TESTS)
     target_compile_definitions(process_commands_order_test PRIVATE ASIO_STANDALONE)
     add_test(NAME process_commands_order_test COMMAND process_commands_order_test)
     sgrn_target(process_commands_order_test)
+
+    # Live-gateway OPC-UA discovery (ported from tests/gateway/opcua_discovery.py):
+    # spawns gateway + s7shell on OS-assigned ports (shared fixture in
+    # sgrn/lib/tests/support), then verifies /registry content against the
+    # OPC-UA address space (NamespaceArray, ObjectsFolder layout, per-DB
+    # DBNumber property) using the vendored open62541 client wrapper.
+    # Missing release binaries → SKIP (exit 0).
+    sgrn_add_component_executable(
+        TARGET opcua_discovery_test
+        SOURCES tests/opcua_discovery_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn::wrappers::opcua
+            sgrn::open62541
+            sgrn::jsoncpp
+    )
+    target_include_directories(opcua_discovery_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/sgrn/lib/tests/support
+        ${CMAKE_SOURCE_DIR}/.prefix/include/httplib
+    )
+    add_test(NAME opcua_discovery_test COMMAND opcua_discovery_test)
+    sgrn_target(opcua_discovery_test)
+
+    # Live-gateway #ENUM round-trip (ported from tests/gateway/enum_tests.py):
+    # write/read every scalar enum leaf of the `enums` simulation's DB1 over
+    # OPC-UA, then cross-check the HTTP twin. Undeclared members, duplicate
+    # UDT signatures and String-to-enum mismatches must not corrupt values.
+    sgrn_add_component_executable(
+        TARGET opcua_enum_test
+        SOURCES tests/opcua_enum_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn::wrappers::opcua
+            sgrn::open62541
+            sgrn::jsoncpp
+    )
+    target_include_directories(opcua_enum_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/sgrn/lib/tests/support
+        ${CMAKE_SOURCE_DIR}/.prefix/include/httplib
+    )
+    add_test(NAME opcua_enum_test COMMAND opcua_enum_test)
+    sgrn_target(opcua_enum_test)
+
+    # Live-gateway Modbus TCP wire test (adapted from tests/gateway/modbus.py,
+    # whose hardcoded DB17 block has no in-tree provider): the register
+    # structure is derived from the gateway's own /registry/modbus map for
+    # the `tennessee` simulation, driven through the vendored libmodbus
+    # client wrapper (FC16/FC03/FC06 writes+reads), then cross-checked via
+    # the HTTP digital twin. s7shell is NOT spawned (no value drift).
+    sgrn_add_component_executable(
+        TARGET modbus_registers_test
+        SOURCES tests/modbus_registers_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn::wrappers::modbus
+            sgrn::jsoncpp
+    )
+    target_include_directories(modbus_registers_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/sgrn/lib/tests/support
+        ${CMAKE_SOURCE_DIR}/.prefix/include/httplib
+    )
+    add_test(NAME modbus_registers_test COMMAND modbus_registers_test)
+    sgrn_target(modbus_registers_test)
+
+    # Live-gateway S7comm wire test: snap7 client (sgrn::wrappers::s7) reads a
+    # scalar Real leaf from the gateway's hosted S7 server; value cross-checked
+    # against the HTTP twin before/after an HTTP PUT (deterministic: no
+    # s7shell simulation running). S7 PUTs are exercised opportunistically —
+    # HTTP-only policy scripts deny them by design.
+    sgrn_add_component_executable(
+        TARGET s7_southbound_test
+        SOURCES tests/s7_southbound_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn::wrappers::s7
+            sgrn::jsoncpp
+    )
+    target_include_directories(s7_southbound_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/sgrn/lib/tests/support
+        ${CMAKE_SOURCE_DIR}/.prefix/include/httplib
+    )
+    add_test(NAME s7_southbound_test COMMAND s7_southbound_test)
+    sgrn_target(s7_southbound_test)
+
+    # OPC-UA projection regression for scalar-alias SCL types (assert-based
+    # harness, was an unregistered orphan source).
+    sgrn_add_component_executable(
+        TARGET opcua_projection_test
+        SOURCES tests/opcua_projection_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn_gateway_opcua
+            sgrn_scl
+            sgrn::wrappers::opcua
+            sgrn::open62541
+    )
+    target_include_directories(opcua_projection_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/sgrn/lib/scl/include
+    )
+    add_test(NAME opcua_projection_test COMMAND opcua_projection_test)
+    sgrn_target(opcua_projection_test)
+
+    # WebSocket JSON/binary parity test (ported from tests/gateway/
+    # binary_live_snapshot.py + the dual-transport essence of websocket.py):
+    # a native IXWebSocket client connects on /ws and asserts (1) the JSON
+    # seed frame equals HTTP /data/<DbName> structurally, (2) a full-DB
+    # subscribe_binary frame payload is byte-identical to the HTTP raw
+    # memory route (same server_.readDbMemory source), (3) a field-slice
+    # subscribe frames exactly the requested window, plus binary-frame
+    # header sanity (u32 db ~BE, f64 ts ~BE). Frozen arena (no simulation),
+    # so exact byte/tree equality is stable.
+    sgrn_add_component_executable(
+        TARGET binary_live_snapshot_test
+        SOURCES tests/binary_live_snapshot_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            ixwebsocket::ixwebsocket
+            sgrn::zlib
+            sgrn::openssl
+            sgrn::jsoncpp
+    )
+    target_include_directories(binary_live_snapshot_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/sgrn/lib/tests/support
+        ${CMAKE_SOURCE_DIR}/.prefix/include/httplib
+    )
+    add_test(NAME binary_live_snapshot_test COMMAND binary_live_snapshot_test)
+    sgrn_target(binary_live_snapshot_test)
 endif()
 
 # 4.6 Documentation

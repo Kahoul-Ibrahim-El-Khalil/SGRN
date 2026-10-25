@@ -122,45 +122,16 @@ constexpr std::string_view kFileMetadataColumns =
     "domain_name AS domain, organisation_name AS organisation, object_id, bucket, key, object_size AS size, "
     "object_created_at, mime_type, upload_mode, part_count, part_size_bytes, sha256";
 
-// Wire types mirror the old postgrest.files JSON: integers as numbers,
-// booleans as booleans, everything else as strings, SQL NULL as null.
-// (Output column names below are the SELECT aliases.)
-Json::Value fileFieldToJson(const drogon::orm::Field& t_field, bool t_as_int, bool t_as_bool) {
-    if (t_field.isNull()) {
-        return Json::Value::null;
-    }
-    try {
-        if (t_as_int) {
-            return Json::Int64(t_field.as<int64_t>());
-        }
-        if (t_as_bool) {
-            return Json::Value(t_field.as<bool>());
-        }
-    } catch (const std::exception&) {
-        // fall through to string rendering below
-    }
-    try {
-        return Json::Value(t_field.as<std::string>());
-    } catch (const std::exception&) {
-        return Json::Value::null;
-    }
-}
-
-Json::Value fileRowToJson(const drogon::orm::Row& t_row) {
-    static const std::unordered_set<std::string> kIntColumns = {"id", "directory_id", "object_id", "session_id", "user_id",
-        "automated_service_id", "size", "compression_level", "part_count", "part_size_bytes"};
-    Json::Value r(Json::objectValue);
-    for (std::size_t i = 0; i < t_row.size(); ++i) {
-        drogon::orm::Field f = t_row[i];
-        std::string col = f.name();
-        r[col] = fileFieldToJson(f, kIntColumns.contains(col), col == "is_compressed");
-    }
-    // Add ETag derived from sha256 (S3-compatible format: sha256-<hex>)
-    if (!r["sha256"].isNull() && r["sha256"].isString()) {
-        r["etag"] = Json::Value("\"" + r["sha256"].asString() + "\"");
-    }
-    return r;
-}
+// ── SQL-side JSON envelope (no per-row C++ serialization) ───────────────────
+// The metadata response is built by Postgres itself: jsonb_build_object
+// renders each row directly with the same wire types as the old libjson
+// rendering (integers as JSON numbers, booleans as booleans, text/timestamps
+// as strings, SQL NULL as null), and the S3-compatible etag (quoted sha256)
+// is appended server-side. A jsonb column's text is a valid JSON document by
+// construction, so the handler splices it into the HTTP body verbatim — no
+// Json::Value DOM, no re-serialization pass. (The validity gate used for
+// arbitrary text JSONB columns in the CRUD engine is unnecessary for a
+// jsonb-typed column.)
 
 // Applies one whitelisted `?col=op.value` filter onto t_sql/t_binds.
 // Operators mirror the generated CRUD grammar; `*` in like/ilike patterns
@@ -236,7 +207,10 @@ bool appendFileFilter(
 
 // Parses `?order=created_at.desc` (or `.asc`, or bare column = ASC).
 // Only allowlisted sort columns are accepted; anything else is a 400.
-bool parseFileOrder(const std::string& t_raw, std::string& t_out_sql) {
+// t_out_sql uses the view column name (usable in the inner query's ORDER BY);
+// t_out_key keeps the client-facing alias (the subquery's output column, used
+// by the outer jsonb_agg scope, which sees no view columns).
+bool parseFileOrder(const std::string& t_raw, std::string& t_out_sql, std::string& t_out_key) {
     static const std::unordered_map<std::string, std::string> kAllowed = {
         {"id", "file_id"},
         {"name", "file_name"},
@@ -256,6 +230,7 @@ bool parseFileOrder(const std::string& t_raw, std::string& t_out_sql) {
         return false;
     }
     t_out_sql = it->second + (desc ? " DESC" : " ASC");
+    t_out_key = col + (desc ? " DESC" : " ASC");
     return true;
 }
 
@@ -273,7 +248,8 @@ std::size_t parseClampedSize(const drogon::HttpRequestPtr& tsp_req, const char* 
 }
 
 // Shared tail of both metadata endpoints: applies whitelisted `?col=op.value`
-// filters, ordering and pagination onto t_sql/t_binds, then runs the query.
+// filters, ordering and pagination onto t_sql/t_binds, then wraps the inner
+// query into a SQL-side JSON envelope (to_jsonb + jsonb_agg) and runs it.
 // t_sql already contains the tenant/service base predicate with its binds.
 Task<HttpResponsePtr> runFileMetadataQuery(HttpRequestPtr tsp_req, std::string t_sql, std::vector<std::string> t_binds) {
     for (const auto& [key, raw] : tsp_req->getParameters()) {
@@ -287,8 +263,9 @@ Task<HttpResponsePtr> runFileMetadataQuery(HttpRequestPtr tsp_req, std::string t
     }
 
     std::string order_sql = "file_id ASC";
+    std::string order_key = "id ASC";
     if (auto order_opt = tsp_req->getOptionalParameter<std::string>("order"); order_opt.has_value()) {
-        if (!parseFileOrder(*order_opt, order_sql)) {
+        if (!parseFileOrder(*order_opt, order_sql, order_key)) {
             co_return createJsonErrorResponse("Unsupported sort column", k400BadRequest);
         }
     }
@@ -300,13 +277,40 @@ Task<HttpResponsePtr> runFileMetadataQuery(HttpRequestPtr tsp_req, std::string t
         co_return sgrn::createJsonResponse(db_res);
     }
     try {
-        auto res = co_await sgrn::datastore::core::execSqlCoroVec(
-            db_res.value(), fmt::format("{} ORDER BY {} LIMIT {} OFFSET {}", t_sql, order_sql, limit, offset), t_binds);
-        Json::Value arr(Json::arrayValue);
-        for (const auto& row : res) {
-            arr.append(fileRowToJson(row));
-        }
-        co_return drogon::HttpResponse::newHttpJsonResponse(std::move(arr));
+        // Inner query: same shape as always (filters accumulated above onto
+        // t_sql), now ordered and paginated in a subquery so LIMIT/OFFSET cut
+        // the correct page before aggregation. The final array order is
+        // enforced again inside jsonb_agg by the client-facing alias (which
+        // is the raw column in the subquery output), so ordering is
+        // guaranteed, not an artifact of subquery scan order.
+        const std::string inner_sql = fmt::format("{} ORDER BY {} LIMIT {} OFFSET {}", t_sql, order_sql, limit, offset);
+        const std::string envelope_sql =
+            fmt::format("SELECT COALESCE(jsonb_agg("
+                        // Row document built per column (jsonb nests integers as numbers,
+                        // booleans as booleans, strings as strings) with timestamps cast
+                        // to text so they render exactly like the old libjson wire body.
+                        "jsonb_build_object("
+                        "'id', s.id, 'name', s.name, 'full_path', s.full_path, 'directory_path', s.directory_path, "
+                        "'directory_id', s.directory_id, 'extension', s.extension, 'created_at', s.created_at::text, "
+                        "'is_compressed', s.is_compressed, 'compression_algorithm', s.compression_algorithm, "
+                        "'compression_level', s.compression_level, 'session_id', s.session_id, 'user_id', s.user_id, "
+                        "'automated_service_id', s.automated_service_id, 'domain', s.domain, "
+                        "'organisation', s.organisation, 'object_id', s.object_id, 'bucket', s.bucket, "
+                        "'key', s.key, 'size', s.size, 'object_created_at', s.object_created_at::text, "
+                        "'mime_type', s.mime_type, 'upload_mode', s.upload_mode, 'part_count', s.part_count, "
+                        "'part_size_bytes', s.part_size_bytes, 'sha256', s.sha256) "
+                        // ETag derived from sha256 (S3-compatible format: "sha256-<hex>")
+                        // appended server-side. s.sha256 (bpchar) splices with its padding,
+                        // exactly like the old Field::as<std::string> rendering.
+                        "|| CASE WHEN s.sha256 IS NULL THEN '{{}}'::jsonb "
+                        "ELSE jsonb_build_object('etag', '\"' || s.sha256 || '\"') END "
+                        "ORDER BY {}), '[]'::jsonb) AS envelope "
+                        "FROM ({}) s",
+                order_key, inner_sql);
+        auto res = co_await sgrn::datastore::core::execSqlCoroVec(db_res.value(), envelope_sql, t_binds);
+        // The envelope is one jsonb column: libpq delivers its canonical
+        // JSON text, spliced verbatim into the body.
+        co_return createJsonResponse(res[0]["envelope"].as<std::string>());
     } catch (const std::exception& e) {
         ERROR_LOG("Files metadata DB error: {}", e.what());
         co_return createJsonErrorResponse(fmt::format("Database error: {}", e.what()), k500InternalServerError);
@@ -630,8 +634,11 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
         }
         auto db_client = db_res.value();
 
-        std::string folders_json = "[";
-        std::string files_json = "[";
+        // folders_json/files_json arrive as complete SQL-side jsonb arrays
+        // (built by buildVirtualRootListing / buildNormalDriveListing); only
+        // the trail is still assembled row by row here.
+        std::string folders_json;
+        std::string files_json;
         std::string trail_json = "[";
 
         // 4. Trail Construction
@@ -806,15 +813,12 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
         if (is_virtual_root) {
             const std::string& organisation = session["user"]["organisation"].asString();
 
-            BackendResult<void> vrl_res = co_await buildVirtualRootListing(folders_json, namespace_prefix, scope, organisation, db_client);
+            BackendResult<void> vrl_res =
+                co_await buildVirtualRootListing(folders_json, total_folders, namespace_prefix, scope, organisation, db_client);
             if (vrl_res.hasError()) {
                 co_return createJsonErrorResponse(
                     std::format("Failed to list virtual root: {}", vrl_res.error().message_), drogon::k500InternalServerError);
             }
-
-            // Count synthetic folders by scanning commas in the JSON array
-            // (cheaper than a second query — virtual root is always small)
-            total_folders = static_cast<int32_t>(std::count(folders_json.begin(), folders_json.end(), '{'));
         } else {
             auto stats = co_await buildNormalDriveListing(
                 folders_json, files_json, namespace_prefix, current_path, user_id, target_owner_id, scope, db_client, limit, page, search);
@@ -822,10 +826,8 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
             total_files = stats.second;
         }
 
-        // Close the JSON arrays
+        // Close the trail array (folders/files arrive complete from SQL).
         trail_json += ']';
-        folders_json += ']';
-        files_json += ']';
 
         // Strip trailing slash from current_path for display
         std::string display_path = current_path;
@@ -851,34 +853,37 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
     }
 }
 
-Task<BackendResult<void>> StorageApiHandler::buildVirtualRootListing(std::string& t_folders_json, const std::string& t_namespace_prefix,
-    StorageScope t_scope, const std::string& t_organisation, const drogon::orm::DbClientPtr& tsp_db_client) {
+Task<BackendResult<void>> StorageApiHandler::buildVirtualRootListing(std::string& t_folders_json, int32_t& t_out_total_folders,
+    const std::string& t_namespace_prefix, StorageScope t_scope, const std::string& t_organisation,
+    const drogon::orm::DbClientPtr& tsp_db_client) {
 
     try {
-        drogon::orm::Result virtual_res =
-            (t_scope == StorageScope::AutomatedServices)
-                ? co_await tsp_db_client->execSqlCoro(
-                      "SELECT token::text, name AS display_name, metadata FROM core.automated_services WHERE "
-                      "organisation = $1 AND deleted_at IS NULL ORDER BY token",
-                      t_organisation)
-            : (t_scope == StorageScope::Domain)
-                ? co_await tsp_db_client->execSqlCoro("SELECT name FROM core.domains WHERE organisation = $1 ORDER BY name", t_organisation)
-                : co_await tsp_db_client->execSqlCoro(
-                      "SELECT email AS name FROM core.users WHERE organisation = $1 AND deleted_at IS NULL ORDER BY email", t_organisation);
+        // SQL-side JSON envelope: Postgres assembles the complete folders
+        // array (aggregated with jsonb_agg, ordered by name) plus the total
+        // count in one round trip, and C++ splices the returned text
+        // verbatim — no per-row field extraction, no fmt/jsonEscape pass.
+        // jsonb_strip_nulls drops the display_name key for non-service rows
+        // so the wire shape matches the old per-row fmt::format output
+        // exactly (display_name existed only for automated services).
+        const std::string sql = (t_scope == StorageScope::AutomatedServices)
+                                    ? "WITH items AS (SELECT token::text AS name, name AS display_name FROM core.automated_services "
+                                      "WHERE organisation = $1 AND deleted_at IS NULL) "
+                                      "SELECT COALESCE(jsonb_agg(jsonb_strip_nulls(jsonb_build_object("
+                                      "'name', it.name, 'display_name', it.display_name, 'path', $2 || '/' || it.name)) "
+                                      "ORDER BY it.name), '[]'::jsonb) AS folders, count(*)::bigint AS total FROM items it"
+                                : (t_scope == StorageScope::Domain)
+                                    ? "WITH items AS (SELECT name FROM core.domains WHERE organisation = $1) "
+                                      "SELECT COALESCE(jsonb_agg(jsonb_strip_nulls(jsonb_build_object("
+                                      "'name', it.name, 'display_name', NULL::text, 'path', $2 || '/' || it.name)) "
+                                      "ORDER BY it.name), '[]'::jsonb) AS folders, count(*)::bigint AS total FROM items it"
+                                    : "WITH items AS (SELECT email AS name FROM core.users WHERE organisation = $1 AND deleted_at IS NULL) "
+                                      "SELECT COALESCE(jsonb_agg(jsonb_strip_nulls(jsonb_build_object("
+                                      "'name', it.name, 'display_name', NULL::text, 'path', $2 || '/' || it.name)) "
+                                      "ORDER BY it.name), '[]'::jsonb) AS folders, count(*)::bigint AS total FROM items it";
 
-        for (const auto& row : virtual_res) {
-            if (t_folders_json.size() > 1)
-                t_folders_json += ',';
-            if (t_scope == StorageScope::AutomatedServices) {
-                const std::string token = row["token"].as<std::string>();
-                t_folders_json += fmt::format(R"({{"name":"{}","display_name":"{}","path":"{}"}})", jsonEscape(token),
-                    jsonEscape(row["display_name"].as<std::string>()), jsonEscape(t_namespace_prefix + "/" + token));
-            } else {
-                const std::string name = row["name"].as<std::string>();
-                t_folders_json +=
-                    fmt::format(R"({{"name":"{}","path":"{}"}})", jsonEscape(name), jsonEscape(t_namespace_prefix + "/" + name));
-            }
-        }
+        drogon::orm::Result res = co_await tsp_db_client->execSqlCoro(sql, t_organisation, t_namespace_prefix);
+        t_folders_json = res[0]["folders"].as<std::string>();
+        t_out_total_folders = static_cast<int32_t>(res[0]["total"].as<int64_t>());
         co_return {};
 
     } catch (const std::exception& ex) {
@@ -902,124 +907,156 @@ Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(std
     const bool is_automated = (t_scope == StorageScope::AutomatedServices);
     const int32_t offset = (t_page - 1) * t_limit;
 
-    // ── Precomputed SQL query strings ─────────────────────────────────────────
+    // ── One-round-trip SQL-side JSON envelope ─────────────────────────────────
     //
-    // WHY: The original code concatenated `owner_col + " = $1 AND ..."` at
-    // runtime on every request, allocating a new std::string each time.
-    // These static constants are built once at program start and then only
-    // referenced by pointer. The only dynamic part is `LIMIT N OFFSET M`,
-    // which is appended via fmt::format at the call site (search for `+ lo`).
+    // The previous implementation issued 3 queries (counts, folders, files)
+    // and re-serialized every row into JSON with fmt::format + jsonEscape.
+    // One statement now produces the page directly as jsonb: folder and file
+    // rows are rendered by jsonb_build_object with the exact same wire keys
+    // and types as the old fmt output (integers as JSON numbers, timestamps
+    // as strings via ::text, NULL extension as "", NULL part_count as null),
+    // and the totals are computed from the same CTEs that feed the page —
+    // C++ only splices the returned text into the response, no per-row
+    // field extraction or escaping at all.
     //
-    // NAMING SCHEME:
-    //   k<Kind><Scope>[Search]
-    //   Kind   : Count | Folder | File
-    //   Scope  : User (user_id) | Svc (automated_service_id)
-    //   Search : absent = exact-parent query,  Search = ILIKE recursive query
+    // Pagination semantics are preserved exactly:
+    //   folder page   : LIMIT min(limit, total_folders - offset) OFFSET offset
+    //   folders used  : min(max(total_folders - offset, 0), limit)
+    //   file page     : LIMIT (limit - folders_used) OFFSET max(0, offset - total_folders)
     //
-    // PARAMETERS (same for all variants in a family):
-    //   Count plain  : $1 = owner_id,  $2 = current_path,  $3 = parent_path
-    //   Count search : $1 = owner_id,  $2 = ILIKE pattern, $3 = LIKE pattern
-    //   Folder/File plain  : same as Count plain  + LIMIT/OFFSET appended
-    //   Folder/File search : same as Count search + LIMIT/OFFSET appended
+    // PARAMETERS:
+    //   {0} owner column (directories), {1} owner column with alias `f`
+    //   (files_cte), {2} unqualified owner column (file_totals has no alias
+    //   on storage.files — the aliased form cannot resolve there), then
+    //   $2/$3 predicate arguments:
+    //     plain  = current_path (root guard `$2 = '/'`), $3 = parent path
+    //     search = ILIKE pattern, $3 = recursive LIKE pattern
+    //   $4 limit, $5 page offset, $6 namespace prefix for path fields.
     //
-    // TO ADD A NEW COLUMN: edit the SELECT list in the relevant k* constant(s)
-    // and update the row-serialisation loop in section 2/3 of this function.
-    //
-    // Domain queries are NOT here — they use a different ownership column
-    // (text `domain` vs int owner_id) and are written inline below.
+    // TO ADD A NEW COLUMN: extend the relevant CTE SELECT list and the
+    // matching jsonb_build_object() call in the final SELECT.
+    static const std::string kListingPlainTemplate = R"SQL(
+WITH parent_dirs AS (
+  SELECT id FROM storage.directories WHERE {0} = $1 AND path = $3
+),
+folders_cte AS (
+  SELECT id, name, created_at::text AS created_at, virtual_size, real_size,
+         count_sub_files, count_sub_directories, path
+  FROM storage.directories
+  WHERE {0} = $1 AND ((parent_id IS NULL AND $2 = '/') OR (parent_id IN (SELECT id FROM parent_dirs)))
+),
+folder_totals AS (SELECT count(*)::bigint AS n FROM folders_cte),
+folder_page AS (
+  SELECT * FROM folders_cte
+  ORDER BY name
+  LIMIT greatest(least($4::int, (SELECT n::int - $5::int FROM folder_totals)), 0)
+  OFFSET $5::int
+),
+files_cte AS (
+  SELECT f.id, f.name, f.full_path, f.extension, f.created_at::text AS created_at,
+    (SELECT COALESCE(SUM(so_sum.size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = fo_sum.object_id WHERE fo_sum.file_id = f.id) AS compressed_size,
+    (SELECT COALESCE(SUM(so_sum.original_size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = fo_sum.object_id WHERE fo_sum.file_id = f.id) AS original_size,
+    so.upload_mode,
+    (SELECT COUNT(*) FROM storage.file_objects WHERE file_id = f.id) AS part_count
+  FROM storage.files f
+  JOIN storage.file_objects fo0 ON fo0.file_id = f.id AND fo0.part_index = 0
+  JOIN storage.objects so ON so.id = fo0.object_id
+  WHERE {1} = $1 AND ((f.directory_id IS NULL AND $2 = '/') OR (f.directory_id IN (SELECT id FROM parent_dirs)))
+),
+file_totals AS (
+  SELECT count(*)::bigint AS n FROM storage.files
+  WHERE {2} = $1 AND ((directory_id IS NULL AND $2 = '/') OR (directory_id IN (SELECT id FROM parent_dirs)))
+),
+file_page AS (
+  SELECT * FROM files_cte
+  ORDER BY name
+  LIMIT greatest($4::int - least(greatest((SELECT n::int FROM folder_totals) - $5::int, 0), $4::int), 0)
+  OFFSET greatest($5::int - (SELECT n::int FROM folder_totals), 0)
+)
+SELECT
+  COALESCE((SELECT jsonb_agg(jsonb_build_object(
+    'id', s.id, 'name', s.name, 'path', $6 || s.path, 'created_at', s.created_at,
+    'virtual_size', s.virtual_size, 'real_size', s.real_size,
+    'count_sub_files', s.count_sub_files, 'count_sub_directories', s.count_sub_directories)
+    ORDER BY s.name) FROM folder_page s), '[]'::jsonb) AS folders,
+  COALESCE((SELECT jsonb_agg(jsonb_build_object(
+    'id', s.id, 'name', s.name, 'path', $6 || s.full_path, 'extension', coalesce(s.extension, ''),
+    'size', s.compressed_size, 'original_size', s.original_size, 'upload_mode', s.upload_mode,
+    'part_count', s.part_count, 'created_at', s.created_at)
+    ORDER BY s.name) FROM file_page s), '[]'::jsonb) AS files,
+  (SELECT n FROM folder_totals) AS total_folders,
+  (SELECT n FROM file_totals) AS total_files
+)SQL";
 
-    // user_id variants
-    static const std::string kCountUser =
-        "SELECT "
-        "  (SELECT count(*) FROM storage.directories WHERE user_id = $1 AND ((parent_id IS NULL AND $2 = '/') OR (parent_id IN (SELECT id "
-        "FROM storage.directories WHERE user_id = $1 AND path = $3)))) as folders, "
-        "  (SELECT count(*) FROM storage.files        WHERE user_id = $1 AND ((directory_id IS NULL AND $2 = '/') OR (directory_id IN "
-        "(SELECT id FROM storage.directories WHERE user_id = $1 AND path = $3)))) as files";
-    static const std::string kCountUserSearch =
-        "SELECT "
-        "  (SELECT count(*) FROM storage.directories WHERE user_id = $1 AND name ILIKE $2 AND path LIKE $3) as folders, "
-        "  (SELECT count(*) FROM storage.files        WHERE user_id = $1 AND name ILIKE $2 AND full_path LIKE $3) as files";
-    static const std::string kFolderUser =
-        "SELECT id, name, created_at, virtual_size, real_size, count_sub_files, count_sub_directories, path "
-        "FROM storage.directories WHERE user_id = $1 AND "
-        "((parent_id IS NULL AND $2 = '/') OR (parent_id IN (SELECT id FROM storage.directories WHERE user_id = $1 AND path = $3))) "
-        "ORDER BY name "; // LIMIT/OFFSET appended at call site
-    static const std::string kFolderUserSearch =
-        "SELECT id, name, created_at, virtual_size, real_size, count_sub_files, count_sub_directories, path "
-        "FROM storage.directories WHERE user_id = $1 AND name ILIKE $2 AND path LIKE $3 ORDER BY name "; // LIMIT/OFFSET appended
-    static const std::string kFileUser =
-        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, "
-        "(SELECT COALESCE(SUM(so_sum.size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
-        "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS compressed_size, "
-        "(SELECT COALESCE(SUM(so_sum.original_size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
-        "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS original_size, "
-        "so.upload_mode, (SELECT COUNT(*) FROM storage.file_objects WHERE file_id = f.id) AS part_count "
-        "FROM storage.files f JOIN storage.file_objects fo0 ON fo0.file_id = f.id AND fo0.part_index = 0 "
-        "JOIN storage.objects so ON so.id = fo0.object_id "
-        "WHERE f.user_id = $1 AND ((f.directory_id IS NULL AND $2 = '/') OR (f.directory_id IN (SELECT id FROM storage.directories WHERE "
-        "user_id = $1 AND path = $3))) "
-        "ORDER BY f.name "; // LIMIT/OFFSET appended
-    static const std::string kFileUserSearch =
-        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, "
-        "(SELECT COALESCE(SUM(so_sum.size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
-        "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS compressed_size, "
-        "(SELECT COALESCE(SUM(so_sum.original_size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
-        "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS original_size, "
-        "so.upload_mode, (SELECT COUNT(*) FROM storage.file_objects WHERE file_id = f.id) AS part_count "
-        "FROM storage.files f JOIN storage.file_objects fo0 ON fo0.file_id = f.id AND fo0.part_index = 0 "
-        "JOIN storage.objects so ON so.id = fo0.object_id "
-        "WHERE f.user_id = $1 AND f.name ILIKE $2 AND f.full_path LIKE $3 ORDER BY f.name "; // LIMIT/OFFSET appended
-    // automated_service_id variants (same structure, different ownership column)
-    static const std::string kCountSvc =
-        "SELECT "
-        "  (SELECT count(*) FROM storage.directories WHERE automated_service_id = $1 AND ((parent_id IS NULL AND $2 = '/') OR (parent_id "
-        "IN (SELECT id FROM storage.directories WHERE automated_service_id = $1 AND path = $3)))) as folders, "
-        "  (SELECT count(*) FROM storage.files        WHERE automated_service_id = $1 AND ((directory_id IS NULL AND $2 = '/') OR "
-        "(directory_id IN (SELECT id FROM storage.directories WHERE automated_service_id = $1 AND path = $3)))) as files";
-    static const std::string kCountSvcSearch =
-        "SELECT "
-        "  (SELECT count(*) FROM storage.directories WHERE automated_service_id = $1 AND name ILIKE $2 AND path LIKE $3) as folders, "
-        "  (SELECT count(*) FROM storage.files        WHERE automated_service_id = $1 AND name ILIKE $2 AND full_path LIKE $3) as files";
-    static const std::string kFolderSvc =
-        "SELECT id, name, created_at, virtual_size, real_size, count_sub_files, count_sub_directories, path "
-        "FROM storage.directories WHERE automated_service_id = $1 AND "
-        "((parent_id IS NULL AND $2 = '/') OR (parent_id IN (SELECT id FROM storage.directories WHERE automated_service_id = $1 AND path = "
-        "$3))) "
-        "ORDER BY name "; // LIMIT/OFFSET appended
-    static const std::string kFolderSvcSearch =
-        "SELECT id, name, created_at, virtual_size, real_size, count_sub_files, count_sub_directories, path "
-        "FROM storage.directories WHERE automated_service_id = $1 AND name ILIKE $2 AND path LIKE $3 ORDER BY name "; // LIMIT/OFFSET
-                                                                                                                      // appended
-    static const std::string kFileSvc =
-        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, "
-        "(SELECT COALESCE(SUM(so_sum.size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
-        "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS compressed_size, "
-        "(SELECT COALESCE(SUM(so_sum.original_size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
-        "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS original_size, "
-        "so.upload_mode, (SELECT COUNT(*) FROM storage.file_objects WHERE file_id = f.id) AS part_count "
-        "FROM storage.files f JOIN storage.file_objects fo0 ON fo0.file_id = f.id AND fo0.part_index = 0 "
-        "JOIN storage.objects so ON so.id = fo0.object_id "
-        "WHERE f.automated_service_id = $1 AND ((f.directory_id IS NULL AND $2 = '/') OR (f.directory_id IN (SELECT id FROM "
-        "storage.directories WHERE automated_service_id = $1 AND path = $3))) "
-        "ORDER BY f.name "; // LIMIT/OFFSET appended
-    static const std::string kFileSvcSearch =
-        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, "
-        "(SELECT COALESCE(SUM(so_sum.size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
-        "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS compressed_size, "
-        "(SELECT COALESCE(SUM(so_sum.original_size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
-        "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS original_size, "
-        "so.upload_mode, (SELECT COUNT(*) FROM storage.file_objects WHERE file_id = f.id) AS part_count "
-        "FROM storage.files f JOIN storage.file_objects fo0 ON fo0.file_id = f.id AND fo0.part_index = 0 "
-        "JOIN storage.objects so ON so.id = fo0.object_id "
-        "WHERE f.automated_service_id = $1 AND f.name ILIKE $2 AND f.full_path LIKE $3 ORDER BY f.name "; // LIMIT/OFFSET appended
+    static const std::string kListingSearchTemplate = R"SQL(
+WITH folders_cte AS (
+  SELECT id, name, created_at::text AS created_at, virtual_size, real_size,
+         count_sub_files, count_sub_directories, path
+  FROM storage.directories
+  WHERE {0} = $1 AND name ILIKE $2 AND path LIKE $3
+),
+folder_totals AS (SELECT count(*)::bigint AS n FROM folders_cte),
+folder_page AS (
+  SELECT * FROM folders_cte
+  ORDER BY name
+  LIMIT greatest(least($4::int, (SELECT n::int - $5::int FROM folder_totals)), 0)
+  OFFSET $5::int
+),
+files_cte AS (
+  SELECT f.id, f.name, f.full_path, f.extension, f.created_at::text AS created_at,
+    (SELECT COALESCE(SUM(so_sum.size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = fo_sum.object_id WHERE fo_sum.file_id = f.id) AS compressed_size,
+    (SELECT COALESCE(SUM(so_sum.original_size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = fo_sum.object_id WHERE fo_sum.file_id = f.id) AS original_size,
+    so.upload_mode,
+    (SELECT COUNT(*) FROM storage.file_objects WHERE file_id = f.id) AS part_count
+  FROM storage.files f
+  JOIN storage.file_objects fo0 ON fo0.file_id = f.id AND fo0.part_index = 0
+  JOIN storage.objects so ON so.id = fo0.object_id
+  WHERE {1} = $1 AND f.name ILIKE $2 AND f.full_path LIKE $3
+),
+file_totals AS (
+  SELECT count(*)::bigint AS n FROM storage.files
+  WHERE {2} = $1 AND name ILIKE $2 AND full_path LIKE $3
+),
+file_page AS (
+  SELECT * FROM files_cte
+  ORDER BY name
+  LIMIT greatest($4::int - least(greatest((SELECT n::int FROM folder_totals) - $5::int, 0), $4::int), 0)
+  OFFSET greatest($5::int - (SELECT n::int FROM folder_totals), 0)
+)
+SELECT
+  COALESCE((SELECT jsonb_agg(jsonb_build_object(
+    'id', s.id, 'name', s.name, 'path', $6 || s.path, 'created_at', s.created_at,
+    'virtual_size', s.virtual_size, 'real_size', s.real_size,
+    'count_sub_files', s.count_sub_files, 'count_sub_directories', s.count_sub_directories)
+    ORDER BY s.name) FROM folder_page s), '[]'::jsonb) AS folders,
+  COALESCE((SELECT jsonb_agg(jsonb_build_object(
+    'id', s.id, 'name', s.name, 'path', $6 || s.full_path, 'extension', coalesce(s.extension, ''),
+    'size', s.compressed_size, 'original_size', s.original_size, 'upload_mode', s.upload_mode,
+    'part_count', s.part_count, 'created_at', s.created_at)
+    ORDER BY s.name) FROM file_page s), '[]'::jsonb) AS files,
+  (SELECT n FROM folder_totals) AS total_folders,
+  (SELECT n FROM file_totals) AS total_files
+)SQL";
 
-    // Select the right query family for this call.
-    const std::string& kCount = is_automated ? kCountSvc : kCountUser;
-    const std::string& kCountSearch = is_automated ? kCountSvcSearch : kCountUserSearch;
-    const std::string& kFolderBase = is_automated ? kFolderSvc : kFolderUser;
-    const std::string& kFolderSearch = is_automated ? kFolderSvcSearch : kFolderUserSearch;
-    const std::string& kFileBase = is_automated ? kFileSvc : kFileUser;
-    const std::string& kFileSearch = is_automated ? kFileSvcSearch : kFileUserSearch;
+    // Owner predicates are substituted from the shared templates once at
+    // program start (thread-safe static init) instead of maintaining six
+    // hand-copied statement strings. Same precomputed-SQL rationale as the
+    // constants this replaces.
+    static const std::string kListingUserPlain = fmt::format(fmt::runtime(kListingPlainTemplate), "user_id", "f.user_id", "user_id");
+    static const std::string kListingUserSearch = fmt::format(fmt::runtime(kListingSearchTemplate), "user_id", "f.user_id", "user_id");
+    static const std::string kListingSvcPlain =
+        fmt::format(fmt::runtime(kListingPlainTemplate), "automated_service_id", "f.automated_service_id", "automated_service_id");
+    static const std::string kListingSvcSearch =
+        fmt::format(fmt::runtime(kListingSearchTemplate), "automated_service_id", "f.automated_service_id", "automated_service_id");
+    static const std::string kListingDomainPlain = fmt::format(fmt::runtime(kListingPlainTemplate), "domain", "f.domain", "domain");
+    static const std::string kListingDomainSearch = fmt::format(fmt::runtime(kListingSearchTemplate), "domain", "f.domain", "domain");
+
+    const std::string& listing_sql = t_search.empty() ? static_cast<const std::string&>(is_domain      ? kListingDomainPlain
+                                                                                        : is_automated ? kListingSvcPlain
+                                                                                                       : kListingUserPlain)
+                                                      : static_cast<const std::string&>(is_domain      ? kListingDomainSearch
+                                                                                        : is_automated ? kListingSvcSearch
+                                                                                                       : kListingUserSearch);
 
     std::string target_domain;
     if (is_domain) {
@@ -1034,146 +1071,31 @@ Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(std
         }
     }
 
-    const int32_t owner_id = (t_scope == StorageScope::Personal) ? t_user_id : t_target_owner_id;
+    // $2/$3 carry different semantics per variant: exact-parent predicates in
+    // plain mode, ILIKE/LIKE patterns in search mode.
     const std::string path_for_parent_lookup = (current_path.length() > 1 ? current_path.substr(0, current_path.length() - 1) : "/");
     const std::string search_pattern = t_search.empty() ? "" : "%" + t_search + "%";
     const std::string recursive_pattern = current_path + "%";
+    const std::string& predicate_2 = t_search.empty() ? current_path : search_pattern;
+    const std::string& predicate_3 = t_search.empty() ? path_for_parent_lookup : recursive_pattern;
 
-    // ── 1. Count Totals ──────────────────────────────────────────────────────
-    int32_t total_folders = 0;
-    int32_t total_files = 0;
+    const int32_t owner_id = (t_scope == StorageScope::Personal) ? t_user_id : t_target_owner_id;
 
-    if (t_search.empty()) {
-        if (is_domain) {
-            drogon::orm::Result count_res = co_await tsp_db_client->execSqlCoro(
-                "SELECT "
-                "  (SELECT count(*) FROM storage.directories WHERE domain = $1 AND ((parent_id IS NULL AND $2 = '/') OR (parent_id IN "
-                "(SELECT id FROM storage.directories WHERE domain = $1 AND path = $3)))) as folders, "
-                "  (SELECT count(*) FROM storage.files WHERE domain = $1 AND ((directory_id IS NULL AND $2 = '/') OR (directory_id IN "
-                "(SELECT id FROM storage.directories WHERE domain = $1 AND path = $3)))) as files",
-                target_domain, current_path, path_for_parent_lookup);
-            total_folders = static_cast<int32_t>(count_res[0]["folders"].as<int64_t>());
-            total_files = static_cast<int32_t>(count_res[0]["files"].as<int64_t>());
-        } else {
-            drogon::orm::Result count_res = co_await tsp_db_client->execSqlCoro(kCount, owner_id, current_path, path_for_parent_lookup);
-            total_folders = static_cast<int32_t>(count_res[0]["folders"].as<int64_t>());
-            total_files = static_cast<int32_t>(count_res[0]["files"].as<int64_t>());
-        }
-    } else {
-        if (is_domain) {
-            drogon::orm::Result count_res = co_await tsp_db_client->execSqlCoro(
-                "SELECT "
-                "  (SELECT count(*) FROM storage.directories WHERE domain = $1 AND name ILIKE $2 AND path LIKE $3) as folders, "
-                "  (SELECT count(*) FROM storage.files WHERE domain = $1 AND name ILIKE $2 AND full_path LIKE $3) as files",
-                target_domain, search_pattern, recursive_pattern);
-            total_folders = static_cast<int32_t>(count_res[0]["folders"].as<int64_t>());
-            total_files = static_cast<int32_t>(count_res[0]["files"].as<int64_t>());
-        } else {
-            drogon::orm::Result count_res = co_await tsp_db_client->execSqlCoro(kCountSearch, owner_id, search_pattern, recursive_pattern);
-            total_folders = static_cast<int32_t>(count_res[0]["folders"].as<int64_t>());
-            total_files = static_cast<int32_t>(count_res[0]["files"].as<int64_t>());
-        }
-    }
-
-    // ── 2. Fetch Folders ─────────────────────────────────────────────────────
-    auto folders_res = co_await [&]() -> Task<drogon::orm::Result> {
-        if (offset >= total_folders) {
-            co_return co_await tsp_db_client->execSqlCoro("SELECT 1 WHERE 1=0");
-        }
-        const int32_t folder_limit = std::min(t_limit, total_folders - offset);
-        const std::string lo = fmt::format("LIMIT {} OFFSET {}", folder_limit, offset);
-        if (t_search.empty()) {
-            if (is_domain) {
-                co_return co_await tsp_db_client->execSqlCoro(
-                    "SELECT id, name, created_at, virtual_size, real_size, count_sub_files, count_sub_directories, path "
-                    "FROM storage.directories WHERE domain = $1 AND "
-                    "((parent_id IS NULL AND $2 = '/') OR (parent_id IN (SELECT id FROM storage.directories WHERE domain = $1 AND path = "
-                    "$3))) "
-                    "ORDER BY name " +
-                        lo,
-                    target_domain, current_path, path_for_parent_lookup);
-            }
-            co_return co_await tsp_db_client->execSqlCoro(kFolderBase + lo, owner_id, current_path, path_for_parent_lookup);
-        }
+    // drogon::orm::Result has no default constructor — use an IIFE.
+    drogon::orm::Result listing_res = co_await [&]() -> Task<drogon::orm::Result> {
         if (is_domain) {
             co_return co_await tsp_db_client->execSqlCoro(
-                "SELECT id, name, created_at, virtual_size, real_size, count_sub_files, count_sub_directories, path "
-                "FROM storage.directories WHERE domain = $1 AND name ILIKE $2 AND path LIKE $3 ORDER BY name " +
-                    lo,
-                target_domain, search_pattern, recursive_pattern);
+                listing_sql, target_domain, predicate_2, predicate_3, t_limit, offset, t_namespace_prefix);
         }
-        co_return co_await tsp_db_client->execSqlCoro(kFolderSearch + lo, owner_id, search_pattern, recursive_pattern);
+        co_return co_await tsp_db_client->execSqlCoro(listing_sql, owner_id, predicate_2, predicate_3, t_limit, offset, t_namespace_prefix);
     }();
 
-    int32_t folders_on_page = 0;
-    for (const auto& row : folders_res) {
-        if (t_folders_json.size() > 1)
-            t_folders_json += ',';
-        t_folders_json += fmt::format(
-            R"({{"id":{},"name":"{}","path":"{}","created_at":"{}","virtual_size":{},"real_size":{},"count_sub_files":{},"count_sub_directories":{}}})",
-            row["id"].as<int64_t>(), jsonEscape(row["name"].as<std::string>()),
-            jsonEscape(t_namespace_prefix + row["path"].as<std::string>()), jsonEscape(row["created_at"].as<std::string>()),
-            row["virtual_size"].as<int64_t>(), row["real_size"].as<int64_t>(), row["count_sub_files"].as<int64_t>(),
-            row["count_sub_directories"].as<int64_t>());
-        ++folders_on_page;
-    }
-
-    // ── 3. Fetch Files ───────────────────────────────────────────────────────
-    int32_t remaining_limit = t_limit - folders_on_page;
-
-    if (remaining_limit > 0) {
-        const int32_t file_offset = std::max(0, offset - total_folders);
-        const std::string lo2 = fmt::format("LIMIT {} OFFSET {}", remaining_limit, file_offset);
-        auto files_res = co_await [&]() -> Task<drogon::orm::Result> {
-            if (t_search.empty()) {
-                if (is_domain) {
-                    co_return co_await tsp_db_client->execSqlCoro(
-                        "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, "
-                        "(SELECT COALESCE(SUM(so_sum.size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
-                        "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS compressed_size, "
-                        "(SELECT COALESCE(SUM(so_sum.original_size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON "
-                        "so_sum.id = fo_sum.object_id WHERE fo_sum.file_id = f.id) AS original_size, "
-                        "so.upload_mode, (SELECT COUNT(*) FROM storage.file_objects WHERE file_id = f.id) AS part_count "
-                        "FROM storage.files f JOIN storage.file_objects fo0 ON fo0.file_id = f.id AND fo0.part_index = 0 JOIN "
-                        "storage.objects so ON so.id = fo0.object_id WHERE f.domain = $1 AND "
-                        "((f.directory_id IS NULL AND $2 = '/') OR (f.directory_id IN (SELECT id FROM storage.directories WHERE domain = "
-                        "$1 AND path = $3))) ORDER BY f.name " +
-                            lo2,
-                        target_domain, current_path, path_for_parent_lookup);
-                }
-                co_return co_await tsp_db_client->execSqlCoro(kFileBase + lo2, owner_id, current_path, path_for_parent_lookup);
-            }
-            if (is_domain) {
-                co_return co_await tsp_db_client->execSqlCoro(
-                    "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, "
-                    "(SELECT COALESCE(SUM(so_sum.size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = "
-                    "fo_sum.object_id WHERE fo_sum.file_id = f.id) AS compressed_size, "
-                    "(SELECT COALESCE(SUM(so_sum.original_size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON "
-                    "so_sum.id = fo_sum.object_id WHERE fo_sum.file_id = f.id) AS original_size, "
-                    "so.upload_mode, (SELECT COUNT(*) FROM storage.file_objects WHERE file_id = f.id) AS part_count "
-                    "FROM storage.files f JOIN storage.file_objects fo0 ON fo0.file_id = f.id AND fo0.part_index = 0 JOIN "
-                    "storage.objects so ON so.id = fo0.object_id WHERE f.domain = $1 AND "
-                    "f.name ILIKE $2 AND f.full_path LIKE $3 ORDER BY f.name " +
-                        lo2,
-                    target_domain, search_pattern, recursive_pattern);
-            }
-            co_return co_await tsp_db_client->execSqlCoro(kFileSearch + lo2, owner_id, search_pattern, recursive_pattern);
-        }();
-
-        for (const auto& row : files_res) {
-            if (t_files_json.size() > 1)
-                t_files_json += ',';
-            const std::string part_count_val = row["part_count"].isNull() ? "null" : std::to_string(row["part_count"].as<int64_t>());
-            t_files_json += fmt::format(
-                R"({{"id":{},"name":"{}","path":"{}","extension":"{}","size":{},"original_size":{},"upload_mode":"{}","part_count":{},"created_at":"{}"}})",
-                row["id"].as<int64_t>(), jsonEscape(row["name"].as<std::string>()),
-                jsonEscape(t_namespace_prefix + row["full_path"].as<std::string>()),
-                jsonEscape(row["extension"].isNull() ? "" : row["extension"].as<std::string>()), row["compressed_size"].as<int64_t>(),
-                row["original_size"].as<int64_t>(), jsonEscape(row["upload_mode"].as<std::string>()), part_count_val,
-                jsonEscape(row["created_at"].as<std::string>()));
-        }
-    }
-    co_return {total_folders, total_files};
+    // Complete jsonb arrays + totals from one row; spliced verbatim by the
+    // caller into the response envelope.
+    t_folders_json = listing_res[0]["folders"].as<std::string>();
+    t_files_json = listing_res[0]["files"].as<std::string>();
+    co_return {static_cast<int32_t>(listing_res[0]["total_folders"].as<int64_t>()),
+        static_cast<int32_t>(listing_res[0]["total_files"].as<int64_t>())};
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handleCreateDirectory(HttpRequestPtr tsp_req) {

@@ -57,7 +57,7 @@ std::string trimInitValue(const std::string& t_s) {
 /// DB memory. Recurses into STRUCT children so nested initializers are applied.
 /// Arrays are intentionally skipped (single-scalar initializers only today).
 void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field) {
-    SGRN_RETURN_IF(t_field.init_value.empty(),);
+    SGRN_RETURN_IF(t_field.init_value.empty(), );
 
     if (t_field.type == scl::DataType::Struct) {
         for (const auto& child : t_field.children)
@@ -69,10 +69,10 @@ void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field
                            t_field.type == scl::DataType::XString || t_field.type == scl::DataType::XWString;
 
     const bool is_array = !is_string && t_field.count > 1;
-    SGRN_RETURN_IF(is_array, ; ); // array initializers (TIA `[a, b, c]`) are not supported yet
+    SGRN_RETURN_IF(is_array, ;); // array initializers (TIA `[a, b, c]`) are not supported yet
 
     std::string raw = trimInitValue(t_field.init_value);
-    SGRN_RETURN_IF(raw.empty(),;);
+    SGRN_RETURN_IF(raw.empty(), ;);
 
     const int max_len = is_string ? (t_field.struct_size > 0 ? t_field.struct_size : t_field.count) : 1;
 
@@ -81,7 +81,7 @@ void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field
     SGRN_RETURN_IF(span == 0, ;);
 
     std::vector<uint8_t> buf(span, 0);
-    SGRN_RETURN_IF(buf.empty(), ; );
+    SGRN_RETURN_IF(buf.empty(), ;);
 
     // Quoted string literal ("Siemens" or 'Siemens') → native string encode.
     if (is_string) {

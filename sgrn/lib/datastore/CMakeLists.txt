@@ -37,6 +37,14 @@ if(SGRN_BUILD_TESTS)
     add_executable(system_config_test tests/system_config_test.cpp)
     target_link_libraries(system_config_test PRIVATE sgrn_datastore_lib)
     add_test(NAME system_config_test COMMAND system_config_test)
+    # Live-PostgreSQL auth + SQL envelope regression tests (postgres/functions
+    # authenticate_*; storage.cpp jsonb envelopes). Uses the shared
+    # sgrn::test fixtures (external PG* env or ephemeral initdb/postgres
+    # cluster); SKIPs with exit 0 when no PostgreSQL is available.
+    add_executable(pg_auth_functions_test tests/pg_auth_functions_test.cpp)
+    target_link_libraries(pg_auth_functions_test PRIVATE sgrn_datastore_lib)
+    target_include_directories(pg_auth_functions_test PRIVATE ${CMAKE_SOURCE_DIR}/sgrn/lib/tests/support)
+    add_test(NAME pg_auth_functions_test COMMAND pg_auth_functions_test)
 endif()
 
 # ==================== Summary ====================

@@ -300,9 +300,10 @@ struct PlcNode {
                 if (!dv.valid()) {
                     t_writer.Null();
                 } else {
-                    // Enum fields round-trip as their symbolic name instead of a
-                    // bare number (scalar-only; arrays stay numeric).
-                    if (!enum_map_.empty() && !is_array) {
+                    // Enum fields round-trip as their symbolic name — scalars
+                    // AND array elements (quoted JSON strings); unknown
+                    // numeric values fall back to the raw number.
+                    if (!enum_map_.empty()) {
                         const int64_t numeric = (dv.kind() == s7codec::ValueKind::UnsignedInt) ? static_cast<int64_t>(dv.u())
                                                 : (dv.kind() == s7codec::ValueKind::SignedInt) ? dv.i()
                                                                                                : INT64_MIN;

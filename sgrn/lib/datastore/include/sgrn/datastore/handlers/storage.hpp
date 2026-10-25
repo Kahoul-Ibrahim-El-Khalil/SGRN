@@ -129,8 +129,12 @@ private:
     // Helpers for handleDriveList
     // Builders write directly into pre-allocated JSON array strings
     // (no intermediate Json::Value tree — eliminates per-row heap allocations).
+    // The folder/file arrays assembled here are complete SQL-side jsonb
+    // documents (Postgres serializes, C++ only splices the text verbatim).
+    // Virtual-root variant additionally reports the folder total so the
+    // caller no longer derives it from the response body.
 
-    drogon::Task<::sgrn::datastore::BackendResult<void>> buildVirtualRootListing(std::string& t_folders_json,
+    drogon::Task<::sgrn::datastore::BackendResult<void>> buildVirtualRootListing(std::string& t_folders_json, int32_t& t_out_total_folders,
         const std::string& t_namespace_prefix, ::sgrn::datastore::services::storage::StorageScope t_scope,
         const std::string& t_organisation, const drogon::orm::DbClientPtr& tsp_db_client);
 

@@ -110,7 +110,13 @@ std::string PlcState::getScalarString(const std::string& t_path) const {
     const PlcNode* p_node = find(base_path);
     if (!p_node)
         return "null";
-    if (array_index < 0 && (!p_node->children_.empty() || !p_node->cached_slot_))
+    // Whole arrays (and any node best serialized structurally) render through
+    // PlcNode::serialize. s7codec::decodeScalar decodes exactly one element —
+    // for a multi-element scalar array the old fall-through silently returned
+    // only element 0, which broke /data/<DB>/<array>/<i> (the handler parses
+    // this result as a JSON array) and whole-array readbacks via
+    // PlcMemory::getFieldValue.
+    if (array_index < 0 && (p_node->count_ > 1 || !p_node->children_.empty() || !p_node->cached_slot_))
         return getJsonString(base_path);
     if (!p_node->cached_slot_)
         return "null";
@@ -145,15 +151,24 @@ std::string PlcState::getScalarString(const std::string& t_path) const {
     if (!dv.valid())
         return "null";
 
-    // Enums round-trip as their symbolic name (scalar reads only).
+    // Enums round-trip as their symbolic name. The label must be a JSON
+    // string (quoted) so every consumer of this value — TreeCacheEngine leaf
+    // inserts, telemetry FieldUpdateNotification::json_value (rapidjson
+    // Parse), the REST element-readback — can render it verbatim. The old
+    // bare-token output was neither valid JSON nor consistent with
+    // PlcNode::serialize, which already emitted quoted labels.
     if (!p_node->enum_map_.empty()) {
         const int64_t numeric = (dv.kind() == s7codec::ValueKind::UnsignedInt) ? static_cast<int64_t>(dv.u())
                                 : (dv.kind() == s7codec::ValueKind::SignedInt) ? dv.i()
                                                                                : INT64_MIN;
         if (numeric != INT64_MIN) {
             auto it = p_node->enum_map_.find(static_cast<int>(numeric));
-            if (it != p_node->enum_map_.end())
-                return it->second;
+            if (it != p_node->enum_map_.end()) {
+                rapidjson::StringBuffer sb;
+                rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+                w.String(it->second.c_str(), static_cast<rapidjson::SizeType>(it->second.length()));
+                return std::string(sb.GetString());
+            }
         }
     }
     return s7codec::formatDecodedValue(dv, p_node->type_);

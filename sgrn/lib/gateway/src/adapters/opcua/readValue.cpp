@@ -7,6 +7,7 @@
 #include <sgrn/wrappers/opcua/TypeRegistry.hpp>
 
 #include <fmt/core.h>
+#include <algorithm>
 #include <open62541/nodeids.h>
 #include <open62541/server.h>
 #include <open62541/types_generated.h>
@@ -30,10 +31,24 @@ void setCurrentTimeStamp(UA_DataValue* tp_data_value) {
 // Direct raw memory read for scalar primitives. decodeMemoryBytesToDataValue
 // covers scalars, temporal types (DTL / DATE_AND_TIME) and typed arrays; on
 static UA_StatusCode readScalarValue(const NodeContext* tp_ctx, UA_DataValue* tp_data_value, UA_Boolean t_source_time_stamp) {
-    auto r = tp_ctx->server->readDbMemory(tp_ctx->db_number, tp_ctx->field_offset, tp_ctx->field_size, tp_ctx->scratch_buf.data());
+    // NOTE on offsets: `field_offset`/`field_size` come from the schema's
+    // per-field DbField, where members of UDTs are parent-relative. Only
+    // top-level DB fields carry absolute arena offsets. The resolved twin
+    // symbol (`plc_node`) always carries absolute coordinates, so prefer it
+    // whenever it is available — otherwise nested UDT members (e.g.
+    // "station.mode" in the enums simulation) read discarded bytes (their
+    // relative offsets accidentally resolve into unrelated memory, while the
+    // sibling WRITE path uses findSymbol()'s absolute coordinates and works).
+    const twin::PlcNode* p_node = tp_ctx->resolveSymbol();
+    const uint32_t off = p_node != nullptr ? p_node->offset_ : tp_ctx->field_offset;
+    const uint32_t size = p_node != nullptr ? p_node->size_ : tp_ctx->field_size;
+    if (tp_ctx->scratch_buf.size() < size)
+        return UA_STATUSCODE_BADINTERNALERROR;
+
+    auto r = tp_ctx->server->readDbMemory(tp_ctx->db_number, off, size, tp_ctx->scratch_buf.data());
     SGRN_RETURN_IF(r.hasError(), toUAStatusCode(r.error()));
 
-    OpcUaDecodingContext raw_ctx{.p_node_ctx = tp_ctx, .p_raw_data = tp_ctx->scratch_buf.data(), .size = tp_ctx->field_size};
+    OpcUaDecodingContext raw_ctx{.p_node_ctx = tp_ctx, .p_raw_data = tp_ctx->scratch_buf.data(), .size = size};
 
     auto decoded = decodeMemoryBytesToDataValue(raw_ctx);
     SGRN_RETURN_IF(decoded.hasError(), toUAStatusCode(decoded.error())); // was hard-coded BADINTERNALERROR
@@ -45,10 +60,20 @@ static UA_StatusCode readScalarValue(const NodeContext* tp_ctx, UA_DataValue* tp
     return UA_STATUSCODE_GOOD;
 }
 static UA_StatusCode readArrayValue(const NodeContext* tp_ctx, UA_DataValue* tp_data_value, UA_Boolean t_source_time_stamp) {
-    auto r = tp_ctx->server->readDbMemory(tp_ctx->db_number, tp_ctx->field_offset, tp_ctx->field_size, tp_ctx->scratch_buf.data());
+    const twin::PlcNode* p_node = tp_ctx->resolveSymbol();
+    // PlcNode::size_ is the PER-ELEMENT byte span (see PlcNode::serialize) —
+    // the whole-array span is size_ * count_. Using size_ alone read only the
+    // first element's bytes and every element beyond decoded as zero.
+    const uint32_t size =
+        p_node != nullptr ? static_cast<uint32_t>(p_node->size_) * std::max<uint32_t>(1u, p_node->count_) : tp_ctx->field_size;
+    const uint32_t off = p_node != nullptr ? p_node->offset_ : tp_ctx->field_offset;
+    if (tp_ctx->scratch_buf.size() < size)
+        return UA_STATUSCODE_BADINTERNALERROR;
+
+    auto r = tp_ctx->server->readDbMemory(tp_ctx->db_number, off, size, tp_ctx->scratch_buf.data());
     SGRN_RETURN_IF(r.hasError(), toUAStatusCode(r.error()));
 
-    OpcUaDecodingContext raw_ctx{.p_node_ctx = tp_ctx, .p_raw_data = tp_ctx->scratch_buf.data(), .size = tp_ctx->field_size};
+    OpcUaDecodingContext raw_ctx{.p_node_ctx = tp_ctx, .p_raw_data = tp_ctx->scratch_buf.data(), .size = size};
 
     auto result = decodeMemoryBytesToDataValue(raw_ctx);
     SGRN_RETURN_IF(result.hasError(), toUAStatusCode(result.error()));
@@ -102,7 +127,7 @@ UA_StatusCode readValue(UA_Server* /*server*/, const UA_NodeId* /*sessionId*/, v
     if (p_ctx->array_length == 0 && p_ctx->udt_name.empty())
         return readScalarValue(p_ctx, tp_data_value, t_source_time_stamp);
 
-    if (p_ctx->array_length > 0 && p_ctx->udt_name.empty() && p_ctx->elem_ua_type_index >= 0)
+    if (p_ctx->array_length > 0 && p_ctx->udt_name.empty() && (p_ctx->elem_ua_type_index >= 0 || p_ctx->enum_type != nullptr))
         return readArrayValue(p_ctx, tp_data_value, t_source_time_stamp);
 
     // Node was registered with the plain read data source but doesn't match
