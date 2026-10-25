@@ -37,8 +37,8 @@ Result<void, OpcUaAdapterError> encodeArrayOfBoolsToMemory(const ArrayOfBoolsEnc
         const size_t byte_index = index / 8U;
         SGRN_RETURN_ERROR_IF(byte_index >= t_ctx.destination_size, OpcUaAdapterError::OUT_OF_RANGE);
 
-        SGRN_RETURN_IF(!s7codec::encodeBool(t_ctx.p_source[index] != 0, static_cast<int>(index % 8U), t_ctx.p_destination + byte_index,
-                           t_ctx.destination_size - byte_index)
+        SGRN_RETURN_IF(!s7codec::encodeBool(t_ctx.p_source[index] != 0, s7codec::BitOffset{static_cast<uint8_t>(index % 8U)},
+                           s7codec::WriteBuffer{t_ctx.p_destination + byte_index, t_ctx.destination_size - byte_index})
                            .has_value(),
             OpcUaAdapterError::ENCODE_FAILED);
     }
@@ -62,12 +62,17 @@ Result<void, OpcUaAdapterError> encodeStringOpcUaToMemory(const OpcUaEncodingCon
     const uint32_t string_capacity = t_ctx.view.string_capacity;
 
     if (t_ctx.view.type == DataType::String) {
-        SGRN_RETURN_IF(!encodeString(p_string_data_char, string_length, string_capacity, t_ctx.p_memory, t_ctx.effectiveSize()).has_value(),
+        SGRN_RETURN_IF(!encodeString(
+            std::string_view{p_string_data_char, static_cast<size_t>(string_length)}, s7codec::StringCapacity{string_capacity},
+            s7codec::WriteBuffer{t_ctx.p_memory, t_ctx.effectiveSize()})
+                           .has_value(),
             OpcUaAdapterError::OUT_OF_RANGE);
 
     } else if (t_ctx.view.type == DataType::XString) {
         SGRN_RETURN_IF(
-            !encodeXString(p_string_data_char, string_length, string_capacity, t_ctx.p_memory, t_ctx.effectiveSize(), t_ctx.view.endian)
+            !encodeXString(
+                std::string_view{p_string_data_char, static_cast<size_t>(string_length)}, s7codec::StringCapacity{string_capacity},
+                s7codec::WriteBuffer{t_ctx.p_memory, t_ctx.effectiveSize()}, t_ctx.view.endian)
                 .has_value(),
             OpcUaAdapterError::OUT_OF_RANGE);
 
@@ -81,17 +86,17 @@ Result<void, OpcUaAdapterError> encodeStringOpcUaToMemory(const OpcUaEncodingCon
 
         const uint16_t* p_string_wide_char = reinterpret_cast<const uint16_t*>(wide->c_str());
 
-        const int wide_string_length = static_cast<int>(wide->size());
+        const auto wide_units = std::span<const uint16_t>{p_string_wide_char, wide->size()};
 
         if (t_ctx.view.type == DataType::WString) {
-            SGRN_RETURN_IF(!encodeWString(p_string_wide_char, wide_string_length, string_capacity, t_ctx.p_memory, t_ctx.effectiveSize(),
-                               t_ctx.view.endian)
+            SGRN_RETURN_IF(!encodeWString(wide_units, s7codec::StringCapacity{string_capacity},
+                               s7codec::WriteBuffer{t_ctx.p_memory, t_ctx.effectiveSize()}, t_ctx.view.endian)
                                .has_value(),
                 OpcUaAdapterError::OUT_OF_RANGE);
         } else {
-            SGRN_RETURN_IF(!encodeXWString(p_string_wide_char, wide_string_length, string_capacity, t_ctx.p_memory, t_ctx.effectiveSize(),
-                               t_ctx.view.endian)
-                               .has_value(),
+            SGRN_RETURN_IF(!encodeXWString(wide_units, s7codec::StringCapacity{string_capacity},
+                                s7codec::WriteBuffer{t_ctx.p_memory, t_ctx.effectiveSize()}, t_ctx.view.endian)
+                                .has_value(),
                 OpcUaAdapterError::OUT_OF_RANGE);
         }
     }
@@ -171,7 +176,8 @@ Result<void, OpcUaAdapterError> encodeDateTimeOpcUaToMemory(const OpcUaEncodingC
 
         dtl.nanosecond = (dts.milliSec * 1000000) + (dts.microSec * 1000) + dts.nanoSec;
 
-        SGRN_RETURN_IF(!s7codec::encodeDtl(dtl, t_ctx.p_memory, s7_size, t_ctx.view.endian).has_value(), OpcUaAdapterError::ENCODE_FAILED);
+        SGRN_RETURN_IF(
+            !s7codec::encodeDtl(dtl, s7codec::WriteBuffer{t_ctx.p_memory, s7_size}, t_ctx.view.endian).has_value(), OpcUaAdapterError::ENCODE_FAILED);
 
     } else if (t_ctx.view.type == DataType::DateTime) {
         SGRN_RETURN_ERROR_IF(unix_time_sec < 631152000LL, OpcUaAdapterError::OUT_OF_RANGE);
@@ -179,7 +185,7 @@ Result<void, OpcUaAdapterError> encodeDateTimeOpcUaToMemory(const OpcUaEncodingC
         struct tm tm_info = resolveOpcUaLocalTime(ua_date);
 
         SGRN_RETURN_IF(!s7codec::encodeDateTime(tm_info.tm_year + 1900, tm_info.tm_mon + 1, tm_info.tm_mday, tm_info.tm_hour,
-                           tm_info.tm_min, tm_info.tm_sec, 0, t_ctx.p_memory, s7_size)
+                           tm_info.tm_min, tm_info.tm_sec, 0, s7codec::WriteBuffer{t_ctx.p_memory, s7_size})
                            .has_value(),
             OpcUaAdapterError::ENCODE_FAILED);
 
@@ -219,7 +225,9 @@ Result<void, OpcUaAdapterError> encodeScalarOpcUaToMemory(const OpcUaEncodingCon
         s7codec::DecodedValue dv = s7codec::DecodedValue::makeSigned(static_cast<int64_t>(raw));
 
         SGRN_RETURN_IF(
-            !s7codec::encodeScalar(dv, t_ctx.view.type, t_ctx.p_memory, s7_size, t_ctx.view.bit_index, 0, t_ctx.view.endian).has_value(),
+            !s7codec::encodeScalar(dv, t_ctx.view.type, s7codec::WriteBuffer{t_ctx.p_memory, s7_size},
+         s7codec::EncodeOptions{.endian = t_ctx.view.endian, .bitOffset = s7codec::BitOffset{t_ctx.view.bit_index}})
+         .has_value(),
             OpcUaAdapterError::ENCODE_FAILED);
 
         return {};
@@ -279,7 +287,9 @@ Result<void, OpcUaAdapterError> encodeScalarOpcUaToMemory(const OpcUaEncodingCon
     SGRN_RETURN_IF(!p_entry->from_ua(t_ctx.p_ua_type, t_ctx.p_ua_buf, dv), OpcUaAdapterError::TYPE_MISMATCH);
 
     SGRN_RETURN_IF(
-        !s7codec::encodeScalar(dv, t_ctx.view.type, t_ctx.p_memory, s7_size, t_ctx.view.bit_index, 0, t_ctx.view.endian).has_value(),
+        !s7codec::encodeScalar(dv, t_ctx.view.type, s7codec::WriteBuffer{t_ctx.p_memory, s7_size},
+         s7codec::EncodeOptions{.endian = t_ctx.view.endian, .bitOffset = s7codec::BitOffset{t_ctx.view.bit_index}})
+         .has_value(),
         OpcUaAdapterError::ENCODE_FAILED);
 
     return {};

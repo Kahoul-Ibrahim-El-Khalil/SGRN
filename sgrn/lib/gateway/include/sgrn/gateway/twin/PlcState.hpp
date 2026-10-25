@@ -296,7 +296,10 @@ struct PlcNode {
                     buffer_remaining = (cached_slot_->offset + cached_slot_->size) - (cached_slot_->offset + base_abs_offset + (i / 8));
                 }
 
-                auto dv = s7codec::decodeScalar(type_, p_ptr, buffer_remaining, b_idx, decode_count, endian_);
+                auto dv = s7codec::decodeScalar(type_, s7codec::ReadBuffer{p_ptr, buffer_remaining},
+                    s7codec::DecodeOptions{//
+                        .endian = endian_, .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(b_idx)},
+                        .stringCapacity = s7codec::StringCapacity{static_cast<uint32_t>(decode_count)}});
                 if (!dv.valid()) {
                     t_writer.Null();
                 } else {

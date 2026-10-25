@@ -63,7 +63,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeDtlValue(
     } else {
         return SclError::Generic;
     }
-    auto status = encodeDtl(dtl, tp_ptr, t_buffer_size, t_e);
+    auto status = encodeDtl(dtl, WriteBuffer{tp_ptr, t_buffer_size}, t_e);
     if (!status.has_value())
         return SclError::Generic;
     return {};
@@ -134,7 +134,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             } else {
                 return SclError::Generic;
             }
-            auto status = s7codec::encodeBool(b, t_field.bit_index, tp_ptr, t_buffer_size);
+            auto status = s7codec::encodeBool(b, BitOffset{t_field.bit_index}, WriteBuffer{tp_ptr, t_buffer_size});
             if (!status.has_value())
                 return SclError::Generic;
             return {};
@@ -145,7 +145,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             auto t_v = to_unsigned(t_value);
             if (!t_v || !isInRange<uint8_t>(*t_v))
                 return SclError::Generic;
-            auto status = encodeU8(static_cast<uint8_t>(*t_v), tp_ptr, t_buffer_size);
+            auto status = encodeU8(static_cast<uint8_t>(*t_v), WriteBuffer{tp_ptr, t_buffer_size});
             if (!status.has_value())
                 return SclError::Generic;
             return {};
@@ -154,7 +154,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             auto t_v = to_signed(t_value);
             if (!t_v || !isInRange<int8_t>(*t_v))
                 return SclError::Generic;
-            auto status = encodeI8(static_cast<int8_t>(*t_v), tp_ptr, t_buffer_size);
+            auto status = encodeI8(static_cast<int8_t>(*t_v), WriteBuffer{tp_ptr, t_buffer_size});
             if (!status.has_value())
                 return SclError::Generic;
             return {};
@@ -163,7 +163,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             auto t_v = to_signed(t_value);
             if (!t_v || !isInRange<int16_t>(*t_v))
                 return SclError::Generic;
-            auto status = encodeI16(static_cast<int16_t>(*t_v), tp_ptr, t_buffer_size, t_e);
+            auto status = encodeI16(static_cast<int16_t>(*t_v), WriteBuffer{tp_ptr, t_buffer_size}, t_e);
             if (!status.has_value())
                 return SclError::Generic;
             return {};
@@ -177,7 +177,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             auto t_v = to_unsigned(t_value);
             if (!t_v || !isInRange<uint16_t>(*t_v))
                 return SclError::Generic;
-            auto status = encodeU16(static_cast<uint16_t>(*t_v), tp_ptr, t_buffer_size, t_e);
+            auto status = encodeU16(static_cast<uint16_t>(*t_v), WriteBuffer{tp_ptr, t_buffer_size}, t_e);
             if (!status.has_value())
                 return SclError::Generic;
             return {};
@@ -186,7 +186,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             auto t_v = to_signed(t_value);
             if (!t_v || !isInRange<int32_t>(*t_v))
                 return SclError::Generic;
-            auto status = encodeI32(static_cast<int32_t>(*t_v), tp_ptr, t_buffer_size, t_e);
+            auto status = encodeI32(static_cast<int32_t>(*t_v), WriteBuffer{tp_ptr, t_buffer_size}, t_e);
             if (!status.has_value())
                 return SclError::Generic;
             return {};
@@ -204,7 +204,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             }
             if (!isInRange<int32_t>(ms))
                 return SclError::Generic;
-            auto status = encodeI32(static_cast<int32_t>(ms), tp_ptr, t_buffer_size, t_e);
+            auto status = encodeI32(static_cast<int32_t>(ms), WriteBuffer{tp_ptr, t_buffer_size}, t_e);
             if (!status.has_value())
                 return SclError::Generic;
             return {};
@@ -215,7 +215,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             auto t_v = to_unsigned(t_value);
             if (!t_v || !isInRange<uint32_t>(*t_v))
                 return SclError::Generic;
-            auto status = encodeU32(static_cast<uint32_t>(*t_v), tp_ptr, t_buffer_size, t_e);
+            auto status = encodeU32(static_cast<uint32_t>(*t_v), WriteBuffer{tp_ptr, t_buffer_size}, t_e);
             if (!status.has_value())
                 return SclError::Generic;
             return {};
@@ -227,7 +227,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             auto t_v = to_signed(t_value);
             if (!t_v)
                 return SclError::Generic;
-            auto status = encodeI64(*t_v, tp_ptr, t_buffer_size, t_e);
+            auto status = encodeI64(*t_v, WriteBuffer{tp_ptr, t_buffer_size}, t_e);
             if (!status.has_value())
                 return SclError::Generic;
             return {};
@@ -238,7 +238,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             auto t_v = to_unsigned(t_value);
             if (!t_v)
                 return SclError::Generic;
-            auto status = encodeU64(*t_v, tp_ptr, t_buffer_size, t_e);
+            auto status = encodeU64(*t_v, WriteBuffer{tp_ptr, t_buffer_size}, t_e);
             if (!status.has_value())
                 return SclError::Generic;
             return {};
@@ -247,7 +247,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             auto t_v = to_float(t_value);
             if (!t_v)
                 return SclError::Generic;
-            auto status = encodeReal(static_cast<float>(*t_v), tp_ptr, t_buffer_size, t_e);
+            auto status = encodeReal(static_cast<float>(*t_v), WriteBuffer{tp_ptr, t_buffer_size}, t_e);
             if (!status.has_value())
                 return SclError::Generic;
             return {};
@@ -256,7 +256,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             auto t_v = to_float(t_value);
             if (!t_v)
                 return SclError::Generic;
-            auto status = encodeLReal(*t_v, tp_ptr, t_buffer_size, t_e);
+            auto status = encodeLReal(*t_v, WriteBuffer{tp_ptr, t_buffer_size}, t_e);
             if (!status.has_value())
                 return SclError::Generic;
             return {};
@@ -273,7 +273,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             else
                 return SclError::Generic;
             auto status = encodeDateTime(
-                tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_wday + 1, tp_ptr, t_buffer_size);
+                tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_wday + 1, WriteBuffer{tp_ptr, t_buffer_size});
             if (!status.has_value())
                 return SclError::Generic;
             return {};
@@ -290,9 +290,9 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             uint32_t max_len = t_field.string_capacity > 0 ? static_cast<uint32_t>(t_field.string_capacity)
                                                            : (t_field.count > 0 ? static_cast<uint32_t>(t_field.count) : 254);
             if (t_field.type == DataType::String)
-                status = encodeString(s.c_str(), static_cast<int>(s.length()), max_len, tp_ptr, t_buffer_size);
+                status = encodeString(s, StringCapacity{max_len}, WriteBuffer{tp_ptr, t_buffer_size});
             else
-                status = encodeXString(s.c_str(), static_cast<int>(s.length()), max_len, tp_ptr, t_buffer_size, t_e);
+                status = encodeXString(s, StringCapacity{max_len}, WriteBuffer{tp_ptr, t_buffer_size}, t_e);
             if (!status.has_value())
                 return SclError::Generic;
             return {};
@@ -308,12 +308,11 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             // For wstrings, max_len comes from string_capacity, not count
             uint32_t max_len = t_field.string_capacity > 0 ? static_cast<uint32_t>(t_field.string_capacity)
                                                            : (t_field.count > 0 ? static_cast<uint32_t>(t_field.count) : 16382);
+            auto wide_units = std::span<const uint16_t>(reinterpret_cast<const uint16_t*>(wide->c_str()), wide->size());
             if (t_field.type == DataType::WString)
-                status = encodeWString(
-                    reinterpret_cast<const uint16_t*>(wide->c_str()), static_cast<int>(wide->size()), max_len, tp_ptr, t_buffer_size, t_e);
+                status = encodeWString(wide_units, StringCapacity{max_len}, WriteBuffer{tp_ptr, t_buffer_size}, t_e);
             else
-                status = encodeXWString(
-                    reinterpret_cast<const uint16_t*>(wide->c_str()), static_cast<int>(wide->size()), max_len, tp_ptr, t_buffer_size, t_e);
+                status = encodeXWString(wide_units, StringCapacity{max_len}, WriteBuffer{tp_ptr, t_buffer_size}, t_e);
             if (!status.has_value())
                 return SclError::Generic;
             return {};
@@ -366,7 +365,9 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeArrayValue(
             if (static_cast<size_t>(byte_off + data_offset) >= t_buffer_size)
                 return SclError::Generic;
 
-            auto status = s7codec::encodeBool(b, bit_off, tp_ptr + data_offset + byte_off, t_buffer_size - data_offset - byte_off);
+            auto status =
+                s7codec::encodeBool(b, s7codec::BitOffset{static_cast<uint8_t>(bit_off)},
+                    s7codec::WriteBuffer{tp_ptr + data_offset + byte_off, t_buffer_size - data_offset - byte_off});
             if (!status.has_value())
                 return SclError::Generic;
         }

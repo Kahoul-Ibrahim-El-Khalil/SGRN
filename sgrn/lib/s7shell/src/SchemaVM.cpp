@@ -48,7 +48,10 @@ static s7codec::DecodedValue decodeFromLiveMemory(ScriptDataBlock* tp_db, FieldM
     size_t span = s7codec::typeSpanBytes(tp_meta->s7type, tp_meta->count).value_or(0);
     std::vector<uint8_t> tmp(span, 0);
     tp_db->readFieldFromMemory(tp_meta->abs_offset, tmp.data(), span);
-    return s7codec::decodeScalar(tp_meta->s7type, tmp.data(), span, tp_meta->bit_index, tp_meta->count, tp_meta->endian);
+    return s7codec::decodeScalar(tp_meta->s7type, s7codec::ReadBuffer{tmp.data(), span},
+        s7codec::DecodeOptions{//
+            .endian = tp_meta->endian, .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(tp_meta->bit_index)},
+            .stringCapacity = s7codec::StringCapacity{static_cast<uint32_t>(tp_meta->count)}});
 }
 
 static void GenericFieldGetter_float(asIScriptGeneric* tp_gen) {
@@ -122,7 +125,10 @@ static void GenericFieldSetter_float(asIScriptGeneric* tp_gen) {
     float val = tp_gen->GetArgFloat(0);
     uint8_t tmp[16]{};
     auto dv = s7codec::DecodedValue::makeFloat(val);
-    s7codec::encodeScalar(dv, p_meta->s7type, tmp, sizeof(tmp), p_meta->bit_index, p_meta->count, p_meta->endian);
+    s7codec::encodeScalar(dv, p_meta->s7type, s7codec::WriteBuffer{tmp, sizeof(tmp)},
+        s7codec::EncodeOptions{//
+            .endian = p_meta->endian, .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(p_meta->bit_index)},
+            .stringCapacity = s7codec::StringCapacity{static_cast<uint32_t>(p_meta->count)}});
     p_db->writeFieldToMemory(
         p_meta->abs_offset, tmp, static_cast<size_t>(s7codec::typeSpanBytes(p_meta->s7type, p_meta->count).value_or(0)));
 }
@@ -133,7 +139,10 @@ static void GenericFieldSetter_double(asIScriptGeneric* tp_gen) {
     double val = tp_gen->GetArgDouble(0);
     uint8_t tmp[16]{};
     auto dv = s7codec::DecodedValue::makeDouble(val);
-    s7codec::encodeScalar(dv, p_meta->s7type, tmp, sizeof(tmp), p_meta->bit_index, p_meta->count, p_meta->endian);
+    s7codec::encodeScalar(dv, p_meta->s7type, s7codec::WriteBuffer{tmp, sizeof(tmp)},
+        s7codec::EncodeOptions{//
+            .endian = p_meta->endian, .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(p_meta->bit_index)},
+            .stringCapacity = s7codec::StringCapacity{static_cast<uint32_t>(p_meta->count)}});
     p_db->writeFieldToMemory(
         p_meta->abs_offset, tmp, static_cast<size_t>(s7codec::typeSpanBytes(p_meta->s7type, p_meta->count).value_or(0)));
 }
@@ -163,7 +172,10 @@ static void GenericFieldSetter_int(asIScriptGeneric* tp_gen) {
     uint32_t span = static_cast<uint32_t>(s7codec::typeSpanBytes(p_meta->s7type, p_meta->count).value_or(8));
     std::vector<uint8_t> tmp(span, 0);
     auto dv = s7codec::DecodedValue::makeSigned(static_cast<int64_t>(val));
-    s7codec::encodeScalar(dv, p_meta->s7type, tmp.data(), tmp.size(), p_meta->bit_index, p_meta->count, p_meta->endian);
+    s7codec::encodeScalar(dv, p_meta->s7type, s7codec::WriteBuffer{tmp.data(), tmp.size()},
+        s7codec::EncodeOptions{//
+            .endian = p_meta->endian, .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(p_meta->bit_index)},
+            .stringCapacity = s7codec::StringCapacity{static_cast<uint32_t>(p_meta->count)}});
     p_db->writeFieldToMemory(p_meta->abs_offset, tmp.data(), tmp.size());
 }
 
@@ -174,7 +186,10 @@ static void GenericFieldSetter_int64(asIScriptGeneric* tp_gen) {
     uint32_t span = static_cast<uint32_t>(s7codec::typeSpanBytes(p_meta->s7type, p_meta->count).value_or(8));
     std::vector<uint8_t> tmp(span, 0);
     auto dv = s7codec::DecodedValue::makeSigned(val);
-    s7codec::encodeScalar(dv, p_meta->s7type, tmp.data(), tmp.size(), p_meta->bit_index, p_meta->count, p_meta->endian);
+    s7codec::encodeScalar(dv, p_meta->s7type, s7codec::WriteBuffer{tmp.data(), tmp.size()},
+        s7codec::EncodeOptions{//
+            .endian = p_meta->endian, .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(p_meta->bit_index)},
+            .stringCapacity = s7codec::StringCapacity{static_cast<uint32_t>(p_meta->count)}});
     p_db->writeFieldToMemory(p_meta->abs_offset, tmp.data(), tmp.size());
 }
 
@@ -188,7 +203,9 @@ static void GenericFieldSetter_bool(asIScriptGeneric* tp_gen) {
     uint8_t cur = 0;
     p_db->readFieldFromMemory(p_meta->abs_offset, &cur, 1);
     auto dv = s7codec::DecodedValue::makeBool(val);
-    s7codec::encodeScalar(dv, p_meta->s7type, &cur, 1, p_meta->bit_index, p_meta->count, p_meta->endian);
+    s7codec::encodeScalar(dv, p_meta->s7type, s7codec::WriteBuffer{&cur, 1},
+        s7codec::EncodeOptions{//
+            .endian = p_meta->endian, .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(p_meta->bit_index)}});
     p_db->writeFieldToMemory(p_meta->abs_offset, &cur, 1);
 }
 
@@ -212,7 +229,10 @@ static void GenericFieldSetter_string(asIScriptGeneric* tp_gen) {
     // encode needs the CHARACTER capacity N, not 1. Use string_capacity which
     // was stored as N from the schema parser.
     uint32_t max_chars = p_meta->string_capacity > 0 ? p_meta->string_capacity : p_meta->count;
-    auto status = s7codec::encodeScalar(dv, p_meta->s7type, tmp.data(), tmp.size(), p_meta->bit_index, max_chars, p_meta->endian);
+    auto status = s7codec::encodeScalar(dv, p_meta->s7type, s7codec::WriteBuffer{tmp.data(), tmp.size()},
+        s7codec::EncodeOptions{//
+            .endian = p_meta->endian, .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(p_meta->bit_index)},
+            .stringCapacity = s7codec::StringCapacity{max_chars}});
     if (!status.has_value()) {
         fmt::print(stderr, "[SchemaVM] string encode failed for '{}': {}\n", p_meta->path, s7codec::toString(status.error()));
     }

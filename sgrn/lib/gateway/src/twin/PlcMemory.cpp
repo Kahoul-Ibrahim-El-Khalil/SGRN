@@ -90,7 +90,8 @@ void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field
         }
 
         auto dv = s7codec::DecodedValue::makeString(std::move(raw));
-        auto st = s7codec::encodeScalar(dv, t_field.type, buf.data(), buf.size(), 0, max_len, t_field.endianness);
+        auto st = s7codec::encodeScalar(dv, t_field.type, s7codec::WriteBuffer{buf.data(), buf.size()},
+            s7codec::EncodeOptions{.endian = t_field.endianness, .stringCapacity = s7codec::StringCapacity{static_cast<uint32_t>(max_len)}});
 
         if (st.has_value())
             (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
@@ -103,7 +104,10 @@ void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field
         for (const auto& [k, v] : t_field.enum_map) {
             if (initEqualsIgnoreCase(v, raw)) {
                 auto dv = s7codec::DecodedValue::makeSigned(k);
-                auto st = s7codec::encodeScalar(dv, t_field.type, buf.data(), buf.size(), t_field.bit_index, 1, t_field.endianness);
+                // Enum is never a string type: the legacy call's "count 1" and
+                // bit_index were dead weight, only the endian matters here.
+                auto st = s7codec::encodeScalar(
+                    dv, t_field.type, s7codec::WriteBuffer{buf.data(), buf.size()}, s7codec::EncodeOptions{.endian = t_field.endianness});
 
                 if (st.has_value())
                     (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
@@ -123,7 +127,8 @@ void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field
             return;
 
         auto dv = s7codec::DecodedValue::makeSigned(b ? 1 : 0);
-        auto st = s7codec::encodeScalar(dv, scl::DataType::Bool, buf.data(), buf.size(), t_field.bit_index, 1, t_field.endianness);
+        auto st = s7codec::encodeScalar(dv, scl::DataType::Bool, s7codec::WriteBuffer{buf.data(), buf.size()},
+            s7codec::EncodeOptions{.endian = t_field.endianness, .bitOffset = s7codec::BitOffset{t_field.bit_index}});
 
         if (st.has_value())
             (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
@@ -152,7 +157,9 @@ void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field
             return;
 
         auto dv = s7codec::DecodedValue::makeDouble(d);
-        auto st = s7codec::encodeScalar(dv, t_field.type, buf.data(), buf.size(), 0, 1, t_field.endianness);
+        // Real/LReal: the legacy "count 1" was dead weight for a non-string type.
+        auto st = s7codec::encodeScalar(
+            dv, t_field.type, s7codec::WriteBuffer{buf.data(), buf.size()}, s7codec::EncodeOptions{.endian = t_field.endianness});
 
         if (st.has_value())
             (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
@@ -167,7 +174,10 @@ void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field
         return;
 
     auto dv = s7codec::DecodedValue::makeSigned(v);
-    auto st = s7codec::encodeScalar(dv, t_field.type, buf.data(), buf.size(), t_field.bit_index, 1, t_field.endianness);
+    // Falls through here only for non-Bool scalars, so bit_index is unused
+    // by the codec on this path (Bool returns earlier).
+    auto st = s7codec::encodeScalar(
+        dv, t_field.type, s7codec::WriteBuffer{buf.data(), buf.size()}, s7codec::EncodeOptions{.endian = t_field.endianness});
 
     if (st.has_value())
         (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());

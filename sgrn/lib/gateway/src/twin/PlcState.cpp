@@ -147,7 +147,10 @@ std::string PlcState::getScalarString(const std::string& t_path) const {
 
     const uint8_t* p_ptr = tree().data() + p_node->cached_slot_->offset + byte_offset;
     size_t remaining = p_node->cached_slot_->size - byte_offset;
-    auto dv = s7codec::decodeScalar(p_node->type_, p_ptr, remaining, bit_index_, decode_count, p_node->endian_);
+    auto dv = s7codec::decodeScalar(p_node->type_, s7codec::ReadBuffer{p_ptr, remaining},
+        s7codec::DecodeOptions{//
+            .endian = p_node->endian_, .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(bit_index_)},
+            .stringCapacity = s7codec::StringCapacity{static_cast<uint32_t>(decode_count)}});
     if (!dv.valid())
         return "null";
 

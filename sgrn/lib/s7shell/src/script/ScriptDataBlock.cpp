@@ -340,8 +340,10 @@ void ScriptDataBlock::writeScalar(const std::string& t_path, const s7codec::Deco
     // Read existing bytes first to preserve other bits (especially for bit-packed BOOL arrays)
     readFieldFromMemory(loc->abs_offset, buf.data(), sz);
 
-    auto status =
-        s7codec::encodeScalar(t_val, loc->field->type, buf.data(), sz, loc->field->bit_index, loc->field->count, loc->field->endianness);
+    auto status = s7codec::encodeScalar(t_val, loc->field->type, s7codec::WriteBuffer{buf.data(), static_cast<size_t>(sz)},
+        s7codec::EncodeOptions{//
+            .endian = loc->field->endianness, .bitOffset = s7codec::BitOffset{loc->field->bit_index},
+            .stringCapacity = s7codec::StringCapacity{loc->field->count}});
     if (!status.has_value()) {
         throwScriptException(s7codec::toString(status.error()), ShellError::TypeMismatch);
         return;
@@ -673,7 +675,8 @@ static void encodeScriptArray(const ::sgrn::scl::DbField& t_field, asIScriptEngi
                 throwScriptException(fmt::format("DB{}.'{}': bool element {} out of range", t_db_num, t_ctx, i), ShellError::TypeMismatch);
                 return;
             }
-            auto status = s7codec::encodeBool(b, bit_off, tp_buf + byte_off, t_buf_size - byte_off);
+            auto status =
+                s7codec::encodeBool(b, s7codec::BitOffset{static_cast<uint8_t>(bit_off)}, s7codec::WriteBuffer{tp_buf + byte_off, t_buf_size - byte_off});
             if (!status.has_value()) {
                 throwScriptException(
                     fmt::format("DB{}.'{}': bool encode failed at element {}", t_db_num, t_ctx, i), ShellError::TypeMismatch);
@@ -768,7 +771,10 @@ static void encodeScriptFieldValue(const ::sgrn::scl::DbField& t_field, asIScrip
     auto decoded = decodedFromScriptScalar(t_field, tp_engine, tp_val, t_type_id, t_ctx, t_db_num);
     if (!decoded.valid())
         return; // decodedFromScriptScalar already threw
-    auto status = s7codec::encodeScalar(decoded, t_field.type, tp_buf, t_buf_size, t_field.bit_index, t_field.count, t_field.endianness);
+    auto status = s7codec::encodeScalar(decoded, t_field.type, s7codec::WriteBuffer{tp_buf, t_buf_size},
+        s7codec::EncodeOptions{//
+            .endian = t_field.endianness, .bitOffset = s7codec::BitOffset{t_field.bit_index},
+            .stringCapacity = s7codec::StringCapacity{t_field.count}});
     if (!status.has_value()) {
         throwScriptException(
             fmt::format("DB{}.'{}' rejected the value for {}", t_db_num, t_ctx, describeField(t_field)), ShellError::TypeMismatch);
@@ -926,7 +932,10 @@ s7codec::DecodedValue ScriptDataBlock::readScalar(const std::string& t_path) {
     int sz = (loc->field->type == DataType::Bool && loc->field->count <= 1) ? 1 : ::sgrn::gateway::twin::fieldSpanSize(*loc->field);
     std::vector<uint8_t> tmp(sz, 0);
     readFieldFromMemory(loc->abs_offset, tmp.data(), sz);
-    return s7codec::decodeScalar(loc->field->type, tmp.data(), sz, loc->field->bit_index, loc->field->count, loc->field->endianness);
+    return s7codec::decodeScalar(loc->field->type, s7codec::ReadBuffer{tmp.data(), static_cast<size_t>(sz)},
+        s7codec::DecodeOptions{//
+            .endian = loc->field->endianness, .bitOffset = s7codec::BitOffset{loc->field->bit_index},
+            .stringCapacity = s7codec::StringCapacity{loc->field->count}});
 }
 double ScriptDataBlock::getReal(const std::string& t_path) {
     auto dv = readScalar(t_path);
