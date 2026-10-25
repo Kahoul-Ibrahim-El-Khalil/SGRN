@@ -26,19 +26,25 @@ using sgrn::utils::strings::trim;
 
 uint32_t fieldElementSpanBytes(const DbField& f) {
     switch (kind_of(f)) {
-        case FieldKind::String:
+        case FieldKind::String: {
+            // Tile capacity: schema/symbol-shaped fields carry it in
+            // string_capacity (count holds the array length); tag-table-shaped
+            // fields conflate chars into count with string_capacity == 0 —
+            // the same rule the JSON encode layer applies.
+            const uint32_t cap = f.string_capacity > 0 ? f.string_capacity : f.count;
             switch (f.type) {
                 case DataType::String:
-                    return 2 + f.string_capacity;
+                    return 2 + cap;
                 case DataType::WString:
-                    return 4 + f.string_capacity * 2;
+                    return 4 + cap * 2;
                 case DataType::XString:
-                    return 8 + f.string_capacity;
+                    return 8 + cap;
                 case DataType::XWString:
-                    return 8 + f.string_capacity * 2;
+                    return 8 + cap * 2;
                 default:
-                    return f.string_capacity;
+                    return cap;
             }
+        }
         case FieldKind::Struct:
             return std::max(static_cast<uint32_t>(1), f.struct_size);
         case FieldKind::Scalar:
@@ -50,6 +56,13 @@ uint32_t fieldElementSpanBytes(const DbField& f) {
 
 uint32_t fieldSpanSize(const DbField& f) {
     const uint32_t elem = fieldElementSpanBytes(f);
+    if (kind_of(f) == FieldKind::String && f.string_capacity == 0) {
+        // Tag-table-shaped string: chars are conflated into count, so elem
+        // already covers the whole field — no array multiplier applies.
+        // (The schema parser always sets string_capacity > 0 for string
+        // kinds, so string_capacity == 0 uniquely identifies this shape.)
+        return f.is_dynamic ? elem + 4 : elem;
+    }
     int base = f.count <= 1 ? elem : elem * f.count;
     return f.is_dynamic ? base + 4 : base;
 }
@@ -57,15 +70,6 @@ uint32_t fieldSpanSize(const DbField& f) {
 // -----------------------------------------------------------------------------
 // Parsing Utilities
 // -----------------------------------------------------------------------------
-
-/**
- * @brief Finds a field by its name in a Data Block registry.
- */
-const DbField* findFieldByName(const DbSchema& t_reg, const std::string& t_name) {
-    std::vector<DbField>::const_iterator it =
-        std::find_if(t_reg.fields.begin(), t_reg.fields.end(), [&](const DbField& t_f) { return t_f.name == t_name; });
-    return it == t_reg.fields.end() ? nullptr : &*it;
-}
 
 // -----------------------------------------------------------------------------
 // Time Utilities

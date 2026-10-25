@@ -32,6 +32,7 @@
 
 #include <sgrn/common/S7SerializationUtils.hpp>
 #include <sgrn/gateway/twin/encoding.hpp>
+#include <sgrn/gateway/twin/path.hpp>
 #include <sgrn/scl/utils.hpp>
 
 #include <algorithm>
@@ -388,10 +389,31 @@ void spanHelpers() {
     DbField fs = mkField("s", DataType::String, 0, 1, 8);
     CHECK(fieldSpanSize(fs) == 10); // scalar string span comes from string_capacity
     CHECK(fieldElementSpanBytes(fs) == 10);
+    // Schema/symbol-shaped scalar STRING (count=1, string_capacity=8): the
+    // twin fork computed typeSpanBytes(String,count) = 2+count = 3 bytes for
+    // a 10-byte tile — the under-sizing behind out-of-range-style failures in
+    // DbIOProvider/ScriptDataBlock/WalReplayer/sgrn_replay sizing. The twin
+    // entry point now delegates to scl's and must agree on both shapes.
+    CHECK(twin::fieldSpanSize(fs) == 10);
+
+    // Tag-table-shaped string (chars conflated into count with
+    // string_capacity == 0): capacity falls back to count and the string
+    // tile is the whole span — no array multiplier (old twin behavior,
+    // preserved; scl's former copy would have multiplied elem by count).
+    DbField ftag = mkField("tg", DataType::String, 0, 44, 0);
+    CHECK(fieldElementSpanBytes(ftag) == 46);
+    CHECK(twin::fieldSpanSize(ftag) == 46);
+    CHECK(fieldSpanSize(ftag) == 46);
+
+    // Degenerate string (count=0, string_capacity=0) keeps a 2-byte header-only
+    // span — matches the pre-unification twin typeSpanBytes behavior.
+    DbField fz = mkField("z", DataType::String, 0, 0, 0);
+    CHECK(fieldSpanSize(fz) == 2);
 
     DbField farr = mkField("sa", DataType::String, 0, 2, 4);
     CHECK(fieldElementSpanBytes(farr) == 6);
     CHECK(fieldSpanSize(farr) == 12);
+    CHECK(twin::fieldSpanSize(farr) == 12);
 
     DbField fuds = mkField("ud", DataType::UDInt, 0, 4);
     CHECK(fieldSpanSize(fuds) == 16);

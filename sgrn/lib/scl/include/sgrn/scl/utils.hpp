@@ -115,9 +115,6 @@ sgrn::Result<void, SclError> encodeFieldAt(const DbField& t_field, const std::st
  */
 std::string decodeDbBuffer(const sgrn::scl::DbSchema& t_reg, const uint8_t* tp_buf, size_t t_buffer_size);
 
-uint32_t symbolFieldSpanBytes(const DbField& t_field);
-const DbField* findFieldByName(const DbSchema& t_reg, const std::string& t_name);
-
 sgrn::Result<std::vector<uint8_t>, SclError> parseHexBytes(const std::string& t_joined);
 std::optional<PlcAddress> parsePlcAddress(const std::string& t_tok);
 std::optional<uint64_t> parseCLiteral(const std::string& t_raw);
