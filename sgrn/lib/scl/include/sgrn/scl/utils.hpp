@@ -98,6 +98,9 @@ uint32_t fieldElementSpanBytes(const DbField& f);
 sgrn::Result<void, SclError> encodeScalarValue(const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr,
     size_t t_buffer_size, s7codec::Endian t_e = s7codec::Endian::Big);
 
+sgrn::Result<void, SclError> encodeArrayValue(const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr,
+    size_t t_buffer_size, int t_depth = 0, s7codec::Endian t_e = s7codec::Endian::Big);
+
 sgrn::Result<std::string, SclError> decodeFieldAt(
     const DbField& t_field, const uint8_t* tp_ptr, size_t t_buffer_size, int t_depth = 0, s7codec::Endian t_e = s7codec::Endian::Big);
 

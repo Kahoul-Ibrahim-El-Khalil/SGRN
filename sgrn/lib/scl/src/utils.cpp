@@ -222,6 +222,9 @@ std::string parseSemanticValue(const std::string& t_raw) {
         return "true";
     if (val == kFalseLower || val == kFalseUpper)
         return "false";
+    // Single-quoted char literals e.g. 'A' → 65 (for CHAR/BYTE fields).
+    if (val.size() == 3 && val[0] == '\'' && val[2] == '\'')
+        return std::to_string(static_cast<uint8_t>(val[1]));
 
     constexpr std::string_view kBinPrefix = "bin:";
     if (val.size() > kBinPrefix.size() && val.substr(0, kBinPrefix.size()) == kBinPrefix) {
@@ -276,9 +279,27 @@ std::string parseRawValuePayload(const std::string& t_raw) {
         std::string part;
         while (std::getline(in, part, ',')) {
             std::string sem = parseSemanticValue(part);
-            rapidjson::Document doc;
-            doc.Parse(sem.c_str());
-            doc.Accept(t_writer);
+            // Avoid a full Document::Parse + heap allocation per token: try to
+            // write primitives directly; only fall back to Document for values
+            // that are already valid JSON objects/arrays.
+            if (!sem.empty() && sem.front() == '"') {
+                // String token — strip surrounding quotes
+                std::string inner = sem.size() >= 2 ? sem.substr(1, sem.size() - 2) : "";
+                t_writer.String(inner.c_str(), static_cast<rapidjson::SizeType>(inner.size()));
+            } else if (sem == "true") {
+                t_writer.Bool(true);
+            } else if (sem == "false") {
+                t_writer.Bool(false);
+            } else if (sem == "null") {
+                t_writer.Null();
+            } else {
+                // Numeric or complex — parse once and accept
+                rapidjson::Document doc;
+                if (!doc.Parse(sem.c_str()).HasParseError())
+                    doc.Accept(t_writer);
+                else
+                    t_writer.Null();
+            }
         }
         t_writer.EndArray();
         return sb.GetString();
@@ -376,7 +397,20 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeDtlValue(
 sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
     const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e) {
     using namespace s7codec;
-    auto to_unsigned = [](const rapidjson::Value& t_v) -> std::optional<uint64_t> {
+    // Enum fields accept their symbolic name as the wire value (e.g. "ON").
+    auto enum_resolve = [&](const rapidjson::Value& t_v) -> std::optional<std::pair<int64_t, bool>> {
+        if (t_v.IsString() && !t_field.enum_map.empty()) {
+            const std::string s = t_v.GetString();
+            for (const auto& [k, v] : t_field.enum_map) {
+                if (v == s)
+                    return std::pair<int64_t, bool>{static_cast<int64_t>(k), true};
+            }
+        }
+        return std::nullopt;
+    };
+    auto to_unsigned = [&](const rapidjson::Value& t_v) -> std::optional<uint64_t> {
+        if (auto e = enum_resolve(t_v); e && e->second && e->first >= 0)
+            return static_cast<uint64_t>(e->first);
         if (t_v.IsUint64())
             return t_v.GetUint64();
         if (t_v.IsInt64() && t_v.GetInt64() >= 0)
@@ -389,7 +423,9 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
         }
         return std::nullopt;
     };
-    auto to_signed = [](const rapidjson::Value& t_v) -> std::optional<int64_t> {
+    auto to_signed = [&](const rapidjson::Value& t_v) -> std::optional<int64_t> {
+        if (auto e = enum_resolve(t_v); e && e->second)
+            return e->first;
         if (t_v.IsInt64())
             return t_v.GetInt64();
         if (t_v.IsUint64() && t_v.GetUint64() <= static_cast<uint64_t>(INT64_MAX))
@@ -575,10 +611,13 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
                 return SclError::Generic;
             std::string s = t_value.GetString();
             std::expected<void, s7codec::CodecStatus> status;
+            // For strings, max_len comes from string_capacity, not count (which is 1 for scalars)
+            uint32_t max_len =
+                t_field.string_capacity > 0 ? static_cast<uint32_t>(t_field.string_capacity) : (t_field.count > 0 ? static_cast<uint32_t>(t_field.count) : 254);
             if (t_field.type == DataType::String)
-                status = encodeString(s, s7codec::StringCapacity{t_field.count}, s7codec::WriteBuffer{tp_ptr, t_buffer_size});
+                status = encodeString(s, s7codec::StringCapacity{max_len}, s7codec::WriteBuffer{tp_ptr, t_buffer_size});
             else
-                status = encodeXString(s, s7codec::StringCapacity{t_field.count}, s7codec::WriteBuffer{tp_ptr, t_buffer_size}, t_e);
+                status = encodeXString(s, s7codec::StringCapacity{max_len}, s7codec::WriteBuffer{tp_ptr, t_buffer_size}, t_e);
             if (!status.has_value())
                 return SclError::Generic;
             return {};
@@ -591,11 +630,14 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             if (!wide)
                 return SclError::Generic;
             std::expected<void, s7codec::CodecStatus> status;
+            // For wstrings, max_len comes from string_capacity, not count
+            uint32_t max_len =
+                t_field.string_capacity > 0 ? static_cast<uint32_t>(t_field.string_capacity) : (t_field.count > 0 ? static_cast<uint32_t>(t_field.count) : 16382);
             auto wide_units = std::span<const uint16_t>(reinterpret_cast<const uint16_t*>(wide->c_str()), wide->size());
             if (t_field.type == DataType::WString)
-                status = encodeWString(wide_units, s7codec::StringCapacity{t_field.count}, s7codec::WriteBuffer{tp_ptr, t_buffer_size}, t_e);
+                status = encodeWString(wide_units, s7codec::StringCapacity{max_len}, s7codec::WriteBuffer{tp_ptr, t_buffer_size}, t_e);
             else
-                status = encodeXWString(wide_units, s7codec::StringCapacity{t_field.count}, s7codec::WriteBuffer{tp_ptr, t_buffer_size}, t_e);
+                status = encodeXWString(wide_units, s7codec::StringCapacity{max_len}, s7codec::WriteBuffer{tp_ptr, t_buffer_size}, t_e);
             if (!status.has_value())
                 return SclError::Generic;
             return {};

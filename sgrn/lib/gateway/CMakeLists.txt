@@ -527,6 +527,29 @@ if(SGRN_BUILD_TESTS)
     add_test(NAME twin_ports_test COMMAND twin_ports_test)
     sgrn_target(twin_ports_test)
 
+    # Wire-level tests for the twin encoder/decoder layer migrated onto the
+    # s7codec span/options API. Pure functions over DbField + byte buffers —
+    # no network, no live PLC. Beats encodeFieldAt/applyJsonPatchToFields
+    # against exact wire bytes, renders through the S7SerializationUtils
+    # decode hop, and pins the pre-existing count/string_capacity and
+    # enum-label conflation semantics so they cannot drift further.
+    sgrn_add_component_executable(
+        TARGET twin_encoding_wire_test
+        SOURCES tests/twin_encoding_wire_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn_gateway_twin
+            sgrn::common
+            sgrn_scl
+    )
+    target_include_directories(twin_encoding_wire_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/sgrn/lib/scl/include
+        ${CMAKE_SOURCE_DIR}/sgrn/lib/common/include
+    )
+    add_test(NAME twin_encoding_wire_test COMMAND twin_encoding_wire_test)
+    sgrn_target(twin_encoding_wire_test)
+
     # Lost-wakeup regression test: producer threads hammer writeDbMemory()
     # while the heavy_pool dirty callback drains; every burst's final write
     # must be observed (no orphaned dirty batch). Links the twin on purpose.
