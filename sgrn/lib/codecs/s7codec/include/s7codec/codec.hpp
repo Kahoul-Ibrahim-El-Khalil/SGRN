@@ -470,91 +470,6 @@ inline std::expected<void, CodecStatus> encodeDtl(const DtlComponents& t_compone
     return {};
 }
 
-// Legacy (uint8_t*, size_t) adapters.
-//
-// Kept intentionally without [[deprecated]]: deploying the attribute here
-// would spray warnings over the ~20 existing pointer-based call sites
-// (gateway encoding, opcua adapters, s7shell, plcsim...) while we migrate
-// them to the span API at their own pace. Each adapter forwards 1:1 to
-// the span primary above; no behavior difference.
-
-inline std::expected<void, CodecStatus> encodeBool(bool t_value, uint8_t t_bit_index, uint8_t* t_ptr, size_t t_buffer_size) {
-    return encodeBool(t_value, BitOffset{t_bit_index}, WriteBuffer(t_ptr, t_buffer_size));
-}
-
-inline std::expected<void, CodecStatus> encodeU8(uint8_t t_value, uint8_t* t_ptr, size_t t_buffer_size) {
-    return encodeU8(t_value, WriteBuffer(t_ptr, t_buffer_size));
-}
-
-inline std::expected<void, CodecStatus> encodeI8(int8_t t_value, uint8_t* t_ptr, size_t t_buffer_size) {
-    return encodeI8(t_value, WriteBuffer(t_ptr, t_buffer_size));
-}
-
-inline std::expected<void, CodecStatus> encodeI16(int16_t t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    return encodeI16(t_value, WriteBuffer(t_ptr, t_buffer_size), t_endian);
-}
-
-inline std::expected<void, CodecStatus> encodeU16(uint16_t t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    return encodeU16(t_value, WriteBuffer(t_ptr, t_buffer_size), t_endian);
-}
-
-inline std::expected<void, CodecStatus> encodeI32(int32_t t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    return encodeI32(t_value, WriteBuffer(t_ptr, t_buffer_size), t_endian);
-}
-
-inline std::expected<void, CodecStatus> encodeU32(uint32_t t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    return encodeU32(t_value, WriteBuffer(t_ptr, t_buffer_size), t_endian);
-}
-
-inline std::expected<void, CodecStatus> encodeI64(int64_t t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    return encodeI64(t_value, WriteBuffer(t_ptr, t_buffer_size), t_endian);
-}
-
-inline std::expected<void, CodecStatus> encodeU64(uint64_t t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    return encodeU64(t_value, WriteBuffer(t_ptr, t_buffer_size), t_endian);
-}
-
-inline std::expected<void, CodecStatus> encodeReal(float t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    return encodeReal(t_value, WriteBuffer(t_ptr, t_buffer_size), t_endian);
-}
-
-inline std::expected<void, CodecStatus> encodeLReal(double t_value, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    return encodeLReal(t_value, WriteBuffer(t_ptr, t_buffer_size), t_endian);
-}
-
-inline std::expected<void, CodecStatus> encodeString(
-    const char* t_value, uint32_t t_value_len, uint32_t t_max_len, uint8_t* t_ptr, size_t t_buffer_size) {
-    return encodeString(std::string_view(t_value, t_value_len), StringCapacity{t_max_len}, WriteBuffer(t_ptr, t_buffer_size));
-}
-
-inline std::expected<void, CodecStatus> encodeWString(const uint16_t* t_code_units, uint32_t t_num_units, uint32_t t_max_len,
-    uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    return encodeWString(
-        std::span<const uint16_t>(t_code_units, t_num_units), StringCapacity{t_max_len}, WriteBuffer(t_ptr, t_buffer_size), t_endian);
-}
-
-inline std::expected<void, CodecStatus> encodeXString(
-    const char* t_value, uint32_t t_value_len, uint32_t t_max_len, uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    return encodeXString(
-        std::string_view(t_value, t_value_len), StringCapacity{t_max_len}, WriteBuffer(t_ptr, t_buffer_size), t_endian);
-}
-
-inline std::expected<void, CodecStatus> encodeXWString(const uint16_t* t_code_units, uint32_t t_num_units, uint32_t t_max_len,
-    uint8_t* t_ptr, size_t t_buffer_size, Endian t_endian = Endian::Big) {
-    return encodeXWString(
-        std::span<const uint16_t>(t_code_units, t_num_units), StringCapacity{t_max_len}, WriteBuffer(t_ptr, t_buffer_size), t_endian);
-}
-
-inline std::expected<void, CodecStatus> encodeDateTime(
-    int t_year, int t_month, int t_day, int t_hour, int t_minute, int t_second, int t_day_of_week, uint8_t* t_ptr, size_t t_buffer_size) {
-    return encodeDateTime(t_year, t_month, t_day, t_hour, t_minute, t_second, t_day_of_week, WriteBuffer(t_ptr, t_buffer_size));
-}
-
-inline std::expected<void, CodecStatus> encodeDtl(const DtlComponents& t_components, uint8_t* t_ptr, size_t t_buffer_size,
-    Endian t_endian = Endian::Big) {
-    return encodeDtl(t_components, WriteBuffer(t_ptr, t_buffer_size), t_endian);
-}
-
 inline bool parseTimeString(const char* raw, int64_t& out_ms) {
     const char* p = raw;
     while (*p == ' ' || *p == '\t')
@@ -784,19 +699,6 @@ inline DecodedValue decodeScalar(Type t_type, ReadBuffer t_buffer, const DecodeO
     }
 }
 
-// Legacy (uint8_t*, size_t) adapter — the original signature of this
-// entry point; kept for the existing pointer-based call sites. The
-// historical t_count parameter is exclusively the string max_len, so it
-// maps to DecodeOptions::stringCapacity.
-inline DecodedValue decodeScalar(
-    Type t_type, const uint8_t* t_ptr, size_t t_buffer_size, uint8_t t_bit_index = 0, uint32_t t_count = 0, Endian t_endian = Endian::Big) {
-    DecodeOptions options;
-    options.endian = t_endian;
-    options.bitOffset = BitOffset{t_bit_index};
-    options.stringCapacity = StringCapacity{t_count};
-    return decodeScalar(t_type, ReadBuffer(t_ptr, t_buffer_size), options);
-}
-
 // Single source of truth for "how many characters can this string field hold".
 // Every call site decoding String/WString/XString/XWString MUST go through
 // this instead of passing count_ or a literal — that's what let the
@@ -904,19 +806,6 @@ inline std::expected<void, CodecStatus> encodeScalar(
         default:
             return std::unexpected(CodecStatus::UNSUPPORTED_TYPE);
     }
-}
-
-// Legacy (uint8_t*, size_t) adapter — the original signature of this
-// entry point; kept for the existing pointer-based call sites. The
-// historical t_count parameter is exclusively the string max_len, so it
-// maps to EncodeOptions::stringCapacity.
-inline std::expected<void, CodecStatus> encodeScalar(const DecodedValue& t_decoded_value, Type t_type, uint8_t* t_ptr,
-    size_t t_buffer_size, uint8_t t_bit_index = 0, uint32_t t_count = 0, Endian t_endian = Endian::Big) {
-    EncodeOptions options;
-    options.endian = t_endian;
-    options.bitOffset = BitOffset{t_bit_index};
-    options.stringCapacity = StringCapacity{t_count};
-    return encodeScalar(t_decoded_value, t_type, WriteBuffer(t_ptr, t_buffer_size), options);
 }
 
 } // namespace s7codec

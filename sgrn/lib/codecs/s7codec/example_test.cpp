@@ -43,14 +43,14 @@ int main() {
 
     // Test 1: Scalar Decoding (Int — S7 Int is big-endian int16)
     uint8_t int_buffer[] = {0x00, 0x2A}; // 42 in big-endian
-    DecodedValue int_val = decodeScalar(s7codec::Type::Int, int_buffer, sizeof(int_buffer));
+    DecodedValue int_val = decodeScalar(s7codec::Type::Int, s7codec::ReadBuffer{int_buffer, sizeof(int_buffer)});
     assert(int_val.valid());
     assert(std::get<int64_t>(int_val) == 42);
     std::cout << "[PASS] Scalar Int Decoding" << std::endl;
 
     // Test 2: Real Decoding (S7 Real is big-endian IEEE 754 float)
     uint8_t real_buffer[] = {0x41, 0xBC, 0x00, 0x00}; // 23.5 in IEEE 754 Big-Endian
-    DecodedValue real_val = decodeScalar(s7codec::Type::Real, real_buffer, sizeof(real_buffer));
+    DecodedValue real_val = decodeScalar(s7codec::Type::Real, s7codec::ReadBuffer{real_buffer, sizeof(real_buffer)});
 
     assert(real_val.valid());
 
@@ -77,10 +77,10 @@ int main() {
 
     assert(db_buffer[0] == 0x05 && db_buffer[1] == 0xDC); // 1500 is 0x05DC big-endian
 
-    DecodedValue speed_back = decodeScalar(s7codec::Type::Int, db_buffer, 2);
+    DecodedValue speed_back = decodeScalar(s7codec::Type::Int, s7codec::ReadBuffer{db_buffer, 2});
     assert(speed_back.valid() && std::get<int64_t>(speed_back) == 1500);
 
-    DecodedValue temp_back = decodeScalar(s7codec::Type::Real, db_buffer + 2, 4);
+    DecodedValue temp_back = decodeScalar(s7codec::Type::Real, s7codec::ReadBuffer{db_buffer + 2, 4});
 
     assert(temp_back.valid());
     assert(std::get<float>(temp_back) > 45.49f && std::get<float>(temp_back) < 45.51f);
@@ -264,22 +264,6 @@ int main() {
         assert(tv.valid() && tv.s() == "01:00:00.000");
 
         std::cout << "[PASS] Date / TOD round-trips" << std::endl;
-    }
-
-    // Test 13: Span-vs-pointer parity — the legacy pointer+size adapters
-    // forward 1:1 to the span primaries (identical wire bytes).
-    {
-        std::array<uint8_t, 4> via_ptr{};
-        assert(s7codec::encodeU32(0x12345678u, via_ptr.data(), via_ptr.size(), Endian::Big).has_value());
-        std::array<uint8_t, 4> via_span{};
-        assert(encodeU32(0x12345678u, WriteBuffer(via_span), Endian::Big).has_value());
-        assert(via_ptr == via_span);
-
-        DecodedValue p_dv = decodeScalar(s7codec::Type::UDInt, via_ptr.data(), via_ptr.size());
-        DecodedValue s_dv = decodeScalar(Type::UDInt, ReadBuffer(via_span));
-        assert(p_dv.valid() && s_dv.valid() && p_dv.u() == s_dv.u() && p_dv.u() == 0x12345678u);
-
-        std::cout << "[PASS] Span vs pointer API parity" << std::endl;
     }
 
     std::cout << "All tests passed successfully!" << std::endl;
