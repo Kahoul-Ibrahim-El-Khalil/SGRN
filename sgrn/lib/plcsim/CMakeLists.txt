@@ -42,3 +42,28 @@ set_target_properties(sgrn_plcsim PROPERTIES
 )
 
 sgrn_target(sgrn_plcsim)
+
+# Store-bound coverage for the tag-table write path: buildPutItems
+# (JSON + DecodedValue variants, byte-exact) and commitLocalPut's local
+# shadow, loaded from the same temp-registry JSON the production loader
+# parses. Pins the documented String-tag gap (no sizing branch → byte_count
+# 0, writes refuse) instead of inventing registry-format semantics.
+sgrn_add_component_executable(
+    TARGET plc_tagtable_test
+    SOURCES tests/plc_tagtable_test.cpp
+    ENABLE_ORIGIN_RPATH
+    PRIVATE_LIBS
+        sgrn_plcsim
+        sgrn::plcsim
+        sgrn_scl
+        sgrn_utils
+        sgrn::common
+        fmt::fmt
+)
+target_include_directories(plc_tagtable_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/sgrn/lib/scl/include
+    ${CMAKE_SOURCE_DIR}/sgrn/lib/common/include
+)
+add_test(NAME plc_tagtable_test COMMAND plc_tagtable_test)
+sgrn_target(plc_tagtable_test)
