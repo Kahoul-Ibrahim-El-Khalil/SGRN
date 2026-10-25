@@ -550,6 +550,27 @@ if(SGRN_BUILD_TESTS)
     add_test(NAME twin_encoding_wire_test COMMAND twin_encoding_wire_test)
     sgrn_target(twin_encoding_wire_test)
 
+    # Store-bound coverage: `:=` init seeding through the fully public load
+    # path (PlcSchemaStore -> PlcMemory::loadRegistry), verified via Tier-2
+    # readDbMemory. Pins Bool/numeric/string/enum literals, skipped array
+    # initializers, and the documented Bool last-wins + struct@0 quirks.
+    sgrn_add_component_executable(
+        TARGET plc_memory_init_test
+        SOURCES tests/plc_memory_init_test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn_gateway_twin
+            sgrn::common
+            sgrn_scl
+    )
+    target_include_directories(plc_memory_init_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/sgrn/lib/scl/include
+        ${CMAKE_SOURCE_DIR}/sgrn/lib/common/include
+    )
+    add_test(NAME plc_memory_init_test COMMAND plc_memory_init_test)
+    sgrn_target(plc_memory_init_test)
+
     # Lost-wakeup regression test: producer threads hammer writeDbMemory()
     # while the heavy_pool dirty callback drains; every burst's final write
     # must be observed (no orphaned dirty batch). Links the twin on purpose.

@@ -54,16 +54,22 @@ std::string trimInitValue(const std::string& t_s) {
 }
 
 /// Seeds a single DB field's initializer (`:= <value>`) into freshly allocated
-/// DB memory. Recurses into STRUCT children so nested initializers are applied.
-/// Arrays are intentionally skipped (single-scalar initializers only today).
-void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field) {
-    SGRN_RETURN_IF(t_field.init_value.empty(), );
-
+/// DB memory. Recurses into STRUCT children so nested initializers are applied:
+/// children carry offsets RELATIVE to their parent (the parser's OffsetTracker
+/// and scl's encode/decode path both treat them that way), so each recursion
+/// level passes `t_base_offset + t_field.offset` down and leaf writes land at
+/// that accumulated base + child.offset. Struct arrays (count > 1) are skipped
+/// (single-scalar initializers only today, consistent with scalar arrays).
+void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field, int t_base_offset) {
     if (t_field.type == scl::DataType::Struct) {
+        if (t_field.count > 1)
+            return;
         for (const auto& child : t_field.children)
-            applyFieldInit(t_mem, t_db, child);
+            applyFieldInit(t_mem, t_db, child, t_base_offset + t_field.offset);
         return;
     }
+
+    SGRN_RETURN_IF(t_field.init_value.empty(), );
 
     const bool is_string = t_field.type == scl::DataType::String || t_field.type == scl::DataType::WString ||
                            t_field.type == scl::DataType::XString || t_field.type == scl::DataType::XWString;
@@ -73,6 +79,22 @@ void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field
 
     std::string raw = trimInitValue(t_field.init_value);
     SGRN_RETURN_IF(raw.empty(), ;);
+
+    // BOOL literal. Read-modify-write through writeBit: seeding a Bool must
+    // not wipe the other Bools sharing its byte (each seed would otherwise
+    // overwrite the whole byte with its own locally-encoded value — shown by
+    // the init-seeding coverage test).
+    if (t_field.type == scl::DataType::Bool) {
+        bool b = false;
+
+        if (initEqualsIgnoreCase(raw, "true") || raw == "1")
+            b = true;
+        else if (!initEqualsIgnoreCase(raw, "false") && raw != "0")
+            return;
+
+        (void)t_mem.writeBit(t_db, static_cast<size_t>(t_base_offset + t_field.offset), t_field.bit_index, b);
+        return;
+    }
 
     const int max_len = is_string ? (t_field.struct_size > 0 ? t_field.struct_size : t_field.count) : 1;
 
@@ -94,7 +116,8 @@ void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field
             s7codec::EncodeOptions{.endian = t_field.endianness, .stringCapacity = s7codec::StringCapacity{static_cast<uint32_t>(max_len)}});
 
         if (st.has_value())
-            (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
+            (void)t_mem.writeDbMemory(
+                t_db, static_cast<size_t>(t_base_offset + t_field.offset), buf.size(), buf.data());
 
         return;
     }
@@ -110,30 +133,12 @@ void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field
                     dv, t_field.type, s7codec::WriteBuffer{buf.data(), buf.size()}, s7codec::EncodeOptions{.endian = t_field.endianness});
 
                 if (st.has_value())
-                    (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
+                    (void)t_mem.writeDbMemory(
+                        t_db, static_cast<size_t>(t_base_offset + t_field.offset), buf.size(), buf.data());
 
                 return;
             }
         }
-    }
-
-    // BOOL literal.
-    if (t_field.type == scl::DataType::Bool) {
-        bool b = false;
-
-        if (initEqualsIgnoreCase(raw, "true") || raw == "1")
-            b = true;
-        else if (!initEqualsIgnoreCase(raw, "false") && raw != "0")
-            return;
-
-        auto dv = s7codec::DecodedValue::makeSigned(b ? 1 : 0);
-        auto st = s7codec::encodeScalar(dv, scl::DataType::Bool, s7codec::WriteBuffer{buf.data(), buf.size()},
-            s7codec::EncodeOptions{.endian = t_field.endianness, .bitOffset = s7codec::BitOffset{t_field.bit_index}});
-
-        if (st.has_value())
-            (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
-
-        return;
     }
 
     // Numeric literal. Rejoin sign/number tokens ("- 3" → "-3") for ease of use.
@@ -162,7 +167,8 @@ void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field
             dv, t_field.type, s7codec::WriteBuffer{buf.data(), buf.size()}, s7codec::EncodeOptions{.endian = t_field.endianness});
 
         if (st.has_value())
-            (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
+            (void)t_mem.writeDbMemory(
+                t_db, static_cast<size_t>(t_base_offset + t_field.offset), buf.size(), buf.data());
 
         return;
     }
@@ -180,14 +186,14 @@ void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field
         dv, t_field.type, s7codec::WriteBuffer{buf.data(), buf.size()}, s7codec::EncodeOptions{.endian = t_field.endianness});
 
     if (st.has_value())
-        (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_field.offset), buf.size(), buf.data());
+        (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_base_offset + t_field.offset), buf.size(), buf.data());
 }
 
 /// Applies `:=` initializers for a whole DB's field tree.
 void applyDbFieldInits(PlcMemory& t_mem, uint16_t t_db, const std::vector<scl::DbField>& t_fields) {
 
     for (const auto& f : t_fields)
-        applyFieldInit(t_mem, t_db, f);
+        applyFieldInit(t_mem, t_db, f, 0);
 }
 
 } // namespace
