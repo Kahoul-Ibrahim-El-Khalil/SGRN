@@ -1,5 +1,7 @@
 # SGRN
 
+[![CI](https://github.com/Kahoul-Ibrahim-El-Khalil/SGRN/actions/workflows/ci.yml/badge.svg)](https://github.com/Kahoul-Ibrahim-El-Khalil/SGRN/actions/workflows/ci.yml)
+
 **SGRN** is an open-source C++ and Python framework that connects industrial control systems to AI through one typed, schema-driven model of the plant. It provides a multi-protocol gateway with a digital twin, a soft-PLC and plant simulator, and tools for storing, replaying and analysing plant data.
 
 SGRN eliminates the brittle, manual byte-offset mapping common in industrial telemetry integration by using **declarative SCL (Structured Control Language) schemas as the single source of truth**. The same schema gives every signal its name, unit, range and permitted operations, so that AI systems built on top can be checked against it.
@@ -18,7 +20,7 @@ SGRN eliminates the brittle, manual byte-offset mapping common in industrial tel
 | Works today | Not built yet |
 |:---|:---|
 | Gateway with typed digital twin and embedded web dashboard | LLM agent |
-| Datastore (storage and indexing of documents and datasets) | Checker and dispatcher |
+| Datastore (storage of documents and datasets)              | Indexing of documents, Checker and dispatcher                          |
 | S7Shell soft-PLC and plant simulator | S7Shell as the runtime through which approved actions reach a plant |
 | Autoencoder and split-conformal detector (simulated data) | Validation on a live plant |
 
@@ -116,7 +118,7 @@ cd SGRN
 ```
 
 > [!NOTE]
-> SGRN does not require Git submodules. Source-based third-party dependencies are downloaded into the local CMake cache (`~/.cache/CPM/`) during the dependency step below.
+> SGRN has **no Git submodules** — ignore any old instructions to run `git submodule update`. All third-party source dependencies are fetched automatically by [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) into `.cpm-cache/` during the CMake configure step below.
 
 ### 2. Initialize the build environment
 The environment files in `micromamba/` provide compilers (GCC/Clang), Ninja, CMake, and the packaged C++ libraries in an isolated prefix:
@@ -134,25 +136,28 @@ Run all builds with the `SGRN` environment activated. Presets are defined in `CM
 First, build and install the dependencies that come as source code:
 
 ```bash
-# Clones/downloads the dependency sources into the CPM cache:
+# Downloads and configures all CPM-fetched dependency sources:
 cmake --preset linux-deps-static
 
-# Builds them and installs the libraries into a local prefix:
-cmake --build .build/linux-deps-static --target install
+# Compiles them and installs libraries into .prefix/linux-static/:
+cmake --build --preset linux-deps-static
 ```
 
 Second, build the project itself:
 
 ```bash
-# Configure using the Linux release preset:
+# Configure using the Linux static-release preset:
 cmake --preset linux-static-release
 
-# Fast incremental install (our binaries and libraries into .dist/):
-cmake --build .build/linux-static-release --target install-binaries
+# Build all SGRN components:
+cmake --build --preset linux-static-release
 
-# Full install (binaries, headers, and dependencies):
-cmake --build .build/linux-static-release --target install
+# Optional: install binaries and headers into .dist/:
+cmake --build --preset linux-static-release --target install
 ```
+
+> [!NOTE]
+> For the full two-phase build workflow, build options, and cross-compilation (Windows / ARM64), see [**`documentation/BUILD.md`**](./documentation/BUILD.md).
 
 > [!NOTE]
 > For cross-compiling to **Windows** (`linux-to-win64`) or **ARM64** (`linux-to-arm64`), see [**`documentation/BUILD.md`**](./documentation/BUILD.md).

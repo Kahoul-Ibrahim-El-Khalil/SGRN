@@ -50,6 +50,7 @@ option(SGRN_BUILD_S7 "Build sgrn_s7 tools/library" ON)
 option(SGRN_BUILD_OPC "Build sgrn_opc tool/library" ON)
 option(SGRN_BUILD_GATEWAY "Build gateway component" ON)
 
+
 set(_BG_DEFAULT ON)
 if(SGRN_CROSS_WIN64 OR SGRN_CROSS_ARM64)
     set(_BG_DEFAULT OFF)

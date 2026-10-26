@@ -1,0 +1,247 @@
+name: CI
+
+on:
+  push:
+    branches: [main, ci/bootstrap]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PRESET_DEPS: linux-deps-static
+  PRESET_MAIN: linux-static-release
+  CPM_CACHE_DIR: ${{ github.workspace }}/.cpm-cache
+
+jobs:
+  linux:
+    name: Linux static release – build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      # ── 1. Checkout ─────────────────────────────────────────────────────────
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      # ── 2. Free disk space ──────────────────────────────────────────────────
+      # The conda env is ~2 GB; deps prefix 3-4 GB; build tree 3-5 GB.
+      # Reclaim the largest pre-installed blobs first.
+      - name: Free disk space
+        shell: bash
+        run: |
+          echo "=== Disk before pruning ==="
+          df -h /
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/boost \
+            /usr/lib/jvm \
+            /usr/share/swift \
+            /usr/local/.ghcup
+          echo "=== Disk after pruning ==="
+          df -h /
+
+      # ── 3. Micromamba / conda environment ───────────────────────────────────
+      # setup-micromamba activates the env in every subsequent bash -el step.
+      # cache-environment caches the full resolved prefix (~2 GB); keyed on the
+      # yml file so any dependency change invalidates it automatically.
+      - name: Set up micromamba (SGRN environment)
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: micromamba/SGRN.yml
+          environment-name: SGRN
+          cache-environment: true
+          cache-downloads: true
+          init-shell: bash
+          post-cleanup: environment
+
+      # ── 4. Export build-environment variables ───────────────────────────────
+      # PATH_TO_NINJA  - required by the base-common preset's CMAKE_MAKE_PROGRAM
+      # CC_BIN/CXX_BIN - override the preset's $CONDA_PREFIX/micromamba/envs/SGRN
+      #                  path, which is wrong when CONDA_PREFIX already IS the env
+      - name: Export build environment
+        run: |
+          echo "PATH_TO_NINJA=$CONDA_PREFIX/bin/ninja" >> "$GITHUB_ENV"
+          echo "CC_BIN=$CONDA_PREFIX/bin/clang"        >> "$GITHUB_ENV"
+          echo "CXX_BIN=$CONDA_PREFIX/bin/clang++"     >> "$GITHUB_ENV"
+
+      # ── 5. Web asset pre-build (bun + Vite) ─────────────────────────────────
+      # sgrn/web/gateway/dist/ is gitignored; CMake's custom command runs
+      # `bun run build` as a build-time step, but it will fail if dist/ does not
+      # already exist. Pre-build here so the sentinel .build_done is present when
+      # ninja runs. Same applies to the datastore React dashboard.
+      - name: Set up Bun (for web asset builds)
+        uses: oven-sh/setup-bun@v2
+
+      - name: Build gateway web assets (Svelte + Vite)
+        run: |
+          (cd sgrn/typescript && bun install --frozen-lockfile 2>/dev/null || bun install)
+          (cd sgrn/web/gateway && bun install --frozen-lockfile 2>/dev/null || bun install)
+          (cd sgrn/web/gateway && bun run build)
+
+      - name: Build datastore web assets (React + Vite)
+        run: |
+          (cd sgrn/web/datastore && bun install --frozen-lockfile 2>/dev/null || bun install)
+          (cd sgrn/web/datastore && bun run build)
+
+      # ── 6. Restore dep cache (.prefix + CPM sources) ────────────────────────
+      # Split restore/save so we can save even when Phase 1 is skipped.
+      - name: Restore dependency cache (.prefix + CPM sources)
+        id: deps-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .prefix
+            .cpm-cache
+          key: deps-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'cmake/**', 'deps/**', 'micromamba/SGRN.yml') }}
+          restore-keys: |
+            deps-${{ runner.os }}-
+
+      # ── 7. Phase 1 - build & install dependencies ───────────────────────────
+      # Only runs on a cache miss (fresh runner or dependency change).
+      # The linux-deps-static BUILD preset already has "targets": ["install"],
+      # so cmake --build --preset linux-deps-static runs compile + install in one
+      # shot - no separate --target install flag needed.
+      - name: Phase 1 - configure dependencies
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: |
+          cmake --preset "$PRESET_DEPS" \
+            -DCMAKE_C_COMPILER="$CC_BIN" \
+            -DCMAKE_CXX_COMPILER="$CXX_BIN" \
+            -DCPM_SOURCE_CACHE="$CPM_CACHE_DIR" \
+            -DUSE_PCH=OFF
+
+      - name: Phase 1 - build and stage dependencies (installs to .prefix/linux-static)
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: |
+          cmake --build --preset "$PRESET_DEPS" -j"$(nproc)"
+          echo "=== Disk after Phase 1 ==="
+          df -h /
+
+      - name: Save dependency cache
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .prefix
+            .cpm-cache
+          key: ${{ steps.deps-cache.outputs.cache-primary-key }}
+
+      # ── 8. ccache (Phase 2 only) ─────────────────────────────────────────────
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-${{ runner.os }}-
+
+      # ── 9. Phase 2 - configure & build SGRN ─────────────────────────────────
+      - name: Phase 2 - configure SGRN
+        run: |
+          cmake --preset "$PRESET_MAIN" \
+            -DCMAKE_C_COMPILER="$CC_BIN" \
+            -DCMAKE_CXX_COMPILER="$CXX_BIN" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCPM_SOURCE_CACHE="$CPM_CACHE_DIR" \
+            -DUSE_PCH=OFF
+
+      - name: Phase 2 - build SGRN
+        run: |
+          cmake --build --preset "$PRESET_MAIN" -j"$(nproc)"
+          ccache --show-stats
+          echo "=== Disk after Phase 2 ==="
+          df -h /
+
+      # ── 10. C++ unit tests (ctest) ───────────────────────────────────────────
+      # Tests excluded and reasons:
+      #
+      #   opcua_discovery_test      - Uses gateway_fixture.hpp to spawn gateway +
+      #                               s7shell. S7 protocol listens on port 102, a
+      #                               privileged port (<1024) on Linux; binding it
+      #                               requires CAP_NET_BIND_SERVICE or root.
+      #                               The test self-SKIPs when the gateway binary is
+      #                               missing, but may fail with EACCES on the port
+      #                               bind before the skip check. Excluded to avoid
+      #                               non-deterministic failures on the runner.
+      #
+      #   opcua_enum_test           - Same reason (gateway_fixture.hpp + port 102).
+      #
+      #   modbus_registers_test     - Spawns gateway via gateway_fixture.hpp; the
+      #                               Modbus listener default is port 502 (also
+      #                               privileged). Self-SKIPs when binary missing.
+      #
+      #   s7_southbound_test        - Spawns gateway (gateway_fixture.hpp); S7 on
+      #                               port 102. Self-SKIPs when binary missing.
+      #
+      #   binary_live_snapshot_test - Spawns gateway + IXWebSocket client; same
+      #                               port-privilege concern. Self-SKIPs when binary
+      #                               missing, excluded for consistency.
+      #
+      #   pg_auth_functions_test    - Needs a live PostgreSQL cluster. Self-SKIPs
+      #                               (exit 0) when PGHOST unset and no initdb in
+      #                               PATH, but excluded here to keep the output
+      #                               clean. Re-enable when a PostgreSQL service
+      #                               container is added to this job.
+      - name: C++ unit tests (ctest)
+        run: |
+          ctest \
+            --test-dir ".build/$PRESET_MAIN" \
+            --output-on-failure \
+            --timeout 120 \
+            -j2 \
+            -E "opcua_discovery_test|opcua_enum_test|modbus_registers_test|s7_southbound_test|binary_live_snapshot_test|pg_auth_functions_test"
+
+      # ── 11. Python tests (non-blocking) ─────────────────────────────────────
+      # gateway-arrays needs a live gateway; scl-validation needs the built
+      # sclc binary (not always available). Kept non-blocking until the pip:
+      # section of SGRN.yml is confirmed to install cleanly on the runner and
+      # the offline tests (gateway-rest, scl-dtypes) are green.
+      - name: Python tests (non-blocking)
+        continue-on-error: true
+        run: python3 tests/run_tests.py --kind python
+
+      # ── 12. TypeScript E2E tests (non-blocking) ──────────────────────────────
+      # Spawns a live gateway+s7shell internally. The s7shell needs port 102
+      # (privileged). Kept non-blocking until a sysctl/capability solution is
+      # confirmed or the tests are refactored to use unprivileged ports.
+      - name: TypeScript E2E tests (non-blocking)
+        continue-on-error: true
+        run: |
+          (cd tests/ts && bun install --frozen-lockfile 2>/dev/null || bun install)
+          python3 tests/run_tests.py --kind ts
+
+      # ── 13. Upload artifacts on failure ──────────────────────────────────────
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: |
+            .build/${{ env.PRESET_MAIN }}/Testing/Temporary/LastTest.log
+            .build/${{ env.PRESET_MAIN }}/Testing/Temporary/LastTestsFailed.log
+            /tmp/gateway-state-*
+          if-no-files-found: ignore
+
+      # ── 14. Report cache sizes (informational) ───────────────────────────────
+      - name: Report cache sizes
+        if: always()
+        shell: bash
+        run: |
+          echo "=== Cache sizes ==="
+          du -sh .prefix         2>/dev/null && true
+          du -sh .cpm-cache      2>/dev/null && true
+          du -sh ~/.cache/ccache 2>/dev/null && true
+          echo "=== Total disk ==="
+          df -h /

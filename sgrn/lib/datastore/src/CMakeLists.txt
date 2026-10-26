@@ -11,7 +11,7 @@ set(ORM_SOURCES "")
 file(GLOB_RECURSE SESSION_SOURCES CONFIGURE_DEPENDS session/*.cpp)
 file(GLOB_RECURSE AUDIT_SOURCES CONFIGURE_DEPENDS audit/*.cpp)
 file(GLOB_RECURSE PLUGIN_SOURCES CONFIGURE_DEPENDS plugins/*.cpp)
-list(FILTER PLUGIN_SOURCES EXCLUDE REGEX ".*/plugins/redis/.*")
+
 list(APPEND BACKEND_SOURCES ${SESSION_SOURCES} ${AUDIT_SOURCES} ${PLUGIN_SOURCES})
 
 # 2. ORM MODELS (Independent Shared Library)
@@ -60,11 +60,7 @@ if(BUILD_ORM)
         endif()
     endif()
 
-    # hiredis (required by Drogon's Redis client when built with Redis support)
-    find_library(SGRN_HIREDIS_LIBRARY NAMES hiredis PATHS "${SGRN_CONDA_PREFIX}/lib" NO_DEFAULT_PATH)
-    if(SGRN_HIREDIS_LIBRARY)
-        target_link_libraries(sgrn_datastore_orm PRIVATE "${SGRN_HIREDIS_LIBRARY}")
-    endif()
+
 endif()
 
 # 3. SERVICES
@@ -144,11 +140,7 @@ if(UNIX AND NOT APPLE)
         target_link_libraries(sgrn_datastore_lib PRIVATE "${SGRN_BROTLIDEC_LIBRARY}" "${SGRN_BROTLIENC_LIBRARY}" "${SGRN_BROTLICOMMON_LIBRARY}")
     endif()
 
-    # hiredis (required by Drogon's Redis client when built with Redis support)
-    find_library(SGRN_HIREDIS_LIBRARY NAMES hiredis PATHS "${SGRN_CONDA_PREFIX}/lib" NO_DEFAULT_PATH)
-    if(SGRN_HIREDIS_LIBRARY)
-        target_link_libraries(sgrn_datastore_lib PRIVATE "${SGRN_HIREDIS_LIBRARY}")
-    endif()
+
 endif()
 
 # ── Compatibility Aliases ────────────────────────────────────────────────────
