@@ -19,20 +19,130 @@ env:
   CPM_CACHE_DIR: ${{ github.workspace }}/.cpm-cache
 
 jobs:
-  linux:
-    name: Linux static release – build and test
+  # ── 0. Change classification ──────────────────────────────────────────────
+  # Cheap path filter that decides which of the real jobs run. Everything
+  # still runs when pushed to main (safety net) — path gating is primarily
+  # for pull requests.
+  changes:
+    name: Detect changed areas
     runs-on: ubuntu-latest
-    timeout-minutes: 300
-    defaults:
-      run:
-        shell: bash -el {0}
-
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.filter.outputs.build }}      # anything that affects C++ build inputs
+      cpp: ${{ steps.filter.outputs.cpp }}          # C++ sources/headers/tests
+      ci: ${{ steps.filter.outputs.ci }}            # workflow / CI tooling
+      python: ${{ steps.filter.outputs.python }}    # python package + research experiments
+      ts: ${{ steps.filter.outputs.ts }}            # typescript / web assets
     steps:
-      # ── 1. Checkout ─────────────────────────────────────────────────────────
       - name: Check out code
         uses: actions/checkout@v4
 
-      # ── 2. Free disk space ──────────────────────────────────────────────────
+      - name: Classify changed paths
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            build:
+              - 'CMakeLists.txt'
+              - 'CMakePresets.json'
+              - 'cmake/**'
+              - 'deps/**'
+              - 'micromamba/**'
+              - 'sgrn/**'
+              - 'tests/**'
+              - 'docs/**'
+            cpp:
+              - 'sgrn/**/*.cpp'
+              - 'sgrn/**/*.cc'
+              - 'sgrn/**/*.hpp'
+              - 'sgrn/**/*.h'
+              - 'sgrn/**/CMakeLists.txt'
+              - 'cmake/**'
+              - 'tests/**'
+            ci:
+              - '.github/**'
+            python:
+              - 'sgrn/python/**'
+              - 'tests/**'
+              - 'experiments/**'
+            ts:
+              - 'sgrn/typescript/**'
+              - 'sgrn/web/**'
+              - 'tests/ts/**'
+
+  # ── 1. Fast quality gate (formatting only — seconds, not minutes) ────────
+  quality:
+    name: C++ style (clang-format)
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Full history: we diff against the base SHA below, and the repo pack
+      # is only a few MiB, so a shallow clone is not worth the edge cases.
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up micromamba (SGRN environment)
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: micromamba/SGRN.yml
+          environment-name: SGRN
+          cache-environment: true
+          cache-downloads: true
+          init-shell: bash
+          post-cleanup: environment
+
+      - name: clang-format check (touched files only)
+        shell: bash -el {0}
+        run: |
+          set -uo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          # New branch / first push: github.event.before is the zero SHA and
+          # the commit may not exist — fall back to checking everything.
+          if [ -z "$BASE" ] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "Base commit '${BASE:-<empty>}' unavailable — checking all tracked C++ sources."
+            FILES=$(git ls-files -- '*.cpp' '*.cc' '*.hpp' '*.h')
+          else
+            FILES=$(git diff --name-only "$BASE" -- '*.cpp' '*.cc' '*.hpp' '*.h' | tr -d '\r' | grep -v '^$' || true)
+          fi
+          if [ -z "$FILES" ]; then
+            echo "No C++ sources touched — nothing to check."
+            exit 0
+          fi
+          # Only keep files that actually exist at HEAD (handles renames/deletes).
+          EXISTING=""
+          for f in $FILES; do
+            [ -f "$f" ] && EXISTING="$EXISTING $f"
+          done
+          if [ -z "$EXISTING" ]; then
+            echo "No surviving C++ files to check."
+            exit 0
+          fi
+          clang-format --dry-run --Werror $EXISTING
+
+  # ── 2. Dependency build & staging (.prefix) ───────────────────────────────
+  deps:
+    name: Phase 1 — dependencies (.prefix)
+    needs: changes
+    if: >
+      needs.changes.outputs.build == 'true' ||
+      needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash -el {0}
+    outputs:
+      cache_key: ${{ steps.deps-cache.outputs.cache-primary-key }}
+    steps:
+      # ── 2a. Free disk space ────────────────────────────────────────────────
       # The conda env is ~2 GB; deps prefix 3-4 GB; build tree 3-5 GB.
       # Reclaim the largest pre-installed blobs first.
       - name: Free disk space
@@ -51,11 +161,8 @@ jobs:
             /usr/local/.ghcup
           echo "=== Disk after pruning ==="
           df -h /
-
-      # ── 3. Micromamba / conda environment ───────────────────────────────────
+      # ── 2b. Micromamba / conda environment ────────────────────────────────
       # setup-micromamba activates the env in every subsequent bash -el step.
-      # cache-environment caches the full resolved prefix (~2 GB); keyed on the
-      # yml file so any dependency change invalidates it automatically.
       - name: Set up micromamba (SGRN environment)
         uses: mamba-org/setup-micromamba@v2
         with:
@@ -66,37 +173,15 @@ jobs:
           init-shell: bash
           post-cleanup: environment
 
-      # ── 4. Export build-environment variables ───────────────────────────────
-      # PATH_TO_NINJA  - required by the base-common preset's CMAKE_MAKE_PROGRAM
-      # CC_BIN/CXX_BIN - override the preset's $CONDA_PREFIX/micromamba/envs/SGRN
-      #                  path, which is wrong when CONDA_PREFIX already IS the env
+      # ── 2c. Ninja & compiler paths ────────────────────────────────────────
       - name: Export build environment
         run: |
           echo "PATH_TO_NINJA=$CONDA_PREFIX/bin/ninja" >> "$GITHUB_ENV"
           echo "CC_BIN=$CONDA_PREFIX/bin/clang"        >> "$GITHUB_ENV"
           echo "CXX_BIN=$CONDA_PREFIX/bin/clang++"     >> "$GITHUB_ENV"
 
-      # ── 5. Web asset pre-build (bun + Vite) ─────────────────────────────────
-      # sgrn/web/gateway/dist/ is gitignored; CMake's custom command runs
-      # `bun run build` as a build-time step, but it will fail if dist/ does not
-      # already exist. Pre-build here so the sentinel .build_done is present when
-      # ninja runs. Same applies to the datastore React dashboard.
-      - name: Set up Bun (for web asset builds)
-        uses: oven-sh/setup-bun@v2
-
-      - name: Build gateway web assets (Svelte + Vite)
-        run: |
-          (cd sgrn/typescript && bun install --frozen-lockfile 2>/dev/null || bun install)
-          (cd sgrn/web/gateway && bun install --frozen-lockfile 2>/dev/null || bun install)
-          (cd sgrn/web/gateway && bun run build)
-
-      - name: Build datastore web assets (React + Vite)
-        run: |
-          (cd sgrn/web/datastore && bun install --frozen-lockfile 2>/dev/null || bun install)
-          (cd sgrn/web/datastore && bun run build)
-
-      # ── 6. Restore dep cache (.prefix + CPM sources) ────────────────────────
-      # Split restore/save so we can save even when Phase 1 is skipped.
+      # ── 2d. Restore/save dependency cache ────────────────────────────────
+      # Split restore/save so we can save even when the rest of the job is skipped.
       - name: Restore dependency cache (.prefix + CPM sources)
         id: deps-cache
         uses: actions/cache/restore@v4
@@ -108,12 +193,8 @@ jobs:
           restore-keys: |
             deps-${{ runner.os }}-
 
-      # ── 7. Phase 1 - build & install dependencies ───────────────────────────
-      # Only runs on a cache miss (fresh runner or dependency change).
-      # The linux-deps-static BUILD preset already has "targets": ["install"],
-      # so cmake --build --preset linux-deps-static runs compile + install in one
-      # shot - no separate --target install flag needed.
-      - name: Phase 1 - configure dependencies
+      # ── 2e. Configure & build dependencies ───────────────────────────────
+      - name: Configure dependencies
         if: steps.deps-cache.outputs.cache-hit != 'true'
         run: |
           cmake --preset "$PRESET_DEPS" \
@@ -122,7 +203,9 @@ jobs:
             -DCPM_SOURCE_CACHE="$CPM_CACHE_DIR" \
             -DUSE_PCH=OFF
 
-      - name: Phase 1 - build and stage dependencies (installs to .prefix/linux-static)
+      # The linux-deps-static BUILD preset has "targets": ["install"], so
+      # cmake --build --preset linux-deps-static runs compile + install in one shot.
+      - name: Build & stage dependencies (installs to .prefix/linux-static)
         if: steps.deps-cache.outputs.cache-hit != 'true'
         run: |
           cmake --build --preset "$PRESET_DEPS" -j"$(nproc)"
@@ -138,7 +221,67 @@ jobs:
             .cpm-cache
           key: ${{ steps.deps-cache.outputs.cache-primary-key }}
 
-      # ── 8. ccache (Phase 2 only) ─────────────────────────────────────────────
+  # ── 3. Build + tests (Phase 2; every downstream test tier lives here) ────
+  build-test:
+    name: Phase 2 — build & test
+    needs: [changes, deps]
+    if: >
+      always() &&
+      (needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      # ── 3a. Micromamba environment ─────────────────────────────────────
+      - name: Set up micromamba (SGRN environment)
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: micromamba/SGRN.yml
+          environment-name: SGRN
+          cache-environment: true
+          cache-downloads: true
+          init-shell: bash
+          post-cleanup: environment
+
+      # ── 3b. Build-environment exports ─────────────────────────────────
+      - name: Export build environment
+        run: |
+          echo "PATH_TO_NINJA=$CONDA_PREFIX/bin/ninja" >> "$GITHUB_ENV"
+          echo "CC_BIN=$CONDA_PREFIX/bin/clang"        >> "$GITHUB_ENV"
+          echo "CXX_BIN=$CONDA_PREFIX/bin/clang++"     >> "$GITHUB_ENV"
+
+      # ── 3c. Web asset pre-build (bun + Vite) ───────────────────────────
+      # sgrn/web/gateway/dist/ is gitignored; CMake's custom command runs
+      # `bun run build` at build time, but fails if dist/ doesn't already
+      # exist. Pre-build here so the sentinel .build_done is present.
+      - name: Set up Bun (for web asset builds)
+        uses: oven-sh/setup-bun@v2
+
+      - name: Build gateway web assets (Svelte + Vite)
+        run: |
+          (cd sgrn/typescript && bun install --frozen-lockfile 2>/dev/null || bun install)
+          (cd sgrn/web/gateway && bun install --frozen-lockfile 2>/dev/null || bun install)
+          (cd sgrn/web/gateway && bun run build)
+
+      - name: Build datastore web assets (React + Vite)
+        run: |
+          (cd sgrn/web/datastore && bun install --frozen-lockfile 2>/dev/null || bun install)
+          (cd sgrn/web/datastore && bun run build)
+
+      # ── 3d. Restore dep cache produced by the deps job ──────────────────
+      - name: Restore dependency cache (.prefix + CPM sources)
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .prefix
+            .cpm-cache
+          key: deps-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'cmake/**', 'deps/**', 'micromamba/SGRN.yml') }}
+          restore-keys: |
+            deps-${{ runner.os }}-
+
+      # ── 3e. ccache ─────────────────────────────────────────────────────
       - name: Restore ccache
         uses: actions/cache@v4
         with:
@@ -146,8 +289,8 @@ jobs:
           key: ccache-${{ runner.os }}-${{ github.sha }}
           restore-keys: ccache-${{ runner.os }}-
 
-      # ── 9. Phase 2 - configure & build SGRN ─────────────────────────────────
-      - name: Phase 2 - configure SGRN
+      # ── 3f. Phase 2 — configure & build SGRN ──────────────────────────
+      - name: Configure SGRN
         run: |
           cmake --preset "$PRESET_MAIN" \
             -DCMAKE_C_COMPILER="$CC_BIN" \
@@ -157,14 +300,14 @@ jobs:
             -DCPM_SOURCE_CACHE="$CPM_CACHE_DIR" \
             -DUSE_PCH=OFF
 
-      - name: Phase 2 - build SGRN
+      - name: Build SGRN
         run: |
           cmake --build --preset "$PRESET_MAIN" -j"$(nproc)"
           ccache --show-stats
           echo "=== Disk after Phase 2 ==="
           df -h /
 
-      # ── 10. C++ unit tests (ctest) ───────────────────────────────────────────
+      # ── 3g. C++ unit tests (ctest) ────────────────────────────────────
       # Tests excluded and reasons:
       #
       #   opcua_discovery_test      - Uses gateway_fixture.hpp to spawn gateway +
@@ -186,14 +329,12 @@ jobs:
       #                               port 102. Self-SKIPs when binary missing.
       #
       #   binary_live_snapshot_test - Spawns gateway + IXWebSocket client; same
-      #                               port-privilege concern. Self-SKIPs when binary
-      #                               missing, excluded for consistency.
+      #                               port-privilege concern. Excluded for consistency.
       #
       #   pg_auth_functions_test    - Needs a live PostgreSQL cluster. Self-SKIPs
       #                               (exit 0) when PGHOST unset and no initdb in
-      #                               PATH, but excluded here to keep the output
-      #                               clean. Re-enable when a PostgreSQL service
-      #                               container is added to this job.
+      #                               PATH, but excluded to keep output clean.
+      #                               Re-enable when a PG service container is added.
       - name: C++ unit tests (ctest)
         run: |
           ctest \
@@ -203,7 +344,7 @@ jobs:
             -j2 \
             -E "opcua_discovery_test|opcua_enum_test|modbus_registers_test|s7_southbound_test|binary_live_snapshot_test|pg_auth_functions_test"
 
-      # ── 11. Python tests (non-blocking) ─────────────────────────────────────
+      # ── 3h. Python tests (non-blocking) ────────────────────────────────
       # gateway-arrays needs a live gateway; scl-validation needs the built
       # sclc binary (not always available). Kept non-blocking until the pip:
       # section of SGRN.yml is confirmed to install cleanly on the runner and
@@ -212,7 +353,7 @@ jobs:
         continue-on-error: true
         run: python3 tests/run_tests.py --kind python
 
-      # ── 12. TypeScript E2E tests (non-blocking) ──────────────────────────────
+      # ── 3i. TypeScript E2E tests (non-blocking) ────────────────────────
       # Spawns a live gateway+s7shell internally. The s7shell needs port 102
       # (privileged). Kept non-blocking until a sysctl/capability solution is
       # confirmed or the tests are refactored to use unprivileged ports.
@@ -222,7 +363,7 @@ jobs:
           (cd tests/ts && bun install --frozen-lockfile 2>/dev/null || bun install)
           python3 tests/run_tests.py --kind ts
 
-      # ── 13. Upload artifacts on failure ──────────────────────────────────────
+      # ── 3j. Upload artifacts on failure ────────────────────────────────
       - name: Upload test logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -234,14 +375,31 @@ jobs:
             /tmp/gateway-state-*
           if-no-files-found: ignore
 
-      # ── 14. Report cache sizes (informational) ───────────────────────────────
-      - name: Report cache sizes
-        if: always()
-        shell: bash
+  # ── 4. Aggregate status — required check target for branch protection ──
+  ci:
+    name: CI summary
+    needs: [changes, quality, deps, build-test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify all consumer jobs succeeded (or were intentionally skipped)
         run: |
-          echo "=== Cache sizes ==="
-          du -sh .prefix         2>/dev/null && true
-          du -sh .cpm-cache      2>/dev/null && true
-          du -sh ~/.cache/ccache 2>/dev/null && true
-          echo "=== Total disk ==="
-          df -h /
+          echo "changes:   ${{ needs.changes.result }}"
+          echo "quality:   ${{ needs.quality.result }}"
+          echo "deps:      ${{ needs.deps.result }}"
+          echo "build-test: ${{ needs.build-test.result }}"
+
+          FAILED=0
+          for r in \
+            "changes ${{ needs.changes.result }}" \
+            "quality ${{ needs.quality.result }}" \
+            "deps ${{ needs.deps.result }}" \
+            "build-test ${{ needs.build-test.result }}"; do
+            name="${r%% *}"; result="${r##* }"
+            case "$result" in
+              success|skipped) ;;
+              *) echo "::error::$name failed with '$result'"; FAILED=1 ;;
+            esac
+          done
+          exit $FAILED
