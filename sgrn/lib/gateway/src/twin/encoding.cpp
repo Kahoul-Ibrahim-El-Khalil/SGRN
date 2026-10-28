@@ -14,7 +14,6 @@
 #include <string>
 #include <vector>
 
-
 #include <sgrn/scl/utils.hpp>
 
 namespace sgrn::gateway::twin
@@ -47,8 +46,8 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeArrayValue(
     return ::sgrn::scl::encodeArrayValue(t_field, t_value, tp_ptr, t_buffer_size, t_depth, t_e);
 }
 
-sgrn::Result<void, ::sgrn::scl::SclError> encodeFieldRapidJson(const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr,
-    size_t t_buffer_size, int t_depth, s7codec::Endian t_e) {
+sgrn::Result<void, ::sgrn::scl::SclError> encodeFieldRapidJson(
+    const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, int t_depth, s7codec::Endian t_e) {
     return ::sgrn::scl::encodeFieldRapidJson(t_field, t_value, tp_ptr, t_buffer_size, t_depth, t_e);
 }
 
@@ -57,8 +56,8 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeFieldAt(
     return ::sgrn::scl::encodeFieldAt(t_field, t_value_json, tp_ptr, t_buffer_size, t_depth, t_e);
 }
 
-sgrn::Result<void, ::sgrn::scl::SclError> applyJsonPatchToFields(
-    const std::vector<::sgrn::scl::DbField>& t_fields, const std::string& t_patch_json, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e) {
+sgrn::Result<void, ::sgrn::scl::SclError> applyJsonPatchToFields(const std::vector<::sgrn::scl::DbField>& t_fields,
+    const std::string& t_patch_json, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e) {
     return ::sgrn::scl::applyJsonPatchToFields(t_fields, t_patch_json, tp_ptr, t_buffer_size, t_e);
 }
 
@@ -69,7 +68,6 @@ std::string parseSemanticValue(const std::string& t_raw) {
 std::string parseRawValuePayload(const std::string& t_raw) {
     return ::sgrn::scl::parseRawValuePayload(t_raw);
 }
-
 
 sgrn::Result<void, ::sgrn::scl::SclError> encodeValue(
     const DbField& t_field, const std::string& t_value, uint8_t* tp_buffer_ptr, size_t t_buffer_size) {

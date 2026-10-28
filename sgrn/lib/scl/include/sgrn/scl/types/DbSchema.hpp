@@ -20,9 +20,10 @@ struct DbSchema {
     std::vector<DbField> fields;
 
     std::string source_file;
-    s7codec::Endian endianness{s7codec::Endian::Big};
+    s7codec::Endian endianness{s7codec::Endian::Little};
     bool trigger_events{false};
     ModbusArea modbus_area{ModbusArea::None}; ///< Modbus exposure directive
+    uint64_t dataset_step_ns{0};              ///< Default dataset time step in nanoseconds (#DATASET_STEP)
 };
 
 } // namespace sgrn::scl
@@ -70,6 +71,10 @@ inline void serializeToWriter(Writer& t_writer, const sgrn::scl::DbSchema& t_db,
             default:
                 break;
         }
+    }
+    if (t_db.dataset_step_ns > 0) {
+        t_writer.Key("dataset_step_ns");
+        t_writer.Uint64(t_db.dataset_step_ns);
     }
     if (!t_headers_only) {
         t_writer.Key("fields");

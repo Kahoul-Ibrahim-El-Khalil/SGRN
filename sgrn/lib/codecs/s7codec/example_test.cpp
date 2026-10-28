@@ -23,20 +23,20 @@ using s7codec::BitOffset;
 using s7codec::CodecStatus;
 using s7codec::DecodedValue;
 using s7codec::DecodeOptions;
-using s7codec::DtlComponents;
-using s7codec::EncodeOptions;
-using s7codec::Endian;
-using s7codec::ReadBuffer;
-using s7codec::StringCapacity;
-using s7codec::Type;
-using s7codec::WriteBuffer;
 using s7codec::decodeScalar;
+using s7codec::DtlComponents;
 using s7codec::encodeBool;
+using s7codec::EncodeOptions;
 using s7codec::encodeScalar;
 using s7codec::encodeString;
 using s7codec::encodeU16;
 using s7codec::encodeU32;
 using s7codec::encodeU8;
+using s7codec::Endian;
+using s7codec::ReadBuffer;
+using s7codec::StringCapacity;
+using s7codec::Type;
+using s7codec::WriteBuffer;
 
 int main() {
     std::cout << "Running S7 Codec Tests..." << std::endl;
@@ -115,17 +115,17 @@ int main() {
     // byte-order honored on decode.
     {
         std::array<uint8_t, 2> be_buf{};
-        assert(encodeScalar(DecodedValue(static_cast<uint64_t>(0xBEEFu)), Type::UInt, WriteBuffer(be_buf),
-                   EncodeOptions{.endian = Endian::Big})
-                   .has_value());
+        assert(encodeScalar(
+            DecodedValue(static_cast<uint64_t>(0xBEEFu)), Type::UInt, WriteBuffer(be_buf), EncodeOptions{.endian = Endian::Big})
+                .has_value());
         assert(be_buf[0] == 0xBE && be_buf[1] == 0xEF);
         DecodedValue be_v = decodeScalar(Type::UInt, ReadBuffer(be_buf), DecodeOptions{.endian = Endian::Big});
         assert(be_v.valid() && std::get<uint64_t>(be_v) == 0xBEEF);
 
         std::array<uint8_t, 2> le_buf{};
-        assert(encodeScalar(DecodedValue(static_cast<uint64_t>(0xBEEFu)), Type::UInt, WriteBuffer(le_buf),
-                   EncodeOptions{.endian = Endian::Little})
-                   .has_value());
+        assert(encodeScalar(
+            DecodedValue(static_cast<uint64_t>(0xBEEFu)), Type::UInt, WriteBuffer(le_buf), EncodeOptions{.endian = Endian::Little})
+                .has_value());
         assert(le_buf[0] == 0xEF && le_buf[1] == 0xBE);
         DecodedValue le_v = decodeScalar(Type::UInt, ReadBuffer(le_buf), DecodeOptions{.endian = Endian::Little});
         assert(le_v.valid() && std::get<uint64_t>(le_v) == 0xBEEF);
@@ -218,9 +218,9 @@ int main() {
     // units), UTF-8 back out. Header is [max_len, cur_len] as u16s.
     {
         std::array<uint8_t, 12> w_buf{}; // 4 header bytes + 4 units * 2
-        assert(encodeScalar(DecodedValue(std::string("AB")), Type::WString, WriteBuffer(w_buf),
-                   EncodeOptions{.stringCapacity = StringCapacity{4}})
-                   .has_value());
+        assert(encodeScalar(
+            DecodedValue(std::string("AB")), Type::WString, WriteBuffer(w_buf), EncodeOptions{.stringCapacity = StringCapacity{4}})
+                .has_value());
         assert(w_buf[0] == 0x00 && w_buf[1] == 0x04); // max_len BE u16
         assert(w_buf[2] == 0x00 && w_buf[3] == 0x02); // cur_len BE u16
         assert(w_buf[4] == 0x00 && w_buf[5] == 0x41); // 'A'
@@ -264,6 +264,40 @@ int main() {
         assert(tv.valid() && tv.s() == "01:00:00.000");
 
         std::cout << "[PASS] Date / TOD round-trips" << std::endl;
+    }
+
+    // Test 13: DTL direct nanosecond conversion & round-trip (zero heap allocations, Big and Little Endian)
+    {
+        // 2024-03-18 19:30:00.500000000 UTC
+        // Year 2024 (0x07E8), Month 3, Day 18, Weekday 1, Hour 19, Min 30, Sec 0, Ns 500000000 (0x1DCD6500)
+        int64_t expected_ns = 1710790200'500'000'000LL;
+
+        // --- Big-Endian ---
+        std::array<uint8_t, 12> dtl_buf_be{0x07, 0xE8, 0x03, 0x12, 0x01, 0x13, 0x1E, 0x00, 0x1D, 0xCD, 0x65, 0x00};
+        int64_t ns_be = s7codec::decodeDtlToNanoseconds(ReadBuffer(dtl_buf_be), DecodeOptions{.endian = Endian::Big});
+        assert(ns_be == expected_ns);
+
+        s7codec::DTL reconstructed_be = s7codec::DTL::fromUnixNanoseconds(ns_be);
+        assert(reconstructed_be.toString() == "2024-03-18 19:30:00.500000000");
+
+        std::array<uint8_t, 12> encoded_buf_be{};
+        assert(s7codec::encodeDtl(ns_be, WriteBuffer(encoded_buf_be), Endian::Big).has_value());
+        assert(encoded_buf_be == dtl_buf_be);
+
+        // --- Little-Endian ---
+        // Year LE: 0xE8, 0x07; Month..Sec: identical; Ns LE: 0x00, 0x65, 0xCD, 0x1D
+        std::array<uint8_t, 12> dtl_buf_le{0xE8, 0x07, 0x03, 0x12, 0x01, 0x13, 0x1E, 0x00, 0x00, 0x65, 0xCD, 0x1D};
+        int64_t ns_le = s7codec::decodeDtlToNanoseconds(ReadBuffer(dtl_buf_le), DecodeOptions{.endian = Endian::Little});
+        assert(ns_le == expected_ns);
+
+        s7codec::DTL reconstructed_le = s7codec::DTL::fromUnixNanoseconds(ns_le);
+        assert(reconstructed_le.toString() == "2024-03-18 19:30:00.500000000");
+
+        std::array<uint8_t, 12> encoded_buf_le{};
+        assert(s7codec::encodeDtl(ns_le, WriteBuffer(encoded_buf_le), Endian::Little).has_value());
+        assert(encoded_buf_le == dtl_buf_le);
+
+        std::cout << "[PASS] DTL direct nanosecond encoding/decoding (BE & LE)" << std::endl;
     }
 
     std::cout << "All tests passed successfully!" << std::endl;

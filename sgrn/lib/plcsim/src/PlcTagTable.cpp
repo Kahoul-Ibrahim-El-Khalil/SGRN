@@ -277,7 +277,8 @@ sgrn::Result<void, S7Error> PlcTagTable::buildPutItems(const std::vector<std::st
             int bit_idx = (blk.value()->addr.word_len == S7WLBit) ? blk.value()->addr.bit_offset : 0;
             auto status = s7codec::encodeScalar(dv, fd.type, s7codec::WriteBuffer{t_buf.data(), t_buf.size()},
                 s7codec::EncodeOptions{//
-                    .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(bit_idx)}, .stringCapacity = s7codec::StringCapacity{fd.count}});
+                    .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(bit_idx)},
+                    .stringCapacity = s7codec::StringCapacity{fd.count}});
             if (!status.has_value())
                 return fromSclErrorToS7Error(SclError::Generic);
             t_out_bufs.push_back(std::move(t_buf));
@@ -332,7 +333,8 @@ sgrn::Result<void, S7Error> PlcTagTable::commitLocalPut(
             int bit_idx = (blk.value()->addr.word_len == S7WLBit) ? blk.value()->addr.bit_offset : 0;
             auto status = s7codec::encodeScalar(dv, fd.type, s7codec::WriteBuffer{encoded.data(), encoded.size()},
                 s7codec::EncodeOptions{//
-                    .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(bit_idx)}, .stringCapacity = s7codec::StringCapacity{fd.count}});
+                    .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(bit_idx)},
+                    .stringCapacity = s7codec::StringCapacity{fd.count}});
 
             SGRN_RETURN_IF(!status.has_value(), fromSclErrorToS7Error(SclError::Generic));
         }

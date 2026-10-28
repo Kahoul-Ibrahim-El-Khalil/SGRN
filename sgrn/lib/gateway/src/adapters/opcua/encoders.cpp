@@ -62,17 +62,15 @@ Result<void, OpcUaAdapterError> encodeStringOpcUaToMemory(const OpcUaEncodingCon
     const uint32_t string_capacity = t_ctx.view.string_capacity;
 
     if (t_ctx.view.type == DataType::String) {
-        SGRN_RETURN_IF(!encodeString(
-            std::string_view{p_string_data_char, static_cast<size_t>(string_length)}, s7codec::StringCapacity{string_capacity},
-            s7codec::WriteBuffer{t_ctx.p_memory, t_ctx.effectiveSize()})
+        SGRN_RETURN_IF(!encodeString(std::string_view{p_string_data_char, static_cast<size_t>(string_length)},
+                           s7codec::StringCapacity{string_capacity}, s7codec::WriteBuffer{t_ctx.p_memory, t_ctx.effectiveSize()})
                            .has_value(),
             OpcUaAdapterError::OUT_OF_RANGE);
 
     } else if (t_ctx.view.type == DataType::XString) {
         SGRN_RETURN_IF(
-            !encodeXString(
-                std::string_view{p_string_data_char, static_cast<size_t>(string_length)}, s7codec::StringCapacity{string_capacity},
-                s7codec::WriteBuffer{t_ctx.p_memory, t_ctx.effectiveSize()}, t_ctx.view.endian)
+            !encodeXString(std::string_view{p_string_data_char, static_cast<size_t>(string_length)},
+                s7codec::StringCapacity{string_capacity}, s7codec::WriteBuffer{t_ctx.p_memory, t_ctx.effectiveSize()}, t_ctx.view.endian)
                 .has_value(),
             OpcUaAdapterError::OUT_OF_RANGE);
 
@@ -95,8 +93,8 @@ Result<void, OpcUaAdapterError> encodeStringOpcUaToMemory(const OpcUaEncodingCon
                 OpcUaAdapterError::OUT_OF_RANGE);
         } else {
             SGRN_RETURN_IF(!encodeXWString(wide_units, s7codec::StringCapacity{string_capacity},
-                                s7codec::WriteBuffer{t_ctx.p_memory, t_ctx.effectiveSize()}, t_ctx.view.endian)
-                                .has_value(),
+                               s7codec::WriteBuffer{t_ctx.p_memory, t_ctx.effectiveSize()}, t_ctx.view.endian)
+                               .has_value(),
                 OpcUaAdapterError::OUT_OF_RANGE);
         }
     }
@@ -176,8 +174,8 @@ Result<void, OpcUaAdapterError> encodeDateTimeOpcUaToMemory(const OpcUaEncodingC
 
         dtl.nanosecond = (dts.milliSec * 1000000) + (dts.microSec * 1000) + dts.nanoSec;
 
-        SGRN_RETURN_IF(
-            !s7codec::encodeDtl(dtl, s7codec::WriteBuffer{t_ctx.p_memory, s7_size}, t_ctx.view.endian).has_value(), OpcUaAdapterError::ENCODE_FAILED);
+        SGRN_RETURN_IF(!s7codec::encodeDtl(dtl, s7codec::WriteBuffer{t_ctx.p_memory, s7_size}, t_ctx.view.endian).has_value(),
+            OpcUaAdapterError::ENCODE_FAILED);
 
     } else if (t_ctx.view.type == DataType::DateTime) {
         SGRN_RETURN_ERROR_IF(unix_time_sec < 631152000LL, OpcUaAdapterError::OUT_OF_RANGE);
@@ -224,10 +222,9 @@ Result<void, OpcUaAdapterError> encodeScalarOpcUaToMemory(const OpcUaEncodingCon
 
         s7codec::DecodedValue dv = s7codec::DecodedValue::makeSigned(static_cast<int64_t>(raw));
 
-        SGRN_RETURN_IF(
-            !s7codec::encodeScalar(dv, t_ctx.view.type, s7codec::WriteBuffer{t_ctx.p_memory, s7_size},
-         s7codec::EncodeOptions{.endian = t_ctx.view.endian, .bitOffset = s7codec::BitOffset{t_ctx.view.bit_index}})
-         .has_value(),
+        SGRN_RETURN_IF(!s7codec::encodeScalar(dv, t_ctx.view.type, s7codec::WriteBuffer{t_ctx.p_memory, s7_size},
+                           s7codec::EncodeOptions{.endian = t_ctx.view.endian, .bitOffset = s7codec::BitOffset{t_ctx.view.bit_index}})
+                           .has_value(),
             OpcUaAdapterError::ENCODE_FAILED);
 
         return {};
@@ -286,10 +283,9 @@ Result<void, OpcUaAdapterError> encodeScalarOpcUaToMemory(const OpcUaEncodingCon
 
     SGRN_RETURN_IF(!p_entry->from_ua(t_ctx.p_ua_type, t_ctx.p_ua_buf, dv), OpcUaAdapterError::TYPE_MISMATCH);
 
-    SGRN_RETURN_IF(
-        !s7codec::encodeScalar(dv, t_ctx.view.type, s7codec::WriteBuffer{t_ctx.p_memory, s7_size},
-         s7codec::EncodeOptions{.endian = t_ctx.view.endian, .bitOffset = s7codec::BitOffset{t_ctx.view.bit_index}})
-         .has_value(),
+    SGRN_RETURN_IF(!s7codec::encodeScalar(dv, t_ctx.view.type, s7codec::WriteBuffer{t_ctx.p_memory, s7_size},
+                       s7codec::EncodeOptions{.endian = t_ctx.view.endian, .bitOffset = s7codec::BitOffset{t_ctx.view.bit_index}})
+                       .has_value(),
         OpcUaAdapterError::ENCODE_FAILED);
 
     return {};

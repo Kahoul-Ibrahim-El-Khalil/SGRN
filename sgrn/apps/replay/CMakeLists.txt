@@ -8,6 +8,7 @@ sgrn_add_component_executable(
         ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/src/gateway.cpp
     ENABLE_ORIGIN_RPATH
     PRIVATE_LIBS
+        sgrn_ml
         sgrn_gateway
         sgrn_gateway_twin
         sgrn::scl
@@ -22,6 +23,7 @@ sgrn_add_component_executable(
 target_include_directories(sgrn_replay PRIVATE
     ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/include
     ${CMAKE_SOURCE_DIR}/sgrn/lib/scl/include
+    ${CMAKE_SOURCE_DIR}/sgrn/lib/ml/include
 )
 sgrn_target(sgrn_replay)
 sgrn_install_component_executable(TARGET sgrn_replay COMPONENT gateway)

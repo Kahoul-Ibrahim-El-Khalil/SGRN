@@ -4,6 +4,8 @@
 #include <sgrn/gateway/database/PersistenceService.hpp>
 #include <sgrn/gateway/tools/sgrn_dataset.hpp>
 #include <sgrn/gateway/twin/FieldTraversal.hpp>
+#include <sgrn/ml/columnar_dataset.hpp>
+#include <sgrn/ml/time_grid_resampler.hpp>
 #include <sgrn/utils/compression.hpp>
 #include <sgrn/utils/time.hpp>
 #include <fstream>
@@ -268,7 +270,6 @@ sgrn::Result<DatasetSummary> DatasetProcessor::process(const DatasetConfig& t_co
         if (n.size() > 10 && n.compare(n.size() - 10, 10, ".timestamp") == 0)
             dtl_ts_feature_idx_.push_back(i);
     }
-    cache_rows_ = 0;
     last_images_.clear();
     deferred_row_ts_ = 0;
     row_pending_ = false;
@@ -312,7 +313,7 @@ sgrn::Result<DatasetSummary> DatasetProcessor::process(const DatasetConfig& t_co
 }
 
 sgrn::Result<void> DatasetProcessor::openWriters(const DatasetConfig& t_config) {
-    if (!t_config.output_csv_path.empty()) {
+    if (!t_config.output_csv_path.empty() && !t_config.no_csv) {
         csv_out_.open(t_config.output_csv_path, std::ios::out | std::ios::trunc);
         if (!csv_out_.is_open()) {
             return fmt::format("Failed to open CSV output file: {}", t_config.output_csv_path);
@@ -325,55 +326,104 @@ sgrn::Result<void> DatasetProcessor::openWriters(const DatasetConfig& t_config) 
         csv_out_ << "\n";
     }
 
-    // Streaming cache (compact numeric twin of the CSV rows, no schema/
-    // headers to parse downstream): fixed-order float32 feature rows plus
-    // per-row timestamps. Written at the same row boundary as the CSV,
-    // so both stay row-identical when produced together.
-    if (t_config.output_cache_prefix.empty())
-        return {};
-    cache_f32_.open(t_config.output_cache_prefix + ".f32", std::ios::binary | std::ios::trunc);
-    cache_ts_.open(t_config.output_cache_prefix + ".ts.i64", std::ios::binary | std::ios::trunc);
-    if (!cache_f32_.is_open() || !cache_ts_.is_open()) {
-        return fmt::format("Failed to open cache output files under prefix: {}", t_config.output_cache_prefix);
+    // --- Discrete time-grid resampler & columnar binary writer ---
+    if (!t_config.output_bin_path.empty()) {
+        // Build ResamplerConfig from the loaded SCL schema store
+        std::vector<sgrn::scl::DbSchema> schemas;
+        schemas.reserve(schema_store_.dbs().size());
+        for (const auto& [db_num, db] : schema_store_.dbs()) {
+            schemas.push_back(db);
+        }
+
+        auto resampler_cfg = sgrn::ml::makeResamplerConfig(schemas, t_config.step_override_ns, t_config.time_tag_override);
+
+        const uint64_t step_ns = resampler_cfg.step_ns;
+        const size_t n_fields = resampler_cfg.fields.size();
+
+        // Separate feature and label field indices for the writer
+        std::vector<size_t> feature_indices;
+        std::vector<size_t> label_indices;
+        for (size_t i = 0; i < n_fields; ++i) {
+            if (resampler_cfg.fields[i].is_label)
+                label_indices.push_back(i);
+            else
+                feature_indices.push_back(i);
+        }
+
+        // Build a manifest with the column names for .sgrnb
+        sgrn::ml::ModelManifest bin_manifest;
+        bin_manifest.name = "sgrn_dataset";
+        bin_manifest.backend = "columnar";
+        for (size_t fi : feature_indices) {
+            sgrn::ml::FeatureDef fd;
+            fd.name = resampler_cfg.fields[fi].name;
+            fd.source_tag = resampler_cfg.fields[fi].name;
+            fd.tag_index = static_cast<uint32_t>(fi);
+            fd.derived = sgrn::ml::DerivedType::Raw;
+            fd.norm = sgrn::ml::NormType::None;
+            bin_manifest.spec.features.push_back(std::move(fd));
+        }
+        for (size_t li : label_indices) {
+            sgrn::ml::LabelDef ld;
+            ld.name = resampler_cfg.fields[li].name;
+            ld.target_tag = resampler_cfg.fields[li].name;
+            ld.task = sgrn::ml::TaskType::Regression;
+            bin_manifest.spec.labels.push_back(std::move(ld));
+        }
+
+        // Open the columnar binary writer
+        bin_writer_ = std::make_unique<sgrn::ml::ColumnarDatasetWriter>();
+        auto open_res = bin_writer_->open(t_config.output_bin_path, std::move(bin_manifest), step_ns);
+        if (open_res.hasError()) {
+            return fmt::format("Failed to open .sgrnb output: {}", open_res.error());
+        }
+
+        // Set up the resampler with a callback that writes rows to the writer
+        resampler_ = std::make_unique<sgrn::ml::TimeGridResampler>(std::move(resampler_cfg));
+
+        // Capture feature/label indices for the row callback
+        auto* writer_ptr = bin_writer_.get();
+        const auto feat_idx = feature_indices;
+        const auto lbl_idx = label_indices;
+
+        resampler_->setRowCallback([writer_ptr, feat_idx, lbl_idx](const sgrn::ml::DiscreteGridRow& t_row) {
+            std::vector<float> features(feat_idx.size());
+            for (size_t i = 0; i < feat_idx.size(); ++i) {
+                features[i] = t_row.values[feat_idx[i]];
+            }
+            std::vector<float> labels(lbl_idx.size());
+            for (size_t i = 0; i < lbl_idx.size(); ++i) {
+                labels[i] = t_row.values[lbl_idx[i]];
+            }
+            (void)writer_ptr->pushRow(t_row.timestamp_ns, features, labels);
+        });
+
+        fmt::print(fg(fmt::color::cyan), "[sgrn_dataset] Time-grid resampler: step={}ns, {} fields ({} features, {} labels)\n", step_ns,
+            n_fields, feature_indices.size(), label_indices.size());
     }
+
     return {};
 }
 
-void DatasetProcessor::closeWriters(const DatasetConfig& t_config) {
+void DatasetProcessor::closeWriters(const DatasetConfig& /*t_config*/) {
     if (csv_out_.is_open())
         csv_out_.close();
 
-    // Cache metadata: feature order/names so downstream streaming readers
-    // can interpret (<prefix>.f32 rows × features, .ts.i64 per-row stamp).
-    if (!cache_f32_.is_open())
-        return;
-    cache_f32_.close();
-    cache_ts_.flush();
-    cache_ts_.close();
-    rapidjson::Document meta_doc(rapidjson::kObjectType);
-    auto& alloc = meta_doc.GetAllocator();
-    meta_doc.AddMember("format", rapidjson::Value("sgrn-window-cache/1"), alloc);
-    // Row timestamps: naive wall epoch from the datablocks' DTLs (see
-    // resolveRowTs) — deterministic across machines, no frame-stamp tz.
-    meta_doc.AddMember("ts_domain", rapidjson::Value("dtl_wall_naive"), alloc);
-    meta_doc.AddMember("rows", rapidjson::Value(static_cast<uint64_t>(cache_rows_)), alloc);
-    meta_doc.AddMember("features", rapidjson::Value(static_cast<uint64_t>(summary_.features.size())), alloc);
-    rapidjson::Value names(rapidjson::kArrayType);
-    rapidjson::Value labels(rapidjson::kArrayType);
-    for (const auto& feat : summary_.features) {
-        names.PushBack(rapidjson::Value(feat.full_name.c_str(), alloc), alloc);
-        labels.PushBack(rapidjson::Value(feat.is_label), alloc);
+    // Flush the resampler's final bucket and finalize the binary writer
+    if (resampler_) {
+        resampler_->flush();
+        fmt::print(fg(fmt::color::cyan), "[sgrn_dataset] Resampler emitted {} discrete rows\n", resampler_->totalEmittedRows());
+        resampler_.reset();
     }
-    meta_doc.AddMember("feature_names", names, alloc);
-    meta_doc.AddMember("is_label", labels, alloc);
-    rapidjson::StringBuffer meta_sb;
-    rapidjson::Writer<rapidjson::StringBuffer> meta_w(meta_sb);
-    meta_doc.Accept(meta_w);
-    std::ofstream cache_meta(std::string(t_config.output_cache_prefix) + ".json", std::ios::out | std::ios::trunc);
-    if (cache_meta.is_open())
-        cache_meta << meta_sb.GetString() << "\n";
-    fmt::print("[sgrn_dataset] Streaming cache written: {}.f32 ({} rows x {} features) + ts + json\n", t_config.output_cache_prefix,
-        cache_rows_, summary_.features.size());
+    if (bin_writer_) {
+        auto fin_res = bin_writer_->finalize();
+        if (fin_res.hasError()) {
+            fmt::print(fg(fmt::color::red), "[sgrn_dataset] Failed to finalize .sgrnb: {}\n", fin_res.error());
+        } else {
+            fmt::print(fg(fmt::color::green), "[sgrn_dataset] Wrote {} rows to .sgrnb\n", bin_writer_->rowCount());
+        }
+        bin_writer_.reset();
+    }
 }
 
 /// Split a dotted key into its segments ("a.b.c" → {"a","b","c"}).
@@ -421,14 +471,46 @@ void DatasetProcessor::flushPendingRow() {
 /// One row from the carried-forward state, shared by the binary and
 /// JSONL branches so both formats produce identical row semantics.
 void DatasetProcessor::emitRow(int64_t t_ts) {
-    if (!csv_out_.is_open() && !cache_f32_.is_open())
+    const int64_t resolved_ts = resolveRowTs(t_ts);
+
+    // --- Feed the discrete time-grid resampler (nanoseconds) ---
+    if (resampler_) {
+        const uint64_t ts_ns = static_cast<uint64_t>(resolved_ts) * 1'000'000ULL;
+        for (const auto& feat : features_) {
+            auto st_it = current_state_.find(feat.full_name);
+            if (st_it == current_state_.end())
+                continue;
+            const std::string& raw = st_it->second;
+            double dval = 0.0;
+            if (raw == "true" || raw == "TRUE")
+                dval = 1.0;
+            else if (raw == "false" || raw == "FALSE")
+                dval = 0.0;
+            else {
+                try {
+                    size_t parsed_to = 0;
+                    dval = std::stod(raw, &parsed_to);
+                    if (parsed_to == 0)
+                        continue;
+                } catch (...) {
+                    continue;
+                }
+            }
+            if (std::isnan(dval))
+                continue;
+            const std::string db_tag = fmt::format("DB{}.{}", feat.db_num, feat.field_path);
+            resampler_->pushNamedSample(db_tag, dval, ts_ns);
+            resampler_->pushNamedSample(feat.full_name, dval, ts_ns);
+        }
+    }
+
+    // --- CSV output ---
+    if (!csv_out_.is_open())
         return;
-    if (csv_out_.is_open())
-        csv_out_ << resolveRowTs(t_ts); // DTL wall clock — identical to the cache ts
+    csv_out_ << resolved_ts;
     for (size_t f_idx = 0; f_idx < summary_.features.size(); ++f_idx) {
         auto& feat = summary_.features[f_idx];
         auto st_it = current_state_.find(feat.full_name);
-        float cache_val = std::nanf("");
         if (st_it != current_state_.end()) {
             const std::string& raw = st_it->second;
             // CSV cells must stay printable ASCII: decodes of unseeded
@@ -442,15 +524,11 @@ void DatasetProcessor::emitRow(int64_t t_ts) {
                 }
             }
             if (printable) {
-                if (csv_out_.is_open())
-                    csv_out_ << "," << raw;
+                csv_out_ << "," << raw;
             } else {
-                if (csv_out_.is_open())
-                    csv_out_ << ",";
+                csv_out_ << ",";
                 feat.null_count++;
                 feat.total_samples++;
-                if (cache_f32_.is_open())
-                    cache_f32_.write(reinterpret_cast<const char*>(&cache_val), sizeof(cache_val));
                 continue;
             }
             feat.total_samples++;
@@ -470,9 +548,6 @@ void DatasetProcessor::emitRow(int64_t t_ts) {
                     dval = std::numeric_limits<double>::quiet_NaN();
                 }
             }
-            cache_val = static_cast<float>(dval);
-            if (std::isnan(cache_val) || std::isinf(cache_val))
-                cache_val = std::nanf("");
 
             if (!std::isnan(dval)) {
                 if (!feat.min_max_set || dval < feat.min_val)
@@ -482,21 +557,11 @@ void DatasetProcessor::emitRow(int64_t t_ts) {
                 feat.min_max_set = true;
             }
         } else {
-            if (csv_out_.is_open())
-                csv_out_ << ",";
+            csv_out_ << ",";
             feat.null_count++;
         }
-        if (cache_f32_.is_open())
-            cache_f32_.write(reinterpret_cast<const char*>(&cache_val), sizeof(cache_val));
     }
-    if (csv_out_.is_open())
-        csv_out_ << "\n";
-    if (cache_f32_.is_open()) {
-        const int64_t row_ts_ms = resolveRowTs(t_ts);
-        const int64_t ts_out = (row_ts_ms > 0) ? row_ts_ms : std::numeric_limits<int64_t>::min();
-        cache_ts_.write(reinterpret_cast<const char*>(&ts_out), sizeof(ts_out));
-        ++cache_rows_;
-    }
+    csv_out_ << "\n";
 }
 void DatasetProcessor::storeStateValue(const std::string& t_key, const rapidjson::Value& t_v) {
     std::string val_str;
@@ -806,7 +871,7 @@ void DatasetProcessor::processBinaryArchive(const std::filesystem::path& t_path,
                 summary_.end_timestamp_ms = ts;
         }
 
-        if (csv_out_.is_open() || cache_f32_.is_open())
+        if (csv_out_.is_open() || resampler_)
             ingestBinaryImage(target_db, image, image_len);
         deferRow(ts);
 

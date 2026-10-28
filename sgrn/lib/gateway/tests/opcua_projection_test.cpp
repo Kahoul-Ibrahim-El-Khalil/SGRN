@@ -29,6 +29,7 @@ END_TYPE
 int main() {
     sgrn::scl::PlcSchemaStore store;
     auto loaded = store.loadSchema(kSchema);
+    (void)loaded;
     assert(loaded.has_value());
 
     sgrn::wrappers::opcua::TypeRegistry registry;

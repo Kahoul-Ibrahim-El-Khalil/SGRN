@@ -55,14 +55,6 @@ MODULE_ORDER = ["gateway", "scl", "datastore", "s7shell", "utils", "suite"]
 # needs_setup entries are skipped by `all` (explicit runs only).
 # ---------------------------------------------------------------------------
 PYTHON_TESTS = [
-    dict(name="gateway-rest", module="gateway", mode="offline",
-         path="gateway/rest_api.py",
-         assumptions="Runs a local HTTP server emulating the gateway. No live gateway needed."),
-    dict(name="gateway-arrays", module="gateway", mode="integration",
-         path="gateway/array_support.py", needs_setup=True,
-         assumptions="Requires a gateway whose schema exposes the target array "
-                     "(defaults: DB2.temperatures[10]; override with --db/--field/--array-size). "
-                     "No in-tree simulation provides it today."),
     dict(name="scl-dtypes", module="scl", mode="offline",
          path="scl/dtypes_endianness.py",
          assumptions="Offline. Depends on the sgrn/python package."),
@@ -74,10 +66,7 @@ PYTHON_TESTS = [
 # file -> (module, surface label). Descriptions come from describe() titles.
 TS_TESTS = [
     ("tests/dashboard.test.ts", "gateway", "dashboard UI over HTTP"),
-    ("tests/data.test.ts", "gateway", "data REST API"),
     ("tests/gateway-api.test.ts", "gateway", "REST API surface (registry/data/memory/policy)"),
-    ("tests/policy.test.ts", "gateway", "policy engine API"),
-    ("tests/registry.test.ts", "gateway", "schema registry API"),
     ("tests/websocket.test.ts", "gateway", "WebSocket telemetry API"),
     ("tests/s7shell.test.ts", "s7shell", "s7shell CLI binary"),
     ("tests/southbound-ethernetip.test.ts", "gateway", "EtherNet/IP views over HTTP/WebSocket"),

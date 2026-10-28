@@ -27,15 +27,15 @@ rapidjson::Document toJson(const sgrn::scl::DbSchema& t_db) {
 // from-side — per-type namespace
 // -----------------------------------------------------------------------------
 
-namespace sgrn::scl
+namespace sgrn::scl::db
 {
 
 namespace
 {
 int fieldSpanBytes(const sgrn::scl::DbField& t_field) {
     if (t_field.type == sgrn::scl::DataType::Struct)
-        return std::max(1, t_field.struct_size) * std::max(1, t_field.count);
-    return s7codec::typeSpanBytes(t_field.type, t_field.count);
+        return static_cast<int>(std::max(1u, t_field.struct_size) * std::max(1u, t_field.count));
+    return static_cast<int>(s7codec::typeSpanBytes(t_field.type, t_field.count).value_or(0));
 }
 } // namespace
 
@@ -71,6 +71,8 @@ sgrn::scl::DbSchema fromJson(const rapidjson::Value& t_node) {
         else if (a == "discrete")
             t_db.modbus_area = sgrn::scl::ModbusArea::Discrete;
     }
+    if (t_node.HasMember("dataset_step_ns") && t_node["dataset_step_ns"].IsUint64())
+        t_db.dataset_step_ns = t_node["dataset_step_ns"].GetUint64();
 
     if (t_node.HasMember("fields") && t_node["fields"].IsArray()) {
         for (const auto& field_node : t_node["fields"].GetArray()) {
@@ -94,4 +96,4 @@ sgrn::scl::DbSchema fromJsonString(const std::string& t_value) {
     return fromJson(doc);
 }
 
-} // namespace sgrn::scl
+} // namespace sgrn::scl::db

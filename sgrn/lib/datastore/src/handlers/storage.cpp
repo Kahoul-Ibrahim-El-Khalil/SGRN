@@ -1717,7 +1717,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleBulkAction(HttpRequestPtr tsp_req
                 res_item["type"] = type;
                 res_item["success"] = (res->statusCode() == k200OK);
                 if (res->statusCode() != k200OK)
-                    res_item["error"] = res->getBody();
+                    res_item["error"] = std::string(res->getBody());
                 else
                     success_count++;
                 results.append(res_item);
@@ -1747,7 +1747,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleBulkAction(HttpRequestPtr tsp_req
                 res_item["type"] = type;
                 res_item["success"] = (res->statusCode() == k200OK);
                 if (res->statusCode() != k200OK)
-                    res_item["error"] = res->getBody();
+                    res_item["error"] = std::string(res->getBody());
                 else
                     success_count++;
                 results.append(res_item);
@@ -1969,7 +1969,7 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleInitUploadSession
         // 50MB - 500MB: 8MB chunks (6 to 63 HTTP requests)
         // 500MB - 5GB: 16MB chunks (31 to 312 HTTP requests)
         // > 5GB: 32MB chunks
-        if (total_size > 5ULL * 1024ULL * 1024ULL * 1024ULL) {
+        if (total_size > static_cast<int64_t>(5ULL * 1024ULL * 1024ULL * 1024ULL)) {
             chunk_size = 32 * 1024 * 1024;
         } else if (total_size > 500 * 1024 * 1024) {
             chunk_size = 16 * 1024 * 1024;

@@ -25,3 +25,4 @@ dependencies:
   - sqlite
   - zlib
   - zstd
+  - libtorch=*=*cpu*

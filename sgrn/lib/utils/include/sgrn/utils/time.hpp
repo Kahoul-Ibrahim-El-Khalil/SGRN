@@ -168,4 +168,57 @@ inline std::string formatTimestamp(int64_t t_ms, const std::string& t_fmt) {
     return ss.str();
 }
 
+/**
+ * @brief Parses a duration string (e.g. "10ms", "500us", "1s", "2m", "100ns") into nanoseconds.
+ * Defaults to milliseconds if no unit is specified.
+ */
+inline std::optional<uint64_t> parseDurationNanoseconds(std::string_view t_str) {
+    if (t_str.empty())
+        return std::nullopt;
+
+    size_t pos = 0;
+    while (pos < t_str.size() && (std::isdigit(static_cast<unsigned char>(t_str[pos])) || t_str[pos] == '.')) {
+        ++pos;
+    }
+
+    if (pos == 0)
+        return std::nullopt;
+
+    double value = 0.0;
+    try {
+        value = std::stod(std::string(t_str.substr(0, pos)));
+    } catch (...) {
+        return std::nullopt;
+    }
+
+    std::string unit;
+    for (size_t i = pos; i < t_str.size(); ++i) {
+        if (!std::isspace(static_cast<unsigned char>(t_str[i]))) {
+            unit.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(t_str[i]))));
+        }
+    }
+
+    double multiplier = 1'000'000.0; // default ms
+    if (unit == "ns") {
+        multiplier = 1.0;
+    } else if (unit == "us" || unit == "µs") {
+        multiplier = 1'000.0;
+    } else if (unit == "ms" || unit.empty()) {
+        multiplier = 1'000'000.0;
+    } else if (unit == "s" || unit == "sec") {
+        multiplier = 1'000'000'000.0;
+    } else if (unit == "m" || unit == "min") {
+        multiplier = 60'000'000'000.0;
+    } else if (unit == "h" || unit == "hr") {
+        multiplier = 3'600'000'000'000.0;
+    } else {
+        return std::nullopt;
+    }
+
+    if (value < 0.0)
+        return std::nullopt;
+
+    return static_cast<uint64_t>(value * multiplier);
+}
+
 } // namespace sgrn::utils::time

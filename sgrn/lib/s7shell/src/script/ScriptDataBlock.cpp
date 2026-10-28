@@ -1,3 +1,4 @@
+#include <sgrn/gateway/twin/encoding.hpp>
 #include <sgrn/gateway/twin/twin.hpp>
 #include <sgrn/plcsim/runtime/PlcRuntime.hpp>
 #include <sgrn/s7shell/bindings/registration.hpp>
@@ -223,6 +224,11 @@ ScriptDataBlock* ScriptDataBlock::get(size_t t_total_size) {
         std::memcpy(snapshot_buffer_.data() + t_offset, res.value().data(), current_chunk);
     }
 
+    if (auto p_db = conn_->schema_.getDb(db_num_);
+        !p_db.hasError() && p_db.value() && p_db.value()->endianness == s7codec::Endian::Little) {
+        ::sgrn::gateway::twin::swapRangeToBigEndian(p_db.value()->fields, snapshot_buffer_.data(), 0, 0, t_total_size);
+    }
+
     if (auto r = conn_->memory_.writeDbMemory(db_num_, 0, t_total_size, snapshot_buffer_.data()); !r) {
         fmt::print(stderr, "DataBlock::fetch: failed to write to local memory for DB{}: {}\n", db_num_, r.error());
         // Don't return nullptr — AngelScript will segfault on a null handle. Return self with error set.
@@ -282,6 +288,9 @@ void ScriptDataBlock::push() {
     bool in_dirty_region = false;
     bool write_failed = false;
 
+    const auto db_res = conn_->schema_.getDb(db_num_);
+    const bool convert = !db_res.hasError() && db_res.value() && db_res.value()->endianness == s7codec::Endian::Little;
+
     for (size_t i = 0; i < db_size_ && !write_failed; ++i) {
         if (current_mem[i] != snapshot_buffer_[i]) {
             if (!in_dirty_region) {
@@ -290,8 +299,15 @@ void ScriptDataBlock::push() {
             }
         } else {
             if (in_dirty_region) {
+                const uint8_t* p_write_data = current_mem.data() + start;
+                std::vector<uint8_t> wire_buf;
+                if (convert) {
+                    wire_buf.assign(p_write_data, p_write_data + (i - start));
+                    ::sgrn::gateway::twin::swapRangeToBigEndian(db_res.value()->fields, wire_buf.data(), start, start, i - start);
+                    p_write_data = wire_buf.data();
+                }
                 auto res = conn_->client_.writeArea(
-                    S7AreaDB, db_num_, static_cast<int>(start), static_cast<int>(i - start), S7WLByte, current_mem.data() + start);
+                    S7AreaDB, db_num_, static_cast<int>(start), static_cast<int>(i - start), S7WLByte, p_write_data);
                 if (res.hasError()) {
                     (void)setOpResult(res);
                     write_failed = true;
@@ -304,8 +320,15 @@ void ScriptDataBlock::push() {
         }
     }
     if (in_dirty_region && !write_failed) {
+        const uint8_t* p_write_data = current_mem.data() + start;
+        std::vector<uint8_t> wire_buf;
+        if (convert) {
+            wire_buf.assign(p_write_data, p_write_data + (db_size_ - start));
+            ::sgrn::gateway::twin::swapRangeToBigEndian(db_res.value()->fields, wire_buf.data(), start, start, db_size_ - start);
+            p_write_data = wire_buf.data();
+        }
         auto res = conn_->client_.writeArea(
-            S7AreaDB, db_num_, static_cast<int>(start), static_cast<int>(db_size_ - start), S7WLByte, current_mem.data() + start);
+            S7AreaDB, db_num_, static_cast<int>(start), static_cast<int>(db_size_ - start), S7WLByte, p_write_data);
         if (res.hasError()) {
             (void)setOpResult(res);
             write_failed = true;
@@ -342,7 +365,8 @@ void ScriptDataBlock::writeScalar(const std::string& t_path, const s7codec::Deco
 
     auto status = s7codec::encodeScalar(t_val, loc->field->type, s7codec::WriteBuffer{buf.data(), static_cast<size_t>(sz)},
         s7codec::EncodeOptions{//
-            .endian = loc->field->endianness, .bitOffset = s7codec::BitOffset{loc->field->bit_index},
+            .endian = loc->field->endianness,
+            .bitOffset = s7codec::BitOffset{loc->field->bit_index},
             .stringCapacity = s7codec::StringCapacity{loc->field->count}});
     if (!status.has_value()) {
         throwScriptException(s7codec::toString(status.error()), ShellError::TypeMismatch);
@@ -675,8 +699,8 @@ static void encodeScriptArray(const ::sgrn::scl::DbField& t_field, asIScriptEngi
                 throwScriptException(fmt::format("DB{}.'{}': bool element {} out of range", t_db_num, t_ctx, i), ShellError::TypeMismatch);
                 return;
             }
-            auto status =
-                s7codec::encodeBool(b, s7codec::BitOffset{static_cast<uint8_t>(bit_off)}, s7codec::WriteBuffer{tp_buf + byte_off, t_buf_size - byte_off});
+            auto status = s7codec::encodeBool(
+                b, s7codec::BitOffset{static_cast<uint8_t>(bit_off)}, s7codec::WriteBuffer{tp_buf + byte_off, t_buf_size - byte_off});
             if (!status.has_value()) {
                 throwScriptException(
                     fmt::format("DB{}.'{}': bool encode failed at element {}", t_db_num, t_ctx, i), ShellError::TypeMismatch);
@@ -773,7 +797,8 @@ static void encodeScriptFieldValue(const ::sgrn::scl::DbField& t_field, asIScrip
         return; // decodedFromScriptScalar already threw
     auto status = s7codec::encodeScalar(decoded, t_field.type, s7codec::WriteBuffer{tp_buf, t_buf_size},
         s7codec::EncodeOptions{//
-            .endian = t_field.endianness, .bitOffset = s7codec::BitOffset{t_field.bit_index},
+            .endian = t_field.endianness,
+            .bitOffset = s7codec::BitOffset{t_field.bit_index},
             .stringCapacity = s7codec::StringCapacity{t_field.count}});
     if (!status.has_value()) {
         throwScriptException(
@@ -934,7 +959,8 @@ s7codec::DecodedValue ScriptDataBlock::readScalar(const std::string& t_path) {
     readFieldFromMemory(loc->abs_offset, tmp.data(), sz);
     return s7codec::decodeScalar(loc->field->type, s7codec::ReadBuffer{tmp.data(), static_cast<size_t>(sz)},
         s7codec::DecodeOptions{//
-            .endian = loc->field->endianness, .bitOffset = s7codec::BitOffset{loc->field->bit_index},
+            .endian = loc->field->endianness,
+            .bitOffset = s7codec::BitOffset{loc->field->bit_index},
             .stringCapacity = s7codec::StringCapacity{loc->field->count}});
 }
 double ScriptDataBlock::getReal(const std::string& t_path) {

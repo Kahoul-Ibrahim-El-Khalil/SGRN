@@ -58,12 +58,12 @@ int g_failures = 0;
         }                                                                                                                                  \
     } while (0)
 
-using sgrn::scl::DbField;
+using s7codec::Endian;
 using sgrn::scl::DataType;
+using sgrn::scl::DbField;
 using sgrn::scl::decodeFieldAt;
 using sgrn::scl::fieldElementSpanBytes;
 using sgrn::scl::fieldSpanSize;
-using s7codec::Endian;
 
 namespace twin = sgrn::gateway::twin;
 
@@ -263,12 +263,33 @@ void temporals() {
     auto b = encode(fl, "\"2024-03-18 19:30:00.500000000\"", &ok);
     CHECK(ok);
     CHECK(b.size() == 12);
-    CHECK(b[0] == 0x07 && b[1] == 0xE8);                   // 2024
-    CHECK(b[2] == 0x03 && b[3] == 0x12);                   // March 18
-    CHECK(b[5] == 0x13 && b[6] == 0x1E);                   // 19:30
-    CHECK(b[7] == 0x00);                                   // :00 sec
+    CHECK(b[0] == 0x07 && b[1] == 0xE8);                                   // 2024
+    CHECK(b[2] == 0x03 && b[3] == 0x12);                                   // March 18
+    CHECK(b[5] == 0x13 && b[6] == 0x1E);                                   // 19:30
+    CHECK(b[7] == 0x00);                                                   // :00 sec
     CHECK(b[8] == 0x1D && b[9] == 0xCD && b[10] == 0x65 && b[11] == 0x00); // 500000000 ns
     CHECK(render(fl, b) == "\"2024-03-18 19:30:00.500000000\"");
+
+    // DTL with LITTLE_ENDIAN: year and nanoseconds must be in Little-Endian byte order.
+    DbField fl_le = mkField("dtl_le", DataType::DTL);
+    fl_le.endianness = Endian::Little;
+    b = encode(fl_le, "\"2024-03-18 19:30:00.500000000\"", &ok);
+    CHECK(ok);
+    CHECK(b.size() == 12);
+    CHECK(b[0] == 0xE8 && b[1] == 0x07);                                   // 2024 LE
+    CHECK(b[2] == 0x03 && b[3] == 0x12);                                   // March 18
+    CHECK(b[5] == 0x13 && b[6] == 0x1E);                                   // 19:30
+    CHECK(b[7] == 0x00);                                                   // :00 sec
+    CHECK(b[8] == 0x00 && b[9] == 0x65 && b[10] == 0xCD && b[11] == 0x1D); // 500000000 ns LE
+    CHECK(render(fl_le, b) == "\"2024-03-18 19:30:00.500000000\"");
+
+    // Symmetric byte swap verification on DTL
+    ::sgrn::gateway::twin::swapFieldToBigEndian(fl_le, b.data(), b.size());
+    CHECK(b[0] == 0x07 && b[1] == 0xE8);                                   // Year swapped to BE
+    CHECK(b[8] == 0x1D && b[9] == 0xCD && b[10] == 0x65 && b[11] == 0x00); // Ns swapped to BE
+    ::sgrn::gateway::twin::swapFieldToBigEndian(fl_le, b.data(), b.size());
+    CHECK(b[0] == 0xE8 && b[1] == 0x07);                                   // Year swapped back to LE
+    CHECK(b[8] == 0x00 && b[9] == 0x65 && b[10] == 0xCD && b[11] == 0x1D); // Ns swapped back to LE
 
     // Date = days since 1990-01-01, BE u16 on the wire; decode renders the
     // calendar date.

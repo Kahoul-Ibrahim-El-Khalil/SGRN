@@ -1,6 +1,7 @@
 #include <fmt/core.h>
 #include <sgrn/Result.hpp>
 #include <sgrn/gateway/twin/DbSnapshot.hpp>
+#include <sgrn/gateway/twin/encoding.hpp>
 #include <sgrn/gateway/twin/utils.hpp>
 #include <sgrn/utils/endianess.hpp>
 #include <sgrn/utils/strings.hpp>
@@ -107,6 +108,10 @@ sgrn::Result<void, ::sgrn::scl::SclError> DbSnapshot::read(S7Client& t_client) {
     if (proto_res.hasError())
         return SclError::Generic;
 
+    if (registry_.endianness == s7codec::Endian::Little) {
+        ::sgrn::gateway::twin::swapRangeToBigEndian(registry_.fields, raw_buffer_.back_data(), 0, 0, registry_.size_bytes);
+    }
+
     raw_buffer_.swap();
     last_sync_time_ms_ = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     is_dirty_ = false;
@@ -143,6 +148,9 @@ void DbSnapshot::commitAsyncRead() {
 
     if (async_buffer_.size() == static_cast<size_t>(registry_.size_bytes)) {
         std::memcpy(raw_buffer_.back_data(), async_buffer_.data(), registry_.size_bytes);
+        if (registry_.endianness == s7codec::Endian::Little) {
+            ::sgrn::gateway::twin::swapRangeToBigEndian(registry_.fields, raw_buffer_.back_data(), 0, 0, registry_.size_bytes);
+        }
     }
     raw_buffer_.swap();
     last_sync_time_ms_ = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -158,7 +166,14 @@ sgrn::Result<void, ::sgrn::scl::SclError> DbSnapshot::write(S7Client& t_client) 
     if (async_in_progress_) {
         return SclError::Generic;
     }
-    auto proto_res = t_client.writeDB(registry_.db_number, 0, registry_.size_bytes, raw_buffer_.front_data());
+    const uint8_t* p_write_data = raw_buffer_.front_data();
+    std::vector<uint8_t> wire_buf;
+    if (registry_.endianness == s7codec::Endian::Little) {
+        wire_buf.assign(raw_buffer_.front_data(), raw_buffer_.front_data() + registry_.size_bytes);
+        ::sgrn::gateway::twin::swapRangeToBigEndian(registry_.fields, wire_buf.data(), 0, 0, registry_.size_bytes);
+        p_write_data = wire_buf.data();
+    }
+    auto proto_res = t_client.writeDB(registry_.db_number, 0, registry_.size_bytes, p_write_data);
     if (proto_res.hasError())
         return SclError::Generic;
 
@@ -278,9 +293,13 @@ sgrn::Result<void, ::sgrn::scl::SclError> DbSnapshot::readField(S7Client& t_clie
     if (proto_res.hasError())
         return SclError::Generic;
     const std::vector<uint8_t>& res_buf = proto_res.value();
+    std::vector<uint8_t> local_buf = res_buf;
+    if (located.value().field->endianness == s7codec::Endian::Little) {
+        ::sgrn::gateway::twin::swapFieldToBigEndian(*located.value().field, local_buf.data(), local_buf.size());
+    }
 
-    std::memcpy(raw_buffer_.front_data_rw() + located.value().abs_offset, res_buf.data(), size);
-    std::memcpy(raw_buffer_.back_data() + located.value().abs_offset, res_buf.data(), size);
+    std::memcpy(raw_buffer_.front_data_rw() + located.value().abs_offset, local_buf.data(), size);
+    std::memcpy(raw_buffer_.back_data() + located.value().abs_offset, local_buf.data(), size);
     last_sync_time_ms_ = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     return {};
 }
@@ -306,12 +325,20 @@ sgrn::Result<void, ::sgrn::scl::SclError> DbSnapshot::writeField(
         std::memcpy(raw_buffer_.back_data() + abs_offset, cur_res.value().data(), size);
     }
 
-    auto encode_status =
-        ::sgrn::gateway::twin::encodeFieldAt(field, t_value, raw_buffer_.front_data_rw() + abs_offset, registry_.size_bytes - abs_offset);
+    auto encode_status = ::sgrn::gateway::twin::encodeFieldAt(
+        field, t_value, raw_buffer_.front_data_rw() + abs_offset, registry_.size_bytes - abs_offset, 0, field.endianness);
     if (encode_status.hasError())
         return encode_status;
 
-    auto write_res = t_client.writeDB(registry_.db_number, abs_offset, size, raw_buffer_.front_data() + abs_offset);
+    const uint8_t* p_send_buf = raw_buffer_.front_data() + abs_offset;
+    std::vector<uint8_t> wire_buf;
+    if (field.endianness == s7codec::Endian::Little) {
+        wire_buf.assign(p_send_buf, p_send_buf + size);
+        ::sgrn::gateway::twin::swapFieldToBigEndian(field, wire_buf.data(), wire_buf.size());
+        p_send_buf = wire_buf.data();
+    }
+
+    auto write_res = t_client.writeDB(registry_.db_number, abs_offset, size, p_send_buf);
     if (write_res.hasError())
         return SclError::Generic;
 

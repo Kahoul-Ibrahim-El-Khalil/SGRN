@@ -4,6 +4,7 @@
 #include <sgrn/scl/schema/SchemaSerializer.hpp>
 #include <sgrn/scl/utils.hpp>
 #include <sgrn/utils/strings.hpp>
+#include <sgrn/utils/time.hpp>
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -351,6 +352,12 @@ public:
                 std::string_view{"#MODBUS_INPUT"},
                 std::string_view{"#MODBUS_COIL"},
                 std::string_view{"#MODBUS_DISCRETE"},
+
+                // Machine clock, discrete time-grid and aggregation directives
+                std::string_view{"#TIMESTAMP_FOR"},
+                std::string_view{"#DATASET_STEP"},
+                std::string_view{"#STEP"},
+                std::string_view{"#AGG"},
             };
             if (std::find(kEywords.begin(), kEywords.end(), std::string_view{upper_val}) != kEywords.end()) {
                 t.type = TokenType::Keyword;
@@ -429,9 +436,8 @@ class AstParser {
     std::map<std::string, UdtDefinition> udt_map_;
     uint16_t m_last_db_number_ = 0;
     // File-scope default endianness (set by a top-level #BIG_ENDIAN /
-    // #LITTLE_ENDIAN directive). Block- and TYPE-level directives override
-    // it for their scope; there is no field-level endianness.
-    s7codec::Endian m_file_endian_ = s7codec::Endian::Big;
+    // #LITTLE_ENDIAN directive). Defaults to Little-Endian for native host memory.
+    s7codec::Endian m_file_endian_ = s7codec::Endian::Little;
 
     bool m_has_error_ = false;
     std::string m_error_msg_;
@@ -500,7 +506,8 @@ class AstParser {
             setError(fmt::format("Line {}:{} - {} (got: '{}')", current_.line, current_.col, t_msg, current_.value));
     }
 
-    void parseAttributes(s7codec::Endian& t_out_endian, bool& t_trigger_events, sgrn::scl::ModbusArea& t_out_modbus_area) {
+    void parseAttributes(s7codec::Endian& t_out_endian, bool& t_trigger_events, sgrn::scl::ModbusArea& t_out_modbus_area,
+        uint64_t* tp_out_dataset_step_ns = nullptr) {
         while (!m_has_error_) {
             if (checkKeyword("TITLE") || checkKeyword("AUTHOR") || checkKeyword("FAMILY") || checkKeyword("NAME") ||
                 checkKeyword("VERSION") || checkKeyword("NON_RETAIN") || checkKeyword("KNOW_HOW_PROTECT") || checkKeyword("EXTERNAL") ||
@@ -517,6 +524,33 @@ class AstParser {
                 t_out_endian = s7codec::Endian::Little;
             } else if (matchKeyword("#EVENT_TRIGGER")) {
                 t_trigger_events = true;
+            } else if (matchKeyword("#DATASET_STEP") || matchKeyword("#STEP")) {
+                expectPunctuation("(", "Expected '(' after #DATASET_STEP");
+                if (match(TokenType::StringLiteral)) {
+                    auto opt = sgrn::utils::time::parseDurationNanoseconds(previous_.value);
+                    if (!opt.has_value()) {
+                        setError(fmt::format(
+                            "Line {}:{} - Invalid duration in #DATASET_STEP: '{}'", current_.line, current_.col, previous_.value));
+                    } else if (tp_out_dataset_step_ns) {
+                        *tp_out_dataset_step_ns = opt.value();
+                    }
+                } else if (match(TokenType::Number)) {
+                    std::string num_str = previous_.value;
+                    std::string unit_str;
+                    if (match(TokenType::Identifier)) {
+                        unit_str = previous_.value;
+                    }
+                    auto opt = sgrn::utils::time::parseDurationNanoseconds(num_str + unit_str);
+                    if (!opt.has_value()) {
+                        setError(fmt::format(
+                            "Line {}:{} - Invalid duration in #DATASET_STEP: '{}'", current_.line, current_.col, num_str + unit_str));
+                    } else if (tp_out_dataset_step_ns) {
+                        *tp_out_dataset_step_ns = opt.value();
+                    }
+                } else {
+                    setError(fmt::format("Line {}:{} - Expected duration in #DATASET_STEP", current_.line, current_.col));
+                }
+                expectPunctuation(")", "Expected ')' after #DATASET_STEP(...)");
             } else if (matchKeyword("#MODBUS_HOLDING")) {
                 t_out_modbus_area = sgrn::scl::ModbusArea::Holding;
             } else if (matchKeyword("#MODBUS_INPUT")) {
@@ -643,7 +677,7 @@ public:
     }
 
     Result<ParseResult, SclError> parse() {
-        m_file_endian_ = s7codec::Endian::Big;
+        m_file_endian_ = s7codec::Endian::Little;
         while (!check(TokenType::EndOfFile) && !m_has_error_) {
             if (matchKeyword("TYPE"))
                 parseUdt();
@@ -921,7 +955,7 @@ private:
         // File-scope default; a block-level directive overrides it below.
         db.endianness = m_file_endian_;
 
-        parseAttributes(db.endianness, db.trigger_events, db.modbus_area);
+        parseAttributes(db.endianness, db.trigger_events, db.modbus_area, &db.dataset_step_ns);
         if (m_has_error_)
             return;
 
@@ -1143,7 +1177,8 @@ private:
         while (checkKeyword("#UNIT") || checkKeyword("#DIMENSION") || checkKeyword("#DESC") || checkKeyword("#LABEL") ||
                checkKeyword("#PRECISION") || checkKeyword("#NOMINAL") || checkKeyword("#TRANSIENT") || checkKeyword("#READ_ONLY") ||
                checkKeyword("#ALARM") || checkKeyword("#RANGE") || checkKeyword("#ENUM") || checkKeyword("#EVENT_TRIGGER") ||
-               checkKeyword("#DYNAMIC") || checkKeyword("#BIG_ENDIAN") || checkKeyword("#LITTLE_ENDIAN")) {
+               checkKeyword("#DYNAMIC") || checkKeyword("#BIG_ENDIAN") || checkKeyword("#LITTLE_ENDIAN") ||
+               checkKeyword("#TIMESTAMP_FOR") || checkKeyword("#DATASET_STEP") || checkKeyword("#STEP") || checkKeyword("#AGG")) {
             if (matchKeyword("#UNIT")) {
                 bool has_paren = matchPunctuation("(");
                 if (match(TokenType::StringLiteral)) {
@@ -1242,6 +1277,87 @@ private:
                 f.endianness = s7codec::Endian::Big;
             } else if (matchKeyword("#LITTLE_ENDIAN")) {
                 f.endianness = s7codec::Endian::Little;
+            } else if (matchKeyword("#TIMESTAMP_FOR")) {
+                f.is_timestamp = true;
+                expectPunctuation("(", "Expected '(' after #TIMESTAMP_FOR");
+                if (matchPunctuation("[")) {
+                    while (!checkPunctuation("]") && !check(TokenType::EndOfFile) && !m_has_error_) {
+                        if (match(TokenType::Identifier) || match(TokenType::StringLiteral)) {
+                            f.timestamp_for.push_back(previous_.value);
+                            if (!checkPunctuation("]")) {
+                                expectPunctuation(",", "Expected ',' between fields in #TIMESTAMP_FOR([...])");
+                            }
+                        } else {
+                            setError(fmt::format("Line {}:{} - Expected identifier in #TIMESTAMP_FOR list", current_.line, current_.col));
+                            break;
+                        }
+                    }
+                    expectPunctuation("]", "Expected ']' at end of #TIMESTAMP_FOR list");
+                } else if (match(TokenType::Identifier) || match(TokenType::StringLiteral)) {
+                    f.timestamp_for.push_back(previous_.value);
+                } else if (checkKeyword("DB")) {
+                    advance();
+                    f.timestamp_for.push_back("DB");
+                } else {
+                    setError(
+                        fmt::format("Line {}:{} - Expected DB, identifier or [...] after #TIMESTAMP_FOR(", current_.line, current_.col));
+                }
+                expectPunctuation(")", "Expected ')' after #TIMESTAMP_FOR(...)");
+            } else if (matchKeyword("#DATASET_STEP") || matchKeyword("#STEP")) {
+                expectPunctuation("(", "Expected '(' after #DATASET_STEP");
+                if (match(TokenType::StringLiteral)) {
+                    auto opt = sgrn::utils::time::parseDurationNanoseconds(previous_.value);
+                    if (!opt.has_value()) {
+                        setError(fmt::format(
+                            "Line {}:{} - Invalid duration in #DATASET_STEP: '{}'", current_.line, current_.col, previous_.value));
+                    } else {
+                        f.dataset_step_ns = opt.value();
+                    }
+                } else if (match(TokenType::Number)) {
+                    std::string num_str = previous_.value;
+                    std::string unit_str;
+                    if (match(TokenType::Identifier)) {
+                        unit_str = previous_.value;
+                    }
+                    auto opt = sgrn::utils::time::parseDurationNanoseconds(num_str + unit_str);
+                    if (!opt.has_value()) {
+                        setError(fmt::format(
+                            "Line {}:{} - Invalid duration in #DATASET_STEP: '{}'", current_.line, current_.col, num_str + unit_str));
+                    } else {
+                        f.dataset_step_ns = opt.value();
+                    }
+                } else {
+                    setError(fmt::format("Line {}:{} - Expected duration in #DATASET_STEP", current_.line, current_.col));
+                }
+                expectPunctuation(")", "Expected ')' after #DATASET_STEP(...)");
+            } else if (matchKeyword("#AGG")) {
+                expectPunctuation("(", "Expected '(' after #AGG");
+                std::string agg_mode_str;
+                if (match(TokenType::Identifier) || match(TokenType::StringLiteral)) {
+                    agg_mode_str = previous_.value;
+                } else if (check(TokenType::Keyword)) {
+                    agg_mode_str = current_.value;
+                    advance();
+                } else {
+                    setError(fmt::format("Line {}:{} - Expected aggregation mode after #AGG(", current_.line, current_.col));
+                }
+                std::transform(agg_mode_str.begin(), agg_mode_str.end(), agg_mode_str.begin(),
+                    [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+                if (agg_mode_str == "MEAN" || agg_mode_str == "AVG") {
+                    f.agg_type = AggregationType::Mean;
+                } else if (agg_mode_str == "MAX") {
+                    f.agg_type = AggregationType::Max;
+                } else if (agg_mode_str == "MIN") {
+                    f.agg_type = AggregationType::Min;
+                } else if (agg_mode_str == "OR") {
+                    f.agg_type = AggregationType::Or;
+                } else if (agg_mode_str == "LAST") {
+                    f.agg_type = AggregationType::Last;
+                } else {
+                    setError(fmt::format("Line {}:{} - Unknown aggregation mode '{}' in #AGG (expected MEAN, MAX, MIN, OR, LAST)",
+                        current_.line, current_.col, agg_mode_str));
+                }
+                expectPunctuation(")", "Expected ')' after #AGG(...)");
             }
         }
     }

@@ -581,11 +581,6 @@
                        <span class="db-badge mr-6">DB{db.number}</span>
                       <strong>{db.name}</strong>
                       <span class="meta-muted">{db.size_bytes} B</span>
-                      {#if db.endianness}
-                        <span class="btn-sm active ml-8"
-                          >{db.endianness}-ENDIAN</span
-                        >
-                      {/if}
                       {#if db.trigger_events}
                         <span class="btn-sm active warn ml-4">EVENTS</span>
                       {/if}

@@ -38,10 +38,11 @@ template <typename Writer>
 void serializeFieldTo(Writer& t_writer, const DbField& t_field, const uint8_t* p_ptr, size_t t_buffer_size) {
     // Endianness is block-scoped (DbField carries its block's value) — decode
     // must honor it or LITTLE_ENDIAN multi-byte values read back swapped.
-    auto dv = s7codec::decodeScalar(
-        t_field.type, s7codec::ReadBuffer{p_ptr, t_buffer_size},
+    auto dv = s7codec::decodeScalar(t_field.type, s7codec::ReadBuffer{p_ptr, t_buffer_size},
         s7codec::DecodeOptions{//
-            .endian = t_field.endianness, .bitOffset = s7codec::BitOffset{t_field.bit_index}, .stringCapacity = s7codec::StringCapacity{t_field.count}});
+            .endian = t_field.endianness,
+            .bitOffset = s7codec::BitOffset{t_field.bit_index},
+            .stringCapacity = s7codec::StringCapacity{t_field.count}});
 
     if (!dv.valid()) {
         t_writer.Null();

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <sgrn/Result.hpp>
+#include <sgrn/ml/columnar_dataset.hpp>
+#include <sgrn/ml/time_grid_resampler.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <ankerl/unordered_dense.h>
 #include <filesystem>
@@ -46,18 +48,21 @@ struct FeatureMeta {
 };
 
 struct DatasetConfig {
-    std::string input_dir;           // /tmp/sgrn-gateway-state/
-    std::string scl_schema_path;     // ./sgrn/gateway/simulations/nuclear/schema.scl
-    std::string output_csv_path;     // dataset.csv or dataset.csv.zst
-    std::string manifest_path;       // manifest.json
-    std::string convert_out_path;    // Output path for archive conversion (.bin.zst or .jsonl.zst)
-    std::string target_format;       // "binary" or "jsonl"
-    std::string output_cache_prefix; ///< Streaming float32 cache: <prefix>.f32 (rows × features),
-                                     ///< <prefix>.ts.i64 (row timestamps, INT64_MIN = unset) and
-                                     ///< <prefix>.json (feature name/order metadata). Empty = off.
-    std::string start_time;          // Optional ISO timestamp filter
-    std::string end_time;            // Optional ISO timestamp filter
+    std::string input_dir;        // /tmp/sgrn-gateway-state/
+    std::string scl_schema_path;  // ./sgrn/gateway/simulations/nuclear/schema.scl
+    std::string output_csv_path;  // dataset.csv or dataset.csv.zst
+    std::string manifest_path;    // manifest.json
+    std::string convert_out_path; // Output path for archive conversion (.bin.zst or .jsonl.zst)
+    std::string target_format;    // "binary" or "jsonl"
+    std::string start_time;       // Optional ISO timestamp filter
+    std::string end_time;         // Optional ISO timestamp filter
     int zstd_compression_level = 5;
+
+    // --- Discrete time-grid & columnar binary output (Milestone 4) ---
+    std::string output_bin_path;   ///< Output path for columnar binary (.sgrnb) dataset
+    uint64_t step_override_ns{0};  ///< Override the schema's #DATASET_STEP (0 = use schema or 10ms default)
+    std::string time_tag_override; ///< Override the schema's #TIMESTAMP_FOR clock tag
+    bool no_csv{false};            ///< Skip CSV output entirely (only produce .sgrnb)
 };
 
 struct DatasetSummary {
@@ -149,9 +154,6 @@ private:
 
     // --- process() pass state, initialised by openWriters()/process() ---
     std::ofstream csv_out_;
-    std::ofstream cache_f32_;
-    std::ofstream cache_ts_;
-    uint64_t cache_rows_ = 0;
     DatasetSummary summary_;
     std::vector<size_t> dtl_ts_feature_idx_; ///< features_*index of "…timestamp" DTL leaves
     int64_t deferred_row_ts_ = 0;            ///< ts of the not-yet-emitted batched row
@@ -159,6 +161,10 @@ private:
     /// Last full DB image per DB, carried across files like the JSONL
     /// current_state_: delta frames patch these in place.
     std::unordered_map<uint16_t, std::vector<uint8_t>> last_images_;
+
+    // --- Discrete time-grid resampler & columnar binary writer (Milestone 4) ---
+    std::unique_ptr<sgrn::ml::TimeGridResampler> resampler_;
+    std::unique_ptr<sgrn::ml::ColumnarDatasetWriter> bin_writer_;
 };
 
 } // namespace sgrn::gateway::tools

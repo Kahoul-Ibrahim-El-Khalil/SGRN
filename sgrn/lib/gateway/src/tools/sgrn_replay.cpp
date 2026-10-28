@@ -4,6 +4,7 @@
 #include <fmt/core.h>
 #include <sgrn/gateway/core/TelemetryBroker.hpp>
 #include <sgrn/gateway/twin/utils.hpp>
+#include <sgrn/ml/columnar_dataset.hpp>
 #include <sgrn/utils/compression.hpp>
 #include <sgrn/utils/time.hpp>
 #include <cctype>
@@ -165,6 +166,13 @@ bool GatewayReplayer::encodeLeaf(const std::string& t_full_path, const rapidjson
         return false;
 
     const auto* p_seg = plc_memory_->state()->findSegmentByName(db_name);
+    if (p_seg == nullptr && db_name.size() > 2 && (db_name[0] == 'D' || db_name[0] == 'd') && (db_name[1] == 'B' || db_name[1] == 'b')) {
+        try {
+            uint16_t num = static_cast<uint16_t>(std::stoul(db_name.substr(2)));
+            p_seg = plc_memory_->state()->findSegmentById(num);
+        } catch (...) {
+        }
+    }
     if (p_seg == nullptr) {
         fmt::print(
             fg(fmt::color::yellow), "[sgrn_replay] Unknown DB '{}' for '{}' (schema drift?), skipping leaf.\n", db_name, t_full_path);
@@ -249,8 +257,16 @@ void GatewayReplayer::replayLoop() {
     fmt::print(fg(fmt::color::cyan), "[sgrn_replay] Speed multiplier: {}x, Loop mode: {} (runtime: POST /replay/speed)\n",
         control_->speed.load(std::memory_order_relaxed), config_.loop ? "ON" : "OFF");
 
+    const bool is_sgrnb = config_.archive_path.size() >= 6 && config_.archive_path.substr(config_.archive_path.size() - 6) == ".sgrnb";
+
     do {
-        if (!processBinaryArchive(config_.archive_path)) {
+        bool ok = false;
+        if (is_sgrnb) {
+            ok = processColumnarDataset(config_.archive_path);
+        } else {
+            ok = processBinaryArchive(config_.archive_path);
+        }
+        if (!ok) {
             fmt::print(fg(fmt::color::yellow), "[sgrn_replay] Archive replay processing encountered error or reached EOF.\n");
             if (!config_.loop)
                 break;
@@ -258,6 +274,54 @@ void GatewayReplayer::replayLoop() {
     } while (running_.load() && config_.loop);
 
     fmt::print(fg(fmt::color::green), "[sgrn_replay] History archive replay finished.\n");
+}
+
+bool GatewayReplayer::processColumnarDataset(const std::string& path) {
+    auto reader_res = sgrn::ml::ColumnarDatasetReader::open(path);
+    if (reader_res.hasError()) {
+        fmt::print(fg(fmt::color::red), "[sgrn_replay] Cannot open .sgrnb archive: {}\n", reader_res.error());
+        return false;
+    }
+    auto& reader = *reader_res.value();
+    const auto& manifest = reader.manifest();
+    auto timestamps = reader.timestamps();
+    const size_t n_rows = reader.rowCount();
+    const size_t n_features = reader.featureCount();
+    const size_t n_labels = reader.labelCount();
+
+    fmt::print(fg(fmt::color::cyan), "[sgrn_replay] Loaded .sgrnb: {} rows, {} features, {} labels (step={}ns)\n", n_rows, n_features,
+        n_labels, reader.stepNs());
+
+    int64_t last_ts = -1;
+    for (size_t r = 0; r < n_rows && running_.load(); ++r) {
+        const int64_t ts_ms = static_cast<int64_t>(timestamps[r] / 1'000'000ULL);
+        if (!sleepPaced(last_ts, ts_ms))
+            break;
+
+        std::deque<std::vector<uint8_t>> storage;
+        std::vector<twin::DbMemorySpan> spans;
+
+        for (size_t f = 0; f < n_features; ++f) {
+            const auto& feat = manifest.spec.features[f];
+            const float val = reader.featureColumn(f)[r];
+            rapidjson::Value jval(val);
+            const std::string& tag = !feat.source_tag.empty() ? feat.source_tag : feat.name;
+            encodeLeaf(tag, jval, storage, spans);
+        }
+        for (size_t l = 0; l < n_labels; ++l) {
+            const auto& lbl = manifest.spec.labels[l];
+            const float val = reader.labelColumn(l)[r];
+            rapidjson::Value jval(val);
+            const std::string& tag = !lbl.target_tag.empty() ? lbl.target_tag : lbl.name;
+            encodeLeaf(tag, jval, storage, spans);
+        }
+
+        flushPendingBits();
+        if (!spans.empty() && plc_memory_ != nullptr) {
+            (void)plc_memory_->writeDbMemory(spans);
+        }
+    }
+    return true;
 }
 
 bool GatewayReplayer::processBinaryArchive(const std::string& path) {

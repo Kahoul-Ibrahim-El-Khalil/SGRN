@@ -113,11 +113,11 @@ void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field
 
         auto dv = s7codec::DecodedValue::makeString(std::move(raw));
         auto st = s7codec::encodeScalar(dv, t_field.type, s7codec::WriteBuffer{buf.data(), buf.size()},
-            s7codec::EncodeOptions{.endian = t_field.endianness, .stringCapacity = s7codec::StringCapacity{static_cast<uint32_t>(max_len)}});
+            s7codec::EncodeOptions{
+                .endian = t_field.endianness, .stringCapacity = s7codec::StringCapacity{static_cast<uint32_t>(max_len)}});
 
         if (st.has_value())
-            (void)t_mem.writeDbMemory(
-                t_db, static_cast<size_t>(t_base_offset + t_field.offset), buf.size(), buf.data());
+            (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_base_offset + t_field.offset), buf.size(), buf.data());
 
         return;
     }
@@ -133,8 +133,7 @@ void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field
                     dv, t_field.type, s7codec::WriteBuffer{buf.data(), buf.size()}, s7codec::EncodeOptions{.endian = t_field.endianness});
 
                 if (st.has_value())
-                    (void)t_mem.writeDbMemory(
-                        t_db, static_cast<size_t>(t_base_offset + t_field.offset), buf.size(), buf.data());
+                    (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_base_offset + t_field.offset), buf.size(), buf.data());
 
                 return;
             }
@@ -167,8 +166,7 @@ void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field
             dv, t_field.type, s7codec::WriteBuffer{buf.data(), buf.size()}, s7codec::EncodeOptions{.endian = t_field.endianness});
 
         if (st.has_value())
-            (void)t_mem.writeDbMemory(
-                t_db, static_cast<size_t>(t_base_offset + t_field.offset), buf.size(), buf.data());
+            (void)t_mem.writeDbMemory(t_db, static_cast<size_t>(t_base_offset + t_field.offset), buf.size(), buf.data());
 
         return;
     }

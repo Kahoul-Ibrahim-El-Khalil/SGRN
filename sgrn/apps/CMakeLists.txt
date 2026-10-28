@@ -31,6 +31,14 @@ if(SGRN_BUILD_DATASTORE)
     add_subdirectory(datastore_shell)
 endif()
 
+if(SGRN_BUILD_ML)
+    add_subdirectory(ml_eval)
+endif()
+
+if(SGRN_WITH_TORCH)
+    add_subdirectory(train)
+endif()
+
 # =============================================================================
 # Runtime packaging (moved here from the component files: targets must exist
 # before these calls run, and apps/ configures after all libraries).
@@ -100,3 +108,30 @@ sgrn_package_runtime_dependencies(
         sgrn::aws
     COMPONENT backend
 )
+
+# ML component bundle.
+if(SGRN_BUILD_ML)
+    sgrn_package_runtime_dependencies(
+        APPS
+            sgrn_ml_eval
+        LIBS
+            sgrn_ml
+            sgrn_utils
+        COMPONENT ml
+    )
+endif()
+
+if(SGRN_WITH_TORCH)
+    sgrn_package_runtime_dependencies(
+        APPS
+            sgrn_train
+        LIBS
+            sgrn_ml_torch
+            sgrn_ml
+            sgrn_utils
+        EXTERNAL_DEPS
+            ${TORCH_LIBRARIES}
+        COMPONENT ml
+    )
+endif()
+

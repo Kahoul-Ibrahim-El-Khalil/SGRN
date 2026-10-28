@@ -176,8 +176,8 @@ int main() {
         // set, bit3 (FALSE) clear → 0b0000_0101.
         CHECK(num[0] == 0x05);
         CHECK(num[1] == 0x00);
-        CHECK(num[2] == 0xFB && num[3] == 0x2E); // -1234 BE int16
-        CHECK(num[4] == 0x01 && num[5] == 0xF4); // 500 BE uint16
+        CHECK(num[2] == 0xFB && num[3] == 0x2E);                                     // -1234 BE int16
+        CHECK(num[4] == 0x01 && num[5] == 0xF4);                                     // 500 BE uint16
         CHECK(num[6] == 0x42 && num[7] == 0x36 && num[8] == 0x00 && num[9] == 0x00); // 45.5f BE
     }
 
@@ -210,7 +210,7 @@ int main() {
     // ── Struct child inits: struct at offset 0 and at offset 4 ──────────────
     const auto st = seeded(mem, 102, 0, 6);
     if (!st.empty()) {
-        CHECK(st[0] == 0x00 && st[1] == 0x07); // Int child 7 BE
+        CHECK(st[0] == 0x00 && st[1] == 0x07);                                   // Int child 7 BE
         CHECK(st[2] == 0x3F && st[3] == 0xC0 && st[4] == 0x00 && st[5] == 0x00); // Real 1.5 BE
     }
 
@@ -221,7 +221,8 @@ int main() {
         CHECK(st2[6] == 0x00 && st2[7] == 0x05); // child at base 4 + rel 2 → 5 BE
     }
 
-    std::printf("[PASS] PlcMemory init seeding: bools (shared-byte RMW), numerics, string tile, enums, skip-arrays, struct children incl. non-zero base\n");
+    std::printf("[PASS] PlcMemory init seeding: bools (shared-byte RMW), numerics, string tile, enums, skip-arrays, struct children incl. "
+                "non-zero base\n");
 
     if (g_failures != 0) {
         std::printf("%d failure(s)\n", g_failures);

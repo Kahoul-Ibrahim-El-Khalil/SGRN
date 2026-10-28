@@ -71,6 +71,7 @@ public:
 private:
     void replayLoop();
     bool processBinaryArchive(const std::string& path);
+    bool processColumnarDataset(const std::string& path);
     /// Sleep for (ts-last_ts)/speed using re-anchored wall clock so a
     /// mid-run speed change applies only to future deltas (no burst/stall).
     /// Honors paused/unpaced. Returns false when stopping.

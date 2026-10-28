@@ -52,6 +52,9 @@ The `DbSymbolsParser` performs lexical analysis and builds an Abstract Syntax Tr
 | `#ALARM` | `#ALARM(lo, hi)`, hi > lo | acceptable band, surfaced in registry/dashboard; evaluation is the consumer's job | dashboard, manifest |
 | `#RANGE` | `#RANGE(min, max)` | sensor span | registry, dashboard |
 | `#ENUM` | `#ENUM(A=1, …)` | named states | registry, dataset (`is_categorical`) |
+| `#TIMESTAMP_FOR` | `#TIMESTAMP_FOR(DB)` or `(f1, f2)` | binds signals to ground-truth S7 DTL machine clock | `TimeGridResampler`, `sgrn_dataset` |
+| `#DATASET_STEP` | `#DATASET_STEP("10ms")` or `#STEP` | declared discrete training grid step $\Delta t$ | `TimeGridResampler`, `sgrn_dataset` |
+| `#AGG` | `#AGG("MEAN")` (or MAX, MIN, OR, LAST) | typed consolidation for discrete time-grid resampling | `TimeGridResampler`, `sgrn_dataset` |
 
 Inheritance: scalar `TYPE` aliases (`TYPE "P" : Real #UNIT…`) carry
 unit/dimension/desc/precision/nominal/alarm/min/max/enum to fields unless

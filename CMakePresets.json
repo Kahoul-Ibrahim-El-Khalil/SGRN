@@ -13,7 +13,6 @@
       "binaryDir": "${sourceDir}/.build/${presetName}",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "CMAKE_MAKE_PROGRAM": "$env{PATH_TO_NINJA}",
         "BUILD_TESTING": "OFF",
         "JSONCPP_WITH_TESTS": "OFF",
         "JSONCPP_WITH_POST_BUILD_UNITTEST": "OFF",
@@ -69,8 +68,8 @@
       "generator": "Ninja",
       "cacheVariables": {
         "SGRN_PLATFORM": "linux",
-        "CMAKE_C_COMPILER": "$env{CONDA_PREFIX}/micromamba/envs/SGRN/bin/clang",
-        "CMAKE_CXX_COMPILER": "$env{CONDA_PREFIX}/micromamba/envs/SGRN/bin/clang++",
+        "CMAKE_C_COMPILER": "$env{CONDA_PREFIX}/bin/clang",
+        "CMAKE_CXX_COMPILER": "$env{CONDA_PREFIX}/bin/clang++",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/.prefix/linux"
       }
     },
@@ -83,7 +82,7 @@
       "cacheVariables": {
         "SGRN_PLATFORM": "win64",
         "CMAKE_TOOLCHAIN_FILE": "cmake/toolchain_win64.cmake",
-        "SGRN_WIN64_PREFIX": "$env{CONDA_PREFIX}/micromamba/envs/SGRN-WIN64",
+        "SGRN_WIN64_PREFIX": "$env{CONDA_PREFIX}/../SGRN-WIN64",
         "SGRN_BUILD_EXTERN_BACKEND": "OFF",
         "SGRN_BUILD_BACKEND": "OFF",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/.prefix/win64"
@@ -98,7 +97,7 @@
       "cacheVariables": {
         "SGRN_PLATFORM": "linux-arm64",
         "CMAKE_TOOLCHAIN_FILE": "cmake/toolchain_arm64.cmake",
-        "SGRN_ARM64_PREFIX": "$env{CONDA_PREFIX}/micromamba/envs/SGRN-ARM64",
+        "SGRN_ARM64_PREFIX": "$env{CONDA_PREFIX}/../SGRN-ARM64",
         "SGRN_BUILD_EXTERN_BACKEND": "OFF",
         "SGRN_BUILD_BACKEND": "OFF",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/.prefix/linux-arm64"
@@ -111,8 +110,8 @@
       "generator": "Ninja",
       "cacheVariables": {
         "SGRN_PLATFORM": "linux",
-        "CMAKE_C_COMPILER": "$env{CONDA_PREFIX}/micromamba/envs/SGRN/bin/clang",
-        "CMAKE_CXX_COMPILER": "$env{CONDA_PREFIX}/micromamba/envs/SGRN/bin/clang++",
+        "CMAKE_C_COMPILER": "$env{CONDA_PREFIX}/bin/clang",
+        "CMAKE_CXX_COMPILER": "$env{CONDA_PREFIX}/bin/clang++",
         "CMAKE_BUILD_TYPE": "Debug",
         "SGRN_BUILD_BACKEND": "ON",
         "SGRN_BUILD_UTILS": "ON",
@@ -137,8 +136,9 @@
         "SGRN_BUILD_S7": "ON",
         "SGRN_BUILD_S7NODE": "ON",
         "SGRN_BUILD_OPC": "ON",
-        "SGRN_WIN64_PREFIX": "$env{CONDA_PREFIX}/micromamba/envs/SGRN-WIN64",
+        "SGRN_WIN64_PREFIX": "$env{CONDA_PREFIX}/../SGRN-WIN64",
         "SGRN_USE_UCRT": "ON",
+        "SGRN_WITH_TORCH": "OFF",
         "CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS": "ON"
       },
       "environment": {
@@ -161,7 +161,7 @@
         "SGRN_BUILD_SDK": "ON",
         "SGRN_BUILD_S7": "ON",
         "SGRN_BUILD_S7NODE": "ON",
-        "SGRN_ARM64_PREFIX": "$env{HOME}/micromamba/envs/SGRN-ARM64"
+        "SGRN_ARM64_PREFIX": "$env{CONDA_PREFIX}/../SGRN-ARM64"
       }
     },
     {
@@ -258,8 +258,8 @@
       "installDir": "${sourceDir}/.prefix/linux-static",
       "cacheVariables": {
         "SGRN_PLATFORM": "linux-static",
-        "CMAKE_C_COMPILER": "$env{CONDA_PREFIX}/micromamba/envs/SGRN/bin/clang",
-        "CMAKE_CXX_COMPILER": "$env{CONDA_PREFIX}/micromamba/envs/SGRN/bin/clang++",
+        "CMAKE_C_COMPILER": "$env{CONDA_PREFIX}/bin/clang",
+        "CMAKE_CXX_COMPILER": "$env{CONDA_PREFIX}/bin/clang++",
         "BUILD_SHARED_LIBS": "OFF",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/.prefix/linux-static"
       }
@@ -274,7 +274,7 @@
       "cacheVariables": {
         "SGRN_PLATFORM": "win64-static",
         "CMAKE_TOOLCHAIN_FILE": "cmake/toolchain_win64.cmake",
-        "SGRN_WIN64_PREFIX": "$env{CONDA_PREFIX}/micromamba/envs/SGRN-WIN64",
+        "SGRN_WIN64_PREFIX": "$env{CONDA_PREFIX}/../SGRN-WIN64",
         "BUILD_SHARED_LIBS": "OFF",
         "SGRN_BUILD_EXTERN_BACKEND": "OFF",
         "SGRN_BUILD_BACKEND": "OFF",
@@ -291,7 +291,7 @@
       "cacheVariables": {
         "SGRN_PLATFORM": "linux-arm64-static",
         "CMAKE_TOOLCHAIN_FILE": "cmake/toolchain_arm64.cmake",
-        "SGRN_ARM64_PREFIX": "$env{CONDA_PREFIX}/micromamba/envs/SGRN-ARM64",
+        "SGRN_ARM64_PREFIX": "$env{CONDA_PREFIX}/../SGRN-ARM64",
         "BUILD_SHARED_LIBS": "OFF",
         "SGRN_BUILD_EXTERN_BACKEND": "OFF",
         "SGRN_BUILD_BACKEND": "OFF",
@@ -350,6 +350,7 @@
         "Python3_ROOT_DIR": "$penv{CONDA_PREFIX}",
         "Python3_EXECUTABLE": "$penv{CONDA_PREFIX}/python.exe",
         "SGRN_USE_UCRT": "ON",
+        "SGRN_WITH_TORCH": "OFF",
         "CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS": "ON",
         "SGRN_BUILD_STATIC": "ON",
         "CMAKE_FIND_LIBRARY_SUFFIXES": ".a;.lib",

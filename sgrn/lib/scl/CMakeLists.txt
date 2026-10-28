@@ -13,6 +13,7 @@ set(SGRN_SCL_SOURCES
     src/schema/TagTable.cpp
     src/schema/ModbusMap.cpp
     src/types/DbField.cpp
+    src/types/DbSchema.cpp
     src/types/UdtDefinition.cpp
     src/types/ParseResult.cpp
     src/AsApiEmitter.cpp

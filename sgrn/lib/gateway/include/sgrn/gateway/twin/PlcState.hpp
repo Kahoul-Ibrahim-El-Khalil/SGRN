@@ -76,7 +76,7 @@ struct PlcNode {
     uint16_t db_number_{0};
     uint8_t bit_index_{0};
     s7codec::Type type_{s7codec::Type::Byte};
-    s7codec::Endian endian_{s7codec::Endian::Big};
+    s7codec::Endian endian_{s7codec::Endian::Little};
     bool is_dynamic_{false};
     /// Numeric→symbolic mapping for enum-typed fields (from scl::DbField::enum_map).
     /// Used by the JSON read paths so enums round-trip as symbolic strings.
@@ -298,7 +298,8 @@ struct PlcNode {
 
                 auto dv = s7codec::decodeScalar(type_, s7codec::ReadBuffer{p_ptr, buffer_remaining},
                     s7codec::DecodeOptions{//
-                        .endian = endian_, .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(b_idx)},
+                        .endian = endian_,
+                        .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(b_idx)},
                         .stringCapacity = s7codec::StringCapacity{static_cast<uint32_t>(decode_count)}});
                 if (!dv.valid()) {
                     t_writer.Null();

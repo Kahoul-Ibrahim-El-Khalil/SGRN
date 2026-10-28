@@ -72,6 +72,86 @@ struct alignas(2) DTL {
         return std::string(buf);
     }
 
+    /// Converts DTL to Unix epoch nanoseconds without heap allocation or timezone conversions.
+    [[nodiscard]] int64_t toUnixNanoseconds() const noexcept {
+        const int y_val = static_cast<uint16_t>(year);
+        const int m_val = static_cast<uint8_t>(month);
+        const int d_val = static_cast<uint8_t>(day);
+        const int h_val = static_cast<uint8_t>(hour);
+        const int min_val = static_cast<uint8_t>(minute);
+        const int s_val = static_cast<uint8_t>(second);
+        const uint32_t ns_val = static_cast<uint32_t>(nanosecond);
+
+        if (y_val < 1970 || m_val < 1 || m_val > 12 || d_val < 1 || d_val > 31) {
+            return 0;
+        }
+
+        int64_t y = y_val - (m_val <= 2 ? 1 : 0);
+        const int64_t era = (y >= 0 ? y : y - 399) / 400;
+        const unsigned yoe = static_cast<unsigned>(y - era * 400);
+        const unsigned doy = (153u * static_cast<unsigned>(m_val + (m_val > 2 ? -3 : 9)) + 2) / 5 + static_cast<unsigned>(d_val) - 1;
+        const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        const int64_t days = era * 146097 + static_cast<int64_t>(doe) - 719468;
+
+        const int64_t total_sec = ((days * 24 + h_val) * 60 + min_val) * 60 + s_val;
+        return total_sec * 1'000'000'000LL + static_cast<int64_t>(ns_val);
+    }
+
+    /// Converts DTL to Unix epoch milliseconds.
+    [[nodiscard]] int64_t toUnixMilliseconds() const noexcept {
+        return toUnixNanoseconds() / 1'000'000LL;
+    }
+
+    /// Reconstructs DTL from Unix epoch nanoseconds.
+    static DTL fromUnixNanoseconds(int64_t t_ns) noexcept {
+        DTL dtl{};
+        if (t_ns <= 0) {
+            dtl.year = 1970;
+            dtl.month = 1;
+            dtl.day = 1;
+            dtl.weekday = 5; // Thursday
+            return dtl;
+        }
+
+        const int64_t total_sec = t_ns / 1'000'000'000LL;
+        const uint32_t rem_ns = static_cast<uint32_t>(t_ns % 1'000'000'000LL);
+
+        int64_t days = total_sec / 86400;
+        int rem_sec = static_cast<int>(total_sec % 86400);
+        if (rem_sec < 0) {
+            rem_sec += 86400;
+            days -= 1;
+        }
+
+        dtl.hour = static_cast<uint8_t>(rem_sec / 3600);
+        dtl.minute = static_cast<uint8_t>((rem_sec % 3600) / 60);
+        dtl.second = static_cast<uint8_t>(rem_sec % 60);
+        dtl.nanosecond = rem_ns;
+
+        days += 719468;
+        const int64_t era = (days >= 0 ? days : days - 146096) / 146097;
+        const unsigned doe = static_cast<unsigned>(days - era * 146097);
+        const unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        const int64_t y = static_cast<int64_t>(yoe) + era * 400;
+        const unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        const unsigned mp = (5 * doy + 2) / 153;
+        const unsigned d = doy - (153 * mp + 2) / 5 + 1;
+        const unsigned m = mp + (mp < 10 ? 3 : -9);
+        const int year_res = static_cast<int>(y + (m <= 2 ? 1 : 0));
+
+        dtl.year = static_cast<uint16_t>(year_res);
+        dtl.month = static_cast<uint8_t>(m);
+        dtl.day = static_cast<uint8_t>(d);
+        dtl.weekday = static_cast<uint8_t>((days + 3) % 7 + 1);
+
+        return dtl;
+    }
+
+    /// Reconstructs DTL from Unix epoch milliseconds.
+    static DTL fromUnixMilliseconds(int64_t t_ms) noexcept {
+        return fromUnixNanoseconds(t_ms * 1'000'000LL);
+    }
+
 private:
     void fromTm(const struct tm& ti, uint32_t ns) {
         year = static_cast<uint16_t>(ti.tm_year + 1900);

@@ -10,6 +10,27 @@
 #include <vector>
 namespace sgrn::scl
 {
+
+enum class AggregationType : uint8_t { Default = 0, Mean = 1, Max = 2, Min = 3, Or = 4, Last = 5 };
+
+inline const char* to_string(AggregationType t_agg) noexcept {
+    switch (t_agg) {
+        case AggregationType::Mean:
+            return "MEAN";
+        case AggregationType::Max:
+            return "MAX";
+        case AggregationType::Min:
+            return "MIN";
+        case AggregationType::Or:
+            return "OR";
+        case AggregationType::Last:
+            return "LAST";
+        case AggregationType::Default:
+            return "DEFAULT";
+    }
+    return "DEFAULT";
+}
+
 struct DbField {
     std::string name;
     int32_t offset{0};
@@ -23,7 +44,7 @@ struct DbField {
     std::string udt_name;
     std::vector<DbField> children;
     uint32_t struct_size{0};
-    s7codec::Endian endianness{s7codec::Endian::Big};
+    s7codec::Endian endianness{s7codec::Endian::Little};
     std::optional<std::string> unit;
     /// Physical dimension class (e.g. "pressure", "temperature", "flow").
     /// Set by #DIMENSION("..."); constrained by file-level #DIMENSIONS(...).
@@ -54,6 +75,15 @@ struct DbField {
     std::string init_value;
     bool trigger_events{false};
     bool is_dynamic{false};
+
+    /// Reduction / aggregation mode for discrete time-grid resampling (#AGG).
+    AggregationType agg_type{AggregationType::Default};
+    /// Explicit timestamp clock indicator (#TIMESTAMP_FOR).
+    bool is_timestamp{false};
+    /// Scope of fields or DBs governed by this timestamp (#TIMESTAMP_FOR(DB | [f1, f2])).
+    std::vector<std::string> timestamp_for;
+    /// Recommended dataset time step in nanoseconds (#DATASET_STEP / #STEP).
+    uint64_t dataset_step_ns{0};
 };
 
 enum class FieldKind : uint8_t { Scalar, Enum, String, Struct };
@@ -235,6 +265,26 @@ inline void serializeToWriter(Writer& t_writer, const sgrn::scl::DbField& t_fiel
     if (t_field.is_dynamic) {
         t_writer.Key("is_dynamic");
         t_writer.Bool(true);
+    }
+    if (t_field.agg_type != AggregationType::Default) {
+        t_writer.Key("agg");
+        t_writer.String(to_string(t_field.agg_type));
+    }
+    if (t_field.is_timestamp) {
+        t_writer.Key("is_timestamp");
+        t_writer.Bool(true);
+    }
+    if (!t_field.timestamp_for.empty()) {
+        t_writer.Key("timestamp_for");
+        t_writer.StartArray();
+        for (const auto& target : t_field.timestamp_for) {
+            t_writer.String(target.c_str());
+        }
+        t_writer.EndArray();
+    }
+    if (t_field.dataset_step_ns > 0) {
+        t_writer.Key("dataset_step_ns");
+        t_writer.Uint64(t_field.dataset_step_ns);
     }
     t_writer.EndObject();
 }

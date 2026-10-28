@@ -34,3 +34,7 @@ sgrn_add_component(SGRN_BUILD_S7 s7shell)
 
 # 7. Backend (Infrastructure)
 sgrn_add_component(SGRN_BUILD_DATASTORE datastore)
+
+# 8. Machine Learning
+sgrn_add_component(SGRN_BUILD_ML ml)
+sgrn_add_component(SGRN_WITH_TORCH ml_torch)

@@ -81,11 +81,12 @@ END_TYPE
 
 // ─── DB1 "ReactorCore" — Neutronics & Thermal-hydraulics ────────────────────
 DATA_BLOCK "ReactorCore" DB 1 #LITTLE_ENDIAN
+// #DATASET_STEP 10ms
 
 #MODBUS_HOLDING
 VAR
     // ── Neutron flux & power ──
-    thermal_power       : LReal #UNIT("MW");    // current thermal output (0 – 3400 MW)
+    thermal_power       : LReal #UNIT("MW") #LABEL;    // current thermal output (0 – 3400 MW)
     thermal_power_ratio : Real #UNIT("%");     // percentage of rated power
     neutron_flux        : LReal #UNIT("n/cm²·s");    // neutron flux (n/cm²·s)
     avg_linear_heat     : Real #UNIT("kW/m");     // average linear heat rate (kW/m)

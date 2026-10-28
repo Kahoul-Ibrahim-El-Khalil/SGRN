@@ -29,7 +29,7 @@ rapidjson::Document toJson(const sgrn::scl::DbField& t_field) {
 // from-side — per-type namespace (C++ cannot overload on return type globally)
 // -----------------------------------------------------------------------------
 
-namespace sgrn::scl
+namespace sgrn::scl::field
 {
 
 sgrn::scl::DbField fromJson(const rapidjson::Value& t_node) {
@@ -95,6 +95,30 @@ sgrn::scl::DbField fromJson(const rapidjson::Value& t_node) {
     if (t_node.HasMember("is_dynamic") && t_node["is_dynamic"].IsBool())
         t_field.is_dynamic = t_node["is_dynamic"].GetBool();
 
+    if (t_node.HasMember("agg") && t_node["agg"].IsString()) {
+        const std::string a = t_node["agg"].GetString();
+        if (a == "MEAN" || a == "AVG")
+            t_field.agg_type = AggregationType::Mean;
+        else if (a == "MAX")
+            t_field.agg_type = AggregationType::Max;
+        else if (a == "MIN")
+            t_field.agg_type = AggregationType::Min;
+        else if (a == "OR")
+            t_field.agg_type = AggregationType::Or;
+        else if (a == "LAST")
+            t_field.agg_type = AggregationType::Last;
+    }
+    if (t_node.HasMember("is_timestamp") && t_node["is_timestamp"].IsBool())
+        t_field.is_timestamp = t_node["is_timestamp"].GetBool();
+    if (t_node.HasMember("timestamp_for") && t_node["timestamp_for"].IsArray()) {
+        for (const auto& item : t_node["timestamp_for"].GetArray()) {
+            if (item.IsString())
+                t_field.timestamp_for.emplace_back(item.GetString());
+        }
+    }
+    if (t_node.HasMember("dataset_step_ns") && t_node["dataset_step_ns"].IsUint64())
+        t_field.dataset_step_ns = t_node["dataset_step_ns"].GetUint64();
+
     if (t_node.HasMember("type") && t_node["type"].IsString()) {
         if (auto opt = s7codec::toType(t_node["type"].GetString())) {
             t_field.type = *opt;
@@ -119,4 +143,4 @@ sgrn::scl::DbField fromJsonString(const std::string& t_value) {
     return fromJson(doc);
 }
 
-} // namespace sgrn::scl
+} // namespace sgrn::scl::field

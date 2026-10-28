@@ -601,8 +601,8 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
                 tm = *parsed;
             else
                 return SclError::Generic;
-            auto status = encodeDateTime(
-                tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_wday + 1, s7codec::WriteBuffer{tp_ptr, t_buffer_size});
+            auto status = encodeDateTime(tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_wday + 1,
+                s7codec::WriteBuffer{tp_ptr, t_buffer_size});
             if (!status.has_value())
                 return SclError::Generic;
             return {};
@@ -616,8 +616,8 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             std::string s = t_value.GetString();
             std::expected<void, s7codec::CodecStatus> status;
             // For strings, max_len comes from string_capacity, not count (which is 1 for scalars)
-            uint32_t max_len =
-                t_field.string_capacity > 0 ? static_cast<uint32_t>(t_field.string_capacity) : (t_field.count > 0 ? static_cast<uint32_t>(t_field.count) : 254);
+            uint32_t max_len = t_field.string_capacity > 0 ? static_cast<uint32_t>(t_field.string_capacity)
+                                                           : (t_field.count > 0 ? static_cast<uint32_t>(t_field.count) : 254);
             if (t_field.type == DataType::String)
                 status = encodeString(s, s7codec::StringCapacity{max_len}, s7codec::WriteBuffer{tp_ptr, t_buffer_size});
             else
@@ -635,8 +635,8 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
                 return SclError::Generic;
             std::expected<void, s7codec::CodecStatus> status;
             // For wstrings, max_len comes from string_capacity, not count
-            uint32_t max_len =
-                t_field.string_capacity > 0 ? static_cast<uint32_t>(t_field.string_capacity) : (t_field.count > 0 ? static_cast<uint32_t>(t_field.count) : 16382);
+            uint32_t max_len = t_field.string_capacity > 0 ? static_cast<uint32_t>(t_field.string_capacity)
+                                                           : (t_field.count > 0 ? static_cast<uint32_t>(t_field.count) : 16382);
             auto wide_units = std::span<const uint16_t>(reinterpret_cast<const uint16_t*>(wide->c_str()), wide->size());
             if (t_field.type == DataType::WString)
                 status = encodeWString(wide_units, s7codec::StringCapacity{max_len}, s7codec::WriteBuffer{tp_ptr, t_buffer_size}, t_e);
@@ -877,14 +877,16 @@ static void serializeScalarOrArrayToWriter(
             }
             auto dv = s7codec::decodeScalar(f.type, s7codec::ReadBuffer{p_elem_ptr, buf_size - static_cast<size_t>(p_elem_ptr - ptr)},
                 s7codec::DecodeOptions{//
-                    .endian = f.endianness, .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(b_idx)}});
+                    .endian = f.endianness,
+                    .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(b_idx)}});
             writeDecodedValue(w, dv, f.type);
         }
         w.EndArray();
     } else {
         auto dv = s7codec::decodeScalar(f.type, s7codec::ReadBuffer{ptr, buf_size},
             s7codec::DecodeOptions{//
-                .endian = f.endianness, .bitOffset = s7codec::BitOffset{f.bit_index}});
+                .endian = f.endianness,
+                .bitOffset = s7codec::BitOffset{f.bit_index}});
         writeDecodedValue(w, dv, f.type);
     }
 }

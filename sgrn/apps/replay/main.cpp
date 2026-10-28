@@ -26,6 +26,7 @@ int main(int argc, char** argv) {
         "Replay speed multiplier (e.g. 1.0, 2.0, 0.5)",
         cxxopts::value<double>()->default_value("1.0"))("l,loop", "Loop replay infinitely", cxxopts::value<bool>()->default_value("false"))(
         "n,no-delay", "Replay as fast as possible without timestamp delays", cxxopts::value<bool>()->default_value("false"))(
+        "no-gui", "Do not launch browser window", cxxopts::value<bool>()->default_value("false"))(
         "g,gui", "Open the embedded dashboard in a browser once replay starts", cxxopts::value<bool>()->default_value("false"))(
         "http-port", "HTTP dashboard port in headless mode (default: 8080)", cxxopts::value<uint16_t>()->default_value("8080"))("ws-port",
         "Recorded WebSocket port (compat only — WS shares the HTTP listener at /ws)",
@@ -148,8 +149,9 @@ OPTIONS
 
     replayer.start();
 
-    // Always open the GUI in headless mode; also honour an explicit --gui flag.
-    const bool open_gui = result["gui"].as<bool>() || config.headless_mode;
+    // Always open the GUI in headless mode (unless --no-gui is given); also honour an explicit --gui flag.
+    const bool no_gui = result["no-gui"].as<bool>();
+    const bool open_gui = !no_gui && (result["gui"].as<bool>() || config.headless_mode);
     if (open_gui) {
         const uint16_t http_port = replayer.httpPort();
         if (http_port == 0) {

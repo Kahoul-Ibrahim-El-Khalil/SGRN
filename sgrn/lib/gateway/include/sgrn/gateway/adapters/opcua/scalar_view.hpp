@@ -21,7 +21,7 @@ namespace sgrn::gateway::adapters
 /// so hot loops pass this POD around instead.
 struct PlcScalarView {
     s7codec::Type type{s7codec::Type::Byte};
-    s7codec::Endian endian{s7codec::Endian::Big};
+    s7codec::Endian endian{s7codec::Endian::Little};
     uint32_t size{0};
     uint32_t count{1};
     uint8_t bit_index{0};

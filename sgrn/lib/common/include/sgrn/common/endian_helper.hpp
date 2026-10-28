@@ -124,6 +124,22 @@ inline std::string loadValue(const uint8_t* tp_buffer, DataType t_type, s7codec:
 }
 
 /**
+ * @brief Directly loads 12-byte DTL into Unix epoch nanoseconds without intermediate string allocations.
+ */
+inline int64_t loadDtlNanoseconds(const uint8_t* tp_buffer, s7codec::Endian t_endianness) {
+    if (!tp_buffer)
+        return 0;
+    return s7codec::decodeDtlToNanoseconds(s7codec::ReadBuffer{tp_buffer, 12}, s7codec::DecodeOptions{.endian = t_endianness});
+}
+
+/**
+ * @brief Directly loads 12-byte DTL into Unix epoch milliseconds without intermediate string allocations.
+ */
+inline int64_t loadDtlMilliseconds(const uint8_t* tp_buffer, s7codec::Endian t_endianness) {
+    return loadDtlNanoseconds(tp_buffer, t_endianness) / 1'000'000LL;
+}
+
+/**
  * @brief Store value to buffer based on data type
  * Handles all data types with proper endianness
  */

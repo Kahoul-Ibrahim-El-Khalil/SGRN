@@ -8,7 +8,7 @@ SGRN eliminates the brittle, manual byte-offset mapping common in industrial tel
 
 ![SGRN architecture: a deterministic harness (gateway, datastore, S7Shell) with an AI layer that proposes actions and a checker that validates them](documentation/images/architecture.png)
 
-*Solid boxes exist today. Dashed boxes (LLM agent, checker, dispatcher) are the next build.*
+*Blue boxes exist today, orange are prototypes, red dotted are to build, and gray dotted (plant, operator) are external to the project.*
 
 > [!TIP]
 > **Research experiments:** for plant anomaly detection, split-conformal uncertainty quantification and the pipeline orchestrator, see [**`experiments/`**](./experiments/README.md) and [**`experiments/flare/`**](./experiments/flare/README.md).

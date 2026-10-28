@@ -19,7 +19,7 @@ struct UdtDefinition {
     int size_bytes{0};
     int max_depth{0};
     std::vector<DbField> fields;
-    s7codec::Endian endianness{s7codec::Endian::Big};
+    s7codec::Endian endianness{s7codec::Endian::Little};
     bool trigger_events{false};
 
     bool is_scalar_alias{false};

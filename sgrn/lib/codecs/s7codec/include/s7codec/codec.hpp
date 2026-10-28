@@ -389,8 +389,8 @@ inline std::expected<void, CodecStatus> encodeString(std::string_view t_value, S
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeWString(std::span<const uint16_t> t_code_units, StringCapacity t_capacity,
-    WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeWString(
+    std::span<const uint16_t> t_code_units, StringCapacity t_capacity, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
     const uint32_t t_max_len = t_capacity.value;
     const uint32_t t_num_units = static_cast<uint32_t>(t_code_units.size());
     if (t_buffer.size() < static_cast<size_t>(4 + t_max_len * 2))
@@ -408,8 +408,8 @@ inline std::expected<void, CodecStatus> encodeWString(std::span<const uint16_t> 
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeXString(std::string_view t_value, StringCapacity t_capacity, WriteBuffer t_buffer,
-    Endian t_endian = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeXString(
+    std::string_view t_value, StringCapacity t_capacity, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
     const uint32_t t_max_len = t_capacity.value;
     if (t_buffer.size() < static_cast<size_t>(8 + t_max_len))
         return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
@@ -422,8 +422,8 @@ inline std::expected<void, CodecStatus> encodeXString(std::string_view t_value, 
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeXWString(std::span<const uint16_t> t_code_units, StringCapacity t_capacity,
-    WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeXWString(
+    std::span<const uint16_t> t_code_units, StringCapacity t_capacity, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
     const uint32_t t_max_len = t_capacity.value;
     const uint32_t t_num_units = static_cast<uint32_t>(t_code_units.size());
     if (t_buffer.size() < static_cast<size_t>(8 + t_max_len * 2))
@@ -468,6 +468,38 @@ inline std::expected<void, CodecStatus> encodeDtl(const DtlComponents& t_compone
     t_buffer[7] = t_components.second;
     toEndian<uint32_t>(t_components.nanosecond, t_buffer.data() + 8, t_endian);
     return {};
+}
+
+/// Encodes Unix epoch nanoseconds directly to 12-byte S7 DTL without intermediate string formatting.
+inline std::expected<void, CodecStatus> encodeDtl(int64_t t_nanoseconds, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+    if (t_buffer.size() < 12)
+        return std::unexpected(CodecStatus::BUFFER_TOO_SMALL);
+    DTL dtl = DTL::fromUnixNanoseconds(t_nanoseconds);
+    toEndian<uint16_t>(static_cast<uint16_t>(dtl.year), t_buffer.data(), t_endian);
+    t_buffer[2] = dtl.month;
+    t_buffer[3] = dtl.day;
+    t_buffer[4] = dtl.weekday;
+    t_buffer[5] = dtl.hour;
+    t_buffer[6] = dtl.minute;
+    t_buffer[7] = dtl.second;
+    toEndian<uint32_t>(static_cast<uint32_t>(dtl.nanosecond), t_buffer.data() + 8, t_endian);
+    return {};
+}
+
+/// Decodes 12-byte S7 DTL directly to Unix epoch nanoseconds without string parsing or heap allocations.
+inline int64_t decodeDtlToNanoseconds(ReadBuffer t_buffer, const DecodeOptions& t_options = {}) {
+    if (t_buffer.size() < 12)
+        return 0;
+    DTL dtl;
+    dtl.year = fromEndian<uint16_t>(t_buffer.subspan(0), t_options.endian);
+    dtl.month = t_buffer[2];
+    dtl.day = t_buffer[3];
+    dtl.weekday = t_buffer[4];
+    dtl.hour = t_buffer[5];
+    dtl.minute = t_buffer[6];
+    dtl.second = t_buffer[7];
+    dtl.nanosecond = fromEndian<uint32_t>(t_buffer.subspan(8), t_options.endian);
+    return dtl.toUnixNanoseconds();
 }
 
 inline bool parseTimeString(const char* raw, int64_t& out_ms) {
@@ -671,7 +703,8 @@ inline DecodedValue decodeScalar(Type t_type, ReadBuffer t_buffer, const DecodeO
             if (!check(8))
                 return {};
             uint32_t cur_len = fromEndian<uint32_t>(t_buffer.subspan(4), t_options.endian);
-            uint32_t max_len = (t_options.stringCapacity.value > 0 ? t_options.stringCapacity.value : fromEndian<uint32_t>(t_buffer.subspan(0), t_options.endian));
+            uint32_t max_len = (t_options.stringCapacity.value > 0 ? t_options.stringCapacity.value
+                                                                   : fromEndian<uint32_t>(t_buffer.subspan(0), t_options.endian));
             if (cur_len > max_len)
                 cur_len = max_len;
             if (!check(8 + cur_len))
@@ -682,7 +715,8 @@ inline DecodedValue decodeScalar(Type t_type, ReadBuffer t_buffer, const DecodeO
             if (!check(8))
                 return {};
             uint32_t cur_len = fromEndian<uint32_t>(t_buffer.subspan(4), t_options.endian);
-            uint32_t max_len = (t_options.stringCapacity.value > 0 ? t_options.stringCapacity.value : fromEndian<uint32_t>(t_buffer.subspan(0), t_options.endian));
+            uint32_t max_len = (t_options.stringCapacity.value > 0 ? t_options.stringCapacity.value
+                                                                   : fromEndian<uint32_t>(t_buffer.subspan(0), t_options.endian));
             if (cur_len > max_len)
                 cur_len = max_len;
             if (!check(8 + cur_len * 2))
@@ -775,6 +809,9 @@ inline std::expected<void, CodecStatus> encodeScalar(
             return encodeDateTime(y, m, d, h, min, s, 0, t_buffer);
         }
         case Type::DTL: {
+            if (t_decoded_value.kind() == ValueKind::SignedInt || t_decoded_value.kind() == ValueKind::UnsignedInt) {
+                return encodeDtl(t_decoded_value.asInt64(), t_buffer, t_options.endian);
+            }
             if (t_decoded_value.kind() != ValueKind::String)
                 return std::unexpected(CodecStatus::INVALID_DTL_STRING);
             DtlComponents c;
