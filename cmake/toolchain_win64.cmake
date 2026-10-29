@@ -141,7 +141,7 @@ set(CMAKE_CXX_SIMULATE_ID "" CACHE INTERNAL "")
 
 # MinGW + Clang: use emulated TLS so libstdc++ (built with emutls) links cleanly
 # (fixes unresolved std::__once_call/std::__once_callable when using std::call_once).
-set(SGRN_ISOLATION_FLAGS "-D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -femulated-tls -fno-autolink -fuse-ld=lld -Wno-unused-command-line-argument -Wno-invalid-constexpr -Wno-inline-namespace-reopened-noninline -Wno-deprecated-builtins -Wno-user-defined-literals -Wno-mismatched-tags -Wno-non-virtual-dtor -Wno-unknown-attributes -Wno-unknown-warning-option -Wno-pragma-pack -Wno-macro-redefined -Wno-keyword-compat ${SGRN_CROSS_FLAGS}")
+set(SGRN_ISOLATION_FLAGS "-D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -femulated-tls -fno-autolink -fuse-ld=lld -Wno-unused-command-line-argument -Wno-invalid-constexpr -Wno-inline-namespace-reopened-noninline -Wno-deprecated-builtins -Wno-user-defined-literals -Wno-mismatched-tags -Wno-non-virtual-dtor -Wno-inconsistent-missing-override -Wno-unknown-attributes -Wno-unknown-warning-option -Wno-pragma-pack -Wno-macro-redefined -Wno-keyword-compat ${SGRN_CROSS_FLAGS}")
 
 set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS}   -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DNTDDI_VERSION=0x0A000000 -DCPPHTTPLIB_WINDOWS_8_OR_LOWER_IS_NOT_SUPPORTED=0 ${SGRN_ISOLATION_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DNTDDI_VERSION=0x0A000000 -DCPPHTTPLIB_WINDOWS_8_OR_LOWER_IS_NOT_SUPPORTED=0 ${SGRN_ISOLATION_FLAGS}")

@@ -1,27 +1,19 @@
-// PENDING MOVE to sgrn/common: blocked on the memory/security
-// interface-abstraction work (depends on TelemetryBroker + TreePath).
 #pragma once
 
-#include <sgrn/Result.hpp>
-#include <sgrn/gateway/core/TelemetryBroker.hpp>
-#include <sgrn/gateway/twin/TreePath.hpp>
+#include <sgrn/common/TreePath.hpp>
+#include <algorithm>
 #include <set>
+#include <string>
 #include <vector>
 
-namespace sgrn::gateway::common
-{
-
-/**
- * @brief Event filtering utilities for subscriptions
- */
-namespace event_filter
+namespace sgrn::common::event_filter
 {
 
 /**
  * @brief Check if any dirty paths match subscriptions
- * @return Result with true if event should be sent, false if not, or error string
+ * @return True if event should be sent, false if not
  */
-inline bool shouldSend(const std::vector<sgrn::gateway::twin::TreePath>& t_dirty_paths, const std::set<std::string>& t_subscriptions) {
+inline bool shouldSend(const std::vector<sgrn::common::TreePath>& t_dirty_paths, const std::set<std::string>& t_subscriptions) {
 
     if (t_subscriptions.empty()) {
         return true; // Firehose mode
@@ -47,10 +39,9 @@ inline bool shouldSend(const std::vector<sgrn::gateway::twin::TreePath>& t_dirty
 
 /**
  * @brief Check if subscription needs field-level filtering
- * @return Result with true if filtering needed, false if not, or error string
+ * @return True if filtering needed, false if not
  */
-inline bool needsFieldFiltering(
-    const std::vector<sgrn::gateway::twin::TreePath>& t_dirty_paths, const std::set<std::string>& t_subscriptions) {
+inline bool needsFieldFiltering(const std::vector<sgrn::common::TreePath>& t_dirty_paths, const std::set<std::string>& t_subscriptions) {
 
     if (t_subscriptions.empty()) {
         return false; // Firehose - no filtering
@@ -83,6 +74,4 @@ inline bool needsFieldFiltering(
     return has_field_level && !has_db_level;
 }
 
-} // namespace event_filter
-
-} // namespace sgrn::gateway::common
+} // namespace sgrn::common::event_filter

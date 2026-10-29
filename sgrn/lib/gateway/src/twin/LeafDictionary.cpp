@@ -113,9 +113,11 @@ void flattenWalk(const rapidjson::Value& t_node, const std::string& t_prefix,
         // If so, emit the whole array value as-is rather than descending with [i] suffixes.
         auto id_it = t_path_to_id.find(t_prefix);
         if (id_it != t_path_to_id.end()) {
-            if (t_allowed && id_it->second < t_allowed->size() && !(*t_allowed)[id_it->second])
-                return;
+
+            SGRN_RETURN_IF(t_allowed && id_it->second < t_allowed->size() && !(*t_allowed)[id_it->second], ;);
+
             std::string id_str = std::to_string(id_it->second);
+
             rapidjson::Value key(id_str.c_str(), static_cast<rapidjson::SizeType>(id_str.size()), t_alloc);
             rapidjson::Value val;
             val.CopyFrom(t_node, t_alloc);

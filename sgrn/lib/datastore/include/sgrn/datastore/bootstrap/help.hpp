@@ -21,9 +21,16 @@ constexpr const char help_message[] =
     --init-db           Step 2: drop/recreate the PostgreSQL database and
                         apply the embedded schema.
     --init              Steps 1+2 in one go (still stops for secret editing).
-    --config-systemd    Step 3 (root only): install systemd units + nginx
-                        configs, remove obsolete units, daemon-reload,
-                        enable and restart changed services.
+    --config-systemd    Step 3 (root only): install systemd units, remove
+                        obsolete units, ensure nginx runtime dirs,
+                        daemon-reload, enable and restart changed services.
+                        Nginx serves its site configs from the operation
+                        directory directly (not copied into the micromamba
+                        env — env updates must not take the site down).
+    --verify-install    No root: report drift between staged templates and
+                        the deployed system (units, nginx, binaries, certs,
+                        temp dirs, running services, ports). Nonzero exit
+                        when drift is found.
     [config]            Path to sgrn.json (overrides default search order).
 
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -69,9 +76,22 @@ constexpr const char help_message[] =
     sudo {bin} --config-systemd
 
     → Copies service files to /etc/systemd/system/
-    → Copies Nginx configurations to the deployment environment
+    → Nginx site configs stay in ~/.local/share/sgrn/nginx/ (Serviced
+      in place — never copied into the micromamba env, where env
+      updates would wipe them)
+    → Ensures nginx buffer/log/pid dirs exist under the data prefix
     → Removes units of retired services (e.g. PostgREST)
     → Reloads systemd daemon; enables and restarts changed services
+
+  ── Step 5: Verify the deployment (no sudo needed) ───────────────────
+
+    {bin} --verify-install
+
+    → Reports staged-vs-deployed unit drift, nginx template health,
+      binary/cert/temp-dir prerequisites, garage on the deployed unit
+      PATH, active services and listening ports
+    → Nonzero exit when something drifted; follow the printed repair
+      sequence to reconcile
 
   ── Step 5: Verify status ────────────────────────────────────────────
 

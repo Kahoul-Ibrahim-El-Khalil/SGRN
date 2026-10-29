@@ -68,11 +68,16 @@ inline drogon::HttpResponsePtr createEmptyResponse(drogon::HttpStatusCode t_http
 // =========================================================
 // 2. Generic Text Response
 // =========================================================
+// NOTE: setContentTypeString() REPLACES the response's default content type
+// (drogon's newHttpResponse starts as "text/html; charset=utf-8"). addHeader()
+// would APPEND a second Content-Type header; proxies (nginx) keep only the
+// first one, so clients would see "text/html" on perfectly valid JSON and the
+// dashboard would refuse to parse it.
 inline drogon::HttpResponsePtr createResponse(
     const std::string& t_body, drogon::HttpStatusCode t_http_code, std::string_view t_content_type = plain_content_type) {
     auto resp = drogon::HttpResponse::newHttpResponse();
     resp->setStatusCode(t_http_code);
-    resp->addHeader("Content-Type", std::string(t_content_type));
+    resp->setContentTypeString(t_content_type);
     resp->setBody(t_body);
     return resp;
 }
@@ -80,7 +85,7 @@ inline drogon::HttpResponsePtr createResponse(
     std::string&& t_body, drogon::HttpStatusCode t_http_code, std::string_view t_content_type = plain_content_type) {
     auto resp = drogon::HttpResponse::newHttpResponse();
     resp->setStatusCode(t_http_code);
-    resp->addHeader("Content-Type", std::string(t_content_type));
+    resp->setContentTypeString(t_content_type);
     resp->setBody(std::move(t_body));
     return resp;
 }
@@ -160,11 +165,12 @@ inline drogon::HttpResponsePtr createJsonResponse(
     }
 }
 
-// From std::string
+// From std::string (raw pre-serialized body — same replacement rule as above:
+// never duplicate the default Content-Type header).
 inline drogon::HttpResponsePtr createJsonResponse(const std::string& t_json, drogon::HttpStatusCode t_http_code = drogon::k200OK) {
     auto resp = drogon::HttpResponse::newHttpResponse();
     resp->setStatusCode(t_http_code);
-    resp->addHeader("Content-Type", ::sgrn::json_content_type);
+    resp->setContentTypeString(::sgrn::json_content_type);
     resp->setBody(t_json);
     return resp;
 }
@@ -172,7 +178,7 @@ inline drogon::HttpResponsePtr createJsonResponse(const std::string& t_json, dro
 inline drogon::HttpResponsePtr createJsonResponse(std::string&& t_json, drogon::HttpStatusCode t_http_code = drogon::k200OK) {
     auto resp = drogon::HttpResponse::newHttpResponse();
     resp->setStatusCode(t_http_code);
-    resp->addHeader("Content-Type", ::sgrn::json_content_type);
+    resp->setContentTypeString(::sgrn::json_content_type);
     resp->setBody(std::move(t_json));
     return resp;
 }
@@ -206,7 +212,7 @@ inline drogon::HttpResponsePtr createErrorResponse(
     // Emit JSON directly — no intermediate Json::Value tree needed for two fields.
     auto resp = drogon::HttpResponse::newHttpResponse();
     resp->setStatusCode(t_http_code);
-    resp->addHeader("Content-Type", ::sgrn::json_content_type);
+    resp->setContentTypeString(::sgrn::json_content_type);
     resp->setBody(fmt::format(R"({{"error":"{}","scope":"{}"}})", jsonEscape(msg), jsonEscape(t_scope)));
     return resp;
 }

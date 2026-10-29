@@ -1,6 +1,9 @@
 #pragma once
 
+#include <sgrn/utils/strings.hpp>
 #include <chrono>
+#include <cstdint>
+#include <cstdio>
 #include <ctime>
 #include <iomanip>
 #include <optional>
@@ -219,6 +222,42 @@ inline std::optional<uint64_t> parseDurationNanoseconds(std::string_view t_str) 
         return std::nullopt;
 
     return static_cast<uint64_t>(value * multiplier);
+}
+
+/**
+ * @brief Parses an S7 Time string in format "#T19:10:10:100" or "[-]HH:MM:SS.mmm".
+ * Returns total milliseconds.
+ */
+inline std::optional<int64_t> parseS7Time(const std::string& t_raw) {
+    std::string s = sgrn::utils::strings::trim(t_raw);
+    if (s.empty())
+        return std::nullopt;
+
+    bool negative = false;
+    if (s[0] == '-') {
+        negative = true;
+        s = s.substr(1);
+    }
+
+    // Handle #T prefix
+    if (s.size() > 2 && s[0] == '#' && (s[1] == 'T' || s[1] == 't')) {
+        s = s.substr(2);
+    }
+
+    unsigned h = 0, m = 0, sec = 0, ms = 0;
+    constexpr std::string_view kFmtS7Time = "%u:%u:%u.%u";
+    constexpr std::string_view kFmtS7TimeAlt = "%u:%u:%u:%u";
+    if (std::sscanf(s.c_str(), kFmtS7Time.data(), &h, &m, &sec, &ms) >= 3) {
+        // success
+    } else if (std::sscanf(s.c_str(), kFmtS7TimeAlt.data(), &h, &m, &sec, &ms) >= 3) {
+        // success with colon for ms (some TIA formats)
+    } else {
+        return std::nullopt;
+    }
+
+    const int64_t abs_ms =
+        static_cast<int64_t>(h) * 3600000 + static_cast<int64_t>(m) * 60000 + static_cast<int64_t>(sec) * 1000 + static_cast<int64_t>(ms);
+    return negative ? -abs_ms : abs_ms;
 }
 
 } // namespace sgrn::utils::time

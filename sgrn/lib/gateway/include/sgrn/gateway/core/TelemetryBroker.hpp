@@ -1,8 +1,8 @@
 #pragma once
 
+#include <sgrn/common/TreePath.hpp>
 #include <sgrn/gateway/core/GlobalContext.hpp>
 #include <sgrn/gateway/core/LeafFieldMeta.hpp>
-#include <sgrn/gateway/twin/TreePath.hpp>
 #include <asio.hpp>
 #include <atomic>
 #include <cstdint>
@@ -36,7 +36,7 @@ struct TelemetryEvent {
     uint64_t timestamp = 0;
 
     // Tier 1: Include specific dirty paths
-    std::vector<sgrn::gateway::twin::TreePath> dirty_paths;
+    std::vector<sgrn::common::TreePath> dirty_paths;
 
     // DB numbers covered by a multi-DB DeltaSnapshot. Single-DB events
     // (LeafUpdate, per-DB snapshots) use `db` above; a coalesced

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <sgrn/Result.hpp>
+#include <sgrn/common/wal_frame.hpp>
 #include <sgrn/gateway/config/persistence.hpp>
 #include <sgrn/gateway/core/TelemetryBroker.hpp>
 #include <sgrn/gateway/database/GatewayDatabase.hpp>
@@ -37,206 +38,22 @@ namespace sgrn::gateway::database
  * live DB numbers are small (declared_db_numbers) and the arena allocator
  * starts synthetic IDs at 1000.
  */
-inline constexpr uint16_t kControlFrameDbNum = 0xFFFF;
+inline constexpr uint16_t kControlFrameDbNum = sgrn::common::wal::kControlFrameDbNum;
+inline constexpr uint16_t kDeltaFrameDbNum = sgrn::common::wal::kDeltaFrameDbNum;
+inline constexpr uint16_t kAnchorFrameDbNum = sgrn::common::wal::kAnchorFrameDbNum;
+inline constexpr uint16_t kBinaryWalVersion = sgrn::common::wal::kBinaryWalVersion;
 
-/**
- * @brief DB number marking a binary-WAL delta frame (version 2+).
- *
- * A delta payload is `db_num:u16` (the REAL target DB) followed by a run
- * list: repeated `(offset:u32, len:u32, bytes...)` against the last image
- * written for that DB (keyframe or previous delta). Self-delimiting within
- * payload_len; runs never overlap. Readers apply runs onto their cached
- * image; a delta for an unseen DB (no keyframe yet) must be skipped.
- */
-inline constexpr uint16_t kDeltaFrameDbNum = 0xFFFE;
-
-/**
- * @brief DB number marking a binary-WAL anchor frame (version 3+).
- *
- * An anchor payload is `db_num:u16` (REAL target) + `crc32:u32` + the full
- * DB image. The CRC covers the image bytes and lets readers VERIFY a
- * decode; anchors are also resync points (see below). The writer emits one
- * for the first frame of each DB per file, periodically, and for large
- * changes — every full-image emission is an anchor, never a bare frame.
- */
-inline constexpr uint16_t kAnchorFrameDbNum = 0xFFFD;
-
-/**
- * @brief CRC32 (IEEE, zlib-compatible) over raw bytes.
- *
- * Used for binary anchor-frame integrity. Small, table-free implementation:
- * fine at archive rates for DB-sized images. Readers recompute over the
- * decoded image and compare against the stored value.
- */
-inline uint32_t binaryWalCrc32(const uint8_t* t_data, size_t t_size) {
-    uint32_t crc = 0xFFFFFFFFu;
-    for (size_t i = 0; i < t_size; ++i) {
-        crc ^= static_cast<uint32_t>(t_data[i]);
-        for (int k = 0; k < 8; ++k)
-            crc = (crc & 1u) ? (crc >> 1) ^ 0xEDB88320u : (crc >> 1);
-    }
-    return ~crc;
-}
-
-/**
- * @brief Current binary WAL version stamped in the archive header.
- *
- * v1 = full-image data frames only. v2 = v1 + delta frames. v3 = v2 +
- * anchor frames (verifiable full images). v4 = v3 + binary schema payload
- * in the header (see SchemaSerializer::serializeBinary); v3 embedded the
- * schema as JSON text and is still written when no schema store is
- * available, and still read back. Readers refuse versions above this;
- * writers always stamp this (or v3 for the schemaless/JSON fallback).
- */
-inline constexpr uint16_t kBinaryWalVersion = 4;
-
-// ── Shared binary-WAL decode primitives ──────────────────────────────────
-// One implementation for every reader (sgrn_dataset, sgrn_replay,
-// RecoveryEngine) so framing, validation and resync stay identical.
-// These are pure and policy-free: corruption *reporting* (warn vs count vs
-// abort) stays with the caller.
-
-/// Validated archive header.
-struct BinaryWalHeader {
-    uint16_t version = 0;
-    uint32_t schema_len = 0;
-    size_t frames_start = 10; ///< first byte after header + schema JSON
-};
-
-/// Header validation outcome (callers map these to their own diagnostics).
-enum class BinaryHeaderStatus {
-    kOk,
-    kTooShort,   ///< fewer than 10 bytes or schema overruns the buffer
-    kBadMagic,   ///< missing SGRN magic
-    kBadVersion, ///< ver < 1 (v0 never shipped) — readers handle 1..kBinaryWalVersion
-};
-
-/// Validates magic + version + header bounds. No logging; see above.
-inline BinaryHeaderStatus checkBinaryWalHeader(const std::string& t_data, BinaryWalHeader& t_header) {
-    if (t_data.size() < 10)
-        return BinaryHeaderStatus::kTooShort;
-    if (t_data[0] != 'S' || t_data[1] != 'G' || t_data[2] != 'R' || t_data[3] != 'N')
-        return BinaryHeaderStatus::kBadMagic;
-    uint16_t ver = 0;
-    uint32_t schema_len = 0;
-    std::memcpy(&ver, t_data.data() + 4, sizeof(ver));
-    std::memcpy(&schema_len, t_data.data() + 6, sizeof(schema_len));
-    if (10 + schema_len > t_data.size())
-        return BinaryHeaderStatus::kTooShort;
-    if (ver < 1 || ver > kBinaryWalVersion)
-        return BinaryHeaderStatus::kBadVersion;
-    t_header.version = ver;
-    t_header.schema_len = schema_len;
-    t_header.frames_start = 10 + schema_len;
-    return BinaryHeaderStatus::kOk;
-}
-
-/// One decoded frame header. `payload` points into the source buffer.
-struct BinaryFrame {
-    int64_t ts = 0;
-    uint16_t db = 0;
-    uint32_t payload_len = 0;
-    size_t header_start = 0; ///< offset of the 14-byte header (resync base)
-    const uint8_t* payload = nullptr;
-};
-
-/// Frame decode outcome.
-enum class BinaryFrameStatus {
-    kOk,       ///< t_pos advanced past the payload; t_frame filled
-    kEnd,      ///< fewer than 14 bytes remain (clean EOF); t_pos untouched
-    kTruncated ///< header parsed but payload overruns (t_pos left at header)
-};
-
-/// Decodes the frame at t_pos. Never reads out of bounds.
-inline BinaryFrameStatus decodeBinaryFrame(const std::string& t_data, size_t& t_pos, BinaryFrame& t_frame) {
-    if (t_pos + 14 > t_data.size())
-        return BinaryFrameStatus::kEnd;
-    int64_t ts = 0;
-    uint16_t db = 0;
-    uint32_t len = 0;
-    std::memcpy(&ts, t_data.data() + t_pos, sizeof(ts));
-    std::memcpy(&db, t_data.data() + t_pos + 8, sizeof(db));
-    std::memcpy(&len, t_data.data() + t_pos + 10, sizeof(len));
-    if (t_pos + 14 + len > t_data.size())
-        return BinaryFrameStatus::kTruncated;
-    t_frame.ts = ts;
-    t_frame.db = db;
-    t_frame.payload_len = len;
-    t_frame.header_start = t_pos;
-    t_frame.payload = reinterpret_cast<const uint8_t*>(t_data.data()) + t_pos + 14;
-    t_pos += 14 + len;
-    return BinaryFrameStatus::kOk;
-}
-
-/// A validated delta run: [offset, offset+len) within the image, with the
-/// run's bytes at data_pos within the frame payload.
-struct BinaryDeltaRun {
-    uint32_t offset = 0;
-    uint32_t len = 0;
-    uint32_t data_pos = 0;
-};
-
-/// Validates a delta payload (`db:u16` + runs) against an image size limit
-/// (cached image size, or live segment size for direct writers). Extracts the
-/// target DB and the run list. Pure: applying runs is the caller's job.
-inline bool parseDeltaRuns(const uint8_t* t_payload, uint32_t t_len, size_t t_limit, uint16_t& t_db, std::vector<BinaryDeltaRun>& t_runs) {
-    t_runs.clear();
-    if (t_len < 2)
-        return false;
-    std::memcpy(&t_db, t_payload, sizeof(t_db));
-    size_t run_pos = 2;
-    while (run_pos + 8 <= t_len) {
-        uint32_t run_off = 0;
-        uint32_t run_len = 0;
-        std::memcpy(&run_off, t_payload + run_pos, sizeof(run_off));
-        std::memcpy(&run_len, t_payload + run_pos + sizeof(run_off), sizeof(run_len));
-        run_pos += 8;
-        if (run_pos + run_len > t_len || static_cast<size_t>(run_off) + run_len > t_limit)
-            return false;
-        t_runs.push_back(BinaryDeltaRun{run_off, run_len, static_cast<uint32_t>(run_pos)});
-        run_pos += run_len;
-    }
-    return run_pos == t_len && !t_runs.empty();
-}
-
-/// Verifies an anchor payload (`db:u16` + `crc32:u32` + image). Extracts the
-/// target DB and a pointer/len view of the image (into the source buffer).
-inline bool verifyAnchorFrame(const uint8_t* t_payload, uint32_t t_len, uint16_t& t_db, const uint8_t*& t_image, size_t& t_image_len) {
-    if (t_len < 6)
-        return false;
-    uint32_t crc = 0;
-    std::memcpy(&t_db, t_payload, sizeof(t_db));
-    std::memcpy(&crc, t_payload + sizeof(t_db), sizeof(crc));
-    t_image = t_payload + 6;
-    t_image_len = t_len - 6;
-    return binaryWalCrc32(t_image, t_image_len) == crc;
-}
-
-/// Scans forward for the next verifiable anchor frame. Returns its frame
-/// start offset, or nullopt. CRC verification makes false hits ~2^-32, so a
-/// hit is a trustworthy resync point after stream corruption.
-inline std::optional<size_t> findNextAnchorFrame(const std::string& t_data, size_t t_from) {
-    const size_t n = t_data.size();
-    for (size_t p = t_from; p + 14 <= n; ++p) {
-        uint16_t db = 0;
-        std::memcpy(&db, t_data.data() + p + 8, sizeof(db));
-        if (db != kAnchorFrameDbNum)
-            continue;
-        uint32_t len = 0;
-        std::memcpy(&len, t_data.data() + p + 10, sizeof(len));
-        if (len < 6 || p + 14 + len > n)
-            continue;
-        const uint8_t* pl = reinterpret_cast<const uint8_t*>(t_data.data()) + p + 14;
-        uint16_t adb = 0;
-        uint32_t crc = 0;
-        std::memcpy(&adb, pl, sizeof(adb));
-        (void)adb;
-        std::memcpy(&crc, pl + sizeof(adb), sizeof(crc));
-        if (binaryWalCrc32(pl + 6, len - 6) == crc)
-            return p;
-    }
-    return std::nullopt;
-}
+using sgrn::common::wal::BinaryDeltaRun;
+using sgrn::common::wal::BinaryFrame;
+using sgrn::common::wal::BinaryFrameStatus;
+using sgrn::common::wal::BinaryHeaderStatus;
+using sgrn::common::wal::binaryWalCrc32;
+using sgrn::common::wal::BinaryWalHeader;
+using sgrn::common::wal::checkBinaryWalHeader;
+using sgrn::common::wal::decodeBinaryFrame;
+using sgrn::common::wal::findNextAnchorFrame;
+using sgrn::common::wal::parseDeltaRuns;
+using sgrn::common::wal::verifyAnchorFrame;
 
 /// Fills id-indexed paths from a {"type":"dictionary","leaves":[...]} line.
 inline void parseDictionaryLine(const rapidjson::Document& t_doc, std::vector<std::string>& t_paths) {

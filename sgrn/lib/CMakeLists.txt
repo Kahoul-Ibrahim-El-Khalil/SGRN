@@ -37,4 +37,5 @@ sgrn_add_component(SGRN_BUILD_DATASTORE datastore)
 
 # 8. Machine Learning
 sgrn_add_component(SGRN_BUILD_ML ml)
+sgrn_add_component(SGRN_BUILD_ML ml_bridge)
 sgrn_add_component(SGRN_WITH_TORCH ml_torch)

@@ -2,7 +2,7 @@
 #include <sgrn/ml/columnar_dataset.hpp>
 #include <sgrn/ml/engine.hpp>
 #include <sgrn/ml/time_grid_resampler.hpp>
-#include <sgrn/ml/twin_bridge.hpp>
+#include <sgrn/ml_bridge/twin_bridge.hpp>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -423,15 +423,15 @@ int main() {
     live_manifest.thresholds.alarm = 0.5f; // Alarm trips when residual > 0.5
 
     // Configure TwinBridge
-    sgrn::ml::TwinBridgeConfig bridge_cfg;
-    bridge_cfg.output_bindings = {{"DB30.PredictedPower", sgrn::ml::TwinOutputTarget::PredictionValue, 1},
-        {"DB30.ThermalAlarm", sgrn::ml::TwinOutputTarget::AlarmBit, 0},
-        {"DB30.InferenceTimestamp", sgrn::ml::TwinOutputTarget::Timestamp, 0}};
+    sgrn::ml_bridge::TwinBridgeConfig bridge_cfg;
+    bridge_cfg.output_bindings = {{"DB30.PredictedPower", sgrn::ml_bridge::TwinOutputTarget::PredictionValue, 1},
+        {"DB30.ThermalAlarm", sgrn::ml_bridge::TwinOutputTarget::AlarmBit, 0},
+        {"DB30.InferenceTimestamp", sgrn::ml_bridge::TwinOutputTarget::Timestamp, 0}};
     bridge_cfg.write_outputs_to_twin = true;
     bridge_cfg.bump_versions = true;
     bridge_cfg.mark_dirty = true;
 
-    sgrn::ml::TwinBridge bridge(bridge_cfg);
+    sgrn::ml_bridge::TwinBridge bridge(bridge_cfg);
     auto load_res = bridge.loadModel(live_manifest, std::make_unique<TrainedPipelineBackend>(0.8f, 1.5f, 10.0f));
     CHECK(!load_res.hasError());
 

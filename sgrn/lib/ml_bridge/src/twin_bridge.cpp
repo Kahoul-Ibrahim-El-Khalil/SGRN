@@ -1,9 +1,15 @@
-#include <sgrn/ml/twin_bridge.hpp>
+#include <sgrn/ml_bridge/twin_bridge.hpp>
 
 #include <type_traits>
 
-namespace sgrn::ml
+namespace sgrn::ml_bridge
 {
+// sgrn::ml types used unqualified below (see twin_bridge.hpp).
+using sgrn::ml::IModelBackend;
+using sgrn::ml::ModelManifest;
+using sgrn::ml::Prediction;
+using sgrn::ml::PredictionEngine;
+using sgrn::ml::VerdictStatus;
 
 TwinBridge::TwinBridge(TwinBridgeConfig t_config)
     : config_(std::move(t_config)) {
@@ -326,4 +332,4 @@ void TwinBridge::reset() {
     std::fill(raw_feature_scratch_.begin(), raw_feature_scratch_.end(), 0.0);
 }
 
-} // namespace sgrn::ml
+} // namespace sgrn::ml_bridge

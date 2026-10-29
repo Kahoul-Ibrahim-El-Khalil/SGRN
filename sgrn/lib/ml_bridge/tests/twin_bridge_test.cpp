@@ -1,4 +1,4 @@
-#include <sgrn/ml/twin_bridge.hpp>
+#include <sgrn/ml_bridge/twin_bridge.hpp>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -53,6 +53,7 @@ public:
 
 int main() {
     using namespace sgrn::ml;
+    using namespace sgrn::ml_bridge;
     using namespace sgrn::gateway::twin;
 
     // 1. Setup PlcState with input DB100 and output DB200

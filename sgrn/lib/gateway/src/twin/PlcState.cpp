@@ -1,4 +1,6 @@
 #include <sgrn/gateway/twin/PlcState.hpp>
+
+#include "PlcState_serialize.hpp" // internal: PlcNode::serialize() definition
 // REVAMP-1: PlcState.cpp — Implementation for PlcState, PlcPoint, and PlcNode.
 
 #include <fmt/format.h>

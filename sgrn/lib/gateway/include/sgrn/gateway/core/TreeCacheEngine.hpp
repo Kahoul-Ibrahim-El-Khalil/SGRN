@@ -1,7 +1,7 @@
 #pragma once
 
+#include <sgrn/common/TreePath.hpp>
 #include <sgrn/gateway/twin/PlcState.hpp>
-#include <sgrn/gateway/twin/TreePath.hpp>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>

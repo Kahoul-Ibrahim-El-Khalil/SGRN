@@ -1,5 +1,5 @@
 #pragma once
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <sgrn/scl/types/DataType.hpp>
 #include <map>
 #include <optional>

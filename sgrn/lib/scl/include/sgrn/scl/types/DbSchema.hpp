@@ -1,5 +1,5 @@
 #pragma once
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <sgrn/scl/types/DbField.hpp>
 #include <sgrn/scl/types/UdtDefinition.hpp>
 #include <sgrn/scl/types/modbus/ModbusArea.hpp>

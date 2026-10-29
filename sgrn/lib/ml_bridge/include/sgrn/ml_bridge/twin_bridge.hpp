@@ -12,8 +12,16 @@
 #include <string>
 #include <vector>
 
-namespace sgrn::ml
+namespace sgrn::ml_bridge
 {
+
+// sgrn::ml types consumed by the bridge (declared here once, used unqualified
+// below — this component sits one layer above sgrn::ml).
+using sgrn::ml::IModelBackend;
+using sgrn::ml::ModelManifest;
+using sgrn::ml::Prediction;
+using sgrn::ml::PredictionEngine;
+using sgrn::ml::VerdictStatus;
 
 using ::sgrn::gateway::twin::DbEntry;
 using ::sgrn::gateway::twin::PlcNode;
@@ -161,4 +169,4 @@ private:
     std::vector<double> raw_feature_scratch_;
 };
 
-} // namespace sgrn::ml
+} // namespace sgrn::ml_bridge

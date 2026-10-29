@@ -1,6 +1,6 @@
 #pragma once
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <sgrn/scl/types/DataType.hpp>
 #include <sgrn/scl/types/DbField.hpp>
 #include <map>

@@ -67,6 +67,10 @@ int main(int t_argc, char** tp_argv) {
             bootstrap::configureSystemd();
             return EXIT_SUCCESS;
         }
+        if (arg == "--verify-install") {
+            std::string base_dir = sgrn::utils::filesystem::expandUserPath(std::string(bootstrap::kDefaultOperationDir));
+            return bootstrap::verifyInstall(base_dir) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        }
     }
 
     return runMain(

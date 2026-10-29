@@ -1,8 +1,10 @@
 #pragma once
 #include "strings.hpp"
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <string_view>
+#include <vector>
 
 #include <sgrn/Result.hpp>
 
@@ -69,6 +71,26 @@ inline bool writeStringToFile(const std::filesystem::path& t_path, const std::st
 
     ofs << t_content.c_str();
     return true;
+}
+
+inline bool readBinaryFile(const std::filesystem::path& t_path, std::vector<uint8_t>& t_data) {
+    std::ifstream ifs(t_path, std::ios::binary);
+    SGRN_RETURN_IF(!ifs.is_open(), false);
+    t_data.assign((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    return true;
+}
+
+inline bool writeBinaryFile(const std::filesystem::path& t_path, const uint8_t* tp_data, size_t t_size) {
+    std::ofstream ofs(t_path, std::ios::binary);
+    SGRN_RETURN_IF(!ofs.is_open(), false);
+    if (t_size > 0 && tp_data != nullptr) {
+        ofs.write(reinterpret_cast<const char*>(tp_data), static_cast<std::streamsize>(t_size));
+    }
+    return ofs.good();
+}
+
+inline bool writeBinaryFile(const std::filesystem::path& t_path, const std::vector<uint8_t>& t_data) {
+    return writeBinaryFile(t_path, t_data.data(), t_data.size());
 }
 
 /// Copy a file only if it doesn't exist or has a different size.
