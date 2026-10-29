@@ -42,20 +42,14 @@ static std::string resolveHostname(const std::string& t_host) {
 template <typename T, typename Fn>
 Result<T, S7Error> invokeValue(Fn&& t_fn) {
     T tp_value{};
-    const auto status = t_fn(tp_value);
-    if (status.hasError()) {
-        return std::move(status).error();
-    }
+    SGRN_IF_ERROR_PROPAGATE(t_fn(tp_value));
     return tp_value;
 }
 
 template <typename Fn>
 Result<std::vector<uint8_t>, S7Error> invokeSizedBuffer(int t_size, Fn&& t_fn) {
     std::vector<uint8_t> tp_buffer(static_cast<size_t>(std::max(t_size, 0)), 0);
-    const auto status = t_fn(tp_buffer.data(), t_size);
-    if (status.hasError()) {
-        return std::move(status).error();
-    }
+    SGRN_IF_ERROR_PROPAGATE(t_fn(tp_buffer.data(), t_size));
     return tp_buffer;
 }
 
@@ -122,17 +116,12 @@ Result<void, S7Error> S7Client::validateRange(int t_start, int t_size_or_amount,
 }
 
 Result<void, S7Error> S7Client::validateBuffer(const void* tp_buffer, int t_size_or_amount, const char* tp_label) const {
-    if (t_size_or_amount > 0 && tp_buffer == nullptr) {
-        return S7Error::InvalidParam;
-    }
+    SGRN_RETURN_ERROR_IF(t_size_or_amount > 0 && tp_buffer == nullptr, S7Error::InvalidParam);
     return {};
 }
 
 Result<void, S7Error> S7Client::connect() {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
 
     last_error_ = client_->Connect();
     return makeStatus(last_error_);
@@ -143,16 +132,9 @@ Result<void, S7Error> S7Client::connect(const std::string& t_ip, int t_rack, int
 }
 
 Result<void, S7Error> S7Client::connect(const ConnectionInfo& t_connection_info) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
-    if (t_connection_info.ip.empty()) {
-        return S7Error::InvalidParam;
-    }
-    if (t_connection_info.rack < 0 || t_connection_info.slot < 0) {
-        return S7Error::InvalidParam;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
+    SGRN_RETURN_ERROR_IF(t_connection_info.ip.empty(), S7Error::InvalidParam);
+    SGRN_RETURN_ERROR_IF(t_connection_info.rack < 0 || t_connection_info.slot < 0, S7Error::InvalidParam);
 
     connection_info_data_ = t_connection_info;
     last_error_ = client_->SetConnectionType(t_connection_info.connection_type);
@@ -170,13 +152,8 @@ Result<void, S7Error> S7Client::connect(const ConnectionInfo& t_connection_info)
 }
 
 Result<void, S7Error> S7Client::setConnectionParams(const std::string& t_ip, uint16_t t_local_tsap, uint16_t t_remote_tsap) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
-    if (t_ip.empty()) {
-        return S7Error::InvalidParam;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
+    SGRN_RETURN_ERROR_IF(t_ip.empty(), S7Error::InvalidParam);
 
     connection_info_data_.ip = t_ip;
     std::string resolved_ip = resolveHostname(t_ip);
@@ -185,18 +162,12 @@ Result<void, S7Error> S7Client::setConnectionParams(const std::string& t_ip, uin
 }
 
 Result<void, S7Error> S7Client::connectWithTsap(const std::string& t_ip, uint16_t t_local_tsap, uint16_t t_remote_tsap) {
-    auto status = setConnectionParams(t_ip, t_local_tsap, t_remote_tsap);
-    if (status.hasError()) {
-        return status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(setConnectionParams(t_ip, t_local_tsap, t_remote_tsap));
     return connect();
 }
 
 Result<void, S7Error> S7Client::setConnectionType(uint16_t t_connection_type) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
 
     connection_info_data_.connection_type = t_connection_type;
     last_error_ = client_->SetConnectionType(t_connection_type);
@@ -204,10 +175,7 @@ Result<void, S7Error> S7Client::setConnectionType(uint16_t t_connection_type) {
 }
 
 Result<void, S7Error> S7Client::disconnect() {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
     if (!client_->Connected()) {
         last_error_ = 0;
         return {};
@@ -222,10 +190,7 @@ bool S7Client::isConnected() const {
 }
 
 Result<void, S7Error> S7Client::getParam(int t_param_number, void* tp_value) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
     if (tp_value == nullptr) {
         return S7Error::InvalidParam;
     }
@@ -235,10 +200,7 @@ Result<void, S7Error> S7Client::getParam(int t_param_number, void* tp_value) {
 }
 
 Result<void, S7Error> S7Client::setParam(int t_param_number, void* tp_value) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
     if (tp_value == nullptr) {
         return S7Error::InvalidParam;
     }
@@ -253,36 +215,18 @@ Result<std::vector<uint8_t>, S7Error> S7Client::readArea(int t_area, uint16_t t_
 }
 
 Result<void, S7Error> S7Client::readArea(int t_area, uint16_t t_db_number, int t_start, int t_amount, int t_word_len, uint8_t* tp_buffer) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
-    const auto range_status = validateRange(t_start, t_amount, "Offset and amount");
-    if (range_status.hasError()) {
-        return range_status;
-    }
-    const auto buffer_status = validateBuffer(tp_buffer, t_amount, "Read area");
-    if (buffer_status.hasError()) {
-        return buffer_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
+    SGRN_IF_ERROR_PROPAGATE(validateRange(t_start, t_amount, "Offset and amount"));
+    SGRN_IF_ERROR_PROPAGATE(validateBuffer(tp_buffer, t_amount, "Read area"));
     last_error_ = t_amount == 0 ? 0 : client_->ReadArea(t_area, t_db_number, t_start, t_amount, t_word_len, tp_buffer);
     return makeStatus(last_error_);
 }
 
 Result<void, S7Error> S7Client::writeArea(
     int t_area, uint16_t t_db_number, int t_start, int t_amount, int t_word_len, const uint8_t* tp_buffer) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
-    const auto range_status = validateRange(t_start, t_amount, "Offset and amount");
-    if (range_status.hasError()) {
-        return range_status;
-    }
-    const auto buffer_status = validateBuffer(tp_buffer, t_amount, "Write area");
-    if (buffer_status.hasError()) {
-        return buffer_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
+    SGRN_IF_ERROR_PROPAGATE(validateRange(t_start, t_amount, "Offset and amount"));
+    SGRN_IF_ERROR_PROPAGATE(validateBuffer(tp_buffer, t_amount, "Write area"));
 
     last_error_ =
         t_amount == 0 ? 0 : client_->WriteArea(t_area, t_db_number, t_start, t_amount, t_word_len, const_cast<uint8_t*>(tp_buffer));
@@ -290,10 +234,7 @@ Result<void, S7Error> S7Client::writeArea(
 }
 
 Result<void, S7Error> S7Client::readMultiVars(S7DataItem* tp_items, int t_item_count) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
     if (t_item_count < 0 || t_item_count > MaxVars) {
         return S7Error::InvalidParam;
     }
@@ -310,10 +251,7 @@ Result<void, S7Error> S7Client::readMultiVars(std::vector<S7DataItem>& tp_items)
 }
 
 Result<void, S7Error> S7Client::writeMultiVars(S7DataItem* tp_items, int t_item_count) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
     if (t_item_count < 0 || t_item_count > MaxVars) {
         return S7Error::InvalidParam;
     }
@@ -335,42 +273,24 @@ Result<std::vector<uint8_t>, S7Error> S7Client::readDB(uint16_t t_db_number, int
 }
 
 Result<void, S7Error> S7Client::readDB(uint16_t t_db_number, int t_start, int t_size, uint8_t* tp_buffer) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
     if (t_db_number == 0) {
         return S7Error::InvalidParam;
     }
-    const auto range_status = validateRange(t_start, t_size, "DB offset and size");
-    if (range_status.hasError()) {
-        return range_status;
-    }
-    const auto buffer_status = validateBuffer(tp_buffer, t_size, "DB read");
-    if (buffer_status.hasError()) {
-        return buffer_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(validateRange(t_start, t_size, "DB offset and size"));
+    SGRN_IF_ERROR_PROPAGATE(validateBuffer(tp_buffer, t_size, "DB read"));
 
     last_error_ = t_size == 0 ? 0 : client_->DBRead(t_db_number, t_start, t_size, tp_buffer);
     return makeStatus(last_error_);
 }
 
 Result<void, S7Error> S7Client::writeDB(uint16_t t_db_number, int t_start, int t_size, const uint8_t* tp_buffer) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
     if (t_db_number == 0) {
         return S7Error::InvalidParam;
     }
-    const auto range_status = validateRange(t_start, t_size, "DB offset and size");
-    if (range_status.hasError()) {
-        return range_status;
-    }
-    const auto buffer_status = validateBuffer(tp_buffer, t_size, "DB write");
-    if (buffer_status.hasError()) {
-        return buffer_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(validateRange(t_start, t_size, "DB offset and size"));
+    SGRN_IF_ERROR_PROPAGATE(validateBuffer(tp_buffer, t_size, "DB write"));
     last_error_ = t_size == 0 ? 0 : client_->DBWrite(t_db_number, t_start, t_size, const_cast<uint8_t*>(tp_buffer));
     return makeStatus(last_error_);
 }
@@ -380,36 +300,18 @@ Result<std::vector<uint8_t>, S7Error> S7Client::readMB(int t_start, int t_size) 
 }
 
 Result<void, S7Error> S7Client::readMB(int t_start, int t_size, uint8_t* tp_buffer) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
-    const auto range_status = validateRange(t_start, t_size, "MB offset and size");
-    if (range_status.hasError()) {
-        return range_status;
-    }
-    const auto buffer_status = validateBuffer(tp_buffer, t_size, "MB read");
-    if (buffer_status.hasError()) {
-        return buffer_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
+    SGRN_IF_ERROR_PROPAGATE(validateRange(t_start, t_size, "MB offset and size"));
+    SGRN_IF_ERROR_PROPAGATE(validateBuffer(tp_buffer, t_size, "MB read"));
 
     last_error_ = t_size == 0 ? 0 : client_->MBRead(t_start, t_size, tp_buffer);
     return makeStatus(last_error_);
 }
 
 Result<void, S7Error> S7Client::writeMB(int t_start, int t_size, const uint8_t* tp_buffer) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
-    const auto range_status = validateRange(t_start, t_size, "MB offset and size");
-    if (range_status.hasError()) {
-        return range_status;
-    }
-    const auto buffer_status = validateBuffer(tp_buffer, t_size, "MB write");
-    if (buffer_status.hasError()) {
-        return buffer_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
+    SGRN_IF_ERROR_PROPAGATE(validateRange(t_start, t_size, "MB offset and size"));
+    SGRN_IF_ERROR_PROPAGATE(validateBuffer(tp_buffer, t_size, "MB write"));
     last_error_ = t_size == 0 ? 0 : client_->MBWrite(t_start, t_size, const_cast<uint8_t*>(tp_buffer));
     return makeStatus(last_error_);
 }
@@ -419,36 +321,18 @@ Result<std::vector<uint8_t>, S7Error> S7Client::readEB(int t_start, int t_size) 
 }
 
 Result<void, S7Error> S7Client::readEB(int t_start, int t_size, uint8_t* tp_buffer) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
-    const auto range_status = validateRange(t_start, t_size, "EB offset and size");
-    if (range_status.hasError()) {
-        return range_status;
-    }
-    const auto buffer_status = validateBuffer(tp_buffer, t_size, "EB read");
-    if (buffer_status.hasError()) {
-        return buffer_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
+    SGRN_IF_ERROR_PROPAGATE(validateRange(t_start, t_size, "EB offset and size"));
+    SGRN_IF_ERROR_PROPAGATE(validateBuffer(tp_buffer, t_size, "EB read"));
 
     last_error_ = t_size == 0 ? 0 : client_->EBRead(t_start, t_size, tp_buffer);
     return makeStatus(last_error_);
 }
 
 Result<void, S7Error> S7Client::writeEB(int t_start, int t_size, const uint8_t* tp_buffer) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
-    const auto range_status = validateRange(t_start, t_size, "EB offset and size");
-    if (range_status.hasError()) {
-        return range_status;
-    }
-    const auto buffer_status = validateBuffer(tp_buffer, t_size, "EB write");
-    if (buffer_status.hasError()) {
-        return buffer_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
+    SGRN_IF_ERROR_PROPAGATE(validateRange(t_start, t_size, "EB offset and size"));
+    SGRN_IF_ERROR_PROPAGATE(validateBuffer(tp_buffer, t_size, "EB write"));
 
     last_error_ = t_size == 0 ? 0 : client_->EBWrite(t_start, t_size, const_cast<uint8_t*>(tp_buffer));
     return makeStatus(last_error_);
@@ -459,36 +343,18 @@ Result<std::vector<uint8_t>, S7Error> S7Client::readAB(int t_start, int t_size) 
 }
 
 Result<void, S7Error> S7Client::readAB(int t_start, int t_size, uint8_t* tp_buffer) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
-    const auto range_status = validateRange(t_start, t_size, "AB offset and size");
-    if (range_status.hasError()) {
-        return range_status;
-    }
-    const auto buffer_status = validateBuffer(tp_buffer, t_size, "AB read");
-    if (buffer_status.hasError()) {
-        return buffer_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
+    SGRN_IF_ERROR_PROPAGATE(validateRange(t_start, t_size, "AB offset and size"));
+    SGRN_IF_ERROR_PROPAGATE(validateBuffer(tp_buffer, t_size, "AB read"));
 
     last_error_ = t_size == 0 ? 0 : client_->ABRead(t_start, t_size, tp_buffer);
     return makeStatus(last_error_);
 }
 
 Result<void, S7Error> S7Client::writeAB(int t_start, int t_size, const uint8_t* tp_buffer) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
-    const auto range_status = validateRange(t_start, t_size, "AB offset and size");
-    if (range_status.hasError()) {
-        return range_status;
-    }
-    const auto buffer_status = validateBuffer(tp_buffer, t_size, "AB write");
-    if (buffer_status.hasError()) {
-        return buffer_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
+    SGRN_IF_ERROR_PROPAGATE(validateRange(t_start, t_size, "AB offset and size"));
+    SGRN_IF_ERROR_PROPAGATE(validateBuffer(tp_buffer, t_size, "AB write"));
 
     last_error_ = t_size == 0 ? 0 : client_->ABWrite(t_start, t_size, const_cast<uint8_t*>(tp_buffer));
     return makeStatus(last_error_);
@@ -500,36 +366,18 @@ Result<std::vector<uint8_t>, S7Error> S7Client::readTM(int t_start, int t_amount
 }
 
 Result<void, S7Error> S7Client::readTM(int t_start, int t_amount, uint8_t* tp_buffer) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
-    const auto range_status = validateRange(t_start, t_amount, "TM offset and amount");
-    if (range_status.hasError()) {
-        return range_status;
-    }
-    const auto buffer_status = validateBuffer(tp_buffer, t_amount, "TM read");
-    if (buffer_status.hasError()) {
-        return buffer_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
+    SGRN_IF_ERROR_PROPAGATE(validateRange(t_start, t_amount, "TM offset and amount"));
+    SGRN_IF_ERROR_PROPAGATE(validateBuffer(tp_buffer, t_amount, "TM read"));
 
     last_error_ = t_amount == 0 ? 0 : client_->TMRead(t_start, t_amount, tp_buffer);
     return makeStatus(last_error_);
 }
 
 Result<void, S7Error> S7Client::writeTM(int t_start, int t_amount, const uint8_t* tp_buffer) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
-    const auto range_status = validateRange(t_start, t_amount, "TM offset and amount");
-    if (range_status.hasError()) {
-        return range_status;
-    }
-    const auto buffer_status = validateBuffer(tp_buffer, t_amount, "TM write");
-    if (buffer_status.hasError()) {
-        return buffer_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
+    SGRN_IF_ERROR_PROPAGATE(validateRange(t_start, t_amount, "TM offset and amount"));
+    SGRN_IF_ERROR_PROPAGATE(validateBuffer(tp_buffer, t_amount, "TM write"));
 
     last_error_ = t_amount == 0 ? 0 : client_->TMWrite(t_start, t_amount, const_cast<uint8_t*>(tp_buffer));
     return makeStatus(last_error_);
@@ -541,36 +389,18 @@ Result<std::vector<uint8_t>, S7Error> S7Client::readCT(int t_start, int t_amount
 }
 
 Result<void, S7Error> S7Client::readCT(int t_start, int t_amount, uint8_t* tp_buffer) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
-    const auto range_status = validateRange(t_start, t_amount, "CT offset and amount");
-    if (range_status.hasError()) {
-        return range_status;
-    }
-    const auto buffer_status = validateBuffer(tp_buffer, t_amount, "CT read");
-    if (buffer_status.hasError()) {
-        return buffer_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
+    SGRN_IF_ERROR_PROPAGATE(validateRange(t_start, t_amount, "CT offset and amount"));
+    SGRN_IF_ERROR_PROPAGATE(validateBuffer(tp_buffer, t_amount, "CT read"));
 
     last_error_ = t_amount == 0 ? 0 : client_->CTRead(t_start, t_amount, tp_buffer);
     return makeStatus(last_error_);
 }
 
 Result<void, S7Error> S7Client::writeCT(int t_start, int t_amount, const uint8_t* tp_buffer) {
-    const auto client_status = requireClient();
-    if (client_status.hasError()) {
-        return client_status;
-    }
-    const auto range_status = validateRange(t_start, t_amount, "CT offset and amount");
-    if (range_status.hasError()) {
-        return range_status;
-    }
-    const auto buffer_status = validateBuffer(tp_buffer, t_amount, "CT write");
-    if (buffer_status.hasError()) {
-        return buffer_status;
-    }
+    SGRN_IF_ERROR_PROPAGATE(requireClient());
+    SGRN_IF_ERROR_PROPAGATE(validateRange(t_start, t_amount, "CT offset and amount"));
+    SGRN_IF_ERROR_PROPAGATE(validateBuffer(tp_buffer, t_amount, "CT write"));
 
     last_error_ = t_amount == 0 ? 0 : client_->CTWrite(t_start, t_amount, const_cast<uint8_t*>(tp_buffer));
     return makeStatus(last_error_);

@@ -90,7 +90,7 @@ void HttpAdapter::handleGetData(const http::HttpRequest& t_req, http::HttpRespon
     }
 
     // Tier 4: Unify REST via TreeCacheEngine
-    auto tree_path = sgrn::gateway::twin::TreePath::fromSlashed(path);
+    auto tree_path = ::sgrn::common::TreePath::fromSlashed(path);
     auto cached = sgrn::gateway::core::TreeCacheEngine::instance().get(tree_path, *t_memory.state());
     if (cached && *cached != "null" && *cached != "{}") {
         t_res.set_content(*cached, "application/json");

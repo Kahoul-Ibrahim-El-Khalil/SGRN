@@ -155,6 +155,13 @@ inline void createDirectoryStructure(const std::string& t_base_dir) {
     fs::create_directories(fs::path(t_base_dir) / "garage" / "data");
     fs::create_directories(fs::path(t_base_dir) / "var" / "log" / "nginx");
     fs::create_directories(fs::path(t_base_dir) / "var" / "run");
+    // nginx expects pre-existing per-request buffer dirs under its -p prefix
+    // (its mkdir() is not recursive). A missing var/tmp/nginx made every
+    // start die with "[emerg] mkdir() ... failed (2: No such file or
+    // directory)" while the unit alone was unchanged.
+    for (const char* kTempSub : {"client", "proxy", "fastcgi", "uwsgi", "scgi"}) {
+        fs::create_directories(fs::path(t_base_dir) / "var" / "tmp" / "nginx" / kTempSub);
+    }
 }
 
 inline void generateDefaultEnvFile(const std::filesystem::path& t_env_path, const std::string& t_user, const std::string& t_base_dir) {
@@ -249,16 +256,30 @@ inline void extractConfigAssets(const std::string& t_base_dir, const std::functi
         auto dec_result = sgrn::utils::compression::decompressStringZstd(asset.compressedView());
         if (!dec_result.hasError()) {
             fs::create_directories(out_path.parent_path());
-            // Dashboard-tuned live configs must survive reinit: back up the
-            // existing sgrn.json to sgrn.json.bak instead of silently
-            // discarding admin changes. Other assets are stateless templates.
-            if (out_path.filename() == "sgrn.json" && fs::exists(out_path)) {
+            // Dashboard-tuned live configs and the nginx staging tree (now
+            // served in place, see SGRN-nginx.service) must survive reinit:
+            // back them up instead of silently discarding admin changes.
+            // sgrn.json keeps its historical in-place .bak; nginx files use
+            // var/backup/nginx/ because an in-place .bak inside sites-enabled
+            // would be re-included by the `include sites-enabled/*` glob
+            // (double-parse emergency). Other assets are stateless templates.
+            const bool is_live_config = out_path.filename() == "sgrn.json" || vpath.starts_with("nginx/");
+            if (is_live_config && fs::exists(out_path)) {
                 std::error_code backup_ec;
-                fs::copy_file(out_path, fs::path(out_path.string() + ".bak"), fs::copy_options::overwrite_existing, backup_ec);
+                if (out_path.filename() == "sgrn.json") {
+                    fs::copy_file(out_path, fs::path(out_path.string() + ".bak"), fs::copy_options::overwrite_existing, backup_ec);
+                } else {
+                    fs::path bak_dir = fs::path(t_base_dir) / "var" / "backup" / "nginx";
+                    std::error_code mkdir_ec;
+                    fs::create_directories(bak_dir, mkdir_ec);
+                    fs::path bak = bak_dir / (fs::relative(out_path, fs::path(t_base_dir) / "nginx").string() + ".bak");
+                    fs::create_directories(bak.parent_path(), mkdir_ec);
+                    fs::copy_file(out_path, bak, fs::copy_options::overwrite_existing, backup_ec);
+                }
                 if (backup_ec) {
                     SGRN_WARN("DatastoreInit", "  -> Could not back up {}: {}", out_path.string(), backup_ec.message());
                 } else {
-                    SGRN_INFO("DatastoreInit", "  -> Backed up live config to {}.bak", out_path.string());
+                    SGRN_INFO("DatastoreInit", "  -> Backed up live config to var/backup (or .bak)");
                 }
             }
             std::ofstream out(out_path, std::ios::binary);
@@ -390,9 +411,10 @@ inline void stopLegacyServices(const std::string& t_sudo_user, uid_t t_user_uid)
 // the configureSystemd() euid check); every command tolerates absence.
 inline void removeObsoleteUnits(const std::filesystem::path& t_data_dir) {
     namespace fs = std::filesystem;
-    static constexpr std::string_view kObsoleteUnits[] = {"SGRN-postgrest.service", "SGRN-minio.service", "SGRN-redis.service"};
-    static constexpr std::string_view kObsoleteDataFiles[] = {
-        "systemd/SGRN-postgrest.service", "systemd/SGRN-minio.service", "systemd/SGRN-redis.service", "postgrest.conf"};
+    static constexpr std::string_view kObsoleteUnits[] = {
+        "SGRN-postgrest.service", "SGRN-minio.service", "SGRN-redis.service", "SGRN-api.service"};
+    static constexpr std::string_view kObsoleteDataFiles[] = {"systemd/SGRN-postgrest.service", "systemd/SGRN-minio.service",
+        "systemd/SGRN-redis.service", "systemd/SGRN-api.service", "postgrest.conf"};
 
     for (auto unit : kObsoleteUnits) {
         SGRN_INFO("DatastoreInit", "Removing obsolete unit {} (if present)...", unit);
@@ -411,7 +433,7 @@ inline void removeObsoleteUnits(const std::filesystem::path& t_data_dir) {
 }
 
 inline sgrn::Result<void, std::string> copyIfChanged(
-    const std::filesystem::path& t_src, const std::filesystem::path& t_dst, bool t_is_nginx, uid_t t_uid, gid_t t_gid) {
+    const std::filesystem::path& t_src, const std::filesystem::path& t_dst, uid_t t_uid, gid_t t_gid) {
     namespace fs = std::filesystem;
     if (!fs::exists(t_src)) {
         return sgrn::Result<void, std::string>::Error(fmt::format("Source file does not exist: {}", t_src.string()));
@@ -436,9 +458,6 @@ inline sgrn::Result<void, std::string> copyIfChanged(
         try {
             fs::create_directories(t_dst.parent_path());
             fs::copy_file(t_src, t_dst, fs::copy_options::overwrite_existing);
-            if (t_is_nginx) {
-                ::chown(t_dst.c_str(), t_uid, t_gid);
-            }
         } catch (const std::exception& e) {
             return sgrn::Result<void, std::string>::Error(
                 fmt::format("Failed to copy {} to {}: {}", t_src.string(), t_dst.string(), e.what()));
@@ -592,6 +611,142 @@ inline void waitForPostgres(const std::string& t_host, const std::string& t_port
     }
     SGRN_WARN("DatastoreInit", "PostgreSQL did not become ready in ~60s; continuing anyway.");
 }
+
+// ---------------------------------------------------------------------------
+// verifyInstall — install health / drift report (user-run, no root required)
+// ---------------------------------------------------------------------------
+
+/// Whole-file byte comparison; false when either side is unreadable.
+inline bool fileContentsEqual(const std::filesystem::path& t_a, const std::filesystem::path& t_b) {
+    std::ifstream fa(t_a, std::ios::binary);
+    std::ifstream fb(t_b, std::ios::binary);
+    if (!fa || !fb) {
+        return false;
+    }
+    return std::equal(std::istreambuf_iterator<char>(fa), std::istreambuf_iterator<char>(), std::istreambuf_iterator<char>(fb));
+}
+
+/// Read a file's full text; empty string when unreadable.
+inline std::string readTextFile(const std::filesystem::path& t_path) {
+    std::ifstream in(t_path);
+    if (!in) {
+        return {};
+    }
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+/// First Environment="PATH=..." value in a systemd unit file; empty when absent.
+inline std::string unitEnvPath(const std::string& t_unit_text) {
+    size_t pos = 0;
+    while ((pos = t_unit_text.find("Environment=", pos)) != std::string::npos) {
+        size_t val_start = t_unit_text.find('"', pos);
+        size_t line_end = t_unit_text.find('\n', pos);
+        if (val_start == std::string::npos || (line_end != std::string::npos && val_start > line_end)) {
+            break;
+        }
+        size_t val_end = t_unit_text.find('"', val_start + 1);
+        if (val_end == std::string::npos) {
+            break;
+        }
+        std::string kv = t_unit_text.substr(val_start + 1, val_end - val_start - 1);
+        if (kv.starts_with("PATH=")) {
+            return kv.substr(5);
+        }
+        pos = val_end + 1;
+    }
+    return {};
+}
+
+/// Shell-like lookup of t_program inside a ':'-separated dir list; empty when absent.
+inline std::string whichInPaths(const std::string& t_dirs, const std::string& t_program) {
+    namespace fs = std::filesystem;
+    size_t pos = 0;
+    while (pos <= t_dirs.size()) {
+        size_t sep = t_dirs.find(':', pos);
+        std::string dir = t_dirs.substr(pos, sep == std::string::npos ? std::string::npos : sep - pos);
+        if (!dir.empty()) {
+            fs::path candidate = fs::path(dir) / t_program;
+            std::error_code ec;
+            auto st = fs::status(candidate, ec);
+            if (!ec && fs::is_regular_file(st) && (st.permissions() & fs::perms::owner_exec) != fs::perms::none) {
+                return candidate.string();
+            }
+        }
+        if (sep == std::string::npos) {
+            break;
+        }
+        pos = sep + 1;
+    }
+    return {};
+}
+
+/// Run a command and capture its stdout (empty string when the pipe fails).
+inline std::string captureOutput(const std::string& t_cmd) {
+    std::string out;
+    if (FILE* pipe = ::popen(t_cmd.c_str(), "r")) {
+        char buf[512];
+        while (std::fgets(buf, sizeof(buf), pipe) != nullptr) {
+            out += buf;
+            if (out.size() > (1u << 16)) {
+                break;
+            }
+        }
+        ::pclose(pipe);
+    }
+    return out;
+}
+
+/// First integer behind "port": in a sgrn.json (0 when absent) — used for the
+/// live port check of the datastore's own listener.
+inline int firstConfiguredPort(const std::string& t_sgrn_json_text) {
+    size_t key = t_sgrn_json_text.find("\"port\"");
+    if (key == std::string::npos) {
+        return 0;
+    }
+    const auto is_digit = [](char t_c) { return t_c >= '0' && t_c <= '9'; };
+    for (size_t i = key + 6; i < t_sgrn_json_text.size(); ++i) {
+        char c = t_sgrn_json_text[i];
+        if (is_digit(c)) {
+            return std::atoi(t_sgrn_json_text.c_str() + i);
+        }
+        if (c == ':' || c == '"') {
+            continue;
+        }
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+            continue;
+        }
+        return 0; // unexpected structure before the number
+    }
+    return 0;
+}
+
+/// Pass/fail ledger for --verify-install; each entry logs one terse line.
+struct VerifyReport {
+    int passed = 0;
+    int failed = 0;
+
+    void pass(const std::string& t_what) {
+        ++passed;
+        SGRN_INFO("DatastoreInit", "  [ ok ] {}", t_what);
+    }
+    void fail(const std::string& t_what) {
+        ++failed;
+        SGRN_ERROR("DatastoreInit", "  [FAIL] {}", t_what);
+    }
+};
+
+// Checks an already-deployed instance against its staged templates and
+// runtime prerequisites, and prints PASS/FAIL lines. Designed against real
+// outage fingerprints observed in production:
+//   - live unit files drifted from staged templates (env update)
+//   - staged nginx.conf carried unsubstituted ${...} placeholders, missed
+//     `daemon off;`, or had an empty sites-enabled (zero server blocks,
+//     nginx runs "active" yet listens on nothing)
+//   - datastore binary, TLS certs or nginx buffer dirs missing under the
+//     -p prefix (starts die with "[emerg] mkdir() ... failed")
+//   - garage not resolvable on the DEPLOYED unit's PATH (datastore then
+//     crash-loops on its dependency start gate)
+// Live systemd/port checks are skipped outside systemd environments.
 
 // ---------------------------------------------------------------------------
 // Main Functions (refactored — each now delegates to focused helpers)
@@ -764,7 +919,6 @@ inline void configureSystemd() {
     fs::path systemd_src = fs::path(sgrn_data) / "systemd";
     fs::path nginx_src = fs::path(sgrn_data) / "nginx";
     fs::path systemd_dst = "/etc/systemd/system";
-    fs::path nginx_dst = fs::path(sgrn_deployment_env) / "etc" / "nginx";
 
     // Precondition: units are staged by `sgrn_datastore --generate-config`
     // (step 1 of the deployment runbook). Refuse loudly instead of
@@ -800,7 +954,7 @@ inline void configureSystemd() {
                 if (entry.path().filename() == "nginx.service" && fs::file_size(entry.path()) == 0)
                     continue;
                 fs::path dest = systemd_dst / entry.path().filename();
-                if (auto copy_result = copyIfChanged(entry.path(), dest, false, user_uid, user_gid); !copy_result.hasError()) {
+                if (auto copy_result = copyIfChanged(entry.path(), dest, user_uid, user_gid); !copy_result.hasError()) {
                     changed_services.push_back(dest.filename().string());
                 } else {
                     SGRN_ERROR("DatastoreInit", "{}", copy_result.error());
@@ -810,19 +964,35 @@ inline void configureSystemd() {
         }
     }
 
-    // Sync nginx configs
-    if (fs::exists(nginx_src)) {
-        for (const auto& entry : fs::recursive_directory_iterator(nginx_src)) {
-            if (entry.is_regular_file()) {
-                fs::path rel = fs::relative(entry.path(), nginx_src);
-                fs::path dest = nginx_dst / rel;
-                if (auto copy_result = copyIfChanged(entry.path(), dest, true, user_uid, user_gid); !copy_result.hasError()) {
-                    changed_services.push_back("SGRN-nginx.service");
-                } else {
-                    SGRN_ERROR("DatastoreInit", "{}", copy_result.error());
-                    copy_failed = true;
-                }
+    // Nginx serves the user-owned staging tree in place (SGRN-nginx.service
+    // ExecStart: -p ${SGRN_DATA_DIR} -c ${SGRN_DATA_DIR}/nginx/nginx.conf).
+    // The old deploy target — copying site configs into
+    // $SGRN_DEPLOYMENT_ENV/etc/nginx — is gone on purpose: micromamba env
+    // updates replace that directory wholesale, which took the whole site
+    // offline once (globs matched nothing -> zero server blocks -> nginx ran
+    // "active" with no listeners and logged no error).
+    if (!fs::exists(nginx_src / "nginx.conf")) {
+        SGRN_ERROR("DatastoreInit", "Error: no staged nginx config at {}.", (nginx_src / "nginx.conf").string());
+        SGRN_ERROR("DatastoreInit", "Run 'sgrn_datastore --generate-config' as user, then re-run this command.");
+        std::exit(EXIT_FAILURE);
+    }
+
+    // nginx's mkdir() is not recursive: the -p prefix's var/{log,run,tmp}/nginx
+    // tree must exist before bind time or every start dies with
+    // "[emerg] mkdir() ... failed (2: No such file or directory)".
+    // --generate-config creates these as the user; recreate anything missing
+    // here (as root they'd be root-owned — chown the tree back to the user).
+    {
+        bool any_created = false;
+        for (const char* kRelDir : {"var/log/nginx", "var/run", "var/tmp/nginx/client", "var/tmp/nginx/proxy", "var/tmp/nginx/fastcgi",
+                 "var/tmp/nginx/uwsgi", "var/tmp/nginx/scgi"}) {
+            if (fs::create_directories(fs::path(sgrn_data) / kRelDir)) {
+                any_created = true;
             }
+        }
+        if (any_created) {
+            std::system(fmt::format("chown -R '{}:{}' '{}/var' 2>/dev/null", user_uid, user_gid, sgrn_data).c_str());
+            SGRN_WARN("DatastoreInit", "Created missing nginx runtime dirs under {}/var (root-owned entries chowned).", sgrn_data);
         }
     }
 
@@ -863,6 +1033,231 @@ inline void bootstrapDatabase() {
     SGRN_INFO("DatastoreInit", "To install and activate system-wide systemd services:");
     SGRN_INFO("DatastoreInit", "  sudo <bin> --config-systemd");
     SGRN_INFO("DatastoreInit", "");
+}
+
+inline int verifyInstall(const std::string& t_base_dir) {
+    namespace fs = std::filesystem;
+    VerifyReport report;
+
+    SGRN_INFO("DatastoreInit", "Verifying SGRN datastore install under {}...", t_base_dir);
+
+    // 0. .env present + parseable (most later checks degrade to defaults
+    // without it, which then report as the actionable failures they are).
+    fs::path env_path = fs::path(t_base_dir) / ".env";
+    if (auto env_result = loadEnvFile(env_path); env_result.hasError()) {
+        report.fail(fmt::format(".env not loadable ({}): run --generate-config first", env_path.string()));
+    } else {
+        report.pass(".env loaded");
+    }
+
+    // 1. staged unit templates exist and are non-empty.
+    std::vector<std::string> staged_units;
+    fs::path systemd_stage = fs::path(t_base_dir) / "systemd";
+    std::error_code iter_ec;
+    if (fs::exists(systemd_stage, iter_ec)) {
+        for (const auto& entry : fs::directory_iterator(systemd_stage, iter_ec)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".service" && fs::file_size(entry.path()) > 0) {
+                staged_units.push_back(entry.path().filename().string());
+            }
+        }
+    }
+    std::sort(staged_units.begin(), staged_units.end());
+    if (staged_units.empty()) {
+        report.fail(fmt::format("no staged systemd units at {} — run --generate-config", systemd_stage.string()));
+    } else {
+        report.pass(fmt::format("{} staged systemd unit(s)", staged_units.size()));
+    }
+
+    // 2. deployed units match staged templates (byte-level drift check).
+    const fs::path systemd_dst_path = "/etc/systemd/system";
+    for (const auto& unit : staged_units) {
+        fs::path live = systemd_dst_path / unit;
+        if (!fs::exists(live)) {
+            report.fail(fmt::format("{} staged but NOT deployed — sudo sgrn_datastore --config-systemd", unit));
+        } else if (!fileContentsEqual(fs::path(systemd_stage) / unit, live)) {
+            report.fail(fmt::format("{} drifted from staged template — sudo sgrn_datastore --config-systemd", unit));
+        } else {
+            report.pass(fmt::format("{} deployed == staged", unit));
+        }
+    }
+
+    // 3. deployed SGRN units without a staged counterpart (retired service
+    // lingering enabler-of-confusion; --config-systemd's obsolete-unit sweep
+    // only clears its own known list, so keep eyes on anything else here).
+    for (const auto& entry : fs::directory_iterator(systemd_dst_path, iter_ec)) {
+        std::string name = entry.path().filename().string();
+        if (entry.is_regular_file() && name.starts_with("SGRN-") && name.ends_with(".service") &&
+            std::find(staged_units.begin(), staged_units.end(), name) == staged_units.end()) {
+            report.fail(fmt::format("deployed unit {} has no staged counterpart (obsolete/unmanaged)", name));
+        }
+    }
+
+    // 4. staged nginx tree health: substitutes applied, daemon off present,
+    // sites-enabled non-empty (empty -> zero server blocks, no listeners,
+    // no error — the outage fingerprint that is hardest to spot).
+    std::string nginx_text = readTextFile(fs::path(t_base_dir) / "nginx" / "nginx.conf");
+    if (nginx_text.empty()) {
+        report.fail(fmt::format("no staged nginx.conf at {}/nginx/nginx.conf — run --generate-config", t_base_dir));
+    } else if (nginx_text.find("${") != std::string::npos) {
+        report.fail("staged nginx.conf still contains ${...} template placeholders — regenerate it");
+    } else if (nginx_text.find("daemon off;") == std::string::npos) {
+        report.fail("staged nginx.conf lacks 'daemon off;' — systemd MAINPID tracking breaks");
+    } else {
+        report.pass("staged nginx.conf template healthy");
+    }
+
+    {
+        bool has_sites = false;
+        fs::path sites_dir = fs::path(t_base_dir) / "nginx" / "sites-enabled";
+        std::error_code sites_ec;
+        if (fs::exists(sites_dir, sites_ec)) {
+            for (const auto& entry : fs::directory_iterator(sites_dir, sites_ec)) {
+                if (entry.is_regular_file() && entry.path().filename() != "nginx.service") {
+                    has_sites = true;
+                    break;
+                }
+            }
+        }
+        if (has_sites) {
+            report.pass("staged nginx sites-enabled non-empty");
+        } else {
+            report.fail("staged nginx sites-enabled empty — nginx would run with zero server blocks");
+        }
+    }
+
+    // 5. datastore binary + TLS certs under the data dir.
+    {
+        std::string bin_dir = envOrDefault("SGRN_BIN_DIR", "/usr/local/bin");
+        if (hasDatastoreBinary(bin_dir)) {
+            report.pass(fmt::format("sgrn_datastore binary at {}/sgrn_datastore", bin_dir));
+        } else {
+            report.fail(fmt::format("no sgrn_datastore in SGRN_BIN_DIR={} — rebuild/install, re-run --generate-config", bin_dir));
+        }
+
+        std::string data_dir = envOrDefault("SGRN_DATA_DIR", t_base_dir);
+        fs::path cert_dir = fs::path(data_dir) / "certs";
+        if (fs::exists(cert_dir / "server.crt") && fs::exists(cert_dir / "server.key")) {
+            report.pass("TLS certs present (certs/server.crt + server.key)");
+        } else {
+            report.fail(fmt::format("TLS certs missing at {} — --generate-config generates them", cert_dir.string()));
+        }
+
+        // 6. nginx buffer dirs under the -p prefix (mkdir() not recursive).
+        for (const char* kTempSub : {"client", "proxy", "fastcgi", "uwsgi", "scgi"}) {
+            fs::path temp_dir = fs::path(data_dir) / "var" / "tmp" / "nginx" / kTempSub;
+            if (fs::is_directory(temp_dir)) {
+                report.pass(fmt::format("nginx buffer dir {}", temp_dir.string()));
+            } else {
+                report.fail(fmt::format("missing {}: starts die with '[emerg] mkdir() ... failed'", temp_dir.string()));
+            }
+        }
+    }
+
+    // 7. deployment env prerequisites: nginx binary + mime.types.
+    {
+        std::string deployment_env = envOrDefault("SGRN_DEPLOYMENT_ENV", "");
+        if (deployment_env.empty() || deployment_env.find("$ENV{") != std::string::npos) {
+            report.fail(
+                fmt::format("SGRN_DEPLOYMENT_ENV unresolved in .env (got '{}') — set it and re-run --generate-config", deployment_env));
+        } else {
+            std::string nginx_bin;
+            for (const char* kSub : {"bin", "sbin"}) {
+                fs::path candidate = fs::path(deployment_env) / kSub / "nginx";
+                std::error_code ec;
+                auto st = fs::status(candidate, ec);
+                if (!ec && fs::is_regular_file(st)) {
+                    nginx_bin = candidate.string();
+                    break;
+                }
+            }
+            if (nginx_bin.empty()) {
+                report.fail(fmt::format("nginx binary not in {}/bin or {}/sbin", deployment_env, deployment_env));
+            } else {
+                report.pass(fmt::format("nginx binary at {}", nginx_bin));
+            }
+
+            if (fs::exists(fs::path(deployment_env) / "etc" / "nginx" / "mime.types")) {
+                report.pass("mime.types available in deployment env");
+            } else {
+                report.fail(fmt::format("mime.types missing in {}/etc/nginx — staged conf includes it", deployment_env));
+            }
+        }
+    }
+
+    // 8. garage binary resolvable on the DEPLOYED unit's PATH (the exact
+    // fingerprint of the outage: unit executes `env garage`, which fails
+    // with status 127 and crash-loops its dependents).
+    {
+        std::string garage_unit = readTextFile(fs::path("/etc/systemd/system") / "SGRN-garage.service");
+        std::string unit_paths = unitEnvPath(garage_unit);
+        if (unit_paths.empty() || garage_unit.empty()) {
+            report.fail("SGRN-garage.service not deployed or has no PATH environment");
+        } else if (whichInPaths(unit_paths, "garage").empty()) {
+            report.fail(
+                fmt::format("garage NOT found on SGRN-garage unit PATH '{}' — place binary/symlink in one of these dirs", unit_paths));
+        } else {
+            report.pass("garage binary resolvable on deployed unit PATH");
+        }
+    }
+
+    // 9. live services + listening ports (skipped outside systemd). Note:
+    // `is-system-running` exits nonzero for a healthy-but-"degraded" system
+    // (some unrelated failed unit) — systemd may still be fully operational
+    // for our units, so accept degraded as up. Verified live: this machine
+    // reports "degraded" yet all SGRN services run.
+    {
+        std::string sys_state = captureOutput("systemctl is-system-running 2>/dev/null");
+        const bool systemd_up = sys_state.rfind("running", 0) == 0 || sys_state.rfind("degraded", 0) == 0;
+        if (systemd_up) {
+            for (const auto& unit : staged_units) {
+                // Oneshot umbrellas (e.g. sgrn.service "start everything") idle
+                // in 'inactive' by design (start-on-demand); fail-loud only for
+                // real daemons.
+                const bool oneshot = unitType(unit) == "oneshot";
+                const std::string state = captureOutput(fmt::format("systemctl show -p ActiveState --value {} 2>/dev/null", unit));
+                const std::string trimmed = state.substr(0, state.find_first_of("\r\n"));
+                if (oneshot) {
+                    report.pass(fmt::format("service {} oneshot (state: {})", unit, trimmed.empty() ? "?" : trimmed));
+                } else if (std::system(fmt::format("systemctl is-active --quiet {} 2>/dev/null", unit).c_str()) == 0) {
+                    report.pass(fmt::format("service {} active", unit));
+                } else {
+                    report.fail(fmt::format("service {} NOT active", unit));
+                }
+            }
+
+            std::string data_dir = envOrDefault("SGRN_DATA_DIR", t_base_dir);
+            int ds_port = firstConfiguredPort(readTextFile(fs::path(data_dir) / "sgrn.json"));
+            if (ds_port <= 0) {
+                report.fail("sgrn.json listeners: no \"port\": entry found (datastore cannot bind)");
+                ds_port = 0;
+            }
+            std::vector<std::pair<int, const char*>> ports = {
+                {80, "nginx HTTP (redirect)"}, {443, "nginx TLS"}, {3900, "garage S3"}, {3903, "garage admin"}};
+            if (ds_port > 0) {
+                ports.push_back({ds_port, "datastore (sgrn.json listener)"});
+            }
+            for (const auto& [port, label] : ports) {
+                if (std::system(fmt::format("ss -ltn 2>/dev/null | grep -qE ':{:d}[[:space:]]'", port).c_str()) == 0) {
+                    report.pass(fmt::format("port {} ({}): listening", port, label));
+                } else {
+                    report.fail(fmt::format("port {} ({}): not listening", port, label));
+                }
+            }
+        } else {
+            SGRN_WARN("DatastoreInit", "systemd not running here; skipping live service and port checks.");
+        }
+    }
+
+    SGRN_INFO("DatastoreInit", "");
+    SGRN_INFO("DatastoreInit", "Verification: {} ok, {} failed", report.passed, report.failed);
+    if (report.failed == 0) {
+        SGRN_INFO("DatastoreInit", "Install healthy.");
+        return 0;
+    }
+    SGRN_ERROR("DatastoreInit", "Drift detected. Standard repair sequence:");
+    SGRN_INFO("DatastoreInit", "  1. sgrn_datastore --generate-config        (user: refresh staged templates)");
+    SGRN_INFO("DatastoreInit", "  2. sudo sgrn_datastore --config-systemd   (root: deploy + restart services)");
+    return report.failed;
 }
 
 } // namespace sgrn::datastore::bootstrap

@@ -16,7 +16,7 @@ sgrn_add_component_library(
         sgrn::core
         sgrn::utils
         sgrn::fmt
-        sgrn_gateway_twin
+        sgrn::scl   # time_grid_resampler.hpp uses scl/types/DbField in its public API
         sgrn::s7codec
 )
 
@@ -34,7 +34,7 @@ sgrn_target(sgrn_ml)
 # =============================================================================
 
 if(SGRN_BUILD_TESTS)
-    foreach(test_name feature_spec_test manifest_test extractor_test engine_test eval_test twin_bridge_test time_grid_resampler_test columnar_dataset_test pipeline_e2e_test)
+    foreach(test_name feature_spec_test manifest_test extractor_test engine_test eval_test time_grid_resampler_test columnar_dataset_test)
         sgrn_add_component_executable(
             TARGET ${test_name}
             SOURCES tests/${test_name}.cpp

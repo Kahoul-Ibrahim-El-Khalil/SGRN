@@ -113,8 +113,8 @@ Result<UA_DataValue, OpcUaAdapterError> decodeTypedArrayToDataValue(const OpcUaD
         auto decoded = s7codec::decodeScalar(t_ctx.p_node_ctx->type, s7codec::ReadBuffer{p_elem_ptr, buf_remaining},
             s7codec::DecodeOptions{//
                 .endian = nodeEndian(*t_ctx.p_node_ctx),
-                .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(bit_idx)},
-                .stringCapacity = s7codec::StringCapacity{decode_count}});
+                .bit_offset = s7codec::BitOffset{static_cast<uint8_t>(bit_idx)},
+                .string_capacity = s7codec::StringCapacity{decode_count}});
 
         // Enum arrays are projected as Int32 (the UA encoding of enumeration
         // values, §Part 6 5.1.5). Match on the enum context, not the element
@@ -228,7 +228,7 @@ Result<UA_DataValue, OpcUaAdapterError> decodeMemoryBytesToDataValue(const OpcUa
     auto decoded = s7codec::decodeScalar(t_ctx.p_node_ctx->type, s7codec::ReadBuffer{t_ctx.p_raw_data, t_ctx.size},
         s7codec::DecodeOptions{//
             .endian = nodeEndian(*t_ctx.p_node_ctx),
-            .stringCapacity = s7codec::StringCapacity{decode_count}});
+            .string_capacity = s7codec::StringCapacity{decode_count}});
 
     SGRN_RETURN_ERROR_IF(!decoded.valid(), OpcUaAdapterError::DECODE_FAILED);
 
@@ -313,7 +313,7 @@ Result<void, OpcUaAdapterError> decodeArrayOfBooleansFromMemory(const uint8_t* t
         const uint8_t* p_bit_ptr = tp_memory_buf + (j / 8U);
 
         auto dv = s7codec::decodeScalar(DataType::Bool, s7codec::ReadBuffer{p_bit_ptr, 1},
-            s7codec::DecodeOptions{.bitOffset = s7codec::BitOffset{static_cast<uint8_t>(j % 8U)}});
+            s7codec::DecodeOptions{.bit_offset = s7codec::BitOffset{static_cast<uint8_t>(j % 8U)}});
 
         t_out_arr[j] = dv.valid() && dv.b();
     }
@@ -345,8 +345,8 @@ Result<void, OpcUaAdapterError> decodeScalarToUa(
     auto dv = s7codec::decodeScalar(t_view.type, s7codec::ReadBuffer{tp_memory_buf, span},
         s7codec::DecodeOptions{//
             .endian = t_view.endian,
-            .bitOffset = s7codec::BitOffset{t_view.bit_index},
-            .stringCapacity = s7codec::StringCapacity{decode_count}});
+            .bit_offset = s7codec::BitOffset{t_view.bit_index},
+            .string_capacity = s7codec::StringCapacity{decode_count}});
 
     SGRN_RETURN_ERROR_IF(!dv.valid(), OpcUaAdapterError::DECODE_FAILED);
 

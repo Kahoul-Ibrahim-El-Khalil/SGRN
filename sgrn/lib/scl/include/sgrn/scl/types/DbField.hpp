@@ -1,5 +1,5 @@
 #pragma once
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <sgrn/scl/types/DataType.hpp>
 #include <map>
 #include <optional>
@@ -44,7 +44,11 @@ struct DbField {
     std::string udt_name;
     std::vector<DbField> children;
     uint32_t struct_size{0};
-    s7codec::Endian endianness{s7codec::Endian::Little};
+    /// Block-scoped byte order. Big-Endian is the S7 wire default and the
+    /// canonical value here: the JSON form omits the key when it is Big, and
+    /// the encode/decode entry points default t_e to Endian::Big. A .scl file
+    /// without #LITTLE_ENDIAN directive stamps this from the file/block scope.
+    s7codec::Endian endianness{s7codec::Endian::Big};
     std::optional<std::string> unit;
     /// Physical dimension class (e.g. "pressure", "temperature", "flow").
     /// Set by #DIMENSION("..."); constrained by file-level #DIMENSIONS(...).

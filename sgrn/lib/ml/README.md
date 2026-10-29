@@ -1,6 +1,6 @@
 # SGRN Machine Learning & Digital Twin Bridge (`sgrn_ml`)
 
-The `sgrn_ml` component provides the core C++23 machine learning runtime, feature extraction engine, discrete time-grid resampler, zero-copy columnar dataset architecture (`.sgrnb`), and live Digital Twin inference bridge (`TwinBridge`) for industrial edge automation.
+The `sgrn_ml` component provides the core C++23 machine learning runtime, feature extraction engine, discrete time-grid resampler, and zero-copy columnar dataset architecture (`.sgrnb`) for industrial edge automation. The live Digital Twin inference bridge (`TwinBridge`) lives in the sibling `sgrn_ml_bridge` component — it depends on both `sgrn_ml` and `sgrn_gateway_twin`, keeping either layer free of the other's headers (see `sgrn/lib/ml_bridge/CMakeLists.txt`).
 
 ---
 
@@ -72,7 +72,7 @@ Traditional ML data preparation relies on intermediate CSV files. In high-freque
 
 ---
 
-## 4. Live Digital Twin Inference Bridge (`TwinBridge`)
+## 4. Live Digital Twin Inference Bridge (`TwinBridge`, in `sgrn_ml_bridge`)
 
 The `TwinBridge` binds trained machine learning models to live PLC memory segments:
 

@@ -28,11 +28,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      build: ${{ steps.filter.outputs.build }}      # anything that affects C++ build inputs
-      cpp: ${{ steps.filter.outputs.cpp }}          # C++ sources/headers/tests
-      ci: ${{ steps.filter.outputs.ci }}            # workflow / CI tooling
-      python: ${{ steps.filter.outputs.python }}    # python package + research experiments
-      ts: ${{ steps.filter.outputs.ts }}            # typescript / web assets
+      build: ${{ steps.filter.outputs.build }}
+      cpp: ${{ steps.filter.outputs.cpp }}
+      ci: ${{ steps.filter.outputs.ci }}
+      python: ${{ steps.filter.outputs.python }}
+      ts: ${{ steps.filter.outputs.ts }}
+      deps: ${{ steps.filter.outputs.deps }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -69,25 +70,92 @@ jobs:
               - 'sgrn/typescript/**'
               - 'sgrn/web/**'
               - 'tests/ts/**'
+            deps:
+              - 'micromamba/**'
+              - 'cmake/**'
+              - 'CMakePresets.json'
+              - 'deps/'
+
+  # ── 0. Setup environment (micromamba + bun) ─────────────────────────────
+  setup:
+    name: Phase 0 — Setup environment
+    needs: changes
+    if: >
+      needs.changes.outputs.deps == 'true' ||
+      needs.changes.outputs.build == 'true' ||
+      needs.changes.outputs.cpp == 'true' ||
+      needs.changes.outputs.python == 'true' ||
+      needs.changes.outputs.ts == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Restore environment cache
+        id: env-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .prefix
+            .bun-dl
+          key: env-${{ runner.os }}-${{ hashFiles('micromamba/SGRN.yml', '.github/workflows/ci.yml') }}
+          restore-keys: |
+            env-${{ runner.os }}-
+
+      - name: Setup micromamba environment
+        if: steps.env-cache.outputs.cache-hit != 'true'
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: micromamba/SGRN.yml
+          environment-name: SGRN
+          cache-environment: true
+          cache-downloads: true
+          init-shell: bash
+          post-cleanup: environment
+
+      - name: Install bun
+        if: steps.env-cache.outputs.cache-hit != 'true'
+        uses: oven-sh/bun@v1
+
+      - name: Save environment cache
+        if: steps.env-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .prefix
+            .bun-dl
+          key: ${{ steps.env-cache.outputs.cache-primary-key }}
 
   # ── 1. Dependency build & staging (.prefix) ───────────────────────────────
   deps:
     name: Phase 1 — dependencies (.prefix)
-    needs: changes
+    needs: [changes, setup]
     if: >
-      needs.changes.outputs.build == 'true' ||
-      needs.changes.outputs.ci == 'true'
+      always() &&
+      needs.changes.outputs.deps == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     defaults:
       run:
         shell: bash -el {0}
-    outputs:
-      cache_key: ${{ steps.deps-cache.outputs.cache-primary-key }}
     steps:
-      # ── 2a. Free disk space ────────────────────────────────────────────────
-      # The conda env is ~2 GB; deps prefix 3-4 GB; build tree 3-5 GB.
-      # Reclaim the largest pre-installed blobs first.
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .prefix
+            .cpm-cache
+          key: deps-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'cmake/**', 'micromamba/SGRN.yml', 'sgrn/CMakeLists.txt') }}
+          restore-keys: |
+            deps-${{ runner.os }}-
+
       - name: Free disk space
         shell: bash
         run: |
@@ -104,43 +172,7 @@ jobs:
             /usr/local/.ghcup
           echo "=== Disk after pruning ==="
           df -h /
-      # ── 2b. Checkout (required: environment-file and cmake/ presets live in the repo) ──
-      - name: Check out code
-        uses: actions/checkout@v4
 
-      # ── 2c. Micromamba / conda environment ────────────────────────────────
-      # setup-micromamba activates the env in every subsequent bash -el step.
-      - name: Set up micromamba (SGRN environment)
-        uses: mamba-org/setup-micromamba@v2
-        with:
-          environment-file: micromamba/SGRN.yml
-          environment-name: SGRN
-          cache-environment: true
-          cache-downloads: true
-          init-shell: bash
-          post-cleanup: environment
-
-      # ── 2c. Ninja & compiler paths ────────────────────────────────────────
-      - name: Export build environment
-        run: |
-          echo "PATH_TO_NINJA=$CONDA_PREFIX/bin/ninja" >> "$GITHUB_ENV"
-          echo "CC_BIN=$CONDA_PREFIX/bin/clang"        >> "$GITHUB_ENV"
-          echo "CXX_BIN=$CONDA_PREFIX/bin/clang++"     >> "$GITHUB_ENV"
-
-      # ── 2d. Restore/save dependency cache ────────────────────────────────
-      # Split restore/save so we can save even when the rest of the job is skipped.
-      - name: Restore dependency cache (.prefix + CPM sources)
-        id: deps-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            .prefix
-            .cpm-cache
-          key: deps-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'cmake/**', 'deps/**', 'micromamba/SGRN.yml') }}
-          restore-keys: |
-            deps-${{ runner.os }}-
-
-      # ── 2e. Configure & build dependencies ───────────────────────────────
       - name: Configure dependencies
         if: steps.deps-cache.outputs.cache-hit != 'true'
         run: |
@@ -150,8 +182,6 @@ jobs:
             -DCPM_SOURCE_CACHE="$CPM_CACHE_DIR" \
             -DUSE_PCH=OFF
 
-      # The linux-deps-static BUILD preset has "targets": ["install"], so
-      # cmake --build --preset linux-deps-static runs compile + install in one shot.
       - name: Build & stage dependencies (installs to .prefix/linux-static)
         if: steps.deps-cache.outputs.cache-hit != 'true'
         run: |
@@ -168,79 +198,22 @@ jobs:
             .cpm-cache
           key: ${{ steps.deps-cache.outputs.cache-primary-key }}
 
-  # ── 2. Build + tests (Phase 2; every downstream test tier lives here) ────
-  build-test:
-    name: Phase 2 — build & test
-    needs: [changes, deps]
+  # ── 2. Build SGRN ───────────────────────────────────────────────────────
+  build:
+    name: Phase 2 — build SGRN
+    needs: [changes, setup, deps]
     if: >
       always() &&
-      (needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true')
+      needs.changes.outputs.build == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 120
     defaults:
       run:
         shell: bash -el {0}
     steps:
-      # ── 2d. Checkout (required: world/web assets and CMake presets live in the repo) ──
       - name: Check out code
         uses: actions/checkout@v4
 
-      # ── 2e. Micromamba environment ─────────────────────────────────────
-      - name: Set up micromamba (SGRN environment)
-        uses: mamba-org/setup-micromamba@v2
-        with:
-          environment-file: micromamba/SGRN.yml
-          environment-name: SGRN
-          cache-environment: true
-          cache-downloads: true
-          init-shell: bash
-          post-cleanup: environment
-
-      # ── 3b. Build-environment exports ─────────────────────────────────
-      - name: Export build environment
-        run: |
-          echo "PATH_TO_NINJA=$CONDA_PREFIX/bin/ninja" >> "$GITHUB_ENV"
-          echo "CC_BIN=$CONDA_PREFIX/bin/clang"        >> "$GITHUB_ENV"
-          echo "CXX_BIN=$CONDA_PREFIX/bin/clang++"     >> "$GITHUB_ENV"
-
-      # ── 3c. Web asset pre-build (bun + Vite) ───────────────────────────
-      # sgrn/web/gateway/dist/ is gitignored; CMake's custom command runs
-      # `bun run build` at build time, but fails if dist/ doesn't already
-      # exist. Pre-build here so the sentinel .build_done is present.
-      - name: Set up Bun (for web asset builds)
-        uses: oven-sh/setup-bun@v2
-
-      - name: Build gateway web assets (Svelte + Vite)
-        run: |
-          (cd sgrn/typescript && bun install --frozen-lockfile 2>/dev/null || bun install)
-          (cd sgrn/web/gateway && bun install --frozen-lockfile 2>/dev/null || bun install)
-          (cd sgrn/web/gateway && bun run build)
-
-      - name: Build datastore web assets (React + Vite)
-        run: |
-          (cd sgrn/web/datastore && bun install --frozen-lockfile 2>/dev/null || bun install)
-          (cd sgrn/web/datastore && bun run build)
-
-      # ── 3d. Restore dep cache produced by the deps job ──────────────────
-      - name: Restore dependency cache (.prefix + CPM sources)
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            .prefix
-            .cpm-cache
-          key: deps-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'cmake/**', 'deps/**', 'micromamba/SGRN.yml') }}
-          restore-keys: |
-            deps-${{ runner.os }}-
-
-      # ── 3e. ccache ─────────────────────────────────────────────────────
-      - name: Restore ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ccache
-          key: ccache-${{ runner.os }}-${{ github.sha }}
-          restore-keys: ccache-${{ runner.os }}-
-
-      # ── 3f. Phase 2 — configure & build SGRN ──────────────────────────
       - name: Configure SGRN
         run: |
           cmake --preset "$PRESET_MAIN" \
@@ -255,81 +228,78 @@ jobs:
         run: |
           cmake --build --preset "$PRESET_MAIN" -j"$(nproc)"
           ccache --show-stats
-          echo "=== Disk after Phase 2 ==="
+          echo "=== Disk after build ==="
           df -h /
 
-      # ── 3g. C++ unit tests (ctest) ────────────────────────────────────
-      # Tests excluded and reasons:
-      #
-      #   opcua_discovery_test      - Uses gateway_fixture.hpp to spawn gateway +
-      #                               s7shell. S7 protocol listens on port 102, a
-      #                               privileged port (<1024) on Linux; binding it
-      #                               requires CAP_NET_BIND_SERVICE or root.
-      #                               The test self-SKIPs when the gateway binary is
-      #                               missing, but may fail with EACCES on the port
-      #                               bind before the skip check. Excluded to avoid
-      #                               non-deterministic failures on the runner.
-      #
-      #   opcua_enum_test           - Same reason (gateway_fixture.hpp + port 102).
-      #
-      #   modbus_registers_test     - Spawns gateway via gateway_fixture.hpp; the
-      #                               Modbus listener default is port 502 (also
-      #                               privileged). Self-SKIPs when binary missing.
-      #
-      #   s7_southbound_test        - Spawns gateway (gateway_fixture.hpp); S7 on
-      #                               port 102. Self-SKIPs when binary missing.
-      #
-      #   binary_live_snapshot_test - Spawns gateway + IXWebSocket client; same
-      #                               port-privilege concern. Excluded for consistency.
-      #
-      #   pg_auth_functions_test    - Needs a live PostgreSQL cluster. Self-SKIPs
-      #                               (exit 0) when PGHOST unset and no initdb in
-      #                               PATH, but excluded to keep output clean.
-      #                               Re-enable when a PG service container is added.
+  # ── 3. Run C++ unit tests ───────────────────────────────────────────────
+  cpp-test:
+    name: Phase 3 — C++ unit tests
+    needs: [deps, build]
+    if: >
+      always() &&
+      needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Configure test environment
+        run: |
+          echo "PATH_TO_NINJA=$CONDA_PREFIX/bin/ninja" >> "$GITHUB_ENV"
+          echo "CC_BIN=$CONDA_PREFIX/bin/clang"        >> "$GITHUB_ENV"
+          echo "CXX_BIN=$CONDA_PREFIX/bin/clang++"     >> "$GITHUB_ENV"
+
+      - name: Restore ctest cache
+        uses: actions/cache@v4
+        with:
+          path: .build/$PRESET_MAIN/Testing/Temporary/LastTest.log
+          key: ctest-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            ctest-${{ runner.os }}-
+
       - name: C++ unit tests (ctest)
         run: |
           ctest \
             --test-dir ".build/$PRESET_MAIN" \
             --output-on-failure \
             --timeout 120 \
-            -j2 \
-            -E "opcua_discovery_test|opcua_enum_test|modbus_registers_test|s7_southbound_test|binary_live_snapshot_test|pg_auth_functions_test"
+            -j2
 
-      # ── 3h. Python tests (non-blocking) ────────────────────────────────
-      # gateway-arrays needs a live gateway; scl-validation needs the built
-      # sclc binary (not always available). Kept non-blocking until the pip:
-      # section of SGRN.yml is confirmed to install cleanly on the runner and
-      # the offline tests (gateway-rest, scl-dtypes) are green.
-      - name: Python tests (non-blocking)
-        continue-on-error: true
-        run: python3 tests/run_tests.py --kind python
+  # ── 4. Python / TypeScript tests (non-blocking) ────────────────────────
+  py-ts-test:
+    name: Phase 4 — Python / TS tests
+    needs: [changes, setup, deps]
+    if: >
+      always() &&
+      (needs.changes.outputs.python == 'true' ||
+       needs.changes.outputs.ts == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
 
-      # ── 3i. TypeScript E2E tests (non-blocking) ────────────────────────
-      # Spawns a live gateway+s7shell internally. The s7shell needs port 102
-      # (privileged). Kept non-blocking until a sysctl/capability solution is
-      # confirmed or the tests are refactored to use unprivileged ports.
       - name: TypeScript E2E tests (non-blocking)
         continue-on-error: true
         run: |
           (cd tests/ts && bun install --frozen-lockfile 2>/dev/null || bun install)
           python3 tests/run_tests.py --kind ts
 
-      # ── 3j. Upload artifacts on failure ────────────────────────────────
-      - name: Upload test logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-logs
-          path: |
-            .build/${{ env.PRESET_MAIN }}/Testing/Temporary/LastTest.log
-            .build/${{ env.PRESET_MAIN }}/Testing/Temporary/LastTestsFailed.log
-            /tmp/gateway-state-*
-          if-no-files-found: ignore
+      - name: Python tests (non-blocking)
+        continue-on-error: true
+        run: python3 tests/run_tests.py --kind python
 
-  # ── 3. Aggregate status — required check target for branch protection ──
+  # ── 5. CI summary — required check target for branch protection ──────────
   ci:
     name: CI summary
-    needs: [changes, deps, build-test]
+    needs: [changes, setup, deps, build, cpp-test, py-ts-test]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -337,14 +307,20 @@ jobs:
       - name: Verify all consumer jobs succeeded (or were intentionally skipped)
         run: |
           echo "changes:   ${{ needs.changes.result }}"
+          echo "setup:     ${{ needs.setup.result }}"
           echo "deps:      ${{ needs.deps.result }}"
-          echo "build-test: ${{ needs.build-test.result }}"
+          echo "build:     ${{ needs.build.result }}"
+          echo "cpp-test:  ${{ needs.cpp-test.result }}"
+          echo "py-ts-test: ${{ needs.py-ts-test.result }}"
 
           FAILED=0
           for r in \
             "changes ${{ needs.changes.result }}" \
+            "setup ${{ needs.setup.result }}" \
             "deps ${{ needs.deps.result }}" \
-            "build-test ${{ needs.build-test.result }}"; do
+            "build ${{ needs.build.result }}" \
+            "cpp-test ${{ needs.cpp-test.result }}" \
+            "py-ts-test ${{ needs.py-ts-test.result }}"; do
             name="${r%% *}"; result="${r##* }"
             case "$result" in
               success|skipped) ;;

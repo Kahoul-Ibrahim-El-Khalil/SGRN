@@ -1,0 +1,99 @@
+{
+  "$schema_version": 1,
+  "default_filters": {
+    "list": ["sgrn::datastore::filters::UserAuthFilter"],
+    "get": ["sgrn::datastore::filters::UserAuthFilter"],
+    "create": ["sgrn::datastore::filters::UserAuthFilter"],
+    "update": ["sgrn::datastore::filters::UserAuthFilter"],
+    "delete": ["sgrn::datastore::filters::UserAuthFilter"]
+  },
+  "schemas": {
+    "core": {
+      "tables": {
+        "automated_services": {
+          "tenant_column": "organisation",
+          "read_relation": "core.automated_services",
+          "write_table": "core.automated_services",
+          "default_order": "id",
+          "max_limit": 500,
+          "operations": ["list", "get", "create", "update", "delete"],
+          "columns": {
+            "name": {
+              "filter_ops": ["eq", "like"]
+            },
+            "token": {
+              "insertable": false,
+              "updatable": false
+            },
+            "domain": {
+              "filter_ops": ["eq"]
+            },
+            "status": {
+              "filter_ops": ["eq", "in"]
+            }
+          }
+        },
+        "domains": {
+          "tenant_column": "organisation",
+          "read_relation": "core.domains",
+          "write_table": "core.domains",
+          "default_order": "id",
+          "max_limit": 500,
+          "operations": ["list", "get", "create", "update", "delete"],
+          "columns": {
+            "name": {
+              "filter_ops": ["eq", "like"]
+            }
+          }
+        },
+        "sessions": {
+          "operations": []
+        },
+        "user_domain_permissions": {
+          "tenant_column": "organisation",
+          "read_relation": "core.user_domain_permissions",
+          "write_table": "core.user_domain_permissions",
+          "default_order": "id",
+          "max_limit": 500,
+          "operations": ["list", "get", "create", "update", "delete"],
+          "columns": {
+            "user_id": {
+              "filter_ops": ["eq", "in"]
+            },
+            "domain": {
+              "filter_ops": ["eq"]
+            }
+          }
+        },
+        "users": {
+          "tenant_column": "organisation",
+          "read_relation": "core.users",
+          "write_table": "core.users",
+          "default_order": "id",
+          "max_limit": 500,
+          "operations": ["list", "get", "create", "update", "delete"],
+          "columns": {
+            "first_name": {
+              "filter_ops": ["eq", "like"]
+            },
+            "family_name": {
+              "filter_ops": ["eq", "like"]
+            },
+            "email": {
+              "filter_ops": ["eq", "like"]
+            },
+            "role": {
+              "filter_ops": ["eq"]
+            },
+            "domain": {
+              "filter_ops": ["eq"]
+            },
+            "status": {
+              "filter_ops": ["eq", "in"]
+            }
+          }
+        }
+      }
+    }
+  }
+}

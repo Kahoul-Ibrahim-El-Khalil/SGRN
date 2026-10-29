@@ -366,8 +366,8 @@ void ScriptDataBlock::writeScalar(const std::string& t_path, const s7codec::Deco
     auto status = s7codec::encodeScalar(t_val, loc->field->type, s7codec::WriteBuffer{buf.data(), static_cast<size_t>(sz)},
         s7codec::EncodeOptions{//
             .endian = loc->field->endianness,
-            .bitOffset = s7codec::BitOffset{loc->field->bit_index},
-            .stringCapacity = s7codec::StringCapacity{loc->field->count}});
+            .bit_offset = s7codec::BitOffset{loc->field->bit_index},
+            .string_capacity = s7codec::StringCapacity{loc->field->count}});
     if (!status.has_value()) {
         throwScriptException(s7codec::toString(status.error()), ShellError::TypeMismatch);
         return;
@@ -798,8 +798,8 @@ static void encodeScriptFieldValue(const ::sgrn::scl::DbField& t_field, asIScrip
     auto status = s7codec::encodeScalar(decoded, t_field.type, s7codec::WriteBuffer{tp_buf, t_buf_size},
         s7codec::EncodeOptions{//
             .endian = t_field.endianness,
-            .bitOffset = s7codec::BitOffset{t_field.bit_index},
-            .stringCapacity = s7codec::StringCapacity{t_field.count}});
+            .bit_offset = s7codec::BitOffset{t_field.bit_index},
+            .string_capacity = s7codec::StringCapacity{t_field.count}});
     if (!status.has_value()) {
         throwScriptException(
             fmt::format("DB{}.'{}' rejected the value for {}", t_db_num, t_ctx, describeField(t_field)), ShellError::TypeMismatch);
@@ -960,8 +960,8 @@ s7codec::DecodedValue ScriptDataBlock::readScalar(const std::string& t_path) {
     return s7codec::decodeScalar(loc->field->type, s7codec::ReadBuffer{tmp.data(), static_cast<size_t>(sz)},
         s7codec::DecodeOptions{//
             .endian = loc->field->endianness,
-            .bitOffset = s7codec::BitOffset{loc->field->bit_index},
-            .stringCapacity = s7codec::StringCapacity{loc->field->count}});
+            .bit_offset = s7codec::BitOffset{loc->field->bit_index},
+            .string_capacity = s7codec::StringCapacity{loc->field->count}});
 }
 double ScriptDataBlock::getReal(const std::string& t_path) {
     auto dv = readScalar(t_path);

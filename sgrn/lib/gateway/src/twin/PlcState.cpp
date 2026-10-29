@@ -1,4 +1,6 @@
 #include <sgrn/gateway/twin/PlcState.hpp>
+
+#include "PlcState_serialize.hpp" // internal: PlcNode::serialize() definition
 // REVAMP-1: PlcState.cpp — Implementation for PlcState, PlcPoint, and PlcNode.
 
 #include <fmt/format.h>
@@ -150,8 +152,8 @@ std::string PlcState::getScalarString(const std::string& t_path) const {
     auto dv = s7codec::decodeScalar(p_node->type_, s7codec::ReadBuffer{p_ptr, remaining},
         s7codec::DecodeOptions{//
             .endian = p_node->endian_,
-            .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(bit_index_)},
-            .stringCapacity = s7codec::StringCapacity{static_cast<uint32_t>(decode_count)}});
+            .bit_offset = s7codec::BitOffset{static_cast<uint8_t>(bit_index_)},
+            .string_capacity = s7codec::StringCapacity{static_cast<uint32_t>(decode_count)}});
     if (!dv.valid())
         return "null";
 

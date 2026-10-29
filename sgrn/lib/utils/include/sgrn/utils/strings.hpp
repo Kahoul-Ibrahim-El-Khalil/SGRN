@@ -1,5 +1,6 @@
 #pragma once
 
+#include "encoding.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -370,24 +371,7 @@ inline std::optional<std::u16string> utf8ToUtf16(const std::string& t_input) {
 }
 
 inline std::optional<std::vector<uint8_t>> hexToBytes(const std::string_view t_hex) {
-    std::string clean_hex;
-    clean_hex.reserve(t_hex.size());
-    for (char c : t_hex)
-        if (std::isxdigit(static_cast<unsigned char>(c)))
-            clean_hex.push_back(c);
-
-    if (clean_hex.size() % 2 != 0)
-        return std::nullopt;
-
-    std::vector<uint8_t> bytes;
-    bytes.reserve(clean_hex.size() / 2);
-    for (size_t i = 0; i < clean_hex.size(); i += 2) {
-        std::optional<int> v = parseInt(clean_hex.substr(i, 2), 16);
-        if (!v.has_value())
-            return std::nullopt;
-        bytes.push_back(static_cast<uint8_t>(v.value()));
-    }
-    return bytes;
+    return sgrn::utils::encoding::fromHex(t_hex);
 }
 
 inline std::optional<std::string> sanitizeRelativeFilename(std::string t_path) {

@@ -49,7 +49,7 @@ bool SecurityManager::authorizeWrite(int t_sender_id, int t_area, uint16_t t_db_
     if (t_area == static_cast<int>(S7Area::ProcessInputs) || t_area == static_cast<int>(S7Area::ProcessOutputs))
         return false;
 
-    auto engine = policy_engine_.load();
+    std::shared_ptr<security::PolicyEngine> engine = policy_engine_.load();
     std::string t_client_ip;
     {
         std::lock_guard<std::mutex> lock(legacy_mutex_);
@@ -90,7 +90,7 @@ bool SecurityManager::authorizeWrite(int t_sender_id, int t_area, uint16_t t_db_
 
 bool SecurityManager::authorizeHttp(const std::string& t_client_ip, const std::string& t_origin,
     const std::vector<std::string>& t_header_names, std::optional<uint16_t> t_db_number) const {
-    auto engine = policy_engine_.load();
+    std::shared_ptr<security::PolicyEngine> engine = policy_engine_.load();
     if (engine) {
         security::RequestContext ctx;
         ctx.protocol = security::Protocol::HTTP;
@@ -110,7 +110,7 @@ bool SecurityManager::authorizeHttp(const std::string& t_client_ip, const std::s
 
 bool SecurityManager::authorizeWebSocket(
     const std::string& t_client_ip, const std::string& t_origin, std::optional<uint16_t> t_db_number) const {
-    auto engine = policy_engine_.load();
+    std::shared_ptr<security::PolicyEngine> engine = policy_engine_.load();
     if (engine) {
         security::RequestContext ctx;
         ctx.protocol = security::Protocol::WebSocket;
@@ -128,7 +128,7 @@ bool SecurityManager::authorizeWebSocket(
 }
 
 bool SecurityManager::authorizeModbus(const std::string& t_client_ip, std::optional<uint16_t> t_db_number) const {
-    auto engine = policy_engine_.load();
+    std::shared_ptr<security::PolicyEngine> engine = policy_engine_.load();
     if (engine) {
         security::RequestContext ctx;
         ctx.protocol = security::Protocol::Modbus;
@@ -146,7 +146,7 @@ bool SecurityManager::authorizeModbus(const std::string& t_client_ip, std::optio
 
 bool SecurityManager::authorizeOpcUa(
     const std::string& t_client_ip, const std::string& t_session_name, std::optional<uint16_t> t_db_number) const {
-    auto engine = policy_engine_.load();
+    std::shared_ptr<security::PolicyEngine> engine = policy_engine_.load();
     if (engine) {
         security::RequestContext ctx;
         ctx.protocol = security::Protocol::OpcUA;
@@ -164,7 +164,7 @@ bool SecurityManager::authorizeOpcUa(
 }
 
 bool SecurityManager::authorizeEip(const std::string& t_client_ip) const {
-    auto engine = policy_engine_.load();
+    std::shared_ptr<security::PolicyEngine> engine = policy_engine_.load();
     if (engine) {
         security::RequestContext ctx;
         ctx.protocol = security::Protocol::EthernetIP;
@@ -182,7 +182,7 @@ bool SecurityManager::authorizeEip(const std::string& t_client_ip) const {
 bool SecurityManager::authorizeField(security::Protocol t_protocol, const std::string& t_client_ip, std::optional<uint16_t> t_db_number,
     const std::string& t_field_path, bool t_is_write, const std::string& t_http_origin, const std::vector<std::string>& t_present_headers,
     const std::string& t_opc_session_name) const {
-    auto engine = policy_engine_.load();
+    std::shared_ptr<security::PolicyEngine> engine = policy_engine_.load();
     if (engine) {
         security::RequestContext ctx;
         ctx.protocol = t_protocol;
@@ -229,7 +229,7 @@ void SecurityManager::clear() {
 }
 
 std::string SecurityManager::policyToJson() const {
-    auto engine = policy_engine_.load();
+    std::shared_ptr<security::PolicyEngine> engine = policy_engine_.load();
     if (engine)
         return engine->policyToJson();
 

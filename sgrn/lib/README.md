@@ -42,3 +42,31 @@ One directory per component: `include/` + `src/` (+ `tests/`), wired in
 - No component reaches into another's `src/` — depends on targets, not files.
 - New protocol adapters depend on `sgrn::common` ports, never on
   `sgrn_gateway_twin`/`sgrn_gateway_security` directly.
+
+### Public-header availability rule
+
+Any type used by a header under `include/` must come from a target linked
+`PUBLIC` in the component's `CMakeLists.txt` (or be a system dependency).
+Linking the provider `PRIVATE` compiles the component's own `.cpp` files but
+breaks every consumer that instantiates the public header
+(`fatal error: 'sgrn/…' file not found` or ambiguous-name errors downstream).
+Rule of thumb: if `#include <sgrn/…>` appears in a public header, the target
+providing that include belongs in `PUBLIC_LIBS`. (This bit `sgrn_ml` via
+`sgrn_gateway_twin` — twin's `PlcState.hpp` used `sgrn/common/TreePath.hpp`
+while `sgrn::common` was PRIVATE.)
+
+### Header file naming
+
+New headers use `snake_case` (`path_utils.hpp`, `event_helper.hpp`), matching
+the majority of `sgrn/common`. PascalCase names (`TreePath.hpp`,
+`ErrorClass.hpp`, `AdapterBase.hpp`) are legacy — rename opportunistically as
+files are touched, not in bulk.
+
+### Compatibility shims (transitional, with an expiry date)
+
+When moving a type between components, a one-line re-export shim
+(`namespace alias`, never a wrapper namespace with using-declarations — the
+latter makes unqualified lookup ambiguous in TU's that also do
+`using namespace <new-namespace>;`) is acceptable *during* a migration.
+Shims must be deleted in the same changeset that converts the last include:
+grep for the old path, convert call sites, `rm` the shim.

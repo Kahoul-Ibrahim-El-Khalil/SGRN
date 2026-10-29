@@ -1,6 +1,6 @@
 #pragma once
 // an Alias over s7codec::Type;
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <array>
 #include <open62541/types.h>
 #include <optional>

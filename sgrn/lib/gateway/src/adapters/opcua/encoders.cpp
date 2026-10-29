@@ -223,7 +223,7 @@ Result<void, OpcUaAdapterError> encodeScalarOpcUaToMemory(const OpcUaEncodingCon
         s7codec::DecodedValue dv = s7codec::DecodedValue::makeSigned(static_cast<int64_t>(raw));
 
         SGRN_RETURN_IF(!s7codec::encodeScalar(dv, t_ctx.view.type, s7codec::WriteBuffer{t_ctx.p_memory, s7_size},
-                           s7codec::EncodeOptions{.endian = t_ctx.view.endian, .bitOffset = s7codec::BitOffset{t_ctx.view.bit_index}})
+                           s7codec::EncodeOptions{.endian = t_ctx.view.endian, .bit_offset = s7codec::BitOffset{t_ctx.view.bit_index}})
                            .has_value(),
             OpcUaAdapterError::ENCODE_FAILED);
 
@@ -284,7 +284,7 @@ Result<void, OpcUaAdapterError> encodeScalarOpcUaToMemory(const OpcUaEncodingCon
     SGRN_RETURN_IF(!p_entry->from_ua(t_ctx.p_ua_type, t_ctx.p_ua_buf, dv), OpcUaAdapterError::TYPE_MISMATCH);
 
     SGRN_RETURN_IF(!s7codec::encodeScalar(dv, t_ctx.view.type, s7codec::WriteBuffer{t_ctx.p_memory, s7_size},
-                       s7codec::EncodeOptions{.endian = t_ctx.view.endian, .bitOffset = s7codec::BitOffset{t_ctx.view.bit_index}})
+                       s7codec::EncodeOptions{.endian = t_ctx.view.endian, .bit_offset = s7codec::BitOffset{t_ctx.view.bit_index}})
                        .has_value(),
         OpcUaAdapterError::ENCODE_FAILED);
 

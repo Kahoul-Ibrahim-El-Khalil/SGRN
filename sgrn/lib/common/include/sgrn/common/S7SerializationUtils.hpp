@@ -41,8 +41,8 @@ void serializeFieldTo(Writer& t_writer, const DbField& t_field, const uint8_t* p
     auto dv = s7codec::decodeScalar(t_field.type, s7codec::ReadBuffer{p_ptr, t_buffer_size},
         s7codec::DecodeOptions{//
             .endian = t_field.endianness,
-            .bitOffset = s7codec::BitOffset{t_field.bit_index},
-            .stringCapacity = s7codec::StringCapacity{t_field.count}});
+            .bit_offset = s7codec::BitOffset{t_field.bit_index},
+            .string_capacity = s7codec::StringCapacity{t_field.count}});
 
     if (!dv.valid()) {
         t_writer.Null();

@@ -18,7 +18,16 @@ S3 plugin):
 | `--generate-config` | Env file, SSL certs, configs, systemd templates |
 | `--init-db` | Initialize/recreate the PostgreSQL schema |
 | `--init` | Config generation followed by DB init |
-| `--config-systemd` | Systemd unit setup |
+| `--config-systemd` | Systemd unit setup (root; nginx stays in the staging dir) |
+| `--verify-install` | Drift/health report: staged vs deployed config, services, ports |
+
+`--verify-install` needs no root. It fingerprints the outage classes this
+deployment has actually hit — units drifted from staged templates after a
+micromamba env update, a nginx config serving from env-owned paths (env
+updates delete `etc/nginx/sites-enabled`, leaving nginx "active" with zero
+server blocks), missing `var/tmp/nginx/*` buffer dirs (`[emerg] mkdir()` at
+start), and a `garage` binary invisible to the deployed unit's PATH (datastore
+then loops on its Garage readiness gate). Follow the printed repair sequence.
 
 First-time deployment needs PostgreSQL 15+, Garage v2.x,
 and Nginx 1.24+ (all in the SGRN Micromamba env, except the `garage`

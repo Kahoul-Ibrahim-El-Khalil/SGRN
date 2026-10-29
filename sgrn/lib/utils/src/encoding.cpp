@@ -161,6 +161,39 @@ std::string toHex(const unsigned char* tp_data, std::size_t t_len) {
     return out;
 }
 
+std::optional<std::vector<uint8_t>> fromHex(std::string_view t_hex) {
+    std::string clean_hex;
+    clean_hex.reserve(t_hex.size());
+    for (char c : t_hex) {
+        if (std::isxdigit(static_cast<unsigned char>(c)))
+            clean_hex.push_back(c);
+    }
+
+    if (clean_hex.size() % 2 != 0)
+        return std::nullopt;
+
+    auto hexVal = [](char c) -> int {
+        if (c >= '0' && c <= '9')
+            return c - '0';
+        if (c >= 'a' && c <= 'f')
+            return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F')
+            return c - 'A' + 10;
+        return -1;
+    };
+
+    std::vector<uint8_t> bytes;
+    bytes.reserve(clean_hex.size() / 2);
+    for (size_t i = 0; i < clean_hex.size(); i += 2) {
+        int hi = hexVal(clean_hex[i]);
+        int lo = hexVal(clean_hex[i + 1]);
+        if (hi < 0 || lo < 0)
+            return std::nullopt;
+        bytes.push_back(static_cast<uint8_t>((hi << 4) | lo));
+    }
+    return bytes;
+}
+
 int bcdToDec(uint8_t t_bcd) {
     return ((t_bcd >> 4) * 10) + (t_bcd & 0x0F);
 }

@@ -1,9 +1,9 @@
+#include <sgrn/common/TreePath.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/gateway/core/RecoveryEngine.hpp>
 #include <sgrn/gateway/database/PersistenceService.hpp>
 #include <sgrn/gateway/twin/LeafDictionary.hpp>
 #include <sgrn/gateway/twin/PlcState.hpp>
-#include <sgrn/gateway/twin/TreePath.hpp>
 #include <sgrn/gateway/twin/encoding.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/scl/schema/SchemaSerializer.hpp>
@@ -36,10 +36,10 @@ namespace sgrn::gateway::core
 namespace
 {
 namespace fs = std::filesystem;
+using sgrn::common::TreePath;
 using sgrn::gateway::twin::DbEntry;
 using sgrn::gateway::twin::PlcNode;
 using sgrn::gateway::twin::PlcState;
-using sgrn::gateway::twin::TreePath;
 using sgrn::scl::DbField;
 using sgrn::scl::PlcSchemaStore;
 

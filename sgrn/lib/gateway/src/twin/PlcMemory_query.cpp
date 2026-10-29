@@ -6,8 +6,10 @@
 #include <sgrn/gateway/twin/utils.hpp>
 #include <sgrn/utils/time.hpp>
 #include <algorithm>
-#include <asio.hpp>
 #include <cstring>
+
+#include "PlcState_serialize.hpp" // internal: PlcNode::serialize() definition
+#include <asio.hpp>
 #include <optional>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>

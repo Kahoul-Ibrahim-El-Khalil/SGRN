@@ -6,14 +6,26 @@ After=network.target
 Type=simple
 
 EnvironmentFile=${SGRN_DATA_DIR}/.env
-Environment="PATH=${SGRN_DEPLOYMENT_ENV}/bin:/usr/bin:/bin"
+Environment="PATH=${SGRN_DEPLOYMENT_ENV}/bin:${SGRN_DEPLOYMENT_ENV}/sbin:/usr/local/bin:/usr/bin:/bin"
 Environment="LD_LIBRARY_PATH=${SGRN_DEPLOYMENT_ENV}/lib"
 
-ExecStart=/usr/bin/env nginx \
-    -c ${SGRN_DEPLOYMENT_ENV}/etc/nginx/nginx.conf \
-    -g 'daemon off;'
+# Serve the user-owned staging config directly. Never point ExecStart into
+# $SGRN_DEPLOYMENT_ENV: env updates (micromamba) replace etc/nginx wholesale
+# and took the whole site down once (empty includes -> zero server blocks ->
+# no listeners, with no startup error). The master runs as root; conf's
+# `user ${SGRN_USER}` drops workers.
 
-ExecReload=/usr/bin/env nginx -s reload
+# 'daemon off;' lives in the config file itself (keep it in sync with the
+# staging copy); no -g override here, duplicates are a start-up emergency.
+ExecStart=/usr/bin/env nginx \
+    -p ${SGRN_DATA_DIR} \
+    -c ${SGRN_DATA_DIR}/nginx/nginx.conf
+
+ExecReload=/usr/bin/env nginx \
+    -p ${SGRN_DATA_DIR} \
+    -c ${SGRN_DATA_DIR}/nginx/nginx.conf \
+    -s reload
+
 ExecStop=/bin/kill -s QUIT $MAINPID
 
 Restart=on-failure

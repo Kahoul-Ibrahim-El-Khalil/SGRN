@@ -80,36 +80,7 @@ uint32_t fieldSpanSize(const DbField& f) {
  * Returns total milliseconds.
  */
 std::optional<int64_t> parseS7Time(const std::string& t_raw) {
-    std::string s = sgrn::utils::strings::trim(t_raw);
-    if (s.empty())
-        return std::nullopt;
-
-    bool negative = false;
-    if (s[0] == '-') {
-        negative = true;
-        s = s.substr(1);
-    }
-
-    // Handle #T prefix
-    if (s.size() > 2 && s[0] == '#' && (s[1] == 'T' || s[1] == 't')) {
-        s = s.substr(2);
-    }
-
-    unsigned h = 0, m = 0, sec = 0, ms = 0;
-    // Try HH:MM:SS.mmm
-    constexpr std::string_view kFmtS7Time = "%u:%u:%u.%u";
-    constexpr std::string_view kFmtS7TimeAlt = "%u:%u:%u:%u";
-    if (std::sscanf(s.c_str(), kFmtS7Time.data(), &h, &m, &sec, &ms) >= 3) {
-        // success
-    } else if (std::sscanf(s.c_str(), kFmtS7TimeAlt.data(), &h, &m, &sec, &ms) >= 3) {
-        // success with colon for ms (some TIA formats)
-    } else {
-        return std::nullopt;
-    }
-
-    const int64_t abs_ms =
-        static_cast<int64_t>(h) * 3600000 + static_cast<int64_t>(m) * 60000 + static_cast<int64_t>(sec) * 1000 + static_cast<int64_t>(ms);
-    return negative ? -abs_ms : abs_ms;
+    return sgrn::utils::time::parseS7Time(t_raw);
 }
 
 std::optional<LocatedField> findFieldByPath(const std::vector<DbField>& t_fields, const std::string& t_path, int t_base_offset) {
@@ -852,13 +823,13 @@ static void serializeStringToWriter(rapidjson::Writer<rapidjson::StringBuffer>& 
         uint32_t elem_size = fieldElementSpanBytes(f);
         for (uint32_t i = 0; i < f.count; ++i) {
             auto dv = s7codec::decodeScalar(f.type, s7codec::ReadBuffer{ptr + (i * elem_size), buf_size - (i * elem_size)},
-                s7codec::DecodeOptions{.stringCapacity = s7codec::StringCapacity{f.string_capacity}});
+                s7codec::DecodeOptions{.string_capacity = s7codec::StringCapacity{f.string_capacity}});
             writeDecodedValue(w, dv, f.type);
         }
         w.EndArray();
     } else {
         auto dv = s7codec::decodeScalar(f.type, s7codec::ReadBuffer{ptr, buf_size},
-            s7codec::DecodeOptions{.stringCapacity = s7codec::StringCapacity{f.string_capacity}});
+            s7codec::DecodeOptions{.string_capacity = s7codec::StringCapacity{f.string_capacity}});
         writeDecodedValue(w, dv, f.type);
     }
 }
@@ -878,7 +849,7 @@ static void serializeScalarOrArrayToWriter(
             auto dv = s7codec::decodeScalar(f.type, s7codec::ReadBuffer{p_elem_ptr, buf_size - static_cast<size_t>(p_elem_ptr - ptr)},
                 s7codec::DecodeOptions{//
                     .endian = f.endianness,
-                    .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(b_idx)}});
+                    .bit_offset = s7codec::BitOffset{static_cast<uint8_t>(b_idx)}});
             writeDecodedValue(w, dv, f.type);
         }
         w.EndArray();
@@ -886,7 +857,7 @@ static void serializeScalarOrArrayToWriter(
         auto dv = s7codec::decodeScalar(f.type, s7codec::ReadBuffer{ptr, buf_size},
             s7codec::DecodeOptions{//
                 .endian = f.endianness,
-                .bitOffset = s7codec::BitOffset{f.bit_index}});
+                .bit_offset = s7codec::BitOffset{f.bit_index}});
         writeDecodedValue(w, dv, f.type);
     }
 }
@@ -908,7 +879,7 @@ void serializeFieldToWriter(rapidjson::Writer<rapidjson::StringBuffer>& t_writer
     }
 }
 sgrn::Result<std::vector<uint8_t>, SclError> parseHexBytes(const std::string& t_joined) {
-    auto res = sgrn::utils::strings::hexToBytes(t_joined);
+    auto res = sgrn::utils::encoding::fromHex(t_joined);
     if (!res)
         return sgrn::Result<std::vector<uint8_t>, SclError>::Error(SclError::Generic);
     return *res;

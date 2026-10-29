@@ -48,8 +48,24 @@ from .models import (
     toBase64url,
 )
 from .semantic import SemanticSchema, FieldMetadata
-from .ml.anomaly import ConformalAnomalyDetector, SplitConformalCalibrator
-from .ai import LLMDoer, MockDoer, PlantDoer, SchemaChecker, ValidationResult, ActionCompiler
+
+try:
+    from .ml.anomaly import ConformalAnomalyDetector, SplitConformalCalibrator
+except ImportError:
+    ConformalAnomalyDetector = None
+    SplitConformalCalibrator = None
+
+try:
+    from .ai import LLMDoer, MockDoer, PlantDoer, SchemaChecker, ValidationResult, ActionCompiler
+except ImportError:
+    LLMDoer = None
+    MockDoer = None
+    PlantDoer = None
+    SchemaChecker = None
+    ValidationResult = None
+    ActionCompiler = None
+
+from . import net
 
 __version__ = "0.2.0"
 
@@ -78,6 +94,8 @@ __all__ = [
     "SchemaChecker",
     "ValidationResult",
     "ActionCompiler",
+    # Network & port utilities
+    "net",
     # Submodules
     "dtypes",
 ]

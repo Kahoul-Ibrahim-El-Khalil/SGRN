@@ -311,8 +311,8 @@ sgrn::Result<std::vector<uint8_t>, DbIoError> DbIOProvider::encodeValue(
     auto status = s7codec::encodeScalar(t_val, t_loc.field->type, s7codec::WriteBuffer{buf.data(), static_cast<size_t>(sz)},
         s7codec::EncodeOptions{//
             .endian = t_loc.field->endianness,
-            .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(bit_idx)},
-            .stringCapacity = s7codec::StringCapacity{t_loc.field->count}});
+            .bit_offset = s7codec::BitOffset{static_cast<uint8_t>(bit_idx)},
+            .string_capacity = s7codec::StringCapacity{t_loc.field->count}});
     SGRN_RETURN_IF(!status.has_value(), DbIoError::EncodeFailed);
 
     return buf;

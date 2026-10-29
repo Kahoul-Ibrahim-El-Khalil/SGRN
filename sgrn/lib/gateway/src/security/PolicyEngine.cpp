@@ -418,17 +418,17 @@ sgrn::Result<void> PolicyEngine::loadScript(const std::string& t_path) {
 }
 
 bool PolicyEngine::authorize(const RequestContext& t_ctx) const {
-    auto tbl = active_table_.load();
+    std::shared_ptr<const RuleTable> tbl = active_table_.load();
     return tbl ? tbl->authorize(t_ctx) : false;
 }
 
 std::size_t PolicyEngine::ruleCount() const {
-    auto tbl = active_table_.load();
+    std::shared_ptr<const RuleTable> tbl = active_table_.load();
     return tbl ? tbl->size() : 0;
 }
 
 std::string PolicyEngine::policyToJson() const {
-    auto tbl = active_table_.load();
+    std::shared_ptr<const RuleTable> tbl = active_table_.load();
     if (!tbl)
         return "{\"rules\":[]}";
     return tbl->toJson();

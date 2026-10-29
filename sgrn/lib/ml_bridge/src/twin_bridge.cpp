@@ -1,9 +1,15 @@
-#include <sgrn/ml/twin_bridge.hpp>
+#include <sgrn/ml_bridge/twin_bridge.hpp>
 
 #include <type_traits>
 
-namespace sgrn::ml
+namespace sgrn::ml_bridge
 {
+// sgrn::ml types used unqualified below (see twin_bridge.hpp).
+using sgrn::ml::IModelBackend;
+using sgrn::ml::ModelManifest;
+using sgrn::ml::Prediction;
+using sgrn::ml::PredictionEngine;
+using sgrn::ml::VerdictStatus;
 
 TwinBridge::TwinBridge(TwinBridgeConfig t_config)
     : config_(std::move(t_config)) {
@@ -128,7 +134,7 @@ double TwinBridge::extractScalarValue(const uint8_t* tp_arena, const BoundFeatur
     }
 
     auto dv = s7codec::decodeScalar(t_node.type, s7codec::ReadBuffer{p_field, remaining},
-        s7codec::DecodeOptions{.endian = t_node.endian, .bitOffset = s7codec::BitOffset{t_node.bit_index}});
+        s7codec::DecodeOptions{.endian = t_node.endian, .bit_offset = s7codec::BitOffset{t_node.bit_index}});
 
     if (!dv.valid()) {
         return 0.0;
@@ -213,7 +219,7 @@ Result<Prediction> TwinBridge::stepSnapshot(uint64_t t_ts_ns, uint16_t t_db_numb
         }
 
         auto dv = s7codec::decodeScalar(bf.type, s7codec::ReadBuffer{p_field, remaining},
-            s7codec::DecodeOptions{.endian = bf.endian, .bitOffset = s7codec::BitOffset{bf.bit_index}});
+            s7codec::DecodeOptions{.endian = bf.endian, .bit_offset = s7codec::BitOffset{bf.bit_index}});
 
         if (dv.valid()) {
             raw_feature_scratch_[i] = s7codec::visit(dv, [](const auto& val) -> double {
@@ -306,7 +312,7 @@ Result<void> TwinBridge::writeOutputsToTwin(const Prediction& t_pred) {
         const size_t remaining = bo.p_entry->size - bo.byte_offset;
 
         auto encode_st = s7codec::encodeScalar(dv, bo.type, s7codec::WriteBuffer{p_field, remaining},
-            s7codec::EncodeOptions{.endian = bo.endian, .bitOffset = s7codec::BitOffset{bo.bit_index}});
+            s7codec::EncodeOptions{.endian = bo.endian, .bit_offset = s7codec::BitOffset{bo.bit_index}});
 
         if (encode_st.has_value()) {
             if (config_.bump_versions && bo.p_node) {
@@ -326,4 +332,4 @@ void TwinBridge::reset() {
     std::fill(raw_feature_scratch_.begin(), raw_feature_scratch_.end(), 0.0);
 }
 
-} // namespace sgrn::ml
+} // namespace sgrn::ml_bridge

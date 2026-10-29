@@ -70,16 +70,16 @@ template <typename E>
 
 #define SGRN_IF_ERROR_PROPAGATE(expr)                                                                                                      \
     do {                                                                                                                                   \
-        auto _sgrn_result = (expr);                                                                                                        \
+        auto&& _sgrn_result = (expr);                                                                                                      \
         if (!_sgrn_result.has_value())                                                                                                     \
-            return _sgrn_result.error();                                                                                                   \
+            return std::unexpected(_sgrn_result.error());                                                                                  \
     } while (false)
 
 #define SGRN_ASSIGN_OR_RETURN(lhs, expr)                                                                                                   \
     do {                                                                                                                                   \
-        auto _sgrn_result = (expr);                                                                                                        \
+        auto&& _sgrn_result = (expr);                                                                                                      \
         if (!_sgrn_result.has_value())                                                                                                     \
-            return _sgrn_result.error();                                                                                                   \
+            return std::unexpected(_sgrn_result.error());                                                                                  \
         (lhs) = std::move(_sgrn_result.value());                                                                                           \
     } while (false)
 

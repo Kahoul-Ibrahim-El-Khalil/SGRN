@@ -212,7 +212,7 @@ sgrn::Result<rapidjson::Document, std::string> postJson(
     auto doc = t_client.makeRequest("POST", t_endpoint, sgrn::utils::json::serializeCompact(t_body));
     if (doc.IsNull())
         return sgrn::Result<rapidjson::Document, std::string>::Error("request failed: empty response from " + t_endpoint);
-    return std::move(doc);
+    return sgrn::Result<rapidjson::Document, std::string>(std::move(doc));
 }
 
 bool responseOk(const rapidjson::Document& t_doc) {
@@ -277,8 +277,7 @@ sgrn::Result<std::string, std::string> DatastoreClient::registerUser(const NewUs
     add("status", t_user.status_);
     add("domain", t_user.domain_);
     auto r = postJson(*this, "/api/v1/admin/users/register", std::move(body));
-    if (r.hasError())
-        return sgrn::Result<std::string, std::string>::Error(r.error());
+    SGRN_IF_ERROR_PROPAGATE(r);
     if (!responseOk(r.value()))
         return sgrn::Result<std::string, std::string>::Error(responseMessage(r.value(), "registration failed"));
     return responseMessage(r.value(), "registered");
@@ -327,8 +326,7 @@ sgrn::Result<ServiceCredentials, std::string> DatastoreClient::registerService(c
         body.AddMember("metadata", rapidjson::Value(rapidjson::kObjectType), alloc);
     }
     auto r = postJson(*this, "/api/v1/admin/automated-services/register", std::move(body));
-    if (r.hasError())
-        return sgrn::Result<ServiceCredentials, std::string>::Error(r.error());
+    SGRN_IF_ERROR_PROPAGATE(r);
     if (!responseOk(r.value()))
         return sgrn::Result<ServiceCredentials, std::string>::Error(responseMessage(r.value(), "registration failed"));
     ServiceCredentials creds;
@@ -344,8 +342,7 @@ sgrn::Result<ServiceCredentials, std::string> DatastoreClient::rotateServiceToke
     body.SetObject();
     body.AddMember("automated_service_id", t_service_id, alloc);
     auto r = postJson(*this, "/api/v1/admin/automated-services/rotate-token", std::move(body));
-    if (r.hasError())
-        return sgrn::Result<ServiceCredentials, std::string>::Error(r.error());
+    SGRN_IF_ERROR_PROPAGATE(r);
     if (!responseOk(r.value()))
         return sgrn::Result<ServiceCredentials, std::string>::Error(responseMessage(r.value(), "rotation failed"));
     ServiceCredentials creds;
@@ -373,8 +370,7 @@ sgrn::Result<std::string, std::string> DatastoreClient::updatePassword(
     body.AddMember("old_password", rapidjson::Value(t_old_password.c_str(), alloc), alloc);
     body.AddMember("new_password", rapidjson::Value(t_new_password.c_str(), alloc), alloc);
     auto r = postJson(*this, "/api/v1/auth/user/password", std::move(body));
-    if (r.hasError())
-        return sgrn::Result<std::string, std::string>::Error(r.error());
+    SGRN_IF_ERROR_PROPAGATE(r);
     if (!responseOk(r.value()))
         return sgrn::Result<std::string, std::string>::Error(responseMessage(r.value(), "password update failed"));
     return responseMessage(r.value(), "password updated");
@@ -464,8 +460,7 @@ namespace
 
 // Parse a raw admin-storage JSON body into a rapidjson Document.
 sgrn::Result<rapidjson::Document, std::string> parseAdminStorageJson(sgrn::Result<std::string, std::string> t_raw, const char* t_what) {
-    if (t_raw.hasError())
-        return sgrn::Result<rapidjson::Document, std::string>::Error(t_raw.error());
+    SGRN_IF_ERROR_PROPAGATE(t_raw);
     auto parsed = sgrn::utils::json::deserialize(t_raw.value());
     if (parsed.hasError())
         return sgrn::Result<rapidjson::Document, std::string>::Error(std::string(t_what) + ": invalid JSON response");
@@ -511,8 +506,7 @@ void fillStringList(const rapidjson::Value& t_doc, const char* t_key, std::vecto
 
 sgrn::Result<std::vector<StorageBucketCensus>, std::string> DatastoreClient::tryStorageAdminOverview(uint32_t t_max_pages) {
     auto doc_res = parseAdminStorageJson(storageAdminOverviewJson(t_max_pages), "storage overview");
-    if (doc_res.hasError())
-        return sgrn::Result<std::vector<StorageBucketCensus>, std::string>::Error(doc_res.error());
+    SGRN_IF_ERROR_PROPAGATE(doc_res);
     rapidjson::Document doc = std::move(doc_res.value());
     if (!doc.IsObject() || !doc.HasMember("buckets") || !doc["buckets"].IsArray())
         return sgrn::Result<std::vector<StorageBucketCensus>, std::string>::Error("storage overview: unexpected response shape");
@@ -540,8 +534,7 @@ sgrn::Result<std::vector<StorageBucketCensus>, std::string> DatastoreClient::try
 sgrn::Result<StorageOrphansReport, std::string> DatastoreClient::tryStorageAdminOrphans(
     const std::string& t_bucket, const std::string& t_prefix, uint32_t t_limit, uint32_t t_max_pages) {
     auto doc_res = parseAdminStorageJson(storageAdminOrphansJson(t_bucket, t_prefix, t_limit, t_max_pages), "storage orphans");
-    if (doc_res.hasError())
-        return sgrn::Result<StorageOrphansReport, std::string>::Error(doc_res.error());
+    SGRN_IF_ERROR_PROPAGATE(doc_res);
     rapidjson::Document doc = std::move(doc_res.value());
     if (!doc.IsObject())
         return sgrn::Result<StorageOrphansReport, std::string>::Error("storage orphans: unexpected response shape");
@@ -561,8 +554,7 @@ sgrn::Result<StorageOrphansReport, std::string> DatastoreClient::tryStorageAdmin
 sgrn::Result<StoragePurgeResult, std::string> DatastoreClient::tryStorageAdminPurge(
     const std::string& t_bucket, const std::vector<std::string>& t_keys, const std::string& t_prefix, bool t_dry_run, uint32_t t_limit) {
     auto doc_res = parseAdminStorageJson(storageAdminPurgeOrphansJson(t_bucket, t_keys, t_prefix, t_dry_run, t_limit), "storage purge");
-    if (doc_res.hasError())
-        return sgrn::Result<StoragePurgeResult, std::string>::Error(doc_res.error());
+    SGRN_IF_ERROR_PROPAGATE(doc_res);
     rapidjson::Document doc = std::move(doc_res.value());
     if (!doc.IsObject())
         return sgrn::Result<StoragePurgeResult, std::string>::Error("storage purge: unexpected response shape");

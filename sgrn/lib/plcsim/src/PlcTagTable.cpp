@@ -212,7 +212,7 @@ sgrn::Result<void, S7Error> PlcTagTable::put(S7Client& t_client, const std::stri
     t_item.Area = blk.value()->addr.area;
     t_item.WordLen = blk.value()->addr.word_len;
     t_item.DBNumber = blk.value()->addr.db_number;
-    // Calculate S7 bit offset for Bools: StartByte * 8 + BitOffset
+    // Calculate S7 bit offset for Bools: StartByte * 8 + bit_offset
     t_item.Start = (blk.value()->addr.word_len == S7WLBit) ? blk.value()->addr.start_byte * 8 + blk.value()->addr.bit_offset
                                                            : blk.value()->addr.start_byte;
     t_item.Amount = (blk.value()->addr.word_len == S7WLBit) ? 1 : blk.value()->addr.byte_count;
@@ -277,8 +277,8 @@ sgrn::Result<void, S7Error> PlcTagTable::buildPutItems(const std::vector<std::st
             int bit_idx = (blk.value()->addr.word_len == S7WLBit) ? blk.value()->addr.bit_offset : 0;
             auto status = s7codec::encodeScalar(dv, fd.type, s7codec::WriteBuffer{t_buf.data(), t_buf.size()},
                 s7codec::EncodeOptions{//
-                    .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(bit_idx)},
-                    .stringCapacity = s7codec::StringCapacity{fd.count}});
+                    .bit_offset = s7codec::BitOffset{static_cast<uint8_t>(bit_idx)},
+                    .string_capacity = s7codec::StringCapacity{fd.count}});
             if (!status.has_value())
                 return fromSclErrorToS7Error(SclError::Generic);
             t_out_bufs.push_back(std::move(t_buf));
@@ -333,8 +333,8 @@ sgrn::Result<void, S7Error> PlcTagTable::commitLocalPut(
             int bit_idx = (blk.value()->addr.word_len == S7WLBit) ? blk.value()->addr.bit_offset : 0;
             auto status = s7codec::encodeScalar(dv, fd.type, s7codec::WriteBuffer{encoded.data(), encoded.size()},
                 s7codec::EncodeOptions{//
-                    .bitOffset = s7codec::BitOffset{static_cast<uint8_t>(bit_idx)},
-                    .stringCapacity = s7codec::StringCapacity{fd.count}});
+                    .bit_offset = s7codec::BitOffset{static_cast<uint8_t>(bit_idx)},
+                    .string_capacity = s7codec::StringCapacity{fd.count}});
 
             SGRN_RETURN_IF(!status.has_value(), fromSclErrorToS7Error(SclError::Generic));
         }

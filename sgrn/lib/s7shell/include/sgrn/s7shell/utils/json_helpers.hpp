@@ -88,22 +88,11 @@ inline std::string bytesToHex(const std::vector<uint8_t>& t_bytes) {
 }
 
 inline bool writeBinaryFile(const std::string& t_path, const std::vector<uint8_t>& t_data) {
-    const std::string normalized = sgrn::utils::filesystem::normalizePath(t_path);
-    std::ofstream out(normalized, std::ios::binary);
-    if (!out.is_open())
-        return false;
-    if (!t_data.empty())
-        out.write(reinterpret_cast<const char*>(t_data.data()), static_cast<std::streamsize>(t_data.size()));
-    return out.good();
+    return sgrn::utils::filesystem::writeBinaryFile(sgrn::utils::filesystem::normalizePath(t_path), t_data);
 }
 
 inline bool readBinaryFile(const std::string& t_path, std::vector<uint8_t>& t_data) {
-    const std::string normalized = sgrn::utils::filesystem::normalizePath(t_path);
-    std::ifstream in(normalized, std::ios::binary);
-    if (!in.is_open())
-        return false;
-    t_data.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    return true;
+    return sgrn::utils::filesystem::readBinaryFile(sgrn::utils::filesystem::normalizePath(t_path), t_data);
 }
 
 inline bool writeHexFile(const std::string& t_path, const std::string& t_hex) {

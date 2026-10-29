@@ -1,6 +1,6 @@
 #pragma once
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <sgrn/scl/types/DataType.hpp>
 #include <sgrn/scl/types/DbField.hpp>
 #include <map>
@@ -19,7 +19,8 @@ struct UdtDefinition {
     int size_bytes{0};
     int max_depth{0};
     std::vector<DbField> fields;
-    s7codec::Endian endianness{s7codec::Endian::Little};
+    /// Block-scoped byte order; Big is canonical (see DbField::endianness).
+    s7codec::Endian endianness{s7codec::Endian::Big};
     bool trigger_events{false};
 
     bool is_scalar_alias{false};

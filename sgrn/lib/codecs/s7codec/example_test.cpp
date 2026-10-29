@@ -203,7 +203,7 @@ int main() {
         // Decode with capacity 8 — corrupt cur_len=200 header is clamped to 8
         // (never read past the real capacity).
         std::array<uint8_t, 12> corrupt{8, 200, 'h', 'i'};
-        DecodedValue sv = decodeScalar(Type::String, ReadBuffer(corrupt), DecodeOptions{.stringCapacity = StringCapacity{8}});
+        DecodedValue sv = decodeScalar(Type::String, ReadBuffer(corrupt), DecodeOptions{.string_capacity = StringCapacity{8}});
         assert(sv.valid() && sv.s().size() == 8 && sv.s().compare(0, 2, "hi") == 0);
 
         // With the default capacity (0 -> 254) the corrupt header survives
@@ -219,7 +219,7 @@ int main() {
     {
         std::array<uint8_t, 12> w_buf{}; // 4 header bytes + 4 units * 2
         assert(encodeScalar(
-            DecodedValue(std::string("AB")), Type::WString, WriteBuffer(w_buf), EncodeOptions{.stringCapacity = StringCapacity{4}})
+            DecodedValue(std::string("AB")), Type::WString, WriteBuffer(w_buf), EncodeOptions{.string_capacity = StringCapacity{4}})
                 .has_value());
         assert(w_buf[0] == 0x00 && w_buf[1] == 0x04); // max_len BE u16
         assert(w_buf[2] == 0x00 && w_buf[3] == 0x02); // cur_len BE u16
@@ -234,13 +234,13 @@ int main() {
         std::cout << "[PASS] WString round-trip and layout" << std::endl;
     }
 
-    // Test 11: DTL exact byte layout (Big-Endian) — 2024-03-18 (dow 1)
+    // Test 11: DTL exact byte layout (Big-Endian) — 2024-03-18 (dow 2, Monday)
     // 19:30:00 ns=500000000.
     {
         std::array<uint8_t, 12> dtl_buf{};
-        DtlComponents c{2024, 3, 18, 1, 19, 30, 0, 500'000'000u};
+        DtlComponents c{2024, 3, 18, 2, 19, 30, 0, 500'000'000u};
         assert(s7codec::encodeDtl(c, WriteBuffer(dtl_buf), Endian::Big).has_value());
-        const std::array<uint8_t, 12> expected{0x07, 0xE8, 0x03, 0x12, 0x01, 0x13, 0x1E, 0x00, 0x1D, 0xCD, 0x65, 0x00};
+        const std::array<uint8_t, 12> expected{0x07, 0xE8, 0x03, 0x12, 0x02, 0x13, 0x1E, 0x00, 0x1D, 0xCD, 0x65, 0x00};
         assert(dtl_buf == expected);
         // And the decode path renders the same instant back.
         DecodedValue dv = decodeScalar(Type::DTL, ReadBuffer(dtl_buf));
@@ -269,11 +269,11 @@ int main() {
     // Test 13: DTL direct nanosecond conversion & round-trip (zero heap allocations, Big and Little Endian)
     {
         // 2024-03-18 19:30:00.500000000 UTC
-        // Year 2024 (0x07E8), Month 3, Day 18, Weekday 1, Hour 19, Min 30, Sec 0, Ns 500000000 (0x1DCD6500)
+        // Year 2024 (0x07E8), Month 3, Day 18, Weekday 2 (Monday), Hour 19, Min 30, Sec 0, Ns 500000000 (0x1DCD6500)
         int64_t expected_ns = 1710790200'500'000'000LL;
 
         // --- Big-Endian ---
-        std::array<uint8_t, 12> dtl_buf_be{0x07, 0xE8, 0x03, 0x12, 0x01, 0x13, 0x1E, 0x00, 0x1D, 0xCD, 0x65, 0x00};
+        std::array<uint8_t, 12> dtl_buf_be{0x07, 0xE8, 0x03, 0x12, 0x02, 0x13, 0x1E, 0x00, 0x1D, 0xCD, 0x65, 0x00};
         int64_t ns_be = s7codec::decodeDtlToNanoseconds(ReadBuffer(dtl_buf_be), DecodeOptions{.endian = Endian::Big});
         assert(ns_be == expected_ns);
 
@@ -285,8 +285,8 @@ int main() {
         assert(encoded_buf_be == dtl_buf_be);
 
         // --- Little-Endian ---
-        // Year LE: 0xE8, 0x07; Month..Sec: identical; Ns LE: 0x00, 0x65, 0xCD, 0x1D
-        std::array<uint8_t, 12> dtl_buf_le{0xE8, 0x07, 0x03, 0x12, 0x01, 0x13, 0x1E, 0x00, 0x00, 0x65, 0xCD, 0x1D};
+        // Year LE: 0xE8, 0x07; Month..Sec: identical (weekday is a single byte, also 2); Ns LE: 0x00, 0x65, 0xCD, 0x1D
+        std::array<uint8_t, 12> dtl_buf_le{0xE8, 0x07, 0x03, 0x12, 0x02, 0x13, 0x1E, 0x00, 0x00, 0x65, 0xCD, 0x1D};
         int64_t ns_le = s7codec::decodeDtlToNanoseconds(ReadBuffer(dtl_buf_le), DecodeOptions{.endian = Endian::Little});
         assert(ns_le == expected_ns);
 

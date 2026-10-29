@@ -1,5 +1,5 @@
 #pragma once
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <sgrn/scl/types/DbField.hpp>
 #include <sgrn/scl/types/UdtDefinition.hpp>
 #include <sgrn/scl/types/modbus/ModbusArea.hpp>
@@ -20,7 +20,8 @@ struct DbSchema {
     std::vector<DbField> fields;
 
     std::string source_file;
-    s7codec::Endian endianness{s7codec::Endian::Little};
+    /// Block-scoped byte order; Big is canonical (see DbField::endianness).
+    s7codec::Endian endianness{s7codec::Endian::Big};
     bool trigger_events{false};
     ModbusArea modbus_area{ModbusArea::None}; ///< Modbus exposure directive
     uint64_t dataset_step_ns{0};              ///< Default dataset time step in nanoseconds (#DATASET_STEP)
