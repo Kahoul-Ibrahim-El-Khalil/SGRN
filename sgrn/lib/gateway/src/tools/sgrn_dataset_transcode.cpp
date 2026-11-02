@@ -186,7 +186,7 @@ bool buildTranscodeLayout(const rapidjson::Document& t_schema, std::unordered_ma
             return;
         std::string db_name = (t_db.HasMember("name") && t_db["name"].IsString()) ? t_db["name"].GetString() : "";
         const std::string prefix = db_name.empty() ? fmt::format("DB{}", db_num) : db_name;
-        s7codec::Endian db_endian = s7codec::Endian::Big;
+        s7codec::Endian db_endian = s7codec::Endian::Little;
         if (t_db.HasMember("endianness") && t_db["endianness"].IsString() && std::string_view(t_db["endianness"].GetString()) == "little") {
             db_endian = s7codec::Endian::Little;
         }

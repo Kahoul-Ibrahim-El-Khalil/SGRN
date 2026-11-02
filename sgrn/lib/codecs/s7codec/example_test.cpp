@@ -43,14 +43,16 @@ int main() {
 
     // Test 1: Scalar Decoding (Int — S7 Int is big-endian int16)
     uint8_t int_buffer[] = {0x00, 0x2A}; // 42 in big-endian
-    DecodedValue int_val = decodeScalar(s7codec::Type::Int, s7codec::ReadBuffer{int_buffer, sizeof(int_buffer)});
+    DecodedValue int_val =
+        decodeScalar(s7codec::Type::Int, s7codec::ReadBuffer{int_buffer, sizeof(int_buffer)}, DecodeOptions{.endian = Endian::Big});
     assert(int_val.valid());
     assert(std::get<int64_t>(int_val) == 42);
     std::cout << "[PASS] Scalar Int Decoding" << std::endl;
 
     // Test 2: Real Decoding (S7 Real is big-endian IEEE 754 float)
     uint8_t real_buffer[] = {0x41, 0xBC, 0x00, 0x00}; // 23.5 in IEEE 754 Big-Endian
-    DecodedValue real_val = decodeScalar(s7codec::Type::Real, s7codec::ReadBuffer{real_buffer, sizeof(real_buffer)});
+    DecodedValue real_val =
+        decodeScalar(s7codec::Type::Real, s7codec::ReadBuffer{real_buffer, sizeof(real_buffer)}, DecodeOptions{.endian = Endian::Big});
 
     assert(real_val.valid());
 
@@ -77,10 +79,10 @@ int main() {
 
     assert(db_buffer[0] == 0x05 && db_buffer[1] == 0xDC); // 1500 is 0x05DC big-endian
 
-    DecodedValue speed_back = decodeScalar(s7codec::Type::Int, s7codec::ReadBuffer{db_buffer, 2});
+    DecodedValue speed_back = decodeScalar(s7codec::Type::Int, s7codec::ReadBuffer{db_buffer, 2}, DecodeOptions{.endian = Endian::Big});
     assert(speed_back.valid() && std::get<int64_t>(speed_back) == 1500);
 
-    DecodedValue temp_back = decodeScalar(s7codec::Type::Real, s7codec::ReadBuffer{db_buffer + 2, 4});
+    DecodedValue temp_back = decodeScalar(s7codec::Type::Real, s7codec::ReadBuffer{db_buffer + 2, 4}, DecodeOptions{.endian = Endian::Big});
 
     assert(temp_back.valid());
     assert(std::get<float>(temp_back) > 45.49f && std::get<float>(temp_back) < 45.51f);
@@ -91,21 +93,23 @@ int main() {
     // span-based encode/decode primaries, plus exact big-endian bytes.
     {
         std::array<uint8_t, 8> int_buf{};
-        assert(encodeScalar(DecodedValue(static_cast<int64_t>(-12345)), Type::Int, WriteBuffer(int_buf)).has_value());
+        assert(
+            encodeScalar(DecodedValue(static_cast<int64_t>(-12345)), Type::Int, WriteBuffer(int_buf), EncodeOptions{.endian = Endian::Big})
+                .has_value());
         assert(int_buf[0] == 0xCF && int_buf[1] == 0xC7); // -12345 is 0xCFC7 big-endian
-        DecodedValue iv = decodeScalar(Type::Int, ReadBuffer(int_buf));
+        DecodedValue iv = decodeScalar(Type::Int, ReadBuffer(int_buf), DecodeOptions{.endian = Endian::Big});
         assert(iv.valid() && std::get<int64_t>(iv) == -12345);
 
         std::array<uint8_t, 8> real_buf{};
-        assert(encodeScalar(DecodedValue(23.5f), Type::Real, WriteBuffer(real_buf)).has_value());
+        assert(encodeScalar(DecodedValue(23.5f), Type::Real, WriteBuffer(real_buf), EncodeOptions{.endian = Endian::Big}).has_value());
         assert(real_buf[0] == 0x41 && real_buf[1] == 0xBC && real_buf[2] == 0x00 && real_buf[3] == 0x00);
-        DecodedValue rv = decodeScalar(Type::Real, ReadBuffer(real_buf));
+        DecodedValue rv = decodeScalar(Type::Real, ReadBuffer(real_buf), DecodeOptions{.endian = Endian::Big});
         assert(rv.valid() && std::get<float>(rv) == 23.5f);
 
         std::array<uint8_t, 8> lreal_buf{};
-        assert(encodeScalar(DecodedValue(45.5), Type::LReal, WriteBuffer(lreal_buf)).has_value());
+        assert(encodeScalar(DecodedValue(45.5), Type::LReal, WriteBuffer(lreal_buf), EncodeOptions{.endian = Endian::Big}).has_value());
         assert(lreal_buf[0] == 0x40 && lreal_buf[1] == 0x46 && lreal_buf[2] == 0xC0); // 45.5 = 0x4046C000..
-        DecodedValue lv = decodeScalar(Type::LReal, ReadBuffer(lreal_buf));
+        DecodedValue lv = decodeScalar(Type::LReal, ReadBuffer(lreal_buf), DecodeOptions{.endian = Endian::Big});
         assert(lv.valid() && std::get<double>(lv) == 45.5);
 
         std::cout << "[PASS] Span round-trips (Int/Real/LReal)" << std::endl;
@@ -218,8 +222,8 @@ int main() {
     // units), UTF-8 back out. Header is [max_len, cur_len] as u16s.
     {
         std::array<uint8_t, 12> w_buf{}; // 4 header bytes + 4 units * 2
-        assert(encodeScalar(
-            DecodedValue(std::string("AB")), Type::WString, WriteBuffer(w_buf), EncodeOptions{.string_capacity = StringCapacity{4}})
+        assert(encodeScalar(DecodedValue(std::string("AB")), Type::WString, WriteBuffer(w_buf),
+            EncodeOptions{.endian = Endian::Big, .string_capacity = StringCapacity{4}})
                 .has_value());
         assert(w_buf[0] == 0x00 && w_buf[1] == 0x04); // max_len BE u16
         assert(w_buf[2] == 0x00 && w_buf[3] == 0x02); // cur_len BE u16
@@ -228,7 +232,7 @@ int main() {
         for (size_t i = 8; i < w_buf.size(); ++i)
             assert(w_buf[i] == 0x00);
 
-        DecodedValue wv = decodeScalar(Type::WString, ReadBuffer(w_buf));
+        DecodedValue wv = decodeScalar(Type::WString, ReadBuffer(w_buf), DecodeOptions{.endian = Endian::Big});
         assert(wv.valid() && wv.s() == "AB");
 
         std::cout << "[PASS] WString round-trip and layout" << std::endl;
@@ -242,8 +246,9 @@ int main() {
         assert(s7codec::encodeDtl(c, WriteBuffer(dtl_buf), Endian::Big).has_value());
         const std::array<uint8_t, 12> expected{0x07, 0xE8, 0x03, 0x12, 0x02, 0x13, 0x1E, 0x00, 0x1D, 0xCD, 0x65, 0x00};
         assert(dtl_buf == expected);
-        // And the decode path renders the same instant back.
-        DecodedValue dv = decodeScalar(Type::DTL, ReadBuffer(dtl_buf));
+        // And the decode path renders the same instant back (explicit BE:
+        // the byte layout above is big-endian).
+        DecodedValue dv = decodeScalar(Type::DTL, ReadBuffer(dtl_buf), DecodeOptions{.endian = Endian::Big});
         assert(dv.valid() && dv.s() == "2024-03-18 19:30:00.500000000");
 
         std::cout << "[PASS] DTL exact byte layout + decode rendering" << std::endl;
@@ -258,9 +263,11 @@ int main() {
         assert(dv.valid() && dv.s() == "1990-01-01");
 
         std::array<uint8_t, 4> tod_buf{};
-        assert(encodeScalar(DecodedValue(static_cast<int64_t>(3600000)), Type::TimeOfDay, WriteBuffer(tod_buf)).has_value());
+        assert(encodeScalar(
+            DecodedValue(static_cast<int64_t>(3600000)), Type::TimeOfDay, WriteBuffer(tod_buf), EncodeOptions{.endian = Endian::Big})
+                .has_value());
         assert(tod_buf[0] == 0x00 && tod_buf[1] == 0x36 && tod_buf[2] == 0xEE && tod_buf[3] == 0x80); // 3600000 = 0x36EE80
-        DecodedValue tv = decodeScalar(Type::TimeOfDay, ReadBuffer(tod_buf));
+        DecodedValue tv = decodeScalar(Type::TimeOfDay, ReadBuffer(tod_buf), DecodeOptions{.endian = Endian::Big});
         assert(tv.valid() && tv.s() == "01:00:00.000");
 
         std::cout << "[PASS] Date / TOD round-trips" << std::endl;

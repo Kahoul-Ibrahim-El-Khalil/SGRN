@@ -21,7 +21,7 @@ struct DbSchema {
 
     std::string source_file;
     /// Block-scoped byte order; Big is canonical (see DbField::endianness).
-    s7codec::Endian endianness{s7codec::Endian::Big};
+    s7codec::Endian endianness{s7codec::Endian::Little};
     bool trigger_events{false};
     ModbusArea modbus_area{ModbusArea::None}; ///< Modbus exposure directive
     uint64_t dataset_step_ns{0};              ///< Default dataset time step in nanoseconds (#DATASET_STEP)
@@ -46,7 +46,7 @@ inline void serializeToWriter(Writer& t_writer, const sgrn::scl::DbSchema& t_db,
         t_writer.Key("source_file");
         t_writer.String(t_db.source_file.c_str());
     }
-    if (t_db.endianness != s7codec::Endian::Big) {
+    if (t_db.endianness != s7codec::Endian::Little) {
         t_writer.Key("endianness");
         t_writer.String(t_db.endianness == s7codec::Endian::Little ? "little" : "big");
     }

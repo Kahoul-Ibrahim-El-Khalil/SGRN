@@ -339,7 +339,7 @@ sgrn::Result<void, std::string> PlcRuntime::defineTagResolved(
     tag.field.name = t_name;
     tag.field.type = tag.type;
     tag.field.count = 1;
-    tag.field.endianness = s7codec::Endian::Big;
+    tag.field.endianness = s7codec::Endian::Little;
 
     {
         std::lock_guard<std::mutex> lk(tag_mutex_);

@@ -59,6 +59,7 @@ if(SGRN_BUILD_TESTS)
                 sgrn::core
                 sgrn::utils
                 sgrn::fmt
+                reproc::reproc++
         )
         target_include_directories(pipeline_cli_test PRIVATE
             ${CMAKE_SOURCE_DIR}/sgrn/lib/tests/support

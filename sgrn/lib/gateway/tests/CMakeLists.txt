@@ -18,6 +18,7 @@ if(SGRN_BUILD_TESTS)
     )
     target_include_directories(runtime_sync_protocol_test PRIVATE
         ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/include
+        ${CMAKE_SOURCE_DIR}/sgrn/lib/core/include
     )
     add_test(NAME runtime_sync_protocol_test COMMAND runtime_sync_protocol_test)
     sgrn_target(runtime_sync_protocol_test)
@@ -194,9 +195,10 @@ if(SGRN_BUILD_TESTS)
     add_test(NAME opcua_projection_test COMMAND opcua_projection_test)
     sgrn_target(opcua_projection_test)
 
-    # The integration tests below use gateway_fixture.hpp / test_util.hpp, which
-    # rely on POSIX process spawning (fork/waitpid/execvp) and sockets.
-    # Exclude them when cross-compiling for Windows.
+    # The integration tests below use gateway_fixture.hpp / test_util.hpp.
+    # Process spawning there is cross-platform (reproc); freePort() still uses
+    # raw POSIX sockets, so keep excluding when cross-compiling for Windows
+    # until the socket helpers gain winsock support.
     if(NOT WIN32 AND NOT MINGW AND NOT SGRN_CROSS_WIN64)
         # Live-gateway OPC-UA discovery (ported from tests/gateway/opcua_discovery.py):
         sgrn_add_component_executable(
@@ -207,6 +209,7 @@ if(SGRN_BUILD_TESTS)
                 sgrn::wrappers::opcua
                 sgrn::open62541
                 sgrn::jsoncpp
+                reproc::reproc++
         )
         target_include_directories(opcua_discovery_test PRIVATE
             ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/include
@@ -225,6 +228,7 @@ if(SGRN_BUILD_TESTS)
                 sgrn::wrappers::opcua
                 sgrn::open62541
                 sgrn::jsoncpp
+                reproc::reproc++
         )
         target_include_directories(opcua_enum_test PRIVATE
             ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/include
@@ -241,6 +245,7 @@ if(SGRN_BUILD_TESTS)
             ENABLE_ORIGIN_RPATH
             PRIVATE_LIBS
                 sgrn::jsoncpp
+                reproc::reproc++
         )
         target_include_directories(gateway_rest_api_test PRIVATE
             ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/include
@@ -257,6 +262,7 @@ if(SGRN_BUILD_TESTS)
             ENABLE_ORIGIN_RPATH
             PRIVATE_LIBS
                 sgrn::jsoncpp
+                reproc::reproc++
         )
         target_include_directories(gateway_array_support_test PRIVATE
             ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/include
@@ -273,6 +279,7 @@ if(SGRN_BUILD_TESTS)
             ENABLE_ORIGIN_RPATH
             PRIVATE_LIBS
                 sgrn::jsoncpp
+                reproc::reproc++
         )
         target_include_directories(gateway_policy_test PRIVATE
             ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/include
@@ -290,6 +297,7 @@ if(SGRN_BUILD_TESTS)
             PRIVATE_LIBS
                 sgrn::wrappers::modbus
                 sgrn::jsoncpp
+                reproc::reproc++
         )
         target_include_directories(modbus_registers_test PRIVATE
             ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/include
@@ -307,6 +315,7 @@ if(SGRN_BUILD_TESTS)
             PRIVATE_LIBS
                 sgrn::wrappers::s7
                 sgrn::jsoncpp
+                reproc::reproc++
         )
         target_include_directories(s7_southbound_test PRIVATE
             ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/include
@@ -326,6 +335,7 @@ if(SGRN_BUILD_TESTS)
                 sgrn::zlib
                 sgrn::openssl
                 sgrn::jsoncpp
+                reproc::reproc++
         )
         target_include_directories(binary_live_snapshot_test PRIVATE
             ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/include

@@ -138,7 +138,7 @@ public:
             teardown();
             return;
         }
-        m_gateway = std::make_unique<Process>(gw_res);
+        m_gateway = std::make_unique<Process>(std::move(gw_res));
 
         // s7shell soft-PLC / simulation script (optional: southbound tests run
         // the bare gateway so nothing else contends for the DB arena)
@@ -148,7 +148,7 @@ public:
             if (sim_res.pid < 0) {
                 std::printf("NOTE: s7shell not spawned (%s); registry checks still run off schema.scl\n", sim_res.error.c_str());
             } else {
-                m_s7shell = std::make_unique<Process>(sim_res);
+                m_s7shell = std::make_unique<Process>(std::move(sim_res));
             }
         }
 

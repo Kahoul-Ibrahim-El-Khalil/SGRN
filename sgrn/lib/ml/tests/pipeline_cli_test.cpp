@@ -255,7 +255,7 @@ int main() {
     const std::string log1 = tmp_dir + "/replay1.log";
     auto spawn1 = sgrn::test::spawnProcess(replay1_argv, tmp_dir, {}, log1);
     assert(spawn1.pid > 0);
-    sgrn::test::Process proc1(spawn1);
+    sgrn::test::Process proc1(std::move(spawn1));
     assert(proc1.live());
 
     // Poll /replay/status endpoint via HTTP
@@ -294,7 +294,7 @@ int main() {
     const std::string log2 = tmp_dir + "/replay2.log";
     auto spawn2 = sgrn::test::spawnProcess(replay2_argv, tmp_dir, {}, log2);
     assert(spawn2.pid > 0);
-    sgrn::test::Process proc2(spawn2);
+    sgrn::test::Process proc2(std::move(spawn2));
     assert(proc2.live());
 
     // Poll /replay/status endpoint via HTTP

@@ -210,7 +210,7 @@ private:
             teardown();
             return;
         }
-        m_server = Process(res);
+        m_server = Process(std::move(res));
 
         // Wait for readiness (~10s): initdb of an isolated cluster is ~1-2s.
         const std::string base = "host=" + sock_dir + " port=" + std::to_string(m_db_port) + " user=sgrn_test dbname=postgres";

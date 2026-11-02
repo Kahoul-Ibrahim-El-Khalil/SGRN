@@ -2,29 +2,32 @@
 
 // test_util.hpp — shared host-side helpers for C++ integration tests.
 //
-// Zero-dependency (POSIX + stdlib only) so any component's tests can include
-// this header without pulling in SGRN libraries or a test framework. Fixture
-// headers (pg_fixture.hpp, gateway_fixture.hpp) build on these primitives.
+// Process spawning uses reproc (cross-platform C99/C++11 child-process
+// control, linked via cmake/deps/reproc.cmake) instead of raw fork/exec/
+// waitpid, so these helpers also compile on Windows; the only remaining
+// platform-specific helper is freePort() (raw sockets). The public API
+// (spawnProcess / runProcess / Process) is unchanged — see each declared
+// below. Fixture headers pg_fixture + gateway_fixture build on these.
 //
 // Conventions shared with tests/run_tests.py:
 //   - a fixture that cannot start sets `available() == false` + `skipReason()`
 //     and the test prints "SKIP: <reason>" then returns 0 (ctest PASS),
 //     matching the Python/TS skip semantics.
 
-#include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
+
+#include <reproc++/reproc.hpp>
 
 #include <cerrno>
 #include <chrono>
-#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -32,6 +35,8 @@
 #include <unistd.h>
 #include <utility>
 #include <vector>
+
+#include <system_error> // std::error_code (reproc++)
 
 namespace sgrn::test
 {
@@ -132,82 +137,81 @@ inline int freePort() {
     return port;
 }
 
-// ── Process management ───────────────────────────────────────────────────────
+// ── Process management (reproc backend) ──────────────────────────────────────
 
 struct SpawnResult {
     ::pid_t pid = -1;
     std::string error;
+    /// Backend ownership: the started child's control object. Null when the
+    /// spawn failed (in which case `pid < 0` and `error` describe why).
+    std::unique_ptr<reproc::process> proc;
 };
 
-/// fork/exec with stdout+stderr redirected to t_log_path (empty → /dev/null).
-/// `t_env_extra` entries are added to the inherited environment; neither the
-/// parent's environment nor the child's argv strings are retained by callers
-/// after this returns (execv permutes nothing — our own copies).
+/// Start a child with stdout+stderr redirected (single shared fd, so the two
+/// streams append sequentially) to t_log_path, or to /dev/null when empty; stdin
+/// is connected to /dev/null. `t_env_extra` entries are added on top of the
+/// inherited environment. Returns the child pid on success, pid == -1 + `error`
+/// on failure. The returned SpawnResult must be handed to a `Process` (or its
+/// moved-into control object dropped) so the child is always reaped.
 inline SpawnResult spawnProcess(const std::vector<std::string>& t_argv, const std::string& t_cwd,
     const std::map<std::string, std::string>& t_env_extra, const std::string& t_log_path = {}) {
     SpawnResult res;
-
-    // Build argv/env once so the child only does execv (no allocation-wise
-    // fork pitfalls beyond strdup, which is fine pre-exec in a single thread).
-    std::vector<char*> argv_c;
-    argv_c.reserve(t_argv.size() + 1);
-    for (const std::string& a : t_argv)
-        argv_c.push_back(::strdup(a.c_str()));
-    argv_c.push_back(nullptr);
-
-    // Environment: inherited + extras
-    std::vector<std::string> env_entries;
-    for (char** e = ::environ; e && *e; ++e)
-        env_entries.emplace_back(*e);
-    for (const auto& [k, v] : t_env_extra)
-        env_entries.emplace_back(k + "=" + v);
-
-    std::vector<char*> env_c;
-    env_c.reserve(env_entries.size() + 1);
-    for (const std::string& e : env_entries)
-        env_c.push_back(::strdup(e.c_str()));
-    env_c.push_back(nullptr);
-
-    const int redirect_fd =
-        t_log_path.empty() ? ::open("/dev/null", O_WRONLY) : ::open(t_log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    if (redirect_fd < 0) {
-        res.error = std::string("open(log): ") + std::strerror(errno);
+    if (t_argv.empty()) {
+        res.error = "cannot start: empty argv";
         return res;
     }
 
-    const ::pid_t pid = ::fork();
-    if (pid < 0) {
-        res.error = std::string("fork: ") + std::strerror(errno);
-        ::close(redirect_fd);
+    std::FILE* log_fp = nullptr;
+    if (!t_log_path.empty()) {
+        log_fp = std::fopen(t_log_path.c_str(), "wb");
+        if (!log_fp) {
+            res.error = std::string("fopen(") + t_log_path + "): " + std::strerror(errno);
+            return res;
+        }
+    }
+
+    reproc::options options;
+    options.env.behavior = reproc::env::extend;
+    if (!t_env_extra.empty())
+        options.env.extra = reproc::env(t_env_extra);
+    if (!t_cwd.empty())
+        options.working_directory = t_cwd.c_str();
+    // Child stdin is always /dev/null (immediate EOF — nothing reads it).
+    options.redirect.in.type = reproc::redirect::discard;
+    if (log_fp) {
+        // Top-level redirect shorthand: the same FILE* backs both stdout and
+        // stderr, so their writes append into one growing file (own-fd-per-
+        // stream via redirect::path would interleave two file offsets).
+        options.redirect.file = log_fp;
+    } else {
+        options.redirect.out.type = reproc::redirect::discard;
+        options.redirect.err.type = reproc::redirect::discard;
+    }
+    // Shutdown escalation consumed by Process::stop() and the destructor.
+    options.stop = {
+        {reproc::stop::terminate, reproc::milliseconds(3000)},
+        {reproc::stop::kill, reproc::infinite},
+        {reproc::stop::noop, reproc::milliseconds(0)},
+    };
+
+    auto proc = std::make_unique<reproc::process>();
+    if (const std::error_code ec = proc->start(t_argv, options)) {
+        res.error = std::string("cannot start child: ") + ec.message();
+        if (log_fp)
+            std::fclose(log_fp);
         return res;
     }
-    if (pid == 0) {
-        // child
-        ::close(STDIN_FILENO);
-        ::open("/dev/null", O_RDONLY);
-        ::dup2(redirect_fd, STDOUT_FILENO);
-        ::dup2(redirect_fd, STDERR_FILENO);
-        ::close(redirect_fd);
-        if (!t_cwd.empty() && ::chdir(t_cwd.c_str()) != 0)
-            _exit(127);
-        ::execv(argv_c[0], argv_c.data());
-        _exit(127); // execv failed — binary missing or not executable
-    }
-
-    ::close(redirect_fd);
-    for (char* a : argv_c)
-        if (a)
-            ::free(a);
-    for (char* e : env_c)
-        if (e)
-            ::free(e);
-
-    res.pid = pid;
+    if (log_fp)
+        std::fclose(log_fp); // the child holds its own dup; parent's copy can close
+    res.pid = proc->pid().first;
+    res.proc = std::move(proc);
     return res;
 }
 
 /// Run a short-lived helper to completion synchronously; returns the exit
-/// status (127 mirrors execv failure) and a description on spawn failure.
+/// status (127 mirrors exec failure) and a description on spawn/wait failure.
+/// Statuses >= 128 report "killed by signal N" (reproc reports WTERMSIG+128);
+/// a genuine application exit in that range would also map into the message.
 inline int runProcess(const std::vector<std::string>& t_argv, const std::string& t_cwd,
     const std::map<std::string, std::string>& t_env_extra, std::string& t_out_error) {
     SpawnResult res = spawnProcess(t_argv, t_cwd, t_env_extra);
@@ -215,35 +219,41 @@ inline int runProcess(const std::vector<std::string>& t_argv, const std::string&
         t_out_error = res.error;
         return -1;
     }
-    int status = 0;
-    if (::waitpid(res.pid, &status, 0) < 0) {
-        t_out_error = std::string("waitpid: ") + std::strerror(errno);
+    const auto [status, ec] = res.proc->wait(reproc::infinite);
+    if (ec) {
+        t_out_error = std::string("reproc wait: ") + ec.message();
         return -1;
     }
-    if (WIFEXITED(status))
-        return WEXITSTATUS(status);
-    if (WIFSIGNALED(status))
-        t_out_error = std::string("killed by signal ") + std::to_string(WTERMSIG(status));
-    return -1;
+    if (status < 0) {
+        t_out_error = std::string("reproc wait: unexpected negative status ") + std::to_string(status);
+        return -1;
+    }
+    if (status >= 128)
+        t_out_error = std::string("killed by signal ") + std::to_string(status - 128);
+    return status;
 }
 
-/// RAII child process: SIGTERM on destruction (SIGKILL after a grace period).
+/// RAII child process: terminate on destruction (SIGTERM → ~3s → SIGKILL,
+/// escalated by reproc's stored stop actions or this class's explicit stop()).
 class Process {
 public:
     Process() = default;
     explicit Process(SpawnResult t_res)
-        : pid_(t_res.pid) {
+        : proc_(std::move(t_res.proc))
+        , pid_(t_res.pid) {
     }
 
     ~Process() {
         stop();
     }
     Process(Process&& t_other) noexcept
-        : pid_(std::exchange(t_other.pid_, -1)) {
+        : proc_(std::exchange(t_other.proc_, nullptr))
+        , pid_(std::exchange(t_other.pid_, -1)) {
     }
     Process& operator=(Process&& t_other) noexcept {
         if (this != &t_other) {
             stop();
+            proc_ = std::exchange(t_other.proc_, nullptr);
             pid_ = std::exchange(t_other.pid_, -1);
         }
         return *this;
@@ -251,20 +261,14 @@ public:
     Process(const Process&) = delete;
     Process& operator=(const Process&) = delete;
 
-    bool live() const {
-        if (pid_ <= 0)
+    /// Non-blocking liveness probe; reaps an exited child as a side effect.
+    bool live() {
+        if (!proc_)
             return false;
-        // /proc/<pid>/stat state field: 'Z' = zombie (exited, unreaped).
-        char path[64];
-        std::snprintf(path, sizeof(path), "/proc/%d/stat", pid_);
-        std::FILE* fp = std::fopen(path, "r");
-        if (!fp)
-            return false;
-        int pid_no = 0;
-        char comm[256] = {}, state = 0;
-        const bool ok = std::fscanf(fp, "%d %255[^)] %c", &pid_no, comm, &state) == 3;
-        std::fclose(fp);
-        return ok && state != 'Z' && state != 'X';
+        const auto [status, ec] = proc_->wait(reproc::milliseconds(0));
+        if (status >= 0)
+            return false;                  // exited (possibly just reaped by this call)
+        return ec == std::errc::timed_out; // still running
     }
     ::pid_t pid() const {
         return pid_;
@@ -272,25 +276,19 @@ public:
 
     /// Terminate (idempotent): SIGTERM, wait up to ~3s, then SIGKILL.
     void stop() {
-        if (pid_ <= 0)
+        if (!proc_)
             return;
-        const ::pid_t pid = pid_;
+        auto proc = std::exchange(proc_, nullptr);
         pid_ = -1;
-        if (::kill(pid, SIGTERM) != 0)
-            return;
-        for (int i = 0; i < 600; ++i) {
-            const ::pid_t w = ::waitpid(pid, nullptr, WNOHANG);
-            if (w == pid)
-                return;
-            if (w < 0 && errno != EINTR && errno != 0)
-                break;
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }
-        ::kill(pid, SIGKILL);
-        ::waitpid(pid, nullptr, 0);
+        (void)proc->stop({
+            {reproc::stop::terminate, reproc::milliseconds(3000)},
+            {reproc::stop::kill, reproc::infinite},
+            {reproc::stop::noop, reproc::milliseconds(0)},
+        });
     }
 
 private:
+    std::unique_ptr<reproc::process> proc_;
     ::pid_t pid_ = -1;
 };
 

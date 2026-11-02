@@ -146,6 +146,18 @@ set(SGRN_DEP_opener_TAG
     "master"
 )
 
+# reproc v14.2.4 — cross-platform child-process control (C99 core + C++11
+# wrapper). Backs the C++ integration-test process fixtures (test_util.hpp).
+# Declared as a git tag (not a URL tarball): CPM archive downloads resolve
+# through codeload.github.com, which is not reachable in some environments.
+set(SGRN_DEP_reproc_REPO
+    "https://github.com/DaanDeMeyer/reproc.git"
+)
+
+set(SGRN_DEP_reproc_TAG
+    "v14.2.4"
+)
+
 # Drogon v1.9.13
 set(SGRN_DEP_drogon_REPO
     "https://github.com/drogonframework/drogon.git"

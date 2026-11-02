@@ -86,9 +86,10 @@ int main() {
         CHECK(items.size() == 1 && bufs.size() == 1);
         CHECK(items[0].Area == S7AreaDB && items[0].DBNumber == 1 && items[0].Start == 0 && items[0].Amount == 4);
         CHECK(items[0].WordLen == S7WLReal);
-        // 3.14 big-endian float
+        // 3.14 little-endian float — PLC memory layout follows the tag's field
+        // endianness (Little default)
         CHECK(bufs[0].size() == 4);
-        CHECK(bufs[0][0] == 0x40 && bufs[0][1] == 0x48 && bufs[0][2] == 0xF5 && bufs[0][3] == 0xC3);
+        CHECK(bufs[0][0] == 0xC3 && bufs[0][1] == 0xF5 && bufs[0][2] == 0x48 && bufs[0][3] == 0x40);
     }
 
     // ── buildPutItems: DecodedValue variant — Bool honours the tag's bit ─────
@@ -104,14 +105,14 @@ int main() {
         CHECK(bufs[0][0] == 0x04); // bit 2 of byte 0
     }
 
-    // ── buildPutItems: DecodedValue DInt big-endian ──────────────────────────
+    // ── buildPutItems: DecodedValue DInt little-endian ──────────────────────
     {
         std::vector<S7DataItem> items;
         std::vector<std::vector<uint8_t>> bufs;
         const auto res = table.buildPutItems({"counter"}, {s7codec::DecodedValue::makeSigned(-7)}, items, bufs);
         CHECK(res.has_value());
         CHECK(bufs[0].size() == 4);
-        CHECK(bufs[0][0] == 0xFF && bufs[0][1] == 0xFF && bufs[0][2] == 0xFF && bufs[0][3] == 0xF9);
+        CHECK(bufs[0][0] == 0xF9 && bufs[0][1] == 0xFF && bufs[0][2] == 0xFF && bufs[0][3] == 0xFF);
     }
 
     // ── buildPutItems: unknown tag refused ───────────────────────────────────

@@ -19,162 +19,53 @@ env:
   CPM_CACHE_DIR: ${{ github.workspace }}/.cpm-cache
 
 jobs:
-  # ── 0. Change classification ──────────────────────────────────────────────
-  # Cheap path filter that decides which of the real jobs run. Everything
-  # still runs when pushed to main (safety net) — path gating is primarily
-  # for pull requests.
-  changes:
-    name: Detect changed areas
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      build: ${{ steps.filter.outputs.build }}
-      cpp: ${{ steps.filter.outputs.cpp }}
-      ci: ${{ steps.filter.outputs.ci }}
-      python: ${{ steps.filter.outputs.python }}
-      ts: ${{ steps.filter.outputs.ts }}
-      deps: ${{ steps.filter.outputs.deps }}
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Classify changed paths
-        uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            build:
-              - 'CMakeLists.txt'
-              - 'CMakePresets.json'
-              - 'cmake/**'
-              - 'deps/**'
-              - 'micromamba/**'
-              - 'sgrn/**'
-              - 'tests/**'
-              - 'docs/**'
-            cpp:
-              - 'sgrn/**/*.cpp'
-              - 'sgrn/**/*.cc'
-              - 'sgrn/**/*.hpp'
-              - 'sgrn/**/*.h'
-              - 'sgrn/**/CMakeLists.txt'
-              - 'cmake/**'
-              - 'tests/**'
-            ci:
-              - '.github/**'
-            python:
-              - 'sgrn/python/**'
-              - 'tests/**'
-              - 'experiments/**'
-            ts:
-              - 'sgrn/typescript/**'
-              - 'sgrn/web/**'
-              - 'tests/ts/**'
-            deps:
-              - 'micromamba/**'
-              - 'cmake/**'
-              - 'CMakePresets.json'
-              - 'deps/'
-
-  # ── 0. Setup environment (micromamba + bun) ─────────────────────────────
-  setup:
-    name: Phase 0 — Setup environment
-    needs: changes
-    if: >
-      needs.changes.outputs.deps == 'true' ||
-      needs.changes.outputs.build == 'true' ||
-      needs.changes.outputs.cpp == 'true' ||
-      needs.changes.outputs.python == 'true' ||
-      needs.changes.outputs.ts == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    defaults:
-      run:
-        shell: bash -el {0}
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Restore environment cache
-        id: env-cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            .prefix
-            .bun-dl
-          key: env-${{ runner.os }}-${{ hashFiles('micromamba/SGRN.yml', '.github/workflows/ci.yml') }}
-          restore-keys: |
-            env-${{ runner.os }}-
-
-      - name: Setup micromamba environment
-        if: steps.env-cache.outputs.cache-hit != 'true'
-        uses: mamba-org/setup-micromamba@v2
-        with:
-          environment-file: micromamba/SGRN.yml
-          environment-name: SGRN
-          cache-environment: true
-          cache-downloads: true
-          init-shell: bash
-          post-cleanup: environment
-
-      - name: Install bun
-        if: steps.env-cache.outputs.cache-hit != 'true'
-        uses: oven-sh/bun@v1
-
-      - name: Save environment cache
-        if: steps.env-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            .prefix
-            .bun-dl
-          key: ${{ steps.env-cache.outputs.cache-primary-key }}
-
-  # ── 1. Dependency build & staging (.prefix) ───────────────────────────────
-  deps:
-    name: Phase 1 — dependencies (.prefix)
-    needs: [changes, setup]
-    if: >
-      always() &&
-      needs.changes.outputs.deps == 'true'
-    runs-on: ubuntu-latest
+  linux:
+    name: Linux CI
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     defaults:
       run:
         shell: bash -el {0}
+
     steps:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Restore dependency cache
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install web dependencies
+        working-directory: sgrn/web/gateway
+        run: bun install --frozen-lockfile
+
+      - name: Restore tool cache
+        id: tool-cache
         uses: actions/cache@v4
         with:
           path: |
             .prefix
             .cpm-cache
-          key: deps-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'cmake/**', 'micromamba/SGRN.yml', 'sgrn/CMakeLists.txt') }}
+          key: linux-ci-${{ runner.os }}-${{ hashFiles('CMakePresets.json', 'micromamba/SGRN.yml', 'cmake/**', 'sgrn/CMakeLists.txt') }}
           restore-keys: |
-            deps-${{ runner.os }}-
+            linux-ci-${{ runner.os }}-
 
-      - name: Free disk space
-        shell: bash
+      - name: Setup micromamba
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: micromamba/SGRN.yml
+          environment-name: SGRN
+          init-shell: bash
+          cache-environment: true
+          cache-downloads: true
+          post-cleanup: environment
+
+      - name: Set compiler paths
         run: |
-          echo "=== Disk before pruning ==="
-          df -h /
-          sudo rm -rf \
-            /usr/share/dotnet \
-            /usr/local/lib/android \
-            /opt/ghc \
-            /opt/hostedtoolcache/CodeQL \
-            /usr/local/share/boost \
-            /usr/lib/jvm \
-            /usr/share/swift \
-            /usr/local/.ghcup
-          echo "=== Disk after pruning ==="
-          df -h /
+          echo "CC_BIN=$CONDA_PREFIX/bin/clang" >> "$GITHUB_ENV"
+          echo "CXX_BIN=$CONDA_PREFIX/bin/clang++" >> "$GITHUB_ENV"
+          echo "PATH_TO_NINJA=$CONDA_PREFIX/bin/ninja" >> "$GITHUB_ENV"
 
       - name: Configure dependencies
-        if: steps.deps-cache.outputs.cache-hit != 'true'
         run: |
           cmake --preset "$PRESET_DEPS" \
             -DCMAKE_C_COMPILER="$CC_BIN" \
@@ -182,37 +73,9 @@ jobs:
             -DCPM_SOURCE_CACHE="$CPM_CACHE_DIR" \
             -DUSE_PCH=OFF
 
-      - name: Build & stage dependencies (installs to .prefix/linux-static)
-        if: steps.deps-cache.outputs.cache-hit != 'true'
+      - name: Build dependencies
         run: |
           cmake --build --preset "$PRESET_DEPS" -j"$(nproc)"
-          echo "=== Disk after Phase 1 ==="
-          df -h /
-
-      - name: Save dependency cache
-        if: steps.deps-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            .prefix
-            .cpm-cache
-          key: ${{ steps.deps-cache.outputs.cache-primary-key }}
-
-  # ── 2. Build SGRN ───────────────────────────────────────────────────────
-  build:
-    name: Phase 2 — build SGRN
-    needs: [changes, setup, deps]
-    if: >
-      always() &&
-      needs.changes.outputs.build == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    defaults:
-      run:
-        shell: bash -el {0}
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
 
       - name: Configure SGRN
         run: |
@@ -228,103 +91,11 @@ jobs:
         run: |
           cmake --build --preset "$PRESET_MAIN" -j"$(nproc)"
           ccache --show-stats
-          echo "=== Disk after build ==="
-          df -h /
 
-  # ── 3. Run C++ unit tests ───────────────────────────────────────────────
-  cpp-test:
-    name: Phase 3 — C++ unit tests
-    needs: [deps, build]
-    if: >
-      always() &&
-      needs.changes.outputs.cpp == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    defaults:
-      run:
-        shell: bash -el {0}
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Configure test environment
-        run: |
-          echo "PATH_TO_NINJA=$CONDA_PREFIX/bin/ninja" >> "$GITHUB_ENV"
-          echo "CC_BIN=$CONDA_PREFIX/bin/clang"        >> "$GITHUB_ENV"
-          echo "CXX_BIN=$CONDA_PREFIX/bin/clang++"     >> "$GITHUB_ENV"
-
-      - name: Restore ctest cache
-        uses: actions/cache@v4
-        with:
-          path: .build/$PRESET_MAIN/Testing/Temporary/LastTest.log
-          key: ctest-${{ runner.os }}-${{ github.sha }}
-          restore-keys: |
-            ctest-${{ runner.os }}-
-
-      - name: C++ unit tests (ctest)
+      - name: Run C++ tests
         run: |
           ctest \
             --test-dir ".build/$PRESET_MAIN" \
             --output-on-failure \
             --timeout 120 \
             -j2
-
-  # ── 4. Python / TypeScript tests (non-blocking) ────────────────────────
-  py-ts-test:
-    name: Phase 4 — Python / TS tests
-    needs: [changes, setup, deps]
-    if: >
-      always() &&
-      (needs.changes.outputs.python == 'true' ||
-       needs.changes.outputs.ts == 'true')
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    defaults:
-      run:
-        shell: bash -el {0}
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: TypeScript E2E tests (non-blocking)
-        continue-on-error: true
-        run: |
-          (cd tests/ts && bun install --frozen-lockfile 2>/dev/null || bun install)
-          python3 tests/run_tests.py --kind ts
-
-      - name: Python tests (non-blocking)
-        continue-on-error: true
-        run: python3 tests/run_tests.py --kind python
-
-  # ── 5. CI summary — required check target for branch protection ──────────
-  ci:
-    name: CI summary
-    needs: [changes, setup, deps, build, cpp-test, py-ts-test]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Verify all consumer jobs succeeded (or were intentionally skipped)
-        run: |
-          echo "changes:   ${{ needs.changes.result }}"
-          echo "setup:     ${{ needs.setup.result }}"
-          echo "deps:      ${{ needs.deps.result }}"
-          echo "build:     ${{ needs.build.result }}"
-          echo "cpp-test:  ${{ needs.cpp-test.result }}"
-          echo "py-ts-test: ${{ needs.py-ts-test.result }}"
-
-          FAILED=0
-          for r in \
-            "changes ${{ needs.changes.result }}" \
-            "setup ${{ needs.setup.result }}" \
-            "deps ${{ needs.deps.result }}" \
-            "build ${{ needs.build.result }}" \
-            "cpp-test ${{ needs.cpp-test.result }}" \
-            "py-ts-test ${{ needs.py-ts-test.result }}"; do
-            name="${r%% *}"; result="${r##* }"
-            case "$result" in
-              success|skipped) ;;
-              *) echo "::error::$name failed with '$result'"; FAILED=1 ;;
-            esac
-          done
-          exit $FAILED

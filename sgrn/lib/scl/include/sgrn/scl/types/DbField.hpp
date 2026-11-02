@@ -46,9 +46,9 @@ struct DbField {
     uint32_t struct_size{0};
     /// Block-scoped byte order. Big-Endian is the S7 wire default and the
     /// canonical value here: the JSON form omits the key when it is Big, and
-    /// the encode/decode entry points default t_e to Endian::Big. A .scl file
-    /// without #LITTLE_ENDIAN directive stamps this from the file/block scope.
-    s7codec::Endian endianness{s7codec::Endian::Big};
+    /// encode/decode entry points default t_e to Endian::Little. A .scl file
+    /// without the #LITTLE_ENDIAN/#BIG_ENDIAN directives (endianness is now Little by default)
+    s7codec::Endian endianness{s7codec::Endian::Little};
     std::optional<std::string> unit;
     /// Physical dimension class (e.g. "pressure", "temperature", "flow").
     /// Set by #DIMENSION("..."); constrained by file-level #DIMENSIONS(...).
@@ -258,7 +258,7 @@ inline void serializeToWriter(Writer& t_writer, const sgrn::scl::DbField& t_fiel
         t_writer.Key("init");
         t_writer.String(t_field.init_value.c_str());
     }
-    if (t_field.endianness != s7codec::Endian::Big) {
+    if (t_field.endianness != s7codec::Endian::Little) {
         t_writer.Key("endianness");
         t_writer.String(t_field.endianness == s7codec::Endian::Little ? "little" : "big");
     }

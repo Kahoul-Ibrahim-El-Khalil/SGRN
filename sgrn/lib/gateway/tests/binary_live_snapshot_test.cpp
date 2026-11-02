@@ -10,14 +10,15 @@
 //      family): rapidjson-independent deep equality via jsoncpp.
 //   2. A full-DB binary subscription ({"command":"subscribe_binary","db":N})
 //      receives an immediate binary frame whose payload — after the 12-byte
-//      header ([u32 db ~BE][f64 timestamp ~BE]) — is byte-identical to HTTP
+//      header ([u32 db ~LE][f64 timestamp ~LE]) — is byte-identical to HTTP
 //      GET /memory/db/<N>/offset/0/size/<size_bytes> (octet-stream). Both
 //      reads originate from server_.readDbMemory.
 //   3. A field-slice subscription (offset/size from the /registry field map)
 //      frames exactly the requested window: payload bytes equal the
 //      corresponding HTTP memory slice.
 //   4. Header sanity: the u32 db prefix matches the subscribed DB number and
-//      the f64 timestamp parses as a finite double (big-endian on the wire).
+//      the f64 timestamp parses as a finite double (little-endian on the
+//      wire, matching the runtime-sync convention).
 //   5. Dual-transport parity (websocket.py's axiom): one WS connection
 //      carried both the JSON text frames and the binary RuntimeSync frames
 //      for the same DB.
@@ -175,7 +176,7 @@ private:
     std::string m_error;
 };
 
-/// Parses the WS binary frame header: [u32 db ~BE][f64 timestamp ~BE].
+/// Parses the WS binary frame header: [u32 db ~LE][f64 timestamp ~LE].
 struct BinaryHeader {
     uint32_t db = 0;
     double timestamp = 0.0;
@@ -185,11 +186,11 @@ struct BinaryHeader {
 bool parseBinaryFrame(const WsFrame& t_frame, BinaryHeader& t_out) {
     if (t_frame.payload.size() < 12)
         return false;
-    t_out.db = (static_cast<uint32_t>(t_frame.payload[0]) << 24) | (static_cast<uint32_t>(t_frame.payload[1]) << 16) |
-               (static_cast<uint32_t>(t_frame.payload[2]) << 8) | static_cast<uint32_t>(t_frame.payload[3]);
+    t_out.db = static_cast<uint32_t>(t_frame.payload[0]) | static_cast<uint32_t>(t_frame.payload[1]) << 8 |
+               static_cast<uint32_t>(t_frame.payload[2]) << 16 | static_cast<uint32_t>(t_frame.payload[3]) << 24;
     uint64_t raw = 0;
     for (int i = 0; i < 8; ++i)
-        raw = (raw << 8) | t_frame.payload[4 + i]; // big-endian u64 → double bits
+        raw |= static_cast<uint64_t>(t_frame.payload[4 + i]) << (i * 8); // little-endian u64 → double bits
     static_assert(sizeof(raw) == sizeof(t_out.timestamp), "double must be 64-bit");
     std::memcpy(&t_out.timestamp, &raw, sizeof(t_out.timestamp));
     t_out.body.assign(t_frame.payload.begin() + 12, t_frame.payload.end());

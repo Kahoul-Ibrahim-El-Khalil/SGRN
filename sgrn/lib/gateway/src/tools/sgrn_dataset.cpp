@@ -733,7 +733,7 @@ void DatasetProcessor::ingestBinaryImage(uint16_t t_db, const uint8_t* t_image, 
             continue;
         }
         std::string val_str = sgrn::common::endian_helper::loadValue(t_image + feat.offset, feat.raw_type,
-            db_endianness_.count(t_db) ? db_endianness_.at(t_db) : s7codec::Endian::Big, feat.bit_index);
+            db_endianness_.count(t_db) ? db_endianness_.at(t_db) : s7codec::Endian::Little, feat.bit_index);
         if (val_str == "null")
             continue;
         current_state_[feat.full_name] = val_str;

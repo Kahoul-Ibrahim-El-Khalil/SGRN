@@ -224,8 +224,8 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
         }
 
         std::vector<uint8_t> frame(12 + size);
-        storeToBuffer<uint32_t>(static_cast<uint32_t>(db), frame.data(), s7codec::Endian::Big);
-        storeToBuffer<double>(timestamp_seconds, frame.data() + 4, s7codec::Endian::Big);
+        storeToBuffer<uint32_t>(static_cast<uint32_t>(db), frame.data(), s7codec::Endian::Little);
+        storeToBuffer<double>(timestamp_seconds, frame.data() + 4, s7codec::Endian::Little);
 
         if (!binary_read_fn_) {
             SGRN_WARN_LOG("WebSocket binary read callback is not configured");
@@ -349,8 +349,8 @@ bool WebSocketAdapter::sendBinaryFrame(
     }
 
     std::vector<uint8_t> frame(12 + t_size);
-    storeToBuffer<uint32_t>(static_cast<uint32_t>(t_db), frame.data(), s7codec::Endian::Big);
-    storeToBuffer<double>(t_timestamp_seconds, frame.data() + 4, s7codec::Endian::Big);
+    storeToBuffer<uint32_t>(static_cast<uint32_t>(t_db), frame.data(), s7codec::Endian::Little);
+    storeToBuffer<double>(t_timestamp_seconds, frame.data() + 4, s7codec::Endian::Little);
 
     auto read_res = binary_read_fn_(t_db, t_offset, t_size, frame.data() + 12);
     if (read_res.hasError()) {

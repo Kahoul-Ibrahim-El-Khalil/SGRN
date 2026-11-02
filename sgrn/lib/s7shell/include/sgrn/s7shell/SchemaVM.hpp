@@ -31,7 +31,7 @@ struct FieldMeta {
     /// For String/WString/XString/XWString scalar fields: character capacity N in STRING[N].
     /// Populated in registerFieldProperties from DbField::count (for scalars) or DbField::string_capacity.
     uint32_t string_capacity{0};
-    s7codec::Endian endian{s7codec::Endian::Big};
+    s7codec::Endian endian{s7codec::Endian::Little};
 };
 
 /// Per-UDT-array metadata attached as auxiliary to UDT array getters.

@@ -164,7 +164,7 @@ static void serializeDbField(Writer& t_writer, const DbField& t_field) {
         }
         t_writer.EndObject();
     }
-    if (t_field.endianness != s7codec::Endian::Big) {
+    if (t_field.endianness != s7codec::Endian::Little) {
         t_writer.Key("endianness");
         t_writer.String(t_field.endianness == s7codec::Endian::Little ? "little" : "big");
     }
@@ -193,7 +193,7 @@ static void serializeUdtDefinition(Writer& t_writer, const UdtDefinition& t_udt)
     for (const auto& t_field : t_udt.fields)
         serializeDbField(t_writer, t_field);
     t_writer.EndArray();
-    if (t_udt.endianness != s7codec::Endian::Big) {
+    if (t_udt.endianness != s7codec::Endian::Little) {
         t_writer.Key("endianness");
         t_writer.String(t_udt.endianness == s7codec::Endian::Little ? "little" : "big");
     }
@@ -266,7 +266,7 @@ static void serializeDbSchema(Writer& t_writer, const DbSchema& t_db, bool t_hea
         t_writer.Key("source_file");
         t_writer.String(t_db.source_file.c_str());
     }
-    if (t_db.endianness != s7codec::Endian::Big) {
+    if (t_db.endianness != s7codec::Endian::Little) {
         t_writer.Key("endianness");
         t_writer.String(t_db.endianness == s7codec::Endian::Little ? "little" : "big");
     }
@@ -484,7 +484,7 @@ static sgrn::Result<DbField, scl::SclError> fieldFromJson(const rapidjson::Value
     }
     if (t_node.HasMember("endianness") && t_node["endianness"].IsString()) {
         std::string e = t_node["endianness"].GetString();
-        t_field.endianness = (e == "little" || e == "LITTLE") ? s7codec::Endian::Little : s7codec::Endian::Big;
+        t_field.endianness = (e == "little" || e == "LITTLE") ? s7codec::Endian::Little : s7codec::Endian::Little;
     }
     if (t_node.HasMember("trigger_events") && t_node["trigger_events"].IsBool()) {
         t_field.trigger_events = t_node["trigger_events"].GetBool();
@@ -569,7 +569,7 @@ sgrn::Result<UdtDefinition, scl::SclError> SchemaSerializer::udtFromJson(const r
 
     if (t_node.HasMember("endianness") && t_node["endianness"].IsString()) {
         std::string e = t_node["endianness"].GetString();
-        p_udt.endianness = (e == "little" || e == "LITTLE") ? s7codec::Endian::Little : s7codec::Endian::Big;
+        p_udt.endianness = (e == "little" || e == "LITTLE") ? s7codec::Endian::Little : s7codec::Endian::Little;
     }
     if (t_node.HasMember("trigger_events") && t_node["trigger_events"].IsBool()) {
         p_udt.trigger_events = t_node["trigger_events"].GetBool();
@@ -632,7 +632,7 @@ sgrn::Result<DbSchema, scl::SclError> SchemaSerializer::dbFromJson(const rapidjs
         t_db.source_file = t_node["source_file"].GetString();
     if (t_node.HasMember("endianness") && t_node["endianness"].IsString()) {
         std::string e = t_node["endianness"].GetString();
-        t_db.endianness = (e == "little" || e == "LITTLE") ? s7codec::Endian::Little : s7codec::Endian::Big;
+        t_db.endianness = (e == "little" || e == "LITTLE") ? s7codec::Endian::Little : s7codec::Endian::Little;
     }
     if (t_node.HasMember("trigger_events") && t_node["trigger_events"].IsBool()) {
         t_db.trigger_events = t_node["trigger_events"].GetBool();
@@ -970,7 +970,7 @@ inline uint8_t endianToU8(s7codec::Endian t_e) {
 inline bool u8ToEndian(uint8_t t_v, s7codec::Endian& t_e) {
     switch (t_v) {
         case 0:
-            t_e = s7codec::Endian::Big;
+            t_e = s7codec::Endian::Little;
             return true;
         case 1:
             t_e = s7codec::Endian::Little;
@@ -1094,7 +1094,7 @@ bool readField(Reader& t_r, DbField& t_f, int t_depth = 0) {
     if (!s7codec::stringToType(type_name.c_str(), type))
         return false;
     t_f.type = type;
-    s7codec::Endian endian = s7codec::Endian::Big;
+    s7codec::Endian endian = s7codec::Endian::Little;
     if (!u8ToEndian(static_cast<uint8_t>((flags & kEndianMask) >> kEndianShift), endian))
         return false;
     t_f.endianness = endian;

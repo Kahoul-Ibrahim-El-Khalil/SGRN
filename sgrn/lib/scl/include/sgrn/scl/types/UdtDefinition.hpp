@@ -20,7 +20,7 @@ struct UdtDefinition {
     int max_depth{0};
     std::vector<DbField> fields;
     /// Block-scoped byte order; Big is canonical (see DbField::endianness).
-    s7codec::Endian endianness{s7codec::Endian::Big};
+    s7codec::Endian endianness{s7codec::Endian::Little};
     bool trigger_events{false};
 
     bool is_scalar_alias{false};
@@ -57,7 +57,7 @@ inline void serializeToWriter(Writer& t_writer, const sgrn::scl::UdtDefinition& 
         sgrn::scl::field::serializeToWriter(t_writer, t_field);
     }
     t_writer.EndArray();
-    if (t_udt.endianness != s7codec::Endian::Big) {
+    if (t_udt.endianness != s7codec::Endian::Little) {
         t_writer.Key("endianness");
         t_writer.String(t_udt.endianness == s7codec::Endian::Little ? "little" : "big");
     }

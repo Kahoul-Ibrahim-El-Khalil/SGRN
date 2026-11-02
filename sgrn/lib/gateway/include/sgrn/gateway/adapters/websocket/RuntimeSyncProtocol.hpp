@@ -7,6 +7,9 @@
 // it carries a sequence number and one or more byte ranges that can be
 // applied atomically by a runtime endpoint.
 
+#include <sgrn/Result.hpp> // SGRN_RETURN_IF validation macro
+
+#include <concepts>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -18,8 +21,6 @@ namespace sgrn::gateway::adapters::websocket::runtime_sync
 
 inline constexpr char kMagic[] = {'S', 'G', 'R', 'W'};
 inline constexpr uint16_t kVersion = 1;
-inline constexpr size_t kHeaderSize = 28;
-inline constexpr size_t kRecordHeaderSize = 10;
 inline constexpr size_t kMaxFrameSize = 16 * 1024 * 1024;
 
 enum class Kind : uint8_t {
@@ -41,48 +42,69 @@ struct Frame {
     std::vector<Record> records;
 };
 
-inline void put16(std::string& out, uint16_t value) {
-    out.push_back(static_cast<char>(value & 0xff));
-    out.push_back(static_cast<char>((value >> 8) & 0xff));
+// ─── Little-endian field I/O ────────────────────────────────────────────────
+//
+// Byte order is expressed exactly once (here) and never re-derived per field
+// width; every frame field is a width-parameterized read/write of an
+// unsigned integer. `std::unsigned_integral` makes mixed-signedness or
+// wrong-width calls a compile-time error instead of a silent truncation.
+
+template <std::unsigned_integral T>
+inline void putLE(std::string& p_out, T t_value) {
+    for (size_t i = 0; i < sizeof(T); ++i) // compile-time bound: always fully unrolled
+        p_out.push_back(static_cast<char>((t_value >> (i * 8)) & 0xff));
 }
 
-inline void put32(std::string& out, uint32_t value) {
-    for (unsigned i = 0; i < 4; ++i)
-        out.push_back(static_cast<char>((value >> (i * 8)) & 0xff));
-}
-
-inline void put64(std::string& out, uint64_t value) {
-    for (unsigned i = 0; i < 8; ++i)
-        out.push_back(static_cast<char>((value >> (i * 8)) & 0xff));
-}
-
-inline bool read16(const std::string& in, size_t& pos, uint16_t& value) {
-    if (pos + 2 > in.size())
+template <std::unsigned_integral T>
+inline bool readLE(const std::string& p_in, size_t& p_pos, T& p_value) {
+    if (p_pos + sizeof(T) > p_in.size())
         return false;
-    value = static_cast<uint16_t>(static_cast<uint8_t>(in[pos])) | static_cast<uint16_t>(static_cast<uint8_t>(in[pos + 1])) << 8;
-    pos += 2;
+    p_value = {};
+    for (size_t i = 0; i < sizeof(T); ++i)
+        p_value |= static_cast<T>(static_cast<uint8_t>(p_in[p_pos + i])) << (i * 8);
+    p_pos += sizeof(T);
     return true;
 }
 
-inline bool read32(const std::string& in, size_t& pos, uint32_t& value) {
-    if (pos + 4 > in.size())
-        return false;
-    value = 0;
-    for (unsigned i = 0; i < 4; ++i)
-        value |= static_cast<uint32_t>(static_cast<uint8_t>(in[pos + i])) << (i * 8);
-    pos += 4;
-    return true;
+namespace detail
+{
+
+// Fixed-size LE field packs: write/read a heterogeneous list of unsigned
+// fields in declaration order. Fold expressions guarantee left-to-right
+// field order; reads stop at the first truncated field (all-or-nothing per
+// field), leaving the remaining references untouched.
+
+template <std::unsigned_integral... Ts>
+inline void putAllLE(std::string& p_out, Ts... p_values) {
+    ((putLE(p_out, p_values)), ...);
 }
 
-inline bool read64(const std::string& in, size_t& pos, uint64_t& value) {
-    if (pos + 8 > in.size())
-        return false;
-    value = 0;
-    for (unsigned i = 0; i < 8; ++i)
-        value |= static_cast<uint64_t>(static_cast<uint8_t>(in[pos + i])) << (i * 8);
-    pos += 8;
-    return true;
+template <std::unsigned_integral... Ts>
+inline bool readAllLE(const std::string& p_in, size_t& p_pos, Ts&... p_values) {
+    return (readLE(p_in, p_pos, p_values) && ...);
 }
+
+// Total byte size of a fixed field pack.
+template <std::unsigned_integral... Ts>
+inline constexpr size_t sumFieldBytes() {
+    return (size_t{0} + ... + sizeof(Ts));
+}
+
+} // namespace detail
+
+// Fixed header layout after the magic: version u16, kind u8, reserved-flags
+// u8, sequence u64, timestamp_ms u64, record count u32 — all little-endian.
+inline constexpr size_t kFixedFieldBytes = detail::sumFieldBytes<uint16_t, uint8_t, uint8_t, uint64_t, uint64_t, uint32_t>();
+inline constexpr size_t kHeaderSize = sizeof(kMagic) + kFixedFieldBytes;
+
+// Record header: db u16, offset u32, payload length u32 — little-endian.
+inline constexpr size_t kRecordHeaderSize = detail::sumFieldBytes<uint16_t, uint32_t, uint32_t>();
+
+// The wire layout is pinned here and by runtime_sync_protocol_test. These
+// asserts make any accidental layout change a compile-time failure; a real
+// layout change must pair with a kVersion bump and consumer updates.
+static_assert(kHeaderSize == 28, "runtime-sync header layout changed — bump kVersion and update consumers");
+static_assert(kRecordHeaderSize == 10, "runtime-sync record header layout changed — bump kVersion and update consumers");
 
 inline std::string encode(const Frame& frame) {
     size_t size = kHeaderSize;
@@ -94,18 +116,14 @@ inline std::string encode(const Frame& frame) {
     std::string out;
     out.reserve(size);
     out.append(kMagic, sizeof(kMagic));
-    put16(out, kVersion);
-    out.push_back(static_cast<char>(frame.kind));
-    out.push_back(0); // flags, reserved for compression/semantic modes
-    put64(out, frame.sequence);
-    put64(out, frame.timestamp_ms);
-    put32(out, static_cast<uint32_t>(frame.records.size()));
+    detail::putAllLE(out, kVersion, static_cast<uint8_t>(frame.kind), uint8_t{0} /* flags, reserved for
+                                                               compression/semantic modes */
+        ,
+        frame.sequence, frame.timestamp_ms, static_cast<uint32_t>(frame.records.size()));
     for (const auto& record : frame.records) {
         if (record.bytes.size() > std::numeric_limits<uint32_t>::max())
             return {};
-        put16(out, record.db);
-        put32(out, record.offset);
-        put32(out, static_cast<uint32_t>(record.bytes.size()));
+        detail::putAllLE(out, record.db, record.offset, static_cast<uint32_t>(record.bytes.size()));
         out.append(reinterpret_cast<const char*>(record.bytes.data()), record.bytes.size());
     }
     return out;
@@ -125,38 +143,36 @@ inline bool decode(const std::string& input, Frame& frame, std::string* error = 
     size_t pos = sizeof(kMagic);
     uint16_t version = 0;
     uint8_t kind = 0;
+    uint8_t reserved_flags = 0;
+    uint64_t sequence = 0;
+    uint64_t timestamp_ms = 0;
     uint32_t count = 0;
-    if (!read16(input, pos, version) || pos + 2 > input.size())
-        return fail("truncated runtime-sync header");
-    kind = static_cast<uint8_t>(input[pos++]);
-    ++pos; // flags, reserved
-    if (!read64(input, pos, frame.sequence) || !read64(input, pos, frame.timestamp_ms) || !read32(input, pos, count))
+    if (!detail::readAllLE(input, pos, version, kind, reserved_flags, sequence, timestamp_ms, count))
         return fail("truncated runtime-sync header");
     if (version != kVersion || kind < static_cast<uint8_t>(Kind::Delta) || kind > static_cast<uint8_t>(Kind::Ack))
         return fail("unsupported runtime-sync frame");
-    if (count > (input.size() - pos) / kRecordHeaderSize)
-        return fail("runtime-sync record count exceeds frame");
     frame.kind = static_cast<Kind>(kind);
+    frame.sequence = sequence;
+    frame.timestamp_ms = timestamp_ms;
     frame.records.clear();
+
+    SGRN_RETURN_IF(count > (input.size() - pos) / kRecordHeaderSize, fail("runtime-sync record count exceeds frame"));
+
     frame.records.reserve(count);
     for (uint32_t i = 0; i < count; ++i) {
-        uint16_t db = 0;
-        uint32_t offset = 0;
-        uint32_t length = 0;
-        if (!read16(input, pos, db) || !read32(input, pos, offset) || !read32(input, pos, length))
-            return fail("truncated runtime-sync record");
-        if (length > input.size() - pos)
-            return fail("runtime-sync record exceeds frame");
         Record record;
-        record.db = db;
-        record.offset = offset;
+        uint32_t length = 0;
+
+        SGRN_RETURN_IF(!detail::readAllLE(input, pos, record.db, record.offset, length), fail("truncated runtime-sync record"));
+
+        SGRN_RETURN_IF(length > input.size() - pos, fail("runtime-sync record exceeds frame"));
         record.bytes.assign(
             reinterpret_cast<const uint8_t*>(input.data() + pos), reinterpret_cast<const uint8_t*>(input.data() + pos + length));
         pos += length;
+
         frame.records.push_back(std::move(record));
     }
-    if (pos != input.size())
-        return fail("trailing runtime-sync bytes");
+    SGRN_RETURN_IF(pos != input.size(), fail("trailing runtime-sync bytes"));
     return true;
 }
 

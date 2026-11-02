@@ -245,7 +245,7 @@ static UA_StatusCode writeTagValue(
     std::vector<uint8_t> buf(tp_ctx->field_size, 0);
     PlcScalarView view;
     view.type = tp_ctx->type;
-    view.endian = s7codec::Endian::Big;
+    view.endian = s7codec::Endian::Little;
     view.size = tp_ctx->field_size;
     view.count = 1;
     view.bit_index = 0;

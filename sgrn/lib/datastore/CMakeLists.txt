@@ -42,7 +42,7 @@ if(SGRN_BUILD_TESTS)
     # sgrn::test fixtures (external PG* env or ephemeral initdb/postgres
     # cluster); SKIPs with exit 0 when no PostgreSQL is available.
     add_executable(pg_auth_functions_test tests/pg_auth_functions_test.cpp)
-    target_link_libraries(pg_auth_functions_test PRIVATE sgrn_datastore_lib)
+    target_link_libraries(pg_auth_functions_test PRIVATE sgrn_datastore_lib reproc::reproc++)
     target_include_directories(pg_auth_functions_test PRIVATE ${CMAKE_SOURCE_DIR}/sgrn/lib/tests/support)
     add_test(NAME pg_auth_functions_test COMMAND pg_auth_functions_test)
 endif()

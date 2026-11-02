@@ -204,11 +204,13 @@ inline const char* toString(CodecStatus status) {
 //  S7CODEC_RETURN_ERR_IF(c, s)  — if (c) return std::unexpected(s)
 //  S7CODEC_CHECK_BUF(buf, need) — guard: buf.size() < need → BUFFER_TOO_SMALL
 // ---------------------------------------------------------------------------
-#define S7CODEC_ERR(status)           std::unexpected(status)
-#define S7CODEC_RETURN_ERR_IF(cond, status) \
-    do { if (cond) return std::unexpected(status); } while (false)
-#define S7CODEC_CHECK_BUF(buf, need) \
-    S7CODEC_RETURN_ERR_IF((buf).size() < (need), CodecStatus::BUFFER_TOO_SMALL)
+#define S7CODEC_ERR(status) std::unexpected(status)
+#define S7CODEC_RETURN_ERR_IF(cond, status)                                                                                                \
+    do {                                                                                                                                   \
+        if (cond)                                                                                                                          \
+            return std::unexpected(status);                                                                                                \
+    } while (false)
+#define S7CODEC_CHECK_BUF(buf, need) S7CODEC_RETURN_ERR_IF((buf).size() < (need), CodecStatus::BUFFER_TOO_SMALL)
 
 // --- Options groups ---
 //
@@ -220,7 +222,7 @@ inline const char* toString(CodecStatus status) {
 
 struct DecodeOptions {
     /// Byte order for every multi-byte field read.
-    Endian endian{Endian::Big};
+    Endian endian{Endian::Little};
     /// Bit position for Type::Bool (LSB-first in the first buffer byte).
     BitOffset bit_offset{};
     /// Max chars/units for string types; 0 = builtin default.
@@ -229,7 +231,7 @@ struct DecodeOptions {
 
 struct EncodeOptions {
     /// Byte order for every multi-byte field write.
-    Endian endian{Endian::Big};
+    Endian endian{Endian::Little};
     /// Bit position for Type::Bool (LSB-first in the first buffer byte).
     BitOffset bit_offset{};
     /// Max chars/units for string types; 0 means the caller's count was 0.
@@ -330,49 +332,49 @@ inline std::expected<void, CodecStatus> encodeI8(int8_t t_value, WriteBuffer t_b
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeI16(int16_t t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeI16(int16_t t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Little) {
     S7CODEC_CHECK_BUF(t_buffer, 2);
     toEndian<int16_t>(t_value, t_buffer.data(), t_endian);
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeU16(uint16_t t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeU16(uint16_t t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Little) {
     S7CODEC_CHECK_BUF(t_buffer, 2);
     toEndian<uint16_t>(t_value, t_buffer.data(), t_endian);
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeI32(int32_t t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeI32(int32_t t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Little) {
     S7CODEC_CHECK_BUF(t_buffer, 4);
     toEndian<int32_t>(t_value, t_buffer.data(), t_endian);
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeU32(uint32_t t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeU32(uint32_t t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Little) {
     S7CODEC_CHECK_BUF(t_buffer, 4);
     toEndian<uint32_t>(t_value, t_buffer.data(), t_endian);
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeI64(int64_t t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeI64(int64_t t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Little) {
     S7CODEC_CHECK_BUF(t_buffer, 8);
     toEndian<int64_t>(t_value, t_buffer.data(), t_endian);
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeU64(uint64_t t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeU64(uint64_t t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Little) {
     S7CODEC_CHECK_BUF(t_buffer, 8);
     toEndian<uint64_t>(t_value, t_buffer.data(), t_endian);
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeReal(float t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeReal(float t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Little) {
     S7CODEC_CHECK_BUF(t_buffer, 4);
     toEndian<float>(t_value, t_buffer.data(), t_endian);
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeLReal(double t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeLReal(double t_value, WriteBuffer t_buffer, Endian t_endian = Endian::Little) {
     S7CODEC_CHECK_BUF(t_buffer, 8);
     toEndian<double>(t_value, t_buffer.data(), t_endian);
     return {};
@@ -392,7 +394,7 @@ inline std::expected<void, CodecStatus> encodeString(std::string_view t_value, S
 }
 
 inline std::expected<void, CodecStatus> encodeWString(
-    std::span<const uint16_t> t_code_units, StringCapacity t_capacity, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+    std::span<const uint16_t> t_code_units, StringCapacity t_capacity, WriteBuffer t_buffer, Endian t_endian = Endian::Little) {
     const uint32_t t_max_len = t_capacity.value;
     const uint32_t t_num_units = static_cast<uint32_t>(t_code_units.size());
     if (t_buffer.size() < static_cast<size_t>(4 + t_max_len * 2))
@@ -410,7 +412,7 @@ inline std::expected<void, CodecStatus> encodeWString(
 }
 
 inline std::expected<void, CodecStatus> encodeXString(
-    std::string_view t_value, StringCapacity t_capacity, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+    std::string_view t_value, StringCapacity t_capacity, WriteBuffer t_buffer, Endian t_endian = Endian::Little) {
     const uint32_t t_max_len = t_capacity.value;
     if (t_buffer.size() < static_cast<size_t>(8 + t_max_len))
         return S7CODEC_ERR(CodecStatus::BUFFER_TOO_SMALL);
@@ -423,7 +425,7 @@ inline std::expected<void, CodecStatus> encodeXString(
 }
 
 inline std::expected<void, CodecStatus> encodeXWString(
-    std::span<const uint16_t> t_code_units, StringCapacity t_capacity, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+    std::span<const uint16_t> t_code_units, StringCapacity t_capacity, WriteBuffer t_buffer, Endian t_endian = Endian::Little) {
     const uint32_t t_max_len = t_capacity.value;
     const uint32_t t_num_units = static_cast<uint32_t>(t_code_units.size());
     if (t_buffer.size() < static_cast<size_t>(8 + t_max_len * 2))
@@ -454,7 +456,8 @@ inline std::expected<void, CodecStatus> encodeDateTime(
     return {};
 }
 
-inline std::expected<void, CodecStatus> encodeDtl(const DtlComponents& t_components, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeDtl(
+    const DtlComponents& t_components, WriteBuffer t_buffer, Endian t_endian = Endian::Little) {
     S7CODEC_CHECK_BUF(t_buffer, 12);
     toEndian<uint16_t>(t_components.year, t_buffer.data(), t_endian);
     t_buffer[2] = t_components.month;
@@ -468,7 +471,7 @@ inline std::expected<void, CodecStatus> encodeDtl(const DtlComponents& t_compone
 }
 
 /// Encodes Unix epoch nanoseconds directly to 12-byte S7 DTL without intermediate string formatting.
-inline std::expected<void, CodecStatus> encodeDtl(int64_t t_nanoseconds, WriteBuffer t_buffer, Endian t_endian = Endian::Big) {
+inline std::expected<void, CodecStatus> encodeDtl(int64_t t_nanoseconds, WriteBuffer t_buffer, Endian t_endian = Endian::Little) {
     S7CODEC_CHECK_BUF(t_buffer, 12);
     DTL dtl = DTL::fromUnixNanoseconds(t_nanoseconds);
     toEndian<uint16_t>(static_cast<uint16_t>(dtl.year), t_buffer.data(), t_endian);
@@ -700,7 +703,7 @@ inline DecodedValue decodeScalar(Type t_type, ReadBuffer t_buffer, const DecodeO
                 return {};
             uint32_t cur_len = fromEndian<uint32_t>(t_buffer.subspan(4), t_options.endian);
             uint32_t max_len = (t_options.string_capacity.value > 0 ? t_options.string_capacity.value
-                                                                   : fromEndian<uint32_t>(t_buffer.subspan(0), t_options.endian));
+                                                                    : fromEndian<uint32_t>(t_buffer.subspan(0), t_options.endian));
             if (cur_len > max_len)
                 cur_len = max_len;
             if (!check(8 + cur_len))
@@ -712,7 +715,7 @@ inline DecodedValue decodeScalar(Type t_type, ReadBuffer t_buffer, const DecodeO
                 return {};
             uint32_t cur_len = fromEndian<uint32_t>(t_buffer.subspan(4), t_options.endian);
             uint32_t max_len = (t_options.string_capacity.value > 0 ? t_options.string_capacity.value
-                                                                   : fromEndian<uint32_t>(t_buffer.subspan(0), t_options.endian));
+                                                                    : fromEndian<uint32_t>(t_buffer.subspan(0), t_options.endian));
             if (cur_len > max_len)
                 cur_len = max_len;
             if (!check(8 + cur_len * 2))

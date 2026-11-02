@@ -56,7 +56,7 @@ sgrn::scl::DbSchema fromJson(const rapidjson::Value& t_node) {
         t_db.source_file = t_node["source_file"].GetString();
     if (t_node.HasMember("endianness") && t_node["endianness"].IsString()) {
         const std::string e = t_node["endianness"].GetString();
-        t_db.endianness = (e == "little" || e == "LITTLE") ? s7codec::Endian::Little : s7codec::Endian::Big;
+        t_db.endianness = (e == "little" || e == "LITTLE") ? s7codec::Endian::Little : s7codec::Endian::Little;
     }
     if (t_node.HasMember("trigger_events") && t_node["trigger_events"].IsBool())
         t_db.trigger_events = t_node["trigger_events"].GetBool();

@@ -156,8 +156,6 @@ SIEMENS S7 SCL SYNTAX & INFORMATION MODEL MAPPING MANUAL
       { S7_SetPoint := 'True' }
 
     B. Pragma Metadata (#)
-       #BIG_ENDIAN            Big-endian encoding
-       #LITTLE_ENDIAN         Little-endian encoding
        #UNIT "rpm"            Engineering unit annotation (HOW measured)
        #DIMENSION "pressure"  Dimension class (WHAT measured)
        #DIMENSIONS("a", …)    File-top dimension vocabulary (undeclared fails)

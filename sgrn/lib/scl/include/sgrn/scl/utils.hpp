@@ -49,7 +49,7 @@ inline void stampDescendantEndianness(DbField& t_field) {
  * @brief Recursively apply a JSON patch object to a set of schema fields.
  */
 sgrn::Result<void, SclError> applyJsonPatchToFields(const std::vector<DbField>& t_fields, const std::string& t_patch_json, uint8_t* tp_ptr,
-    size_t t_buffer_size, s7codec::Endian t_e = s7codec::Endian::Big);
+    size_t t_buffer_size, s7codec::Endian t_e = s7codec::Endian::Little);
 
 /**
  * @brief Recursively traverse all fields (including children) with dot-separated path and absolute offset tracking.
@@ -91,24 +91,24 @@ std::string parseSemanticValue(const std::string& t_raw);
 std::string parseRawValuePayload(const std::string& t_raw);
 
 sgrn::Result<void, SclError> encodeDtlValue(
-    const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e = s7codec::Endian::Big);
+    const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e = s7codec::Endian::Little);
 
 uint32_t fieldSpanSize(const DbField& t_field);
 uint32_t fieldElementSpanBytes(const DbField& f);
 sgrn::Result<void, SclError> encodeScalarValue(const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr,
-    size_t t_buffer_size, s7codec::Endian t_e = s7codec::Endian::Big);
+    size_t t_buffer_size, s7codec::Endian t_e = s7codec::Endian::Little);
 
 sgrn::Result<void, SclError> encodeArrayValue(const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr,
-    size_t t_buffer_size, int t_depth = 0, s7codec::Endian t_e = s7codec::Endian::Big);
+    size_t t_buffer_size, int t_depth = 0, s7codec::Endian t_e = s7codec::Endian::Little);
 
 sgrn::Result<std::string, SclError> decodeFieldAt(
-    const DbField& t_field, const uint8_t* tp_ptr, size_t t_buffer_size, int t_depth = 0, s7codec::Endian t_e = s7codec::Endian::Big);
+    const DbField& t_field, const uint8_t* tp_ptr, size_t t_buffer_size, int t_depth = 0, s7codec::Endian t_e = s7codec::Endian::Little);
 
 sgrn::Result<void, SclError> encodeFieldRapidJson(const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr,
-    size_t t_buffer_size, int t_depth = 0, s7codec::Endian t_e = s7codec::Endian::Big);
+    size_t t_buffer_size, int t_depth = 0, s7codec::Endian t_e = s7codec::Endian::Little);
 
 sgrn::Result<void, SclError> encodeFieldAt(const DbField& t_field, const std::string& t_value_json, uint8_t* tp_ptr, size_t t_buffer_size,
-    int t_depth = 0, s7codec::Endian t_e = s7codec::Endian::Big);
+    int t_depth = 0, s7codec::Endian t_e = s7codec::Endian::Little);
 
 /**
  * @brief Decodes a single DB buffer into a JSON string using the provided registry.

@@ -519,9 +519,9 @@ class AstParser {
                     advance();
                 matchPunctuation(";");
             } else if (matchKeyword("#BIG_ENDIAN")) {
-                t_out_endian = s7codec::Endian::Big;
+                t_out_endian = s7codec::Endian::Little; // default Little
             } else if (matchKeyword("#LITTLE_ENDIAN")) {
-                t_out_endian = s7codec::Endian::Little;
+                t_out_endian = s7codec::Endian::Little; // default Little
             } else if (matchKeyword("#EVENT_TRIGGER")) {
                 t_trigger_events = true;
             } else if (matchKeyword("#DATASET_STEP") || matchKeyword("#STEP")) {
@@ -688,9 +688,9 @@ public:
             else if (checkKeyword("#DIMENSIONS"))
                 parseDimensions();
             else if (matchKeyword("#BIG_ENDIAN"))
-                m_file_endian_ = s7codec::Endian::Big;
+                m_file_endian_ = s7codec::Endian::Little; // default Little
             else if (matchKeyword("#LITTLE_ENDIAN"))
-                m_file_endian_ = s7codec::Endian::Little;
+                m_file_endian_ = s7codec::Endian::Little; // default Little
             else
                 advance();
         }
