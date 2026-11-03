@@ -65,6 +65,7 @@ python3 experiments/flare run --capture   # slow: rebuild flare_history.jsonl.zs
 See [`experiments/flare/README.md`](./flare/README.md) for architecture and metrics.
 
 The orchestrator executes and displays live progress bars for:
+
 1. **[1/5] Process Telemetry & WAL Ingestion** (`flare_history.jsonl.zst`)
 2. **[2/5] SCL Schema Parsing & Sliding Window Extraction** (`dataset.csv`)
 3. **[3/5] Manifold Autoencoder Training & Split-Conformal Calibration** (`model.pt`, `model_meta.json`)
@@ -146,6 +147,7 @@ python3 experiments/flare/train_detector.py --seed 42
 ```
 
 **Training Execution Details:**
+
 - **Hardware Acceleration**: Automatically discovers and utilizes AMD ROCm or NVIDIA CUDA GPU via `sgrn.ml.device`.
 - **Training Optimization**: 50 epochs using Adam optimizer ($\text{lr} = 0.001$, weight decay $10^{-5}$) with MSE loss.
 - **Split-Conformal Calibration**: Computes empirical non-conformity scores on held-out `X_cal`:
@@ -164,6 +166,7 @@ python3 experiments/flare/evaluate.py
 ```
 
 **Live Verified Performance Metrics:**
+
 ```
 ================================================================================
                     EVALUATION METRICS SUMMARY (GAS DEHYDRATION & FLARE)
@@ -184,6 +187,7 @@ python3 experiments/flare/evaluate.py
 ```
 
 Outputs generated:
+
 - Metrics summary: [`experiments/flare/evaluation_metrics.json`](./flare/evaluation_metrics.json)
 - Multi-panel visual plot: [`experiments/flare/evaluation_plot.png`](./flare/evaluation_plot.png)
 

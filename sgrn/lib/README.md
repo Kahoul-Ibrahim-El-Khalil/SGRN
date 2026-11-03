@@ -19,13 +19,13 @@ One directory per component: `include/` + `src/` (+ `tests/`), wired in
 
 1. `sgrn/lib/<name>/` with `include/sgrn/<name>/`, `src/`, `CMakeLists.txt`:
    - Compiled: `sgrn_add_component_library(TARGET sgrn_<name> ALIAS
-     sgrn::<name> TYPE STATIC|SHARED, SOURCES, INCLUDE_DIR
-     ${CMAKE_CURRENT_SOURCE_DIR}/include, PUBLIC/PRIVATE_LIBS)` +
+sgrn::<name> TYPE STATIC|SHARED, SOURCES, INCLUDE_DIR
+${CMAKE_CURRENT_SOURCE_DIR}/include, PUBLIC/PRIVATE_LIBS)` +
      `sgrn_target(...)`, PIC + C++23 props like the neighbors.
    - Header-only: copy `sgrn/lib/core/CMakeLists.txt` (INTERFACE target,
      `BUILD/INSTALL_INTERFACE` includes, `sgrn_install_component_library`).
    - Use `${CMAKE_CURRENT_SOURCE_DIR}` inside the component file;
-     `${CMAKE_SOURCE_DIR}/sgrn/lib/...` only to reach *other* components.
+     `${CMAKE_SOURCE_DIR}/sgrn/lib/...` only to reach _other_ components.
 2. One gate line in `lib/CMakeLists.txt` on the matching `SGRN_BUILD_*`
    option (declare the option in `sgrn/CMakeLists.txt` if new).
 3. Staging (`cmake/staging_sgrn.cmake`, otherwise the lib silently never
@@ -67,6 +67,6 @@ files are touched, not in bulk.
 When moving a type between components, a one-line re-export shim
 (`namespace alias`, never a wrapper namespace with using-declarations — the
 latter makes unqualified lookup ambiguous in TU's that also do
-`using namespace <new-namespace>;`) is acceptable *during* a migration.
+`using namespace <new-namespace>;`) is acceptable _during_ a migration.
 Shims must be deleted in the same changeset that converts the last include:
 grep for the old path, convert call sites, `rm` the shim.

@@ -1,0 +1,39 @@
+@layer base {
+    /* Global element styles */
+
+    body {
+        background-color: hsl(var(--background));
+    }
+
+    * {
+        border-color: hsl(var(--border));
+        transition:
+            background-color 0.15s ease,
+            border-color 0.15s ease;
+    }
+
+    /* Scrollbars */
+
+    /* Animations */
+    @keyframes slideIn {
+        from {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+    @keyframes spin {
+        from {
+            transform: rotate(0deg);
+        }
+        to {
+            transform: rotate(360deg);
+        }
+    }
+    .animate-slideIn {
+        animation: slideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+}

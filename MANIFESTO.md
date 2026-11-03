@@ -2,8 +2,8 @@
 
 ## Identifying the Systemic Bottleneck
 
-In the domain of industrial data engineering, the primary obstacle to scalable data aggregation is rarely the limitation of the storage layer itself. Instead, 
-the critical bottleneck is the extraction of data from the industrial plant. The prevailing paradigm treats every Programmable Logic Controller (PLC) as a bespoke integration target, 
+In the domain of industrial data engineering, the primary obstacle to scalable data aggregation is rarely the limitation of the storage layer itself. Instead,
+the critical bottleneck is the extraction of data from the industrial plant. The prevailing paradigm treats every Programmable Logic Controller (PLC) as a bespoke integration target,
 necessitating custom, protocol-specific adapters. Scalability—the ostensible objective—is thus rendered mathematically intractable, not due to database constraints, but because the upstream data ingestion pipeline lacks a generalized, deterministic architecture.
 
 Concurrently, automation engineers face a mirrored manifestation of this systemic flaw. A routine modification to a PLC's memory layout inevitably breaks downstream, hand-coded middleware, necessitating manual recalculation of byte offsets and imposing arbitrary vendor licensing fees per connection or per tag.

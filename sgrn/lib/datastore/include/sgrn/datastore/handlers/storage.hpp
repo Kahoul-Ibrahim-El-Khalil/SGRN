@@ -141,7 +141,7 @@ private:
     drogon::Task<std::pair<int32_t, int32_t>> buildNormalDriveListing(std::string& t_folders_json, std::string& t_files_json,
         const std::string& t_namespace_prefix, const std::string& t_current_path, int32_t t_user_id, int32_t t_target_owner_id,
         ::sgrn::datastore::services::storage::StorageScope t_scope, const drogon::orm::DbClientPtr& tsp_db_client, int32_t t_limit,
-        int32_t t_page, const std::string& t_search);
+        int32_t t_page, const std::string& t_search, const std::string& t_sort_key = "name", bool t_sort_desc = false);
 
     // Helpers for handleMove
     drogon::Task<drogon::HttpResponsePtr> moveFile(const std::shared_ptr<drogon::orm::Transaction>& tsp_transaction, int64_t t_entity_id,

@@ -11,7 +11,7 @@
   resolves via the root `devDependencies`).
 
 Bun resolves nested `file:` dependencies from the installing project root,
-so keep this rule: packages consumed *outside* this workspace must only
+so keep this rule: packages consumed _outside_ this workspace must only
 depend inward via paths that resolve from their own directory (see the
 `@sgrn/types` wiring). Run `bun install` here after moves or dep edits.
 

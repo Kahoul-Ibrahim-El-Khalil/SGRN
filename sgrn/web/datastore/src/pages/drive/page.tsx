@@ -9,16 +9,15 @@
 //     useDriveActions      – create folder, delete, rename, navigate
 //
 //   Local Components (UI)
-//     DriveHeader          – title, scope tabs, breadcrumb, search, refresh
-//     DriveToolbar         – view-mode toggle + upload / new-folder buttons
+//     DriveBar           – combined breadcrumb + scope/search/view/actions bar
 //     NewFolderPrompt      – inline create-folder input
 //     DriveContent         – grid/list + pagination
 //     PaginationControls   – prev/next page row
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Loader2, Upload, FolderPlus, Folder, Shield, LayoutGrid, List, Search, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { Loader2, Upload, FolderPlus, ChevronLeft, ChevronRight } from "lucide-react";
 import { PageLayout } from "@/components/PageLayout";
-import { Breadcrumb } from "@/pages/drive/components/Breadcrumb";
+import { DriveBar } from "@/pages/drive/components/DriveBar";
 import { FileGrid } from "@/pages/drive/components/FileGrid";
 import { FileList } from "@/pages/drive/components/FileList";
 import {
@@ -34,7 +33,10 @@ import {
     renameItem,
     bulkAction,
     type StorageScope,
+    type DriveSortKey,
+    type DriveSortOrder,
 } from "@/pages/drive/api";
+import { toDisplayDrivePath } from "@/pages/drive/pathDisplay";
 import { RenameModal } from "@/pages/drive/components/RenameModal";
 import { DetailsPanel } from "@/pages/drive/components/DetailsPanel";
 import { SelectionBar } from "@/pages/drive/components/SelectionBar";
@@ -82,12 +84,14 @@ function useDriveListing(currentPath: string, currentScope: StorageScope, showEv
     const [currentPage, setCurrentPage] = useState(1);
     const [searchQuery, setSearchQuery] = useState("");
     const [debouncedSearch, setDebouncedSearch] = useState("");
+    const [sortBy, setSortBy] = useState<DriveSortKey>("name");
+    const [sortOrder, setSortOrder] = useState<DriveSortOrder>("asc");
     const [initialized, setInitialized] = useState(false);
 
-    // reset page when path / scope change
+    // reset page when path / scope / ordering change
     useEffect(() => {
         setCurrentPage(1);
-    }, [currentPath, currentScope]);
+    }, [currentPath, currentScope, sortBy, sortOrder]);
 
     // debounce search input
     useEffect(() => {
@@ -99,10 +103,17 @@ function useDriveListing(currentPath: string, currentScope: StorageScope, showEv
     }, [searchQuery]);
 
     const fetchListing = useCallback(
-        async (path = currentPath, scope = currentScope, page = currentPage, search = debouncedSearch) => {
+        async (
+            path = currentPath,
+            scope = currentScope,
+            page = currentPage,
+            search = debouncedSearch,
+            sort = sortBy,
+            order = sortOrder,
+        ) => {
             setLoading(true);
             setListing(null);
-            const result = await listDirectory(path, scope, page, PAGE_SIZE, search);
+            const result = await listDirectory(path, scope, page, PAGE_SIZE, search, sort, order);
             if (isError(result)) {
                 showEvent("error", result.error);
                 setListing({
@@ -122,14 +133,26 @@ function useDriveListing(currentPath: string, currentScope: StorageScope, showEv
             setLoading(false);
             return isError(result) ? null : result.data;
         },
-        [currentPath, currentScope, currentPage, debouncedSearch, showEvent],
+        [currentPath, currentScope, currentPage, debouncedSearch, sortBy, sortOrder, showEvent],
     );
 
     // initial + reactive fetch
     useEffect(() => {
         if (!initialized) return;
-        fetchListing(currentPath, currentScope, currentPage, debouncedSearch);
-    }, [initialized, currentPath, currentScope, currentPage, debouncedSearch, fetchListing]);
+        fetchListing(currentPath, currentScope, currentPage, debouncedSearch, sortBy, sortOrder);
+    }, [initialized, currentPath, currentScope, currentPage, debouncedSearch, sortBy, sortOrder, fetchListing]);
+
+    /** Clicking an active column flips direction; a new column starts ascending. */
+    const toggleSort = useCallback((key: DriveSortKey) => {
+        setSortBy((prevKey) => {
+            if (prevKey === key) {
+                setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+                return prevKey;
+            }
+            setSortOrder("asc");
+            return key;
+        });
+    }, []);
 
     return {
         listing,
@@ -137,6 +160,9 @@ function useDriveListing(currentPath: string, currentScope: StorageScope, showEv
         currentPage,
         searchQuery,
         debouncedSearch,
+        sortBy,
+        sortOrder,
+        toggleSort,
         setCurrentPage,
         setSearchQuery,
         fetchListing,
@@ -503,20 +529,22 @@ function useDriveActions(
     );
 
     const handleRenameConfirm = useCallback(
-        async (newName: string) => {
+        async (newName: string): Promise<boolean> => {
             const canWrite = listing?.capabilities?.can_write !== false;
             if (!canWrite) {
                 showEvent("error", "Rename permission denied in this workspace");
-                return;
+                return false;
             }
 
-            if (!renamingItem) return;
+            if (!renamingItem) return false;
             const result = await renameItem(renamingItem.id, renamingItem.type, newName);
-            if (isError(result)) showEvent("error", result.error);
-            else {
-                showEvent("success", "Item renamed successfully");
-                onRefresh();
+            if (isError(result)) {
+                showEvent("error", result.error);
+                return false;
             }
+            showEvent("success", "Item renamed successfully");
+            onRefresh();
+            return true;
         },
         [renamingItem, showEvent, onRefresh, listing],
     );
@@ -716,175 +744,6 @@ function useDriveActions(
 
 // ─── local components ────────────────────────────────────────────────────────
 
-interface DriveHeaderProps {
-    currentPath: string;
-    trail: DirectoryListing["trail"];
-    onNavigate: (path: string) => void;
-}
-
-function DriveHeader({ currentPath, trail, onNavigate }: DriveHeaderProps) {
-    return (
-        <div className="drive-header">
-            <Breadcrumb path={currentPath} trail={trail} onNavigate={onNavigate} />
-        </div>
-    );
-}
-
-interface DriveToolbarProps {
-    currentScope: StorageScope;
-    checkAdmin: boolean;
-    onSwitchScope: (scope: StorageScope) => void;
-    viewMode: "grid" | "list";
-    uploading: boolean;
-    loading: boolean;
-    searchQuery: string;
-    fileInputRef: React.RefObject<HTMLInputElement | null>;
-    folderInputRef: React.RefObject<HTMLInputElement | null>;
-    onSetViewMode: (mode: "grid" | "list") => void;
-    onNewFolder: () => void;
-    onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-    onFolderChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-    onSearch: (q: string) => void;
-    onRefresh: () => void;
-    capabilities?: any;
-}
-
-function DriveToolbar({
-    currentScope,
-    checkAdmin,
-    onSwitchScope,
-    viewMode,
-    uploading,
-    loading,
-    searchQuery,
-    fileInputRef,
-    folderInputRef,
-    onSetViewMode,
-    onNewFolder,
-    onFileChange,
-    onFolderChange,
-    onSearch,
-    onRefresh,
-    capabilities,
-}: DriveToolbarProps) {
-    const canWrite = capabilities?.can_write !== false;
-    return (
-        <div className="drive-toolbar">
-            <div className="drive-toolbar-row">
-                <div className="drive-scope-tabs">
-                    {(["personal", "automated_services", ...(checkAdmin ? ["users", "domains"] : [])] as StorageScope[]).map((scope) => (
-                        <button
-                            key={scope}
-                            type="button"
-                            onClick={() => onSwitchScope(scope)}
-                            className={`drive-scope-btn ${currentScope === scope ? "drive-scope-btn-active" : ""}`}
-                        >
-                            {scope !== "personal" && <Shield size={14} />}
-                            <span>
-                                {scope === "automated_services"
-                                    ? "Services"
-                                    : scope === "users"
-                                      ? "Users"
-                                      : scope === "domains"
-                                        ? "Domains"
-                                        : "Personal"}
-                            </span>
-                        </button>
-                    ))}
-                </div>
-
-                <div className="drive-search-wrapper">
-                    <Search size={16} className="drive-search-icon" />
-                    <input
-                        type="search"
-                        placeholder="Search files and folders"
-                        className="drive-search-input"
-                        value={searchQuery}
-                        onChange={(e) => onSearch(e.target.value)}
-                        aria-label="Search files and folders"
-                    />
-                </div>
-            </div>
-
-            <div className="drive-toolbar-row drive-toolbar-row--actions">
-                <div className="drive-view-toggle" role="group" aria-label="View mode">
-                    <button
-                        type="button"
-                        onClick={() => onSetViewMode("grid")}
-                        className={`drive-view-btn${viewMode === "grid" ? " drive-view-btn-active" : ""}`}
-                        title="Grid view"
-                        aria-pressed={viewMode === "grid"}
-                    >
-                        <LayoutGrid size={16} />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => onSetViewMode("list")}
-                        className={`drive-view-btn${viewMode === "list" ? " drive-view-btn-active" : ""}`}
-                        title="List view"
-                        aria-pressed={viewMode === "list"}
-                    >
-                        <List size={16} />
-                    </button>
-                </div>
-
-                <div className="drive-toolbar-actions">
-                    <button
-                        type="button"
-                        onClick={onNewFolder}
-                        disabled={!canWrite}
-                        className="btn-industrial-secondary drive-toolbar-btn"
-                        title={!canWrite ? "Write permission denied in this workspace" : "Create folder"}
-                    >
-                        <FolderPlus size={16} />
-                        <span>New folder</span>
-                    </button>
-
-                    <button
-                        type="button"
-                        onClick={() => folderInputRef.current?.click()}
-                        disabled={uploading || !canWrite}
-                        className="btn-industrial-secondary drive-toolbar-btn"
-                        title={!canWrite ? "Write permission denied in this workspace" : "Upload folder"}
-                    >
-                        <Folder size={16} />
-                        <span>Upload folder</span>
-                    </button>
-                    <input
-                        ref={folderInputRef}
-                        type="file"
-                        {...({ webkitdirectory: "" } as any)}
-                        style={{ display: "none" }}
-                        onChange={onFolderChange}
-                    />
-
-                    <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={uploading || !canWrite}
-                        className="btn-industrial-primary drive-toolbar-btn"
-                        title={!canWrite ? "Write permission denied in this workspace" : "Upload files"}
-                    >
-                        <Upload size={16} />
-                        <span>Upload files</span>
-                    </button>
-                    <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={onFileChange} />
-
-                    <button
-                        type="button"
-                        onClick={onRefresh}
-                        className="btn-industrial-secondary drive-toolbar-btn drive-refresh-btn"
-                        title="Refresh"
-                        aria-label="Refresh listing"
-                    >
-                        <RefreshCw size={16} className={loading ? "drive-spin" : ""} />
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
 interface NewFolderPromptProps {
     inputRef: React.RefObject<HTMLInputElement | null>;
     name: string;
@@ -946,6 +805,9 @@ interface DriveContentProps {
     viewMode: "grid" | "list";
     currentPage: number;
     debouncedSearch: string;
+    sortBy: DriveSortKey;
+    sortOrder: DriveSortOrder;
+    onSort: (key: DriveSortKey) => void;
     isSelected: (item: DriveMoveItem) => boolean;
     onToggleSelect: (item: DriveMoveItem) => void;
     onFolderClick: (folder: DriveFolder) => void;
@@ -965,6 +827,9 @@ function DriveContent({
     viewMode,
     currentPage,
     debouncedSearch,
+    sortBy,
+    sortOrder,
+    onSort,
     isSelected,
     onToggleSelect,
     onFolderClick,
@@ -993,6 +858,9 @@ function DriveContent({
         onToggleSelection: onToggleSelect,
         onMoveItems,
         searchQuery: debouncedSearch,
+        sortBy,
+        sortOrder,
+        onSort,
     };
 
     return (
@@ -1108,7 +976,7 @@ export default function DrivePage() {
             selection.clear();
             actions.setInfoItem(null);
         },
-        [scope, selection, actions],
+        [scope.navigate, selection.clear, actions.setInfoItem],
     );
 
     const handleRenameOpen = useCallback(
@@ -1126,15 +994,17 @@ export default function DrivePage() {
                             <Upload size={40} className="drive-drag-overlay-icon" />
                             <h3 className="drive-drag-overlay-title">Drop files to upload</h3>
                             <p className="drive-drag-overlay-subtitle">
-                                Your files will be preserved within <span className="drive-drag-overlay-path">{scope.currentPath}</span>
+                                Your files will be preserved within{" "}
+                                <span className="drive-drag-overlay-path">{toDisplayDrivePath(scope.currentPath)}</span>
                             </p>
                         </div>
                     </div>
                 )}
 
-                <DriveHeader currentPath={scope.currentPath} trail={listing.listing?.trail} onNavigate={handleNavigate} />
-
-                <DriveToolbar
+                <DriveBar
+                    currentPath={scope.currentPath}
+                    trail={listing.listing?.trail}
+                    onNavigate={handleNavigate}
                     currentScope={scope.currentScope}
                     checkAdmin={checkAdmin}
                     onSwitchScope={scope.switchScope}
@@ -1150,6 +1020,9 @@ export default function DrivePage() {
                     onFolderChange={upload.handleFolderSelect}
                     onSearch={listing.setSearchQuery}
                     onRefresh={refresh}
+                    sortBy={listing.sortBy}
+                    sortOrder={listing.sortOrder}
+                    onSort={listing.toggleSort}
                     capabilities={(listing.listing as any)?.capabilities}
                 />
 
@@ -1177,6 +1050,9 @@ export default function DrivePage() {
                                 viewMode={viewMode}
                                 currentPage={listing.currentPage}
                                 debouncedSearch={listing.debouncedSearch}
+                                sortBy={listing.sortBy}
+                                sortOrder={listing.sortOrder}
+                                onSort={listing.toggleSort}
                                 isSelected={selection.isSelected}
                                 onToggleSelect={selection.toggle}
                                 onFolderClick={(folder) => scope.navigate(folder.path)}

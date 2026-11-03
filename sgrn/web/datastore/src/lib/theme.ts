@@ -29,6 +29,41 @@ export const THEME_OPTIONS: ThemeOption[] = [
         name: "Slate",
         preview: { bg: "#0f172a", text: "#e2e8f0", accent: "#0090c4" },
     },
+    {
+        id: "ayu-dark",
+        name: "Ayu Dark",
+        preview: { bg: "#0f1419", text: "#d3d8db", accent: "#f29e74" },
+    },
+    {
+        id: "nord",
+        name: "Nord",
+        preview: { bg: "#2e3440", text: "#d8dee9", accent: "#88c0d0" },
+    },
+    {
+        id: "dracula",
+        name: "Dracula",
+        preview: { bg: "#282a36", text: "#f8f8f2", accent: "#bd93f9" },
+    },
+    {
+        id: "catppuccin",
+        name: "Catppuccin",
+        preview: { bg: "#1e1e2e", text: "#cdd6f4", accent: "#89b4fa" },
+    },
+    {
+        id: "gruvbox",
+        name: "Gruvbox",
+        preview: { bg: "#282828", text: "#ebdbb2", accent: "#fabd2f" },
+    },
+    {
+        id: "tokyo-night",
+        name: "Tokyo Night",
+        preview: { bg: "#1a1b26", text: "#c0caf5", accent: "#7aa2f7" },
+    },
+    {
+        id: "retro",
+        name: "Retro",
+        preview: { bg: "#002b00", text: "#7fff00", accent: "#00ff00" },
+    },
 ];
 
 /** Every theme class ever emitted — used to strip old classes on switch. */

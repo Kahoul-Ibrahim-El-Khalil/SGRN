@@ -1,9 +1,11 @@
 # Gas Processing Simulation (Molecular Sieve Dehydration)
 
 ## Overview
+
 This scenario simulates a natural gas dehydration unit using a 3-tower molecular sieve design. It is highly elaborate, modelling dynamic physics, thermodynamic equations, and mechanical wear over time.
 
 ## What is Simulated?
+
 - **3-Tower State Machine**: The 3 adsorber towers cycle through Adsorption, Depressurization, Heating, Cooling, and Repressurization states dynamically.
 - **Process Noise**: Random noise is injected into feed pressures, feed flows, and blower flows to emulate real-world sensor fluctuations and process instability.
 - **Fouling**: The inlet coalescer filter gradually fouls over time (differential pressure increases).
@@ -15,6 +17,7 @@ This scenario simulates a natural gas dehydration unit using a 3-tower molecular
 - **Emergency Shutdown (ESD)**: If the dew point spec is grossly violated, feed pressure spikes (`feed_press > 90.0` bar), or the heater runs away, the ESD trips.
 
 ## Enabled / Disabled Features
+
 - **S7 Adapter**: **Enabled** (Port 102).
 - **HTTP/WebSocket API**: **Enabled** (Port 8000; WebSocket at `/ws`).
 - **Modbus Adapter**: **Disabled** in the default simulation configuration due to port 502 root binding restrictions.
@@ -22,6 +25,7 @@ This scenario simulates a natural gas dehydration unit using a 3-tower molecular
 - **Persistence**: **Enabled**. Snapshots are flushed to `/tmp/sgrn-gateway-state`.
 
 ## How to Test
+
 1. Observe the cycling state of the towers in `DB2` (`AdsorberTowers`).
 2. Watch the `coalescer_dp` in `DB1` slowly rise due to fouling.
 3. Observe the `heater_outlet_temp` ramping up and down in `DB3` in sync with the tower states.
@@ -38,7 +42,7 @@ For the minimal partial-loop prototype evaluating the flare blocked fault with P
 One simulation tick advances `SIM_SECONDS_PER_TICK` (default `3600.0` = one
 plant hour). `SIM_TICK_SLEEP_MS` (default `1`, `0` = unpaced) only paces
 wall-clock throughput; it never changes the simulated trajectory
-(`sleep(n)` waits *n milliseconds* — verified in
+(`sleep(n)` waits _n milliseconds_ — verified in
 `sgrn/lib/core/include/sgrn/AngelScriptEngine.hpp::sleepCmd`).
 
 ### Root cause of the "streaming stops without sleep" symptom
@@ -53,10 +57,10 @@ measurements below):
    runs ~1500+ ticks/s. `PlcRuntime::markDirty()` merges overlapping regions
    and `takeDirty()` consumes them, so intermediate tick states are
    overwritten in memory before the worker reads them. The gateway keeps
-   receiving *latest-only* snapshots (measured: 7–13 persisted lines per 200
+   receiving _latest-only_ snapshots (measured: 7–13 persisted lines per 200
    ticks pre-fix) — appearing "stopped" to anyone expecting per-tick updates.
 2. **Gateway echo-back race (correctness).** The gateway broadcasts every
-   applied write to all subscribers *including the originator* (no originator
+   applied write to all subscribers _including the originator_ (no originator
    exclusion in `WebSocketAdapter::collectTargets`). The sim's WebSocket thread
    applies echoes via `writeFieldThroughRuntime`, clobbering newer sim state.
    Absolute-written fields self-heal next tick, but the legacy
@@ -65,7 +69,7 @@ measurements below):
    the loss depending on round-trip timing — i.e. on the sleep interval.
 3. **Unsubscribe-all meant firehose (suppression failure).** Empty subscription
    set = "send everything" (`event_filter::shouldSend`). Unsubscribing all DBs
-   therefore *maximised* echo instead of stopping it (observed as
+   therefore _maximised_ echo instead of stopping it (observed as
    `queued_dbs=7` at every metric tick), and stale echoes re-published during
    drain regressed the gateway twin. Fixed in `GatewaySync` (mute holding
    path, no API change) — see below.
@@ -89,7 +93,7 @@ stayed connected); timestamp-before-tick (fixed); `setupEnv()` ignoring its
   still ~500 000× real time). WAL granularity additionally depends on the
   gateway's `atomic_window_ms` (use `0`/`1` for per-tick lines).
 - **Snapshot mode** (`false`): auto-publish only, plus a forced flush every
-  `SNAPSHOT_EVERY_N_TICKS`. Intermediate states are coalesced *by design*
+  `SNAPSHOT_EVERY_N_TICKS`. Intermediate states are coalesced _by design_
   (~2000+ ticks/s); the published snapshot keeps exact totalizers (script
   globals), but per-tick history for historian/regression/alarm replay
   requires every-tick mode.
@@ -119,7 +123,7 @@ stayed connected); timestamp-before-tick (fixed); `setupEnv()` ignoring its
 - `sgrn/lib/s7shell/.../cmd_emit_as.cpp`,
   `sgrn/lib/s7shell/simulations/generated/s7shell_api.as`: document the
   existing (previously undeclared) `GatewaySync::sync()`.
-- `experiments/flare/run_capture.py`: injected loop now stamps *after* the
+- `experiments/flare/run_capture.py`: injected loop now stamps _after_ the
   tick (was timestamp-before-tick).
 
 ### Guarantees
@@ -151,12 +155,12 @@ the installed ones.
 
 ### Measured results (same seed; end-to-end including connect + drain)
 
-| Config | Ticks/s | Sim-hours/s | WAL lines / 200 ticks | Twin final == sim final |
-|---|---|---|---|---|
-| 1 ms pacing, every-tick | ~116 | ~116 | ~62 | yes |
-| Zero pacing, every-tick | ~133 | ~133 | ~60–63 | yes |
-| Zero pacing, snapshot (/50) | ~840 (2000-tick soak) | ~840 | ~6–11 | yes (latest only) |
-| Pre-fix, 1 ms / 0 ms | ~85 / ~95 | same | 13 / 7 | **no** (echo loss: 97708/94264 vs true 169848) |
+| Config                      | Ticks/s               | Sim-hours/s | WAL lines / 200 ticks | Twin final == sim final                        |
+| --------------------------- | --------------------- | ----------- | --------------------- | ---------------------------------------------- |
+| 1 ms pacing, every-tick     | ~116                  | ~116        | ~62                   | yes                                            |
+| Zero pacing, every-tick     | ~133                  | ~133        | ~60–63                | yes                                            |
+| Zero pacing, snapshot (/50) | ~840 (2000-tick soak) | ~840        | ~6–11                 | yes (latest only)                              |
+| Pre-fix, 1 ms / 0 ms        | ~85 / ~95             | same        | 13 / 7                | **no** (echo loss: 97708/94264 vs true 169848) |
 
 Trajectory `[STATE]` is now byte-identical across all pacing modes and
 matches the no-gateway baseline; timestamps verified monotonic across

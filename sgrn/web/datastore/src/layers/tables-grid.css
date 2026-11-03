@@ -1,0 +1,58 @@
+@layer tables-grid {
+    /* ---------- DATAGRID-INDUSTRIAL TABLE ---------- */
+
+    /* Generic reusable table primitive. */
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        background-color: hsl(var(--card));
+    }
+
+    /* Admin page tables */
+    .admin-table {
+        width: 100%;
+        border-collapse: collapse;
+        background-color: hsl(var(--card));
+        border: 1px solid hsl(var(--border));
+        font-size: 11px;
+    }
+    .admin-table th {
+        padding: 0.5rem 0.75rem;
+        border-bottom: 2px solid hsl(var(--border));
+        background-color: hsl(var(--muted) / 0.3);
+        color: hsl(var(--muted-foreground));
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        font-weight: 900;
+        font-size: 10px;
+        text-align: left;
+    }
+    .admin-table td {
+        padding: 0.5rem 0.75rem;
+        border-bottom: 1px solid hsl(var(--border));
+        vertical-align: middle;
+    }
+    .admin-table tr:hover td {
+        background-color: hsl(var(--primary) / 0.045);
+    }
+    .admin-table tr.active td {
+        background-color: hsl(var(--primary) / 0.075);
+        border-left: 2px solid hsl(var(--primary));
+    }
+
+    /* Breadcrumb styles */
+
+    /* Sign-in page */
+
+    /* LEGACY AUTH (keep for compatibility) */
+    @keyframes fadeInZoom {
+        from {
+            opacity: 0;
+            transform: scale(0.95);
+        }
+        to {
+            opacity: 1;
+            transform: scale(1);
+        }
+    }
+}

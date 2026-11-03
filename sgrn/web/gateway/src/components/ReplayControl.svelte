@@ -36,7 +36,9 @@
   }
 
   async function togglePause(): Promise<void> {
-    await fetch(paused ? "/replay/resume" : "/replay/pause", { method: "POST" });
+    await fetch(paused ? "/replay/resume" : "/replay/pause", {
+      method: "POST",
+    });
     await refresh();
   }
 

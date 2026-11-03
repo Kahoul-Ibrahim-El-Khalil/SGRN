@@ -1,7 +1,7 @@
 <script lang="ts">
   import Sidebar from "../components/Sidebar.svelte";
   import DocsContent from "../components/DocsContent.svelte";
-  
+
   export let params: { doc?: string } = {};
 
   $: docName = params.doc || "index";
@@ -29,15 +29,15 @@
     overflow-y: auto;
     background: var(--surface-bright);
     padding: 24px 48px 48px;
-}
+  }
 
-.docs-page {
+  .docs-page {
     width: min(1400px, 100%);
     margin: 0 auto;
     line-height: 1.65;
     font-size: 14px;
     color: var(--text);
-}
+  }
   .docs-page :global(h2) {
     font-size: 18px;
     font-weight: 700;
@@ -87,7 +87,8 @@
     font-size: 11px;
   }
 
-  .docs-page :global(ul), .docs-page :global(ol) {
+  .docs-page :global(ul),
+  .docs-page :global(ol) {
     margin: 0 0 12px;
     padding-left: 20px;
   }

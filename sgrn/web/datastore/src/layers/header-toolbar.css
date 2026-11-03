@@ -1,0 +1,211 @@
+@layer header-toolbar {
+    /* ---------- APP SHELL ---------- */
+
+    /* ── SIGN-IN PAGE (split layout) ──────────────────────────────────── */
+    .signin-root {
+        background-color: hsl(var(--background));
+    }
+    .signin-topbar {
+        background-color: hsl(var(--card));
+    }
+    /* Left branding panel */
+    .signin-left {
+        background-color: hsl(var(--background));
+    }
+    .signin-brand {
+        position: relative;
+        z-index: 1;
+    }
+    .signin-brand-title {
+        color: hsl(var(--foreground));
+        margin-bottom: 0.25rem;
+        line-height: 1;
+    }
+    .signin-brand-sub {
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        color: hsl(var(--primary));
+        margin-bottom: 1.5rem;
+    }
+    .signin-brand-desc {
+        font-size: 0.875rem;
+        line-height: 1.6;
+        color: hsl(var(--muted-foreground));
+        max-width: 28rem;
+    }
+    .signin-clock {
+        position: relative;
+        z-index: 1;
+        padding-top: 2rem;
+        border-top: 1px solid hsl(var(--border));
+    }
+    .signin-clock-time {
+        font-size: 2.5rem;
+        font-weight: 900;
+        font-family: monospace;
+        letter-spacing: -0.05em;
+        color: hsl(var(--primary));
+        line-height: 1;
+        margin-bottom: 0.25rem;
+    }
+    .signin-clock-date {
+        font-size: 0.625rem;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        color: hsl(var(--muted-foreground));
+        margin-bottom: 0.75rem;
+    }
+    .signin-clock-indicator {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.625rem;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: 0.15em;
+        color: hsl(var(--primary));
+    }
+    /* Right form panel */
+    .signin-right {
+        background-color: hsl(var(--card));
+    }
+    .signin-form-card {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+    }
+    .signin-form-header {
+        border-left: 3px solid hsl(var(--primary));
+        padding-left: 1rem;
+    }
+    .signin-form-title {
+        color: hsl(var(--foreground));
+        margin-bottom: 0.25rem;
+    }
+    .signin-form-subtitle {
+        font-size: 0.75rem;
+        color: hsl(var(--muted-foreground));
+    }
+    .signin-form {
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+    }
+    .signin-field {
+        display: flex;
+        flex-direction: column;
+        gap: 0.375rem;
+    }
+    .signin-label {
+        text-transform: uppercase;
+        color: hsl(var(--muted-foreground));
+    }
+    .signin-submit {
+        width: 100%;
+        height: 3rem;
+        margin-top: 0.5rem;
+        font-size: 11px;
+        letter-spacing: 0.15em;
+    }
+
+    /* LEGACY AUTH (keep for compatibility) */
+    @keyframes fadeInZoom {
+        from {
+            opacity: 0;
+            transform: scale(0.95);
+        }
+        to {
+            opacity: 1;
+            transform: scale(1);
+        }
+    }
+
+    /* SIDEBAR */
+    .desktop-sidebar {
+        background-color: hsl(var(--card));
+    }
+    .desktop-sidebar-link:hover {
+        background-color: hsl(var(--muted) / 0.5);
+    }
+    .desktop-sidebar-link.active {
+        background-color: hsl(var(--primary) / 0.05);
+    }
+
+    /* MAIN CONTENT */
+    .desktop-header {
+        padding-inline: 1.5rem;
+        background-color: hsl(var(--background) / 0.8);
+        position: sticky;
+        top: 0;
+    }
+    .header-icon-btn {
+        color: hsl(var(--muted-foreground));
+        transition: color 0.15s ease;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .header-icon-btn:hover {
+        color: hsl(var(--foreground));
+    }
+    .header-user-role {
+        margin-top: 0.25rem;
+    }
+    .header-signout-btn {
+        color: hsl(var(--muted-foreground));
+        transition: all 0.15s ease;
+        cursor: pointer;
+        padding: 0.5rem;
+    }
+    .header-signout-btn:hover {
+        color: hsl(var(--destructive));
+        background-color: hsl(var(--destructive) / 0.1);
+    }
+
+    /* TOOLBAR INTEGRATED INTO HEADER */
+    /* Drive toolbar actions integrated into header */
+
+    .drive-view-toggle {
+        background-color: hsl(var(--background));
+        margin-right: 0.5rem;
+    }
+
+    .drive-view-btn {
+        justify-content: center;
+    }
+    .drive-view-btn:hover {
+        background-color: hsl(var(--muted) / 0.4);
+    }
+    .drive-view-btn-active {
+        background-color: hsl(var(--primary));
+    }
+    .drive-view-btn-active:hover {
+        background-color: hsl(var(--primary));
+        color: hsl(var(--primary-foreground));
+        opacity: 0.9;
+    }
+
+    .drive-scope-tabs {
+        background-color: hsl(var(--muted) / 0.2);
+    }
+
+    .drive-scope-btn {
+        border-right: 1px solid hsl(var(--border) / 0.3);
+        height: 100%;
+    }
+    .drive-scope-btn:last-child {
+        border-right: none;
+    }
+    .drive-scope-btn:hover {
+        background-color: hsl(var(--muted) / 0.3);
+    }
+    .drive-scope-btn-active {
+        background-color: hsl(var(--primary) / 0.1);
+        border-color: hsl(var(--primary) / 0.2);
+    }
+}

@@ -41,10 +41,10 @@ PlcCommandProcessor  ──►  TelemetryBroker
 
 SGRN has **two distinct persistence mechanisms** that serve different purposes and should not be confused:
 
-| Layer | Component | What it saves | Where | Purpose |
-|-------|-----------|--------------|-------|---------|
-| **Twin State** | `TreePersistenceStore` | Last known value of every PLC field | `state/twin_state.json` | Warm restart — restores the digital twin instantly without waiting for a PLC cycle |
-| **Historian** | `PersistenceService` | Time-series change archive as `.json.zst` files | `state/unsynced/<date>/` | Long-term storage, offline buffering, cloud upload queue |
+| Layer          | Component              | What it saves                                   | Where                    | Purpose                                                                            |
+| -------------- | ---------------------- | ----------------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------- |
+| **Twin State** | `TreePersistenceStore` | Last known value of every PLC field             | `state/twin_state.json`  | Warm restart — restores the digital twin instantly without waiting for a PLC cycle |
+| **Historian**  | `PersistenceService`   | Time-series change archive as `.json.zst` files | `state/unsynced/<date>/` | Long-term storage, offline buffering, cloud upload queue                           |
 
 The twin state file is always active. The historian is opt-in via the `persistence` block in `gateway.json`.
 
@@ -71,19 +71,19 @@ Add a `persistence` block to your `gateway.json`:
 }
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | bool | `false` | Master on/off switch |
-| `mode` | string | `"changes_with_timestamp"` | Archive mode (`changes_with_timestamp`, `full_tree_with_anchor`) |
-| `format` | string | `"jsonl"` | Archive format: `"jsonl"` (`.jsonl.zst`) or `"binary"` (`.bin.zst` high-density raw WAL) |
-| `namespaces` | array | `[]` | Path prefixes to filter. Empty or `["*"]` / `["all"]` = all fields |
-| `atomic_window_ms` | number | `10` | Merge window (ms) for PLC scan-cycle atomicity. `0` = disabled |
-| `batch_size` | number | `1000` | Number of merged records that trigger a disk flush |
-| `batch_interval_s` | number | `300` | Seconds between forced flushes (even if batch is not full) |
-| `anchor_interval_s` | number | `86400` | Re-issue anchor after N seconds (`full_tree_with_anchor` only, `0` = disabled) |
-| `anchor_change_count` | number | `10000` | Re-issue anchor after N accumulated changes (`full_tree_with_anchor` only, `0` = disabled) |
-| `zstd_level` | number | `5` | Zstd compression level for delta batches (1–22) |
-| `anchor_zstd_level` | number | `12` | Zstd compression level for anchor snapshots |
+| Field                 | Type   | Default                    | Description                                                                                |
+| --------------------- | ------ | -------------------------- | ------------------------------------------------------------------------------------------ |
+| `enabled`             | bool   | `false`                    | Master on/off switch                                                                       |
+| `mode`                | string | `"changes_with_timestamp"` | Archive mode (`changes_with_timestamp`, `full_tree_with_anchor`)                           |
+| `format`              | string | `"jsonl"`                  | Archive format: `"jsonl"` (`.jsonl.zst`) or `"binary"` (`.bin.zst` high-density raw WAL)   |
+| `namespaces`          | array  | `[]`                       | Path prefixes to filter. Empty or `["*"]` / `["all"]` = all fields                         |
+| `atomic_window_ms`    | number | `10`                       | Merge window (ms) for PLC scan-cycle atomicity. `0` = disabled                             |
+| `batch_size`          | number | `1000`                     | Number of merged records that trigger a disk flush                                         |
+| `batch_interval_s`    | number | `300`                      | Seconds between forced flushes (even if batch is not full)                                 |
+| `anchor_interval_s`   | number | `86400`                    | Re-issue anchor after N seconds (`full_tree_with_anchor` only, `0` = disabled)             |
+| `anchor_change_count` | number | `10000`                    | Re-issue anchor after N accumulated changes (`full_tree_with_anchor` only, `0` = disabled) |
+| `zstd_level`          | number | `5`                        | Zstd compression level for delta batches (1–22)                                            |
+| `anchor_zstd_level`   | number | `12`                       | Zstd compression level for anchor snapshots                                                |
 
 ---
 
@@ -92,20 +92,25 @@ Add a `persistence` block to your `gateway.json`:
 When `"format": "binary"` (or `"bin.zst"`) is configured in `gateway.json`, the `PersistenceService` writes direct binary memory snapshots into Zstd-compressed files instead of JSON lines.
 
 #### Archive Header (First 10 Bytes + Schema JSON)
+
 Every `.bin.zst` file starts with an uncompressed header block:
+
 - **Magic Header** (4 bytes): `"SGRN"` ASCII magic identifier.
 - **Version** (2 bytes): `uint16_t` format version (currently `1`).
 - **Schema Length** (4 bytes): `uint32_t` length of embedded SCL schema JSON.
 - **Schema Payload**: Raw UTF-8 JSON string containing full schema definitions.
 
 #### Binary Data Frames
+
 Following the header, telemetry frames are packed sequentially:
+
 ```
 ┌─────────────────────────┬──────────────────────┬─────────────────────────┬────────────────────────┐
 │ Timestamp MS (8 bytes)  │ DB Number (2 bytes)  │ Payload Bytes (4 bytes) │ Raw Memory Bytes       │
 │ uint64_t                │ uint16_t             │ uint32_t                │ (size = Payload Bytes) │
 └─────────────────────────┴──────────────────────┴─────────────────────────┴────────────────────────┘
 ```
+
 - **Coalesced Dirty Dumping**: Only dirty DB memory ranges are emitted per telemetry tick, avoiding full memory arena waste.
 - **Decoding**: The `sgrn_dataset` tool decodes `.bin.zst` archives back to `.jsonl.zst` or CSV natively using embedded SCL schemas.
 
@@ -166,6 +171,7 @@ Combines the storage efficiency of delta archiving with the ability to reconstru
    - **Count-based:** `anchor_change_count` field-change records have accumulated since the last anchor. Set to `0` to disable.
 
 **Anchor file format:**
+
 ```json
 {
   "type": "ANCHOR",
@@ -178,11 +184,13 @@ Combines the storage efficiency of delta archiving with the ability to reconstru
 ```
 
 **Reconstruction algorithm:**
+
 1. Find the most recent anchor file whose timestamp is **≤** the target time.
 2. Apply all delta batches in chronological order up to the target time.
 3. The result is the complete plant state at the target instant.
 
 **Configuration example** (anchor every hour or every 5000 changes):
+
 ```json
 {
   "persistence": {
@@ -225,6 +233,7 @@ A single PLC scan cycle may update dozens of fields almost simultaneously. Each 
 </div>
 
 **Example — without merging (`atomic_window_ms: 0`):**
+
 ```json
 { "timestamp": "T+0ms",   "changes": { "DB10.thermal_power_mw": 1340.5 } }
 { "timestamp": "T+0.1ms", "changes": { "DB10.thermal_power_pct": 39.4 } }
@@ -232,6 +241,7 @@ A single PLC scan cycle may update dozens of fields almost simultaneously. Each 
 ```
 
 **Example — with merging (`atomic_window_ms: 10`):**
+
 ```json
 {
   "timestamp": "T+0ms",
@@ -244,6 +254,7 @@ A single PLC scan cycle may update dozens of fields almost simultaneously. Each 
 ```
 
 **Tuning guidance:**
+
 - Set `atomic_window_ms` to slightly above your PLC cycle time. For a 10ms scan cycle, `10–20ms` is a safe value.
 - Set to `0` only if you need sub-cycle event granularity (rare).
 - If two scan cycles fall within the window, the later cycle's values overwrite the earlier ones in the merged record. Reduce the window if that is unacceptable.
@@ -258,11 +269,11 @@ The `namespaces` array archives only specific parts of the PLC memory. Each entr
 { "namespaces": ["DB10", "DB11.hot_leg_temp_c", "DB12.status"] }
 ```
 
-| Prefix | Matches |
-|--------|---------|
-| `"DB10"` | All fields in DB10 |
+| Prefix                  | Matches                                     |
+| ----------------------- | ------------------------------------------- |
+| `"DB10"`                | All fields in DB10                          |
 | `"DB11.hot_leg_temp_c"` | Only the single field `DB11.hot_leg_temp_c` |
-| `"DB12.status"` | Only the single field `DB12.status` |
+| `"DB12.status"`         | Only the single field `DB12.status`         |
 
 An empty `namespaces` array (the default) archives **all fields of all DBs**. Filtering is applied before merging, so only matching fields consume merge window slots and batch storage.
 
@@ -272,14 +283,15 @@ An empty `namespaces` array (the default) archives **all fields of all DBs**. Fi
 
 Two independent triggers control when the in-memory batch is written to disk:
 
-| Trigger | Config key | Condition |
-|---------|-----------|-----------|
-| **Size** | `batch_size` | Batch reaches N merged records |
+| Trigger  | Config key         | Condition                             |
+| -------- | ------------------ | ------------------------------------- |
+| **Size** | `batch_size`       | Batch reaches N merged records        |
 | **Time** | `batch_interval_s` | N seconds elapse since the last flush |
 
 Both are evaluated after each incoming event. The first trigger that fires causes an immediate flush.
 
 **Sizing guidance:**
+
 - A batch of 1000 records with typical 3-field changes compresses to roughly 20–60 KB at `zstd_level: 5`.
 - Set `batch_interval_s` low enough that data is not lost on an unexpected restart. `60–300` seconds is typical.
 - Increase `batch_size` to reduce file count when the PLC is very noisy.
@@ -306,6 +318,7 @@ state/
 - After a successful `DatastoreBridge` upload, files are moved to `synced/`.
 
 **Inspect any file:**
+
 ```bash
 zstd -d state/unsynced/2025-07-12/220000-220500.json.zst -o - | jq .
 ```
@@ -346,11 +359,11 @@ You can also write a **custom uploader** by reading `pending_batches` directly �
 
 Rough estimates at `zstd_level: 5` for a busy 200-field PLC updating every 100ms:
 
-| Mode | Approx. size / hour |
-|------|-------------------|
-| `full_tree` | ~30–120 MB/h |
-| `full_tree_with_anchor` | ~2–8 MB/h |
-| `changes_with_timestamp` | ~0.5–4 MB/h |
+| Mode                     | Approx. size / hour |
+| ------------------------ | ------------------- |
+| `full_tree`              | ~30–120 MB/h        |
+| `full_tree_with_anchor`  | ~2–8 MB/h           |
+| `changes_with_timestamp` | ~0.5–4 MB/h         |
 
 Use `changes_with_timestamp` with `atomic_window_ms ≥ poll_interval_ms` for best efficiency. Daily anchors add a one-time ~50–200 KB overhead.
 
@@ -359,23 +372,29 @@ Use `changes_with_timestamp` with `atomic_window_ms ≥ poll_interval_ms` for be
 ### Troubleshooting
 
 **No files written despite `enabled: true`**
+
 - Check that `state_dir` is writable by the gateway process.
 - Verify that at least one `DeltaSnapshot` event has been received (check the WebSocket live view or `GET /data/`).
 - For testing, set `batch_size: 1` and `batch_interval_s: 5` to force an immediate flush on the very first change.
 
 **Files are written but the `pending_batches` table is empty**
+
 - `GatewayDatabase` was not passed to `PersistenceService::configure()`. Files accumulate locally but `DatastoreBridge` will not upload them automatically. Upload manually or restart with a properly configured `state_dir`.
 
 **Anchor is never written in `full_tree_with_anchor` mode**
+
 - Anchors originate from `FullSnapshot` events. These are produced by the S7 poller (`s7proxy`) on startup or by calling `ingestFullTree()` directly.
 - If only delta events arrive, you will get delta batches but no anchor file. Trigger a manual full snapshot via the REST API, or ensure your poller emits a `FullSnapshot` at startup.
 
 **Records contain only one field per timestamp**
+
 - `atomic_window_ms` is `0` or smaller than the PLC scan cycle. Increase it to cover the full cycle duration.
 
-**High pending_tasks_ counter / dropped events**
+**High pending_tasks\_ counter / dropped events**
+
 - Compression runs on the `heavy_pool` background thread pool and is non-blocking.
 - If `pending_tasks_` exceeds 200, incoming events are dropped to protect memory. Reduce `batch_size` to flush more frequently, or increase the `heavy_pool` thread count in the gateway source.
 
 **Old files not being cleaned up**
+
 - `PersistenceService` never deletes files — that is the responsibility of `DatastoreBridge` after a confirmed upload. Run the bridge, or manually delete files from `synced/` once you have confirmed they were uploaded.

@@ -76,14 +76,14 @@ END_DATA_BLOCK
 
 ## 3. Core Tools & Binary Entry Points
 
-| Tool Binary | Location / Path | Purpose & Responsibilities |
-|---|---|---|
-| **`gateway`** | `.prefix/bin/gateway` | Passive multi-protocol aggregator & Digital Twin server (S7, Modbus, EtherNet/IP, OPC UA, HTTP, WebSocket). |
-| **`s7shell`** | `.prefix/bin/s7shell` | Soft-PLC simulator & active control engine executing AngelScript logic (`plc_logic.as`). |
-| **`sgrn_dataset`** | `.prefix/bin/sgrn_dataset` | High-performance C++ dataset generator and archive converter (`.bin.zst` <-> `.jsonl.zst` <-> `dataset.csv`). |
-| **`sgrn_replay`** | `.prefix/bin/sgrn_replay` | Gateway history archive replayer; initializes protocol interfaces for Northbound subscribers and streams archive frames. |
-| **`demos/datapipeline.py`** | `./demos/datapipeline.py` | End-to-end test harness: records live history, extracts datasets, trains AutoML models, and runs twin predictions. |
-| **`demos/gateway.py`** | `./demos/gateway.py` | Interactive simulation launcher for gateway + soft-PLC + dashboard runs. |
+| Tool Binary                 | Location / Path            | Purpose & Responsibilities                                                                                               |
+| --------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| **`gateway`**               | `.prefix/bin/gateway`      | Passive multi-protocol aggregator & Digital Twin server (S7, Modbus, EtherNet/IP, OPC UA, HTTP, WebSocket).              |
+| **`s7shell`**               | `.prefix/bin/s7shell`      | Soft-PLC simulator & active control engine executing AngelScript logic (`plc_logic.as`).                                 |
+| **`sgrn_dataset`**          | `.prefix/bin/sgrn_dataset` | High-performance C++ dataset generator and archive converter (`.bin.zst` <-> `.jsonl.zst` <-> `dataset.csv`).            |
+| **`sgrn_replay`**           | `.prefix/bin/sgrn_replay`  | Gateway history archive replayer; initializes protocol interfaces for Northbound subscribers and streams archive frames. |
+| **`demos/datapipeline.py`** | `./demos/datapipeline.py`  | End-to-end test harness: records live history, extracts datasets, trains AutoML models, and runs twin predictions.       |
+| **`demos/gateway.py`**      | `./demos/gateway.py`       | Interactive simulation launcher for gateway + soft-PLC + dashboard runs.                                                 |
 
 ---
 
@@ -92,6 +92,7 @@ END_DATA_BLOCK
 `sgrn_dataset` provides standard Unix CLI syntax for dataset processing, binary conversion, and decompression.
 
 ### Synopsis
+
 ```bash
 # Dataset processing (extract feature CSV and ML manifest)
 sgrn_dataset -i <INPUT_DIR> -s <SCHEMA.scl> [-o <DATASET.csv>] [-m <MANIFEST.json>]
@@ -107,6 +108,7 @@ sgrn_dataset archive.bin.zst -f jsonl
 ```
 
 ### Options & Flags
+
 - `-i, --input <FILE|DIR>`: Path to input telemetry file or archive directory. Supports positional argument.
 - `-o, --output <FILE>`: Path to output destination file (CSV or converted archive).
 - `-f, --format <FORMAT>`: Target conversion format (`jsonl`, `binary`, `csv`).
@@ -127,6 +129,7 @@ The `gateway` binary features a cross-platform desktop UI capability:
 ```
 
 ### Key Behaviors:
+
 - **Cross-Platform**:
   - **Linux**: Spawns Chromium/Firefox in standalone application window mode (`--app=http://127.0.0.1:<PORT>/`).
   - **Windows**: Spawns Edge or Chrome (`msedge --app=http://127.0.0.1:<PORT>/`).
@@ -142,16 +145,19 @@ The `gateway` binary features a cross-platform desktop UI capability:
 ## 5. End-to-End Test Harness & Workflow Commands
 
 ### 1. Build Project Binaries & Stage Libraries
+
 ```bash
 cmake --build .build/linux-static-release/ -j12 --target install
 ```
 
 ### 2. Run Interactive Simulation Demo with Embedded GUI Window
+
 ```bash
 ./demos/gateway.py
 ```
 
 ### 3. Run End-to-End Twin Prediction Pipeline Test with Side-by-Side GUI Windows
+
 ```bash
 ./demos/datapipeline.py --gui
 ```

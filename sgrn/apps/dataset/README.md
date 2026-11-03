@@ -26,12 +26,14 @@ Four primary modes (merge wins over convert; otherwise single-input process):
 ## Discrete Time-Grid Resampling & Columnar Output
 
 Industrial control signals and neural networks have differing temporal semantics:
+
 - Telemetry arrives asynchronously with transport and scheduling jitter.
 - Neural networks (MLPs, LSTMs, Transformers) require discrete uniform time steps $\Delta t$.
 - Multi-rate PLCs update fast loops (10ms) and slow loops (100ms) on independent cadences.
 
 `sgrn_dataset` natively integrates `TimeGridResampler` and `ColumnarDatasetWriter`
 to resolve data sanitization and resampling at extraction time:
+
 - Governed by SCL directives: `#TIMESTAMP_FOR`, `#DATASET_STEP`, `#AGG` (`Mean`, `Max`, `Min`, `Or`, `Last`).
 - Zero-order hold gap forward-filling prevents artificial NaNs from breaking training tensors.
 - Emits memory-mapped, 64-byte aligned columnar `.sgrnb` files directly consumable by `sgrn_train`.

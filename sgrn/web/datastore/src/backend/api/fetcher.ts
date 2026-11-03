@@ -4,8 +4,6 @@ import type { SgrnResult } from "@sgrn/types";
 import { ErrorScope } from "@sgrn/types";
 import { appPath } from "@/lib/appPath";
 
-export const SGRN_TOKEN_KEY_IDENTIFIER: string = "Authorization";
-
 export async function authenticatedFetch(t_url: string, t_http_options: RequestInit = {}) {
     // Get token
     let token = sessionStorage.getItem("SGRN-TOKEN");

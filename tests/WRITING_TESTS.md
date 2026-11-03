@@ -40,7 +40,7 @@ build dir/binaries) are UNAVAILABLE/`SKIP`, never failed; entries marked
 1. Put the file in the directory of the module it verifies
    (`tests/gateway/`, `tests/scl/` — create the dir if a new module
    needs one). Filename must be a valid module name (`snake_case.py`).
-2. Start the file with a **docstring** — its first paragraph *is* the
+2. Start the file with a **docstring** — its first paragraph _is_ the
    description shown in `--list` and `--message`. State what is verified
    and any requirements (ports, packages, simulations).
 3. Make it directly executable: `#!/usr/bin/env python3`, parse args with
@@ -68,7 +68,7 @@ build dir/binaries) are UNAVAILABLE/`SKIP`, never failed; entries marked
 
 ## Writing a TS test (`tests/ts/tests/<name>.test.ts`)
 
-1. One file per surface; the `describe("...")` title *is* the description
+1. One file per surface; the `describe("...")` title _is_ the description
    shown by the orchestrator, so make it say what behavior is covered
    (e.g. `"WebSocket Telemetry Tests"`).
 2. Use `GatewayProcess` from `../src/GatewayProcess` to spawn an isolated

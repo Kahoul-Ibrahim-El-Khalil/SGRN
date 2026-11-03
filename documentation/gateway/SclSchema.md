@@ -22,13 +22,13 @@ Not supported for runtime init:
 
 ## SGRN custom directives (`#`)
 
-| Directive | Scope | Effect |
-|-----------|--------|--------|
-| **`#BIG_ENDIAN`** | DB or UDT block | Default **big-endian** field encoding in the arena |
-| **`#LITTLE_ENDIAN`** | DB or UDT block | Default **little-endian** |
-| **`#UNIT "text"`** | After a field declaration | Sets `unit` metadata in JSON only |
-| **`#EVENT_TRIGGER`** | DB, UDT or Field | Enable native OPC UA Event emission for the node |
-| **`#MODBUS_*`** | DB block | Expose fields as Modbus registers/coils — see [modbus.md](modbus.md) |
+| Directive            | Scope                     | Effect                                                               |
+| -------------------- | ------------------------- | -------------------------------------------------------------------- |
+| **`#BIG_ENDIAN`**    | DB or UDT block           | Default **big-endian** field encoding in the arena                   |
+| **`#LITTLE_ENDIAN`** | DB or UDT block           | Default **little-endian**                                            |
+| **`#UNIT "text"`**   | After a field declaration | Sets `unit` metadata in JSON only                                    |
+| **`#EVENT_TRIGGER`** | DB, UDT or Field          | Enable native OPC UA Event emission for the node                     |
+| **`#MODBUS_*`**      | DB block                  | Expose fields as Modbus registers/coils — see [modbus.md](modbus.md) |
 
 Example:
 

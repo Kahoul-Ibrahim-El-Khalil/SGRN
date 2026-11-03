@@ -39,12 +39,12 @@ There is **no separate web deploy**: the dashboard is Zstd-compressed into
 
 Edit DDL under `sgrn/lib/datastore/postgres/`:
 
-| Location | Purpose |
-|---|---|
-| `schemas/core.sql`, `schemas/storage.sql` | Base tables |
-| `views/core/*.sql`, `views/storage/*.sql` | Read-only views (optional safer `read_relation`) |
-| `functions/*.sql` | Auth, registration, token rotation — not generated |
-| `init.sql` | `\i` order; rarely edited unless adding a new schema file |
+| Location                                  | Purpose                                                   |
+| ----------------------------------------- | --------------------------------------------------------- |
+| `schemas/core.sql`, `schemas/storage.sql` | Base tables                                               |
+| `views/core/*.sql`, `views/storage/*.sql` | Read-only views (optional safer `read_relation`)          |
+| `functions/*.sql`                         | Auth, registration, token rotation — not generated        |
+| `init.sql`                                | `\i` order; rarely edited unless adding a new schema file |
 
 Requirements for **generated CRUD** (see [crud_views.md](crud_views.md)):
 
@@ -114,9 +114,9 @@ Use `authenticatedFetch` from `src/backend/api/fetcher.ts` (adds
 
 ```ts
 const params = new URLSearchParams({
-  "name": "like.%25lab%25",
-  "order": "name",
-  "limit": "50",
+  name: "like.%25lab%25",
+  order: "name",
+  limit: "50",
 });
 const res = await authenticatedFetch(`/api/v1/domains?${params}`);
 const rows = await res.json(); // JSON array
@@ -154,17 +154,17 @@ cmake --build <build-dir> --target sgrn_dashboard_assets
 Use a **hand-written** `IHandler` subclass (see `handlers/admin.hpp`,
 `handlers/storage.hpp`, `handlers/auth.hpp`, `handlers/query.hpp`) when you need:
 
-| Need | Why codegen cannot do it |
-|---|---|
-| **Multi-table joins** exposed as one API | Engine queries one `read_relation` only |
-| **Aggregations** (`GROUP BY`, counts, sums) | No aggregate query builder |
-| **Nested / embedded resources** | No sub-resource routing |
-| **Cross-tenant or admin-only projections** | Tenant always from session; use admin handlers |
-| **Complex validation** (password hashing, token rotation) | Use `functions/*.sql` + dedicated handlers |
-| **`storage.*` ownership** | Tenant is `user_id` / `automated_service_id`, not `organisation` — `StorageApiHandler` |
-| **Composite primary keys** | Generator hard-errors |
-| **File upload / streaming / multipart** | Storage and auth paths |
-| **Side effects** (email, notifications, Garage) | Business handlers |
+| Need                                                      | Why codegen cannot do it                                                               |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| **Multi-table joins** exposed as one API                  | Engine queries one `read_relation` only                                                |
+| **Aggregations** (`GROUP BY`, counts, sums)               | No aggregate query builder                                                             |
+| **Nested / embedded resources**                           | No sub-resource routing                                                                |
+| **Cross-tenant or admin-only projections**                | Tenant always from session; use admin handlers                                         |
+| **Complex validation** (password hashing, token rotation) | Use `functions/*.sql` + dedicated handlers                                             |
+| **`storage.*` ownership**                                 | Tenant is `user_id` / `automated_service_id`, not `organisation` — `StorageApiHandler` |
+| **Composite primary keys**                                | Generator hard-errors                                                                  |
+| **File upload / streaming / multipart**                   | Storage and auth paths                                                                 |
+| **Side effects** (email, notifications, Garage)           | Business handlers                                                                      |
 
 `read_relation` on a view that hides columns is **in scope**. A view that
 **joins** tables for convenience is only in scope if you treat the result as
@@ -201,11 +201,11 @@ Gateway SPA follows the same pattern from `sgrn/web/gateway/dist/` into
 CMake **invokes Bun directly** — there is no Node/npm fallback in the build
 graph:
 
-| Step | Command (from CMake) |
-|---|---|
-| Install deps (dashboard) | `bun install` in `sgrn/web/datastore/` |
-| Production bundle | `VITE_BASE_PATH=/datastore bun run build` |
-| Gateway bundle | `bun run build` in `sgrn/web/gateway/` |
+| Step                     | Command (from CMake)                      |
+| ------------------------ | ----------------------------------------- |
+| Install deps (dashboard) | `bun install` in `sgrn/web/datastore/`    |
+| Production bundle        | `VITE_BASE_PATH=/datastore bun run build` |
+| Gateway bundle           | `bun run build` in `sgrn/web/gateway/`    |
 
 You need [Bun](https://bun.sh) on `PATH` when building any target that
 embeds web assets. Python (`zstandard`) is also required for the compression
@@ -233,16 +233,16 @@ so the binary and embedded hashes stay aligned.
 
 Example: expose `core.widgets` in the dashboard.
 
-| Step | Action |
-|---|---|
-| 1 | `CREATE TABLE core.widgets (…)` with PK + `organisation` FK |
-| 2 | Optional: `CREATE VIEW core.widget_details AS SELECT …` if reads should hide columns |
-| 3 | `sgrn_datastore --init-db` |
-| 4 | Manifest entry: `operations`, `columns` / `filter_ops` |
-| 5 | `generate_orm.py` + `generate_views.py`; review diff |
-| 6 | `cmake --build` → verify `GET /api/v1/widgets` |
-| 7 | `endpoints.ts` + page/components using `authenticatedFetch` |
-| 8 | `cmake --build` again → embedded dashboard includes new JS |
+| Step | Action                                                                               |
+| ---- | ------------------------------------------------------------------------------------ |
+| 1    | `CREATE TABLE core.widgets (…)` with PK + `organisation` FK                          |
+| 2    | Optional: `CREATE VIEW core.widget_details AS SELECT …` if reads should hide columns |
+| 3    | `sgrn_datastore --init-db`                                                           |
+| 4    | Manifest entry: `operations`, `columns` / `filter_ops`                               |
+| 5    | `generate_orm.py` + `generate_views.py`; review diff                                 |
+| 6    | `cmake --build` → verify `GET /api/v1/widgets`                                       |
+| 7    | `endpoints.ts` + page/components using `authenticatedFetch`                          |
+| 8    | `cmake --build` again → embedded dashboard includes new JS                           |
 
 If the feature needs joins, admin cross-tenant lists, or storage semantics →
 stop at step 4 and implement `handlers/*.cpp` instead (document in
@@ -254,13 +254,13 @@ stop at step 4 and implement `handlers/*.cpp` instead (document in
 
 Honest gaps useful for planning:
 
-| Area | Today | Likely future work |
-|---|---|---|
-| **Admin vs CRUD overlap** | e.g. user list uses `/api/v1/admin/users`, not generated `/api/v1/users` | Consolidate or document which surface is canonical |
-| **TypeScript from manifest** | No codegen of TS clients from `crud/manifest.json` | Optional OpenAPI or TS generator |
-| **Dashboard README** | Default Vite template text in `sgrn/web/datastore/README.md` | Replace with SGRN-specific dev notes |
-| **Gateway docs assets** | `doc_assets.hpp` compiled; handler TBD | Wire man pages to HTTP |
-| **Complex reporting** | Hand-written query/admin only | Dedicated read models or BI export, not CRUD generator |
+| Area                         | Today                                                                    | Likely future work                                     |
+| ---------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------ |
+| **Admin vs CRUD overlap**    | e.g. user list uses `/api/v1/admin/users`, not generated `/api/v1/users` | Consolidate or document which surface is canonical     |
+| **TypeScript from manifest** | No codegen of TS clients from `crud/manifest.json`                       | Optional OpenAPI or TS generator                       |
+| **Dashboard README**         | Default Vite template text in `sgrn/web/datastore/README.md`             | Replace with SGRN-specific dev notes                   |
+| **Gateway docs assets**      | `doc_assets.hpp` compiled; handler TBD                                   | Wire man pages to HTTP                                 |
+| **Complex reporting**        | Hand-written query/admin only                                            | Dedicated read models or BI export, not CRUD generator |
 
 The **intended** path for simple multi-tenant tables is fully wired: SQL →
 manifest → `.gen.hpp` → React → Bun → embedded binary. Everything else stays

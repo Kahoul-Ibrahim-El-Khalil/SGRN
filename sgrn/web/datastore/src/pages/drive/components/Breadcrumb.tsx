@@ -1,6 +1,7 @@
 // @/pages/drive/components/Breadcrumb.tsx
 import { ChevronRight } from "lucide-react";
 import type { DrivePathNode } from "@sgrn/types";
+import { toDisplayDrivePath, domainDisplaySegment, DOMAIN_PATH_PREFIX } from "@/pages/drive/pathDisplay";
 
 interface BreadcrumbProps {
     path: string;
@@ -18,24 +19,30 @@ function getBreadcrumbLabel(segment: DrivePathNode): string {
 }
 
 export function Breadcrumb({ path, onNavigate, trail, onDropToPath }: BreadcrumbProps) {
+    // Domain namespaces are rendered as real handles: canonical
+    // /domains/<name>/<rest> displays as @<name>/<rest>. The synthetic
+    // domain segment navigates back to the namespace root; segments deeper
+    // in the trail belong to the in-domain directory tree (their storage
+    // rows do not carry the /domains/<name> prefix, so no duplication).
+    const domainSegment = domainDisplaySegment(path);
+
+    // Fallback when no trail: labels come from the *display* form, segment
+    // paths are reconstructed from the canonical path for navigation.
+    const isDomainPath = path.startsWith(DOMAIN_PATH_PREFIX);
+    const rawPieces = path.split("/").filter(Boolean);
+    const displayPieces = (isDomainPath ? toDisplayDrivePath(path) : path).split("/").filter(Boolean);
+    const pieceOffset = isDomainPath ? 1 : 0; // raw carries the extra "domains" node
     const segments =
         trail && trail.length > 0
             ? trail
             : path === "/"
               ? []
-              : path
-                    .split("/")
-                    .filter(Boolean)
-                    .map((segment, index) => ({
-                        name: segment,
-                        path:
-                            "/" +
-                            path
-                                .split("/")
-                                .filter(Boolean)
-                                .slice(0, index + 1)
-                                .join("/"),
-                    }));
+              : displayPieces.map((label, k) => ({
+                    name: label,
+                    path: "/" + rawPieces.slice(0, k + 1 + pieceOffset).join("/"),
+                }));
+
+    const rendered = domainSegment && trail && trail.length > 0 ? [domainSegment, ...segments] : segments;
 
     return (
         <nav className="drive-breadcrumb" aria-label="Breadcrumb">
@@ -60,9 +67,9 @@ export function Breadcrumb({ path, onNavigate, trail, onDropToPath }: Breadcrumb
                 title="Go to root"
             ></button>
 
-            {segments.map((segment, index) => {
+            {rendered.map((segment, index) => {
                 const segmentPath = segment.path;
-                const isLast = index === segments.length - 1;
+                const isLast = index === rendered.length - 1;
                 const label = "display_name" in segment ? getBreadcrumbLabel(segment as DrivePathNode) : segment.name;
 
                 return (

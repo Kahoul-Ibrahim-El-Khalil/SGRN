@@ -19,49 +19,49 @@ PlantWide (DB5): fault_code, production/cost proxies, safety envelope, agent act
 
 ## Tag table (52 process tags + plant metadata)
 
-| SGRN twin path | TE tag | Nominal | Unit | Notes |
-|---|---|---|---|---|
-| `Reactor.a_feed_flow` | XMEAS 1 | 0.25 | kscm | stream 1 |
-| `Reactor.d_feed_flow` | XMEAS 2 | 63 | kg/h | stream 2 |
-| `Reactor.e_feed_flow` | XMEAS 3 | 54 | kg/h | stream 3 |
-| `Reactor.ac_feed_flow` | XMEAS 4 | 0.25 | kscm | stream 4 |
-| `Reactor.reactor_feed_rate` | XMEAS 6 | 42 | kscm | stream 6 |
-| `Reactor.pressure` | XMEAS 7 | 2700 | kPa | safety-critical, checker watches 3000 |
-| `Reactor.level` | XMEAS 8 | 75 | % | |
-| `Reactor.temp` | XMEAS 9 | 120 | degC | checker watches 150 |
-| `Reactor.cooling_out_temp` | XMEAS 21 | 92 | degC | |
-| `Reactor.feed_comp.*` | XMEAS 23-28 | — | mol% | A-H in stream 6 |
-| `Separator.purge_rate` | XMEAS 10 | 0.34 | kscm | stream 9 |
-| `Separator.product_temp` | XMEAS 11 | 83 | degC | |
-| `Separator.sep_level` | XMEAS 12 | 50 | % | |
-| `Separator.sep_pressure` | XMEAS 13 | 2600 | kPa | |
-| `Separator.sep_underflow` | XMEAS 14 | 26 | m3/h | stream 10 |
-| `Separator.cooling_out_temp` | XMEAS 22 | 88 | degC | |
-| `Separator.purge_comp.*` | XMEAS 29-36 | — | mol% | A-H in purge |
-| `Stripper.level/pressure/underflow/temp/steam_flow` | XMEAS 15-19 | 50/2600/25/66/230 | %/kPa/m3/h/degC/kg/h | |
-| `Stripper.product_comp.*` | XMEAS 37-41 | — | mol% | D-H in product |
-| `Compressor.recycle_flow/work` | XMEAS 5/20 | 32/280 | kscm/kW | |
-| `*.valve` | XMV 1-11 | — | % | manipulated valves |
-| `PlantWide.fault_code` | IDV | 0 | — | fault selector, writable live |
+| SGRN twin path                                      | TE tag      | Nominal           | Unit                 | Notes                                 |
+| --------------------------------------------------- | ----------- | ----------------- | -------------------- | ------------------------------------- |
+| `Reactor.a_feed_flow`                               | XMEAS 1     | 0.25              | kscm                 | stream 1                              |
+| `Reactor.d_feed_flow`                               | XMEAS 2     | 63                | kg/h                 | stream 2                              |
+| `Reactor.e_feed_flow`                               | XMEAS 3     | 54                | kg/h                 | stream 3                              |
+| `Reactor.ac_feed_flow`                              | XMEAS 4     | 0.25              | kscm                 | stream 4                              |
+| `Reactor.reactor_feed_rate`                         | XMEAS 6     | 42                | kscm                 | stream 6                              |
+| `Reactor.pressure`                                  | XMEAS 7     | 2700              | kPa                  | safety-critical, checker watches 3000 |
+| `Reactor.level`                                     | XMEAS 8     | 75                | %                    |                                       |
+| `Reactor.temp`                                      | XMEAS 9     | 120               | degC                 | checker watches 150                   |
+| `Reactor.cooling_out_temp`                          | XMEAS 21    | 92                | degC                 |                                       |
+| `Reactor.feed_comp.*`                               | XMEAS 23-28 | —                 | mol%                 | A-H in stream 6                       |
+| `Separator.purge_rate`                              | XMEAS 10    | 0.34              | kscm                 | stream 9                              |
+| `Separator.product_temp`                            | XMEAS 11    | 83                | degC                 |                                       |
+| `Separator.sep_level`                               | XMEAS 12    | 50                | %                    |                                       |
+| `Separator.sep_pressure`                            | XMEAS 13    | 2600              | kPa                  |                                       |
+| `Separator.sep_underflow`                           | XMEAS 14    | 26                | m3/h                 | stream 10                             |
+| `Separator.cooling_out_temp`                        | XMEAS 22    | 88                | degC                 |                                       |
+| `Separator.purge_comp.*`                            | XMEAS 29-36 | —                 | mol%                 | A-H in purge                          |
+| `Stripper.level/pressure/underflow/temp/steam_flow` | XMEAS 15-19 | 50/2600/25/66/230 | %/kPa/m3/h/degC/kg/h |                                       |
+| `Stripper.product_comp.*`                           | XMEAS 37-41 | —                 | mol%                 | D-H in product                        |
+| `Compressor.recycle_flow/work`                      | XMEAS 5/20  | 32/280            | kscm/kW              |                                       |
+| `*.valve`                                           | XMV 1-11    | —                 | %                    | manipulated valves                    |
+| `PlantWide.fault_code`                              | IDV         | 0                 | —                    | fault selector, writable live         |
 
 XMV 12 (agitator) is held constant at 100%.
 
 ## Fault subset (demo IDs → TE IDVs)
 
-| `fault_code` | TE IDV | Type | Signature in surrogate |
-|---|---|---|---|
-| 0 | 0 | normal | regulation to nominal + noise |
-| 1 | 1 | step | A/C feed ratio step |
-| 2 | 2 | step | B composition step |
-| 3 | 3 | step | D feed temperature step |
-| 4 | 4 | step | reactor cooling water inlet step |
-| 5 | 6 | step | A feed loss |
-| 6 | 7 | step | C header pressure loss |
-| 7 | 8 | random | A/B/C feed composition variation |
-| 8 | 11 | random | reactor cooling water variation |
+| `fault_code` | TE IDV | Type   | Signature in surrogate           |
+| ------------ | ------ | ------ | -------------------------------- |
+| 0            | 0      | normal | regulation to nominal + noise    |
+| 1            | 1      | step   | A/C feed ratio step              |
+| 2            | 2      | step   | B composition step               |
+| 3            | 3      | step   | D feed temperature step          |
+| 4            | 4      | step   | reactor cooling water inlet step |
+| 5            | 6      | step   | A feed loss                      |
+| 6            | 7      | step   | C header pressure loss           |
+| 7            | 8      | random | A/B/C feed composition variation |
+| 8            | 11     | random | reactor cooling water variation  |
 
 IDs 9+ (unseen: sensor bias/drift, combined faults) are reserved for the
-robustness / OOD tests in `demos/model.py` and are *not* in the training set.
+robustness / OOD tests in `demos/model.py` and are _not_ in the training set.
 
 ## Run with SGRN
 

@@ -56,7 +56,7 @@ AngelScript API available in the REPL, `runScript()` and `./angelscript.as`
 mirror `showHelp()`:
 
 - **Siemens types**: `BOOL/SINT/USINT/BYTE/INT/UINT/WORD/DINT/UDINT/DWORD/
-  LINT/ULINT/LWORD/REAL/LREAL/TIME/LTIME/DATE/TOD/LTOD`.
+LINT/ULINT/LWORD/REAL/LREAL/TIME/LTIME/DATE/TOD/LTOD`.
 - **Virtual PLC runtime**: `PlcRuntime@ rt = PlcRuntime()` (empty),
   `PlcRuntime("plant.scl")` (schema on creation),
   `PlcRuntime("", "DB1 pump:BOOL; END_DB")` (inline SCL, for debugging);
@@ -78,32 +78,32 @@ mirror `showHelp()`:
   `getReal/getInt/getBool`, `put()` + `put(path, val)` writes,
   `getRetry/putRetry`, `lastOpOk/lastOpError`, `db["field.path"]`
   (FieldProxy@), `db.path(...)` (S7PathBatch@), `toJson/diff/number/name/
-  print`, `registerSize/addField` (manual authoring), `cast<HexTable>`.
+print`, `registerSize/addField` (manual authoring), `cast<HexTable>`.
 - **TagTable**: `get/getReal/getInt/getBool`, `put` (immediate),
   bulk `get()/put()`, retry variants, `lastOpOk/lastOpError`,
   `path(name)`.
 - **S7PathBatch** (scoped read handle): `db.path("f")`,
   `put/get/read/toJson`.
 - **S7Connection** (low-level tuning): `connectWithTsap/useTsap/
-  useRackSlot`, `usesTsap/localTsap/remoteTsap`, `get/setParamInt/UInt16`,
+useRackSlot`, `usesTsap/localTsap/remoteTsap`, `get/setParamInt/UInt16`,
   `paramSummary`; `CONNTYPE_PG/OP/BASIC`.
 - **Diagnostics**: `client.diagnostics()` → `connectionInfo/status/info/
-  cpuInfo/pduInfo/isRunning/orderCode/cpInfo/protection/lastError/
-  lastErrorText/diagnosticBuffer/szl/listBlocks/listBlocksOfType/blockInfo`.
+cpuInfo/pduInfo/isRunning/orderCode/cpInfo/protection/lastError/
+lastErrorText/diagnosticBuffer/szl/listBlocks/listBlocksOfType/blockInfo`.
 - **PLC control**: `client.control()` → `hotStart/coldStart/stop/clock/
-  setClock/syncClockToSystem/setPassword/clearPassword/copyRamToRom/
-  compress`.
+setClock/syncClockToSystem/setPassword/clearPassword/copyRamToRom/
+compress`.
 - **Low-level memory**: `client.memory()` → `readArea/writeArea`,
   `readAddress/writeAddress` (e.g. `"DB1.DBX0.0"`), `readTag/writeTag/
-  tagInfo/decodeTag/listTags`, `readDB/writeDB`, `readMB/writeMB` (merkers),
+tagInfo/decodeTag/listTags`, `readDB/writeDB`, `readMB/writeMB` (merkers),
   `readEB/writeEB` (inputs), `readAB/writeAB` (outputs), `readTM/writeTM`,
   `readCT/writeCT`, `saveHexToFile/loadHexFromFile`; areas `Area_DB/MK/PE/
-  PA/TM/CT`, word lengths `WL_Bit/Byte/Word/DWord`.
+PA/TM/CT`, word lengths `WL_Bit/Byte/Word/DWord`.
 - **PLC simulation time**: `dtl()/setPlcTime/advancePlcTime/resetPlcTime`.
 - **Gateway sync & proxy**: `S7ProxySession(src, hub)` with
   `addMapping/start/stop/running`; `GatewaySync(runtime)` with
   `subscribeDb/unsubscribeDb/publishOnDirty/connect/disconnect/connected/
-  lastError`.
+lastError`.
 - **REPL conveniences**: bare expressions auto-print (`toJson` for
   DataBlock/TagTable/S7PathBatch, `toString` for HexTable/DTL/FieldProxy,
   `info()` for diagnostics, `print()` otherwise); primitives print as-is.

@@ -1,5 +1,6 @@
-import { useEffect, useState, useMemo, Component, type ReactNode } from "react";
-import { X, Download, FileText, Loader2, Search, Image as ImageIcon, ChevronDown } from "lucide-react";
+import { useEffect, useState, useMemo, useRef, useCallback, Component, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { X, Download, FileText, Loader2, Search, Image as ImageIcon, ChevronDown, Music } from "lucide-react";
 import { decompress } from "fzstd";
 import { Light as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vs2015 } from "react-syntax-highlighter/dist/esm/styles/hljs";
@@ -164,102 +165,106 @@ function getLanguage(filename: string): string {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
+type PreviewMedia = { url: string; kind: "image" | "pdf" | "video" | "audio" };
+
 export function FilePreviewModal({ isOpen, file, currentScope, onClose, onDownload }: FilePreviewModalProps) {
     const [loading, setLoading] = useState(false);
     const [content, setContent] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const [imageUrl, setImageUrl] = useState<string | null>(null);
-    const [mediaUrl, setMediaUrl] = useState<string | null>(null); // pdf / video / audio
-    const [mediaType, setMediaType] = useState<"pdf" | "video" | "audio" | null>(null);
+    const [media, setMedia] = useState<PreviewMedia | null>(null);
     const [parsedJson, setParsedJson] = useState<any | null>(null);
     const [jsonQuery, setJsonQuery] = useState<string>("");
     const [wasDecompressed, setWasDecompressed] = useState(false);
     const [jpLoader, setJpLoader] = useState<any>(null);
+    const objectUrlRef = useRef<string | null>(null);
+
+    const releaseObjectUrl = useCallback(() => {
+        if (objectUrlRef.current) {
+            URL.revokeObjectURL(objectUrlRef.current);
+            objectUrlRef.current = null;
+        }
+    }, []);
 
     // Lazily load jsonpath only when the user starts typing a query
     useEffect(() => {
         if (jsonQuery && !jpLoader) {
             import("jsonpath").then((m) => setJpLoader(() => m.default ?? m)).catch(() => console.error("Failed to load jsonpath"));
         }
-    }, [jsonQuery]);
+    }, [jsonQuery, jpLoader]);
 
-    // Load file content whenever the modal opens or file changes
+    // Escape to close + lock page scroll while open
     useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") onClose();
+        };
+        const prevOverflow = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        window.addEventListener("keydown", onKey);
+        return () => {
+            window.removeEventListener("keydown", onKey);
+            document.body.style.overflow = prevOverflow;
+        };
+    }, [isOpen, onClose]);
+
+    // Load content whenever the modal opens or the file changes
+    useEffect(() => {
+        setContent(null);
+        setError(null);
+        setMedia(null);
+        setParsedJson(null);
+        setJsonQuery("");
+        setWasDecompressed(false);
+
         if (!isOpen || !file) {
-            setContent(null);
-            setError(null);
-            if (imageUrl) URL.revokeObjectURL(imageUrl);
-            setImageUrl(null);
-            if (mediaUrl) URL.revokeObjectURL(mediaUrl);
-            setMediaUrl(null);
-            setMediaType(null);
-            setParsedJson(null);
-            setJsonQuery("");
-            setWasDecompressed(false);
+            setLoading(false);
             return;
         }
 
-        const loadContent = async () => {
-            setLoading(true);
-            setError(null);
-            setContent(null);
+        const kind: PreviewMedia["kind"] | null = isImageFile(file.name)
+            ? "image"
+            : isPdfFile(file.name)
+              ? "pdf"
+              : isVideoFile(file.name)
+                ? "video"
+                : isAudioFile(file.name)
+                  ? "audio"
+                  : null;
 
+        if (!kind && !isTextFile(file.name)) {
+            setLoading(false);
+            setError("Preview is not available for this file type.");
+            return;
+        }
+
+        let cancelled = false;
+        setLoading(true);
+
+        (async () => {
             const result = await fetchDriveFileContent(file.path, currentScope);
+            if (cancelled) return;
             if (isError(result)) {
                 setError(result.error);
                 setLoading(false);
                 return;
             }
-
             const buffer = result.data;
 
-            // ── Image path ───────────────────────────────────────────────
-            if (isImageFile(file.name)) {
-                const blob = new Blob([buffer], { type: getMimeType(file.name) });
-                setImageUrl(URL.createObjectURL(blob));
+            if (kind) {
+                const url = URL.createObjectURL(new Blob([buffer], { type: getMimeType(file.name) }));
+                objectUrlRef.current = url;
+                setMedia({ url, kind });
                 setLoading(false);
                 return;
             }
 
-            // ── PDF path ─────────────────────────────────────────────────
-            if (isPdfFile(file.name)) {
-                const blob = new Blob([buffer], { type: "application/pdf" });
-                setMediaUrl(URL.createObjectURL(blob));
-                setMediaType("pdf");
-                setLoading(false);
-                return;
-            }
-
-            // ── Video path ───────────────────────────────────────────────
-            if (isVideoFile(file.name)) {
-                const blob = new Blob([buffer], { type: getMimeType(file.name) });
-                setMediaUrl(URL.createObjectURL(blob));
-                setMediaType("video");
-                setLoading(false);
-                return;
-            }
-
-            // ── Audio path ───────────────────────────────────────────────
-            if (isAudioFile(file.name)) {
-                const blob = new Blob([buffer], { type: getMimeType(file.name) });
-                setMediaUrl(URL.createObjectURL(blob));
-                setMediaType("audio");
-                setLoading(false);
-                return;
-            }
-
-            // ── Text / binary path ───────────────────────────────────────
-            const view = new Uint8Array(buffer as ArrayBuffer);
-            let dataToDecode: Uint8Array = view;
-
+            const view = new Uint8Array(buffer);
             // Zstd magic: 0x28 0xB5 0x2F 0xFD
             const isZstd = view.length >= 4 && view[0] === 0x28 && view[1] === 0xb5 && view[2] === 0x2f && view[3] === 0xfd;
-
-            setWasDecompressed(isZstd);
-
+            let bytes: Uint8Array = view;
             if (isZstd) {
                 try {
-                    dataToDecode = decompress(view) as unknown as Uint8Array;
+                    bytes = decompress(view) as unknown as Uint8Array;
                 } catch {
                     setError("Failed to decompress file.");
                     setLoading(false);
@@ -267,32 +272,28 @@ export function FilePreviewModal({ isOpen, file, currentScope, onClose, onDownlo
                 }
             }
 
-            let text = new TextDecoder("utf-8").decode(dataToDecode);
-
-            // Pretty-print JSON
+            let text = new TextDecoder("utf-8").decode(bytes);
+            let json: any = null;
             if (file.name.endsWith(".json") || file.name.endsWith(".json.zst")) {
                 try {
-                    const parsed = JSON.parse(text);
-                    setParsedJson(parsed);
-                    text = JSON.stringify(parsed, null, 2);
+                    json = JSON.parse(text);
+                    text = JSON.stringify(json, null, 2);
                 } catch {
                     /* leave as-is */
                 }
             }
 
+            setWasDecompressed(isZstd);
+            setParsedJson(json);
             setContent(text);
             setLoading(false);
-        };
+        })();
 
-        if (isTextFile(file.name) || isImageFile(file.name)) {
-            loadContent();
-        } else if (isPdfFile(file.name) || isVideoFile(file.name) || isAudioFile(file.name)) {
-            loadContent();
-        } else {
-            setLoading(false);
-            setError("Preview is not available for this file type.");
-        }
-    }, [isOpen, file, currentScope]);
+        return () => {
+            cancelled = true;
+            releaseObjectUrl();
+        };
+    }, [isOpen, file, currentScope, releaseObjectUrl]);
 
     const displayContent = useMemo(() => {
         if (!parsedJson || !jsonQuery) return content;
@@ -306,8 +307,7 @@ export function FilePreviewModal({ isOpen, file, currentScope, onClose, onDownlo
 
     const handleDownloadDecompressed = () => {
         if (!content || !file) return;
-        const blob = new Blob([content], { type: "text/plain" });
-        const url = URL.createObjectURL(blob);
+        const url = URL.createObjectURL(new Blob([content], { type: "text/plain" }));
         const a = document.createElement("a");
         a.href = url;
         a.download = file.name.endsWith(".zst") ? file.name.slice(0, -4) : file.name;
@@ -320,113 +320,96 @@ export function FilePreviewModal({ isOpen, file, currentScope, onClose, onDownlo
     if (!isOpen || !file) return null;
 
     const lang = getLanguage(file.name);
+    const HeaderIcon = isImageFile(file.name) || isVideoFile(file.name) ? ImageIcon : FileText;
 
-    return (
-        <div className="preview-modal-overlay">
-            <div className="preview-modal-window">
-                {/* ── Header ───────────────────────────────────────── */}
+    return createPortal(
+        <div
+            className="preview-modal-overlay"
+            role="presentation"
+            onMouseDown={(e) => {
+                if (e.target === e.currentTarget) onClose();
+            }}
+        >
+            <div className="preview-modal-window" role="dialog" aria-modal="true" aria-label={`Preview of ${file.name}`}>
                 <div className="preview-modal-header">
                     <div className="preview-modal-title">
-                        {isImageFile(file.name) || isVideoFile(file.name) ? (
-                            <ImageIcon size={16} className="text-blue-400" />
-                        ) : (
-                            <FileText size={16} className="text-blue-400" />
-                        )}
-                        {file.name}
+                        <HeaderIcon size={16} />
+                        <span>{file.name}</span>
                     </div>
 
                     <div className="preview-modal-actions">
-                        {/* JSONPath query bar – only for JSON */}
                         {parsedJson && (
-                            <div className="flex items-center bg-[#1e1e1e] border border-white/10 rounded px-2 mr-2">
-                                <Search size={14} className="text-white/40 mr-2" />
+                            <label className="preview-modal-search">
+                                <Search size={14} />
                                 <input
                                     type="text"
                                     placeholder="JSONPath query (e.g. $.users[0])"
-                                    className="bg-transparent text-xs text-white placeholder:text-white/30 border-none outline-none w-56 h-8 font-mono"
                                     value={jsonQuery}
                                     onChange={(e) => setJsonQuery(e.target.value)}
                                 />
-                            </div>
+                            </label>
                         )}
 
-                        {/* Download button – dropdown when file was decompressed */}
                         {wasDecompressed ? (
                             <DropdownMenu>
                                 <DropdownMenuTrigger className="preview-modal-download">
                                     <Download size={14} />
-                                    <span className="text-xs font-bold tracking-wider">DOWNLOAD</span>
-                                    <ChevronDown size={14} className="ml-1 opacity-70" />
+                                    <span>DOWNLOAD</span>
+                                    <ChevronDown size={14} />
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="w-48 bg-[#252526] border-white/10 text-white shadow-xl">
-                                    <DropdownMenuItem
-                                        className="cursor-pointer hover:bg-white/10 focus:bg-white/10 py-2"
-                                        onClick={handleDownloadDecompressed}
-                                    >
+                                <DropdownMenuContent align="end" className="preview-modal-menu">
+                                    <DropdownMenuItem className="preview-modal-menu-item" onClick={handleDownloadDecompressed}>
                                         Download Decompressed
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                        className="cursor-pointer hover:bg-white/10 focus:bg-white/10 py-2"
-                                        onClick={() => onDownload(file)}
-                                    >
+                                    <DropdownMenuItem className="preview-modal-menu-item" onClick={() => onDownload(file)}>
                                         Download Original (.zst)
                                     </DropdownMenuItem>
                                 </DropdownMenuContent>
                             </DropdownMenu>
                         ) : (
-                            <button className="preview-modal-download" onClick={() => onDownload(file)}>
+                            <button type="button" className="preview-modal-download" onClick={() => onDownload(file)}>
                                 <Download size={14} />
-                                <span className="text-xs font-bold tracking-wider">DOWNLOAD</span>
+                                <span>DOWNLOAD</span>
                             </button>
                         )}
 
-                        <div className="w-px h-5 bg-white/10 mx-2" />
-                        <button className="preview-modal-close" onClick={onClose}>
+                        <button
+                            type="button"
+                            className="preview-modal-close"
+                            onClick={onClose}
+                            aria-label="Close preview"
+                            title="Close (Esc)"
+                        >
                             <X size={18} />
                         </button>
                     </div>
                 </div>
 
-                {/* ── Content ──────────────────────────────────────── */}
                 <div className="preview-modal-content">
                     {loading ? (
                         <div className="preview-modal-loading">
-                            <Loader2 size={36} className="animate-spin text-blue-500" />
-                            <div className="text-xs font-mono uppercase tracking-[0.2em]">Loading...</div>
+                            <Loader2 size={32} className="drive-spin" />
+                            <span>Loading...</span>
                         </div>
                     ) : error ? (
                         <div className="preview-modal-error">
                             <div className="preview-modal-error-msg">{error}</div>
                         </div>
-                    ) : imageUrl ? (
-                        <div className="w-full h-full flex items-center justify-center p-8 bg-[#1a1a1a]">
-                            <img src={imageUrl} alt={file.name} className="max-w-full max-h-full object-contain drop-shadow-2xl" />
+                    ) : media?.kind === "image" ? (
+                        <div className="preview-modal-media">
+                            <img src={media.url} alt={file.name} />
                         </div>
-                    ) : mediaUrl && mediaType === "pdf" ? (
-                        <iframe src={mediaUrl} title={file.name} className="w-full h-full border-0" style={{ background: "#fff" }} />
-                    ) : mediaUrl && mediaType === "video" ? (
-                        <div className="w-full h-full flex items-center justify-center bg-black">
-                            <video
-                                src={mediaUrl}
-                                controls
-                                autoPlay={false}
-                                className="max-w-full max-h-full outline-none"
-                                style={{ maxHeight: "calc(100vh - 120px)" }}
-                            />
+                    ) : media?.kind === "pdf" ? (
+                        <iframe className="preview-modal-pdf" src={media.url} title={file.name} />
+                    ) : media?.kind === "video" ? (
+                        <div className="preview-modal-media">
+                            <video src={media.url} controls />
                         </div>
-                    ) : mediaUrl && mediaType === "audio" ? (
-                        <div className="w-full h-full flex flex-col items-center justify-center gap-6 bg-[#1a1a1a]">
-                            <div className="flex flex-col items-center gap-3 text-white/60">
-                                <div className="w-20 h-20 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
-                                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                                        <path d="M9 18V5l12-2v13" />
-                                        <circle cx="6" cy="18" r="3" />
-                                        <circle cx="18" cy="16" r="3" />
-                                    </svg>
-                                </div>
-                                <span className="text-sm font-mono opacity-60">{file.name}</span>
-                            </div>
-                            <audio src={mediaUrl} controls className="w-80" />
+                    ) : media?.kind === "audio" ? (
+                        <div className="preview-modal-media preview-modal-audio">
+                            <Music size={40} />
+                            <span>{file.name}</span>
+                            <audio src={media.url} controls />
                         </div>
                     ) : content !== null ? (
                         <div className="preview-modal-scroll">
@@ -455,7 +438,7 @@ export function FilePreviewModal({ isOpen, file, currentScope, onClose, onDownlo
                                     wrapLongLines={false}
                                     customStyle={{
                                         margin: 0,
-                                        padding: "1.5rem",
+                                        padding: "1rem 1.25rem",
                                         fontSize: "13px",
                                         fontFamily:
                                             'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
@@ -478,6 +461,7 @@ export function FilePreviewModal({ isOpen, file, currentScope, onClose, onDownlo
                     ) : null}
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body,
     );
 }

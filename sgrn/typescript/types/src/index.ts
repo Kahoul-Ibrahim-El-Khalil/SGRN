@@ -251,6 +251,9 @@ export interface DirectoryListing {
   page: number;
   page_size: number;
   total_pages: number;
+  /** Ordering the listing is currently sorted by (echoed by the server). */
+  sort?: string;
+  order?: "asc" | "desc";
 }
 
 export interface Directory {

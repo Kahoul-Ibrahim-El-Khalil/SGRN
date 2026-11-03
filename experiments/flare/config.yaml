@@ -7,19 +7,19 @@ scenario:
   normal_days: 30
   fault_day: 31
   ticks_per_day: 24
-  fault_injection_tick: 723          # Day 31, Hour 3 (0-indexed: 30*24 + 3)
+  fault_injection_tick: 723 # Day 31, Hour 3 (0-indexed: 30*24 + 3)
   fault_code: 9
   fault_name: "FLARE_BLOCKED"
-  flare_ramp_rate: 0.15              # bar per tick (flare header pressure)
-  feed_ramp_rate: 1.15               # bar per tick (feed pressure)
-  esd_feed_press_limit: 90.0         # bar (emergency shutdown threshold)
-  tick_sleep_ms: 20                  # simulation tick rate
+  flare_ramp_rate: 0.15 # bar per tick (flare header pressure)
+  feed_ramp_rate: 1.15 # bar per tick (feed pressure)
+  esd_feed_press_limit: 90.0 # bar (emergency shutdown threshold)
+  tick_sleep_ms: 20 # simulation tick rate
 
 dataset:
-  window_size:                       # sliding window for autoencoder input (1 tick = 1 simulated hour)
+  window_size: # sliding window for autoencoder input (1 tick = 1 simulated hour)
     unit: "hours"
-    size: 12                         # 12-hour windows (must match config.json when both exist)
-  stride: 1                          # step between consecutive windows
+    size: 12 # 12-hour windows (must match config.json when both exist)
+  stride: 1 # step between consecutive windows
   # Three-way chronological split of the PRE-FAULT rows (fault day stays the
   # test set). Ratios must sum to 1.0 and every part must hold at least one
   # full window (enforced at runtime, ValueError otherwise).
@@ -49,16 +49,16 @@ dataset:
   # n >= (1-alpha)/alpha = 19) pushes q_alpha to INF — the honest
   # never-flag regime, reported as such. Set to 1 to score every window.
   calibration_stride: 12
-  random_seed: 42                    # seeds random/numpy/torch for the whole run
+  random_seed: 42 # seeds random/numpy/torch for the whole run
 
 model:
-  latent_dim: 16                     # bottleneck dimension (manifold dim)
-  hidden_dim: 64                     # MLP hidden layer width
+  latent_dim: 16 # bottleneck dimension (manifold dim)
+  hidden_dim: 64 # MLP hidden layer width
   learning_rate: 0.001
   epochs: 50
   batch_size: 32
-  alpha: 0.05                        # conformal significance level (95% coverage)
-  k_multiplier: 1.4                  # upper bound multiplier (q_upper = k * q_alpha)
+  alpha: 0.05 # conformal significance level (95% coverage)
+  k_multiplier: 1.4 # upper bound multiplier (q_upper = k * q_alpha)
 
 features:
   - "InletSeparation.feed_pressure"
@@ -91,5 +91,30 @@ baselines:
   signal: "SafetySystems.flare_header_press"
   # statistics: "level" (window mean of the raw signal) and
   #             "slope" (mean per-tick difference over the window)
-  k_grid: [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25, 3.5, 3.75,
-           4.0, 4.25, 4.5, 4.75, 5.0, 5.5, 6.0, 6.5, 7.0, 8.0]
+  k_grid:
+    [
+      0.5,
+      0.75,
+      1.0,
+      1.25,
+      1.5,
+      1.75,
+      2.0,
+      2.25,
+      2.5,
+      2.75,
+      3.0,
+      3.25,
+      3.5,
+      3.75,
+      4.0,
+      4.25,
+      4.5,
+      4.75,
+      5.0,
+      5.5,
+      6.0,
+      6.5,
+      7.0,
+      8.0,
+    ]

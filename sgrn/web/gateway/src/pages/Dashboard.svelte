@@ -24,9 +24,10 @@
   let registry_error: string = "";
   let show_only_subscribed: boolean = false;
   let is_prediction_gateway = false;
-  $: model_prediction = $liveTelemetryValues["ModelOutput-dew_point_prediction"]?.value;
-  $: has_model_prediction = typeof model_prediction === "number" &&
-    Number.isFinite(model_prediction);
+  $: model_prediction =
+    $liveTelemetryValues["ModelOutput-dew_point_prediction"]?.value;
+  $: has_model_prediction =
+    typeof model_prediction === "number" && Number.isFinite(model_prediction);
   $: model_prediction_text = has_model_prediction
     ? `${(model_prediction as number).toFixed(2)} °C`
     : "Waiting for prediction";
@@ -49,7 +50,10 @@
   // Tree nodes for Process Image
   let tree_nodes: RegistryTreeNode[] = [];
   let expanded_nodes: Set<string> = new Set<string>(); // node IDs that are expanded
-  let node_map: Map<string, RegistryTreeNode> = new Map<string, RegistryTreeNode>();
+  let node_map: Map<string, RegistryTreeNode> = new Map<
+    string,
+    RegistryTreeNode
+  >();
   let subscribed_paths: Set<string> = new Set<string>(); // paths that are active in WS
 
   // Collapsible sections for Schema Registry
@@ -153,7 +157,11 @@
             node.type === "db" ? node.db_name : `${node.db_name}/${node.path}`;
           matches_subscribed = false;
           for (const p of subscribed_paths) {
-            if (p === target_path || p === node.db_name || p.startsWith(target_path + "/")) {
+            if (
+              p === target_path ||
+              p === node.db_name ||
+              p.startsWith(target_path + "/")
+            ) {
               matches_subscribed = true;
               break;
             }
@@ -487,7 +495,11 @@
                   {#if node.type === "db" || node.is_struct || node.is_array || node.field_type === "TRUNCATED"}
                     —
                   {:else}
-                    {node.unit ?? "—"}{#if node.dimension}<span class="meta-muted"> · {node.dimension}</span>{/if}
+                    {node.unit ?? "—"}{#if node.dimension}<span
+                        class="meta-muted"
+                      >
+                        · {node.dimension}</span
+                      >{/if}
                   {/if}
                 </td>
 
@@ -501,7 +513,9 @@
                     —
                   {/if}
                   {#if node.alarm_lo !== undefined && node.alarm_hi !== undefined && node.type !== "db" && !node.is_struct && !node.is_array}
-                    <span class="meta-muted"> ⚠[{node.alarm_lo}, {node.alarm_hi}]</span>
+                    <span class="meta-muted">
+                      ⚠[{node.alarm_lo}, {node.alarm_hi}]</span
+                    >
                   {/if}
                 </td>
 
@@ -578,7 +592,7 @@
                         class:collapsed={!expanded_reg_groups.has(group_id)}
                         >▼</span
                       >
-                       <span class="db-badge mr-6">DB{db.number}</span>
+                      <span class="db-badge mr-6">DB{db.number}</span>
                       <strong>{db.name}</strong>
                       <span class="meta-muted">{db.size_bytes} B</span>
                       {#if db.trigger_events}
@@ -645,18 +659,25 @@
                               {/if}
                               <span
                                 class={f.udt_name ? "struct-node" : "leaf-node"}
-                                title={f.description ?? ""}
-                                >{f.name}</span
+                                title={f.description ?? ""}>{f.name}</span
                               >
                             </div>
                           </td>
-                          <td class="unit-cell">{f.unit ?? "—"}{#if f.dimension}<span class="meta-muted"> · {f.dimension}</span>{/if}</td>
+                          <td class="unit-cell"
+                            >{f.unit ?? "—"}{#if f.dimension}<span
+                                class="meta-muted"
+                              >
+                                · {f.dimension}</span
+                              >{/if}</td
+                          >
                           <td class="range-cell">
                             {#if f.min !== undefined && f.max !== undefined}
                               [{f.min}, {f.max}]
                             {/if}
                             {#if f.alarm_lo !== undefined && f.alarm_hi !== undefined}
-                              <span class="meta-muted">alarm [{f.alarm_lo}, {f.alarm_hi}]</span>
+                              <span class="meta-muted"
+                                >alarm [{f.alarm_lo}, {f.alarm_hi}]</span
+                              >
                             {/if}
                             {#if f.enum_map}
                               <span class="meta-muted"
@@ -748,18 +769,25 @@
                               {/if}
                               <span
                                 class={f.udt_name ? "struct-node" : "leaf-node"}
-                                title={f.description ?? ""}
-                                >{f.name}</span
+                                title={f.description ?? ""}>{f.name}</span
                               >
                             </div>
                           </td>
-                          <td class="unit-cell">{f.unit ?? "—"}{#if f.dimension}<span class="meta-muted"> · {f.dimension}</span>{/if}</td>
+                          <td class="unit-cell"
+                            >{f.unit ?? "—"}{#if f.dimension}<span
+                                class="meta-muted"
+                              >
+                                · {f.dimension}</span
+                              >{/if}</td
+                          >
                           <td class="range-cell">
                             {#if f.min !== undefined && f.max !== undefined}
                               [{f.min}, {f.max}]
                             {/if}
                             {#if f.alarm_lo !== undefined && f.alarm_hi !== undefined}
-                              <span class="meta-muted">alarm [{f.alarm_lo}, {f.alarm_hi}]</span>
+                              <span class="meta-muted"
+                                >alarm [{f.alarm_lo}, {f.alarm_hi}]</span
+                              >
                             {/if}
                             {#if f.enum_map}
                               <span class="meta-muted"

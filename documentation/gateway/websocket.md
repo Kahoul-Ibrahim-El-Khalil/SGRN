@@ -47,9 +47,7 @@ the inspectable form:
 ```json
 {
   "command": "write",
-  "updates": [
-    {"db": 1, "offset": 12, "size": 4, "data": "AAAAQA"}
-  ]
+  "updates": [{ "db": 1, "offset": 12, "size": 4, "data": "AAAAQA" }]
 }
 ```
 
@@ -85,9 +83,9 @@ This prevents telemetry from blocking the UI thread during high-frequency PLC cy
 
 The flush rate controls how often buffered updates are batched and sent to the UI:
 
-| Interval | Rate | Use Case |
-|----------|------|----------|
-| 8 ms | ~125 Hz | High-speed monitoring |
-| 32 ms | ~30 Hz | Standard UI (default) |
-| 100 ms | 10 Hz | Low-power / overview |
-| 1000 ms | 1 Hz | Dashboard tiles only |
+| Interval | Rate    | Use Case              |
+| -------- | ------- | --------------------- |
+| 8 ms     | ~125 Hz | High-speed monitoring |
+| 32 ms    | ~30 Hz  | Standard UI (default) |
+| 100 ms   | 10 Hz   | Low-power / overview  |
+| 1000 ms  | 1 Hz    | Dashboard tiles only  |

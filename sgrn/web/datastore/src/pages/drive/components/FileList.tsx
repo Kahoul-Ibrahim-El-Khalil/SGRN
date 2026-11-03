@@ -15,10 +15,13 @@ import {
     Info,
     Edit3,
     Eye,
+    ArrowUp,
+    ArrowDown,
 } from "lucide-react";
 import type { DriveFolder, DriveFile } from "@sgrn/types";
 import type { DriveMoveItem } from "@/pages/drive/types";
 import { Highlight } from "./Highlight";
+import type { DriveSortKey, DriveSortOrder } from "@/pages/drive/api";
 import React, { useState } from "react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
@@ -37,6 +40,9 @@ interface FileListProps {
     onToggleSelection: (item: DriveMoveItem) => void;
     onMoveItems?: (items: DriveMoveItem[], targetId: number) => void;
     searchQuery?: string;
+    sortBy?: DriveSortKey;
+    sortOrder?: DriveSortOrder;
+    onSort?: (key: DriveSortKey) => void;
 }
 
 function formatFileSize(bytes: number): string {
@@ -102,7 +108,32 @@ export function FileList({
     onToggleSelection,
     onMoveItems,
     searchQuery = "",
+    sortBy = "name",
+    sortOrder = "asc",
+    onSort,
 }: FileListProps) {
+    // Sortable column headers; a click on the active column flips direction
+    // (handled by the parent's toggleSort), a new column starts ascending.
+    const SortHeader: React.FC<{ label: string; sortKey: DriveSortKey; className?: string }> = ({ label, sortKey, className }) => (
+        <th className={className}>
+            {onSort ? (
+                <button
+                    type="button"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onSort(sortKey);
+                    }}
+                    className={`drive-list-head-btn${sortBy === sortKey ? " drive-list-head-btn--active" : ""}`}
+                    aria-label={`Sort by ${label}${sortBy === sortKey ? (sortOrder === "asc" ? ", currently ascending" : ", currently descending") : ""}`}
+                >
+                    <span>{label}</span>
+                    {sortBy === sortKey && (sortOrder === "asc" ? <ArrowUp size={10} /> : <ArrowDown size={10} />)}
+                </button>
+            ) : (
+                label
+            )}
+        </th>
+    );
     const [dragOverPath, setDragOverPath] = useState<string | null>(null);
 
     const handleDragStart = (e: React.DragEvent, item: DriveMoveItem) => {
@@ -130,6 +161,9 @@ export function FileList({
 
     const isEmpty = folders.length === 0 && files.length === 0;
 
+    // Separators only earn their place when there are enough rows to need them
+    const showSeparators = folders.length + files.length > 10;
+
     if (isEmpty) {
         return (
             <div className="drive-empty">
@@ -143,16 +177,16 @@ export function FileList({
 
     return (
         <div className="overflow-x-auto">
-            <table className="datagrid-industrial w-full">
+            <table className={`drive-list w-full${showSeparators ? " drive-list--lined" : ""}`}>
                 <thead>
                     <tr>
-                        <th className="w-10"></th>
-                        <th className="w-10"></th>
-                        <th>NAME</th>
-                        <th className="w-24">TYPE</th>
-                        <th className="w-32">SIZE</th>
-                        <th className="w-48">MODIFIED</th>
-                        <th className="w-40 text-right">ACTIONS</th>
+                        <th aria-label="Selection" />
+                        <th aria-label="Type icon" />
+                        <SortHeader label="Name" sortKey="name" />
+                        <th>Type</th>
+                        <SortHeader label="Size" sortKey="size" />
+                        <SortHeader label="Modified" sortKey="modified" />
+                        <th aria-label="Actions" />
                     </tr>
                 </thead>
                 <tbody>
@@ -175,7 +209,7 @@ export function FileList({
                                 }}
                                 onDragLeave={() => setDragOverPath(null)}
                                 onDrop={(e) => handleDrop(e, folder)}
-                                className={`group cursor-pointer transition-colors ${selected ? "active" : "hover:bg-muted/10"} ${isDragOver ? "drop-target" : ""}`}
+                                className={`group cursor-pointer transition-colors ${selected ? "active" : ""} ${isDragOver ? "drop-target" : ""}`}
                                 onClick={() => onFolderClick(folder)}
                             >
                                 <td className="text-center" onClick={(e) => e.stopPropagation()}>
@@ -216,10 +250,10 @@ export function FileList({
                                           : "--"}
                                 </td>
                                 <td>
-                                    <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="drive-row-actions opacity-0 group-hover:opacity-100 transition-opacity">
                                         {folder.id && onFolderDownload && (
                                             <button
-                                                className="btn-industrial-secondary h-7 w-7 p-0"
+                                                className="drive-row-btn"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     onFolderDownload(folder);
@@ -230,7 +264,7 @@ export function FileList({
                                         )}
                                         {folder.id && onInfo && (
                                             <button
-                                                className="btn-industrial-secondary h-7 w-7 p-0"
+                                                className="drive-row-btn"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     onInfo(folder, "folder");
@@ -241,7 +275,7 @@ export function FileList({
                                         )}
                                         {folder.id && onRename && (
                                             <button
-                                                className="btn-industrial-secondary h-7 w-7 p-0"
+                                                className="drive-row-btn"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     onRename(folder, "folder");
@@ -252,7 +286,7 @@ export function FileList({
                                         )}
                                         {folder.id && onDelete && (
                                             <button
-                                                className="btn-industrial-secondary h-7 w-7 p-0 border-destructive/20 text-destructive hover:bg-destructive/10"
+                                                className="drive-row-btn drive-row-btn--danger"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     onDelete(folder, "folder");
@@ -277,7 +311,7 @@ export function FileList({
                                 onDragStart={(e) =>
                                     handleDragStart(e, { id: file.id, type: "file", source_path: file.path, name: file.name })
                                 }
-                                className={`group cursor-pointer transition-colors ${selected ? "active" : "hover:bg-muted/10"}`}
+                                className={`group cursor-pointer transition-colors ${selected ? "active" : ""}`}
                                 onClick={() => onFileClick(file)}
                             >
                                 <td className="text-center" onClick={(e) => e.stopPropagation()}>
@@ -303,10 +337,12 @@ export function FileList({
                                     {formatDate(file.created_at)}
                                 </td>
                                 <td>
-                                    <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="drive-row-actions opacity-0 group-hover:opacity-100 transition-opacity">
                                         {onPreview && (
                                             <button
-                                                className="btn-industrial-secondary h-7 w-7 p-0"
+                                                className="drive-row-btn"
+                                                title="Preview"
+                                                aria-label="Preview"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     onPreview(file);
@@ -316,7 +352,7 @@ export function FileList({
                                             </button>
                                         )}
                                         <button
-                                            className="btn-industrial-secondary h-7 w-7 p-0"
+                                            className="drive-row-btn"
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 onInfo?.(file, "file");
@@ -325,7 +361,7 @@ export function FileList({
                                             <Info size={12} />
                                         </button>
                                         <button
-                                            className="btn-industrial-secondary h-7 w-7 p-0"
+                                            className="drive-row-btn"
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 onRename?.(file, "file");
@@ -338,13 +374,13 @@ export function FileList({
                                             <div onClick={(e) => e.stopPropagation()}>
                                                 <DropdownMenu>
                                                     <DropdownMenuTrigger asChild>
-                                                        <button className="btn-industrial-secondary h-7 w-7 p-0">
+                                                        <button className="drive-row-btn">
                                                             <Download size={12} />
                                                         </button>
                                                     </DropdownMenuTrigger>
                                                     <DropdownMenuContent
                                                         align="end"
-                                                        className="w-48 bg-[#252526] border-white/10 text-white shadow-xl"
+                                                        className="w-48 bg-popover border-border text-popover-foreground shadow-xl"
                                                     >
                                                         <DropdownMenuItem
                                                             className="cursor-pointer hover:bg-white/10 focus:bg-white/10 py-2"
@@ -363,7 +399,7 @@ export function FileList({
                                             </div>
                                         ) : (
                                             <button
-                                                className="btn-industrial-secondary h-7 w-7 p-0"
+                                                className="drive-row-btn"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     onFileClick(file);
@@ -374,7 +410,7 @@ export function FileList({
                                         )}
                                         {onDelete && (
                                             <button
-                                                className="btn-industrial-secondary h-7 w-7 p-0 border-destructive/20 text-destructive hover:bg-destructive/10"
+                                                className="drive-row-btn drive-row-btn--danger"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     onDelete?.(file, "file");

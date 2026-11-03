@@ -4,10 +4,10 @@ The gateway ships a two-mode security model controlled by `security_policy` in `
 
 ### Policy Modes
 
-| Mode | Behaviour |
-|------|-----------|
-| `Relaxed` | No access control. All clients accepted. Suitable for development. |
-| `Strict` | AngelScript rule engine loaded from `security_script`. All requests evaluated against active rules. |
+| Mode      | Behaviour                                                                                           |
+| --------- | --------------------------------------------------------------------------------------------------- |
+| `Relaxed` | No access control. All clients accepted. Suitable for development.                                  |
+| `Strict`  | AngelScript rule engine loaded from `security_script`. All requests evaluated against active rules. |
 
 ### AngelScript Policy Engine
 
@@ -47,28 +47,28 @@ void definePolicy(PolicyBuilder@ policy) {
 
 ### Rule Predicates
 
-| Builder Method | Description |
-|----------------|-------------|
-| `.forProtocol(P)` | Match only the specified protocol |
-| `.fromCidr("x.x.x.x/n")` | Match source IP against CIDR range |
-| `.fromIp("x.x.x.x")` | Match exact source IP |
-| `.allowDbNumbers({N, M})` | Restrict to specific DB numbers |
-| `.requireHeader("H")` | Require an HTTP header to be present |
-| `.allowOrigins({"url"})` | Match HTTP/WS `Origin` header |
-| `.allowSessionNames({"name"})` | Match OPC-UA session name |
-| `.allow()` | Emit an ALLOW rule (default deny-by-default) |
-| `.deny()` | Emit an explicit DENY rule |
+| Builder Method                 | Description                                  |
+| ------------------------------ | -------------------------------------------- |
+| `.forProtocol(P)`              | Match only the specified protocol            |
+| `.fromCidr("x.x.x.x/n")`       | Match source IP against CIDR range           |
+| `.fromIp("x.x.x.x")`           | Match exact source IP                        |
+| `.allowDbNumbers({N, M})`      | Restrict to specific DB numbers              |
+| `.requireHeader("H")`          | Require an HTTP header to be present         |
+| `.allowOrigins({"url"})`       | Match HTTP/WS `Origin` header                |
+| `.allowSessionNames({"name"})` | Match OPC-UA session name                    |
+| `.allow()`                     | Emit an ALLOW rule (default deny-by-default) |
+| `.deny()`                      | Emit an explicit DENY rule                   |
 
 ### Protocol Constants
 
-| Constant | Protocol |
-|----------|----------|
-| `PROTOCOL_S7` | S7 ISO-on-TCP (port 102) |
-| `PROTOCOL_HTTP` | REST / HTTP (northbound) |
-| `PROTOCOL_WEBSOCKET` | WebSocket telemetry |
-| `PROTOCOL_MODBUS` | Modbus TCP |
-| `PROTOCOL_OPCUA` | OPC Unified Architecture |
-| `PROTOCOL_ETHERNETIP` | EtherNet/IP (CIP) |
+| Constant              | Protocol                 |
+| --------------------- | ------------------------ |
+| `PROTOCOL_S7`         | S7 ISO-on-TCP (port 102) |
+| `PROTOCOL_HTTP`       | REST / HTTP (northbound) |
+| `PROTOCOL_WEBSOCKET`  | WebSocket telemetry      |
+| `PROTOCOL_MODBUS`     | Modbus TCP               |
+| `PROTOCOL_OPCUA`      | OPC Unified Architecture |
+| `PROTOCOL_ETHERNETIP` | EtherNet/IP (CIP)        |
 
 ### Rule Evaluation
 

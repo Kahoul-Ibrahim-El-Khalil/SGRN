@@ -29,15 +29,15 @@ This experiment demonstrates an LLM-in-the-loop control system for a simulated t
 
 ## Data Blocks
 
-| DB | Name | Description |
-|----|------|-------------|
-| 1 | Setpoints | Operator commands (pump, valves, heater, E-stop) |
-| 2 | Tank | Process values (level, temp, flows, alarms) |
-| 3 | Pump | Pump status (running, speed, fault) |
-| 4 | Valves | Inlet/outlet valve actuator positions |
-| 5 | Heater | PID temperature control loop |
-| 6 | Alarms | Aggregated alarm summary |
-| 7 | LLMAnalysis | LLM analysis text, suggested action, confidence |
+| DB  | Name        | Description                                      |
+| --- | ----------- | ------------------------------------------------ |
+| 1   | Setpoints   | Operator commands (pump, valves, heater, E-stop) |
+| 2   | Tank        | Process values (level, temp, flows, alarms)      |
+| 3   | Pump        | Pump status (running, speed, fault)              |
+| 4   | Valves      | Inlet/outlet valve actuator positions            |
+| 5   | Heater      | PID temperature control loop                     |
+| 6   | Alarms      | Aggregated alarm summary                         |
+| 7   | LLMAnalysis | LLM analysis text, suggested action, confidence  |
 
 ## LLM Analysis Flow
 
@@ -96,6 +96,7 @@ Open http://localhost:8000 in your browser.
 ## LLM Prompt Engineering
 
 The prompt in `llm_client.py` includes:
+
 - Full plant state (tank, pump, valves, heater, alarms)
 - Current skid mode (OFF/FILLING/HEATING/DISCHARGING/ALARM)
 - Previous LLM action for context
@@ -106,16 +107,16 @@ Modify `build_llm_prompt()` to adjust the prompt for your use case.
 
 ## Action Space
 
-| Code | Action | Description |
-|------|--------|-------------|
-| 0 | HOLD | Maintain current state |
-| 1 | INCREASE_FILL | Increase pump speed & inlet valve |
-| 2 | DECREASE_FILL | Decrease pump speed & inlet valve |
-| 3 | START_HEAT | Enable heater, setpoint 60°C |
-| 4 | STOP_HEAT | Disable heater |
-| 5 | OPEN_OUTLET | Increase outlet valve |
-| 6 | CLOSE_OUTLET | Decrease outlet valve |
-| 7 | EMERGENCY_STOP | Engage E-stop |
+| Code | Action         | Description                       |
+| ---- | -------------- | --------------------------------- |
+| 0    | HOLD           | Maintain current state            |
+| 1    | INCREASE_FILL  | Increase pump speed & inlet valve |
+| 2    | DECREASE_FILL  | Decrease pump speed & inlet valve |
+| 3    | START_HEAT     | Enable heater, setpoint 60°C      |
+| 4    | STOP_HEAT      | Disable heater                    |
+| 5    | OPEN_OUTLET    | Increase outlet valve             |
+| 6    | CLOSE_OUTLET   | Decrease outlet valve             |
+| 7    | EMERGENCY_STOP | Engage E-stop                     |
 
 ## Safety Features
 
@@ -136,6 +137,7 @@ Modify `build_llm_prompt()` to adjust the prompt for your use case.
 ### Change LLM Provider
 
 The client uses OpenAI-compatible API. For other providers:
+
 - Set `LLM_BASE_URL` to provider's endpoint
 - Use appropriate `LLM_MODEL` name
 - Ensure API key format matches provider
@@ -143,6 +145,7 @@ The client uses OpenAI-compatible API. For other providers:
 ### Add Checker/Validator
 
 Create a second Python script that:
+
 1. Reads LLMAnalysis.response
 2. Validates action against safety rules
 3. Sets `action_blocked` flag if unsafe

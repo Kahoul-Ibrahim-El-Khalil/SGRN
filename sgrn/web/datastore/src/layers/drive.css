@@ -1,0 +1,254 @@
+@layer drive {
+    /* =====================================================================
+     DRIVE PAGE — single source of truth for the drive UI.
+     DriveHeader (breadcrumb) + DriveToolbar (scope/search/view/actions)
+     are combined into a single .drive-bar container.
+     ===================================================================== */
+
+    .drive-page {
+        background: transparent;
+    }
+
+    /* --- Full-bleed: drive content occupies the screen edge-to-edge ---- */
+
+    /* --- Combined drive bar (breadcrumb + toolbar) --------------------- */
+
+    .drive-bar {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        width: 100%;
+        flex-shrink: 0;
+    }
+
+    /* --- Breadcrumb ---------------------------------------------------- */
+
+    .drive-breadcrumb-root {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+        transition: all 0.15s;
+        border: 1px solid transparent;
+    }
+
+    .drive-breadcrumb-root:hover {
+        background-color: hsl(var(--muted) / 0.3);
+        border-color: hsl(var(--border) / 0.5);
+    }
+
+    .drive-breadcrumb-root::before {
+        content: "/";
+        font-weight: 900;
+        color: hsl(var(--primary));
+        font-size: 0.875rem;
+    }
+
+    .drive-breadcrumb-segment {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+
+    .drive-breadcrumb-separator {
+        color: hsl(var(--muted-foreground) / 0.3);
+    }
+
+    .drive-breadcrumb-item {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 220px;
+        border: 1px solid transparent;
+        transition: all 0.15s;
+    }
+
+    .drive-breadcrumb-current {
+        font-weight: 600;
+        background: hsl(var(--primary) / 0.1);
+        border-color: hsl(var(--primary) / 0.2);
+        pointer-events: none;
+    }
+
+    /* --- Toolbar ------------------------------------------------------- */
+
+    /* Breadcrumb line under the toolbar row: tight, continuous with the bar */
+    .drive-breadcrumb-row {
+        display: flex;
+        align-items: center;
+        width: 100%;
+        padding: 2px 8px;
+        background: hsl(var(--muted));
+        border-bottom: 1px solid hsl(var(--border));
+    }
+
+    /* Scope tabs */
+    .drive-scope-tabs {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        height: auto;
+        padding: 0;
+        background: transparent;
+        border: none;
+        border-radius: 0;
+    }
+
+    .drive-scope-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        color: hsl(var(--muted-foreground));
+        background: transparent;
+        border: none;
+        border-bottom: 2px solid transparent;
+        cursor: pointer;
+        transition:
+            color 0.15s,
+            border-color 0.15s,
+            background 0.15s;
+    }
+
+    .drive-scope-btn:hover {
+        color: hsl(var(--primary));
+        background: transparent;
+    }
+
+    .drive-scope-btn-active {
+        color: hsl(var(--primary));
+        background: transparent;
+        border-bottom-color: hsl(var(--primary));
+        box-shadow: none;
+    }
+
+    /* Search */
+
+    .drive-search-input {
+        width: 100%;
+    }
+
+    .drive-search-icon {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        color: hsl(var(--muted-foreground));
+        pointer-events: none;
+    }
+
+    /* View toggle */
+    .drive-view-toggle {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        height: auto;
+        padding: 0;
+        background: transparent;
+        border: none;
+        border-radius: 0;
+    }
+
+    .drive-view-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        min-height: 24px;
+        padding: 2px 10px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0;
+        text-transform: none;
+        color: hsl(var(--muted-foreground));
+        background: transparent;
+        border: none;
+        border-bottom: 2px solid transparent;
+        border-radius: 0;
+        cursor: pointer;
+        transition:
+            color 0.15s,
+            border-color 0.15s,
+            background 0.15s;
+    }
+
+    .drive-view-btn:hover {
+        color: hsl(var(--primary));
+        background: transparent;
+    }
+
+    /* Toolbar actions */
+
+    .drive-refresh-btn {
+        padding: 0.4rem;
+        width: 2rem;
+    }
+
+    /* --- Content area -------------------------------------------------- */
+
+    /* Bordered canvas: files area fills all remaining screen height, so empty
+     space reads as part of the file browser rather than floating background */
+    .drive-content-area {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+        position: relative;
+        background: hsl(var(--card));
+        border: 1px solid hsl(var(--border));
+        border-radius: 0;
+    }
+
+    .drive-main-scroll {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 10px;
+    }
+
+    .drive-loading {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 16rem;
+        gap: 1rem;
+        color: hsl(var(--muted-foreground));
+    }
+
+    .drive-pagination {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+        padding-top: 1.5rem;
+        padding-bottom: 1.5rem;
+        border-top: 1px solid hsl(var(--border) / 0.1);
+        margin-top: 1rem;
+    }
+
+    .drive-pagination-info {
+        font-size: 10px;
+        font-family: monospace;
+        letter-spacing: 0.2em;
+        color: hsl(var(--muted-foreground));
+    }
+
+    /* --- File inputs --------------------------------------------------- */
+
+    /* --- New folder prompt --------------------------------------------- */
+
+    /* --- Industrial grid ----------------------------------------------- */
+
+    /* --- Drag & drop overlay states ------------------------------------ */
+
+    .drop-target {
+        border: 2px dashed hsl(var(--primary) / 0.5) !important;
+        background-color: hsl(var(--primary) / 0.05) !important;
+    }
+
+    /* --- Spin animation (shared) --------------------------------------- */
+
+    .drive-spin {
+        animation: spin 1s linear infinite;
+    }
+}

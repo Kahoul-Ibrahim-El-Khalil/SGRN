@@ -25,4 +25,3 @@ Public endpoint returning `{id, name}` pairs.
 `GET /api/v1/query/user/info`
 
 Returns detailed information about a user.
-

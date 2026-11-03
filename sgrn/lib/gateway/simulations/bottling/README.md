@@ -1,6 +1,7 @@
 # Bottling & Packaging Plant Simulation (Full Plant-Scale)
 
 ## Overview
+
 This scenario simulates a plant-scale beverage bottling operation with **two
 parallel filling lines** feeding a **shared palletizing cell**, a common
 **product supply / CIP skid**, and plant-wide **utilities** and **safety**
@@ -33,6 +34,7 @@ never originates control; it's a passive downstream receiver that persists
 and broadcasts whatever `simulation.as` pushes to it.
 
 ## What is Simulated?
+
 - **Cascade speed control**: a single operator "master speed %" resolves
   into a per-line BPM target, which is then trimmed station-by-station using
   **inter-station accumulation buffers** — exactly how a real packaging line
@@ -64,6 +66,7 @@ and broadcasts whatever `simulation.as` pushes to it.
   process telemetry, which is flushed once at the end of the cycle.
 
 ## Enabled / Disabled Features
+
 - **S7 Adapter**: **Enabled** (Port 102). `simulation.as` connects here to push the runtime's state to the gateway.
 - **HTTP/WebSocket API**: **Enabled** (Port 8000; WebSocket at `/ws`).
 - **Modbus Adapter**: **Disabled** — commented out in `security.as`.
@@ -73,6 +76,7 @@ and broadcasts whatever `simulation.as` pushes to it.
 - **Persistence**: **Enabled**, all 18 DBs.
 
 ## Naming Convention
+
 No field name encodes a unit (no `_ml`, `_bar`, `_nm`, `_pct` suffixes) —
 every physical quantity carries a `#UNIT(...)` annotation in `schema.scl`
 instead. Where three or more sibling fields shared a common prefix (e.g.
@@ -84,28 +88,30 @@ fields on `Supervisor`, `tank_*` / `cip_*` on `ProductSupply`, `air_*` /
 `Palletizer`.
 
 ## Data Blocks
-| DB | Name              | Purpose                                             |
-|----|-------------------|------------------------------------------------------|
-| 1  | Supervisor        | Plant/line mode, master speed cascade, OEE, counts   |
-| 2  | ProductSupply     | Shared batch tank + CIP skid                         |
-| 3  | Line1_Infeed      | Unscrambler + accumulation table, Line 1              |
-| 4  | Line1_Rinser      | Air/water bottle rinser, Line 1                       |
-| 5  | Line1_Filler      | 40-valve rotary filler, Line 1                        |
-| 6  | Line1_Capper      | 12-head chuck capper, Line 1                          |
-| 7  | Line1_Labeler     | Front/back labeler, Line 1                            |
-| 8  | Line1_CasePacker  | Case erector/packer + glue, Line 1                    |
-| 9  | Line2_Infeed      | Unscrambler + accumulation table, Line 2              |
-| 10 | Line2_Filler      | 24-valve rotary filler, Line 2                        |
-| 11 | Line2_Capper      | 8-head chuck capper, Line 2                           |
-| 12 | Line2_Labeler     | Front/back labeler, Line 2                            |
-| 13 | Line2_CasePacker  | Case erector/packer + glue, Line 2                    |
-| 14 | ConveyorNetwork   | Inter-station buffers + merge conveyor                |
-| 15 | Palletizer        | Shared robotic palletizer + stretch wrapper           |
-| 16 | Utilities         | Compressed air, glycol chiller, plant vacuum          |
-| 17 | SafetySystems     | E-stop zones, guard doors, light curtains             |
-| 18 | Alarms            | Plant-wide aggregated alarm summary                   |
+
+| DB  | Name             | Purpose                                            |
+| --- | ---------------- | -------------------------------------------------- |
+| 1   | Supervisor       | Plant/line mode, master speed cascade, OEE, counts |
+| 2   | ProductSupply    | Shared batch tank + CIP skid                       |
+| 3   | Line1_Infeed     | Unscrambler + accumulation table, Line 1           |
+| 4   | Line1_Rinser     | Air/water bottle rinser, Line 1                    |
+| 5   | Line1_Filler     | 40-valve rotary filler, Line 1                     |
+| 6   | Line1_Capper     | 12-head chuck capper, Line 1                       |
+| 7   | Line1_Labeler    | Front/back labeler, Line 1                         |
+| 8   | Line1_CasePacker | Case erector/packer + glue, Line 1                 |
+| 9   | Line2_Infeed     | Unscrambler + accumulation table, Line 2           |
+| 10  | Line2_Filler     | 24-valve rotary filler, Line 2                     |
+| 11  | Line2_Capper     | 8-head chuck capper, Line 2                        |
+| 12  | Line2_Labeler    | Front/back labeler, Line 2                         |
+| 13  | Line2_CasePacker | Case erector/packer + glue, Line 2                 |
+| 14  | ConveyorNetwork  | Inter-station buffers + merge conveyor             |
+| 15  | Palletizer       | Shared robotic palletizer + stretch wrapper        |
+| 16  | Utilities        | Compressed air, glycol chiller, plant vacuum       |
+| 17  | SafetySystems    | E-stop zones, guard doors, light curtains          |
+| 18  | Alarms           | Plant-wide aggregated alarm summary                |
 
 ## Setting Setpoints via OPC-UA
+
 Since there's no operator script, drive the plant by writing nodes directly
 on `opc.tcp://<host>:4840` (hosted inside `simulation.as`). Any OPC-UA
 client works — e.g. UaExpert for interactive use, or
@@ -139,6 +145,7 @@ client.disconnect()
 > confirm node names if the paths above don't resolve directly.
 
 ## How to Test
+
 1. Run the gateway with `gateway.json`, then start `simulation.as` (via
    `s7shell simulation.as`) — this single process is both the physics
    runtime and the OPC-UA server.

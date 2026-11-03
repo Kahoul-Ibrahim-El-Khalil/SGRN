@@ -19,6 +19,7 @@ Two modes:
   zero-config development path.
 
 Supports:
+
 - **Formats**: `.bin.zst`, `.jsonl.zst`, and native `.sgrnb` (columnar datasets).
 - **Synthetic Simulation**: Replay trained ML model predictions back into twin memory.
 - **Pacing**: `--speed` multiplier, `--loop`, `--no-delay` (max speed).

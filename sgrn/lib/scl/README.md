@@ -31,30 +31,30 @@ The `DbSymbolsParser` performs lexical analysis and builds an Abstract Syntax Tr
 - `#DIMENSION("pressure")` — WHAT is measured (physical dimension class).
 - `#DIMENSIONS("pressure", "temperature", "flow")` — file-level vocabulary,
   conventionally at the top before the first `DATA_BLOCK`/`TYPE`. When
-  present, every `#DIMENSION`   in the file must be a member, otherwise parsing fails (typo guard). When absent, any `#DIMENSION` is accepted.
+  present, every `#DIMENSION` in the file must be a member, otherwise parsing fails (typo guard). When absent, any `#DIMENSION` is accepted.
 - Dimensions ride the same paths as units: field JSON (`"dimension"`),
   schema binary codec, `sgrn_dataset` manifest features, `GET /registry`,
   and the dashboard (shown next to the unit).
 
 ### Semantic annotations reference
 
-| Directive | Form | Meaning | Consumers |
-|---|---|---|---|
-| `#UNIT` | `#UNIT("kPa")` | HOW measured (engineering unit) | registry, dashboard, OPC-UA, manifest |
-| `#DIMENSION` | `#DIMENSION("pressure")` | WHAT measured (dimension class) | registry, dashboard, manifest |
-| `#DIMENSIONS` | `#DIMENSIONS("pressure", …)` top of file | allowed vocabulary; undeclared values fail parse | parser |
-| `#DESC` | `#DESC("…")` | human description | dashboard tooltip, registry, manifest |
-| `#LABEL` | bare | label/metadata, not a model feature (CSV column kept, flagged `is_label`) | `sgrn_dataset` manifest, trainers |
-| `#PRECISION` | `#PRECISION(2)` (0..18) | dashboard display decimals (default 4) | dashboard |
-| `#NOMINAL` | `#NOMINAL(2700.0)` | expected operating point (residual reference, not a control target) | models, manifest |
-| `#TRANSIENT` | bare | excluded from JSONL WAL + datasets (binary WAL keeps full images for resync) | persistence, `sgrn_dataset` |
-| `#READ_ONLY` | bare | semantic `POST /data/*` writes denied regardless of ACLs (raw `/memory/*` stays DB-ACL) | HTTP adapter |
-| `#ALARM` | `#ALARM(lo, hi)`, hi > lo | acceptable band, surfaced in registry/dashboard; evaluation is the consumer's job | dashboard, manifest |
-| `#RANGE` | `#RANGE(min, max)` | sensor span | registry, dashboard |
-| `#ENUM` | `#ENUM(A=1, …)` | named states | registry, dataset (`is_categorical`) |
-| `#TIMESTAMP_FOR` | `#TIMESTAMP_FOR(DB)` or `(f1, f2)` | binds signals to ground-truth S7 DTL machine clock | `TimeGridResampler`, `sgrn_dataset` |
-| `#DATASET_STEP` | `#DATASET_STEP("10ms")` or `#STEP` | declared discrete training grid step $\Delta t$ | `TimeGridResampler`, `sgrn_dataset` |
-| `#AGG` | `#AGG("MEAN")` (or MAX, MIN, OR, LAST) | typed consolidation for discrete time-grid resampling | `TimeGridResampler`, `sgrn_dataset` |
+| Directive        | Form                                     | Meaning                                                                                 | Consumers                             |
+| ---------------- | ---------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------- |
+| `#UNIT`          | `#UNIT("kPa")`                           | HOW measured (engineering unit)                                                         | registry, dashboard, OPC-UA, manifest |
+| `#DIMENSION`     | `#DIMENSION("pressure")`                 | WHAT measured (dimension class)                                                         | registry, dashboard, manifest         |
+| `#DIMENSIONS`    | `#DIMENSIONS("pressure", …)` top of file | allowed vocabulary; undeclared values fail parse                                        | parser                                |
+| `#DESC`          | `#DESC("…")`                             | human description                                                                       | dashboard tooltip, registry, manifest |
+| `#LABEL`         | bare                                     | label/metadata, not a model feature (CSV column kept, flagged `is_label`)               | `sgrn_dataset` manifest, trainers     |
+| `#PRECISION`     | `#PRECISION(2)` (0..18)                  | dashboard display decimals (default 4)                                                  | dashboard                             |
+| `#NOMINAL`       | `#NOMINAL(2700.0)`                       | expected operating point (residual reference, not a control target)                     | models, manifest                      |
+| `#TRANSIENT`     | bare                                     | excluded from JSONL WAL + datasets (binary WAL keeps full images for resync)            | persistence, `sgrn_dataset`           |
+| `#READ_ONLY`     | bare                                     | semantic `POST /data/*` writes denied regardless of ACLs (raw `/memory/*` stays DB-ACL) | HTTP adapter                          |
+| `#ALARM`         | `#ALARM(lo, hi)`, hi > lo                | acceptable band, surfaced in registry/dashboard; evaluation is the consumer's job       | dashboard, manifest                   |
+| `#RANGE`         | `#RANGE(min, max)`                       | sensor span                                                                             | registry, dashboard                   |
+| `#ENUM`          | `#ENUM(A=1, …)`                          | named states                                                                            | registry, dataset (`is_categorical`)  |
+| `#TIMESTAMP_FOR` | `#TIMESTAMP_FOR(DB)` or `(f1, f2)`       | binds signals to ground-truth S7 DTL machine clock                                      | `TimeGridResampler`, `sgrn_dataset`   |
+| `#DATASET_STEP`  | `#DATASET_STEP("10ms")` or `#STEP`       | declared discrete training grid step $\Delta t$                                         | `TimeGridResampler`, `sgrn_dataset`   |
+| `#AGG`           | `#AGG("MEAN")` (or MAX, MIN, OR, LAST)   | typed consolidation for discrete time-grid resampling                                   | `TimeGridResampler`, `sgrn_dataset`   |
 
 Inheritance: scalar `TYPE` aliases (`TYPE "P" : Real #UNIT…`) carry
 unit/dimension/desc/precision/nominal/alarm/min/max/enum to fields unless

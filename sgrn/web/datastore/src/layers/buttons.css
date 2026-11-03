@@ -1,0 +1,65 @@
+@layer buttons {
+    /* =====================================================================
+     BUTTONS — single source of truth
+     ===================================================================== */
+
+    .btn-desktop,
+    .btn-desktop-primary,
+    .btn-industrial-primary,
+    .btn-industrial-secondary,
+    .btn-desktop-secondary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        min-height: 34px;
+        padding: 6px 13px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        text-transform: none;
+        cursor: pointer;
+        border: 1px solid hsl(var(--border));
+        border-radius: 0 !important;
+        background: hsl(var(--card));
+        color: hsl(var(--foreground));
+        box-shadow: none;
+        transition:
+            background-color 0.15s,
+            border-color 0.15s,
+            color 0.15s;
+    }
+
+    .btn-desktop:active {
+        transform: translateY(1px);
+    }
+
+    .btn-desktop:hover,
+    .btn-industrial-secondary:hover,
+    .btn-desktop-secondary:hover {
+        background: hsl(var(--primary) / 0.08);
+        border-color: hsl(var(--primary));
+        color: hsl(var(--primary));
+    }
+
+    .btn-desktop-primary,
+    .btn-industrial-primary {
+        border-color: hsl(var(--primary));
+        background: hsl(var(--primary));
+        color: hsl(var(--primary-foreground));
+        box-shadow: 0 3px 10px hsl(var(--primary) / 0.22);
+    }
+
+    .btn-desktop-primary:hover,
+    .btn-industrial-primary:hover {
+        opacity: 0.88;
+    }
+
+    .btn-desktop:disabled,
+    .btn-industrial-primary:disabled,
+    .btn-industrial-secondary:disabled {
+        opacity: 0.48;
+        pointer-events: none;
+        box-shadow: none;
+    }
+}

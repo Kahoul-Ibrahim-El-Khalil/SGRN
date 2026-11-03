@@ -5,9 +5,11 @@ This directory contains reusable utilities for all protocol adapters in the SGRN
 ## Contents
 
 ### 1. AdapterBase.hpp
+
 CRTP base class for protocol adapters providing common lifecycle management without virtual dispatch.
 
 **Usage:**
+
 ```cpp
 class MyAdapter : public AdapterBase<MyAdapter> {
 public:
@@ -33,15 +35,18 @@ private:
 ```
 
 **Benefits:**
+
 - No virtual functions (zero overhead)
 - Common start/stop lifecycle
 - Automatic thread management
 - Access to memory() and security()
 
 ### 2. PathUtils.hpp
+
 Static utility class for path manipulation between different formats (topics, PLC paths).
 
 **Key Functions:**
+
 - `topicToPlcPath()` - Convert "ReactorCore/speed" → "ReactorCore.speed" (returns new string)
 - `topicToPlcPathInPlace()` - Convert in-place (no allocation)
 - `plcPathToTopic()` - Convert "ReactorCore.speed" → "ReactorCore/speed" (returns new string)
@@ -50,6 +55,7 @@ Static utility class for path manipulation between different formats (topics, PL
 - `buildTopic()` - Build topic path from DB number/name (protocol-agnostic)
 
 **Usage:**
+
 ```cpp
 // Convert topic to PLC path (creates new string)
 std::string plc_path = PathUtils::topicToPlcPath("ReactorCore/speed");
@@ -71,14 +77,17 @@ std::string topic2 = PathUtils::buildTopic("ReactorCore", "speed"); // "ReactorC
 ```
 
 ### 3. SecurityHelper.hpp
+
 Static helper functions for common security operations across all adapters.
 
 **Key Functions:**
+
 - `authorizeRead()` - Authorize a read operation
 - `authorizeWrite()` - Authorize a write operation
 - `authorizeConnection()` - Authorize connection (protocol-specific)
 
 **Usage:**
+
 ```cpp
 // Before (verbose):
 if (!security_manager_->authorizeField(
@@ -96,14 +105,17 @@ if (!SecurityHelper::authorizeRead(
 ```
 
 ### 4. SchemaResolver.hpp
+
 Static utility class for resolving paths to schema information.
 
 **Key Functions:**
+
 - `resolve()` - Resolve path to full Resolution struct
 - `resolveDb()` - Resolve path to DB number only
 - `resolveField()` - Resolve path to field path only
 
 **Usage:**
+
 ```cpp
 // Resolve full path
 auto resolution = SchemaResolver::resolve("ReactorCore/speed", store);
@@ -124,13 +136,16 @@ std::string field_path = field_result.value();
 ```
 
 ### 5. EventFilter.hpp
+
 Inline functions for filtering telemetry events based on subscriptions.
 
 **Key Functions:**
+
 - `shouldSend()` - Check if event should be sent to client
 - `needsFieldFiltering()` - Check if field-level filtering is needed
 
 **Usage:**
+
 ```cpp
 // Check if client should receive this event
 auto send_result = event_filter::shouldSend(dirty_paths, client_subscriptions);
@@ -145,9 +160,11 @@ bool filter = filter_result.value();
 ```
 
 ### 6. JsonHelper.hpp
+
 Inline functions for JSON parsing, extraction, and filtering.
 
 **Key Functions:**
+
 - `parse()` - Parse JSON string to Document
 - `extractField()` - Extract field value from JSON
 - `filterFields()` - Filter JSON to specific fields
@@ -155,6 +172,7 @@ Inline functions for JSON parsing, extraction, and filtering.
 - `serializeObject()` - Serialize object from pairs
 
 **Usage:**
+
 ```cpp
 // Parse JSON
 auto doc = json_helper::parse(json_string);
@@ -172,6 +190,7 @@ std::string json = json_helper::serializeValue("temperature", "25.5");
 ## Migration Guide
 
 ### Before (ModbusAdapter):
+
 ```cpp
 class ModbusAdapter {
     twin::PlcMemory& memory_;
@@ -189,6 +208,7 @@ class ModbusAdapter {
 ```
 
 ### After (ModbusAdapter):
+
 ```cpp
 class ModbusAdapter : public AdapterBase<ModbusAdapter> {
     using AdapterBase::AdapterBase; // Inherit constructor
@@ -235,3 +255,4 @@ All utilities are header-only and inline. No additional compilation units needed
 #include <sgrn/common/path_utils.hpp>
 #include <sgrn/gateway/common/SecurityHelper.hpp>
 // ... etc
+```

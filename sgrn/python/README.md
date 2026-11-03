@@ -35,7 +35,7 @@ ML extras with `pip install ./sgrn/python[ml]` for torch, pandas,
 scikit-learn and zstandard).
 
 The repo-root `sgrn/` directory is the C++ tree and must NOT shadow this
-package: test scripts put `sgrn/python` on `sys.path` *before* the repo
+package: test scripts put `sgrn/python` on `sys.path` _before_ the repo
 root. In-tree consumers: `tests/gateway/websocket.py`,
 `tests/gateway/rest_api.py`, `tests/scl/dtypes_endianness.py`,
 `demos/train_binary_ml.py`.

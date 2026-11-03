@@ -1,0 +1,22 @@
+@layer shims {
+    /* --- layout / display --- */
+    .break-words {
+        break-words: break-word;
+    }
+    .break-all {
+        break-all: break-all;
+    }
+    .select-none {
+        -webkit-user-select: none;
+        -moz-user-select: none;
+    }
+    .focus-visible:ring-1:focus-visible {
+        box-shadow: 0 0 0 1px hsl(var(--ring));
+    }
+    .data-\[disabled\]pointer-events-none[data-disabled] {
+        pointer-events: none;
+    }
+    .data-\[state\=selected\]bg-muted[data-state="selected"] {
+        background-color: hsl(var(--muted));
+    }
+}

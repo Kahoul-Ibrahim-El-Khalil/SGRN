@@ -65,20 +65,20 @@ table:
 tenant:
   column: organisation
   required: true
-  server_bound: true            # Bound server-side from session (never client override)
+  server_bound: true # Bound server-side from session (never client override)
 
 policy:
-  read_scope: org               # org | own | global | admin
-  write_scope: own              # org | own | global | admin
-  delete_scope: admin           # org | own | global | admin
+  read_scope: org # org | own | global | admin
+  write_scope: own # org | own | global | admin
+  delete_scope: admin # org | own | global | admin
   allowed_roles:
     - admin
     - user
     - service_account
   max_limit: 500
-  soft_delete: true             # Automatically appends `deleted_at IS NULL`
-  audit: true                   # Logs mutations via AuditLogger
-  versioning: true              # Optimistic locking support
+  soft_delete: true # Automatically appends `deleted_at IS NULL`
+  audit: true # Logs mutations via AuditLogger
+  versioning: true # Optimistic locking support
   batch_enabled: false
 
 routes:
@@ -166,16 +166,16 @@ admin_overrides:
 
 Query parameter filtering follows standard PostgREST syntax: `column=operator.value`.
 
-| Operator | Query Example | Generated SQL |
-|---|---|---|
-| `eq` | `email=eq.user@acme.com` | `"email" = $1` |
-| `neq` | `role=neq.admin` | `"role" != $1` |
-| `gt` | `id=gt.100` | `"id" > $1` |
-| `gte` | `id=gte.100` | `"id" >= $1` |
-| `lt` | `id=lt.500` | `"id" < $1` |
-| `lte` | `id=lte.500` | `"id" <= $1` |
-| `like` | `email=like.%25@acme.com` | `"email" LIKE $1` |
-| `in` | `role=in.admin,user` | `"role" IN ($1, $2)` |
+| Operator | Query Example             | Generated SQL        |
+| -------- | ------------------------- | -------------------- |
+| `eq`     | `email=eq.user@acme.com`  | `"email" = $1`       |
+| `neq`    | `role=neq.admin`          | `"role" != $1`       |
+| `gt`     | `id=gt.100`               | `"id" > $1`          |
+| `gte`    | `id=gte.100`              | `"id" >= $1`         |
+| `lt`     | `id=lt.500`               | `"id" < $1`          |
+| `lte`    | `id=lte.500`              | `"id" <= $1`         |
+| `like`   | `email=like.%25@acme.com` | `"email" LIKE $1`    |
+| `in`     | `role=in.admin,user`      | `"role" IN ($1, $2)` |
 
 ---
 

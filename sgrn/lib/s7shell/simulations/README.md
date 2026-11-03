@@ -86,5 +86,6 @@ sgrn_replay --archive ./datasets/synthetic/unsynced/run_*.bin.zst --speed 1.0
 ```
 
 ### Options for `sgrn_replay`
+
 - `--speed 1.0`: Play back at 1.0× realtime (use `--speed 2.0` for 2× speed, or `--speed 0` for max speed).
 - `--loop`: Continuously loop replay of the archive.

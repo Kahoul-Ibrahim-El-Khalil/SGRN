@@ -7,15 +7,15 @@ JSON registry, plus code generators. Thin entry point over `sgrn_scl`.
 
 Subcommands (aliases in parentheses; `compile` is default when omitted):
 
-| Command | Effect |
-|---|---|
-| `compile` (`cmp`, `c`) | Parse SCL/UDT/DB/XML/JSON inputs (or stdin `-`), emit JSON registry |
-| `codegen` (`gen`, `header`, `cpp`) | Generate s7codec-compatible C++ header |
-| `emit-scl` (`scl`) | Generate clean `.scl` sources from schema |
-| `emit-dir` (`dir`, `canonical`) | Normalized layout (`UDT{idx}-{name}.udt`, `DB{idx}-{name}.db`, `registry.json`) |
-| `emit-angelscript` (`emit-as`, `as`) | Declaration-only AngelScript headers |
-| `examples` | Starter `.scl`/`.udt` files |
-| `man` | Full SCL syntax reference manual |
+| Command                              | Effect                                                                          |
+| ------------------------------------ | ------------------------------------------------------------------------------- |
+| `compile` (`cmp`, `c`)               | Parse SCL/UDT/DB/XML/JSON inputs (or stdin `-`), emit JSON registry             |
+| `codegen` (`gen`, `header`, `cpp`)   | Generate s7codec-compatible C++ header                                          |
+| `emit-scl` (`scl`)                   | Generate clean `.scl` sources from schema                                       |
+| `emit-dir` (`dir`, `canonical`)      | Normalized layout (`UDT{idx}-{name}.udt`, `DB{idx}-{name}.db`, `registry.json`) |
+| `emit-angelscript` (`emit-as`, `as`) | Declaration-only AngelScript headers                                            |
+| `examples`                           | Starter `.scl`/`.udt` files                                                     |
+| `man`                                | Full SCL syntax reference manual                                                |
 
 Inputs: `.scl`, `.udt`, `.db`, TIA Portal `.xml` tag tables, `.json`
 registries (for merging), `-` for stdin. Global options: `-o/--output`

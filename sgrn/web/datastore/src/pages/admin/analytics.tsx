@@ -13,10 +13,10 @@ import { fetchAuditLogs, purgeAuditLogs, type AuditLogEntry } from "@/backend/ap
 
 function StatCell({ t_label, t_value, t_sub }: { t_label: string; t_value: string; t_sub?: string }) {
     return (
-        <div className="roster-card">
-            <div className="admin-cell-muted">{t_label}</div>
-            <div className="admin-cell-bold">{t_value}</div>
-            {t_sub && <div className="admin-cell-muted">{t_sub}</div>}
+        <div className="stat-tile">
+            <div className="stat-tile-label">{t_label}</div>
+            <div className="stat-tile-value">{t_value}</div>
+            <div className="stat-tile-sub">{t_sub ?? "\u00a0"}</div>
         </div>
     );
 }
@@ -126,7 +126,7 @@ export default function AnalyticsPanel() {
 
             {overview && (
                 <>
-                    <div className="query-controls-row">
+                    <div className="stat-grid">
                         <StatCell t_label="FILES" t_value={String(overview.counts.files)} t_sub={`${overview.counts.objects} objects`} />
                         <StatCell t_label="VIRTUAL BYTES" t_value={formatBytes(overview.bytes.virtual)} />
                         <StatCell
@@ -154,20 +154,14 @@ export default function AnalyticsPanel() {
                     {overview.timeseries_30d.length > 0 && (
                         <div className="roster-card">
                             <div className="roster-title">UPLOADS — LAST 30 DAYS</div>
-                            <div className="explorer-body">
+                            <div className="bar-chart">
                                 {overview.timeseries_30d.map((p) => (
-                                    <div key={p.day} className="query-controls-row">
-                                        <span className="admin-cell-muted w-64">{p.day}</span>
-                                        <div className="flex-1" style={{ background: "var(--panel, #eee)", height: 10 }}>
-                                            <div
-                                                style={{
-                                                    width: `${Math.round((p.files / maxDayFiles) * 100)}%`,
-                                                    height: 10,
-                                                    background: "var(--primary, #2563eb)",
-                                                }}
-                                            />
+                                    <div key={p.day} className="bar-row">
+                                        <span className="bar-label">{p.day}</span>
+                                        <div className="bar-track">
+                                            <div className="bar-fill" style={{ width: `${Math.round((p.files / maxDayFiles) * 100)}%` }} />
                                         </div>
-                                        <span className="admin-cell-bold w-64">
+                                        <span className="bar-value">
                                             {p.files} · {formatBytes(p.bytes_virtual)}
                                         </span>
                                     </div>

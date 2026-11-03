@@ -5,10 +5,10 @@
 > The **primary, self-contained, turn-key research experiment** is located in [**`experiments/flare/`**](../experiments/flare/README.md) and [**`experiments/`**](../experiments/README.md).
 >
 > To run the verified evaluation (18.0h lead time, 0.00% false alarms, 98.6% pressure attribution), run:
+>
 > ```bash
 > python3 experiments/flare/evaluate.py
 > ```
-
 
 Start here when exploring gateway simulation scenarios and interactive UI launchers. These commands use the binaries produced by the Linux build and the scenarios under `sgrn/lib/gateway/simulations/`.
 

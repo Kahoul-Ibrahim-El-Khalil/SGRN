@@ -1,13 +1,16 @@
 # Pump & Tank Skid Simulation (MiniPlant)
 
 ## Overview
-This scenario simulates a small, simplified process skid consisting of a feed pump, an inlet valve, a water tank with a heating element, and a gravity drain outlet valve. 
+
+This scenario simulates a small, simplified process skid consisting of a feed pump, an inlet valve, a water tank with a heating element, and a gravity drain outlet valve.
 
 It demonstrates a **dual-client architecture**:
+
 1. `plc_logic.as`: Acts as a Soft-PLC. It connects to the Gateway as an S7 client, reads the operator setpoints, runs a high-frequency (5 Hz) thermodynamic/hydraulic physics loop, and writes the state back to the Gateway.
 2. `operator.as`: Acts as a SCADA/HMI script. It periodically connects to the Gateway, reads the system state, and writes automated setpoints (e.g., turning on the pump, changing heater setpoints, or triggering an Emergency Stop).
 
 ## What is Simulated?
+
 - **Tank Hydraulics**: Non-linear gravity draining logic simulating Torricelli's Law (drain rate scales with hydrostatic head).
 - **Pump Dynamics**: Ramping pump speeds, and **Cavitation faults** (if the pump is run at high speeds while the tank level drops below 5%, the pump cavitates, trips, and latches a fault).
 - **Thermodynamics (PID)**: The PLC runs a PID loop regulating the heater output to match the operator's temperature setpoint, accounting for heat loss to the ambient environment.
@@ -15,13 +18,15 @@ It demonstrates a **dual-client architecture**:
 - **Interlocks**: A hardwired overfill interlock trips the pump and forces the drain valve open if the tank level exceeds 99%.
 
 ## Enabled / Disabled Features
-- **S7 Adapter**: **Enabled** (Port 102). *Both AngelScript clients connect via this port.*
+
+- **S7 Adapter**: **Enabled** (Port 102). _Both AngelScript clients connect via this port._
 - **HTTP/WebSocket API**: **Enabled** (Port 8000; WebSocket at `/ws`).
 - **Modbus Adapter**: **Disabled** in the default simulation configuration due to root binding constraints.
 - **Security**: **Strict Mode**. AngelScript policy enforced via `security.as`.
 - **Persistence**: **Enabled**.
 
 ## How to Test
+
 1. Connect via the Web Dashboard and observe `DB2` (Tank) and `DB5` (Heater).
 2. The `operator.as` script runs alongside the simulation when launched with `python3 demos/gateway.py pump`, automatically manipulating `DB1` (Setpoints). You will see the system dynamically responding, heating up, and cycling.
 3. To trigger a cavitation fault, manually force the tank level low while the pump is running, or override the operator script's commands via the Web UI.

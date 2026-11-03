@@ -1,0 +1,28 @@
+{
+  "schema": "./sgrn/web/gateway/dev/schema.scl",
+  "state_dir": "/tmp/sgrn-gateway-dev-state",
+  "reconnect_ms": 2000,
+  "security_policy": "permissive",
+
+  "northbound": {
+    "http": {
+      "ip": "127.0.0.1",
+      "port": 8001
+    },
+    "websocket": {
+      "ip": "127.0.0.1",
+      "port": 8001
+    }
+  },
+
+  "persistence": {
+    "enabled": true,
+    "mode": "changes_with_timestamp",
+    "format": "binary",
+    "namespaces": ["DevPlant"],
+    "atomic_window_ms": 50,
+    "max_events": 200,
+    "batch_interval_s": 5,
+    "zstd_level": 3
+  }
+}

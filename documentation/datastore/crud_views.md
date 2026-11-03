@@ -20,18 +20,21 @@ Every generated view route listed in the current manifest uses
 `UserAuthFilter` on all operations (see `default_filters` in
 `crud/manifest.json`).
 
-| Requirement | Value |
-|---|---|
-| Header | `Authorization: Bearer <session-token>` |
-| Session store | SessionStore (RAM cache + PostgreSQL, validated before handler) |
-| Tenant source | `session_json["user"]["organisation"]` (string) |
+| Requirement   | Value                                                                         |
+| ------------- | ----------------------------------------------------------------------------- |
+| Header        | `Authorization: Bearer <session-token>`                                       |
+| Session store | SessionStore (RAM cache + PostgreSQL, validated before handler)               |
+| Tenant source | `session_json["user"]["organisation"]` (string)                               |
 | Tenant in SQL | Bound server-side as `$1` on every query — **never** accepted from the client |
 
 If the filter passes but the session has no organisation string, the handler
 returns `401` with scope `Authentication`:
 
 ```json
-{ "error": "Missing organisation identity in session", "scope": "Authentication" }
+{
+  "error": "Missing organisation identity in session",
+  "scope": "Authentication"
+}
 ```
 
 The tenant column itself (`organisation` on most `core.*` tables) is **not**
@@ -43,11 +46,11 @@ responses because `selectList()` always returns PK + tenant + whitelisted fields
 
 ## Route naming
 
-| Manifest table | HTTP path prefix |
-|---|---|
-| `core.domains` | `/api/v1/domains` |
-| `core.users` | `/api/v1/users` |
-| `core.automated_services` | `/api/v1/automated-services` |
+| Manifest table                 | HTTP path prefix                  |
+| ------------------------------ | --------------------------------- |
+| `core.domains`                 | `/api/v1/domains`                 |
+| `core.users`                   | `/api/v1/users`                   |
+| `core.automated_services`      | `/api/v1/automated-services`      |
 | `core.user_domain_permissions` | `/api/v1/user-domain-permissions` |
 
 Rule: schema prefix is dropped; table name is kebab-cased (`_` → `-`).
@@ -66,16 +69,16 @@ Errors use the shape documented in [Error responses](#error-responses).
 
 Returns a **JSON array** of objects (not wrapped in `{ "data": … }`).
 
-| Aspect | Contract |
-|---|---|
-| Query filters | See [Filter query parameters](#filter-query-parameters) |
-| Pagination | `limit` (integer, capped by view `max_limit`, default 500), `offset` (integer, default 0) |
-| Sort | `order=<column>` ascending, or `order=<column>.desc` descending |
-| Default sort column | View `default_order` (usually PK name, e.g. `id`) when `order` is omitted |
-| Sortable columns | Only columns in the view whitelist (`kFields`) — **not** PK or tenant unless they appear there |
-| Response columns | PK + tenant column + every whitelisted field |
-| Success | `200 OK`, body `[{ … }, …]` |
-| Empty result | `200 OK`, body `[]` |
+| Aspect              | Contract                                                                                       |
+| ------------------- | ---------------------------------------------------------------------------------------------- |
+| Query filters       | See [Filter query parameters](#filter-query-parameters)                                        |
+| Pagination          | `limit` (integer, capped by view `max_limit`, default 500), `offset` (integer, default 0)      |
+| Sort                | `order=<column>` ascending, or `order=<column>.desc` descending                                |
+| Default sort column | View `default_order` (usually PK name, e.g. `id`) when `order` is omitted                      |
+| Sortable columns    | Only columns in the view whitelist (`kFields`) — **not** PK or tenant unless they appear there |
+| Response columns    | PK + tenant column + every whitelisted field                                                   |
+| Success             | `200 OK`, body `[{ … }, …]`                                                                    |
+| Empty result        | `200 OK`, body `[]`                                                                            |
 
 **Example** — list domains whose name contains `prod`:
 
@@ -93,24 +96,24 @@ Authorization: Bearer <token>
 
 ### `get` — `GET /api/v1/<resource>/{id}`
 
-| Aspect | Contract |
-|---|---|
-| Path `{id}` | Primary key value |
-| Query params | Ignored |
-| Success | `200 OK`, single JSON object |
+| Aspect                               | Contract                                                     |
+| ------------------------------------ | ------------------------------------------------------------ |
+| Path `{id}`                          | Primary key value                                            |
+| Query params                         | Ignored                                                      |
+| Success                              | `200 OK`, single JSON object                                 |
 | Not found (wrong id or other tenant) | `404`, `{ "error": "No matching row", "scope": "NotFound" }` |
 
 ### `create` — `POST /api/v1/<resource>`
 
-| Aspect | Contract |
-|---|---|
-| Body | JSON object; `Content-Type: application/json` required |
-| Writable keys | Only whitelisted columns with `insertable: true` in the manifest |
-| Ignored keys | PK, tenant column, non-insertable columns, unknown keys (silently skipped) |
-| Tenant | Set from session — body cannot override |
-| Success | `201 Created`, body is the inserted row (`RETURNING` same column set as reads) |
-| Invalid JSON | `400`, scope `Body` |
-| Type mismatch | `400`, scope `Body`, e.g. `"Field 'role' expects text but got boolean"` |
+| Aspect        | Contract                                                                       |
+| ------------- | ------------------------------------------------------------------------------ |
+| Body          | JSON object; `Content-Type: application/json` required                         |
+| Writable keys | Only whitelisted columns with `insertable: true` in the manifest               |
+| Ignored keys  | PK, tenant column, non-insertable columns, unknown keys (silently skipped)     |
+| Tenant        | Set from session — body cannot override                                        |
+| Success       | `201 Created`, body is the inserted row (`RETURNING` same column set as reads) |
+| Invalid JSON  | `400`, scope `Body`                                                            |
+| Type mismatch | `400`, scope `Body`, e.g. `"Field 'role' expects text but got boolean"`        |
 
 **Example** — create a domain:
 
@@ -130,23 +133,23 @@ Content-Type: application/json
 
 Partial update: only keys present in the body are considered.
 
-| Aspect | Contract |
-|---|---|
-| Body | JSON object (at least one updatable field required) |
-| Writable keys | Whitelisted columns with `updatable: true` |
-| Tenant / PK | Never updatable |
-| Success | `200 OK`, body is the updated row |
+| Aspect                      | Contract                                              |
+| --------------------------- | ----------------------------------------------------- |
+| Body                        | JSON object (at least one updatable field required)   |
+| Writable keys               | Whitelisted columns with `updatable: true`            |
+| Tenant / PK                 | Never updatable                                       |
+| Success                     | `200 OK`, body is the updated row                     |
 | Empty or non-updatable body | `400`, `"No updatable fields supplied"`, scope `Body` |
-| Not found | `404`, scope `NotFound` |
+| Not found                   | `404`, scope `NotFound`                               |
 
 `PUT` is **not** registered — only `PATCH`.
 
 ### `delete` — `DELETE /api/v1/<resource>/{id}`
 
-| Aspect | Contract |
-|---|---|
-| Body | None |
-| Success | `204 No Content` (empty body) |
+| Aspect    | Contract                                                                         |
+| --------- | -------------------------------------------------------------------------------- |
+| Body      | None                                                                             |
+| Success   | `204 No Content` (empty body)                                                    |
 | Not found | Still `204` — delete is idempotent; zero rows deleted does not change the status |
 
 ---
@@ -156,16 +159,16 @@ Partial update: only keys present in the body are considered.
 Syntax follows a PostgREST-style **`column=operator.value`** pattern (one
 query parameter per filter).
 
-| Operator | Query example | SQL |
-|---|---|---|
-| `eq` | `role=eq.admin` | `role = $n` |
-| `neq` | `status=neq.disabled` | `status != $n` |
-| `gt` | `id=gt.10` | `id > $n` |
-| `gte` | `id=gte.10` | `id >= $n` |
-| `lt` | `id=lt.100` | `id < $n` |
-| `lte` | `id=lte.100` | `id <= $n` |
-| `like` | `name=like.%25acme%25` | `name LIKE $n` (client supplies `%` wildcards) |
-| `in` | `status=in.active,pending` | `status IN ($n, $m, …)` (comma-separated, no spaces required) |
+| Operator | Query example              | SQL                                                           |
+| -------- | -------------------------- | ------------------------------------------------------------- |
+| `eq`     | `role=eq.admin`            | `role = $n`                                                   |
+| `neq`    | `status=neq.disabled`      | `status != $n`                                                |
+| `gt`     | `id=gt.10`                 | `id > $n`                                                     |
+| `gte`    | `id=gte.10`                | `id >= $n`                                                    |
+| `lt`     | `id=lt.100`                | `id < $n`                                                     |
+| `lte`    | `id=lte.100`               | `id <= $n`                                                    |
+| `like`   | `name=like.%25acme%25`     | `name LIKE $n` (client supplies `%` wildcards)                |
+| `in`     | `status=in.active,pending` | `status IN ($n, $m, …)` (comma-separated, no spaces required) |
 
 Rules:
 
@@ -178,18 +181,18 @@ Rules:
 
 Pagination parameters are plain integers (not `operator.value`):
 
-| Param | Behavior |
-|---|---|
-| `limit=N` | `N` clamped to `max_limit` from manifest (default 500). Invalid values ignored → default used. |
-| `offset=N` | SQL `OFFSET N`. Invalid values ignored → no offset. |
+| Param      | Behavior                                                                                       |
+| ---------- | ---------------------------------------------------------------------------------------------- |
+| `limit=N`  | `N` clamped to `max_limit` from manifest (default 500). Invalid values ignored → default used. |
+| `offset=N` | SQL `OFFSET N`. Invalid values ignored → no offset.                                            |
 
 Sort parameter:
 
-| Form | Meaning |
-|---|---|
-| `order=email` | `ORDER BY email ASC` |
-| `order=email.desc` | `ORDER BY email DESC` |
-| (omitted) | `ORDER BY <default_order> ASC` |
+| Form               | Meaning                        |
+| ------------------ | ------------------------------ |
+| `order=email`      | `ORDER BY email ASC`           |
+| `order=email.desc` | `ORDER BY email DESC`          |
+| (omitted)          | `ORDER BY <default_order> ASC` |
 
 ---
 
@@ -197,14 +200,14 @@ Sort parameter:
 
 Types come from Postgres (`udt_name`) at generation time.
 
-| `FieldType` | JSON in responses | Accepted in POST/PATCH body |
-|---|---|---|
-| `Int` | number | integer, integral number, decimal string, or `0x` hex string |
-| `BigInt` | **string** (decimal digits) | same as Int (64-bit range) |
-| `Text` | string | string only |
-| `Bool` | boolean | boolean only |
-| `Timestamp` | string (ISO timestamp from Postgres) | non-empty string only (no epoch numbers) |
-| `Jsonb` | parsed JSON value, or string if corrupt | any JSON value (re-serialized to jsonb) |
+| `FieldType` | JSON in responses                       | Accepted in POST/PATCH body                                  |
+| ----------- | --------------------------------------- | ------------------------------------------------------------ |
+| `Int`       | number                                  | integer, integral number, decimal string, or `0x` hex string |
+| `BigInt`    | **string** (decimal digits)             | same as Int (64-bit range)                                   |
+| `Text`      | string                                  | string only                                                  |
+| `Bool`      | boolean                                 | boolean only                                                 |
+| `Timestamp` | string (ISO timestamp from Postgres)    | non-empty string only (no epoch numbers)                     |
+| `Jsonb`     | parsed JSON value, or string if corrupt | any JSON value (re-serialized to jsonb)                      |
 
 Null column values serialize as JSON `null`.
 
@@ -215,12 +218,12 @@ Null column values serialize as JSON `null`.
 What the generator puts in `kFields` (and therefore what clients can
 filter/write) vs what appears in responses:
 
-| Column kind | In `kFields`? | In GET/POST response? | Client can set on create/update? |
-|---|---|---|---|
-| Primary key | No | Yes (`id`, …) | No (DB-generated on create) |
-| Tenant (`organisation`, …) | No | Yes | No (from session) |
-| `SENSITIVE_COLUMNS` (`password`, …) | No | **No** | No |
-| Normal table column | Yes (defaults) | Yes | Yes unless manifest sets `insertable`/`updatable: false` |
+| Column kind                         | In `kFields`?  | In GET/POST response? | Client can set on create/update?                         |
+| ----------------------------------- | -------------- | --------------------- | -------------------------------------------------------- |
+| Primary key                         | No             | Yes (`id`, …)         | No (DB-generated on create)                              |
+| Tenant (`organisation`, …)          | No             | Yes                   | No (from session)                                        |
+| `SENSITIVE_COLUMNS` (`password`, …) | No             | **No**                | No                                                       |
+| Normal table column                 | Yes (defaults) | Yes                   | Yes unless manifest sets `insertable`/`updatable: false` |
 
 Manifest `columns` entries only **override defaults** (filter ops, insert/update
 flags). Omitting a column from the manifest does **not** hide it from reads.
@@ -231,12 +234,12 @@ flags). Omitting a column from the manifest does **not** hide it from reads.
 
 From `crud/manifest.json` (regenerate after manifest changes):
 
-| Resource | Operations | Notable column policy |
-|---|---|---|
-| `/api/v1/domains` | list, get, create, update, delete | `name`: filter `eq`, `like` |
-| `/api/v1/users` | all five | `first_name`, `family_name`, `email`: `eq`, `like`; `role`, `domain`, `status`: `eq` (status also `in`) |
-| `/api/v1/automated-services` | all five | `token`: not insertable/updatable; `name`: `eq`, `like`; `status`: `eq`, `in` |
-| `/api/v1/user-domain-permissions` | all five | `user_id`: `eq`, `in`; `domain`: `eq` |
+| Resource                          | Operations                        | Notable column policy                                                                                   |
+| --------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `/api/v1/domains`                 | list, get, create, update, delete | `name`: filter `eq`, `like`                                                                             |
+| `/api/v1/users`                   | all five                          | `first_name`, `family_name`, `email`: `eq`, `like`; `role`, `domain`, `status`: `eq` (status also `in`) |
+| `/api/v1/automated-services`      | all five                          | `token`: not insertable/updatable; `name`: `eq`, `like`; `status`: `eq`, `in`                           |
+| `/api/v1/user-domain-permissions` | all five                          | `user_id`: `eq`, `in`; `domain`: `eq`                                                                   |
 
 **Not generated:** `core.sessions` (`operations: []` — session lifecycle is
 hand-written under `/api/v1/auth/…`).
@@ -300,13 +303,13 @@ Most handler errors:
 
 Common scopes:
 
-| Scope | Typical HTTP status | When |
-|---|---|---|
-| `Authentication` | 401 | Missing/invalid token; missing organisation in session |
-| `Query` | 400 | Bad filter, sort column, or operator |
-| `Body` | 400 | Invalid JSON, wrong types, no updatable fields |
-| `NotFound` | 404 | GET/PATCH target row missing for this tenant |
-| `Database` | 500 | SQL/driver failure |
+| Scope            | Typical HTTP status | When                                                   |
+| ---------------- | ------------------- | ------------------------------------------------------ |
+| `Authentication` | 401                 | Missing/invalid token; missing organisation in session |
+| `Query`          | 400                 | Bad filter, sort column, or operator                   |
+| `Body`           | 400                 | Invalid JSON, wrong types, no updatable fields         |
+| `NotFound`       | 404                 | GET/PATCH target row missing for this tenant           |
+| `Database`       | 500                 | SQL/driver failure                                     |
 
 Filter failures (before the handler) use the same JSON shape with scope
 `Authentication` or `503` when the session store is unavailable.

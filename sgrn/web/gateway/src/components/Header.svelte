@@ -16,7 +16,9 @@
   export let variant: "gateway" | "replay" = "gateway";
 
   onMount(() => {
-    gatewayName = new URLSearchParams(window.location.search).get("gatewayName")?.trim() ?? "";
+    gatewayName =
+      new URLSearchParams(window.location.search).get("gatewayName")?.trim() ??
+      "";
     if (gatewayName) document.title = `${gatewayName} | SGRN Gateway`;
   });
 
@@ -129,7 +131,7 @@
     color: var(--accent);
     font-size: 10px;
     font-weight: 700;
-    letter-spacing: .2px;
+    letter-spacing: 0.2px;
     white-space: nowrap;
   }
 

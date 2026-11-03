@@ -1,0 +1,89 @@
+{
+  "listeners": [
+    {
+      "address": "127.0.0.1",
+      "port": 5001,
+      "threads": 2
+    }
+  ],
+  "db_clients": [
+    {
+      "name": "default",
+      "rdbms": "postgresql",
+      "host": "127.0.0.1",
+      "port": 5432,
+      "dbname": "${POSTGRES_DB}",
+      "user": "${POSTGRES_USER}",
+      "passwd": "${POSTGRES_PASSWORD}",
+      "connection_number": 4,
+      "is_fast": false
+    }
+  ],
+  "plugins": [
+    {
+      "name": "sgrn::datastore::plugins::aws::S3Client",
+      "config": {
+        "region": "us-east-1",
+        "endpoint": "http://127.0.0.1:3900",
+        "access_key": "${GARAGE_ACCESS_KEY}",
+        "secret_key": "${GARAGE_SECRET_KEY}"
+      }
+    },
+    {
+      "name": "sgrn::datastore::plugins::Threadpool",
+      "config": {
+        "worker_threads": 2,
+        "pool_name": "s3-worker-pool"
+      }
+    }
+  ],
+  "app": {
+    "threads_num": 2,
+    "log_path": "./",
+    "logfile_base_name": "",
+    "log_level": "DEBUG",
+    "log_size_limit": 0,
+    "enable_access_log": true,
+    "access_log_path": "./",
+    "access_log_file": "",
+    "run_as_daemon": false,
+    "relaunch_on_error": false,
+    "enable_session": true,
+    "session": {
+      "timeout": 86400,
+      "cookie_name": "SGRN-COOKIE",
+      "same_site": "lax",
+      "cookie_key": "dev-insecure-key-do-not-use-in-production-replace-me!!",
+      "max_age": 86400
+    },
+    "client_max_body_size": 2147483648,
+    "max_connections": 50,
+    "max_memory": 1073741824
+  },
+  "static_file_headers": [
+    {
+      "name": "Cache-Control",
+      "value": "no-cache"
+    }
+  ],
+  "custom_config": {
+    "jwt_secret": "${JWT_SECRET}",
+    "rate_limiting": {
+      "enabled": false
+    },
+    "s3": {
+      "default_bucket": "sgrn-uploads",
+      "worker_threads": 2,
+      "threshold_compress_ram_mb": 1,
+      "threshold_presigned_mb": 25,
+      "max_file_size_mb": 2048,
+      "default_expiration_seconds": 900,
+      "compression_size_threshold_kb": 1,
+      "compression_level": 10,
+      "allowed_extensions": ["*"],
+      "prohibited_extensions": ["exe", "dll", "so", "sh", "bat"],
+      "chunking_threshold_mb": 64,
+      "chunk_part_size_mb": 12
+    }
+  }
+}

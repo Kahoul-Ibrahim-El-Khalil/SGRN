@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "bun run dev.ts",
+    "dev:vite-only": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },

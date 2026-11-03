@@ -26,6 +26,12 @@ build/
 out/
 prefix/
 
+# ── Gateway runtime state (cwd-relative fallback: ./gateway-state) ────────────
+# The gateway default state_dir is "./gateway-state" — if it is ever started
+# from a source tree (e.g. dev misuse), the sqlite/crypto state must not be
+# committed.
+gateway-state/
+
 # ── Python ─────────────────────────────────────────────────────────────────
 *.pyc
 __pycache__/

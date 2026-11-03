@@ -234,8 +234,8 @@ export function FormatsPanel() {
             <div className="query-help">
                 <strong>Blocked</strong> formats reject new uploads at the service layer; history stays readable. <strong>Delete</strong> is
                 refused while files still reference the extension — block first, purge history through garbage collection, then delete.
-                Files whose extension is not listed here are stored with a null format — the suffix stays part of the
-                file name. Add an entry to recognize it.
+                Files whose extension is not listed here are stored with a null format — the suffix stays part of the file name. Add an
+                entry to recognize it.
             </div>
         </div>
     );

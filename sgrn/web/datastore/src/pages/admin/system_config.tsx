@@ -339,7 +339,9 @@ export default function SystemConfigPanel() {
 
     const dirtyPaths = useMemo(() => {
         if (!doc) return [];
-        return doc.schema.filter((s) => isDirty(getFieldValue(doc.values, s.path), getFieldValue(draft, s.path))).map((s) => s.path);
+        return (doc.schema ?? [])
+            .filter((s) => isDirty(getFieldValue(doc.values, s.path), getFieldValue(draft, s.path)))
+            .map((s) => s.path);
     }, [doc, draft]);
 
     const handleSave = useCallback(async () => {
@@ -432,13 +434,6 @@ export default function SystemConfigPanel() {
                     <div className="roster-title">{section.name.toUpperCase()}</div>
                     <div className="datagrid-wrapper">
                         <table className="datagrid-industrial">
-                            <thead>
-                                <tr>
-                                    <th>SETTING</th>
-                                    <th>VALUE</th>
-                                    <th>APPLY</th>
-                                </tr>
-                            </thead>
                             <tbody>
                                 {section.fields.map((spec) => {
                                     const original = getFieldValue(doc.values, spec.path);

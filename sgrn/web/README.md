@@ -9,10 +9,10 @@ deploy step** in production: the SPA ships inside `sgrn_datastore` or
 
 ## Directories
 
-| Directory | Stack | Served by | Output dir | Embedded as |
-|---|---|---|---|---|
-| **`datastore/`** | React + Vite | Drogon (`sgrn_datastore`) | `build/` | `dashboard_generated/web_assets.hpp` |
-| **`gateway/`** | Svelte + Vite | Crow (`sgrn_gateway`) | `dist/` | `web_generated/web_assets.hpp` |
+| Directory        | Stack         | Served by                 | Output dir | Embedded as                          |
+| ---------------- | ------------- | ------------------------- | ---------- | ------------------------------------ |
+| **`datastore/`** | React + Vite  | Drogon (`sgrn_datastore`) | `build/`   | `dashboard_generated/web_assets.hpp` |
+| **`gateway/`**   | Svelte + Vite | Crow (`sgrn_gateway`)     | `dist/`    | `web_generated/web_assets.hpp`       |
 
 TypeScript bindings consumed at build time:
 

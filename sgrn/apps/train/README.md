@@ -10,13 +10,13 @@ columnar datasets (`.sgrnb`).
 
 ## 1. Zero-Copy Columnar Ingestion (`.sgrnb`) vs. CSV
 
-| Feature | Legacy CSV (`.csv`) | Columnar Binary (`.sgrnb`) |
-|---|---|---|
-| **Memory Ingestion** | Reads text line by line; string splits, `stod` parsing | Memory-mapped (`mmap`) zero heap copies |
-| **Ingestion Complexity** | $O(N \cdot D)$ character parsing operations | $O(1)$ pointer assignment to GPU/PyTorch tensors |
-| **Precision** | Truncated to ASCII decimal representations | Exact 32-bit float and 64-bit nanosecond epochs |
-| **Memory Alignment** | Unaligned heap vectors | 64-byte aligned SIMD/GPU cache-line boundaries |
-| **Embedded Metadata** | Requires external `manifest.json` | Self-contained: includes embedded `ModelManifest` JSON |
+| Feature                  | Legacy CSV (`.csv`)                                    | Columnar Binary (`.sgrnb`)                             |
+| ------------------------ | ------------------------------------------------------ | ------------------------------------------------------ |
+| **Memory Ingestion**     | Reads text line by line; string splits, `stod` parsing | Memory-mapped (`mmap`) zero heap copies                |
+| **Ingestion Complexity** | $O(N \cdot D)$ character parsing operations            | $O(1)$ pointer assignment to GPU/PyTorch tensors       |
+| **Precision**            | Truncated to ASCII decimal representations             | Exact 32-bit float and 64-bit nanosecond epochs        |
+| **Memory Alignment**     | Unaligned heap vectors                                 | 64-byte aligned SIMD/GPU cache-line boundaries         |
+| **Embedded Metadata**    | Requires external `manifest.json`                      | Self-contained: includes embedded `ModelManifest` JSON |
 
 ---
 
@@ -49,6 +49,7 @@ sgrn_train -d <DATASET> [OPTIONS]
 ## 3. Workflow Examples
 
 ### 3.1 Training directly from `.sgrnb` (Zero-Copy)
+
 ```bash
 LD_LIBRARY_PATH=/home/odahim/micromamba/envs/SGRN/lib \
 ./.build/linux-static-release/sgrn/apps/train/sgrn_train \
@@ -63,7 +64,9 @@ LD_LIBRARY_PATH=/home/odahim/micromamba/envs/SGRN/lib \
 ```
 
 ### 3.2 Output Artifacts
+
 Upon completion, `sgrn_train` generates two files in the output directory:
+
 1. `<model_name>.pt`: Serialized PyTorch TorchScript weights.
 2. `<model_name>_manifest.json`: Standardized SGRN `ModelManifest` capturing input feature normalization stats (min/max/mean), output targets, training epoch loss, and weights SHA256 checksum.
 

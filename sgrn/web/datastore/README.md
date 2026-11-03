@@ -7,6 +7,7 @@ The **SGRN Datastore Web Application** is a React + TypeScript + Vite frontend t
 ## 🎨 Key Features
 
 ### 📁 Storage & Drive UI
+
 - **Virtual File Explorer:** Grid and List view modes with breadcrumb navigation, search filtering, and multi-selection support.
 - **Resumable Chunked Uploads:** Automatic thresholding (files $\ge$ 5MB automatically switch to multi-chunk resumable upload).
 - **Floating Upload Progress Bar:** Real-time bottom-right progress panel displaying active/completed uploads with animated gradient progress bars, chunk counts, uploaded size, and status indicators.
@@ -14,6 +15,7 @@ The **SGRN Datastore Web Application** is a React + TypeScript + Vite frontend t
 - **Drag & Drop:** Full-screen drop overlay for seamless single-file, multi-file, and folder structure uploads.
 
 ### 🛡️ Admin & Telemetry Dashboard
+
 - **Live User Sessions:** Metaprobe table displaying active authenticated user sessions, auth modes (`password`, `sso`, `token`), domain, and IP addresses.
 - **Webhook Management:** Real-time interface for registering and deleting event webhooks (`user.signin`, `user.signout`).
 - **Storage Metrics & Quotas:** Storage breakdown visualizer, orphan scanner, and domain quota allocation overview.
@@ -23,12 +25,14 @@ The **SGRN Datastore Web Application** is a React + TypeScript + Vite frontend t
 ## 🚀 Getting Started
 
 ### Development Server
+
 ```bash
 npm install
 npm run dev
 ```
 
 ### Production Build
+
 ```bash
 npm run build
 ```

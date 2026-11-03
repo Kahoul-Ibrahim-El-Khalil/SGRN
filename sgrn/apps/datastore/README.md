@@ -11,15 +11,15 @@ point; the backend library and asset pipelines live in `sgrn/lib/datastore`.
 (`configDrogonApp` + signal handling + dashboard assets, filters, handlers,
 S3 plugin):
 
-| Invocation | Effect |
-|---|---|
-| `sgrn_datastore` | Run the server (optional `sgrn.json` path arg) |
-| `--help` | Print the deployment help (also covers first-time setup) |
-| `--generate-config` | Env file, SSL certs, configs, systemd templates |
-| `--init-db` | Initialize/recreate the PostgreSQL schema |
-| `--init` | Config generation followed by DB init |
-| `--config-systemd` | Systemd unit setup (root; nginx stays in the staging dir) |
-| `--verify-install` | Drift/health report: staged vs deployed config, services, ports |
+| Invocation          | Effect                                                          |
+| ------------------- | --------------------------------------------------------------- |
+| `sgrn_datastore`    | Run the server (optional `sgrn.json` path arg)                  |
+| `--help`            | Print the deployment help (also covers first-time setup)        |
+| `--generate-config` | Env file, SSL certs, configs, systemd templates                 |
+| `--init-db`         | Initialize/recreate the PostgreSQL schema                       |
+| `--init`            | Config generation followed by DB init                           |
+| `--config-systemd`  | Systemd unit setup (root; nginx stays in the staging dir)       |
+| `--verify-install`  | Drift/health report: staged vs deployed config, services, ports |
 
 `--verify-install` needs no root. It fingerprints the outage classes this
 deployment has actually hit — units drifted from staged templates after a

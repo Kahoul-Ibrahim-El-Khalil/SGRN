@@ -5,7 +5,7 @@ interface RenameModalProps {
     isOpen: boolean;
     initialName: string;
     onClose: () => void;
-    onConfirm: (newName: string) => Promise<void>;
+    onConfirm: (newName: string) => Promise<boolean>;
 }
 
 export const RenameModal: React.FC<RenameModalProps> = ({ isOpen, initialName, onClose, onConfirm }) => {
@@ -16,21 +16,25 @@ export const RenameModal: React.FC<RenameModalProps> = ({ isOpen, initialName, o
     useEffect(() => {
         if (isOpen) {
             setNewName(initialName);
-            setTimeout(() => inputRef.current?.focus(), 100);
+            setTimeout(() => {
+                inputRef.current?.focus();
+                inputRef.current?.select();
+            }, 100);
         }
     }, [isOpen, initialName]);
 
     if (!isOpen) return null;
 
     const handleConfirm = async () => {
+        if (loading) return;
         if (!newName.trim() || newName === initialName) {
             onClose();
             return;
         }
         setLoading(true);
         try {
-            await onConfirm(newName.trim());
-            onClose();
+            const success = await onConfirm(newName.trim());
+            if (success) onClose();
         } finally {
             setLoading(false);
         }
@@ -52,19 +56,25 @@ export const RenameModal: React.FC<RenameModalProps> = ({ isOpen, initialName, o
         >
             <div
                 style={{
-                    backgroundColor: "#16161e",
-                    borderRadius: "1rem",
+                    backgroundColor: "hsl(var(--card))",
+                    borderRadius: "0", // Enforce industrial hard corners
                     width: "400px",
                     maxWidth: "90%",
                     padding: "1.5rem",
-                    boxShadow: "0 20px 40px rgba(0, 0, 0, 0.4)",
-                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    boxShadow: "var(--shadow-lg)",
+                    border: "1px solid hsl(var(--border))",
+                    color: "hsl(var(--foreground))",
                 }}
                 onClick={(e) => e.stopPropagation()}
             >
                 <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1.25rem" }}>
                     <div
-                        style={{ backgroundColor: "rgba(59, 130, 246, 0.1)", color: "#3b82f6", padding: "0.5rem", borderRadius: "0.5rem" }}
+                        style={{
+                            backgroundColor: "hsl(var(--primary) / 0.1)",
+                            color: "hsl(var(--primary))",
+                            padding: "0.5rem",
+                            borderRadius: "0",
+                        }}
                     >
                         <Edit3 size={20} />
                     </div>
@@ -82,11 +92,11 @@ export const RenameModal: React.FC<RenameModalProps> = ({ isOpen, initialName, o
                     }}
                     style={{
                         width: "100%",
-                        backgroundColor: "rgba(255, 255, 255, 0.05)",
-                        border: "1px solid rgba(255, 255, 255, 0.1)",
-                        borderRadius: "0.75rem",
+                        backgroundColor: "hsl(var(--background) / 0.5)",
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: "0", // Enforce industrial hard corners
                         padding: "0.75rem 1rem",
-                        color: "#fff",
+                        color: "hsl(var(--foreground))",
                         fontSize: "1rem",
                         outline: "none",
                         marginBottom: "1.5rem",
@@ -100,10 +110,10 @@ export const RenameModal: React.FC<RenameModalProps> = ({ isOpen, initialName, o
                         disabled={loading}
                         style={{
                             padding: "0.6rem 1.25rem",
-                            borderRadius: "0.75rem",
-                            border: "none",
-                            backgroundColor: "rgba(255, 255, 255, 0.05)",
-                            color: "rgba(255, 255, 255, 0.6)",
+                            borderRadius: "0", // Enforce industrial hard corners
+                            border: "1px solid hsl(var(--border))",
+                            backgroundColor: "hsl(var(--secondary) / 0.5)",
+                            color: "hsl(var(--muted-foreground))",
                             cursor: "pointer",
                             fontSize: "0.9rem",
                             fontWeight: 500,

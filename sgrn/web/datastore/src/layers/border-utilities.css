@@ -1,0 +1,38 @@
+@layer border-utilities {
+    /* ---------- BORDERS ---------- */
+
+    /* ---------- BORDER COLOR ---------- */
+
+    /* ---------- BORDER RADIUS - SHARP CORNERS INDUSTRIAL ---------- */
+    /* All border-radius set to 0 for industrial design */
+    .rounded-none {
+        border-radius: 0 !important;
+    }
+    .rounded-md {
+        border-radius: 0 !important;
+    }
+    .rounded-lg {
+        border-radius: 0 !important;
+    }
+    .rounded-xl {
+        border-radius: 0 !important;
+    }
+
+    /* ---------- WIDTH / MIN-WIDTH ---------- */
+    .w-\[1px\] {
+        width: 1px;
+    }
+    .w-\[50px\] {
+        width: 50px;
+    }
+
+    /* ---------- HEIGHT / MIN-HEIGHT ---------- */
+    .max-h-\[600px\] {
+        max-height: 600px;
+    }
+    .max-h-\[var\(--radix-dropdown-menu-content-available-height\)\] {
+        max-height: var(--radix-dropdown-menu-content-available-height);
+    }
+
+    /* ---------- SPACE ---------- */
+}

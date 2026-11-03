@@ -7,12 +7,16 @@ The `sgrn_ml` component provides the core C++23 machine learning runtime, featur
 ## 1. Architectural Highlights
 
 ### 1.1 Asymmetric Amortized Endianness
+
 In industrial PLC environments (Siemens S7-1500 / S7-300), fieldbuses transmit telemetry and accept setpoints in **Big-Endian** wire order. Modern edge servers and GPUs execute on **Little-Endian** architectures (x86_64, AArch64).
+
 - **Previous Bottleneck**: Gateways that maintained twin buffers in wire format were forced to repeatedly swap bytes for every scalar read by northbound consumers (OPC-UA, WebSockets, REST APIs, ML tensors).
 - **SGRN Solution**: Standardizes all in-memory Digital Twin buffers (`PlcState`, `DbSnapshot`) to host **Little-Endian**. Wire byte-swapping is amortized to single bulk operations strictly at network ingress and egress. Northbound subscribers and PyTorch tensor loaders consume memory directly with **zero per-scalar byte-swap penalty**.
 
 ### 1.2 Ground-Truth Machine Clocks vs. OS Receive Jitter
+
 Telemetry arrives at edge gateways with non-deterministic network transport and OS thread scheduling jitter ($\pm 1 \text{ to } 10\,\text{ms}$).
+
 - Ground-truth process time is determined by Siemens S7 DTL (`Date and Time Long`) clocks written directly into DataBlocks by the PLC cycle.
 - The ML pipeline extracts ground-truth 64-bit nanosecond epochs via `s7codec::decodeDtlToNanoseconds()` and routes prediction timestamps back into DataBlocks via `TwinOutputTarget::Timestamp` with zero floating-point truncation.
 
@@ -26,6 +30,7 @@ $$t_k = t_0 + k \cdot \Delta t$$
 Industrial PLCs, however, emit updates asynchronously, at varying cadences across DataBlocks (e.g., fast dynamics at 10ms, slow loops at 100ms), or in delta-compressed bursts.
 
 ### 2.1 Resampling Engine
+
 `TimeGridResampler` synchronizes asynchronous streams into discrete intervals $\Delta t$ using typed accumulators:
 
 - **Analog Sensors (Temperatures, Pressures, Flows)**: `#AGG("MEAN")` (default for `Real`/`LReal`). Computes arithmetic mean over all updates inside bucket $k$. Optional `#AGG("MIN")` or `#AGG("MAX")` for peak detection.
@@ -66,6 +71,7 @@ Traditional ML data preparation relies on intermediate CSV files. In high-freque
 ```
 
 ### Key Technical Properties:
+
 - **64-Byte Cache-Line Alignment**: Guarantees optimal SIMD vector loading (AVX-512, ARM Neon) and direct DMA transfer to GPU VRAM.
 - **Zero-Copy Ingestion**: `ColumnarDatasetReader::open()` calls `mmap(PROT_READ)`. Floats are accessed as contiguous `std::span<const float>` directly from disk cache.
 - **Instant Tensor Construction**: PyTorch tensors are constructed via `torch::from_blob(col.data(), {N}, torch::kFloat32)` in sub-millisecond time.
@@ -98,6 +104,7 @@ flowchart LR
 ```
 
 ### Output Route Targets:
+
 - `TwinOutputTarget::PredictionValue`: Continuous scalar predictions (e.g., thermal power, estimated load).
 - `TwinOutputTarget::AnomalyScore`: Raw distance metric or reconstruction error.
 - `TwinOutputTarget::AlarmBit`: Boolean alarm raised when residual exceeds configured warning/alarm threshold.

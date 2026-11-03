@@ -21,12 +21,12 @@ The `listen.modbus` block only selects the bind address and port. The register/c
 
 Mark fields in your `.scl`/`.udt` schema with a block-level directive to expose them over Modbus:
 
-| Directive | Modbus area |
-|-----------|-------------|
-| `#MODBUS_HOLDING` | Holding registers (FC 03/06/16) |
-| `#MODBUS_INPUT` | Input registers (FC 04) |
-| `#MODBUS_COIL` | Coils (FC 01/05/15) |
-| `#MODBUS_DISCRETE` | Discrete inputs (FC 02) |
+| Directive          | Modbus area                     |
+| ------------------ | ------------------------------- |
+| `#MODBUS_HOLDING`  | Holding registers (FC 03/06/16) |
+| `#MODBUS_INPUT`    | Input registers (FC 04)         |
+| `#MODBUS_COIL`     | Coils (FC 01/05/15)             |
+| `#MODBUS_DISCRETE` | Discrete inputs (FC 02)         |
 
 The `ModbusMap` builder assigns discrete addresses automatically at schema load time. If no DB is annotated with any `#MODBUS_*` directive, the adapter starts with an **empty mapping** (a warning is logged).
 
@@ -38,16 +38,16 @@ curl http://gateway:8000/registry/modbus | jq
 
 ### Supported Function Codes
 
-| FC | Name | Description |
-|----|------|-------------|
-| 01 | Read Coils | Read discrete output coils |
-| 02 | Read Discrete Inputs | Read discrete input contacts |
-| 03 | Read Holding Registers | Read output registers (16-bit) |
-| 04 | Read Input Registers | Read input registers (16-bit) |
-| 05 | Write Single Coil | Write a single coil |
-| 06 | Write Single Register | Write a single holding register |
-| 15 | Write Multiple Coils | Write multiple coils |
-| 16 | Write Multiple Registers | Write multiple holding registers |
+| FC  | Name                     | Description                      |
+| --- | ------------------------ | -------------------------------- |
+| 01  | Read Coils               | Read discrete output coils       |
+| 02  | Read Discrete Inputs     | Read discrete input contacts     |
+| 03  | Read Holding Registers   | Read output registers (16-bit)   |
+| 04  | Read Input Registers     | Read input registers (16-bit)    |
+| 05  | Write Single Coil        | Write a single coil              |
+| 06  | Write Single Register    | Write a single holding register  |
+| 15  | Write Multiple Coils     | Write multiple coils             |
+| 16  | Write Multiple Registers | Write multiple holding registers |
 
 ### Security
 

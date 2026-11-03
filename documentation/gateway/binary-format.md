@@ -30,17 +30,17 @@ the first truncated frame (`pos + payload_len > size`).
 
 ## Header
 
-| Field        | Size | Type   | Notes                                              |
-|--------------|------|--------|----------------------------------------------------|
-| magic        | 4    | bytes  | ASCII `SGRN`                                       |
-| version      | 2    | uint16 | Format version: `1` (full-image frames), `2` (v1 + delta frames), `3` (v2 + anchor frames), `4` (v3 + binary schema payload) |
-| schema_len   | 4    | uint32 | Byte length of the schema payload that follows     |
-| schema       | N    | bytes  | v4+: binary schema (`SGRS` magic, see below); v3: `PlcSchemaStore::toJson()` UTF-8; empty skips the schema check |
+| Field      | Size | Type   | Notes                                                                                                                        |
+| ---------- | ---- | ------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| magic      | 4    | bytes  | ASCII `SGRN`                                                                                                                 |
+| version    | 2    | uint16 | Format version: `1` (full-image frames), `2` (v1 + delta frames), `3` (v2 + anchor frames), `4` (v3 + binary schema payload) |
+| schema_len | 4    | uint32 | Byte length of the schema payload that follows                                                                               |
+| schema     | N    | bytes  | v4+: binary schema (`SGRS` magic, see below); v3: `PlcSchemaStore::toJson()` UTF-8; empty skips the schema check             |
 
 Writers stamp `kBinaryWalVersion` (`4`); readers refuse `ver < 1` or
 `ver > kBinaryWalVersion` instead of misparsing. Readers that skip the
 schema bytes (replayers, dataset tools) are version-agnostic: only the
-schema *comparison* in `RecoveryEngine` and the layout builder in
+schema _comparison_ in `RecoveryEngine` and the layout builder in
 `sgrn_dataset transcode` branch on the payload encoding (sniffed via the
 `SGRS` magic, so a v4 reader also accepts v3 files).
 
@@ -83,12 +83,12 @@ type names) and cap recursion depth, string lengths, and element counts.
 The 14-byte envelope `(ts:u64)(db_num:u16)(payload_len:u32)` is shared; the
 `db_num` selects the kind:
 
-| `db_num` | Kind | Payload |
-|----------|------|---------|
-| real DB id | **full-image frame** (v1; legacy) | whole DB image, offset 0, `size` bytes |
-| `0xFFFE` (`kDeltaFrameDbNum`, v2+) | **delta frame** | `db:u16` (real target) + `(offset:u32, len:u32, bytes…)*` runs against the last image of that DB |
-| `0xFFFD` (`kAnchorFrameDbNum`, v3+) | **anchor frame** | `db:u16` (real target) + `crc32:u32` + full DB image |
-| `0xFFFF` (`kControlFrameDbNum`) | **control frame** | JSON (dictionary / manifest / anchor / footer) |
+| `db_num`                            | Kind                              | Payload                                                                                          |
+| ----------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------ |
+| real DB id                          | **full-image frame** (v1; legacy) | whole DB image, offset 0, `size` bytes                                                           |
+| `0xFFFE` (`kDeltaFrameDbNum`, v2+)  | **delta frame**                   | `db:u16` (real target) + `(offset:u32, len:u32, bytes…)*` runs against the last image of that DB |
+| `0xFFFD` (`kAnchorFrameDbNum`, v3+) | **anchor frame**                  | `db:u16` (real target) + `crc32:u32` + full DB image                                             |
+| `0xFFFF` (`kControlFrameDbNum`)     | **control frame**                 | JSON (dictionary / manifest / anchor / footer)                                                   |
 
 Delta runs never overlap and are self-delimiting within `payload_len`; a
 delta for a DB with no cached keyframe is skipped, a structurally corrupt one
@@ -181,13 +181,13 @@ the **same frame envelope** with the reserved sentinel DB number
 (`include/sgrn/gateway/database/PersistenceService.hpp`). `0xFFFF` can never
 be a live DB number (live IDs are small; synthetic arena IDs start at 1000).
 
-| Writer call site                              | Control JSON content                          |
-|-----------------------------------------------|-----------------------------------------------|
-| `openNewArchive()`                            | `{"type":"dictionary","leaves":[{"id","path"}]}` |
-| `openNewArchive()`                            | `{"type":"manifest","start_time","mode","namespaces"}` |
-| `writeAnchorLine()` (every `FullSnapshot`)    | `{"type":"anchor","ts","data":{"<id>":val}}` (flat ID-keyed) |
-| `finalizeArchive()`                           | `{"type":"footer","last_anchor_line","record_count"}` |
-| `writeDeltaLine()` (defensive; unreachable — the binary event path never fills the merge buffer) | delta JSON |
+| Writer call site                                                                                 | Control JSON content                                         |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| `openNewArchive()`                                                                               | `{"type":"dictionary","leaves":[{"id","path"}]}`             |
+| `openNewArchive()`                                                                               | `{"type":"manifest","start_time","mode","namespaces"}`       |
+| `writeAnchorLine()` (every `FullSnapshot`)                                                       | `{"type":"anchor","ts","data":{"<id>":val}}` (flat ID-keyed) |
+| `finalizeArchive()`                                                                              | `{"type":"footer","last_anchor_line","record_count"}`        |
+| `writeDeltaLine()` (defensive; unreachable — the binary event path never fills the merge buffer) | delta JSON                                                   |
 
 Raw JSON lines must NEVER appear in a binary archive: readers parse every
 14-byte header as `ts/db/len`, so unframed text is misdecoded as a garbage
@@ -211,17 +211,17 @@ batched `writeDbMemory`; dataset decodes the row from the patched image).
 - **sgrn_dataset**: fields are decoded only when the full field width fits
   (`offset + sizeof(type) <= payload_len`); truncated tail fields render as
   empty cells, and a cut-off tail logs `[sgrn_dataset] N trailing bytes
-  discarded`.
+discarded`.
 
 ## Tooling
 
-| Tool | Direction |
-|------|-----------|
-| `sgrn_dataset` (default mode) | `.bin.zst` → CSV + manifest (control frames skipped) |
-| `sgrn_dataset -f jsonl` | `.bin.zst` → `.jsonl.zst` with values preserved: control JSON passes through verbatim; full/anchor frames decode every dictionary-mapped leaf to flat ID-keyed `anchor` lines; delta frames decode changed leaves to `changes` lines (images cached per DB, endian- and bit-aware) |
-| `sgrn_dataset -f binary` from JSONL | **not implemented** (`convertFormat` refuses; jsonl→binary transcoding is an open follow-up) |
-| `sgrn_replay` | `.bin.zst` → live `PlcMemory` (control frames skipped, pacing by frame `ts`) |
-| `sgrn/ml/dataset.py` | `.bin.zst` → NumPy (same control-frame skip) |
+| Tool                                | Direction                                                                                                                                                                                                                                                                          |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sgrn_dataset` (default mode)       | `.bin.zst` → CSV + manifest (control frames skipped)                                                                                                                                                                                                                               |
+| `sgrn_dataset -f jsonl`             | `.bin.zst` → `.jsonl.zst` with values preserved: control JSON passes through verbatim; full/anchor frames decode every dictionary-mapped leaf to flat ID-keyed `anchor` lines; delta frames decode changed leaves to `changes` lines (images cached per DB, endian- and bit-aware) |
+| `sgrn_dataset -f binary` from JSONL | **not implemented** (`convertFormat` refuses; jsonl→binary transcoding is an open follow-up)                                                                                                                                                                                       |
+| `sgrn_replay`                       | `.bin.zst` → live `PlcMemory` (control frames skipped, pacing by frame `ts`)                                                                                                                                                                                                       |
+| `sgrn/ml/dataset.py`                | `.bin.zst` → NumPy (same control-frame skip)                                                                                                                                                                                                                                       |
 
 ## Merging archives
 

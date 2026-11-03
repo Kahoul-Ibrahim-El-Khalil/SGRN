@@ -7,9 +7,8 @@ import { doSignIn } from "@/pages/signin/backend";
 import { useAuthForm } from "@/pages/signin/hooks/useAuthForm";
 import { useClock } from "@/pages/signin/hooks/useClock";
 import { handleSgrnResult } from "@/backend/errorHandler";
-import { Logo } from "@/components/Logo";
 import ThemeToggle from "@/components/ThemeToggle";
-import { Shield, Terminal } from "lucide-react";
+import { Terminal } from "lucide-react";
 
 function useSignIn(
     formData: ReturnType<typeof useAuthForm>["formData"],
@@ -54,7 +53,6 @@ export default function SignInPage() {
         <div className="signin-root">
             {/* Top logos bar */}
             <header className="signin-topbar">
-                <Logo size="sm" showDivider={true} />
                 <ThemeToggle />
             </header>
 
@@ -63,9 +61,6 @@ export default function SignInPage() {
                 {/* Left panel — branding */}
                 <div className="signin-left">
                     <div className="signin-brand">
-                        <div className="signin-brand-icon">
-                            <Shield size={40} />
-                        </div>
                         <h1 className="signin-brand-title">SGRN</h1>
                         <p className="signin-brand-sub">Resource Management Platform</p>
                         <p className="signin-brand-desc">

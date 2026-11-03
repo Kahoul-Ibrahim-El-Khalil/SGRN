@@ -299,15 +299,26 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
                 scope_res->display_name.empty() ? std::nullopt : std::optional<std::string>(scope_res->display_name));
         }
 
-        // 5. Pagination & Search Parameters
+        // 5. Pagination, Search & Ordering Parameters
         int32_t limit = tsp_req->getOptionalParameter<int32_t>("limit").value_or(20);
         int32_t page = tsp_req->getOptionalParameter<int32_t>("page").value_or(1);
         std::string search = tsp_req->getOptionalParameter<std::string>("search").value_or("");
+        std::string sort_key = tsp_req->getOptionalParameter<std::string>("sort").value_or("name");
+        std::string sort_order = tsp_req->getOptionalParameter<std::string>("order").value_or("asc");
 
         if (limit < 1)
             limit = 20;
         if (page < 1)
             page = 1;
+
+        // Whitelist-validate sort key/dir; unknown values fall back silently
+        // to the default instead of erroring so older clients are unaffected.
+        std::transform(sort_key.begin(), sort_key.end(), sort_key.begin(), [](unsigned char c) { return std::tolower(c); });
+        std::transform(sort_order.begin(), sort_order.end(), sort_order.begin(), [](unsigned char c) { return std::tolower(c); });
+        const bool sort_desc = (sort_order == "desc");
+        if (sort_key != "name" && sort_key != "size" && sort_key != "modified")
+            sort_key = "name";
+        sort_order = sort_desc ? "desc" : "asc";
 
         int32_t total_folders = 0;
         int32_t total_files = 0;
@@ -323,8 +334,8 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
                     std::format("Failed to list virtual root: {}", vrl_res.error().message_), drogon::k500InternalServerError);
             }
         } else {
-            auto stats = co_await buildNormalDriveListing(
-                folders_json, files_json, namespace_prefix, current_path, user_id, target_owner_id, scope, db_client, limit, page, search);
+            auto stats = co_await buildNormalDriveListing(folders_json, files_json, namespace_prefix, current_path, user_id,
+                target_owner_id, scope, db_client, limit, page, search, sort_key, sort_desc);
             total_folders = stats.first;
             total_files = stats.second;
         }
@@ -343,10 +354,10 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
         const int32_t total_pages = std::max(1, (int32_t)std::ceil((double)(total_folders + total_files) / limit));
 
         co_return createJsonResponse(fmt::format(
-            R"({{"path":"{}","trail":{},"folders":{},"files":{},"capabilities":{{"can_read":{},"can_write":{},"can_delete":{},"allowed_subpath":"{}"}},"total_folders":{},"total_files":{},"total_items":{},"page":{},"page_size":{},"total_pages":{}}})",
+            R"({{"path":"{}","trail":{},"folders":{},"files":{},"capabilities":{{"can_read":{},"can_write":{},"can_delete":{},"allowed_subpath":"{}"}},"total_folders":{},"total_files":{},"total_items":{},"page":{},"page_size":{},"total_pages":{},"sort":"{}","order":"{}"}})",
             jsonEscape(display_path_val), trail_json, folders_json, files_json, scope_res->can_read ? "true" : "false",
             scope_res->can_write ? "true" : "false", scope_res->can_delete ? "true" : "false", jsonEscape(scope_res->allowed_subpath),
-            total_folders, total_files, total_folders + total_files, page, limit, total_pages));
+            total_folders, total_files, total_folders + total_files, page, limit, total_pages, sort_key, sort_order));
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Drive list DB exception: {}", e.base().what());
         co_return createErrorResponse(GenericApiError::InternalServerError);
@@ -396,7 +407,8 @@ Task<BackendResult<void>> StorageApiHandler::buildVirtualRootListing(std::string
 
 Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(std::string& t_folders_json, std::string& t_files_json,
     const std::string& t_namespace_prefix, const std::string& t_current_path_in, int32_t t_user_id, int32_t t_target_owner_id,
-    StorageScope t_scope, const drogon::orm::DbClientPtr& tsp_db_client, int32_t t_limit, int32_t t_page, const std::string& t_search) {
+    StorageScope t_scope, const drogon::orm::DbClientPtr& tsp_db_client, int32_t t_limit, int32_t t_page, const std::string& t_search,
+    const std::string& t_sort_key, bool t_sort_desc) {
 
     std::string current_path = t_current_path_in;
     if (current_path.empty() || current_path.front() != '/') {
@@ -451,7 +463,7 @@ folders_cte AS (
 folder_totals AS (SELECT count(*)::bigint AS n FROM folders_cte),
 folder_page AS (
   SELECT * FROM folders_cte
-  ORDER BY name
+  ORDER BY %FOLDER_PAGE_ORDER%
   LIMIT greatest(least($4::int, (SELECT n::int - $5::int FROM folder_totals)), 0)
   OFFSET $5::int
 ),
@@ -472,7 +484,7 @@ file_totals AS (
 ),
 file_page AS (
   SELECT * FROM files_cte
-  ORDER BY name
+  ORDER BY %FILE_PAGE_ORDER%
   LIMIT greatest($4::int - least(greatest((SELECT n::int FROM folder_totals) - $5::int, 0), $4::int), 0)
   OFFSET greatest($5::int - (SELECT n::int FROM folder_totals), 0)
 )
@@ -481,12 +493,12 @@ SELECT
     'id', s.id, 'name', s.name, 'path', $6 || s.path, 'created_at', s.created_at,
     'virtual_size', s.virtual_size, 'real_size', s.real_size,
     'count_sub_files', s.count_sub_files, 'count_sub_directories', s.count_sub_directories)
-    ORDER BY s.name) FROM folder_page s), '[]'::jsonb) AS folders,
+    ORDER BY %FOLDER_AGG_ORDER%) FROM folder_page s), '[]'::jsonb) AS folders,
   COALESCE((SELECT jsonb_agg(jsonb_build_object(
     'id', s.id, 'name', s.name, 'path', $6 || s.full_path, 'extension', coalesce(s.extension, ''),
     'size', s.compressed_size, 'original_size', s.original_size, 'upload_mode', s.upload_mode,
     'part_count', s.part_count, 'created_at', s.created_at)
-    ORDER BY s.name) FROM file_page s), '[]'::jsonb) AS files,
+    ORDER BY %FILE_AGG_ORDER%) FROM file_page s), '[]'::jsonb) AS files,
   (SELECT n FROM folder_totals) AS total_folders,
   (SELECT n FROM file_totals) AS total_files
 )SQL";
@@ -501,7 +513,7 @@ WITH folders_cte AS (
 folder_totals AS (SELECT count(*)::bigint AS n FROM folders_cte),
 folder_page AS (
   SELECT * FROM folders_cte
-  ORDER BY name
+  ORDER BY %FOLDER_PAGE_ORDER%
   LIMIT greatest(least($4::int, (SELECT n::int - $5::int FROM folder_totals)), 0)
   OFFSET $5::int
 ),
@@ -522,7 +534,7 @@ file_totals AS (
 ),
 file_page AS (
   SELECT * FROM files_cte
-  ORDER BY name
+  ORDER BY %FILE_PAGE_ORDER%
   LIMIT greatest($4::int - least(greatest((SELECT n::int FROM folder_totals) - $5::int, 0), $4::int), 0)
   OFFSET greatest($5::int - (SELECT n::int FROM folder_totals), 0)
 )
@@ -531,12 +543,12 @@ SELECT
     'id', s.id, 'name', s.name, 'path', $6 || s.path, 'created_at', s.created_at,
     'virtual_size', s.virtual_size, 'real_size', s.real_size,
     'count_sub_files', s.count_sub_files, 'count_sub_directories', s.count_sub_directories)
-    ORDER BY s.name) FROM folder_page s), '[]'::jsonb) AS folders,
+    ORDER BY %FOLDER_AGG_ORDER%) FROM folder_page s), '[]'::jsonb) AS folders,
   COALESCE((SELECT jsonb_agg(jsonb_build_object(
     'id', s.id, 'name', s.name, 'path', $6 || s.full_path, 'extension', coalesce(s.extension, ''),
     'size', s.compressed_size, 'original_size', s.original_size, 'upload_mode', s.upload_mode,
     'part_count', s.part_count, 'created_at', s.created_at)
-    ORDER BY s.name) FROM file_page s), '[]'::jsonb) AS files,
+    ORDER BY %FILE_AGG_ORDER%) FROM file_page s), '[]'::jsonb) AS files,
   (SELECT n FROM folder_totals) AS total_folders,
   (SELECT n FROM file_totals) AS total_files
 )SQL";
@@ -560,6 +572,43 @@ SELECT
                                                       : static_cast<const std::string&>(is_domain      ? kListingDomainSearch
                                                                                         : is_automated ? kListingSvcSearch
                                                                                                        : kListingUserSearch);
+
+    // ── Sort key resolution (whitelist → no user text reaches the SQL) ────────
+    // The templates carry %ORDER% tokens (cannot collide with fmt braces);
+    // they are substituted here per request with a whitelisted column and
+    // direction plus a stable tiebreaker (name, then id) so pagination
+    // stays consistent across pages regardless of sort key.
+    struct SortColumns {
+        std::string_view folders;
+        std::string_view files;
+    };
+    static const std::unordered_map<std::string_view, SortColumns> kSortKeys{
+        {"name", {"name", "name"}},                    //
+        {"size", {"virtual_size", "compressed_size"}}, // folders size ≠ files size
+        {"modified", {"created_at", "created_at"}},    // tables have no updated_at
+    };
+
+    const auto key_it = kSortKeys.find(t_sort_key);
+    const SortColumns& sort_cols = (key_it != kSortKeys.end()) ? key_it->second : kSortKeys.at("name");
+
+    auto make_order = [t_sort_desc](std::string_view t_column, bool t_qualified) {
+        const std::string prefix = t_qualified ? "s." : "";
+        if (t_column == "name")
+            return fmt::format("{0}name{1}, {0}id ASC", prefix, t_sort_desc ? " DESC" : " ASC");
+        return fmt::format("{0}{1}{2}, {0}name ASC, {0}id ASC", prefix, t_column, t_sort_desc ? " DESC" : " ASC");
+    };
+
+    // One copy of the 6 KB statement per request — the token substitution
+    // keeps the owner-variant strings static/thread-safe as before.
+    std::string order_sql = listing_sql;
+    auto replace_token = [](std::string& t_sql, std::string_view t_token, const std::string& t_value) {
+        for (std::string::size_type pos = 0; (pos = t_sql.find(t_token, pos)) != std::string::npos; pos += t_value.size())
+            t_sql.replace(pos, t_token.size(), t_value);
+    };
+    replace_token(order_sql, "%FOLDER_PAGE_ORDER%", make_order(sort_cols.folders, false));
+    replace_token(order_sql, "%FILE_PAGE_ORDER%", make_order(sort_cols.files, false));
+    replace_token(order_sql, "%FOLDER_AGG_ORDER%", make_order(sort_cols.folders, true));
+    replace_token(order_sql, "%FILE_AGG_ORDER%", make_order(sort_cols.files, true));
 
     std::string target_domain;
     if (is_domain) {
@@ -588,9 +637,9 @@ SELECT
     drogon::orm::Result listing_res = co_await [&]() -> Task<drogon::orm::Result> {
         if (is_domain) {
             co_return co_await tsp_db_client->execSqlCoro(
-                listing_sql, target_domain, predicate_2, predicate_3, t_limit, offset, t_namespace_prefix);
+                order_sql, target_domain, predicate_2, predicate_3, t_limit, offset, t_namespace_prefix);
         }
-        co_return co_await tsp_db_client->execSqlCoro(listing_sql, owner_id, predicate_2, predicate_3, t_limit, offset, t_namespace_prefix);
+        co_return co_await tsp_db_client->execSqlCoro(order_sql, owner_id, predicate_2, predicate_3, t_limit, offset, t_namespace_prefix);
     }();
 
     // Complete jsonb arrays + totals from one row; spliced verbatim by the

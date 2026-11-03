@@ -13,7 +13,7 @@
 
   let activeTab: "modbus" | "eip" | "opcua" = "modbus";
   let modbusSubTab: "holding" | "input" | "coils" | "discrete" = "holding";
-  
+
   let registry: RegistryResponse | null = null;
   let modbusMap: ModbusMap | null = null;
   let loading = true;
@@ -55,89 +55,112 @@
     <div class="state-msg error">{error}</div>
   {:else}
     <div class="tabs">
-      <button class:active={activeTab === 'modbus'} on:click={() => activeTab = 'modbus'}>Modbus TCP</button>
-      <button class:active={activeTab === 'eip'} on:click={() => activeTab = 'eip'}>EtherNet/IP</button>
-      <button class:active={activeTab === 'opcua'} on:click={() => activeTab = 'opcua'}>OPC-UA</button>
+      <button
+        class:active={activeTab === "modbus"}
+        on:click={() => (activeTab = "modbus")}>Modbus TCP</button
+      >
+      <button
+        class:active={activeTab === "eip"}
+        on:click={() => (activeTab = "eip")}>EtherNet/IP</button
+      >
+      <button
+        class:active={activeTab === "opcua"}
+        on:click={() => (activeTab = "opcua")}>OPC-UA</button
+      >
     </div>
 
     <div class="tab-content">
-      {#if activeTab === 'modbus'}
+      {#if activeTab === "modbus"}
         {#if !modbusMap}
           <div class="state-msg">
-            Modbus is disabled in the gateway configuration or the mapping could not be generated.
+            Modbus is disabled in the gateway configuration or the mapping could
+            not be generated.
           </div>
         {:else}
           <div class="modbus-subtabs">
-            <button class:active={modbusSubTab === 'holding'} on:click={() => modbusSubTab = 'holding'}>Holding Registers</button>
-            <button class:active={modbusSubTab === 'input'} on:click={() => modbusSubTab = 'input'}>Input Registers</button>
-            <button class:active={modbusSubTab === 'coils'} on:click={() => modbusSubTab = 'coils'}>Coils</button>
-            <button class:active={modbusSubTab === 'discrete'} on:click={() => modbusSubTab = 'discrete'}>Discrete Inputs</button>
+            <button
+              class:active={modbusSubTab === "holding"}
+              on:click={() => (modbusSubTab = "holding")}
+              >Holding Registers</button
+            >
+            <button
+              class:active={modbusSubTab === "input"}
+              on:click={() => (modbusSubTab = "input")}>Input Registers</button
+            >
+            <button
+              class:active={modbusSubTab === "coils"}
+              on:click={() => (modbusSubTab = "coils")}>Coils</button
+            >
+            <button
+              class:active={modbusSubTab === "discrete"}
+              on:click={() => (modbusSubTab = "discrete")}
+              >Discrete Inputs</button
+            >
           </div>
 
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Address</th>
-                {#if modbusSubTab === 'holding' || modbusSubTab === 'input'}
-                  <th>Count</th>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Address</th>
+                  {#if modbusSubTab === "holding" || modbusSubTab === "input"}
+                    <th>Count</th>
+                  {/if}
+                  {#if modbusSubTab === "coils" || modbusSubTab === "discrete"}
+                    <th>Bit Index</th>
+                  {/if}
+                  <th>Source (Schema Field)</th>
+                  <th>Type</th>
+                  <th>Access</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#if modbusSubTab === "holding" && modbusMap?.holding_registers}
+                  {#each modbusMap.holding_registers as reg}
+                    <tr>
+                      <td class="code">{reg.start}</td>
+                      <td>{reg.count}</td>
+                      <td class="source-col">{reg.source}</td>
+                      <td class="code">{reg.type}</td>
+                      <td>{reg.access.toUpperCase()}</td>
+                    </tr>
+                  {/each}
+                {:else if modbusSubTab === "input" && modbusMap?.input_registers}
+                  {#each modbusMap.input_registers as reg}
+                    <tr>
+                      <td class="code">{reg.start}</td>
+                      <td>{reg.count}</td>
+                      <td class="source-col">{reg.source}</td>
+                      <td class="code">{reg.type}</td>
+                      <td>{reg.access.toUpperCase()}</td>
+                    </tr>
+                  {/each}
+                {:else if modbusSubTab === "coils" && modbusMap?.coils}
+                  {#each modbusMap.coils as reg}
+                    <tr>
+                      <td class="code">{reg.address}</td>
+                      <td>{reg.bit}</td>
+                      <td class="source-col">{reg.source}</td>
+                      <td class="code">{reg.type}</td>
+                      <td>{reg.access.toUpperCase()}</td>
+                    </tr>
+                  {/each}
+                {:else if modbusSubTab === "discrete" && modbusMap?.discrete_inputs}
+                  {#each modbusMap.discrete_inputs as reg}
+                    <tr>
+                      <td class="code">{reg.address}</td>
+                      <td>{reg.bit}</td>
+                      <td class="source-col">{reg.source}</td>
+                      <td class="code">{reg.type}</td>
+                      <td>{reg.access.toUpperCase()}</td>
+                    </tr>
+                  {/each}
                 {/if}
-                {#if modbusSubTab === 'coils' || modbusSubTab === 'discrete'}
-                  <th>Bit Index</th>
-                {/if}
-                <th>Source (Schema Field)</th>
-                <th>Type</th>
-                <th>Access</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#if modbusSubTab === 'holding' && modbusMap?.holding_registers}
-                {#each modbusMap.holding_registers as reg}
-                  <tr>
-                    <td class="code">{reg.start}</td>
-                    <td>{reg.count}</td>
-                    <td class="source-col">{reg.source}</td>
-                    <td class="code">{reg.type}</td>
-                    <td>{reg.access.toUpperCase()}</td>
-                  </tr>
-                {/each}
-              {:else if modbusSubTab === 'input' && modbusMap?.input_registers}
-                {#each modbusMap.input_registers as reg}
-                  <tr>
-                    <td class="code">{reg.start}</td>
-                    <td>{reg.count}</td>
-                    <td class="source-col">{reg.source}</td>
-                    <td class="code">{reg.type}</td>
-                    <td>{reg.access.toUpperCase()}</td>
-                  </tr>
-                {/each}
-              {:else if modbusSubTab === 'coils' && modbusMap?.coils}
-                {#each modbusMap.coils as reg}
-                  <tr>
-                    <td class="code">{reg.address}</td>
-                    <td>{reg.bit}</td>
-                    <td class="source-col">{reg.source}</td>
-                    <td class="code">{reg.type}</td>
-                    <td>{reg.access.toUpperCase()}</td>
-                  </tr>
-                {/each}
-              {:else if modbusSubTab === 'discrete' && modbusMap?.discrete_inputs}
-                {#each modbusMap.discrete_inputs as reg}
-                  <tr>
-                    <td class="code">{reg.address}</td>
-                    <td>{reg.bit}</td>
-                    <td class="source-col">{reg.source}</td>
-                    <td class="code">{reg.type}</td>
-                    <td>{reg.access.toUpperCase()}</td>
-                  </tr>
-                {/each}
-              {/if}
-            </tbody>
-          </table>
-        </div>
+              </tbody>
+            </table>
+          </div>
         {/if}
-
-      {:else if activeTab === 'eip'}
+      {:else if activeTab === "eip"}
         <div class="table-wrap">
           <table class="data-table">
             <thead>
@@ -162,8 +185,7 @@
             </tbody>
           </table>
         </div>
-
-      {:else if activeTab === 'opcua'}
+      {:else if activeTab === "opcua"}
         <div class="table-wrap">
           <table class="data-table">
             <thead>
@@ -310,11 +332,11 @@
   }
 
   .data-table tr:hover td {
-    background: rgba(255,255,255,0.03);
+    background: rgba(255, 255, 255, 0.03);
   }
 
   .code {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: "JetBrains Mono", monospace;
   }
 
   .source-col {

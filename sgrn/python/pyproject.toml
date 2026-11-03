@@ -12,24 +12,16 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "SGRN" }]
 keywords = ["sgrn", "gateway", "plc", "telemetry", "iot", "numpy"]
 classifiers = [
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3 :: Only",
-    "Topic :: System :: Networking",
-    "Topic :: Software Development :: Libraries",
-    "Typing :: Typed",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: System :: Networking",
+  "Topic :: Software Development :: Libraries",
+  "Typing :: Typed",
 ]
-dependencies = [
-    "numpy>=1.23",
-    "websockets>=14.0",
-]
+dependencies = ["numpy>=1.23", "websockets>=14.0"]
 
 [project.optional-dependencies]
-ml = [
-    "torch>=2.0",
-    "pandas>=1.5",
-    "scikit-learn>=1.0",
-    "zstandard>=0.20",
-]
+ml = ["torch>=2.0", "pandas>=1.5", "scikit-learn>=1.0", "zstandard>=0.20"]
 
 [project.urls]
 Repository = "https://github.com/Kahoul-Ibrahim-El-Khalil/SGRN"

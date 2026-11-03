@@ -54,13 +54,14 @@ Body:
 Returns every agent that belongs to the authenticated admin's organisation.
 
 Response shape (per row):
+
 ```json
 {
   "id": 1,
   "name": "line-a-polling",
   "kind": "plc",
   "token": "xxxxxxxxxxxx",
-  "metadata": { /* JSON metadata blob */ },
+  "metadata": {/* JSON metadata blob */},
   "is_active": true,
   "created_at": "2026-03-01T08:42:00Z"
 }
@@ -73,6 +74,7 @@ The JSON metadata allows the admin UI or tooling to display contextual tags (sit
 `POST /api/v1/admin/agents/rotate-token`
 
 Body:
+
 ```json
 { "agent_id": 42 }
 ```

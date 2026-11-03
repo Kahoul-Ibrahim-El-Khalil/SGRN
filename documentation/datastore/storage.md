@@ -182,8 +182,12 @@ garage -c garage.toml bucket allow --read --write sgrn-uploads --key sgrn-datast
 **5. Point the datastore at it** (`sgrn.json`, `plugins` → `S3Client`):
 
 ```json
-{ "region": "us-east-1", "endpoint": "http://127.0.0.1:3900",
-  "access_key": "<key>", "secret_key": "<secret>" }
+{
+  "region": "us-east-1",
+  "endpoint": "http://127.0.0.1:3900",
+  "access_key": "<key>",
+  "secret_key": "<secret>"
+}
 ```
 
 Restart required (plugin config is boot-only, unlike hot `custom_config.s3.*`).

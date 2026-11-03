@@ -1,0 +1,455 @@
+@layer cards {
+    /* =====================================================================
+     CARDS / PANELS — single source of truth
+     ===================================================================== */
+
+    .panel,
+    .card,
+    .reg-card,
+    .profile-card,
+    .stats-card,
+    .credentials-card,
+    .file-card {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        background: hsl(var(--card));
+        border: 1px solid hsl(var(--border) / 0.82);
+    }
+
+    .stats-header,
+    .reg-header,
+    .explorer-header {
+        background: hsl(var(--toolbar-bg));
+        border-bottom: 1px solid hsl(var(--border));
+    }
+
+    .stats-title,
+    .explorer-label,
+    .reg-title {
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        color: hsl(var(--foreground));
+    }
+
+    /* FILE CARD — drive grid: borderless floating tile; whitespace separates,
+       state is expressed with tint only (no outlines unless selected/drag) */
+    .file-card {
+        background-color: transparent;
+        border: 0;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+        transition:
+            background-color 0.12s ease,
+            box-shadow 0.12s ease;
+        position: relative;
+    }
+
+    .file-card:hover {
+        border-color: transparent;
+        background-color: hsl(var(--foreground) / 0.035);
+        box-shadow: none;
+        transform: none;
+    }
+
+    .file-card--selected {
+        border-color: transparent;
+        background-color: hsl(var(--primary) / 0.08);
+        box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.45);
+    }
+
+    .file-card--drag-over {
+        background-color: hsl(var(--primary) / 0.07);
+        outline: 1px dashed hsl(var(--primary));
+        outline-offset: -3px;
+    }
+
+    .file-card-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .file-card-icon-wrap {
+        padding: 0.4rem;
+        background-color: transparent;
+        border: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: transform 0.15s ease;
+    }
+
+    .file-card:hover .file-card-icon-wrap {
+        background-color: transparent;
+    }
+
+    .file-card-check {
+        padding: 0.15rem;
+        transition: background-color 0.15s;
+        flex-shrink: 0;
+    }
+
+    .file-card-check:hover {
+        background-color: hsl(var(--muted) / 0.4);
+    }
+
+    .file-card-body {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        min-width: 0;
+    }
+
+    .file-card-name {
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        line-height: 1.25;
+        color: hsl(var(--foreground));
+        font-family: inherit;
+    }
+
+    .file-card-meta {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .file-card-type {
+        font-family: "Courier New", "Lucida Console", monospace;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: hsl(var(--muted-foreground) / 0.7);
+    }
+
+    .file-card-size {
+        font-family: "Courier New", "Lucida Console", monospace;
+        font-size: 10px;
+        font-weight: 600;
+        color: hsl(var(--muted-foreground) / 0.6);
+        letter-spacing: 0.03em;
+    }
+
+    .file-card-actions {
+        display: flex;
+        gap: 0.2rem;
+        opacity: 0;
+        transition: opacity 0.12s ease;
+        padding-top: 0.15rem;
+    }
+
+    .file-card:hover .file-card-actions {
+        opacity: 1;
+    }
+
+    .file-card-action-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.4rem;
+        height: 1.4rem;
+        border: 0;
+        color: hsl(var(--muted-foreground));
+        background-color: transparent;
+        cursor: pointer;
+        transition: all 0.12s ease;
+    }
+
+    .file-card-action-btn:hover {
+        color: hsl(var(--foreground));
+        background-color: hsl(var(--foreground) / 0.08);
+    }
+
+    .file-card-action-btn--danger {
+        color: hsl(var(--destructive) / 0.7);
+    }
+
+    .file-card-action-btn--danger:hover {
+        background-color: hsl(var(--destructive) / 0.1);
+        color: hsl(var(--destructive));
+    }
+
+    /* DRIVE LIST — floating datalist rows.
+       Rows inherit the page background; no cell borders, no outer frame.
+       A `--lined` modifier turns on row separators only for long lists. */
+    .drive-list {
+        width: 100%;
+        border-collapse: collapse;
+        background: transparent;
+        font-size: 13px;
+    }
+
+    .drive-list th {
+        padding: 0.35rem 0.75rem;
+        text-align: left;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: hsl(var(--muted-foreground) / 0.8);
+        border-bottom: 1px solid hsl(var(--border) / 0.5);
+        white-space: nowrap;
+    }
+
+    .drive-list-head-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        border: 0;
+        background: transparent;
+        padding: 0;
+        font: inherit;
+        letter-spacing: inherit;
+        text-transform: inherit;
+        color: hsl(var(--muted-foreground) / 0.8);
+        cursor: pointer;
+        transition: color 0.12s ease;
+    }
+
+    .drive-list-head-btn:hover {
+        color: hsl(var(--foreground));
+    }
+
+    .drive-list-head-btn--active {
+        color: hsl(var(--primary));
+    }
+
+    .drive-list th:first-child,
+    .drive-list td:first-child {
+        width: 2.5rem;
+        text-align: center;
+    }
+
+    .drive-list td {
+        padding: 0.55rem 0.75rem;
+        vertical-align: middle;
+        color: hsl(var(--foreground));
+        border-bottom: 1px solid transparent;
+        background-color: transparent;
+        transition: background-color 0.12s ease;
+    }
+
+    .drive-list td:last-child {
+        text-align: right;
+    }
+
+    .drive-list tbody tr:hover td {
+        background-color: hsl(var(--foreground) / 0.03);
+    }
+
+    .drive-list tbody tr.active td {
+        background-color: hsl(var(--primary) / 0.08);
+    }
+
+    /* Separator between rows only when the list is long enough to need them */
+    .drive-list--lined tbody tr:not(:last-child) td {
+        border-bottom-color: hsl(var(--border) / 0.45);
+    }
+
+    /* Ghost row action buttons — no borders, they float with the row */
+    .drive-row-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.15rem;
+    }
+
+    .drive-row-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.7rem;
+        height: 1.7rem;
+        border: 0;
+        padding: 0;
+        color: hsl(var(--muted-foreground));
+        background-color: transparent;
+        cursor: pointer;
+        transition: all 0.12s ease;
+        flex-shrink: 0;
+    }
+
+    .drive-row-btn:hover {
+        color: hsl(var(--foreground));
+        background-color: hsl(var(--foreground) / 0.08);
+    }
+
+    .drive-row-btn--danger {
+        color: hsl(var(--destructive) / 0.7);
+    }
+
+    .drive-row-btn--danger:hover {
+        color: hsl(var(--destructive));
+        background-color: hsl(var(--destructive) / 0.1);
+    }
+
+    /* FILE GRID ICONS */
+    .file-grid-icon {
+        transition: transform 0.15s ease;
+    }
+
+    .file-card:hover .file-grid-icon {
+        transform: scale(1.1);
+    }
+
+    .file-grid-icon--folder {
+        color: hsl(var(--primary));
+    }
+
+    .file-grid-icon--service {
+        color: hsl(var(--primary) / 0.85);
+    }
+
+    .file-grid-icon--image,
+    .file-grid-icon--code,
+    .file-grid-icon--sheet,
+    .file-grid-icon--audio,
+    .file-grid-icon--video,
+    .file-grid-icon--archive,
+    .file-grid-icon--pdf,
+    .file-grid-icon--generic {
+        color: hsl(var(--muted-foreground));
+    }
+
+    /* EMPTY STATE */
+    .drive-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 260px;
+        margin: 48px auto;
+        max-width: 360px;
+        padding: 32px 24px;
+        border: 1px dashed hsl(var(--border));
+        background: hsl(var(--foreground) / 0.014);
+    }
+
+    .drive-empty-icon {
+        color: hsl(var(--muted-foreground) / 0.35);
+    }
+
+    .drive-empty-label {
+        font-weight: 900;
+        text-transform: uppercase;
+        color: hsl(var(--muted-foreground) / 0.7);
+        opacity: 0.7;
+    }
+
+    /* BADGES */
+    .badge-status {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        font-weight: 600;
+        line-height: 1;
+        letter-spacing: 0;
+        text-transform: none;
+        border: 1px solid hsl(var(--border));
+    }
+
+    .badge-status--active {
+        background: hsl(var(--primary) / 0.1);
+        color: hsl(var(--primary));
+        border: 1px solid hsl(var(--primary) / 0.22);
+    }
+
+    /* ALERTS */
+    .security-alert {
+        padding: 14px 16px;
+        border-left: 3px solid hsl(var(--primary));
+        border-radius: 0 !important;
+        background: hsl(var(--primary) / 0.07);
+        display: flex;
+        gap: 1rem;
+        font-size: 13px;
+        font-weight: 500;
+        line-height: 1.55;
+    }
+
+    /* INDUSTRIAL PANEL */
+
+    /* SELECTION / ACTION BAR */
+    .drive-selection-bar {
+        position: fixed;
+        bottom: 2rem;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 1.5rem;
+        padding: 0.75rem 1.5rem;
+        background-color: hsl(var(--card));
+        border: 1px solid hsl(var(--primary));
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+        z-index: 100;
+    }
+
+    /* NOTIFICATIONS */
+    .notification-container {
+        position: fixed;
+        bottom: 1.5rem;
+        right: 1.5rem;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        max-width: 24rem;
+        width: 100%;
+    }
+
+    .notification-item {
+        border-left: 4px solid;
+        border-right: 1px solid hsl(var(--border));
+        border-top: 1px solid hsl(var(--border));
+        border-bottom: 1px solid hsl(var(--border));
+        background-color: hsl(var(--card));
+        padding: 1rem;
+        animation: slideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        box-shadow:
+            0 20px 25px -5px rgba(0, 0, 0, 0.1),
+            0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        border: 1px solid hsl(var(--border) / 0.72);
+        box-shadow: var(--shadow-lg);
+        backdrop-filter: blur(18px);
+    }
+
+    .notification-scope {
+        font-size: 9px;
+        padding: 0.125rem 0.375rem;
+        background-color: hsl(var(--primary) / 0.1);
+        color: hsl(var(--primary));
+        font-family: monospace;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    /* PAGE HEADERS */
+    .page-header {
+        display: flex;
+        flex-direction: column;
+        max-width: 1200px;
+    }
+
+    .page-title {
+        color: hsl(var(--foreground));
+    }
+
+    .page-header-line {
+        width: 100%;
+        margin-left: 1.5rem;
+        display: none;
+    }
+
+    @media (min-width: 768px) {
+        .page-header-line {
+            display: block;
+        }
+    }
+}

@@ -4,7 +4,7 @@
 
 ---
 
-##  Utility of the Software
+## Utility of the Software
 
 In industrial automation environments (such as water treatment, power, and manufacturing plants), interacting with Siemens S7 PLCs typically requires specialized proprietary software (e.g., TIA Portal) or custom C++/C# compilation.
 
@@ -12,7 +12,7 @@ In industrial automation environments (such as water treatment, power, and manuf
 
 ---
 
-###  Use Case 1 — Interactive REPL Commissioning
+### Use Case 1 — Interactive REPL Commissioning
 
 Connect directly to a live PLC in seconds. Inspect registers, force outputs, and diagnose network connectivity without a TIA Portal installation.
 
@@ -32,7 +32,7 @@ s7> plc.diagnostics().cpuInfo()
 
 ---
 
-###  Use Case 2 — Soft PLC / Hardware-in-the-Loop
+### Use Case 2 — Soft PLC / Hardware-in-the-Loop
 
 Spin up a virtual S7-300 on port 102. SCADA systems and HMI panels connect to `s7shell` exactly as they would to a real PLC. Drive the simulation from a script.
 
@@ -63,7 +63,7 @@ Run headless: `s7shell hil_tank.as`
 
 ---
 
-###  Use Case 3 — Symbolic Tag Table Control
+### Use Case 3 — Symbolic Tag Table Control
 
 Load a JSON tag registry to interact with Inputs (`PE`), Outputs (`PA`), and Memory Markers (`MK`) by name — no manual address arithmetic.
 
@@ -86,7 +86,7 @@ print("Valve 1 forced open.");
 
 ---
 
-###  Use Case 4 — PDU-Optimised Batch Extraction
+### Use Case 4 — PDU-Optimised Batch Extraction
 
 Read dozens of scattered fields in the fewest possible PDU round-trips using `S7BatchEngine`. Siemens limits a single PDU to 19 items; `S7BatchEngine` chunks automatically.
 
@@ -111,7 +111,7 @@ print(db1.toJson());
 
 ---
 
-###  Use Case 5 — Diagnostic Inspection
+### Use Case 5 — Diagnostic Inspection
 
 Audit a PLC without opening TIA Portal. Dump the diagnostic buffer, inspect SZL tables, and verify CPU state.
 
@@ -132,7 +132,7 @@ print(plc.diagnostics().szl(0x0131, 0x0001));
 
 ---
 
-###  Use Case 6 — Headless Live Recording
+### Use Case 6 — Headless Live Recording
 
 Continuously record all DB changes to a compressed WAL archive. Only changed byte regions are written — idle polls produce zero bytes.
 
@@ -166,7 +166,7 @@ print("Archive written to " + pers.outDir());
 
 ---
 
-###  Use Case 7 — GatewaySync Live State Introspection
+### Use Case 7 — GatewaySync Live State Introspection
 
 Attach to a running SGRN Gateway over WebSocket. The local `PlcRuntime` stays in sync with the live plant state — no additional load on the PLC network.
 
@@ -188,7 +188,7 @@ while (true) {
 
 ---
 
-###  Use Case 8 — Remote Write Injection via Gateway
+### Use Case 8 — Remote Write Injection via Gateway
 
 Read live state from the Gateway, apply a correction, and publish the delta
 back through the same WebSocket session to safely write to the physical PLC.
@@ -212,7 +212,7 @@ rt.set(1, "motor.setpoint", "" + (current_sp + 50.0));
 
 ---
 
-###  Use Case 9 — Watchdog / Automated Plant Response
+### Use Case 9 — Watchdog / Automated Plant Response
 
 Monitor live telemetry and trigger protective actions if a threshold is breached. No polling load on the PLC — the Gateway pushes changes.
 
@@ -248,7 +248,7 @@ while (true) {
 
 ---
 
-###  Use Case 10 — Edge Proxy: legacy PLC → Hub PLC
+### Use Case 10 — Edge Proxy: legacy PLC → Hub PLC
 
 Run `s7shell` on an edge device with no cloud connectivity. Poll a legacy S7-300 and forward deltas to a hub S7-400 without storing anything centrally.
 
@@ -268,7 +268,7 @@ while (true) { sleep(10000); }
 
 ---
 
-##  Integration Runtime CLI
+## Integration Runtime CLI
 
 `s7shell` serves as a **lightweight industrial integration runtime** (similar to Bun or Node.js, but tailored for PLC & Gateway automation glue code).
 
@@ -287,7 +287,7 @@ s7shell emit-as ./generated/
 ### CLI Reference
 
 | Command / Flag            | Example                        | Description                                               |
-| ---------------------------| --------------------------------| -----------------------------------------------------------|
+| ------------------------- | ------------------------------ | --------------------------------------------------------- |
 | `s7shell [script.as]`     | `s7shell main.as`              | Execute an AngelScript integration script directly        |
 | `s7shell run [script.as]` | `s7shell run main.as`          | Explicit execution subcommand (Bun-like)                  |
 | `s7shell emit-as [dir]`   | `s7shell emit-as ./generated/` | Emit `s7shell_api.as` header for Neovim / VS Code linters |
@@ -296,7 +296,7 @@ s7shell emit-as ./generated/
 
 ---
 
-##  Architecture
+## Architecture
 
 ```mermaid
 graph TD
@@ -314,26 +314,32 @@ graph TD
 ```
 
 ### 1. Schema-Driven Virtual Machine (`SchemaVM`)
+
 Exposes complex S7 Data Blocks (DBs) and User-Defined Types (UDTs) directly to the scripting engine.
-* **Metadata Parsing**: Parses `.scl` or `.json` schema definitions.
-* **Dynamic RefTypes**: Registers DB structures as native AngelScript reference types.
-* **Virtual Property Accessors**: Automatically generates getters and setters for all fields (supporting nested structures, arrays, and primitive types). Getters/setters perform on-the-fly network-buffer decoding/encoding with correct endianness via `s7codec`.
+
+- **Metadata Parsing**: Parses `.scl` or `.json` schema definitions.
+- **Dynamic RefTypes**: Registers DB structures as native AngelScript reference types.
+- **Virtual Property Accessors**: Automatically generates getters and setters for all fields (supporting nested structures, arrays, and primitive types). Getters/setters perform on-the-fly network-buffer decoding/encoding with correct endianness via `s7codec`.
 
 ### 2. PDU-Aware Batch Engine (`S7BatchEngine`)
-Siemens S7 communication relies on PDUs (Protocol Data Units), which impose limits on the size and number of variables in a single network request. 
-* **Transparent Chunking**: `S7BatchEngine` transparently aggregates multiple reads or writes and chunks them into optimal 19-item transactions, protecting the user from PDU boundary concerns.
+
+Siemens S7 communication relies on PDUs (Protocol Data Units), which impose limits on the size and number of variables in a single network request.
+
+- **Transparent Chunking**: `S7BatchEngine` transparently aggregates multiple reads or writes and chunks them into optimal 19-item transactions, protecting the user from PDU boundary concerns.
 
 ### 3. Symbolic Tag Table (`PlcTagTable`)
+
 Manages sparse symbolic tags (inputs, outputs, memory markers, DB tags) loaded from JSON registries, aligning symbolic names to raw PLC addresses (`DB`, `MK`, `PA`, `PE`).
 
 ### 4. Runtime-Centered Bindings (`PlcRuntime`)
+
 `PlcRuntime` is the single owner of schema, memory, tag tables, DB providers and dirty-region state. Every protocol endpoint attaches to a runtime in one of two roles:
 
-* **Client binding:** initiates a connection to a target while using the runtime as local state, e.g. `S7Client(ip, rack, slot, port, rt)`.
-* **Server binding:** listens for external clients and exposes a local runtime, e.g. `S7Server(rt)`.
-* **Persistence binding:** attaches `PersistenceBridge` to record dirty regions via `TelemetryBroker` to WAL.
-* **HTTP binding:** exposes `PlcMemory` and schema as a REST API via the gateway's `HttpAdapter`.
-* **WebSocket binding:** streams live delta frames to WebSocket clients via the gateway's `WebSocketAdapter` subscribing to `TelemetryBroker`.
+- **Client binding:** initiates a connection to a target while using the runtime as local state, e.g. `S7Client(ip, rack, slot, port, rt)`.
+- **Server binding:** listens for external clients and exposes a local runtime, e.g. `S7Server(rt)`.
+- **Persistence binding:** attaches `PersistenceBridge` to record dirty regions via `TelemetryBroker` to WAL.
+- **HTTP binding:** exposes `PlcMemory` and schema as a REST API via the gateway's `HttpAdapter`.
+- **WebSocket binding:** streams live delta frames to WebSocket clients via the gateway's `WebSocketAdapter` subscribing to `TelemetryBroker`.
 
 ```
 Script write / db.get() / SimEngine
@@ -349,26 +355,31 @@ Script write / db.get() / SimEngine
 
 ---
 
-##  Scripting & REPL API
+## Scripting & REPL API
 
 Start the REPL using:
+
 ```bash
 $ ./s7shell
 ```
-*Tip: Entering a bare object expression in the REPL prints it automatically. Primitives (int, float, bool) print as-is.*
 
-###  Siemens Types
+_Tip: Entering a bare object expression in the REPL prints it automatically. Primitives (int, float, bool) print as-is._
+
+### Siemens Types
+
 Native representation for all standard types:
 `BOOL`, `SINT`, `USINT`, `BYTE`, `INT`, `UINT`, `WORD`, `DINT`, `UDINT`, `DWORD`, `LINT`, `ULINT`, `LWORD`, `REAL`, `LREAL`, `TIME` (ms), `LTIME` (ns), `DATE` (days), `TOD` (ms), `LTOD` (ns).
 
-###  Global Utilities
+### Global Utilities
+
 ```as
 sleep(500)            // block script thread for N milliseconds (wall-clock, real wait)
 int64 t = now_ms()    // wall-clock time in milliseconds since epoch
 string env = getEnv("PLC_IP")   // read an environment variable
 ```
 
-###  Virtual PLC Runtime (`PlcRuntime`)
+### Virtual PLC Runtime (`PlcRuntime`)
+
 ```as
 PlcRuntime@ rt = PlcRuntime()                       // empty, load schema later
 PlcRuntime@ rt = PlcRuntime("plant.scl")            // load SCL schema on creation
@@ -385,7 +396,8 @@ rt.UDTS()                               // Introspect loaded UDT definitions (ri
 
 > **Note**: `rt.loadSclSchema(path)` auto-injects `DataBlock@` globals; the constructor form `PlcRuntime("plant.scl")` does not (call `loadSclSchema` explicitly afterward if you want globals).
 
-###  Persistence & WAL Recording (`Persistence`)
+### Persistence & WAL Recording (`Persistence`)
+
 Bridges `PlcRuntime` dirty-region observers into the canonical `TelemetryBroker` → `PersistenceService` pipeline, producing WAL archives **identical** in format to those recorded from a real S7 adapter.
 
 #### How it works internally
@@ -393,6 +405,7 @@ Bridges `PlcRuntime` dirty-region observers into the canonical `TelemetryBroker`
 Every time a Data Block region changes — whether from a **field write in a script**, a `SimEngine` tick, or a **live `db.get()`** call that fetches new bytes from a physical PLC — `PlcRuntime` fires a dirty-region notification. `PersistenceBridge` subscribes to those notifications, serialises the changed byte range as a `TelemetryEvent` (DeltaSnapshot), and publishes it to `TelemetryBroker`. `PersistenceService` consumes these events and writes them into a compressed WAL archive (`.bin.zst` or `.jsonl.zst`) under `<out_dir>/unsynced/`.
 
 **What triggers a dirty event:**
+
 - **Script write** (`db.put(field, val)` / typed property assignment): fires immediately on the changed bytes.
 - **`db.get()` with a runtime attached**: after fetching fresh bytes from the PLC, the new snapshot is diffed byte-by-byte against the previous one; only the changed regions are fired as dirty events.
 - **`SimEngine.run()`**: each tick applies state mutations that internally call write paths.
@@ -428,7 +441,7 @@ db.get() from a live PLC
 #### API reference
 
 | Method      | Signature                         | Description                                                                  |
-| -------------| -----------------------------------| ------------------------------------------------------------------------------|
+| ----------- | --------------------------------- | ---------------------------------------------------------------------------- |
 | Constructor | `Persistence(rt)`                 | Attach to a runtime; output defaults to `"."`                                |
 | Constructor | `Persistence(rt, outDir)`         | Attach and set output directory immediately                                  |
 | `configure` | `configure(outDir)`               | Set output dir; format & mode default to `binary` / `changes_with_timestamp` |
@@ -444,7 +457,7 @@ db.get() from a live PLC
 **Mode values**:
 
 | Mode                       | Description                                                           |
-| ----------------------------| -----------------------------------------------------------------------|
+| -------------------------- | --------------------------------------------------------------------- |
 | `"changes_with_timestamp"` | Records only changed byte regions + timestamp (default, most compact) |
 | `"full_tree"`              | Writes the full DB snapshot on every tick                             |
 | `"full_tree_with_anchor"`  | `changes_with_timestamp` + periodic full-tree anchor frames           |
@@ -586,8 +599,9 @@ pers.stop();    // finalise .bin.zst archive
 ```
 
 #### `SimParams` properties
+
 | Property      | Type     | Description                                                                                |
-| ---------------| ----------| --------------------------------------------------------------------------------------------|
+| ------------- | -------- | ------------------------------------------------------------------------------------------ |
 | `seed`        | `uint64` | PRNG seed. Equal seeds produce identical output.                                           |
 | `duration_s`  | `uint32` | Simulated duration in seconds.                                                             |
 | `timestep_ms` | `uint32` | Clock advancement per tick in ms (default `100`).                                          |
@@ -595,8 +609,9 @@ pers.stop();    // finalise .bin.zst archive
 | `fault`       | `string` | Named fault scenario (e.g. `"bearing_degradation"`, `"pump_cavitation"`). Empty ⟹ nominal. |
 
 #### `SimEngine` methods
+
 | Method                  | Description                                                        |
-| -------------------------| --------------------------------------------------------------------|
+| ----------------------- | ------------------------------------------------------------------ |
 | `SimEngine(rt, params)` | Construct bound to a `PlcRuntime` and a `SimParams`.               |
 | `run()`                 | Execute simulation loop until `duration_s` is exhausted. Blocking. |
 
@@ -636,7 +651,7 @@ through the existing JSON delta stream and binary DB subscriptions.
 
 ---
 
-###  WAL Archive Replayer (`WalReplayer`)
+### WAL Archive Replayer (`WalReplayer`)
 
 Rate-controlled playback of binary (`.bin.zst`) or JSONL (`.jsonl.zst`) WAL archives into a live `PlcRuntime` digital twin. Useful for replaying previously recorded or generated datasets through additional processing pipelines.
 
@@ -654,21 +669,25 @@ replayer.run();   // frames are applied back into rt
 ```
 
 #### `WalReplayer` methods
-| Method | Description |
-|---|---|
-| `WalReplayer(path)` | Open a `.bin.zst` or `.jsonl.zst` archive. |
-| `speed(multiplier)` | Set playback rate (1.0 = realtime, 0.0 = no throttle). |
-| `run()` | Start playback. Blocking until archive is exhausted. |
 
-###  Virtual PLC Server (`S7Server`)
+| Method              | Description                                            |
+| ------------------- | ------------------------------------------------------ |
+| `WalReplayer(path)` | Open a `.bin.zst` or `.jsonl.zst` archive.             |
+| `speed(multiplier)` | Set playback rate (1.0 = realtime, 0.0 = no throttle). |
+| `run()`             | Start playback. Blocking until archive is exhausted.   |
+
+### Virtual PLC Server (`S7Server`)
+
 Provides a Soft PLC behavior serving the shared `PlcRuntime` to incoming connections.
+
 ```as
 S7Server@ srv = S7Server(rt, "0.0.0.0")        // bind runtime to S7 server
 srv.start() / srv.stop()                       // lifecycle
 srv.isRunning() / srv.clientsCount() / srv.getCpuStatus()
 ```
 
-###  PLC Connection (`S7Client`)
+### PLC Connection (`S7Client`)
+
 ```as
 S7Client@ client = S7Client(ip, rack, slot)
 S7Client@ client = S7Client(ip, rack, slot, port, rt)  // attach to shared runtime
@@ -682,8 +701,10 @@ TagTable@ tags = client.tags()
 S7Connection@ conn = client.connection()   // low-level connection tuning
 ```
 
-###  Typed Property Accessors (Soft PLC & Field PLC)
+### Typed Property Accessors (Soft PLC & Field PLC)
+
 After an explicit call to `<var>.loadSclSchema(path)`, all DBs become available as **typed properties** on the `PlcRuntime` or `S7Client` object (matching schema):
+
 ```as
 rt.PrimaryCoolant.get("temp_pv")
 client.PrimaryCoolant.put("on", "true")
@@ -696,7 +717,8 @@ s7> client.PrimaryCoolant
 }
 ```
 
-###  DataBlock API
+### DataBlock API
+
 ```as
 db.get() / db.put()                       // fetch/flush the whole DB
 db.get(path) / db.put(path, val)          // single field, immediate read/write
@@ -706,7 +728,8 @@ db.path("field.path")  → S7PathBatch@     // fluent access
 db.toJson() / db.diff() / db.number() / db.name() / db.print()
 ```
 
-###  FieldProxy API (field-level get/put + structured assignment)
+### FieldProxy API (field-level get/put + structured assignment)
+
 ```as
 FieldProxy@ f = db["axis"];
 f.get() / f.put(val)                      // network fetch / shadow + trip, at f's path
@@ -723,6 +746,7 @@ db["axis"] = ax;                          // struct dicts merge: missing members
 array<dictionary@>@ rows = {{{"pos", 3.0}}, {{"pos", 4.0}}};
 db["axes"] = rows;                        // arrays of UDTs; nesting recurses
 ```
+
 Assignment encodes straight from script objects to field bytes (no JSON
 round-trip). Use a typed temporary for nested literals — inline
 `{{...}, {...}}` is ambiguous to the AngelScript compiler:
@@ -730,7 +754,8 @@ round-trip). Use a typed temporary for nested literals — inline
 Struct dicts merge over existing bytes (partial update); fixed-size arrays
 require exactly `count` elements — assign full-length values (zeros to clear).
 
-###  Endianness scoping
+### Endianness scoping
+
 Endianness is file/block scoped, never per-field: an optional top-level
 `#BIG_ENDIAN` / `#LITTLE_ENDIAN` sets the file default, a directive after
 `DATA_BLOCK` / `TYPE` overrides it for that scope, and UDT members inherit
@@ -742,7 +767,8 @@ including DTL (year + nanosecond) and LDT/LDTL. DateTime is fixed BCD byte
 order and needs no swap. Caveats: string headers are not swapped at the S7
 boundary; Modbus register mapping assumes big-endian arena bytes.
 
-###  S7PathBatch (Fluent Batched Access)
+### S7PathBatch (Fluent Batched Access)
+
 ```as
 S7PathBatch@ b = db.path("field.path");
 b.put()                       // flush staged writes to the PLC
@@ -750,7 +776,8 @@ b.get()                       // refresh from the PLC
 b.read()                      // current value → string
 ```
 
-###  Diagnostics & Memory
+### Diagnostics & Memory
+
 ```as
 S7Diagnostics@ d = client.diagnostics();
 d.cpuInfo() / d.status() / d.diagnosticBuffer(10) / d.listBlocks()
@@ -764,7 +791,7 @@ m.readDB(...) / m.readMB(...) / m.readEB(...) / m.readAB(...)
 
 ---
 
-###  IDE & Tooling Support (`sclc emit-angelscript`)
+### IDE & Tooling Support (`sclc emit-angelscript`)
 
 Generate declaration-only `.as` header files for code completion and linter integration in editors:
 
@@ -786,10 +813,12 @@ sclc as plant.scl -o generated/ --include-predefined  # → as.predefined
 
 ---
 
-##  Embedded Proxy & Gateway Bindings
+## Embedded Proxy & Gateway Bindings
 
 ### Proxy (`S7ProxySession`)
+
 Mirror DBs from a field PLC to a hub PLC via periodic polling (suppresses redundant traffic through dirty-change detection).
+
 ```as
 S7ProxySession@ proxy = S7ProxySession(srcClient, hubClient);
 proxy.addMapping(1, 1, 100, 512); // srcDB=1 → dstDB=1, 100ms interval, 512 bytes
@@ -797,10 +826,12 @@ proxy.start();
 ```
 
 ### Gateway Sync (`GatewaySync`)
+
 Attaches a runtime to an SGRN Gateway. Inbound deltas and outbound writes use
 the same WebSocket session. `useBinary(true)` selects compact versioned
 RuntimeSync frames; the default JSON command is easier to inspect and remains
 compatible with script/debug tooling.
+
 ```as
 PlcRuntime@ rt = PlcRuntime("schema.scl");
 GatewaySync@ sync = GatewaySync(rt);
@@ -811,6 +842,7 @@ sync.connect("ws://192.168.1.1:8080/ws");
 ```
 
 ### HTTP REST Server (`HttpServer`)
+
 Reuses the gateway's `HttpAdapter` directly to expose live `PlcRuntime` memory and SCL schema over HTTP REST.
 
 ```as
@@ -829,8 +861,9 @@ http.stop();
 ```
 
 #### `HttpServer` Methods
+
 | Method       | Signature                | Description                                    |
-| --------------| --------------------------| ------------------------------------------------|
+| ------------ | ------------------------ | ---------------------------------------------- |
 | Constructor  | `HttpServer(rt)`         | Attach to a `PlcRuntime`                       |
 | `start`      | `start(ip, port = 8080)` | Start listening for REST requests              |
 | `stop`       | `stop()`                 | Stop the server                                |
@@ -860,14 +893,15 @@ gateway.start("0.0.0.0", 8080);
 ```
 
 #### `Gateway` Methods
+
 | Method       | Signature                | Description                                      |
-| -------------| --------------------------| -------------------------------------------------|
-| Constructor  | `Gateway(rt)`             | Attach to a `PlcRuntime`                         |
-| `start`      | `start(ip, port = 8080)`  | Start HTTP and WebSocket on one listener         |
-| `stop`       | `stop()`                  | Stop the shared listener                         |
-| `isRunning`  | `isRunning() -> bool`     | Returns `true` if the gateway is active          |
-| `broadcast`  | `broadcast(jsonStr)`      | Push an arbitrary JSON message to WS clients     |
-| `loadPolicy` | `loadPolicy(path)`        | Load a gateway-compatible security policy script |
+| ------------ | ------------------------ | ------------------------------------------------ |
+| Constructor  | `Gateway(rt)`            | Attach to a `PlcRuntime`                         |
+| `start`      | `start(ip, port = 8080)` | Start HTTP and WebSocket on one listener         |
+| `stop`       | `stop()`                 | Stop the shared listener                         |
+| `isRunning`  | `isRunning() -> bool`    | Returns `true` if the gateway is active          |
+| `broadcast`  | `broadcast(jsonStr)`     | Push an arbitrary JSON message to WS clients     |
+| `loadPolicy` | `loadPolicy(path)`       | Load a gateway-compatible security policy script |
 
 `HttpServer` and `WebSocketServer` remain available when a script needs an
 individual adapter, but new scripts should generally use `Gateway`.
@@ -875,6 +909,7 @@ individual adapter, but new scripts should generally use `Gateway`.
 ---
 
 ### WebSocket Live Stream Server (`WebSocketServer`)
+
 Reuses the gateway's `WebSocketAdapter` directly. Subscribes to `TelemetryBroker::instance()` so every dirty region (script write, `SimEngine` tick, or live `db.get()` diff) automatically broadcasts as JSON delta frames to all connected WebSocket clients.
 
 ```as
@@ -892,8 +927,9 @@ ws.stop();
 ```
 
 #### `WebSocketServer` Methods
+
 | Method       | Signature                | Description                                             |
-| --------------| --------------------------| ---------------------------------------------------------|
+| ------------ | ------------------------ | ------------------------------------------------------- |
 | Constructor  | `WebSocketServer(rt)`    | Attach to a `PlcRuntime`                                |
 | `start`      | `start(ip, port = 9001)` | Start WebSocket server and subscribe to TelemetryBroker |
 | `stop`       | `stop()`                 | Stop the WebSocket server                               |
@@ -903,7 +939,8 @@ ws.stop();
 
 ---
 
-###  Standalone Micro-Gateway Example
+### Standalone Micro-Gateway Example
+
 Combine `S7Server`, the unified `Gateway`, and `Persistence` in a single script to turn `s7shell` into a complete, standalone gateway environment:
 
 ```as
@@ -924,7 +961,8 @@ pers.start();
 
 print("[MicroGateway] Running S7:102, HTTP:8080, WS:8080/ws");
 ```
-```
+
+````
 
 ---
 
@@ -939,5 +977,6 @@ S7Client@ plc = S7Client("192.168.1.10", 0, 1, 102, rt);
 void cycle() {
     // some simulation logic
 }
-```
+````
+
 All variables and functions defined here are fully available in the REPL session.

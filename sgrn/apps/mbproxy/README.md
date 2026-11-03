@@ -20,20 +20,32 @@ Usage: mbproxy <config.json>
 
 ```json
 {
-    "hub_ip": "127.0.0.1",
-    "hub_port": 502,
-    "verbose": false,
-    "devices": [
+  "hub_ip": "127.0.0.1",
+  "hub_port": 502,
+  "verbose": false,
+  "devices": [
+    {
+      "name": "plc1",
+      "ip": "192.168.0.10",
+      "port": 502,
+      "mappings": [
         {
-            "name": "plc1",
-            "ip": "192.168.0.10",
-            "port": 502,
-            "mappings": [
-                { "type": "holding", "src_address": 0, "dst_address": 100, "count": 10, "interval_ms": 100 },
-                { "type": "coil", "src_address": 0, "dst_address": 0, "count": 8, "interval_ms": 250 }
-            ]
+          "type": "holding",
+          "src_address": 0,
+          "dst_address": 100,
+          "count": 10,
+          "interval_ms": 100
+        },
+        {
+          "type": "coil",
+          "src_address": 0,
+          "dst_address": 0,
+          "count": 8,
+          "interval_ms": 250
         }
-    ]
+      ]
+    }
+  ]
 }
 ```
 

@@ -8,6 +8,10 @@ import { ErrorScope } from "@sgrn/types";
 
 export type StorageScope = "personal" | "automated_services" | "users" | "domains";
 
+/** Columns the backend whitelists for ordering the drive listing. */
+export type DriveSortKey = "name" | "size" | "modified";
+export type DriveSortOrder = "asc" | "desc";
+
 /**
  * List directory contents at the given virtual path under a specific scope.
  *
@@ -24,6 +28,8 @@ export async function listDirectory(
     t_page: number = 1,
     t_limit: number = 20,
     t_search: string = "",
+    t_sort: DriveSortKey = "name",
+    t_order: DriveSortOrder = "asc",
 ): Promise<SgrnResult<DirectoryListing>> {
     try {
         const params = new URLSearchParams({
@@ -32,6 +38,8 @@ export async function listDirectory(
             page: t_page.toString(),
             limit: t_limit.toString(),
             search: t_search,
+            sort: t_sort,
+            order: t_order,
         });
         const res = await authenticatedFetch(`${StorageBackendApiEndpoints.DRIVE_LIST}?${params.toString()}`);
         const data = await res.json();

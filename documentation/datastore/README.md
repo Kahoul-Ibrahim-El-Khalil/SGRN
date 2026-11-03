@@ -19,7 +19,7 @@ There are two primary session paradigms, strictly gated by bespoke, natively-dev
 Session propagation:
 
 - Strictly uses standard `Authorization: Bearer <jwt>`, ensuring stateless validation scaled securely across node distributions.
-- *Some legacy OT clients may fall back to the `SGRN-TOKEN` header, but modern tooling heavily prefers `Authorization`.*
+- _Some legacy OT clients may fall back to the `SGRN-TOKEN` header, but modern tooling heavily prefers `Authorization`._
 
 ## Development
 

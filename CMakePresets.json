@@ -186,10 +186,7 @@
     {
       "name": "linux-static-release",
       "displayName": "linux (Static Release)",
-      "inherits": [
-        "linux-static",
-        "clang-diagnostics"
-      ],
+      "inherits": ["linux-static", "clang-diagnostics"],
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
@@ -370,23 +367,17 @@
     {
       "name": "linux-deps",
       "configurePreset": "linux-deps",
-      "targets": [
-        "install"
-      ]
+      "targets": ["install"]
     },
     {
       "name": "win64-deps",
       "configurePreset": "win64-deps",
-      "targets": [
-        "install"
-      ]
+      "targets": ["install"]
     },
     {
       "name": "linux-arm64-deps",
       "configurePreset": "linux-arm64-deps",
-      "targets": [
-        "install"
-      ]
+      "targets": ["install"]
     },
     {
       "name": "linux",
@@ -427,30 +418,22 @@
     {
       "name": "linux-deps-static",
       "configurePreset": "linux-deps-static",
-      "targets": [
-        "install"
-      ]
+      "targets": ["install"]
     },
     {
       "name": "win64-deps-static",
       "configurePreset": "win64-deps-static",
-      "targets": [
-        "install"
-      ]
+      "targets": ["install"]
     },
     {
       "name": "linux-arm64-deps-static",
       "configurePreset": "linux-arm64-deps-static",
-      "targets": [
-        "install"
-      ]
+      "targets": ["install"]
     },
     {
       "name": "win64-native-deps",
       "configurePreset": "win64-native-deps",
-      "targets": [
-        "install"
-      ]
+      "targets": ["install"]
     },
     {
       "name": "win64-native-static",

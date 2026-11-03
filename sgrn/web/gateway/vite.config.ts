@@ -78,17 +78,19 @@ export default defineConfig({
     format: "es",
   },
   // Proxy API calls to the running gateway during `bun run dev`
+  // dev.ts launches the gateway on port 8001 (dev port, separate from
+  // the production 8000 instance).
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://localhost:8000",
-      "/data": "http://localhost:8000",
-      "/registry": "http://localhost:8000",
-      "/connections": "http://localhost:8000",
-      "/db": "http://localhost:8000",
-      "/endpoints": "http://localhost:8000",
-      "/replay": "http://localhost:8000",
-      "/ws": { target: "ws://localhost:8000", ws: true },
+      "/api": "http://localhost:8001",
+      "/data": "http://localhost:8001",
+      "/registry": "http://localhost:8001",
+      "/connections": "http://localhost:8001",
+      "/db": "http://localhost:8001",
+      "/endpoints": "http://localhost:8001",
+      "/replay": "http://localhost:8001",
+      "/ws": { target: "ws://localhost:8001", ws: true },
     },
   },
 });

@@ -40,14 +40,14 @@ export interface PurgeAuditLogsResult {
     message: string;
 }
 
-export async function fetchAuditLogs(params?: FetchAuditLogsParams): Promise<SgrnResult<AuditLogsResult>> {
+export async function fetchAuditLogs(t_params?: FetchAuditLogsParams): Promise<SgrnResult<AuditLogsResult>> {
     try {
         const query = new URLSearchParams();
-        if (params?.actor_type) query.set("actor_type", params.actor_type);
-        if (params?.action) query.set("action", params.action);
-        if (params?.status) query.set("status", params.status);
-        if (params?.limit) query.set("limit", String(params.limit));
-        if (params?.offset) query.set("offset", String(params.offset));
+        if (t_params?.actor_type) query.set("actor_type", t_params.actor_type);
+        if (t_params?.action) query.set("action", t_params.action);
+        if (t_params?.status) query.set("status", t_params.status);
+        if (t_params?.limit) query.set("limit", String(t_params.limit));
+        if (t_params?.offset) query.set("offset", String(t_params.offset));
 
         const url = `${AdminBackendApiEndpoints.AUDIT_LOGS}?${query.toString()}`;
         const res = await authenticatedFetch(url);
@@ -60,9 +60,9 @@ export async function fetchAuditLogs(params?: FetchAuditLogsParams): Promise<Sgr
     }
 }
 
-export async function purgeAuditLogs(older_than_days: number = 30): Promise<SgrnResult<PurgeAuditLogsResult>> {
+export async function purgeAuditLogs(t_older_than_days: number = 30): Promise<SgrnResult<PurgeAuditLogsResult>> {
     try {
-        const url = `${AdminBackendApiEndpoints.AUDIT_LOGS}?older_than_days=${older_than_days}`;
+        const url: string = `${AdminBackendApiEndpoints.AUDIT_LOGS}?older_than_days=${t_older_than_days}`;
         const res = await authenticatedFetch(url, { method: "DELETE" });
         return await processResponse<PurgeAuditLogsResult>(res);
     } catch (e) {

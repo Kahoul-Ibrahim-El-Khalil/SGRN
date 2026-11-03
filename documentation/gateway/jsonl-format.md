@@ -16,13 +16,13 @@ high-density sibling and `persistence.md` for service configuration.
 
 A healthy archive reads top to bottom as:
 
-| # | `type`       | Written by | Content |
-|---|--------------|------------|---------|
-| 1 | `schema`     | `openNewArchive()` | `{"schema": <PlcSchemaStore JSON> \| null}` (null skips recovery validation) |
-| 2 | `dictionary` | `openNewArchive()` | `{"leaves": [{"id": <uint>, "path": "DbName.field"}]}` — the LeafDictionary |
-| 3 | `manifest`   | `openNewArchive()` | `{"start_time": <iso8601>, "mode", "namespaces"}` |
-| 4..N-1 | `anchor` / `delta` | see below | state records with `ts` (ms) |
-| N | `footer`     | `finalizeArchive()` | `{"last_anchor_line": <1-based line index>, "record_count": N}` |
+| #      | `type`             | Written by          | Content                                                                      |
+| ------ | ------------------ | ------------------- | ---------------------------------------------------------------------------- |
+| 1      | `schema`           | `openNewArchive()`  | `{"schema": <PlcSchemaStore JSON> \| null}` (null skips recovery validation) |
+| 2      | `dictionary`       | `openNewArchive()`  | `{"leaves": [{"id": <uint>, "path": "DbName.field"}]}` — the LeafDictionary  |
+| 3      | `manifest`         | `openNewArchive()`  | `{"start_time": <iso8601>, "mode", "namespaces"}`                            |
+| 4..N-1 | `anchor` / `delta` | see below           | state records with `ts` (ms)                                                 |
+| N      | `footer`           | `finalizeArchive()` | `{"last_anchor_line": <1-based line index>, "record_count": N}`              |
 
 `RecoveryEngine` streams the file twice: pass 1 learns `last_anchor_line`
 from the footer (falling back to a full scan when the footer is missing, e.g.
@@ -73,12 +73,12 @@ resolvable) or already-dotted paths (used verbatim).
 
 ## Tooling
 
-| Tool | Direction |
-|------|-----------|
-| `sgrn_dataset` (default mode) | `.jsonl.zst` → CSV + manifest (dictionary-resolved, state carried forward per timestamp) |
-| `sgrn_replay` | `.jsonl.zst` → live `PlcMemory`: leaves resolve via the dictionary line to schema fields, encode with `encodeFieldAt`, and commit per WAL line as one batched `writeDbMemory` (+ `writeBit` for packed single-bit bools) |
-| `tools/wal_dump` | human-readable dump (`expandRecordKeys` for ID→path) |
-| `RecoveryEngine` | boot restore from newest schema-matching archive |
+| Tool                          | Direction                                                                                                                                                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sgrn_dataset` (default mode) | `.jsonl.zst` → CSV + manifest (dictionary-resolved, state carried forward per timestamp)                                                                                                                                 |
+| `sgrn_replay`                 | `.jsonl.zst` → live `PlcMemory`: leaves resolve via the dictionary line to schema fields, encode with `encodeFieldAt`, and commit per WAL line as one batched `writeDbMemory` (+ `writeBit` for packed single-bit bools) |
+| `tools/wal_dump`              | human-readable dump (`expandRecordKeys` for ID→path)                                                                                                                                                                     |
+| `RecoveryEngine`              | boot restore from newest schema-matching archive                                                                                                                                                                         |
 
 ## Inspecting a file
 
@@ -95,7 +95,7 @@ first file's schema/manifest win (schema drift warns), changed `dictionary`
 lines stay inline so IDs keep resolving, every footer is dropped and one
 recomputed footer (`last_anchor_line`, `record_count`) closes the file.
 Inputs should be non-overlapping finalized archives, processed in filename
-order. Merging *into* `.bin.zst` accepts binary inputs only.
+order. Merging _into_ `.bin.zst` accepts binary inputs only.
 
 Inputs may mix directories and explicit files, in any order and repetition:
 `-i` is repeatable and positional paths work too; directories expand in

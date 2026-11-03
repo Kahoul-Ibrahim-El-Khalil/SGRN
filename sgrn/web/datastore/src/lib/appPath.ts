@@ -8,10 +8,10 @@
 //
 // Baked at build time from VITE_BASE_PATH (the CMake dashboard build passes
 // VITE_BASE_PATH=/datastore explicitly); defaults to /datastore so a plain
-// `bun run build` matches the shipped nginx contract. Set VITE_BASE_PATH=/
-// (or empty) for a root deployment. `vite dev` is unaffected: the dev server
-// falls back to index.html for unknown paths, and the router strips the
-// prefix client-side either way.
+// `bun run build` matches the shipped nginx contract. NOTE: `vite dev` is
+// affected by this default — the router would mount outside /datastore and
+// render nothing at the server root. That is why vite.config.ts defines
+// VITE_BASE_PATH="/" in serve mode. `bun run dev` starts it via dev.ts.
 
 declare global {
     interface ImportMetaEnv {

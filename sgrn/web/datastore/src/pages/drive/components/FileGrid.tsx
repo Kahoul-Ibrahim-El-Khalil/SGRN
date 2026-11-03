@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import type { DriveFolder, DriveFile } from "@sgrn/types";
 import type { DriveMoveItem } from "@/pages/drive/types";
+import type { DriveSortKey, DriveSortOrder } from "@/pages/drive/api";
 import { Highlight } from "./Highlight";
 import React, { useState } from "react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -37,6 +38,10 @@ interface FileGridProps {
     onToggleSelection: (item: DriveMoveItem) => void;
     onMoveItems?: (items: DriveMoveItem[], targetId: number) => void;
     searchQuery?: string;
+    /** Grid tiles have no column headers; sorting is driven from the DriveBar dropdown. */
+    sortBy?: DriveSortKey;
+    sortOrder?: DriveSortOrder;
+    onSort?: (key: DriveSortKey) => void;
 }
 
 function formatFileSize(bytes: number): string {
@@ -55,14 +60,14 @@ function getFileIcon(extension: string) {
     const videoExts = ["mp4", "avi", "mkv", "mov", "wmv", "webm"];
     const archiveExts = ["zip", "rar", "7z", "tar", "gz", "bz2", "xz"];
 
-    if (imageExts.includes(ext)) return <FileImage size={16} className="file-grid-icon file-grid-icon--image" />;
-    if (codeExts.includes(ext)) return <FileCode size={16} className="file-grid-icon file-grid-icon--code" />;
-    if (spreadsheetExts.includes(ext)) return <FileSpreadsheet size={16} className="file-grid-icon file-grid-icon--sheet" />;
-    if (audioExts.includes(ext)) return <Music size={16} className="file-grid-icon file-grid-icon--audio" />;
-    if (videoExts.includes(ext)) return <Video size={16} className="file-grid-icon file-grid-icon--video" />;
-    if (archiveExts.includes(ext)) return <Archive size={16} className="file-grid-icon file-grid-icon--archive" />;
-    if (ext === "pdf") return <FileText size={16} className="file-grid-icon file-grid-icon--pdf" />;
-    return <File size={16} className="file-grid-icon file-grid-icon--generic" />;
+    if (imageExts.includes(ext)) return <FileImage size={20} className="file-grid-icon file-grid-icon--image" />;
+    if (codeExts.includes(ext)) return <FileCode size={20} className="file-grid-icon file-grid-icon--code" />;
+    if (spreadsheetExts.includes(ext)) return <FileSpreadsheet size={20} className="file-grid-icon file-grid-icon--sheet" />;
+    if (audioExts.includes(ext)) return <Music size={20} className="file-grid-icon file-grid-icon--audio" />;
+    if (videoExts.includes(ext)) return <Video size={20} className="file-grid-icon file-grid-icon--video" />;
+    if (archiveExts.includes(ext)) return <Archive size={20} className="file-grid-icon file-grid-icon--archive" />;
+    if (ext === "pdf") return <FileText size={20} className="file-grid-icon file-grid-icon--pdf" />;
+    return <File size={20} className="file-grid-icon file-grid-icon--generic" />;
 }
 
 function getFolderLabel(folder: DriveFolder): string {
@@ -146,7 +151,7 @@ export function FileGrid({
                                     className={
                                         folder.token ? "file-grid-icon file-grid-icon--service" : "file-grid-icon file-grid-icon--folder"
                                     }
-                                    size={16}
+                                    size={20}
                                 />
                             </div>
                             {folder.id && (
@@ -264,6 +269,8 @@ export function FileGrid({
                             {onPreview && (
                                 <button
                                     className="file-card-action-btn"
+                                    title="Preview"
+                                    aria-label="Preview"
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         onPreview(file);
@@ -299,7 +306,10 @@ export function FileGrid({
                                                 <Download size={11} />
                                             </button>
                                         </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end" className="w-48 bg-[#252526] border-white/10 text-white shadow-xl">
+                                        <DropdownMenuContent
+                                            align="end"
+                                            className="w-48 bg-popover border-border text-popover-foreground shadow-xl"
+                                        >
                                             <DropdownMenuItem
                                                 className="cursor-pointer hover:bg-white/10 focus:bg-white/10 py-2"
                                                 onClick={() => onDownloadDecompressed(file)}

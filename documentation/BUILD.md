@@ -6,16 +6,16 @@ This document explains the development environment, build workflow, dependency m
 
 ## Directory Layout
 
-| Directory    | Purpose                                                                 |
-|:-------------|:------------------------------------------------------------------------|
-| `cmake/`     | All CMake logic: global config, dep wiring, platform resolvers          |
-| `cmake/deps/`| Third-party dep declarations (CPM), per-dep cmake files, staging        |
-| `deps/`      | Deps-only sub-project CMakeLists.txt (Phase 1 entry point)              |
-| `sgrn/`      | SGRN component source trees                                             |
-| `.build/`    | CMake build directories — one per preset (gitignored)                   |
-| `.prefix/`   | Staged sysroot: compiled deps + headers (gitignored, populated Phase 1) |
-| `.dist/`     | Final distribution bundles (gitignored, populated by `--target install`)|
-| `~/.cache/CPM/` | Machine-level CPM source cache — survives build dir wipes           |
+| Directory       | Purpose                                                                  |
+| :-------------- | :----------------------------------------------------------------------- |
+| `cmake/`        | All CMake logic: global config, dep wiring, platform resolvers           |
+| `cmake/deps/`   | Third-party dep declarations (CPM), per-dep cmake files, staging         |
+| `deps/`         | Deps-only sub-project CMakeLists.txt (Phase 1 entry point)               |
+| `sgrn/`         | SGRN component source trees                                              |
+| `.build/`       | CMake build directories — one per preset (gitignored)                    |
+| `.prefix/`      | Staged sysroot: compiled deps + headers (gitignored, populated Phase 1)  |
+| `.dist/`        | Final distribution bundles (gitignored, populated by `--target install`) |
+| `~/.cache/CPM/` | Machine-level CPM source cache — survives build dir wipes                |
 
 > **Note:** There are no git submodules. All third-party source code is downloaded
 > on first configure via [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) and
@@ -87,6 +87,7 @@ cmake --preset linux-deps-static
 ```
 
 After the first configure completes:
+
 - All dep sources are in `~/.cache/CPM/`
 - Running `cmake --preset linux-arm64-deps-static` or `cmake --preset win64-deps-static`
   reuses those sources — **zero re-downloads**
@@ -141,12 +142,12 @@ rarely) are separated from our own binaries. CMake's install mechanism
 checks file timestamps — only files newer than the destination are copied;
 the rest are skipped as "Up-to-date".
 
-| Target                 | What gets installed                                              | Use case                        |
-|:-----------------------|:-----------------------------------------------------------------|:--------------------------------|
-| `install-prefix`       | Headers + `sgrn-config.cmake` → `.prefix/`                       | First-time setup, after header changes |
-| `install-binaries`     | **Our** libs + executables → `.prefix/<platform>/`               | Every `.cpp` edit (fast)        |
-| `install-deps-binaries`| Third-party system libs (OpenSSL, zstd, etc.) → `.prefix/<platform>/lib/` | Rarely; first build or dep updates |
-| `install`              | Everything (built-in CMake target)                               | CI, final builds                |
+| Target                  | What gets installed                                                       | Use case                               |
+| :---------------------- | :------------------------------------------------------------------------ | :------------------------------------- |
+| `install-prefix`        | Headers + `sgrn-config.cmake` → `.prefix/`                                | First-time setup, after header changes |
+| `install-binaries`      | **Our** libs + executables → `.prefix/<platform>/`                        | Every `.cpp` edit (fast)               |
+| `install-deps-binaries` | Third-party system libs (OpenSSL, zstd, etc.) → `.prefix/<platform>/lib/` | Rarely; first build or dep updates     |
+| `install`               | Everything (built-in CMake target)                                        | CI, final builds                       |
 
 **Typical dev loop** (after initial `install-prefix` and `install-deps-binaries`):
 
@@ -206,34 +207,35 @@ All third-party dependencies are managed by **CPM.cmake** via
 
 ### How sources are fetched
 
-| Strategy      | Used for                          | Speed        |
-|:--------------|:----------------------------------|:-------------|
-| URL tarball   | Deps with GitHub release archives | Fastest      |
-| Shallow clone | Deps with no release archives     | Fast         |
+| Strategy      | Used for                          | Speed   |
+| :------------ | :-------------------------------- | :------ |
+| URL tarball   | Deps with GitHub release archives | Fastest |
+| Shallow clone | Deps with no release archives     | Fast    |
 
 CPM caches sources in `~/.cache/CPM/` (set by `CPM_SOURCE_CACHE` in
 `CMakePresets.json`). This cache is:
+
 - **Machine-level**: shared across all presets and projects
 - **Persistent**: survives `rm -rf .build/`
 - **Deduplicated**: the same version of a dep is never downloaded twice
 
 ### Current dependencies
 
-| Library          | Version    | Fetch method  |
-|:-----------------|:-----------|:--------------|
-| fmt              | 12.1.0     | URL tarball   |
-| jsoncpp          | 1.9.8      | URL tarball   |
-| open62541        | v1.4.15    | URL tarball   |
-| ixwebsocket      | v12.0.1    | URL tarball   |
-| libmodbus        | v3.1.12    | URL tarball   |
-| cpp-httplib      | v0.53.0    | URL tarball   |
-| sqlite_modern_cpp| v3.2       | URL tarball   |
-| snap7            | main       | Shallow clone |
-| angelscript      | SHA pinned | Shallow clone |
-| opener           | master     | Shallow clone |
-| drogon           | v1.9.13    | Shallow clone |
-| rapidjson        | master     | Shallow clone |
-| xml_h            | SHA pinned | Shallow clone |
+| Library           | Version    | Fetch method  |
+| :---------------- | :--------- | :------------ |
+| fmt               | 12.1.0     | URL tarball   |
+| jsoncpp           | 1.9.8      | URL tarball   |
+| open62541         | v1.4.15    | URL tarball   |
+| ixwebsocket       | v12.0.1    | URL tarball   |
+| libmodbus         | v3.1.12    | URL tarball   |
+| cpp-httplib       | v0.53.0    | URL tarball   |
+| sqlite_modern_cpp | v3.2       | URL tarball   |
+| snap7             | main       | Shallow clone |
+| angelscript       | SHA pinned | Shallow clone |
+| opener            | master     | Shallow clone |
+| drogon            | v1.9.13    | Shallow clone |
+| rapidjson         | master     | Shallow clone |
+| xml_h             | SHA pinned | Shallow clone |
 
 ---
 
@@ -344,16 +346,16 @@ If the library is consumed in normal (non-deps-only) builds, add it to
 
 ## 7. Key CMake Variables
 
-| Variable                  | Set in                    | Meaning                                           |
-|:--------------------------|:--------------------------|:--------------------------------------------------|
-| `SGRN_SHARED_PREFIX`      | `cmake/global.cmake`      | `.prefix/` — architecture-neutral header root     |
-| `SGRN_LOCAL_PREFIX`       | `cmake/global.cmake`      | `.prefix/<platform>` — platform-specific libs     |
-| `SGRN_CONDA_PREFIX`       | `cmake/global.cmake`      | Active conda env root                             |
-| `SGRN_USE_INSTALLED_DEPS` | `CMakeLists.txt`          | Auto-ON when `extern-config.cmake` exists         |
-| `SGRN_DEPS_ONLY`          | preset (`base-deps`)      | ON in `*-deps*` presets — skips SGRN components  |
-| `SGRN_BUILD_STATIC`       | preset                    | ON for static builds                              |
-| `CPM_SOURCE_CACHE`        | `CMakePresets.json`       | `~/.cache/CPM` — persistent dep source cache      |
-| `FETCHCONTENT_BASE_DIR`   | `CMakePresets.json`       | `.build/_deps` — build-local fallback cache       |
+| Variable                  | Set in               | Meaning                                         |
+| :------------------------ | :------------------- | :---------------------------------------------- |
+| `SGRN_SHARED_PREFIX`      | `cmake/global.cmake` | `.prefix/` — architecture-neutral header root   |
+| `SGRN_LOCAL_PREFIX`       | `cmake/global.cmake` | `.prefix/<platform>` — platform-specific libs   |
+| `SGRN_CONDA_PREFIX`       | `cmake/global.cmake` | Active conda env root                           |
+| `SGRN_USE_INSTALLED_DEPS` | `CMakeLists.txt`     | Auto-ON when `extern-config.cmake` exists       |
+| `SGRN_DEPS_ONLY`          | preset (`base-deps`) | ON in `*-deps*` presets — skips SGRN components |
+| `SGRN_BUILD_STATIC`       | preset               | ON for static builds                            |
+| `CPM_SOURCE_CACHE`        | `CMakePresets.json`  | `~/.cache/CPM` — persistent dep source cache    |
+| `FETCHCONTENT_BASE_DIR`   | `CMakePresets.json`  | `.build/_deps` — build-local fallback cache     |
 
 ---
 
@@ -361,44 +363,44 @@ If the library is consumed in normal (non-deps-only) builds, add it to
 
 ### `cmake/deps/` — Dependency layer
 
-| File                    | Role                                                                 |
-|:------------------------|:---------------------------------------------------------------------|
-| `FetchDeps.cmake`       | CPM bootstrap + all dep download metadata + `sgrn_fetch_source()`   |
-| `<dep>.cmake`           | Per-dep: populate source, set options, add_subdirectory, alias       |
-| `jsoncpp_consume.cmake` | Consumer-side jsoncpp resolver (installed/source/system fallback)    |
+| File                    | Role                                                                    |
+| :---------------------- | :---------------------------------------------------------------------- |
+| `FetchDeps.cmake`       | CPM bootstrap + all dep download metadata + `sgrn_fetch_source()`       |
+| `<dep>.cmake`           | Per-dep: populate source, set options, add_subdirectory, alias          |
+| `jsoncpp_consume.cmake` | Consumer-side jsoncpp resolver (installed/source/system fallback)       |
 | `staging.cmake`         | Phase 1 install pipeline → `.prefix/` + generates `extern-config.cmake` |
-| `hardening.cmake`       | Compiler hardening flags for the deps build                          |
-| `linux.cmake`           | Linux-native dep resolver (Phase 2)                                  |
-| `arm64.cmake`           | ARM64 cross-compile dep resolver (Phase 2)                           |
-| `win64.cmake`           | Win64 cross-compile dep resolver (Phase 2)                           |
-| `fmt.cmake`             | `sgrn::fmt` resolver (deps-only produce + normal consume)            |
-| `header_only.cmake`     | INTERFACE targets: rapidjson, httplib, xml_h, sqlite_modern_cpp      |
-| `s7codec.cmake`         | s7codec header-only target                                           |
+| `hardening.cmake`       | Compiler hardening flags for the deps build                             |
+| `linux.cmake`           | Linux-native dep resolver (Phase 2)                                     |
+| `arm64.cmake`           | ARM64 cross-compile dep resolver (Phase 2)                              |
+| `win64.cmake`           | Win64 cross-compile dep resolver (Phase 2)                              |
+| `fmt.cmake`             | `sgrn::fmt` resolver (deps-only produce + normal consume)               |
+| `header_only.cmake`     | INTERFACE targets: rapidjson, httplib, xml_h, sqlite_modern_cpp         |
+| `s7codec.cmake`         | s7codec header-only target                                              |
 
 ### `cmake/` — Main build logic
 
-| File                  | Role                                                                     |
-|:----------------------|:-------------------------------------------------------------------------|
-| `global.cmake`        | Source of truth — prefix paths, `sgrn_alias()`, `sgrn_link_dependency()` |
-| `macros.cmake`        | Low-level CMake utilities                                                 |
-| `targets.cmake`       | Component library/executable helpers                                     |
-| `deps.cmake`          | Orchestrator — includes platform resolver + header_only                  |
-| `pch.cmake`           | Tiered PCH system                                                        |
-| `packaging.cmake`     | Runtime `.so` harvester for distribution bundles                         |
-| `staging_sgrn.cmake`  | SGRN's own install pipeline + `sgrn-config.cmake` generation             |
+| File                 | Role                                                                     |
+| :------------------- | :----------------------------------------------------------------------- |
+| `global.cmake`       | Source of truth — prefix paths, `sgrn_alias()`, `sgrn_link_dependency()` |
+| `macros.cmake`       | Low-level CMake utilities                                                |
+| `targets.cmake`      | Component library/executable helpers                                     |
+| `deps.cmake`         | Orchestrator — includes platform resolver + header_only                  |
+| `pch.cmake`          | Tiered PCH system                                                        |
+| `packaging.cmake`    | Runtime `.so` harvester for distribution bundles                         |
+| `staging_sgrn.cmake` | SGRN's own install pipeline + `sgrn-config.cmake` generation             |
 
 ---
 
 ## 9. Troubleshooting
 
-| Symptom | Fix |
-|:--------|:----|
-| `CPM.cmake` download fails | Place `CPM_0.42.0.cmake` manually in `~/.cache/CPM/cpm/` |
-| Dep source not found | Delete `~/.cache/CPM/<dep>/` and re-configure to force re-download |
-| `find_package(extern)` fails | Run the appropriate `*-deps*` preset first to populate `.prefix/` |
-| Wrong headers after dep update | `rm -rf .prefix/ .build/` and rebuild from Phase 1 |
-| ARM64: missing `string_view` | Ensure `SGRN-ARM64` conda env is up-to-date (`micromamba update`) |
-| Windows: missing DLLs in `.dist/` | Verify dep is in `SGRN-WIN64` conda env and `SGRN_WIN64_PREFIX` is set |
+| Symptom                                                          | Fix                                                                                                                                                          |
+| :--------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CPM.cmake` download fails                                       | Place `CPM_0.42.0.cmake` manually in `~/.cache/CPM/cpm/`                                                                                                     |
+| Dep source not found                                             | Delete `~/.cache/CPM/<dep>/` and re-configure to force re-download                                                                                           |
+| `find_package(extern)` fails                                     | Run the appropriate `*-deps*` preset first to populate `.prefix/`                                                                                            |
+| Wrong headers after dep update                                   | `rm -rf .prefix/ .build/` and rebuild from Phase 1                                                                                                           |
+| ARM64: missing `string_view`                                     | Ensure `SGRN-ARM64` conda env is up-to-date (`micromamba update`)                                                                                            |
+| Windows: missing DLLs in `.dist/`                                | Verify dep is in `SGRN-WIN64` conda env and `SGRN_WIN64_PREFIX` is set                                                                                       |
 | clangd / LSP shows no symbols or "no compilation database found" | The root `compile_commands.json` symlink is missing. Run `./scripts/link_ccab.sh` (see [Editor / Language Server](#10-editor--language-server-clangd) below) |
 
 ---

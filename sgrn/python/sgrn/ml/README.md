@@ -52,6 +52,7 @@ Enables transparent hardware acceleration across heterogeneous compute environme
 - **Host CPU**: High-efficiency fallback.
 
 #### Key Functions
+
 ```python
 from sgrn.ml import getHardwareInfo, resolveDevice
 
@@ -84,6 +85,7 @@ Parses Siemens S7 SCL (`.scl`) source files directly, establishing the SCL schem
 - **Discrete context, not discrete targets**: context signals condition the encoder and define standardisation strata; they are never reconstructed, so enum code distance never pollutes the anomaly score.
 
 #### Key Functions
+
 ```python
 from sgrn.ml import parseSclSchema, configureModelFromSchema
 
@@ -116,6 +118,7 @@ Handles the data engineering pipeline from raw SCADA tables or WAL streams into 
 - **`createSlidingWindows`**: Constructs temporal sliding observation arrays $(N, W, S)$ where $W$ is window length and $S$ is signal count.
 
 #### Key Functions
+
 ```python
 from sgrn.ml import (
     Scaler,
@@ -136,7 +139,7 @@ from sgrn.ml import (
 Implements the physical manifold projection operator and split-conformal statistical uncertainty bounds:
 
 - **`WindowAutoencoder` (`nn.Module`)**: Symmetric MLP autoencoder with parameterized bottleneck compressing flattened sliding windows ($W \cdot (S + C) \to 64 \to 16 \to 64 \to W \cdot S$), where $C$ is the one-hot discrete-context width. Context conditions the encoder; the decoder reconstructs continuous signals only.
-- **`ModePredictor` (`nn.Module`)**: Second head trained on the same nominal windows, answering "which mode does the physics imply?" from the continuous window *alone* (feeding it the actual codes would be a trivial copy). Per-Bool BCE / per-enum cross-entropy nonconformity with its own conformal bounds (`mode_mismatch` names the disagreeing switch).
+- **`ModePredictor` (`nn.Module`)**: Second head trained on the same nominal windows, answering "which mode does the physics imply?" from the continuous window _alone_ (feeding it the actual codes would be a trivial copy). Per-Bool BCE / per-enum cross-entropy nonconformity with its own conformal bounds (`mode_mismatch` names the disagreeing switch).
 - **`ProcessManifoldDetector`**: Production detector wrapper that:
   - Projects incoming windows through the neural autoencoder on GPU/CPU.
   - Computes orthogonal reconstruction error $e(\mathbf{x}) = \frac{1}{W \cdot S} \|\widetilde{\mathbf{x}} - \widehat{\mathbf{x}}\|^2$ on mode-stratified residuals.
@@ -151,6 +154,7 @@ Implements the physical manifold projection operator and split-conformal statist
 - **`trainManifoldDetector`**: Trains autoencoder on nominal baseline data and calibrates empirical quantile $q_\alpha = \text{Quantile}_{\frac{\lceil(n+1)(1-\alpha)\rceil}{n}}(\{s_i\})$ on held-out calibration split, thinned to non-overlapping blocks (`calibrationStride`, default = window length) for approximate exchangeability.
 
 #### Key Functions
+
 ```python
 from sgrn.ml import ProcessManifoldDetector, trainManifoldDetector
 
@@ -183,6 +187,7 @@ Provides high-level functional composition tying together schema parsing, data s
 - **`predictFeature(detector, window, feature, ...)`**: Manifold-constrained nowcast of one signal from all the others (masked reconstruction + conformal interval); fault windows land far outside with large `surprise`.
 
 #### Key Functions
+
 ```python
 from sgrn.ml import fitManifoldPipeline, evaluateManifoldSequence
 
@@ -224,6 +229,7 @@ Provides stream readers for SGRN persistence formats:
 ## 3. Mathematical Foundations
 
 ### The Physical Manifold Hypothesis
+
 Continuous industrial plants operate under strict physical laws:
 $$\sum \dot{m}_{\text{in}} = \sum \dot{m}_{\text{out}} + \frac{dm_{\text{cv}}}{dt} \quad (\text{Mass Conservation})$$
 $$\frac{dU}{dt} = \dot{Q} - \dot{W} + \sum \dot{m}h \quad (\text{Energy Conservation})$$
@@ -233,6 +239,7 @@ Because of these coupled constraints, nominal telemetry observations $\mathbf{x}
 $$\mathcal{M} \subset \mathbb{R}^D, \quad \dim(\mathcal{M}) = d \ll D$$
 
 ### Orthogonal Residual Metric
+
 The autoencoder acts as a non-linear orthogonal projection operator:
 $$\widehat{\mathbf{x}} = \operatorname{Proj}_{\mathcal{M}}(\widetilde{\mathbf{x}}) = f_{\text{dec}}(f_{\text{enc}}(\widetilde{\mathbf{x}}))$$
 
@@ -241,12 +248,12 @@ $$e(\mathbf{x}) = \operatorname{dist}^2(\widetilde{\mathbf{x}}, \mathcal{M}) = \
 
 ### Why Sliding Windows: Dynamical Phase Space & Conformal Exchangeability
 
-A single instantaneous time step $\mathbf{x}_t \in \mathbb{R}^D$ provides only a static snapshot of sensor voltages and process levels. In an industrial dynamical system, instantaneous points cannot disambiguate velocity, acceleration, thermal lag, or hysteresis. 
+A single instantaneous time step $\mathbf{x}_t \in \mathbb{R}^D$ provides only a static snapshot of sensor voltages and process levels. In an industrial dynamical system, instantaneous points cannot disambiguate velocity, acceleration, thermal lag, or hysteresis.
 
 To overcome this, SGRN constructs **temporal sliding observation tensors** $\mathbf{X}_w = [\mathbf{x}_{t-W+1}, \dots, \mathbf{x}_t] \in \mathbb{R}^{W \times D}$ ($W = 12\text{ hours}$):
 
 1. **Phase-Space Trajectory Reconstruction (Takens' Delay Embedding)**:
-   According to delay-coordinate embedding theorems, stacking temporal lags of observable process states reconstructs an unobserved dynamical state space diffeomorphic to the true underlying physical manifold. The autoencoder therefore learns the *trajectory* and rate of change of the plant rather than isolated points.
+   According to delay-coordinate embedding theorems, stacking temporal lags of observable process states reconstructs an unobserved dynamical state space diffeomorphic to the true underlying physical manifold. The autoencoder therefore learns the _trajectory_ and rate of change of the plant rather than isolated points.
 2. **Cyclic Stationarity Over Full Operational Limits**:
    The molecular sieve dehydration towers operate cyclically (adsorption, thermal regeneration at $290^\circ\text{C}$, and cooling). Setting $W = 12\text{h}$ covers the complete switching period, converting periodic non-stationarity into cyclically stationary limit cycles in $\mathbb{R}^{W \times D}$.
 3. **Preserving Conformal Quasi-Exchangeability**:
@@ -264,6 +271,7 @@ The reconstruction residual vector $\mathbf{r} = \widetilde{\mathbf{x}} - \wideh
 $$e_d = \frac{1}{W} \sum_{t=1}^W (X_{w, t, d} - \widehat{X}_{w, t, d})^2$$
 
 Because the schema defines the coordinate space, the detector calculates the exact deviation in each feature dimension:
+
 - **`primary_dimension`**: `SafetySystems.flare_header_press` (the top deviating feature dimension)
 - **`dimension_breakdown`**: The vector of deviations $\{e_d\}_{d=1}^D$ showing each feature's contribution to total manifold error.
 - **`primary_subsystem`**: `SafetySystems` (the specific plant datablock/device owning the primary dimension)

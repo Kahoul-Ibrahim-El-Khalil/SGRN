@@ -250,14 +250,14 @@ dependencies:
   - zstandard=0.25.0=py314hfe1a184_4
   - zstd=1.5.7=hb78ec9c_7
   - pip:
-    - aiofiles==25.1.0
-    - aiosqlite==0.22.1
-    - asyncua==1.1.6
-    - cryptography==50.0.2
-    - pyOpenSSL==26.4.0
-    - pycomm3==1.2.16
-    - python-snap7==2.1.0
-    - pytz==2026.5
-    - sortedcontainers==2.4.0
+      - aiofiles==25.1.0
+      - aiosqlite==0.22.1
+      - asyncua==1.1.6
+      - cryptography==50.0.2
+      - pyOpenSSL==26.4.0
+      - pycomm3==1.2.16
+      - python-snap7==2.1.0
+      - pytz==2026.5
+      - sortedcontainers==2.4.0
 
 prefix: "/home/odahim/micromamba/envs/SGRN"

@@ -7,6 +7,7 @@ All routes are under `/api/v1/auth/...`.
 `POST /api/v1/auth/user/signin`
 
 Body:
+
 ```json
 {
   "email": "user@example.com",
@@ -37,6 +38,7 @@ Response:
 Auth: `Authorization: Bearer <token>` (user session token)
 
 Body:
+
 ```json
 {
   "old_password": "...",
@@ -49,6 +51,7 @@ Body:
 `POST /api/v1/auth/agent/signin`
 
 Body:
+
 ```json
 {
   "token": "<agent public token>",

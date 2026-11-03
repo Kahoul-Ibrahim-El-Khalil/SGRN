@@ -1,9 +1,10 @@
 # Motor / VFD Simulation
 
 ## Overview
+
 A single induction motor driven by a simulated VFD (variable-frequency drive). Unlike the other
 simulations, there's no separate "operator" script and no internal demand generator — the motor is
-controlled *entirely* from the outside, over OPC-UA, exactly as if `MotorCommand` were the drive's
+controlled _entirely_ from the outside, over OPC-UA, exactly as if `MotorCommand` were the drive's
 physical control terminals.
 
 - `simulation.as` is the controlling unit itself (the VFD firmware): it reads `MotorCommand`,
@@ -14,6 +15,7 @@ physical control terminals.
   any other command field) lands directly in the VM's memory and is read on the very next scan.
 
 ## What is Simulated?
+
 - **Ramped start/stop**: speed moves from 0→100% (or wherever it's commanded) over `accel_time_s`,
   and back down over `decel_time_s` — not a step change.
 - **Inrush current**: current spikes above steady-state while actively accelerating, decaying back
@@ -32,6 +34,7 @@ physical control terminals.
   stall condition) has actually cleared — you can't reset your way past an overtemp trip.
 
 ## Enabled / Disabled Features
+
 - **S7 Adapter**: Enabled (port 102) — used internally by `simulation.as` to attach to its own
   schema; not the control channel.
 - **OPC-UA**: **Enabled — this is the control channel.** `opc.tcp://localhost:4840`.
@@ -41,9 +44,11 @@ physical control terminals.
 - **Persistence**: Enabled.
 
 ## How to Test
+
 Connect any OPC-UA client to `opc.tcp://localhost:4840` and browse to `MotorCommand`.
 
 A typical start-and-accelerate sequence:
+
 1. Write `accel_time_s = 8.0`, `decel_time_s = 5.0`, `speed_sp_pct = 75.0`.
 2. Write `start = true` (rising edge starts the ramp). Watch `MotorStatus.drive.speed_fb_pct`
    climb toward 75% over ~8 seconds, with `current_a` spiking above steady-state while it

@@ -8,9 +8,7 @@ JSON command is:
 {
   "command": "write",
   "sequence": 7,
-  "updates": [
-    {"db":1,"offset":0,"size":4,"data":"base64url-bytes"}
-  ]
+  "updates": [{ "db": 1, "offset": 0, "size": 4, "data": "base64url-bytes" }]
 }
 ```
 
@@ -32,9 +30,7 @@ inspectable:
 {
   "command": "write_area",
   "sequence": 8,
-  "updates": [
-    {"area":130,"offset":0,"size":1,"data":"AQ"}
-  ]
+  "updates": [{ "area": 130, "offset": 0, "size": 1, "data": "AQ" }]
 }
 ```
 
@@ -50,7 +46,7 @@ reliable uplink — so a shell serving dashboards and uplinking never starves
 either consumer. Inbound (gateway-originated) writes are suppression-flagged
 like DB deltas.
 
-Loop safety: uplink applies on the gateway side are *silent*
+Loop safety: uplink applies on the gateway side are _silent_
 (`writeAreaMemory(..., mark=false)`), exactly like twin DB writes, which
 never touch the runtime dirty ledger. A marking apply would broadcast every
 uplinked write back to its sender, refilling the sync's publish ledger from

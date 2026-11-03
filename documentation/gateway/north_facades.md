@@ -4,12 +4,12 @@ The North-Bound Facades are responsible for abstracting data access and exposing
 
 ## Architectural Overview
 
-*   **Dynamic paths:** HTTP and OPC UA paths are derived from **`PlcSchemaStore`** DB names and field trees (e.g. `SensorData.temperature`).
-*   **Data serialization:**
-    *   **Cached whole DB:** if the DB is clean and `cache_json_north` is enabled, return the cached JSON blob.
-    *   **Subtree:** whole-DB JSON + `extractSubtree`, or live subtree serialization for nested OPC UA nodes.
-    *   **HTTP fast path:** a `live_cache_` updated from `TelemetryBroker` → `DeltaSnapshot` events.
-*   **Protocols:** HTTP/REST, WebSocket (ixwebsocket), OPC UA (open62541).
+- **Dynamic paths:** HTTP and OPC UA paths are derived from **`PlcSchemaStore`** DB names and field trees (e.g. `SensorData.temperature`).
+- **Data serialization:**
+  - **Cached whole DB:** if the DB is clean and `cache_json_north` is enabled, return the cached JSON blob.
+  - **Subtree:** whole-DB JSON + `extractSubtree`, or live subtree serialization for nested OPC UA nodes.
+  - **HTTP fast path:** a `live_cache_` updated from `TelemetryBroker` → `DeltaSnapshot` events.
+- **Protocols:** HTTP/REST, WebSocket (ixwebsocket), OPC UA (open62541).
 
 ## HTTP/REST
 

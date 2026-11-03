@@ -1,0 +1,107 @@
+// ============================================================================
+// schema.scl — Dev gateway schema
+// Owned by sgrn/web/gateway/dev/ — used exclusively by `bun run dev`.
+// Edit freely to add tags needed for UI development.
+// ============================================================================
+
+// ── Shared types ─────────────────────────────────────────────────────────────
+
+TYPE "AlarmStatus"
+  VAR
+    active   : Bool;
+    code     : Int;
+    message  : String[64];
+  END_VAR
+END_TYPE
+
+TYPE "MotorState"
+  VAR
+    running      : Bool;
+    speed_rpm    : Int  #UNIT("RPM");
+    current_a    : Real #UNIT("A");
+    temp_c       : Real #UNIT("°C");
+    fault        : "AlarmStatus";
+  END_VAR
+END_TYPE
+
+TYPE "ValveState"
+  VAR
+    open_pct   : Real #UNIT("%");
+    feedback   : Bool;
+    fault      : "AlarmStatus";
+  END_VAR
+END_TYPE
+
+// ── DB 1: Main process ───────────────────────────────────────────────────────
+
+DATA_BLOCK "DevPlant" DB 1
+
+#MODBUS_HOLDING
+VAR
+    // Tank section
+    tank_level        : Real  #UNIT("%");
+    fluid_temp        : Real  #UNIT("°C");
+    pressure_bar      : Real  #UNIT("bar");
+    ph_value          : Real;
+    conductivity      : Real  #UNIT("µS/cm");
+
+    // Actuators
+    feed_pump         : "MotorState";
+    discharge_pump    : "MotorState";
+    mixer             : "MotorState";
+
+    inlet_valve       : "ValveState";
+    outlet_valve      : "ValveState";
+    bypass_valve      : "ValveState";
+
+    // Alarms
+    high_level_alarm  : Bool;
+    low_level_alarm   : Bool;
+    high_temp_alarm   : Bool;
+    e_stop            : Bool;
+
+    // Setpoints
+    level_sp          : Real  #UNIT("%");
+    temp_sp           : Real  #UNIT("°C");
+    pressure_sp       : Real  #UNIT("bar");
+
+    // Mode
+    mode_code         : Int;     // 0=IDLE 1=RUN 2=HOLD 3=CLEAN 4=FAULT
+    batch_count       : DInt;
+    cycle_time_s      : Real  #UNIT("s");
+END_VAR
+END_DATA_BLOCK
+
+// ── DB 2: Energy monitoring ──────────────────────────────────────────────────
+
+DATA_BLOCK "Energy" DB 2
+
+#MODBUS_HOLDING
+VAR
+    active_power_kw   : Real  #UNIT("kW");
+    reactive_power    : Real  #UNIT("kVAr");
+    power_factor      : Real;
+    voltage_l1        : Real  #UNIT("V");
+    voltage_l2        : Real  #UNIT("V");
+    voltage_l3        : Real  #UNIT("V");
+    current_l1        : Real  #UNIT("A");
+    current_l2        : Real  #UNIT("A");
+    current_l3        : Real  #UNIT("A");
+    energy_kwh        : LReal #UNIT("kWh");
+    freq_hz           : Real  #UNIT("Hz");
+END_VAR
+END_DATA_BLOCK
+
+// ── DB 3: Array data (for testing array UI components) ───────────────────────
+
+DATA_BLOCK "Sensors" DB 3
+
+#MODBUS_HOLDING
+VAR
+    temperatures      : Array[0..7] of Real  #UNIT("°C");
+    pressures         : Array[0..3] of Real  #UNIT("bar");
+    flow_rates        : Array[0..3] of Real  #UNIT("L/min");
+    valve_positions   : Array[0..5] of Real  #UNIT("%");
+    digital_inputs    : Array[0..15] of Bool;
+END_VAR
+END_DATA_BLOCK
