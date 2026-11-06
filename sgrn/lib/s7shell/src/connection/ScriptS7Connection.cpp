@@ -10,7 +10,7 @@
 #include <sgrn/s7shell/script/ScriptDataBlock.hpp>
 #include <sgrn/s7shell/script/ScriptSchemaStore.hpp>
 #include <sgrn/s7shell/script/ScriptTagTable.hpp>
-#include <sgrn/s7shell/utils/json_helpers.hpp>
+#include <sgrn/s7shell/utils/json-helpers.hpp>
 
 #include <sgrn/gateway/twin/twin.hpp>
 #include <sgrn/utils/filesystem.hpp>

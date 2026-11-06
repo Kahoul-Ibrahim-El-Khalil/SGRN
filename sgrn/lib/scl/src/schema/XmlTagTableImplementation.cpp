@@ -1,4 +1,4 @@
-#include "xml_wrapper.h"
+#include "xml-wrapper.h"
 
 // Define the implementation in this compilation unit
 #define XML_H_IMPLEMENTATION

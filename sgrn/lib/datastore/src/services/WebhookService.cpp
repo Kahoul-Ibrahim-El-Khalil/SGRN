@@ -2,7 +2,7 @@
 
 #include <drogon/HttpClient.h>
 #include <drogon/orm/CoroMapper.h>
-#include <sgrn/datastore/utils/safe_access.hpp>
+#include <sgrn/datastore/utils/safe-access.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/hashing.hpp>
 #include <sgrn/utils/jsoncpp.hpp>

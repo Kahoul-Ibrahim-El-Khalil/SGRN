@@ -2,7 +2,7 @@
 #include <sgrn/assets/EmbeddedAsset.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/gateway/adapters/http.hpp>
-#include <sgrn/gateway/adapters/rate_limit.hpp>
+#include <sgrn/gateway/adapters/rate-limit.hpp>
 #include <sgrn/utils/compression.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <web_assets.hpp>

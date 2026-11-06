@@ -7,7 +7,7 @@
 #include <sgrn/s7shell/script/ScriptFieldProxy.hpp>
 #include <sgrn/s7shell/script/ScriptPathBatch.hpp>
 #include <sgrn/s7shell/script/ScriptTagTable.hpp>
-#include <sgrn/s7shell/utils/json_helpers.hpp>
+#include <sgrn/s7shell/utils/json-helpers.hpp>
 #include <sgrn/scl/types.hpp>
 #include <sgrn/scl/utils.hpp>
 

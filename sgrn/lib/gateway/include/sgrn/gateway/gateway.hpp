@@ -19,11 +19,11 @@
 #include <sgrn/gateway/database/GatewayDatabase.hpp>
 #include <sgrn/gateway/database/PersistenceService.hpp>
 #include <sgrn/gateway/datastore/DatastoreBridge.hpp>
-#include <sgrn/gateway/tools/replay_control.hpp>
+#include <sgrn/gateway/tools/replay-control.hpp>
 #include <sgrn/gateway/twin/DbSnapshot.hpp>
 #include <sgrn/gateway/twin/LeafDictionary.hpp>
 #include <sgrn/gateway/twin/PlcCommandProcessor.hpp>
-#include <sgrn/gateway/twin/field_update.hpp>
+#include <sgrn/gateway/twin/field-update.hpp>
 #include <sgrn/gateway/twin/utils.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/scl/schema/SchemaSerializer.hpp>

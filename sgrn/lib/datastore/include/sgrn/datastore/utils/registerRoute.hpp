@@ -10,7 +10,7 @@
 #pragma once
 
 #include <drogon/drogon.h>
-#include <sgrn/datastore/utils/route_utils.hpp>
+#include <sgrn/datastore/utils/route-utils.hpp>
 #include <sgrn/types/HttpResponseCallback.hpp>
 #include <functional>
 #include <string>

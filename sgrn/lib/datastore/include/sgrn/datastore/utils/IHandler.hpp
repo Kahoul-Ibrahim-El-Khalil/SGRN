@@ -1,7 +1,7 @@
 // sgrn/core/IHandler.hpp
 #pragma once
 
-#include <sgrn/datastore/utils/route_utils.hpp>
+#include <sgrn/datastore/utils/route-utils.hpp>
 #include <array>
 #include <cstdint>
 #include <string>
@@ -9,7 +9,7 @@
 #include <vector>
 
 // Note: makeConstraints() and joinStrings() now live in route_utils.hpp.
-// Including this header is sufficient — route_utils.hpp is pulled in above.
+// Including this header is sufficient — route-utils.hpp is pulled in above.
 
 namespace sgrn
 {

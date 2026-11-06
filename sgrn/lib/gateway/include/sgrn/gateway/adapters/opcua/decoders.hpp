@@ -2,7 +2,7 @@
 
 #include <sgrn/Result.hpp>
 #include <sgrn/gateway/adapters/opcua/errors.hpp>
-#include <sgrn/gateway/adapters/opcua/scalar_view.hpp>
+#include <sgrn/gateway/adapters/opcua/scalar-view.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <open62541/server.h>

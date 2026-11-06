@@ -60,6 +60,6 @@ endif()
 include(${CMAKE_CURRENT_LIST_DIR}/deps/crow.cmake)
 
 # ── reproc (child-process control for C++ test support) ─────────────────────
-# C99 core + C++11 wrapper backing test_util.hpp's spawn/run/RAII-process
+# C99 core + C++11 wrapper backing test-util.hpp's spawn/run/RAII-process
 # primitives; cross-platform (fork/exec on POSIX, CreateProcess on Windows).
 include(${CMAKE_CURRENT_LIST_DIR}/deps/reproc.cmake)

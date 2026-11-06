@@ -50,7 +50,7 @@ sgrn_target(sgrn_plcsim)
 # 0, writes refuse) instead of inventing registry-format semantics.
 sgrn_add_component_executable(
     TARGET plc_tagtable_test
-    SOURCES tests/plc_tagtable_test.cpp
+    SOURCES tests/plc-tagtable-test.cpp
     ENABLE_ORIGIN_RPATH
     PRIVATE_LIBS
         sgrn_plcsim

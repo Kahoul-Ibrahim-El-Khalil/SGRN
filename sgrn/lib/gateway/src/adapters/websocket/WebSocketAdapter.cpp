@@ -1,8 +1,8 @@
 #include <fmt/core.h>
-#include <sgrn/common/endian_helper.hpp>
-#include <sgrn/common/event_helper.hpp>
-#include <sgrn/common/json_helper.hpp>
-#include <sgrn/common/path_utils.hpp>
+#include <sgrn/common/endian-helper.hpp>
+#include <sgrn/common/event-helper.hpp>
+#include <sgrn/common/json-helper.hpp>
+#include <sgrn/common/path-utils.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/gateway/adapters/websocket/WebSocketAdapter.hpp>
 #include <sgrn/gateway/common/SchemaResolver.hpp>

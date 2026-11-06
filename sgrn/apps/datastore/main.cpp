@@ -1,87 +1,31 @@
-#include <drogon/drogon.h>
-#include <drogon/orm/DbClient.h>
-#include <sgrn/datastore/error/exception.hpp>
-#include <sgrn/datastore/init/init.hpp>
-#include <sgrn/debug.hpp>
-#include <sgrn/utils/app.hpp>
-#include <sgrn/utils/compression.hpp>
-#include <sgrn/utils/filesystem.hpp>
-#include <cstdlib>
-#include <filesystem>
-#include <trantor/net/EventLoopThread.h>
-
 #include <sgrn/Result.hpp>
-#include <sgrn/datastore/bootstrap/bootstrap.hpp>
+#include <sgrn/datastore/bootstrap/cli.hpp>
 #include <sgrn/datastore/config/config.hpp>
 #include <sgrn/datastore/init/init.hpp>
-#include <sgrn/datastore/services/upload_cleanup.hpp>
 #include <sgrn/utils/app.hpp>
+#include <cstdlib>
 
-using namespace sgrn::utils::app;
-
-using namespace sgrn::datastore;
-
-inline void init() {
-    setupSignals([](int t_signum) {
-        SGRN_INFO("SGRN-Datastore", "Received signal {}. Shutting down gracefully...", t_signum);
-        drogon::app().quit();
-    });
-
-    assets::registerDashboardAssets();
-    filters::createAndRegisterFilters();
-    handlers::initHandlers();
-    plugins::initS3();
-    ratelimit::initRateLimiting();
-    services::upload_cleanup::startUploadCleanupJob();
-
-    drogon::app().run();
-}
+using sgrn::Result;
+using sgrn::datastore::config::configDrogonApp;
+using sgrn::datastore::init::runServer;
 
 int main(int t_argc, char** tp_argv) {
-    // Deployment runbook — atomic steps, run in order (see --help):
-    //   1. --generate-config  (user, no sudo, no DB)
-    //   2. --init-db          (user, needs PostgreSQL; secrets edited first)
-    //   3. --config-systemd   (root only; installs + enables units)
-    // --init is the step 1+2 convenience alias.
-    if (t_argc > 1) {
-        std::string_view arg(tp_argv[1]);
-        if (arg == "--help" || arg == "-h") {
-            bootstrap::printHelp(tp_argv[0]);
-            return EXIT_SUCCESS;
-        }
-        if (arg == "--init") {
-            bootstrap::bootstrapDatabase();
-            return EXIT_SUCCESS;
-        }
-        if (arg == "--generate-config") {
-            std::string base_dir = sgrn::utils::filesystem::expandUserPath(std::string(bootstrap::kDefaultOperationDir));
-            bootstrap::generateConfigOnly(base_dir);
-            return EXIT_SUCCESS;
-        }
-        if (arg == "--init-db") {
-            std::string base_dir = sgrn::utils::filesystem::expandUserPath(std::string(bootstrap::kDefaultOperationDir));
-            bootstrap::initDatabaseOnly(base_dir);
-            return EXIT_SUCCESS;
-        }
-        if (arg == "--config-systemd") {
-            bootstrap::configureSystemd();
-            return EXIT_SUCCESS;
-        }
-        if (arg == "--verify-install") {
-            std::string base_dir = sgrn::utils::filesystem::expandUserPath(std::string(bootstrap::kDefaultOperationDir));
-            return bootstrap::verifyInstall(base_dir) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
-        }
+    // Dispatch subcommands (--init, --backup-*, --rotate, --help, …).
+    // Returns the process exit code when a subcommand ran; nullopt → server mode.
+    if (const std::optional<int> rc = sgrn::datastore::bootstrap::cli::dispatch(t_argc, tp_argv)) {
+        return rc.value();
     }
 
-    return runMain(
+    // Server mode: configure Drogon then start the event loop.
+    return sgrn::utils::app::runMain(
         t_argc, tp_argv,
         [](int t_argc, char** tp_argv) {
-            ::sgrn::Result<void, std::string> configuration_result = sgrn::datastore::config::configDrogonApp(t_argc, tp_argv);
-            if (configuration_result.hasError()) {
-                fmt::print("{}\n", configuration_result.error());
+            Result<void> cfg = configDrogonApp(t_argc, tp_argv);
+            if (cfg.hasError()) {
+                fmt::print("{}\n", cfg.error());
                 return EXIT_FAILURE;
             }
-            init();
+            runServer();
             return EXIT_SUCCESS;
         },
         "SGRN-Datastore");

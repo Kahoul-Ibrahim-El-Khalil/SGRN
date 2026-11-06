@@ -4,7 +4,7 @@
 #include <sgrn/Result.hpp>
 #include <sgrn/datastore/BackendError.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
-#include <sgrn/datastore/utils/safe_access.hpp>
+#include <sgrn/datastore/utils/safe-access.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/types/HttpResponseCallback.hpp>
 #include <sgrn/utils/jsoncpp.hpp>

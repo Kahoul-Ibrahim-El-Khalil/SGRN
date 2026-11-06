@@ -9,7 +9,7 @@
 #include <sgrn/datastore/plugins/threadpool/Threadpool.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
-#include <sgrn/datastore/utils/safe_access.hpp>
+#include <sgrn/datastore/utils/safe-access.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/compression.hpp>
 #include <sgrn/utils/hashing.hpp>

@@ -16,7 +16,7 @@
 
 #include <sgrn/gateway/twin/PlcCommandProcessor.hpp>
 #include <sgrn/gateway/twin/SnapshotRegistry.hpp>
-#include <sgrn/gateway/twin/field_update.hpp>
+#include <sgrn/gateway/twin/field-update.hpp>
 #include <s7codec/codec.hpp>
 
 namespace sgrn::gateway::twin

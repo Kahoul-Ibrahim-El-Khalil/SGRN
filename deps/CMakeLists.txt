@@ -98,8 +98,19 @@ if(SGRN_BUILD_EXTERN_CORE)
 # linked into our shared component libraries (like libsgrn_utils.so).
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# 1. fmt — resolved centrally by cmake/fmt.cmake (single source of truth).
-include(${SGRN_ROOT}/cmake/deps/fmt.cmake)
+# 1. fmt — resolved centrally by cmake/deps/fmt.cmake (single source of truth).
+#
+# ONLY include it in the deps-production phase. In the in-tree normal build
+# (SGRN_USE_INSTALLED_DEPS=OFF) this CMakeLists is add_subdirectory()'d from
+# the root, and a find_package() executed HERE would create fmt's imported
+# targets in this subdirectory scope — invisible at root, where every
+# component CMakeLists references fmt::fmt. The root-scope include
+# (cmake/deps/linux.cmake) is the intended consume path; include_guard(GLOBAL)
+# in fmt.cmake would otherwise swallow it. (Same pattern as jsoncpp: produce
+# here, consume at root via *_consume.cmake.)
+if(SGRN_DEPS_ONLY)
+    include(${SGRN_ROOT}/cmake/deps/fmt.cmake)
+endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/../cmake/deps/jsoncpp.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/../cmake/deps/snap7.cmake)

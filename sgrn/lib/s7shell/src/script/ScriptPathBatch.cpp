@@ -3,7 +3,7 @@
 #include <sgrn/s7shell/script/ScriptDataBlock.hpp>
 #include <sgrn/s7shell/script/ScriptPathBatch.hpp>
 #include <sgrn/s7shell/script/ScriptTagTable.hpp>
-#include <sgrn/s7shell/utils/json_helpers.hpp>
+#include <sgrn/s7shell/utils/json-helpers.hpp>
 
 #include <fmt/format.h>
 #include <stdexcept>

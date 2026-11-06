@@ -1,10 +1,14 @@
 #pragma once
 #include "strings.hpp"
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <string_view>
 #include <vector>
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
 
 #include <sgrn/Result.hpp>
 
@@ -126,6 +130,86 @@ inline sgrn::Result<void, std::string> copyIfChanged(const std::filesystem::path
         }
     }
     return {};
+}
+
+/// Whole-file byte comparison; returns false when either file is unreadable.
+inline bool fileContentsEqual(const std::filesystem::path& t_a, const std::filesystem::path& t_b) {
+    std::ifstream fa(t_a, std::ios::binary);
+    std::ifstream fb(t_b, std::ios::binary);
+    if (!fa || !fb)
+        return false;
+    return std::equal(std::istreambuf_iterator<char>(fa), std::istreambuf_iterator<char>(), std::istreambuf_iterator<char>(fb));
+}
+
+/// Read a file's full text; returns an empty string when the file is unreadable.
+inline std::string readTextFile(const std::filesystem::path& t_path) {
+    std::ifstream in(t_path);
+    if (!in)
+        return {};
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+/// Returns the directory containing the currently running binary via /proc/self/exe.
+/// Returns an empty string when it cannot be resolved (non-Linux, confined environments).
+inline std::string currentExeDir() {
+    char exe_buf[4096] = {};
+    ssize_t exe_len = ::readlink("/proc/self/exe", exe_buf, sizeof(exe_buf) - 1);
+    if (exe_len <= 0)
+        return {};
+    return std::filesystem::path(std::string(exe_buf, static_cast<size_t>(exe_len))).parent_path().string();
+}
+
+/// Shell-like lookup of t_program inside a ':'-separated directory list.
+/// Returns the full path of the first executable found, or empty string when absent.
+/// @example whichInPaths("/usr/bin:/usr/local/bin", "nginx")
+inline std::string whichInPaths(const std::string& t_dirs, const std::string& t_program) {
+    size_t pos = 0;
+    while (pos <= t_dirs.size()) {
+        size_t sep = t_dirs.find(':', pos);
+        std::string dir = t_dirs.substr(pos, sep == std::string::npos ? std::string::npos : sep - pos);
+        if (!dir.empty()) {
+            std::filesystem::path candidate = std::filesystem::path(dir) / t_program;
+            std::error_code ec;
+            auto st = std::filesystem::status(candidate, ec);
+            if (!ec && std::filesystem::is_regular_file(st) &&
+                (st.permissions() & std::filesystem::perms::owner_exec) != std::filesystem::perms::none)
+                return candidate.string();
+        }
+        if (sep == std::string::npos)
+            break;
+        pos = sep + 1;
+    }
+    return {};
+}
+
+/// Restrict a file to owner rw permissions (0600).
+inline bool ensureOwnerOnlyPerms(const std::filesystem::path& t_path) {
+    std::error_code ec;
+    std::filesystem::permissions(
+        t_path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write, std::filesystem::perm_options::replace, ec);
+    return !ec;
+}
+
+/// Find the newest file in a directory matching a given suffix (e.g. ".pg", ".tar").
+inline std::filesystem::path findLatestFile(const std::filesystem::path& t_dir, std::string_view t_suffix = "") {
+    std::error_code ec;
+    if (!std::filesystem::exists(t_dir, ec))
+        return {};
+    std::filesystem::path latest;
+    std::filesystem::file_time_type latest_time{};
+    for (const auto& entry : std::filesystem::directory_iterator(t_dir, ec)) {
+        if (!entry.is_regular_file(ec))
+            continue;
+        const std::string name = entry.path().filename().string();
+        if (!t_suffix.empty() && !name.ends_with(t_suffix))
+            continue;
+        const auto mtime = entry.last_write_time(ec);
+        if (latest.empty() || mtime > latest_time) {
+            latest = entry.path();
+            latest_time = mtime;
+        }
+    }
+    return latest;
 }
 
 } // namespace sgrn::utils::filesystem

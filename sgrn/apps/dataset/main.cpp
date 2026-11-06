@@ -1,6 +1,6 @@
-#include <sgrn/gateway/tools/sgrn_dataset.hpp>
+#include <sgrn/gateway/tools/sgrn-dataset.hpp>
 
-#include "man_message.hpp"
+#include "man-message.hpp"
 #include <fmt/color.h>
 #include <fmt/core.h>
 #include <sgrn/utils/time.hpp>

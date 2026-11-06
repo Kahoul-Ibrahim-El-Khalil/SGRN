@@ -21,7 +21,7 @@ sgrn_install_component_library(
 # assert-based codec regression harness; -UNDEBUG keeps the asserts live in
 # release configs (this is the only guard it has).
 if(SGRN_BUILD_TESTS)
-    add_executable(s7codec_example_test example_test.cpp)
+    add_executable(s7codec_example_test example-test.cpp)
     target_link_libraries(s7codec_example_test PRIVATE sgrn::s7codec)
     target_compile_options(s7codec_example_test PRIVATE -UNDEBUG)
     add_test(NAME s7codec_example_test COMMAND s7codec_example_test)

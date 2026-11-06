@@ -16,7 +16,7 @@ sgrn_add_component_library(
         sgrn::core
         sgrn::utils
         sgrn::fmt
-        sgrn::scl   # time_grid_resampler.hpp uses scl/types/DbField in its public API
+        sgrn::scl   # time-grid-resampler.hpp uses scl/types/DbField in its public API
         sgrn::s7codec
 )
 
@@ -34,7 +34,7 @@ sgrn_target(sgrn_ml)
 # =============================================================================
 
 if(SGRN_BUILD_TESTS)
-    foreach(test_name feature_spec_test manifest_test extractor_test engine_test eval_test time_grid_resampler_test columnar_dataset_test)
+    foreach(test_name feature-spec-test manifest-test extractor-test engine-test eval-test time-grid-resampler-test columnar-dataset-test)
         sgrn_add_component_executable(
             TARGET ${test_name}
             SOURCES tests/${test_name}.cpp
@@ -52,7 +52,7 @@ if(SGRN_BUILD_TESTS)
     if(NOT WIN32 AND NOT MINGW AND NOT SGRN_CROSS_WIN64)
         sgrn_add_component_executable(
             TARGET pipeline_cli_test
-            SOURCES tests/pipeline_cli_test.cpp
+            SOURCES tests/pipeline-cli-test.cpp
             ENABLE_ORIGIN_RPATH
             PRIVATE_LIBS
                 sgrn_ml

@@ -13,7 +13,7 @@ if(SGRN_BUILD_TESTS)
     # network dependency so malformed SGRW frames are cheap to regression-test.
     sgrn_add_component_executable(
         TARGET runtime_sync_protocol_test
-        SOURCES runtime_sync_protocol_test.cpp
+        SOURCES runtime-sync-protocol-test.cpp
         ENABLE_ORIGIN_RPATH
     )
     target_include_directories(runtime_sync_protocol_test PRIVATE
@@ -25,7 +25,7 @@ if(SGRN_BUILD_TESTS)
 
     sgrn_add_component_executable(
         TARGET opcua_simulation_enum_projection_test
-        SOURCES opcua_simulation_enum_projection_test.cpp
+        SOURCES opcua-simulation-enum-projection-test.cpp
         ENABLE_ORIGIN_RPATH
         PRIVATE_LIBS
             sgrn_gateway_opcua
@@ -43,7 +43,7 @@ if(SGRN_BUILD_TESTS)
     # library — a successful link proves the adapters are decoupled.
     sgrn_add_component_executable(
         TARGET adapter_ports_test
-        SOURCES adapter_ports_test.cpp
+        SOURCES adapter-ports-test.cpp
         ENABLE_ORIGIN_RPATH
         PRIVATE_LIBS
             sgrn_gateway_s7
@@ -64,7 +64,7 @@ if(SGRN_BUILD_TESTS)
     # full classify() coverage. Links the twin on purpose (tests the glue).
     sgrn_add_component_executable(
         TARGET twin_ports_test
-        SOURCES twin_ports_test.cpp
+        SOURCES twin-ports-test.cpp
         ENABLE_ORIGIN_RPATH
         PRIVATE_LIBS
             sgrn_gateway_ports
@@ -86,7 +86,7 @@ if(SGRN_BUILD_TESTS)
     # enum-label conflation semantics so they cannot drift further.
     sgrn_add_component_executable(
         TARGET twin_encoding_wire_test
-        SOURCES twin_encoding_wire_test.cpp
+        SOURCES twin-encoding-wire-test.cpp
         ENABLE_ORIGIN_RPATH
         PRIVATE_LIBS
             sgrn_gateway_twin
@@ -107,7 +107,7 @@ if(SGRN_BUILD_TESTS)
     # initializers, and the documented Bool last-wins + struct@0 quirks.
     sgrn_add_component_executable(
         TARGET plc_memory_init_test
-        SOURCES plc_memory_init_test.cpp
+        SOURCES plc-memory-init-test.cpp
         ENABLE_ORIGIN_RPATH
         PRIVATE_LIBS
             sgrn_gateway_twin
@@ -127,7 +127,7 @@ if(SGRN_BUILD_TESTS)
     # must be observed (no orphaned dirty batch). Links the twin on purpose.
     sgrn_add_component_executable(
         TARGET dirty_wakeup_test
-        SOURCES dirty_wakeup_test.cpp
+        SOURCES dirty-wakeup-test.cpp
         ENABLE_ORIGIN_RPATH
         PRIVATE_LIBS
             sgrn_gateway_twin
@@ -145,7 +145,7 @@ if(SGRN_BUILD_TESTS)
     # archive must round-trip through recoverStateFromArchives().
     sgrn_add_component_executable(
         TARGET persistence_binary_test
-        SOURCES persistence_binary_test.cpp
+        SOURCES persistence-binary-test.cpp
         ENABLE_ORIGIN_RPATH
         PRIVATE_LIBS
             sgrn_gateway
@@ -163,7 +163,7 @@ if(SGRN_BUILD_TESTS)
     # scrambled DBs must invoke the batch callback in ascending DB order.
     sgrn_add_component_executable(
         TARGET process_commands_order_test
-        SOURCES process_commands_order_test.cpp
+        SOURCES process-commands-order-test.cpp
         ENABLE_ORIGIN_RPATH
         PRIVATE_LIBS
             sgrn_gateway_twin
@@ -180,7 +180,7 @@ if(SGRN_BUILD_TESTS)
     # harness, was an unregistered orphan source).
     sgrn_add_component_executable(
         TARGET opcua_projection_test
-        SOURCES opcua_projection_test.cpp
+        SOURCES opcua-projection-test.cpp
         ENABLE_ORIGIN_RPATH
         PRIVATE_LIBS
             sgrn_gateway_opcua
@@ -195,7 +195,7 @@ if(SGRN_BUILD_TESTS)
     add_test(NAME opcua_projection_test COMMAND opcua_projection_test)
     sgrn_target(opcua_projection_test)
 
-    # The integration tests below use gateway_fixture.hpp / test_util.hpp.
+    # The integration tests below use gateway-fixture.hpp / test_util.hpp.
     # Process spawning there is cross-platform (reproc); freePort() still uses
     # raw POSIX sockets, so keep excluding when cross-compiling for Windows
     # until the socket helpers gain winsock support.
@@ -203,7 +203,7 @@ if(SGRN_BUILD_TESTS)
         # Live-gateway OPC-UA discovery (ported from tests/gateway/opcua_discovery.py):
         sgrn_add_component_executable(
             TARGET opcua_discovery_test
-            SOURCES opcua_discovery_test.cpp
+            SOURCES opcua-discovery-test.cpp
             ENABLE_ORIGIN_RPATH
             PRIVATE_LIBS
                 sgrn::wrappers::opcua
@@ -222,7 +222,7 @@ if(SGRN_BUILD_TESTS)
         # Live-gateway #ENUM round-trip (ported from tests/gateway/enum_tests.py):
         sgrn_add_component_executable(
             TARGET opcua_enum_test
-            SOURCES opcua_enum_test.cpp
+            SOURCES opcua-enum-test.cpp
             ENABLE_ORIGIN_RPATH
             PRIVATE_LIBS
                 sgrn::wrappers::opcua
@@ -241,7 +241,7 @@ if(SGRN_BUILD_TESTS)
         # Live-gateway REST API test (ported from tests/gateway/rest_api.py & tests/ts/tests/data.test.ts):
         sgrn_add_component_executable(
             TARGET gateway_rest_api_test
-            SOURCES gateway_rest_api_test.cpp
+            SOURCES gateway-rest-api-test.cpp
             ENABLE_ORIGIN_RPATH
             PRIVATE_LIBS
                 sgrn::jsoncpp
@@ -258,7 +258,7 @@ if(SGRN_BUILD_TESTS)
         # Live-gateway array support test (ported from tests/gateway/array_support.py):
         sgrn_add_component_executable(
             TARGET gateway_array_support_test
-            SOURCES gateway_array_support_test.cpp
+            SOURCES gateway-array-support-test.cpp
             ENABLE_ORIGIN_RPATH
             PRIVATE_LIBS
                 sgrn::jsoncpp
@@ -275,7 +275,7 @@ if(SGRN_BUILD_TESTS)
         # Live-gateway policy & registry test (ported from tests/ts/tests/policy.test.ts & registry.test.ts):
         sgrn_add_component_executable(
             TARGET gateway_policy_test
-            SOURCES gateway_policy_test.cpp
+            SOURCES gateway-policy-test.cpp
             ENABLE_ORIGIN_RPATH
             PRIVATE_LIBS
                 sgrn::jsoncpp
@@ -292,7 +292,7 @@ if(SGRN_BUILD_TESTS)
         # Live-gateway Modbus TCP wire test:
         sgrn_add_component_executable(
             TARGET modbus_registers_test
-            SOURCES modbus_registers_test.cpp
+            SOURCES modbus-registers-test.cpp
             ENABLE_ORIGIN_RPATH
             PRIVATE_LIBS
                 sgrn::wrappers::modbus
@@ -310,7 +310,7 @@ if(SGRN_BUILD_TESTS)
         # Live-gateway S7comm wire test:
         sgrn_add_component_executable(
             TARGET s7_southbound_test
-            SOURCES s7_southbound_test.cpp
+            SOURCES s7-southbound-test.cpp
             ENABLE_ORIGIN_RPATH
             PRIVATE_LIBS
                 sgrn::wrappers::s7
@@ -328,7 +328,7 @@ if(SGRN_BUILD_TESTS)
         # WebSocket JSON/binary parity test:
         sgrn_add_component_executable(
             TARGET binary_live_snapshot_test
-            SOURCES binary_live_snapshot_test.cpp
+            SOURCES binary-live-snapshot-test.cpp
             ENABLE_ORIGIN_RPATH
             PRIVATE_LIBS
                 ixwebsocket::ixwebsocket

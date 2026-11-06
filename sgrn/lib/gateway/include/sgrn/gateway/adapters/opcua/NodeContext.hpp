@@ -1,6 +1,6 @@
 #pragma once
 
-#include <sgrn/gateway/adapters/opcua/tag_access.hpp>
+#include <sgrn/gateway/adapters/opcua/tag-access.hpp>
 #include <sgrn/scl/types.hpp>
 #include <cstdint>
 #include <memory>

@@ -147,7 +147,7 @@ set(SGRN_DEP_opener_TAG
 )
 
 # reproc v14.2.4 — cross-platform child-process control (C99 core + C++11
-# wrapper). Backs the C++ integration-test process fixtures (test_util.hpp).
+# wrapper). Backs the C++ integration-test process fixtures (test-util.hpp).
 # Declared as a git tag (not a URL tarball): CPM archive downloads resolve
 # through codeload.github.com, which is not reachable in some environments.
 set(SGRN_DEP_reproc_REPO

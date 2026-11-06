@@ -122,7 +122,7 @@ sgrn_target(sgrn_wrappers_ethernetip)
 #
 # Dependency rule: this target must NOT depend on sgrn_gateway_twin,
 # sgrn_scl schema types, PlcMemory, or SecurityManager. Schema → UDT
-# translation lives in the adapter (schema_type_registry.cpp).
+# translation lives in the adapter (schema-type-registry.cpp).
 #
 # Headers live under:  include/sgrn/wrappers/opcua/
 # Sources live under:  src/opcua/

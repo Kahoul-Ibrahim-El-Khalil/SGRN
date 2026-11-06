@@ -46,7 +46,7 @@ sgrn_target(sgrn_scl)
 if(SGRN_BUILD_TESTS)
     sgrn_add_component_executable(
         TARGET schema_binary_codec_test
-        SOURCES tests/schema_binary_codec_test.cpp
+        SOURCES tests/schema-binary-codec-test.cpp
         ENABLE_ORIGIN_RPATH
         PRIVATE_LIBS
             sgrn_scl
@@ -59,7 +59,7 @@ if(SGRN_BUILD_TESTS)
 
     sgrn_add_component_executable(
         TARGET scl_directives_test
-        SOURCES tests/scl_directives_test.cpp
+        SOURCES tests/scl-directives-test.cpp
         ENABLE_ORIGIN_RPATH
         PRIVATE_LIBS
             sgrn_scl

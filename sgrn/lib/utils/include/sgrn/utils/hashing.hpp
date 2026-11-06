@@ -262,6 +262,56 @@ inline ::sgrn::Result<std::string> computeSha256File(const std::filesystem::path
     return Error("Unknown hash encoding");
 }
 
+// =======================================================
+//  Streaming SHA-256 Hasher
+// =======================================================
+
+class Sha256Stream {
+public:
+    Sha256Stream() {
+        ctx_ = EVP_MD_CTX_new();
+        EVP_DigestInit_ex(ctx_, EVP_sha256(), nullptr);
+    }
+
+    ~Sha256Stream() {
+        if (ctx_ != nullptr) {
+            EVP_MD_CTX_free(ctx_);
+        }
+    }
+
+    Sha256Stream(const Sha256Stream&) = delete;
+    Sha256Stream& operator=(const Sha256Stream&) = delete;
+
+    void update(const char* t_data, size_t t_len) {
+        EVP_DigestUpdate(ctx_, t_data, t_len);
+    }
+
+    void update(const uint8_t* t_data, size_t t_len) {
+        EVP_DigestUpdate(ctx_, t_data, t_len);
+    }
+
+    void update(std::string_view t_data) {
+        EVP_DigestUpdate(ctx_, t_data.data(), t_data.size());
+    }
+
+    std::string hex() {
+        unsigned char md[EVP_MAX_MD_SIZE] = {};
+        unsigned int len = 0;
+        EVP_DigestFinal_ex(ctx_, md, &len);
+        static constexpr char kHex[] = "0123456789abcdef";
+        std::string out;
+        out.reserve(len * 2);
+        for (unsigned int i = 0; i < len; ++i) {
+            out.push_back(kHex[md[i] >> 4]);
+            out.push_back(kHex[md[i] & 0xF]);
+        }
+        return out;
+    }
+
+private:
+    EVP_MD_CTX* ctx_ = nullptr;
+};
+
 } // namespace sgrn::utils
 
 #undef DEBUG_LOG

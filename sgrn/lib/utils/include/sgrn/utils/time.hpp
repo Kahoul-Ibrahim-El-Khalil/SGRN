@@ -1,5 +1,6 @@
 #pragma once
 
+#include <fmt/format.h>
 #include <sgrn/utils/strings.hpp>
 #include <chrono>
 #include <cstdint>
@@ -258,6 +259,39 @@ inline std::optional<int64_t> parseS7Time(const std::string& t_raw) {
     const int64_t abs_ms =
         static_cast<int64_t>(h) * 3600000 + static_cast<int64_t>(m) * 60000 + static_cast<int64_t>(sec) * 1000 + static_cast<int64_t>(ms);
     return negative ? -abs_ms : abs_ms;
+}
+
+/**
+ * @brief Format a duration in seconds into human-readable format ("00m 05s", "01m 15s", "1h 01m 05s").
+ */
+inline std::string formatDuration(std::chrono::seconds t_sec) {
+    const long long total_s = t_sec.count();
+    if (total_s < 0) {
+        return "00m 00s";
+    }
+    const long long hours = total_s / 3600;
+    const long long mins = (total_s % 3600) / 60;
+    const long long secs = total_s % 60;
+    if (hours > 0) {
+        return fmt::format("{}h {:02d}m {:02d}s", hours, mins, secs);
+    }
+    return fmt::format("{:02d}m {:02d}s", mins, secs);
+}
+
+/**
+ * @brief Returns the current UTC time formatted with a custom strftime format (default: "%Y%m%d-%H%M%S").
+ */
+inline std::string utcStamp(const char* t_format = "%Y%m%d-%H%M%S") {
+    const std::time_t now = std::time(nullptr);
+    std::tm tm{};
+#ifdef _WIN32
+    gmtime_s(&tm, &now);
+#else
+    gmtime_r(&now, &tm);
+#endif
+    char buf[64] = {};
+    std::strftime(buf, sizeof(buf), t_format, &tm);
+    return buf;
 }
 
 } // namespace sgrn::utils::time

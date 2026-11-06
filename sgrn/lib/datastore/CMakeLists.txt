@@ -24,27 +24,31 @@ add_subdirectory(src)
 # CRUD view bind tests: pure validation (helper) plus HTTP-level 400 checks
 # that run before any DB access, so no live database is required.
 if(SGRN_BUILD_TESTS)
-    add_executable(crud_binds_test tests/crud_binds_test.cpp)
+    add_executable(crud_binds_test tests/crud-binds-test.cpp)
     target_link_libraries(crud_binds_test PRIVATE sgrn_datastore_lib)
     add_test(NAME crud_binds_test COMMAND crud_binds_test)
     # Rate limiter pure-logic tests (classification, config, key building):
     # no external services, no app singleton, no live database required.
-    add_executable(rate_limit_test tests/rate_limit_test.cpp)
+    add_executable(rate_limit_test tests/rate-limit-test.cpp)
     target_link_libraries(rate_limit_test PRIVATE sgrn_datastore_lib)
     add_test(NAME rate_limit_test COMMAND rate_limit_test)
     # System-config helper tests (schema/sanitize/validate+merge): pure Json
     # logic, no Drogon app singleton, no filesystem writes.
-    add_executable(system_config_test tests/system_config_test.cpp)
+    add_executable(system_config_test tests/system-config-test.cpp)
     target_link_libraries(system_config_test PRIVATE sgrn_datastore_lib)
     add_test(NAME system_config_test COMMAND system_config_test)
     # Live-PostgreSQL auth + SQL envelope regression tests (postgres/functions
     # authenticate_*; storage.cpp jsonb envelopes). Uses the shared
     # sgrn::test fixtures (external PG* env or ephemeral initdb/postgres
     # cluster); SKIPs with exit 0 when no PostgreSQL is available.
-    add_executable(pg_auth_functions_test tests/pg_auth_functions_test.cpp)
+    add_executable(pg_auth_functions_test tests/pg-auth-functions-test.cpp)
     target_link_libraries(pg_auth_functions_test PRIVATE sgrn_datastore_lib reproc::reproc++)
     target_include_directories(pg_auth_functions_test PRIVATE ${CMAKE_SOURCE_DIR}/sgrn/lib/tests/support)
     add_test(NAME pg_auth_functions_test COMMAND pg_auth_functions_test)
+    # Backup & ustar archive tests (tar writing, SHA-256 streaming, directory hygiene)
+    add_executable(backup_test tests/backup-test.cpp)
+    target_link_libraries(backup_test PRIVATE sgrn_datastore_lib)
+    add_test(NAME backup_test COMMAND backup_test)
 endif()
 
 # ==================== Summary ====================

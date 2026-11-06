@@ -52,10 +52,9 @@ export default function SignInPage() {
     return (
         <div className="signin-root">
             {/* Top logos bar */}
-            <header className="signin-topbar">
+            <div style={{ display: "flex" }}>
                 <ThemeToggle />
-            </header>
-
+            </div>
             {/* Split body */}
             <main className="signin-body">
                 {/* Left panel — branding */}
@@ -79,45 +78,40 @@ export default function SignInPage() {
                 </div>
 
                 {/* Right panel — form */}
-                <div className="signin-right">
-                    <div className="signin-form-card">
-                        <div className="signin-form-header">
-                            <h2 className="signin-form-title">Sign in</h2>
-                            <p className="signin-form-subtitle">Use your operator credentials to continue</p>
-                        </div>
+                <div className="signin-form-card">
+                    <h2 className="signin-form-title">Sign in</h2>
 
-                        <form onSubmit={handleSubmit} className="signin-form">
-                            <div className="signin-field">
-                                <label className="signin-label">Email</label>
-                                <input
-                                    className="input-desktop"
-                                    type="email"
-                                    name="email"
-                                    value={formData.email}
-                                    onChange={handleChange}
-                                    placeholder="operator@domain.com"
-                                    disabled={loading}
-                                    required
-                                />
-                            </div>
-                            <div className="signin-field">
-                                <label className="signin-label">Password</label>
-                                <input
-                                    className="input-desktop"
-                                    type="password"
-                                    name="password"
-                                    value={formData.password}
-                                    onChange={handleChange}
-                                    placeholder="••••••••••••"
-                                    disabled={loading}
-                                    required
-                                />
-                            </div>
-                            <button type="submit" className="btn-desktop-primary signin-submit" disabled={loading}>
-                                {loading ? "Signing in…" : "Sign in"}
-                            </button>
-                        </form>
-                    </div>
+                    <form onSubmit={handleSubmit} className="signin-form">
+                        <div className="signin-field">
+                            <label className="signin-label">Email</label>
+                            <input
+                                className="input-desktop"
+                                type="email"
+                                name="email"
+                                value={formData.email}
+                                onChange={handleChange}
+                                placeholder="operator@domain.com"
+                                disabled={loading}
+                                required
+                            />
+                        </div>
+                        <div className="signin-field">
+                            <label className="signin-label">Password</label>
+                            <input
+                                className="input-desktop"
+                                type="password"
+                                name="password"
+                                value={formData.password}
+                                onChange={handleChange}
+                                placeholder="••••••••••••"
+                                disabled={loading}
+                                required
+                            />
+                        </div>
+                        <button type="submit" className="btn-desktop-primary signin-submit" disabled={loading}>
+                            {loading ? "Signing in…" : "Sign in"}
+                        </button>
+                    </form>
                 </div>
             </main>
         </div>

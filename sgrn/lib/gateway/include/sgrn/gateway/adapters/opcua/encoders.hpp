@@ -3,7 +3,7 @@
 #include <sgrn/gateway/adapters/opcua/NodeContext.hpp>
 #include <sgrn/gateway/adapters/opcua/TypeTranslation.hpp>
 #include <sgrn/gateway/adapters/opcua/errors.hpp>
-#include <sgrn/gateway/adapters/opcua/scalar_view.hpp>
+#include <sgrn/gateway/adapters/opcua/scalar-view.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
 #include <sgrn/gateway/twin/PlcCommandProcessor.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
@@ -18,7 +18,7 @@
 #include <string>
 
 #include <fmt/core.h>
-#include <opcua_codec_table.hpp>
+#include <opcua-codec-table.hpp>
 #include <open62541/nodeids.h>
 #include <open62541/server.h>
 #include <open62541/types_generated.h>

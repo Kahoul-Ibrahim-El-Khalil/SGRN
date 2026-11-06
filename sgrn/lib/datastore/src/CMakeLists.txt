@@ -79,6 +79,11 @@ list(APPEND BACKEND_SOURCES ${HANDLERS_SOURCES})
 file(GLOB_RECURSE UTILS_SOURCES CONFIGURE_DEPENDS utils/*.cpp)
 list(APPEND BACKEND_SOURCES ${UTILS_SOURCES})
 
+# 5c. BOOTSTRAP (CLI subcommand implementations: --init, --rotate,
+#     --backup-*, --verify-install; declarations in include/…/bootstrap/)
+file(GLOB_RECURSE BOOTSTRAP_SOURCES CONFIGURE_DEPENDS bootstrap/*.cpp)
+list(APPEND BACKEND_SOURCES ${BOOTSTRAP_SOURCES})
+
 # ── The Fat Backend Library ──────────────────────────────────────────────────
 if(SGRN_BUILD_STATIC)
     add_library(sgrn_datastore_lib STATIC ${BACKEND_SOURCES})
@@ -305,6 +310,12 @@ add_custom_command(
 add_custom_target(sgrn_config_assets
     DEPENDS "${CONFIG_GEN_DIR}/config_assets.hpp"
 )
+
+# The bootstrap implementation units embed the generated asset headers
+# (config-gen.cpp → config_assets.hpp, db-init.cpp → sql_assets.hpp), so the
+# backend library needs the GEN dirs and must build the assets first.
+target_include_directories(sgrn_datastore_lib PRIVATE "${SQL_GEN_DIR}" "${CONFIG_GEN_DIR}")
+add_dependencies(sgrn_datastore_lib sgrn_sql_assets sgrn_config_assets)
 
 # ── Apps ─────────────────────────────────────────────────────────────────────
 # The sgrn_datastore executable lives in sgrn/apps/datastore/ (entry point +

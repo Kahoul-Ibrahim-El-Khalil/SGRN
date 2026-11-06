@@ -55,7 +55,7 @@ for entry in "${BOUNDARIES[@]}"; do
                            grep -v "sgrn/lib/gateway/include/sgrn/gateway/adapters/modbus/ModbusAdapter.hpp" | \
                            grep -v "sgrn/lib/gateway/wrappers/s7/ProtocolError.hpp" | \
                            grep -v "sgrn/lib/wrappers/include/sgrn/wrappers/s7/error.hpp" | \
-                           grep -v "sgrn/lib/gateway/src/adapters/http/memory_handlers.cpp" || true)
+                           grep -v "sgrn/lib/gateway/src/adapters/http/memory-handlers.cpp" || true)
         
         # Only fail if there are any non-whitelisted matches left
         if [ -n "$FILTERED_MATCHES" ]; then

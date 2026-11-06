@@ -6,7 +6,7 @@
 #include <sgrn/gateway/adapters/opcua/TypeTranslation.hpp>
 #include <sgrn/gateway/twin/PlcState.hpp>
 #include <sgrn/utils/strings.hpp>
-#include <opcua_codec_table.hpp>
+#include <opcua-codec-table.hpp>
 #include <open62541/types_generated.h>
 #include <open62541/types_generated_handling.h>
 #include <s7codec/codec.hpp>

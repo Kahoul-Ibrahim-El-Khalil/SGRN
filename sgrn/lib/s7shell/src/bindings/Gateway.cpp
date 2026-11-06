@@ -19,9 +19,9 @@
 #include <sgrn/gateway/adapters/websocket/WebSocketAdapter.hpp>
 #include <sgrn/gateway/database/GatewayDatabase.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
-#include <sgrn/s7shell/bindings/flat_delta.hpp>
+#include <sgrn/s7shell/bindings/flat-delta.hpp>
 #include <sgrn/s7shell/bindings/registration.hpp>
-#include <sgrn/s7shell/bindings/tag_http.hpp>
+#include <sgrn/s7shell/bindings/tag-http.hpp>
 
 #include <fmt/color.h>
 #include <fmt/format.h>

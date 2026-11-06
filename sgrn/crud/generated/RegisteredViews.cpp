@@ -3,7 +3,7 @@
 
 #include "domains.gen.hpp"
 #include "files.gen.hpp"
-#include "user_domain_permissions.gen.hpp"
+#include "user-domain-permissions.gen.hpp"
 #include "users.gen.hpp"
 
 namespace sgrn::crud::generated

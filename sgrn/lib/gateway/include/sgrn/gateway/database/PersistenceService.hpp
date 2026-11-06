@@ -1,7 +1,7 @@
 #pragma once
 
 #include <sgrn/Result.hpp>
-#include <sgrn/common/wal_frame.hpp>
+#include <sgrn/common/wal-frame.hpp>
 #include <sgrn/gateway/config/persistence.hpp>
 #include <sgrn/gateway/core/TelemetryBroker.hpp>
 #include <sgrn/gateway/database/GatewayDatabase.hpp>

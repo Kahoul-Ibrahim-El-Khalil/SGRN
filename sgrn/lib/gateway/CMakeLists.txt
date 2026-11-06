@@ -127,14 +127,14 @@ set(GATEWAY_TWIN_SOURCES
     src/twin/PlcState.cpp
     src/twin/DbIOProvider.cpp
     src/twin/PlcMemory.cpp
-    src/twin/PlcMemory_io.cpp
-    src/twin/PlcMemory_query.cpp
+    src/twin/PlcMemory-io.cpp
+    src/twin/PlcMemory-query.cpp
     src/twin/encoding.cpp
     src/twin/serialization.cpp
     src/twin/path.cpp
-    src/twin/time_utils.cpp
+    src/twin/time-utils.cpp
     src/twin/PlcCommandProcessor.cpp
-    src/twin/field_update.cpp
+    src/twin/field-update.cpp
     src/twin/SnapshotRegistry.cpp
     src/twin/LeafDictionary.cpp
 )
@@ -237,14 +237,14 @@ target_compile_definitions(sgrn_gateway_io INTERFACE SGRN_HAS_SNAP7)
 # Sources live under:  src/adapters/opcua/
 set(GATEWAY_OPCUA_SOURCES
     src/adapters/opcua/OpcUaAdapter.cpp
-    src/adapters/opcua/schema_type_registry.cpp
+    src/adapters/opcua/schema-type-registry.cpp
     src/adapters/opcua/TypeTranslation.cpp
     src/adapters/opcua/decoders.cpp
     src/adapters/opcua/readValue.cpp
     src/adapters/opcua/writeValue.cpp
-    src/adapters/opcua/delta_push.cpp
-    src/adapters/opcua/node_registration.cpp
-    src/adapters/opcua/information_model.cpp
+    src/adapters/opcua/delta-push.cpp
+    src/adapters/opcua/node-registration.cpp
+    src/adapters/opcua/information-model.cpp
     src/adapters/opcua/encoders.cpp
     # session_security.* superseded by wrappers/opcua/SessionRegistry
 )
@@ -296,17 +296,17 @@ set(GATEWAY_LIB_SOURCES
     src/adapters/http.cpp
     src/adapters/http/types.cpp
     src/adapters/http/path.cpp
-    src/adapters/http/put_handler.cpp
-    src/adapters/http/memory_handlers.cpp
-    src/adapters/http/post_handler.cpp
-    src/adapters/http/read_handlers.cpp
-    src/adapters/http/tags_handlers.cpp
+    src/adapters/http/put-handler.cpp
+    src/adapters/http/memory-handlers.cpp
+    src/adapters/http/post-handler.cpp
+    src/adapters/http/read-handlers.cpp
+    src/adapters/http/tags-handlers.cpp
     src/adapters/http/assets.cpp
     src/adapters/s7/callbacks.cpp
     src/core/snapshot.cpp
     src/adapters/websocket/WebSocketAdapter.cpp
-    src/adapters/websocket/delta_push.cpp
-    src/adapters/websocket/client_messages.cpp
+    src/adapters/websocket/delta-push.cpp
+    src/adapters/websocket/client-messages.cpp
     src/database/GatewayDatabase.cpp
     src/database/EngineStateStore.cpp
     src/database/PersistenceService.cpp

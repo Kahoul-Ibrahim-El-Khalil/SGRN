@@ -3,8 +3,8 @@
 #include <sgrn/datastore/handlers/admin.hpp>
 #include <sgrn/datastore/handlers/auth.hpp>
 #include <sgrn/datastore/handlers/query.hpp>
+#include <sgrn/datastore/handlers/storage-admin.hpp>
 #include <sgrn/datastore/handlers/storage.hpp>
-#include <sgrn/datastore/handlers/storage_admin.hpp>
 
 // Generated CRUD views (compile-time REST-over-Postgres). The header only
 // declares initGeneratedViews(); the per-table instances live in the

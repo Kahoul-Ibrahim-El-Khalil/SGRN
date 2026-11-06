@@ -19,7 +19,7 @@ set(SGRN_S7SHELL_LIB_SOURCES
     src/s7shell/onStart.cpp
     src/s7shell/runShellCommand.cpp
     src/SchemaVM.cpp
-    src/commands/cmd_emit_as.cpp
+    src/commands/cmd-emit-as.cpp
     src/script/ScriptDataBlock.cpp
     src/script/ScriptFieldProxy.cpp
     src/script/ScriptTagTable.cpp
@@ -49,7 +49,7 @@ set(SGRN_S7SHELL_LIB_SOURCES
     src/connection/ProxySession.cpp
     src/connection/GatewaySync.cpp
     src/connection/S7ShellServer.cpp
-    src/utils/json_helpers.cpp
+    src/utils/json-helpers.cpp
 )
 if(SGRN_BUILD_OPC)
     list(APPEND SGRN_S7SHELL_LIB_SOURCES src/connection/OpcUaShellServer.cpp src/bindings/OpcUaServer.cpp)
@@ -107,7 +107,7 @@ endif()
 if(SGRN_BUILD_TESTS)
     sgrn_add_component_executable(
         TARGET wal_replayer_test
-        SOURCES tests/wal_replayer_test.cpp
+        SOURCES tests/wal-replayer-test.cpp
         ENABLE_ORIGIN_RPATH
         PRIVATE_LIBS
             sgrn_s7shell
@@ -119,7 +119,7 @@ if(SGRN_BUILD_TESTS)
 
     sgrn_add_component_executable(
         TARGET init_script_test
-        SOURCES tests/init_script_test.cpp
+        SOURCES tests/init-script-test.cpp
         ENABLE_ORIGIN_RPATH
         PRIVATE_LIBS
             sgrn_s7shell
@@ -130,7 +130,7 @@ if(SGRN_BUILD_TESTS)
 
     sgrn_add_component_executable(
         TARGET schema_reload_hook_test
-        SOURCES tests/schema_reload_hook_test.cpp
+        SOURCES tests/schema-reload-hook-test.cpp
         ENABLE_ORIGIN_RPATH
         PRIVATE_LIBS
             sgrn_s7shell
@@ -144,7 +144,7 @@ if(SGRN_BUILD_TESTS)
     # own REPL engine through the execute() suppression paths at once.
     sgrn_add_component_executable(
         TARGET angel_concurrency_test
-        SOURCES tests/angel_concurrency_test.cpp
+        SOURCES tests/angel-concurrency-test.cpp
         ENABLE_ORIGIN_RPATH
         PRIVATE_LIBS
             sgrn_s7shell

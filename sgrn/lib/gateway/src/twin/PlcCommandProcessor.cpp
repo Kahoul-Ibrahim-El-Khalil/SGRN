@@ -3,7 +3,7 @@
 #include <sgrn/gateway/twin/PlcCommandProcessor.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
 #include <sgrn/gateway/twin/encoding.hpp>
-#include <sgrn/gateway/twin/field_update.hpp>
+#include <sgrn/gateway/twin/field-update.hpp>
 #include <sgrn/gateway/twin/path.hpp>
 #include <sgrn/utils/time.hpp>
 #include <asio.hpp>

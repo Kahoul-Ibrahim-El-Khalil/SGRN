@@ -3,9 +3,9 @@
 #include <sgrn/Result.hpp>
 #include <sgrn/gateway/adapters/http/types.hpp>
 #include <sgrn/gateway/adapters/northbound/NorthboundServer.hpp>
-#include <sgrn/gateway/adapters/rate_limit.hpp>
+#include <sgrn/gateway/adapters/rate-limit.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
-#include <sgrn/gateway/tools/replay_control.hpp>
+#include <sgrn/gateway/tools/replay-control.hpp>
 #include <atomic>
 #include <crow.h>
 #include <functional>
@@ -150,7 +150,7 @@ private:
         const std::string& t_url_path, const rapidjson::Document& t_document);
     void handlePut(const http::HttpRequest& t_req, http::HttpResponse& t_res);
 
-    // Discrete tag endpoints: /tags and /tags/<name> (see tags_handlers.cpp)
+    // Discrete tag endpoints: /tags and /tags/<name> (see tags-handlers.cpp)
     void handleGetTags(const http::HttpRequest& t_req, http::HttpResponse& t_res);
     void handleGetTag(const http::HttpRequest& t_req, http::HttpResponse& t_res);
     void handleWriteTag(const http::HttpRequest& t_req, http::HttpResponse& t_res);

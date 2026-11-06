@@ -60,7 +60,7 @@ sgrn_target(sgrn_ml_torch)
 # =============================================================================
 
 if(SGRN_BUILD_TESTS)
-    foreach(test_name torch_smoke_test mlp_test torch_backend_test trainer_test)
+    foreach(test_name torch-smoke-test mlp-test torch-backend-test trainer-test)
         sgrn_add_component_executable(
             TARGET ${test_name}
             SOURCES tests/${test_name}.cpp

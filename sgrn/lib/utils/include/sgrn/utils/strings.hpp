@@ -1,6 +1,7 @@
 #pragma once
 
 #include "encoding.hpp"
+#include <fmt/format.h>
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -490,6 +491,78 @@ inline std::string sanitizeIdentifier(const std::string& t_s) {
     }
     if (out.empty() || std::isdigit(static_cast<unsigned char>(out[0])))
         out = "_" + out;
+    return out;
+}
+
+/**
+ * @brief Format a byte count into a human-readable string (e.g. "500 B", "2.0 KB", "15.0 MB", "3.00 GB").
+ */
+inline std::string formatBytes(std::uintmax_t t_bytes) {
+    if (t_bytes >= 1024ULL * 1024ULL * 1024ULL) {
+        return fmt::format("{:.2f} GB", static_cast<double>(t_bytes) / (1024.0 * 1024.0 * 1024.0));
+    }
+    if (t_bytes >= 1024ULL * 1024ULL) {
+        return fmt::format("{:.1f} MB", static_cast<double>(t_bytes) / (1024.0 * 1024.0));
+    }
+    if (t_bytes >= 1024ULL) {
+        return fmt::format("{:.1f} KB", static_cast<double>(t_bytes) / 1024.0);
+    }
+    return fmt::format("{} B", t_bytes);
+}
+
+/**
+ * @brief Appends JSON-escaped string representation of in into out.
+ */
+inline void jsonEscapeInto(std::string& out, std::string_view in) {
+    for (char c : in) {
+        switch (c) {
+            case '"':
+                out += "\\\"";
+                break;
+            case '\\':
+                out += "\\\\";
+                break;
+            case '\b':
+                out += "\\b";
+                break;
+            case '\f':
+                out += "\\f";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\r':
+                out += "\\r";
+                break;
+            case '\t':
+                out += "\\t";
+                break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
+                    out += buf;
+                } else {
+                    out += c;
+                }
+                break;
+        }
+    }
+}
+
+/**
+ * @brief Escapes single quotes for SQL string literals.
+ */
+inline std::string sqlEscape(std::string_view t_value) {
+    std::string out;
+    out.reserve(t_value.size() + 4);
+    for (char c : t_value) {
+        if (c == '\'') {
+            out += "''";
+        } else {
+            out += c;
+        }
+    }
     return out;
 }
 

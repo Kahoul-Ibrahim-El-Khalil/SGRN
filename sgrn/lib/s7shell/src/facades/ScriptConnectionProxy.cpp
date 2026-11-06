@@ -1,6 +1,6 @@
 #include <sgrn/s7shell/connection/S7Connection.hpp>
 #include <sgrn/s7shell/facades/ScriptConnectionProxy.hpp>
-#include <sgrn/s7shell/utils/json_helpers.hpp>
+#include <sgrn/s7shell/utils/json-helpers.hpp>
 
 #include <fmt/format.h>
 #include <stdexcept>

@@ -3,7 +3,7 @@
 #include <sgrn/s7shell/connection/S7Connection.hpp>
 #include <sgrn/s7shell/script/ScriptPathBatch.hpp>
 #include <sgrn/s7shell/script/ScriptTagTable.hpp>
-#include <sgrn/s7shell/utils/json_helpers.hpp>
+#include <sgrn/s7shell/utils/json-helpers.hpp>
 
 #include <sgrn/gateway/twin/twin.hpp>
 #include <sgrn/scl/types.hpp>

@@ -1,8 +1,8 @@
 #include <sgrn/gateway/adapters/opcua.hpp>
 #include <sgrn/gateway/adapters/opcua/NodeContext.hpp>
-#include <sgrn/gateway/adapters/opcua/delta_push.hpp>
-#include <sgrn/gateway/adapters/opcua/information_model.hpp>
-#include <sgrn/gateway/adapters/opcua/schema_type_registry.hpp>
+#include <sgrn/gateway/adapters/opcua/delta-push.hpp>
+#include <sgrn/gateway/adapters/opcua/information-model.hpp>
+#include <sgrn/gateway/adapters/opcua/schema-type-registry.hpp>
 #include <sgrn/gateway/core/TelemetryBroker.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
 #include <sgrn/gateway/twin/PlcCommandProcessor.hpp>

@@ -4,7 +4,7 @@ sgrn_add_component_executable(
     TARGET      sgrn_replay
     SOURCES
         main.cpp
-        ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/src/tools/sgrn_replay.cpp
+        ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/src/tools/sgrn-replay.cpp
         ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/src/gateway.cpp
     ENABLE_ORIGIN_RPATH
     PRIVATE_LIBS

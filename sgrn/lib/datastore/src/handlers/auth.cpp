@@ -5,7 +5,7 @@
 #include <sgrn/datastore/services/auth.hpp>
 #include <sgrn/datastore/session/SessionStore.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
-#include <sgrn/datastore/utils/safe_access.hpp>
+#include <sgrn/datastore/utils/safe-access.hpp>
 #include <sgrn/utils/jsoncpp.hpp>
 
 #ifdef DEBUG_AUTH_HANDLER

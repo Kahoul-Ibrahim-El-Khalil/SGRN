@@ -27,7 +27,7 @@
 #include <sgrn/gateway/adapters/websocket/WebSocketAdapter.hpp>
 #include <sgrn/gateway/security/SecurityManager.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
-#include <sgrn/s7shell/bindings/flat_delta.hpp>
+#include <sgrn/s7shell/bindings/flat-delta.hpp>
 #include <sgrn/s7shell/bindings/registration.hpp>
 
 #include <fmt/color.h>

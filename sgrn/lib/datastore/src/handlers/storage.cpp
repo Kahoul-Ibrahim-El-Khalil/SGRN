@@ -6,7 +6,7 @@
 #include <sgrn/datastore/services/helpers/magic.hpp>
 #include <sgrn/datastore/services/storage.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
-#include <sgrn/datastore/utils/safe_access.hpp>
+#include <sgrn/datastore/utils/safe-access.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/encoding.hpp>
 #include <sgrn/utils/hashing.hpp>
@@ -34,8 +34,8 @@
 #define ERROR_LOG(...) ((void)0)
 #endif
 // storage.cpp — StorageApiHandler construction + generated object CRUD
-// route handlers. Cohesive feature groups live in storage_files.cpp,
-// storage_drive.cpp and storage_uploads.cpp (same class, split by domain).
+// route handlers. Cohesive feature groups live in storage-files.cpp,
+// storage-drive.cpp and storage-uploads.cpp (same class, split by domain).
 
 namespace sgrn::datastore::handlers::storage
 {

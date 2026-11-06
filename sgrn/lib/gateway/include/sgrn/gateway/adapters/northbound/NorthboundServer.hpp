@@ -19,7 +19,7 @@
 // and is thread-safe.
 
 #include <sgrn/Result.hpp>
-#include <sgrn/gateway/adapters/rate_limit.hpp>
+#include <sgrn/gateway/adapters/rate-limit.hpp>
 #include <atomic>
 #include <crow.h>
 #include <cstdint>

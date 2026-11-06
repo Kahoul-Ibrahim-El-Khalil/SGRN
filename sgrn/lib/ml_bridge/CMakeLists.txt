@@ -44,7 +44,7 @@ sgrn_target(sgrn_ml_bridge)
 # =============================================================================
 
 if(SGRN_BUILD_TESTS)
-    foreach(test_name twin_bridge_test pipeline_e2e_test)
+    foreach(test_name twin-bridge-test pipeline-e2e-test)
         sgrn_add_component_executable(
             TARGET ${test_name}
             SOURCES tests/${test_name}.cpp

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <sgrn/Result.hpp>
-#include <sgrn/gateway/adapters/opcua/tag_access.hpp>
+#include <sgrn/gateway/adapters/opcua/tag-access.hpp>
 #include <cstddef>
 #include <memory>
 #include <string>

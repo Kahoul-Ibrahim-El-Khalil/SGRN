@@ -25,7 +25,7 @@
 
 #include <fmt/core.h>
 #include <sgrn/gateway/adapters/opcua/encoders.hpp>
-#include <opcua_codec_table.hpp>
+#include <opcua-codec-table.hpp>
 #include <open62541/nodeids.h>
 #include <open62541/server.h>
 #include <open62541/types_generated.h>

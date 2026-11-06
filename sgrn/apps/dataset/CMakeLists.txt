@@ -4,9 +4,9 @@ sgrn_add_component_executable(
     TARGET      sgrn_dataset
     SOURCES
         main.cpp
-        ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/src/tools/sgrn_dataset.cpp
-        ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/src/tools/sgrn_dataset_transcode.cpp
-        ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/src/tools/sgrn_dataset_merge.cpp
+        ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/src/tools/sgrn-dataset.cpp
+        ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/src/tools/sgrn-dataset-transcode.cpp
+        ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/src/tools/sgrn-dataset-merge.cpp
     ENABLE_ORIGIN_RPATH
     PRIVATE_LIBS
         sgrn_ml

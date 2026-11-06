@@ -1,0 +1,625 @@
+#include <sgrn/gateway/adapters/opcua/TypeTranslation.hpp>
+#include <sgrn/gateway/adapters/opcua/information-model.hpp>
+#include <sgrn/gateway/adapters/opcua/scalar-view.hpp>
+#include <sgrn/gateway/security/SecurityManager.hpp>
+#include <sgrn/gateway/twin/PlcMemory.hpp>
+#include <sgrn/scl/schema/PlcSchemaStore.hpp>
+#include <sgrn/wrappers/opcua/Server.hpp>
+#include <sgrn/wrappers/opcua/TypeRegistry.hpp>
+
+#include <fmt/core.h>
+#include <sgrn/debug.hpp>
+#include <sgrn/gateway/twin/PlcState.hpp>
+#include <memory>
+#include <open62541/common.h>
+#include <open62541/nodeids.h>
+#include <open62541/server.h>
+#include <open62541/types_generated.h>
+#include <open62541/types_generated_handling.h>
+#include <s7codec/codec.hpp>
+#include <stdexcept>
+#include <string>
+using ::sgrn::scl::DataType;
+using ::sgrn::scl::DbField;
+
+namespace sgrn::gateway::adapters
+{
+
+// Defined here (the adapter lifecycle TU) rather than in NodeContext.hpp so
+// the header keeps its forward declarations. Resolves the cached twin symbol
+// on first use; makeFieldContext() below populates it eagerly when the twin
+// tree is already loaded, this covers any context created before that.
+const twin::PlcNode* NodeContext::resolveSymbol() const {
+    if (!plc_node && server)
+        plc_node = server->findSymbol(db_number, field_path);
+    return plc_node;
+}
+
+PlcScalarView makeScalarView(const twin::PlcNode& t_node) {
+    return PlcScalarView{
+        .type = t_node.type_,
+        .endian = t_node.endian_,
+        .size = static_cast<uint32_t>(t_node.size_),
+        .count = t_node.count_,
+        .bit_index = t_node.bit_index_,
+        .string_capacity = t_node.string_capacity_,
+        .min_val = t_node.min_val_,
+        .max_val = t_node.max_val_,
+    };
+}
+
+extern UA_StatusCode readValue(
+    UA_Server*, const UA_NodeId*, void*, const UA_NodeId*, void*, UA_Boolean, const UA_NumericRange*, UA_DataValue*);
+extern UA_StatusCode readAggregateValue(
+    UA_Server*, const UA_NodeId*, void*, const UA_NodeId*, void*, UA_Boolean, const UA_NumericRange*, UA_DataValue*);
+extern UA_StatusCode writeValue(UA_Server*, const UA_NodeId*, void*, const UA_NodeId*, void*, const UA_NumericRange*, const UA_DataValue*);
+
+static void trackNode(uint16_t t_db_number, const std::string& t_full_path, const wrappers::opcua::NodeId& t_var_id,
+    const NodeContext* tp_ctx, std::unordered_map<std::string, wrappers::opcua::NodeId>* tp_node_id_map, DeltaPushHandler* tp_delta_push) {
+    if (!tp_node_id_map)
+        return;
+    std::string map_key = fmt::format("{}:{}", t_db_number, t_full_path);
+    (*tp_node_id_map).insert_or_assign(map_key, wrappers::opcua::nodeIdFromRaw(t_var_id.get()));
+    if (tp_delta_push)
+        tp_delta_push->registerNode(map_key, t_var_id, tp_ctx);
+}
+
+static void setReadOnlyDataSource(UA_Server* tp_server, const UA_NodeId& t_var_id) {
+    UA_DataSource ds{};
+    ds.read = readAggregateValue;
+    UA_Server_setVariableNode_dataSource(tp_server, t_var_id, ds);
+}
+
+static void setReadWriteDataSource(UA_Server* tp_server, const UA_NodeId& t_var_id) {
+    UA_DataSource ds{};
+    ds.read = readValue;
+    ds.write = writeValue;
+    UA_Server_setVariableNode_dataSource(tp_server, t_var_id, ds);
+}
+
+static std::unique_ptr<NodeContext> makeFieldContext(twin::PlcMemory* tp_plc_memory, uint16_t t_db_number, const std::string& t_full_path,
+    ::sgrn::gateway::SecurityManager* tp_security, const DbField& t_field, bool t_is_array, bool t_is_custom_udt, int t_ua_type_idx,
+    uint32_t t_field_size, wrappers::opcua::TypeRegistry& t_type_registry, bool t_trigger_events)
+
+{
+    // Owned from birth: if anything below (or the caller's push_back) throws,
+    // the context is freed instead of leaking the raw new.
+    auto p_ctx_owned = std::unique_ptr<NodeContext>(new NodeContext{
+        .server = tp_plc_memory,
+        .db_number = t_db_number,
+        .field_path = t_full_path,
+        .security = tp_security,
+        .array_length = t_is_array ? static_cast<uint32_t>(t_field.count) : 0u,
+        .elem_ua_type_index = t_ua_type_idx,
+        .udt_name = (::sgrn::scl::kind_of(t_field) == ::sgrn::scl::FieldKind::Struct) ? t_field.udt_name : "",
+        .type_registry = &t_type_registry,
+        .trigger_events = t_trigger_events,
+        .field_offset = static_cast<uint32_t>(t_field.offset),
+        .field_size = t_field_size,
+        .type = t_field.type,
+        .kind = ::sgrn::scl::kind_of(t_field),
+        .string_capacity = static_cast<uint32_t>(t_field.string_capacity),
+        .scratch_buf = {},
+        .enum_type = nullptr,
+        .enum_map = {},
+    });
+    NodeContext* p_ctx = p_ctx_owned.get();
+    p_ctx->min_val = t_field.min_val;
+    p_ctx->max_val = t_field.max_val;
+    p_ctx->scratch_buf.resize(p_ctx->field_size);
+    p_ctx->enum_map = t_field.enum_map;
+
+    // Eagerly cache the twin symbol (no-op → nullptr when the twin tree isn't
+    // loaded yet; resolveSymbol() re-resolves lazily on first use). This keeps
+    // findSymbol()'s string build + case-insensitive hash out of every write /
+    // aggregate read / delta-push callback.
+    p_ctx->plc_node = tp_plc_memory->findSymbol(t_db_number, t_full_path);
+    if (p_ctx->kind == ::sgrn::scl::FieldKind::Enum) {
+        if (auto ua_base_res = dataTypeToUaTypeIndex(t_field.type); ua_base_res.hasValue()) {
+            const std::string sig = enumTypeSignature(ua_base_res.value(), t_field.enum_map);
+            if (const UA_DataType* p_enum = t_type_registry.findEnumBySignature(sig))
+                p_ctx->enum_type = p_enum;
+        } else {
+            SGRN_WARN_LOG("OPC UA: field '{}' has enum_map but unsupported base type — registering as plain scalar", t_full_path);
+        }
+    }
+    return p_ctx_owned;
+}
+
+static uint32_t computeFieldSize(const DbField& t_field, bool t_is_array) {
+    if (t_field.type == DataType::Struct)
+        return static_cast<uint32_t>(t_field.struct_size);
+
+    if (t_field.type == DataType::String || t_field.type == DataType::WString || t_field.type == DataType::XString ||
+        t_field.type == DataType::XWString) {
+        // struct_size is the per-element byte span after the offset-tracker fix.
+        // Return the TOTAL field size (per-element span × element count) so that
+        // readDbMemory reads the entire string array in one call.
+        const uint32_t elem_span = [&]() -> uint32_t {
+            if (t_field.struct_size > 0)
+                return static_cast<uint32_t>(t_field.struct_size);
+            auto span_opt = s7codec::typeSpanBytes(t_field.type, t_field.string_capacity > 0 ? t_field.string_capacity : t_field.count);
+            return span_opt ? *span_opt : 0;
+        }();
+        const uint32_t n_elems = static_cast<uint32_t>(t_field.count > 0 ? t_field.count : 1);
+        return elem_span * n_elems;
+    }
+
+    if (t_is_array) {
+        auto span_opt = s7codec::typeSpanBytes(t_field.type, t_field.count);
+        return span_opt ? *span_opt : 0;
+    }
+
+    auto prim_opt = s7codec::primitiveSize(t_field.type);
+    return prim_opt ? static_cast<uint32_t>(*prim_opt) : 0;
+}
+
+static void configureVariableAttributes(UA_VariableAttributes& t_v_attr, const DbField& t_field, bool t_is_array, bool t_is_custom_udt,
+    int t_ua_type_idx, const UA_DataType* tp_custom_type, const UA_DataType* tp_enum_type) {
+    t_v_attr.accessLevel = UA_ACCESSLEVELMASK_READ | UA_ACCESSLEVELMASK_WRITE;
+    t_v_attr.userAccessLevel = t_v_attr.accessLevel;
+
+    // node-registration.cpp — configureVariableAttributes(), replace the enum block
+    if (::sgrn::scl::kind_of(t_field) == ::sgrn::scl::FieldKind::Enum && tp_enum_type) {
+        // OPC UA Part 3 §5.6.2 / Part 8 §5.1: an Enumeration-subtype variable's
+        // DataType attribute MUST be the specific Enum type NodeId so clients can
+        // discover EnumStrings/EnumValues. Enum values are still wire-encoded as
+        // Int32 (Part 6 §5.1.5) — open62541's write-path validation already
+        // special-cases Int32-typed Variants against Enum-kind DataTypes, so this
+        // does not need the Int32 substitution the previous version used.
+        t_v_attr.dataType = tp_enum_type->typeId;
+        if (t_is_array) {
+            t_v_attr.valueRank = UA_VALUERANK_ONE_DIMENSION;
+            t_v_attr.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
+            t_v_attr.arrayDimensions[0] = static_cast<UA_UInt32>(t_field.count);
+            t_v_attr.arrayDimensionsSize = 1;
+        } else {
+            t_v_attr.valueRank = UA_VALUERANK_SCALAR;
+        }
+        return;
+    }
+
+    if (t_is_custom_udt && tp_custom_type) {
+        t_v_attr.dataType = tp_custom_type->typeId;
+        if (t_is_array) {
+            t_v_attr.valueRank = UA_VALUERANK_ONE_DIMENSION;
+            t_v_attr.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
+            t_v_attr.arrayDimensions[0] = static_cast<UA_UInt32>(t_field.count);
+            t_v_attr.arrayDimensionsSize = 1;
+        } else {
+            t_v_attr.valueRank = UA_VALUERANK_SCALAR;
+        }
+    } else if (t_is_array && t_ua_type_idx >= 0) {
+        t_v_attr.dataType = UA_TYPES[t_ua_type_idx].typeId;
+        t_v_attr.valueRank = UA_VALUERANK_ONE_DIMENSION;
+        t_v_attr.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
+        t_v_attr.arrayDimensions[0] = static_cast<UA_UInt32>(t_field.count);
+        t_v_attr.arrayDimensionsSize = 1;
+    } else {
+        t_v_attr.valueRank = UA_VALUERANK_SCALAR;
+        if (t_ua_type_idx >= 0)
+            t_v_attr.dataType = UA_TYPES[t_ua_type_idx].typeId;
+    }
+
+    // Override semantic types where OPC UA has standard mappings.
+    // TIME is decoded as a Double (milliseconds), but semantically is a Duration (NodeId 290).
+    if (t_field.type == ::sgrn::scl::DataType::Time) {
+        t_v_attr.dataType = UA_NODEID_NUMERIC(0, 290);
+    }
+}
+
+static void addEngineeringUnitsProperty(
+    UA_Server* tp_server, const UA_NodeId& t_parent_id, const std::string& t_full_node_id, const std::string& t_unit_str) {
+
+    UA_NodeId prop_id = UA_NODEID_STRING_ALLOC(1, (t_full_node_id + ".EngineeringUnits").c_str());
+    UA_VariableAttributes eu_attr = UA_VariableAttributes_default;
+    eu_attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", "EngineeringUnits");
+    eu_attr.dataType = UA_NODEID_NUMERIC(0, UA_NS0ID_EUINFORMATION);
+    UA_EUInformation eu;
+    UA_EUInformation_init(&eu);
+    eu.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", t_unit_str.c_str());
+    UA_Variant_setScalarCopy(&eu_attr.value, &eu, &UA_TYPES[UA_TYPES_EUINFORMATION]);
+    UA_Server_addVariableNode(tp_server, prop_id, t_parent_id, UA_NODEID_NUMERIC(0, UA_NS0ID_HASPROPERTY),
+        UA_QUALIFIEDNAME_ALLOC(0, "EngineeringUnits"), UA_NODEID_NUMERIC(0, UA_NS0ID_PROPERTYTYPE), eu_attr, nullptr, nullptr);
+    UA_NodeId_clear(&prop_id);
+    UA_EUInformation_clear(&eu);
+}
+
+void addAggregateValueNode(const OpcUaAdapterContext& t_adapter_ctx, const OpcUaNodeRegistryContext& t_nodes_ctx,
+    const OpcUaNodePath& t_path, const OpcUaDbContext& t_db, const OpcUaAggregateFieldContext& t_aggregate) {
+    UA_Server* p_raw = t_adapter_ctx.p_opcua_server->raw();
+    const UA_NodeId& parent = t_path.parent_id.get();
+
+    auto p_ctx_owned = std::unique_ptr<NodeContext>(new NodeContext{
+        .server = t_adapter_ctx.p_plc_memory,
+        .db_number = t_db.number,
+        .field_path = t_path.path,
+        .security = t_adapter_ctx.p_security_manager,
+        .array_length = 0u,
+        .elem_ua_type_index = -1,
+        .udt_name = t_aggregate.udt_name,
+        .type_registry = t_adapter_ctx.p_type_registry,
+        .trigger_events = t_db.trigger_events,
+        .field_offset = t_aggregate.field_offset,
+        .field_size = t_aggregate.field_size,
+        .type = ::sgrn::scl::DataType::Struct,
+        .string_capacity = 0,
+        .scratch_buf = {},
+        .enum_type = nullptr,
+        .enum_map = {},
+    });
+    NodeContext* p_ctx = p_ctx_owned.get();
+    t_nodes_ctx.p_owned_contexts->push_back(std::move(p_ctx_owned));
+
+    UA_NodeId t_var_id = UA_NODEID_STRING_ALLOC(1, (t_path.node_id + ".Value").c_str());
+    UA_VariableAttributes t_v_attr = UA_VariableAttributes_default;
+    t_v_attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", "Value");
+
+    if (!t_aggregate.udt_name.empty()) {
+        const UA_DataType* p_udt_type = t_adapter_ctx.p_type_registry->find(t_aggregate.udt_name);
+        if (p_udt_type) {
+            t_v_attr.dataType = p_udt_type->typeId;
+            t_v_attr.valueRank = UA_VALUERANK_SCALAR;
+            t_v_attr.accessLevel = UA_ACCESSLEVELMASK_READ;
+            t_v_attr.userAccessLevel = t_v_attr.accessLevel;
+        } else {
+            t_v_attr.dataType = UA_NODEID_NUMERIC(0, UA_NS0ID_STRING);
+            t_v_attr.accessLevel = UA_ACCESSLEVELMASK_READ;
+            t_v_attr.userAccessLevel = t_v_attr.accessLevel;
+        }
+    } else {
+        t_v_attr.dataType = UA_NODEID_NUMERIC(0, UA_NS0ID_STRING);
+        t_v_attr.accessLevel = UA_ACCESSLEVELMASK_READ;
+        t_v_attr.userAccessLevel = t_v_attr.accessLevel;
+    }
+
+    UA_Server_addVariableNode(p_raw, t_var_id, parent, UA_NODEID_NUMERIC(0, UA_NS0ID_HASCOMPONENT), UA_QUALIFIEDNAME_ALLOC(1, "Value"),
+        UA_NODEID_NUMERIC(0, UA_NS0ID_BASEDATAVARIABLETYPE), t_v_attr, p_ctx, nullptr);
+
+    setReadOnlyDataSource(p_raw, t_var_id);
+    trackNode(t_db.number, t_path.path, wrappers::opcua::nodeIdFromRaw(t_var_id), p_ctx, t_nodes_ctx.p_node_id_map,
+        t_adapter_ctx.p_delta_push_handler);
+    UA_NodeId_clear(&t_var_id);
+}
+void addFieldNodes(const OpcUaAdapterContext& t_adapter_ctx, const OpcUaNodeRegistryContext& t_nodes,
+    const wrappers::opcua::NodeId& t_parent_id, const std::vector<DbField>& t_fields, const std::string& t_path_prefix,
+    const std::string& t_node_id_prefix, const OpcUaDbContext& t_db) {
+    for (const DbField& t_field : t_fields) {
+        const std::string t_full_path = t_path_prefix.empty() ? t_field.name : t_path_prefix + "." + t_field.name;
+
+        const std::string t_full_node_id = t_node_id_prefix + "." + t_field.name;
+
+        const bool t_is_custom_udt = !t_field.udt_name.empty() && t_adapter_ctx.p_type_registry->find(t_field.udt_name) != nullptr;
+
+        const bool current_trigger_events = t_db.trigger_events || t_field.trigger_events;
+
+        // After:
+        OpcUaNodePath node_path{
+            .parent_id = wrappers::opcua::nodeIdFromRaw(t_parent_id.get()),
+            .path = t_full_path,
+            .node_id = t_full_node_id,
+        };
+        OpcUaDbContext node_db{
+            .number = t_db.number,
+            .trigger_events = current_trigger_events,
+        };
+
+        if (t_is_custom_udt || t_field.children.empty()) {
+            addLeafVariableNode(t_adapter_ctx, t_nodes, node_path, t_field, node_db);
+        } else {
+            addFolderNode(t_adapter_ctx, t_nodes, node_path, t_field, node_db);
+        }
+    }
+}
+static void addRangeProperty(
+    UA_Server* tp_server, const UA_NodeId& t_parent_id, const std::string& t_full_node_id, double t_low, double t_high) {
+
+    UA_NodeId prop_id = UA_NODEID_STRING_ALLOC(1, (t_full_node_id + ".EURange").c_str());
+    UA_VariableAttributes r_attr = UA_VariableAttributes_default;
+    r_attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", "EURange");
+    r_attr.dataType = UA_NODEID_NUMERIC(0, UA_NS0ID_RANGE);
+
+    UA_Range range;
+    range.low = t_low;
+    range.high = t_high;
+    UA_Variant_setScalarCopy(&r_attr.value, &range, &UA_TYPES[UA_TYPES_RANGE]);
+
+    UA_Server_addVariableNode(tp_server, prop_id, t_parent_id, UA_NODEID_NUMERIC(0, UA_NS0ID_HASPROPERTY),
+        UA_QUALIFIEDNAME_ALLOC(0, "EURange"), UA_NODEID_NUMERIC(0, UA_NS0ID_PROPERTYTYPE), r_attr, nullptr, nullptr);
+    UA_NodeId_clear(&prop_id);
+}
+void addLeafVariableNode(const OpcUaAdapterContext& t_adapter_ctx, const OpcUaNodeRegistryContext& t_nodes_ctx, const OpcUaNodePath& t_path,
+    const ::sgrn::scl::DbField& t_field, const OpcUaDbContext& t_db) {
+    UA_Server* p_raw = t_adapter_ctx.p_opcua_server->raw();
+    const UA_NodeId& parent = t_path.parent_id.get();
+
+    const bool is_array = (t_field.count > 1);
+    const bool is_custom_udt = !t_field.udt_name.empty() && t_adapter_ctx.p_type_registry->find(t_field.udt_name) != nullptr;
+
+    int t_ua_type_idx = -1;
+    const UA_DataType* p_custom_type = nullptr;
+    const UA_DataType* p_enum_type = nullptr;
+    if (is_custom_udt) {
+        p_custom_type = t_adapter_ctx.p_type_registry->find(t_field.udt_name);
+    } else {
+        t_ua_type_idx = dataTypeToUaTypeIndex(t_field.type).value();
+    }
+
+    if (!t_field.enum_map.empty()) {
+        // Enum fields are custom-UDT-aliased, so is_custom_udt above has
+        // already consumed t_ua_type_idx (left at -1). The registry's enum
+        // signatures are keyed by the UA index of the field's *backing
+        // scalar* type (see schema_type_registry collectEnums), so derive
+        // that directly from t_field.type here.
+        const int sig_base = (t_ua_type_idx >= 0) ? t_ua_type_idx : dataTypeToUaTypeIndex(t_field.type).value_or(-1);
+        if (sig_base >= 0) {
+            const std::string sig = enumTypeSignature(sig_base, t_field.enum_map);
+            p_enum_type = t_adapter_ctx.p_type_registry->findEnumBySignature(sig);
+        }
+    }
+
+    const uint32_t t_field_size = computeFieldSize(t_field, is_array);
+    auto p_ctx_owned = makeFieldContext(t_adapter_ctx.p_plc_memory, t_db.number, t_path.path, t_adapter_ctx.p_security_manager, t_field,
+        is_array, is_custom_udt, t_ua_type_idx, t_field_size, *t_adapter_ctx.p_type_registry, t_db.trigger_events);
+    NodeContext* p_ctx = p_ctx_owned.get();
+    p_ctx->enum_type = p_enum_type;
+    t_nodes_ctx.p_owned_contexts->push_back(std::move(p_ctx_owned));
+
+    UA_NodeId t_var_id = UA_NODEID_STRING_ALLOC(1, t_path.node_id.c_str());
+    UA_VariableAttributes t_v_attr = UA_VariableAttributes_default;
+    t_v_attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", t_field.name.c_str());
+    configureVariableAttributes(t_v_attr, t_field, is_array, is_custom_udt, t_ua_type_idx, p_custom_type, p_enum_type);
+    if (t_path.path == "przr_pid" || t_path.path.find("przr_pid") != std::string::npos) {
+        fmt::print("[node_reg] path={} is_array={} is_custom_udt={} udt_name={} p_custom_type={} count={} size={} dataType=ns={};i={} "
+                   "valueRank={}\n",
+            t_path.path, is_array, is_custom_udt, t_field.udt_name, p_custom_type ? p_custom_type->typeName : "null", t_field.count,
+            t_field_size, t_v_attr.dataType.namespaceIndex, t_v_attr.dataType.identifier.numeric, t_v_attr.valueRank);
+    }
+
+    UA_Server_addVariableNode(p_raw, t_var_id, parent, UA_NODEID_NUMERIC(0, UA_NS0ID_HASCOMPONENT),
+        UA_QUALIFIEDNAME_ALLOC(1, t_field.name.c_str()), UA_NODEID_NUMERIC(0, UA_NS0ID_BASEDATAVARIABLETYPE), t_v_attr, p_ctx, nullptr);
+
+    setReadWriteDataSource(p_raw, t_var_id);
+
+    if (t_field.unit.has_value())
+        addEngineeringUnitsProperty(p_raw, t_var_id, t_path.node_id, t_field.unit.value());
+    if (t_field.min_val.has_value() && t_field.max_val.has_value())
+        addRangeProperty(p_raw, t_var_id, t_path.node_id, t_field.min_val.value(), t_field.max_val.value());
+    wrappers::opcua::NodeId tracked = wrappers::opcua::nodeIdFromRaw(t_var_id);
+    trackNode(t_db.number, t_path.path, tracked, p_ctx, t_nodes_ctx.p_node_id_map, t_adapter_ctx.p_delta_push_handler);
+
+    if (!t_field.children.empty()) {
+        OpcUaDbContext db_ctx{t_db.number, t_db.trigger_events};
+        addFieldNodes(t_adapter_ctx, t_nodes_ctx, tracked, t_field.children, t_path.path, t_path.node_id, db_ctx);
+    }
+
+    UA_NodeId_clear(&t_var_id);
+}
+// ── Discrete (TIA-style) tag projection ────────────────────────────────────
+// A "Tags" folder with one live variable node per tag, backed by TagAccess
+// (not the twin). Scalars decode through the shared scalar path over
+// normalized backing bytes; UDT tags are JSON document strings. Tag nodes
+// are intentionally NOT tracked for delta-push (v1): reads/writes are live,
+// subscriptions observe polls. Without adapter tag access this is a no-op.
+
+// One live scalar leaf for a tag (or one UDT member): natively typed,
+// backed by tag-relative bytes. Bool members normalize through bit_index.
+static void addTagScalarNode(const OpcUaAdapterContext& t_adapter, const OpcUaNodeRegistryContext& t_nodes,
+    const wrappers::opcua::NodeId& t_parent_id, const std::string& t_parent_node_id, const std::string& t_tag_name,
+    const std::string& t_member_name, ::sgrn::scl::DataType t_type, uint32_t t_span_bytes, uint32_t t_byte_offset, int t_bit_index,
+    const std::shared_ptr<const TagBacking>& t_backing) {
+    UA_Server* p_raw = t_adapter.p_opcua_server->raw();
+
+    auto ua_res = dataTypeToUaTypeIndex(t_type);
+    if (ua_res.hasError()) {
+        SGRN_WARN_LOG("OPC UA: tag '{}.{}' has unmappable type, skipped", t_tag_name, t_member_name);
+        return;
+    }
+
+    auto p_ctx_owned = std::unique_ptr<NodeContext>(new NodeContext{
+        .server = nullptr, // tag-backed; read/write branches check is_tag first
+        .db_number = 0,
+        .field_path = t_tag_name,
+        .security = t_adapter.p_security_manager,
+        .array_length = 0u,
+        .elem_ua_type_index = ua_res.value(),
+        .udt_name = "",
+        .type_registry = t_adapter.p_type_registry,
+        .trigger_events = false,
+        .field_offset = 0,
+        .field_size = t_span_bytes,
+        .type = t_type,
+        .kind = ::sgrn::scl::FieldKind::Scalar,
+        .string_capacity = 0,
+        .scratch_buf = {},
+        .enum_type = nullptr,
+        .enum_map = {},
+        .is_tag = true,
+        .tag_name = t_tag_name,
+        .tag_byte_offset = t_byte_offset,
+        .tag_bit_index = t_bit_index,
+        .tag_backing = t_backing,
+    });
+    NodeContext* p_ctx = p_ctx_owned.get();
+    p_ctx->scratch_buf.resize(t_span_bytes);
+    t_nodes.p_owned_contexts->push_back(std::move(p_ctx_owned));
+
+    const std::string node_id_str = t_parent_node_id + "." + t_member_name;
+    UA_NodeId t_var_id = UA_NODEID_STRING_ALLOC(1, node_id_str.c_str());
+    UA_VariableAttributes t_v_attr = UA_VariableAttributes_default;
+    t_v_attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", t_member_name.c_str());
+    t_v_attr.accessLevel = UA_ACCESSLEVELMASK_READ | UA_ACCESSLEVELMASK_WRITE;
+    t_v_attr.userAccessLevel = t_v_attr.accessLevel;
+    t_v_attr.valueRank = UA_VALUERANK_SCALAR;
+    t_v_attr.dataType = UA_TYPES[ua_res.value()].typeId;
+
+    UA_Server_addVariableNode(p_raw, t_var_id, t_parent_id.get(), UA_NODEID_NUMERIC(0, UA_NS0ID_HASCOMPONENT),
+        UA_QUALIFIEDNAME_ALLOC(1, t_member_name.c_str()), UA_NODEID_NUMERIC(0, UA_NS0ID_BASEDATAVARIABLETYPE), t_v_attr, p_ctx, nullptr);
+
+    setReadWriteDataSource(p_raw, t_var_id);
+    UA_NodeId_clear(&t_var_id);
+}
+
+// UDT member walk: struct members recurse into sub-folders, scalar leaves
+// become variable nodes, arrays are skipped (v1). Field offsets come from
+// the schema UDT layout; the tag base offset anchors them in tag bytes.
+static void addTagMemberNodes(const OpcUaAdapterContext& t_adapter, const OpcUaNodeRegistryContext& t_nodes,
+    const wrappers::opcua::NodeId& t_parent_id, const std::string& t_parent_node_id, const std::string& t_tag_name,
+    const std::vector<::sgrn::scl::DbField>& t_fields, uint32_t t_base_offset, const std::shared_ptr<const TagBacking>& t_backing,
+    const ::sgrn::scl::PlcSchemaStore& t_registry);
+
+static void addTagStructFolder(const OpcUaAdapterContext& t_adapter, const OpcUaNodeRegistryContext& t_nodes,
+    const wrappers::opcua::NodeId& t_parent_id, const std::string& t_parent_node_id, const std::string& t_tag_name,
+    const std::string& t_member_name, const std::vector<::sgrn::scl::DbField>& t_fields, uint32_t t_base_offset,
+    const std::shared_ptr<const TagBacking>& t_backing, const ::sgrn::scl::PlcSchemaStore& t_registry) {
+    UA_Server* p_raw = t_adapter.p_opcua_server->raw();
+    const std::string node_id_str = t_parent_node_id + "." + t_member_name;
+    UA_NodeId folder_id = UA_NODEID_STRING_ALLOC(1, node_id_str.c_str());
+    UA_ObjectAttributes folder_attr = UA_ObjectAttributes_default;
+    folder_attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", t_member_name.c_str());
+    const UA_StatusCode res = UA_Server_addObjectNode(p_raw, folder_id, t_parent_id.get(), UA_NODEID_NUMERIC(0, UA_NS0ID_ORGANIZES),
+        UA_QUALIFIEDNAME_ALLOC(1, t_member_name.c_str()), UA_NODEID_NUMERIC(0, UA_NS0ID_FOLDERTYPE), folder_attr, nullptr, nullptr);
+    if (res != UA_STATUSCODE_GOOD) {
+        UA_NodeId_clear(&folder_id);
+        return;
+    }
+    wrappers::opcua::NodeId folder_node = wrappers::opcua::nodeIdFromRaw(folder_id);
+    addTagMemberNodes(t_adapter, t_nodes, folder_node, node_id_str, t_tag_name, t_fields, t_base_offset, t_backing, t_registry);
+    UA_NodeId_clear(&folder_id);
+}
+
+static void addTagMemberNodes(const OpcUaAdapterContext& t_adapter, const OpcUaNodeRegistryContext& t_nodes,
+    const wrappers::opcua::NodeId& t_parent_id, const std::string& t_parent_node_id, const std::string& t_tag_name,
+    const std::vector<::sgrn::scl::DbField>& t_fields, uint32_t t_base_offset, const std::shared_ptr<const TagBacking>& t_backing,
+    const ::sgrn::scl::PlcSchemaStore& t_registry) {
+    for (const auto& field : t_fields) {
+        const bool is_struct = field.type == ::sgrn::scl::DataType::Struct;
+        const bool is_array = field.count > 1;
+        if (is_array) {
+            SGRN_WARN_LOG("OPC UA: tag '{}.{}': array members not projected in v1, skipped", t_tag_name, field.name);
+            continue;
+        }
+        const uint32_t abs_offset = t_base_offset + static_cast<uint32_t>(field.offset);
+        if (is_struct) {
+            // Children ride the schema UDT when present; else the inline list.
+            const std::vector<::sgrn::scl::DbField>* p_children = &field.children;
+            std::vector<::sgrn::scl::DbField> empty;
+            if (p_children->empty() && !field.udt_name.empty()) {
+                if (auto u = t_registry.getUdtByName(field.udt_name); !u.hasError() && u.value())
+                    p_children = &u.value()->fields;
+                else
+                    p_children = &empty;
+            }
+            if (p_children->empty()) {
+                SGRN_WARN_LOG("OPC UA: tag '{}.{}': struct without layout, skipped", t_tag_name, field.name);
+                continue;
+            }
+            addTagStructFolder(
+                t_adapter, t_nodes, t_parent_id, t_parent_node_id, t_tag_name, field.name, *p_children, abs_offset, t_backing, t_registry);
+            continue;
+        }
+        // Scalar leaf: span + bit from the schema layout.
+        uint32_t span = 0;
+        if (auto span_opt = s7codec::typeSpanBytes(field.type, 1))
+            span = *span_opt;
+        if (span == 0) {
+            SGRN_WARN_LOG("OPC UA: tag '{}.{}': unsizable type, skipped", t_tag_name, field.name);
+            continue;
+        }
+        const int bit = (field.type == ::sgrn::scl::DataType::Bool) ? static_cast<int>(field.bit_index) : -1;
+        addTagScalarNode(
+            t_adapter, t_nodes, t_parent_id, t_parent_node_id, t_tag_name, field.name, field.type, span, abs_offset, bit, t_backing);
+    }
+}
+
+void registerTagsFolder(
+    const OpcUaAdapterContext& t_adapter, const OpcUaNodeRegistryContext& t_nodes, const ::sgrn::scl::PlcSchemaStore& t_registry) {
+    const TagAccess* p_access = t_adapter.p_tag_access;
+    if (!p_access || !p_access->list || !p_access->backing)
+        return;
+    const TagAccess& t_access = *p_access;
+    // No folder on tagless schemas — keeps tag-free servers byte-identical
+    // in browse results.
+    const std::vector<TagDescriptor> tags = t_access.list();
+    if (tags.empty())
+        return;
+    UA_Server* p_raw = t_adapter.p_opcua_server->raw();
+
+    const std::string folder_name = "Tags";
+    UA_NodeId folder_id = UA_NODEID_STRING_ALLOC(1, folder_name.c_str());
+    UA_ObjectAttributes folder_attr = UA_ObjectAttributes_default;
+    folder_attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", folder_name.c_str());
+    const UA_StatusCode folder_res =
+        UA_Server_addObjectNode(p_raw, folder_id, UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER), UA_NODEID_NUMERIC(0, UA_NS0ID_ORGANIZES),
+            UA_QUALIFIEDNAME_ALLOC(1, folder_name.c_str()), UA_NODEID_NUMERIC(0, UA_NS0ID_FOLDERTYPE), folder_attr, nullptr, nullptr);
+    if (folder_res != UA_STATUSCODE_GOOD) {
+        // A DB literally named "Tags" already claimed the NodeId — skip the
+        // folder rather than shadowing it.
+        SGRN_WARN_LOG("OPC UA: cannot create Tags folder (NodeId taken), tag projection skipped");
+        UA_NodeId_clear(&folder_id);
+        return;
+    }
+
+    wrappers::opcua::NodeId folder_node = wrappers::opcua::nodeIdFromRaw(folder_id);
+    for (const auto& tag : tags) {
+        if (tag.name.empty() || tag.span_bytes <= 0) {
+            SGRN_WARN_LOG("OPC UA: tag with empty name/span skipped");
+            continue;
+        }
+        if (!tag.udt_name.empty()) {
+            // Native structured node: folder + member leaves from the UDT
+            // layout (registry first, inline children as fallback).
+            const std::vector<::sgrn::scl::DbField>* p_fields = nullptr;
+            if (auto u = t_registry.getUdtByName(tag.udt_name); !u.hasError() && u.value())
+                p_fields = &u.value()->fields;
+            if (!p_fields || p_fields->empty()) {
+                SGRN_WARN_LOG("OPC UA: UDT tag '{}' (UDT '{}') has no layout, skipped", tag.name, tag.udt_name);
+                continue;
+            }
+            addTagStructFolder(
+                t_adapter, t_nodes, folder_node, folder_name, tag.name, tag.name, *p_fields, 0, t_access.backing, t_registry);
+            continue;
+        }
+        const int bit = (tag.type == ::sgrn::scl::DataType::Bool) ? tag.bit_index : -1;
+        addTagScalarNode(t_adapter, t_nodes, folder_node, folder_name, tag.name, tag.name, tag.type, static_cast<uint32_t>(tag.span_bytes),
+            0, bit, t_access.backing);
+    }
+    UA_NodeId_clear(&folder_id);
+}
+
+void addFolderNode(const OpcUaAdapterContext& t_adapter, const OpcUaNodeRegistryContext& t_nodes, const OpcUaNodePath& t_path,
+    const ::sgrn::scl::DbField& t_field, const OpcUaDbContext& t_db) {
+    UA_Server* p_raw = t_adapter.p_opcua_server->raw();
+    const UA_NodeId& parent = t_path.parent_id.get();
+
+    UA_NodeId branch_id = UA_NODEID_STRING_ALLOC(1, t_path.node_id.c_str());
+
+    UA_ObjectAttributes b_attr = UA_ObjectAttributes_default;
+    b_attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", t_field.name.c_str());
+    b_attr.eventNotifier = UA_EVENTNOTIFIER_SUBSCRIBE_TO_EVENT;
+
+    UA_Server_addObjectNode(p_raw, branch_id, parent, UA_NODEID_NUMERIC(0, UA_NS0ID_HASCOMPONENT),
+        UA_QUALIFIEDNAME_ALLOC(1, t_field.name.c_str()), UA_NODEID_NUMERIC(0, UA_NS0ID_FOLDERTYPE), b_attr, nullptr, nullptr);
+
+    UA_ExpandedNodeId branch_exp_id;
+    UA_ExpandedNodeId_init(&branch_exp_id);
+    branch_exp_id.nodeId = branch_id;
+    UA_Server_addReference(p_raw, parent, UA_NODEID_NUMERIC(0, 48 /* HasNotifier */), branch_exp_id, true);
+
+    const uint32_t struct_size =
+        t_field.type == DataType::Struct ? static_cast<uint32_t>(t_field.struct_size) : computeFieldSize(t_field, false);
+    OpcUaAggregateFieldContext agg_ctx{t_field.udt_name, static_cast<uint32_t>(t_field.offset), struct_size};
+
+    OpcUaNodePath agg_path{wrappers::opcua::nodeIdFromRaw(branch_id), t_path.path, t_path.node_id};
+    addAggregateValueNode(t_adapter, t_nodes, agg_path, t_db, agg_ctx);
+
+    // FIX: without this, unresolved/anonymous struct fields only ever exposed
+    // the single opaque ".Value" JSON aggregate — clients never saw the
+    // individual member fields as their own browsable/writable nodes.
+    if (!t_field.children.empty()) {
+        addFieldNodes(t_adapter, t_nodes, wrappers::opcua::nodeIdFromRaw(branch_id), t_field.children, t_path.path, t_path.node_id, t_db);
+    }
+
+    UA_NodeId_clear(&branch_id);
+}
+} // namespace sgrn::gateway::adapters

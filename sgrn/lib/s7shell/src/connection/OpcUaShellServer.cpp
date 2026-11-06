@@ -1,7 +1,7 @@
 #include "sgrn/s7shell/connection/OpcUaShellServer.hpp"
 
 #include <sgrn/gateway/security/SecurityManager.hpp>
-#include <sgrn/s7shell/bindings/tag_opcua.hpp>
+#include <sgrn/s7shell/bindings/tag-opcua.hpp>
 
 #include <fmt/core.h>
 #include <stdexcept>

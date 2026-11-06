@@ -29,7 +29,7 @@
 #include <sgrn/datastore/services/admin.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
-#include <sgrn/datastore/utils/safe_access.hpp>
+#include <sgrn/datastore/utils/safe-access.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <orm/models/core/Users.h>
 

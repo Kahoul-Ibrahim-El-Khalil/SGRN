@@ -21,6 +21,12 @@
  *   SGRN_SCHEMA      schema.scl path                   (default: dev/schema.scl)
  *   SGRN_DEV_PORT    gateway HTTP port                 (display/info only — the listen port comes
  *                                                      from SGRN_GW_CONFIG's northbound block)
+ *   SGRN_FRESH_DEV   same as --fresh                   (default: keep state)
+ *
+ * Flags:
+ *   --fresh          wipe the gateway state dir (gateway.sqlite3: logs,
+ *                    clients, metrics…) before starting; the binary
+ *                    re-creates it from scratch on launch.
  *
  * To use a shared simulation instead of the dev config:
  *   SGRN_GW_CONFIG=sgrn/lib/gateway/simulations/pump/gateway.json \
@@ -29,6 +35,7 @@
  */
 
 import path from "path";
+import { rm } from "fs/promises";
 
 const PRESET_BUILD_DIR: string = ".build/linux-static-release";
 // ── Paths ─────────────────────────────────────────────────────────────────────
@@ -43,6 +50,32 @@ const GW_CONFIG =
   process.env.SGRN_GW_CONFIG ?? path.join(DEV_DIR, "gateway.json");
 const SCHEMA = process.env.SGRN_SCHEMA ?? path.join(DEV_DIR, "schema.scl");
 
+// ── --fresh: wipe old state, start from a new one ────────────────────────────
+// The gateway keeps its sqlite db (gateway.sqlite3) under state_dir, which
+// persists across runs. `--fresh` / SGRN_FRESH_DEV=1 deletes it before the
+// launch; the binary re-creates the file and tables on startup.
+const FRESH =
+  Bun.argv.includes("--fresh") || process.env.SGRN_FRESH_DEV === "1";
+if (FRESH) {
+  let stateDir: string | null = null;
+  try {
+    const raw = JSON.parse(await Bun.file(GW_CONFIG).text());
+    const dir = raw?.state_dir;
+    if (typeof dir === "string" && dir.length > 0)
+      stateDir = dir.startsWith("/")
+        ? dir
+        : path.resolve(path.dirname(GW_CONFIG), dir);
+  } catch {
+    stateDir = null;
+  }
+  if (stateDir) {
+    await rm(stateDir, { recursive: true, force: true }).catch(() => {});
+    console.log(`--fresh: wiped gateway state dir ${stateDir}\n`);
+  } else {
+    console.log("warning: --fresh: no state_dir in config — nothing to wipe\n");
+  }
+}
+
 // ── Validate binary ───────────────────────────────────────────────────────────
 if (!(await Bun.file(BINARY).exists())) {
   console.error(`\n  Binary not found: ${BINARY}`);
@@ -55,7 +88,7 @@ if (!(await Bun.file(BINARY).exists())) {
 // ── Launch gateway ────────────────────────────────────────────────────────────
 const args = [BINARY, "-c", GW_CONFIG, "-s", SCHEMA];
 
-console.log(`\n▶  gateway  (dev port ${DEV_PORT} from dev/gateway.json)`);
+console.log(`\ngateway  (dev port ${DEV_PORT} from dev/gateway.json)`);
 console.log(`   binary : ${BINARY}`);
 console.log(`   config : ${GW_CONFIG}`);
 console.log(`   schema : ${SCHEMA}\n`);
@@ -78,7 +111,7 @@ if (backend.exitCode !== null) {
 
 // ── Launch Vite ───────────────────────────────────────────────────────────────
 console.log(
-  `▶  Vite dev server → http://localhost:5173  (proxying API/WS → :${DEV_PORT})\n`,
+  `Vite dev server → http://localhost:5173  (proxying API/WS → :${DEV_PORT})\n`,
 );
 
 const vite = Bun.spawn(["bun", "x", "vite"], {
@@ -90,7 +123,7 @@ const vite = Bun.spawn(["bun", "x", "vite"], {
 
 // ── Cleanup ───────────────────────────────────────────────────────────────────
 function shutdown() {
-  console.log("\n⏹  Shutting down dev stack…");
+  console.log("\nShutting down dev stack…");
   vite.kill();
   backend.kill();
   process.exit(0);

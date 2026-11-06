@@ -3,7 +3,7 @@
 # reproc (Redirected Process) — cross-platform C99/C++11 child-process
 # control: start with cwd/env-extend/redirect-to-file, wait with timeout, and
 # a shutdown escalation chain (stop → terminate → kill). Used by the shared
-# C++ test-support fixtures (sgrn/lib/tests/support/test_util.hpp) so they no
+# C++ test-support fixtures (sgrn/lib/tests/support/test-util.hpp) so they no
 # longer depend on raw fork/exec/waitpid (and therefore stay portable to
 # Windows when the test targets there are unblocked).
 #

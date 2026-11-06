@@ -1,9 +1,9 @@
 /*sgrn/gateway/adapters/http/http.cpp*/
 #include <fmt/core.h>
-#include <sgrn/common/json_helper.hpp>
-#include <sgrn/common/path_utils.hpp>
+#include <sgrn/common/json-helper.hpp>
+#include <sgrn/common/path-utils.hpp>
 #include <sgrn/gateway/adapters/http.hpp>
-#include <sgrn/gateway/adapters/rate_limit.hpp>
+#include <sgrn/gateway/adapters/rate-limit.hpp>
 #include <sgrn/gateway/common/SecurityHelper.hpp>
 #include <sgrn/gateway/core/TelemetryBroker.hpp>
 #include <sgrn/gateway/core/snapshot.hpp>
@@ -183,7 +183,7 @@ void HttpAdapter::registerRoutes(GatewayApp& t_app) {
         .CROW_MIDDLEWARES(t_app, RateLimitMiddleware)
         .methods("GET"_method, "POST"_method, "PUT"_method, "OPTIONS"_method)(data_root);
 
-    // ── Discrete tags (TIA-style; see tags_handlers.cpp) ────────────────────
+    // ── Discrete tags (TIA-style; see tags-handlers.cpp) ────────────────────
     //   GET  /tags            — tag table listing (name/table/type/address)
     //   GET  /tags/<name>     — current value as JSON (404 unknown)
     //   POST /tags/<name>     — write JSON value (UDT partials merge)

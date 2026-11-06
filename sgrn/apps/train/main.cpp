@@ -1,6 +1,6 @@
 #include <sgrn/Result.hpp>
-#include <sgrn/ml/columnar_dataset.hpp>
-#include <sgrn/ml/feature_spec.hpp>
+#include <sgrn/ml/columnar-dataset.hpp>
+#include <sgrn/ml/feature-spec.hpp>
 #include <sgrn/ml/manifest.hpp>
 #include <sgrn/ml_torch/mlp.hpp>
 #include <sgrn/ml_torch/trainer.hpp>

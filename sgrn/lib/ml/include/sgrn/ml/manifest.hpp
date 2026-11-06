@@ -1,7 +1,7 @@
 #pragma once
 
 #include <sgrn/Result.hpp>
-#include <sgrn/ml/feature_spec.hpp>
+#include <sgrn/ml/feature-spec.hpp>
 #include <cstdint>
 #include <filesystem>
 #include <map>

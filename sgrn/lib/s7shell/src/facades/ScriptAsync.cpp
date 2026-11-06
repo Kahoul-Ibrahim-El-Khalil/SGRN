@@ -1,6 +1,6 @@
 #include <sgrn/s7shell/connection/S7Connection.hpp>
 #include <sgrn/s7shell/facades/ScriptAsync.hpp>
-#include <sgrn/s7shell/utils/json_helpers.hpp>
+#include <sgrn/s7shell/utils/json-helpers.hpp>
 
 #include <sgrn/scl/utils.hpp>
 #include <sgrn/utils/encoding.hpp>

@@ -1,4 +1,4 @@
-#include <sgrn/gateway/adapters/rate_limit.hpp>
+#include <sgrn/gateway/adapters/rate-limit.hpp>
 #include <sgrn/gateway/gateway.hpp>
 
 #include <sgrn/scl/schema/SchemaSerializer.hpp>

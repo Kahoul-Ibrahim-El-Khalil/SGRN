@@ -15,22 +15,26 @@ set(SOURCES
 set(HEADERS
     include/sgrn/utils/app.hpp
     include/sgrn/utils/compression.hpp
-    include/sgrn/utils/concurrent_queue.hpp
+    include/sgrn/utils/concurrent-queue.hpp
     include/sgrn/utils/encoding.hpp
     include/sgrn/utils/endianess.hpp
-    include/sgrn/utils/event_broker.hpp
+    include/sgrn/utils/env.hpp
+    include/sgrn/utils/event-broker.hpp
     include/sgrn/utils/filesystem.hpp
     include/sgrn/utils/hashing.hpp
     include/sgrn/utils/jsoncpp.hpp
     include/sgrn/utils/json.hpp
     include/sgrn/utils/jwt.hpp
     include/sgrn/utils/mime.hpp
+    include/sgrn/utils/network.hpp
+    include/sgrn/utils/process.hpp
+    include/sgrn/utils/progress.hpp
     include/sgrn/utils/rapidjson.hpp
     include/sgrn/utils/strings.hpp
+    include/sgrn/utils/tar.hpp
     include/sgrn/utils/threading.hpp
     include/sgrn/utils/time.hpp
     include/sgrn/utils/xml.hpp
-    include/sgrn/utils/network.hpp
 )
 
 # Disable PCH for C files which cannot use the CXX PCH
@@ -83,7 +87,7 @@ sgrn_package_runtime_dependencies(
 if(SGRN_BUILD_TESTS)
     sgrn_add_component_executable(
         TARGET compression_test
-        SOURCES tests/compression_test.cpp
+        SOURCES tests/compression-test.cpp
         ENABLE_ORIGIN_RPATH
         PRIVATE_LIBS
             sgrn_utils
