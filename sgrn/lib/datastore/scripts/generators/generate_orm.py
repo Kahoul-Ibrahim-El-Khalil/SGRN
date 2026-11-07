@@ -296,7 +296,25 @@ def runGeneration(target_dbname, target_dir, db_config, clean, views):
             password=db_config["passwd"]
         )
 
+    # Format generated C++ code before compilation
+    formatGeneratedCode(target_dir, views)
+
     print("Model Generation done")
+
+def formatGeneratedCode(orm_target_dir: str, views_generated: bool):
+    formatter_script = REPO_ROOT / "scripts" / "format.py"
+    if not formatter_script.exists():
+        return
+    print(">> Formatting generated C++ models and views...")
+    cmd = [sys.executable, str(formatter_script), "cpp", "--dir", orm_target_dir]
+    if views_generated:
+        views_dir = DATASTORE_ROOT / "src" / "handlers" / "generated"
+        if views_dir.exists():
+            cmd.extend(["--dir", str(views_dir)])
+    try:
+        subprocess.run(cmd, check=False)
+    except Exception as e:
+        print(f">> Warning: Failed to run formatter: {e}")
 
 def main():
     # Parse command line flags

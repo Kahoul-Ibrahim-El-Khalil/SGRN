@@ -41,6 +41,12 @@ create table if not exists core.domains (
   name text not null,
   parent_id int references core.domains (id) on delete restrict default null,
   path text not null default '',
+  -- Encryption policy for files stored in this domain.
+  -- 'none'     – plaintext only (default)
+  -- 'optional' – client may request encryption at upload time
+  -- 'required' – server rejects plaintext uploads; all new files must be encrypted
+  encryption_policy text not null default 'none'
+      check (encryption_policy in ('none', 'optional', 'required')),
   unique (organisation, name),
   unique (organisation, path)
 );
@@ -546,6 +552,10 @@ alter table core.users add column if not exists rate_limit_upload_rpm int defaul
 alter table core.automated_services add column if not exists max_file_size_mb bigint default null;
 alter table core.automated_services add column if not exists preferred_chunk_size_mb int default null;
 alter table core.automated_services add column if not exists rate_limit_upload_rpm int default null;
+
+-- Encryption policy on domains (idempotent for existing databases)
+alter table core.domains add column if not exists encryption_policy text not null default 'none'
+    check (encryption_policy in ('none', 'optional', 'required'));
 
 -- secret hash is never exposed via CRUD: omitted from the field list entirely.
 

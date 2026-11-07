@@ -202,6 +202,8 @@ export interface DriveFile {
   created_at: string;
   upload_mode?: string;
   part_count?: number | null;
+  is_encrypted?: boolean;
+  key_id?: string | null;
 }
 
 export interface DirectoryListing {

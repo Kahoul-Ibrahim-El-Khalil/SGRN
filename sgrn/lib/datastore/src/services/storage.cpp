@@ -1,7 +1,9 @@
 // src/sgrn/services/storage/service.cpp
+#include <sgrn/datastore/crypto/key-store.hpp>
 #include <sgrn/datastore/services/helpers/magic.hpp>
 #include <sgrn/datastore/services/helpers/storage.hpp>
 #include <sgrn/datastore/services/storage.hpp>
+#include <sgrn/utils/crypto/stream.hpp>
 
 #include <drogon/HttpAppFramework.h>
 #include <drogon/orm/DbClient.h>
@@ -222,6 +224,81 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(
     HttpResponsePtr sp_resp = HttpResponse::newHttpResponse();
     sp_resp->addHeader("Accept-Ranges", "bytes");
 
+    if (record_res->is_encrypted) {
+        if (!record_res->key_id.has_value() || record_res->key_id->empty()) {
+            co_return createJsonErrorResponse("File is marked encrypted but has no key", drogon::k500InternalServerError);
+        }
+        auto key_store = sgrn::datastore::crypto::getKeyStore();
+        if (!key_store) {
+            co_return createJsonErrorResponse("Key store unavailable", drogon::k500InternalServerError);
+        }
+        auto key_res = key_store->get(*record_res->key_id);
+        if (key_res.hasError()) {
+            co_return createJsonErrorResponse("Failed to retrieve file decryption key", drogon::k500InternalServerError);
+        }
+        const auto& key_rec = key_res.value();
+        std::span<const uint8_t> ct_span(reinterpret_cast<const uint8_t*>(file_data.data()), file_data.size());
+
+        if (!t_range_header.empty() && t_range_header.starts_with("bytes=")) {
+            std::string range_spec = t_range_header.substr(6);
+            auto dash_pos = range_spec.find('-');
+            if (dash_pos != std::string::npos) {
+                size_t start_byte = 0;
+                size_t end_byte = 0;
+                try {
+                    start_byte = std::stoull(range_spec.substr(0, dash_pos));
+                } catch (...) {
+                }
+                std::string end_str = range_spec.substr(dash_pos + 1);
+
+                size_t hdr_len = 0;
+                auto hdr_res = sgrn::utils::crypto::StreamHeader::deserialize(ct_span, hdr_len);
+                if (hdr_res.hasError()) {
+                    co_return createJsonErrorResponse("Corrupted encrypted stream header", drogon::k500InternalServerError);
+                }
+                uint64_t total_plain_size = hdr_res.value().total_plaintext_size;
+                if (!end_str.empty()) {
+                    try {
+                        end_byte = std::stoull(end_str);
+                    } catch (...) {
+                    }
+                } else {
+                    end_byte = total_plain_size > 0 ? total_plain_size - 1 : 0;
+                }
+                if (start_byte < total_plain_size) {
+                    if (end_byte >= total_plain_size)
+                        end_byte = total_plain_size - 1;
+                    size_t content_length = end_byte - start_byte + 1;
+                    auto range_res =
+                        sgrn::utils::crypto::decryptRange(ct_span, key_rec.dek, start_byte, content_length, *record_res->key_id);
+                    if (range_res.hasError()) {
+                        co_return createJsonErrorResponse("Range decryption failed", drogon::k500InternalServerError);
+                    }
+                    std::string chunk(reinterpret_cast<const char*>(range_res.value().data()), range_res.value().size());
+                    sp_resp->setStatusCode(k206PartialContent);
+                    sp_resp->addHeader("Content-Range", fmt::format("bytes {}-{}/{}", start_byte, end_byte, total_plain_size));
+                    sp_resp->addHeader("Content-Length", std::to_string(content_length));
+                    if (record_res->is_compressed_) {
+                        sp_resp->setContentTypeString("application/zstd");
+                        sp_resp->addHeader("X-Compressed", "true");
+                    } else {
+                        sp_resp->setContentTypeString(helpers::inferMimeType(record_res->name));
+                    }
+                    sp_resp->addHeader("Content-Disposition", fmt::format("attachment; filename=\"{}\"", download_name));
+                    sp_resp->setBody(std::move(chunk));
+                    co_return sp_resp;
+                }
+            }
+        }
+
+        // Full file decryption
+        auto dec_res = sgrn::utils::crypto::decryptBuffer(ct_span, key_rec.dek, *record_res->key_id);
+        if (dec_res.hasError()) {
+            co_return createJsonErrorResponse("Decryption failed", drogon::k500InternalServerError);
+        }
+        file_data = std::string(reinterpret_cast<const char*>(dec_res.value().data()), dec_res.value().size());
+    }
+
     if (!t_range_header.empty() && t_range_header.starts_with("bytes=")) {
         std::string range_spec = t_range_header.substr(6);
         size_t total_size = file_data.size();
@@ -319,6 +396,7 @@ Task<HttpResponsePtr> StorageService::handleGetConstraints() {
     Json::Value constraints;
     constraints["max_file_size_mb"] = Json::Value::UInt64(cfg.max_file_size_mb);
     constraints["max_file_size_bytes"] = Json::Value::UInt64(cfg.maxFileSizeBytes());
+    constraints["encryption_supported"] = sgrn::datastore::crypto::isKeyStoreInitialized();
     co_return HttpResponse::newHttpJsonResponse(std::move(constraints));
 }
 
@@ -521,7 +599,16 @@ Task<HttpResponsePtr> StorageService::handleDeleteObject(Json::Value t_session, 
             }
         }
 
-        // 4. Delete file row
+        // 4. Crypto-shred if encrypted, then delete file row
+        auto key_rows = co_await tsp_db_client->execSqlCoro("SELECT key_id, is_encrypted FROM storage.files WHERE id = $1", t_file_id);
+        if (!key_rows.empty() && key_rows[0]["is_encrypted"].as<bool>() && !key_rows[0]["key_id"].isNull()) {
+            std::string kid = key_rows[0]["key_id"].as<std::string>();
+            auto ks = sgrn::datastore::crypto::getKeyStore();
+            if (ks) {
+                (void)ks->shred(kid);
+            }
+        }
+
         auto del_res = co_await tsp_db_client->execSqlCoro("DELETE FROM storage.files WHERE id = $1", t_file_id);
 
         if (del_res.affectedRows() == 0) {
@@ -545,6 +632,14 @@ Task<HttpResponsePtr> StorageService::handleDeleteObject(Json::Value t_session, 
 }
 Task<BackendResult<void>> StorageService::deleteFile(drogon::orm::DbClientPtr tsp_db_client, int64_t t_file_id) {
     try {
+        auto key_rows = co_await tsp_db_client->execSqlCoro("SELECT key_id, is_encrypted FROM storage.files WHERE id = $1", t_file_id);
+        if (!key_rows.empty() && key_rows[0]["is_encrypted"].as<bool>() && !key_rows[0]["key_id"].isNull()) {
+            std::string kid = key_rows[0]["key_id"].as<std::string>();
+            auto ks = sgrn::datastore::crypto::getKeyStore();
+            if (ks) {
+                (void)ks->shred(kid);
+            }
+        }
         co_await tsp_db_client->execSqlCoro("DELETE FROM storage.files WHERE id = $1", t_file_id);
         co_return {};
     } catch (const std::exception& ex) {

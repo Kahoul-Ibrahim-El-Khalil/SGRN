@@ -79,6 +79,12 @@ if(SGRN_BUILD_TESTS)
     target_include_directories(audit_tamper_test PRIVATE ${CMAKE_SOURCE_DIR}/sgrn/lib/tests/support)
     target_compile_definitions(audit_tamper_test PRIVATE SGRN_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME audit_tamper_test COMMAND audit_tamper_test)
+    # Encrypted storage tests (Prompt 8)
+    add_executable(encryption_test tests/encryption-test.cpp)
+    target_link_libraries(encryption_test PRIVATE sgrn_datastore_lib reproc::reproc++ OpenSSL::Crypto)
+    target_include_directories(encryption_test PRIVATE ${CMAKE_SOURCE_DIR}/sgrn/lib/tests/support)
+    target_compile_definitions(encryption_test PRIVATE SGRN_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    add_test(NAME encryption_test COMMAND encryption_test)
 endif()
 
 # ==================== Summary ====================

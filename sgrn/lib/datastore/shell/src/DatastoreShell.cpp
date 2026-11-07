@@ -1623,8 +1623,13 @@ int DatastoreShell::cmdLs(const std::vector<std::string>& t_args) {
         name_width = std::max(name_width, displayWidth(f.name_));
     for (const auto& d : r.value().folders)
         fmt::print(styleDir(), "{}/\n", padCell(d.name_, name_width, false));
-    for (const auto& f : r.value().files)
-        fmt::print("{}  {}\n", padCell(f.name_, name_width, false), humanBytes(f.size));
+    for (const auto& f : r.value().files) {
+        if (f.is_encrypted) {
+            fmt::print("{}  {}  [enc]\n", padCell(f.name_, name_width, false), humanBytes(f.size));
+        } else {
+            fmt::print("{}  {}\n", padCell(f.name_, name_width, false), humanBytes(f.size));
+        }
+    }
     return 0;
 }
 
@@ -1688,8 +1693,13 @@ int DatastoreShell::cmdGet(const std::vector<std::string>& t_args) {
 
 int DatastoreShell::cmdPut(const std::vector<std::string>& t_args) {
     if (t_args.empty()) {
-        fmt::print(stderr, "put: missing local path (put <local> [remote])\n");
+        fmt::print(stderr, "put: missing local path (put <local> [remote] [--encrypt])\n");
         return 1;
+    }
+    for (const auto& a : t_args) {
+        if (a == "--encrypt" || a == "-e") {
+            return cmdRput(t_args);
+        }
     }
     const std::string local = expandLocalPath(t_args[0]);
     std::string remote = (t_args.size() > 1) ? normalizePath(t_args[1]) : normalizePath(baseName(local));
@@ -1886,9 +1896,9 @@ int DatastoreShell::cmdZip(const std::vector<std::string>& t_args) {
 // ── Resumable upload ─────────────────────────────────────────────────────────
 
 int DatastoreShell::cmdRput(const std::vector<std::string>& t_args) {
-    // Usage: rput <local> [remote] [--chunk-size BYTES]
+    // Usage: rput <local> [remote] [--chunk-size BYTES] [--encrypt]
     if (t_args.empty()) {
-        fmt::print(stderr, "rput: missing local path (rput <local> [remote] [--chunk-size BYTES])\n");
+        fmt::print(stderr, "rput: missing local path (rput <local> [remote] [--chunk-size BYTES] [--encrypt])\n");
         return 1;
     }
     if (!client_) {
@@ -1899,9 +1909,12 @@ int DatastoreShell::cmdRput(const std::vector<std::string>& t_args) {
     std::string local;
     std::string remote;
     int64_t chunk_size = 5 * 1024 * 1024; // 5 MB default
+    bool encrypt = false;
     for (size_t i = 0; i < t_args.size(); ++i) {
         const auto& a = t_args[i];
-        if ((a == "--chunk-size" || a == "-c") && i + 1 < t_args.size()) {
+        if (a == "--encrypt" || a == "-e") {
+            encrypt = true;
+        } else if ((a == "--chunk-size" || a == "-c") && i + 1 < t_args.size()) {
             try {
                 chunk_size = std::stoll(t_args[++i]);
             } catch (...) {
@@ -1950,13 +1963,14 @@ int DatastoreShell::cmdRput(const std::vector<std::string>& t_args) {
     else if (ext == ".pdf")
         mime = "application/pdf";
 
-    auto sess_res = client_->initUploadSession(baseName(local), remote, total_size, chunk_size, mime);
+    auto sess_res = client_->initUploadSession(baseName(local), remote, total_size, chunk_size, mime, encrypt);
     if (sess_res.hasError()) {
         fmt::print(stderr, "rput: init failed: {}\n", sess_res.error());
         return 1;
     }
     const auto& sess = sess_res.value();
-    fmt::print("rput: session {} ({} chunks of {} bytes)\n", sess.upload_id, sess.total_chunks, humanBytes(sess.chunk_size));
+    fmt::print("rput: session {} ({} chunks of {} bytes, encrypted: {})\n", sess.upload_id, sess.total_chunks, humanBytes(sess.chunk_size),
+        sess.is_encrypted ? "yes" : "no");
 
     std::vector<char> buf(static_cast<size_t>(chunk_size));
     for (int32_t idx = 0; idx < sess.total_chunks; ++idx) {
@@ -2242,7 +2256,7 @@ void DatastoreShell::printHelp() {
                "  currentPath() -> string\n"
                "  sessionInfo()\n"
                "  isConnected() -> bool\n"
-               "  rput(localPath, remotePath, chunkSizeBytes) -> string   resumable upload\n"
+               "  rput(localPath, remotePath, chunkSizeBytes, encrypt=false) -> string   resumable upload\n"
                "  sessions() -> string                                     live session JSON (admin)\n"
                "  webhooks() -> string                                     webhook list JSON (admin)\n"
                "  webhookAdd(url, secret) -> string                        register webhook (admin)\n"
@@ -2395,8 +2409,9 @@ void DatastoreShell::registerBindings() {
     engine->RegisterGlobalFunction(
         "string exec(const string &in, const string &in)", asMETHOD(DatastoreShell, as_exec), asCALL_THISCALL_ASGLOBAL, this);
     // Resumable upload
-    engine->RegisterGlobalFunction(
-        "string rput(const string &in, const string &in, int64)", asMETHOD(DatastoreShell, as_rput), asCALL_THISCALL_ASGLOBAL, this);
+    engine->RegisterGlobalFunction("string rput(const string &in, const string &in, int64, bool = false)",
+        asMETHODPR(DatastoreShell, as_rput, (const std::string&, const std::string&, int64_t, bool), std::string), asCALL_THISCALL_ASGLOBAL,
+        this);
     // Admin: live sessions & webhooks
     engine->RegisterGlobalFunction("string sessions()", asMETHOD(DatastoreShell, as_sessions), asCALL_THISCALL_ASGLOBAL, this);
     engine->RegisterGlobalFunction("string webhooks()", asMETHOD(DatastoreShell, as_webhooks), asCALL_THISCALL_ASGLOBAL, this);
@@ -2550,13 +2565,16 @@ std::string DatastoreShell::as_exec(const std::string& t_shell_cmd, const std::s
 
 // ── Resumable upload AS binding ──────────────────────────────────────────────
 
-std::string DatastoreShell::as_rput(const std::string& t_local, const std::string& t_remote, int64_t t_chunk_size) {
+std::string DatastoreShell::as_rput(const std::string& t_local, const std::string& t_remote, int64_t t_chunk_size, bool t_encrypt) {
     std::vector<std::string> args = {t_local};
     if (!t_remote.empty())
         args.push_back(t_remote);
     if (t_chunk_size > 0) {
         args.push_back("--chunk-size");
         args.push_back(std::to_string(t_chunk_size));
+    }
+    if (t_encrypt) {
+        args.push_back("--encrypt");
     }
     const int rc = cmdRput(args);
     return rc == 0 ? "ok" : "error";

@@ -201,6 +201,8 @@ function useDriveUpload(
 ) {
     const [uploading, setUploading] = useState(false);
     const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
+    const [encryptUploads, setEncryptUploads] = useState<boolean>(false);
+    const toggleEncrypt = useCallback(() => setEncryptUploads((prev) => !prev), []);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const folderInputRef = useRef<HTMLInputElement>(null);
 
@@ -227,22 +229,27 @@ function useDriveUpload(
 
             setUploadItems((prev) => [newItem, ...prev]);
 
-            if (file.size >= 5 * 1024 * 1024) {
-                showEvent("info", `Initiating chunked resumable upload for ${file.name}...`);
-                const result = await uploadResumableDriveFile(currentPath, file, (p) => {
-                    updateItem(id, {
-                        percent: p.percent,
-                        uploadedChunks: p.uploadedChunks,
-                        totalChunks: p.totalChunks,
-                        uploadedBytes: Math.round((file.size * p.percent) / 100),
-                    });
-                });
+            if (file.size >= 5 * 1024 * 1024 || encryptUploads) {
+                showEvent("info", `Initiating ${encryptUploads ? "encrypted " : ""}chunked upload for ${file.name}...`);
+                const result = await uploadResumableDriveFile(
+                    currentPath,
+                    file,
+                    (p) => {
+                        updateItem(id, {
+                            percent: p.percent,
+                            uploadedChunks: p.uploadedChunks,
+                            totalChunks: p.totalChunks,
+                            uploadedBytes: Math.round((file.size * p.percent) / 100),
+                        });
+                    },
+                    encryptUploads,
+                );
                 if (isError(result)) {
                     updateItem(id, { status: "error", errorMessage: result.error });
                     showEvent("error", `${file.name}: ${result.error}`);
                 } else {
                     updateItem(id, { status: "completed", percent: 100, uploadedBytes: file.size });
-                    showEvent("success", `${file.name} uploaded successfully via chunked session.`);
+                    showEvent("success", `${file.name} uploaded successfully${encryptUploads ? " (AES-256-GCM encrypted)" : ""}.`);
                 }
             } else {
                 updateItem(id, { percent: 50 });
@@ -259,7 +266,7 @@ function useDriveUpload(
                 }
             }
         },
-        [currentPath, currentScope, showEvent, updateItem],
+        [currentPath, currentScope, showEvent, updateItem, encryptUploads],
     );
 
     const handleFileSelect = useCallback(
@@ -412,6 +419,8 @@ function useDriveUpload(
         uploadItems,
         clearCompletedUploads,
         registerDownload,
+        encryptUploads,
+        toggleEncrypt,
     };
 }
 
@@ -1024,6 +1033,8 @@ export default function DrivePage() {
                     sortOrder={listing.sortOrder}
                     onSort={listing.toggleSort}
                     capabilities={(listing.listing as any)?.capabilities}
+                    encryptUploads={upload.encryptUploads}
+                    onToggleEncrypt={upload.toggleEncrypt}
                 />
 
                 {actions.showNewFolder && (

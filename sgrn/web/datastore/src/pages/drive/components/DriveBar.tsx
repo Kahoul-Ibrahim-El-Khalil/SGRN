@@ -17,6 +17,7 @@ import {
     ArrowUp,
     ArrowDown,
     Check,
+    Lock,
 } from "lucide-react";
 import type { StorageScope, DriveSortKey, DriveSortOrder } from "@/pages/drive/api";
 import type { DirectoryListing } from "@sgrn/types";
@@ -52,6 +53,8 @@ interface DriveBarProps {
     sortOrder: DriveSortOrder;
     onSort: (key: DriveSortKey) => void;
     capabilities?: any;
+    encryptUploads?: boolean;
+    onToggleEncrypt?: () => void;
 }
 
 export function DriveBar({
@@ -77,6 +80,8 @@ export function DriveBar({
     sortOrder,
     onSort,
     capabilities,
+    encryptUploads = false,
+    onToggleEncrypt,
 }: DriveBarProps) {
     const canWrite = capabilities?.can_write !== false;
 
@@ -207,6 +212,19 @@ export function DriveBar({
                         <span>Upload files</span>
                     </button>
                     <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={onFileChange} />
+
+                    {onToggleEncrypt && (
+                        <button
+                            type="button"
+                            onClick={onToggleEncrypt}
+                            className={`btn-industrial-secondary drive-toolbar-btn ${encryptUploads ? "text-amber-500 border-amber-500/40 bg-amber-500/10" : ""}`}
+                            title={encryptUploads ? "Encryption-at-rest: ON (AES-256-GCM)" : "Encryption-at-rest: OFF (Plaintext)"}
+                            aria-label="Toggle upload encryption"
+                        >
+                            <Lock size={15} />
+                            <span>{encryptUploads ? "Encrypted" : "Plaintext"}</span>
+                        </button>
+                    )}
 
                     <button
                         type="button"

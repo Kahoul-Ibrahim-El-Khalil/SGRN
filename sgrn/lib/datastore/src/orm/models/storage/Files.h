@@ -52,6 +52,8 @@ public:
         static const std::string _directory_id;
         static const std::string _extension;
         static const std::string _full_path;
+        static const std::string _key_id;
+        static const std::string _is_encrypted;
         static const std::string _created_at;
         static const std::string _domain;
     };
@@ -169,6 +171,24 @@ public:
     void setFullPath(const std::string& pFullPath) noexcept;
     void setFullPath(std::string&& pFullPath) noexcept;
 
+    /**  For column key_id  */
+    /// Get the value of the column key_id, returns the default value if the column is null
+    const std::string& getValueOfKeyId() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<std::string>& getKeyId() const noexcept;
+    /// Set the value of the column key_id
+    void setKeyId(const std::string& pKeyId) noexcept;
+    void setKeyId(std::string&& pKeyId) noexcept;
+    void setKeyIdToNull() noexcept;
+
+    /**  For column is_encrypted  */
+    /// Get the value of the column is_encrypted, returns the default value if the column is null
+    const bool& getValueOfIsEncrypted() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<bool>& getIsEncrypted() const noexcept;
+    /// Set the value of the column is_encrypted
+    void setIsEncrypted(const bool& pIsEncrypted) noexcept;
+
     /**  For column created_at  */
     /// Get the value of the column created_at, returns the default value if the column is null
     const ::trantor::Date& getValueOfCreatedAt() const noexcept;
@@ -188,7 +208,7 @@ public:
     void setDomainToNull() noexcept;
 
     static size_t getColumnNumber() noexcept {
-        return 10;
+        return 12;
     }
     static const std::string& getColumnName(size_t index) noexcept(false);
 
@@ -219,6 +239,8 @@ private:
     std::shared_ptr<int64_t> directoryId_;
     std::shared_ptr<std::string> extension_;
     std::shared_ptr<std::string> fullPath_;
+    std::shared_ptr<std::string> keyId_;
+    std::shared_ptr<bool> isEncrypted_;
     std::shared_ptr<::trantor::Date> createdAt_;
     std::shared_ptr<std::string> domain_;
     struct MetaData {
@@ -231,7 +253,7 @@ private:
         const bool notNull_;
     };
     static const std::vector<MetaData> metaData_;
-    bool dirtyFlag_[10] = {false};
+    bool dirtyFlag_[12] = {false};
 
 public:
     static const std::string& sqlForFindingByPrimaryKey() {
@@ -277,12 +299,21 @@ public:
             sql += "full_path,";
             ++parametersCount;
         }
-        sql += "created_at,";
+        if (dirtyFlag_[8]) {
+            sql += "key_id,";
+            ++parametersCount;
+        }
+        sql += "is_encrypted,";
         ++parametersCount;
-        if (!dirtyFlag_[8]) {
+        if (!dirtyFlag_[9]) {
             needSelection = true;
         }
-        if (dirtyFlag_[9]) {
+        sql += "created_at,";
+        ++parametersCount;
+        if (!dirtyFlag_[10]) {
+            needSelection = true;
+        }
+        if (dirtyFlag_[11]) {
             sql += "domain,";
             ++parametersCount;
         }
@@ -328,10 +359,20 @@ public:
         if (dirtyFlag_[8]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[9]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
         } else {
             sql += "default,";
         }
-        if (dirtyFlag_[9]) {
+        if (dirtyFlag_[10]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        } else {
+            sql += "default,";
+        }
+        if (dirtyFlag_[11]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }

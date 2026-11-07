@@ -15,10 +15,11 @@ using sgrn::datastore::query::PrimaryKey;
 
 class DomainsView : public CrudViewHandler<DomainsView> {
 public:
-    static constexpr std::array<Field, 3> kFields = {{
+    static constexpr std::array<Field, 4> kFields = {{
         {"name", FieldType::Text, Op::Eq | Op::Like, true, true},
         {"parent_id", FieldType::Int, static_cast<uint8_t>(Op::Eq), true, true},
         {"path", FieldType::Text, Op::Eq | Op::Like, true, true},
+        {"encryption_policy", FieldType::Text, 0, true, true},
     }};
 
     static constexpr CrudViewSpec kSpec{

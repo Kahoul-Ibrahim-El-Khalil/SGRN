@@ -84,6 +84,10 @@ list(APPEND BACKEND_SOURCES ${UTILS_SOURCES})
 file(GLOB_RECURSE BOOTSTRAP_SOURCES CONFIGURE_DEPENDS bootstrap/*.cpp)
 list(APPEND BACKEND_SOURCES ${BOOTSTRAP_SOURCES})
 
+# 5d. CRYPTO (Key providers and key store implementations)
+file(GLOB_RECURSE CRYPTO_SOURCES CONFIGURE_DEPENDS crypto/*.cpp)
+list(APPEND BACKEND_SOURCES ${CRYPTO_SOURCES})
+
 # ── The Fat Backend Library ──────────────────────────────────────────────────
 if(SGRN_BUILD_STATIC)
     add_library(sgrn_datastore_lib STATIC ${BACKEND_SOURCES})

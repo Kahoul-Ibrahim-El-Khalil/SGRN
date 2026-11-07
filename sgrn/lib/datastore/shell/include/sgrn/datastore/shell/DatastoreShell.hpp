@@ -186,7 +186,7 @@ private:
     std::string as_pipe(const std::string& t_input, const std::string& t_shell_cmd);
     std::string as_exec(const std::string& t_shell_cmd, const std::string& t_input);
     // Resumable upload AS bindings
-    std::string as_rput(const std::string& t_local, const std::string& t_remote, int64_t t_chunk_size);
+    std::string as_rput(const std::string& t_local, const std::string& t_remote, int64_t t_chunk_size, bool t_encrypt = false);
     // Admin AS bindings
     std::string as_sessions();
     std::string as_webhooks();

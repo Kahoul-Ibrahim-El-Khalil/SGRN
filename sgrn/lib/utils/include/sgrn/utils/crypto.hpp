@@ -6,6 +6,11 @@
 #include <string_view>
 #include <vector>
 
+#include "sgrn/utils/crypto/aead.hpp"
+#include "sgrn/utils/crypto/dek.hpp"
+#include "sgrn/utils/crypto/key-provider.hpp"
+#include "sgrn/utils/crypto/stream.hpp"
+
 namespace sgrn::utils::crypto
 {
 

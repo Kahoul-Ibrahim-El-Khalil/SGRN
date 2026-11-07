@@ -60,7 +60,7 @@ struct Row {
     }
 };
 
-Row exec(PGconn* t_conn, const std::string& t_sql, const std::vector<std::string>& t_params = {}) {
+Row exec(PGconn* t_conn, const std::string& t_sql, const std::vector<std::string>& t_params = {}, bool t_expect_error = false) {
     Row out;
     std::vector<const char*> vals;
     vals.reserve(t_params.size());
@@ -69,12 +69,13 @@ Row exec(PGconn* t_conn, const std::string& t_sql, const std::vector<std::string
     out.res = ::PQexecParams(
         t_conn, t_sql.c_str(), static_cast<int>(t_params.size()), nullptr, vals.empty() ? nullptr : vals.data(), nullptr, nullptr, 0);
     if (!out.res) {
-        std::printf("FAIL PQexecParams NULL: %s\n", ::PQerrorMessage(t_conn));
+        if (!t_expect_error)
+            std::printf("FAIL PQexecParams NULL: %s\n", ::PQerrorMessage(t_conn));
         return out;
     }
     const ExecStatusType st = ::PQresultStatus(out.res);
     out.ok = (st == PGRES_TUPLES_OK || st == PGRES_COMMAND_OK);
-    if (!out.ok)
+    if (!out.ok && !t_expect_error)
         std::printf("FAIL SQL: %s\n  → %s\n", t_sql.substr(0, 120).c_str(), ::PQresultErrorMessage(out.res));
     return out;
 }
@@ -104,10 +105,10 @@ bool appendLog(PGconn* t_conn, const std::string& t_org, const std::string& t_ac
     return r.ok;
 }
 
-/// Returns the full verify result row (is_valid, first_broken_seq, failure_reason).
+/// Returns the full verify result row (is_valid, total_rows, first_broken_seq, failure_reason).
 Row verifyChain(PGconn* t_conn, const std::string& t_org) {
     return exec(t_conn,
-        "SELECT is_valid, first_broken_seq, failure_reason "
+        "SELECT is_valid, total_rows, first_broken_seq, failure_reason "
         "FROM core.verify_audit_chain($1::text)",
         {t_org});
 }
@@ -483,6 +484,112 @@ void testEd25519Checkpoint(PGconn* t_conn) {
     std::printf("    done (sign OK; corrupted sig/hash correctly rejected)\n");
 }
 
+void testRetentionPurgeVerifiedSegment(PGconn* t_conn) {
+    std::printf("\n[6] Retention purge of verified segments and chain continuity\n");
+    const std::string org = "audit_test_purge";
+    wipeOrg(t_conn, org);
+
+    // 1. Append 10 rows
+    for (int i = 1; i <= 10; ++i)
+        appendLog(t_conn, org, "purge.evt." + std::to_string(i));
+
+    // Baseline verify
+    {
+        const Row r = verifyChain(t_conn, org);
+        CHECK(r.ok && ntuples(r) == 1);
+        CHECK_MSG(cell(r, 0, "is_valid") == "t", "baseline chain 1..10 must be valid");
+    }
+
+    // 2. Direct unprivileged DELETE must be rejected by tamper guard trigger
+    {
+        const Row r = exec(t_conn, "DELETE FROM core.audit_logs WHERE organisation = $1 AND seq = 1", {org}, /*expect_error=*/true);
+        CHECK_MSG(!r.ok, "direct DELETE on audit_logs must be blocked by tamper guard trigger");
+    }
+
+    // 3. Create signed checkpoint at seq 10
+    std::string last_hash;
+    {
+        const Row r = exec(t_conn, "SELECT row_hash FROM core.audit_logs WHERE organisation = $1 AND seq = 10", {org});
+        CHECK(r.ok && ntuples(r) == 1);
+        last_hash = cell(r, 0, "row_hash");
+    }
+
+    std::string priv_hex, pub_hex;
+    CHECK(sgrn::datastore::audit::AuditLogger::generateEd25519KeyPair(priv_hex, pub_hex));
+    const std::string payload = org + ":10:" + last_hash;
+    std::string sig_hex;
+    CHECK(sgrn::datastore::audit::AuditLogger::signEd25519(payload, priv_hex, sig_hex));
+
+    // Insert checkpoint with timestamp backdated 100 days so retention threshold of 90 days is satisfied
+    {
+        const Row r = exec(t_conn,
+            "INSERT INTO core.audit_checkpoints "
+            "(organisation, last_seq, last_hash, signature, public_key, created_at) "
+            "VALUES ($1, 10, $2, $3, $4, NOW() - interval '100 days')",
+            {org, last_hash, sig_hex, pub_hex});
+        CHECK_MSG(r.ok, "insert backdated signed checkpoint must succeed");
+    }
+
+    // 4. Append 5 more rows (seq 11..15)
+    for (int i = 11; i <= 15; ++i)
+        appendLog(t_conn, org, "purge.evt." + std::to_string(i));
+
+    // 5. Test retention floor: attempt purge with < 90 days interval -> must throw exception
+    {
+        const Row r = exec(t_conn, "SELECT * FROM core.purge_audit_logs($1, interval '30 days')", {org}, /*expect_error=*/true);
+        CHECK_MSG(!r.ok, "purge with < 90 days retention must be rejected by SQL function");
+    }
+
+    // 6. Purge verified segment up to checkpoint seq 10 with 90 days threshold
+    {
+        const Row r = exec(t_conn,
+            "SELECT purged_count::text, purged_up_to_seq::text, status_message "
+            "FROM core.purge_audit_logs($1, interval '90 days')",
+            {org});
+        CHECK(r.ok && ntuples(r) == 1);
+        CHECK_MSG(cell(r, 0, "purged_count") == "10", "purged_count must be 10");
+        CHECK_MSG(cell(r, 0, "purged_up_to_seq") == "10", "purged_up_to_seq must be 10");
+    }
+
+    // 7. Verify remaining rows in table: count must be 5, seq 11..15
+    {
+        const Row r = exec(t_conn,
+            "SELECT COUNT(*)::text AS n, MIN(seq)::text AS mn, MAX(seq)::text AS mx "
+            "FROM core.audit_logs WHERE organisation = $1",
+            {org});
+        CHECK(r.ok && ntuples(r) == 1);
+        CHECK_MSG(cell(r, 0, "n") == "5", "5 rows must remain after purge");
+        CHECK_MSG(cell(r, 0, "mn") == "11", "min seq must be 11");
+        CHECK_MSG(cell(r, 0, "mx") == "15", "max seq must be 15");
+    }
+
+    // 8. Verify audit chain on remaining segment (seq 11..15) against signed checkpoint at seq 10
+    {
+        const Row r = verifyChain(t_conn, org);
+        CHECK(r.ok && ntuples(r) == 1);
+        CHECK_MSG(cell(r, 0, "is_valid") == "t", "remaining audit chain starting at seq 11 must be VALID against checkpoint seq 10");
+        CHECK_MSG(cell(r, 0, "total_rows") == "5", "total_rows verified must be 5");
+    }
+
+    // 9. Tamper test: physically remove row 11 (bypassing trigger as superuser)
+    // Now min(seq) becomes 12, but checkpoint only covers up to 10.
+    // verify_audit_chain must detect missing checkpoint for seq 11 and FAIL!
+    {
+        exec(t_conn, "SET session_replication_role = replica");
+        exec(t_conn, "DELETE FROM core.audit_logs WHERE organisation = $1 AND seq = 11", {org});
+        exec(t_conn, "SET session_replication_role = DEFAULT");
+
+        const Row r = verifyChain(t_conn, org);
+        CHECK(r.ok && ntuples(r) == 1);
+        CHECK_MSG(cell(r, 0, "is_valid") == "f", "chain with missing purged segment checkpoint must FAIL verification");
+        const std::string reason = cell(r, 0, "failure_reason");
+        CHECK_MSG(
+            reason.find("Missing signed checkpoint") != std::string::npos, ("expected missing checkpoint error, got: " + reason).c_str());
+    }
+
+    std::printf("    done (retention purge leaves chain verifiable; uncheckpointed gap detected)\n");
+}
+
 } // namespace
 
 // ── main ─────────────────────────────────────────────────────────────────────
@@ -509,6 +616,7 @@ int main() {
     testSqlDeleteDetection(conn);
     testConcurrentWriters(conn, fix.adminConnInfo());
     testEd25519Checkpoint(conn);
+    testRetentionPurgeVerifiedSegment(conn);
 
     ::PQfinish(conn);
 

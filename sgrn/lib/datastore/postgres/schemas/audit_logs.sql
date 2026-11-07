@@ -134,12 +134,38 @@ stable
 as $$
 declare
     r record;
+    v_min_seq bigint;
     v_expected_seq bigint := 1;
     v_expected_prev text := '0000000000000000000000000000000000000000000000000000000000000000';
     v_canon text;
     v_calc_hash text;
     v_count bigint := 0;
+    v_cp record;
 begin
+    select min(seq) into v_min_seq from core.audit_logs where organisation = p_organisation;
+    if v_min_seq is null then
+        return query select true, 0::bigint, null::bigint, null::bigint, 'Chain empty'::text;
+        return;
+    end if;
+
+    if v_min_seq > 1 then
+        select last_seq, last_hash into v_cp
+        from core.audit_checkpoints
+        where organisation = p_organisation
+          and last_seq = v_min_seq - 1
+        order by created_at desc
+        limit 1;
+
+        if not found then
+            return query select false, 0::bigint, v_min_seq, null::bigint,
+                ('Missing signed checkpoint for purged segment prior to seq ' || v_min_seq)::text;
+            return;
+        end if;
+
+        v_expected_seq := v_min_seq;
+        v_expected_prev := v_cp.last_hash;
+    end if;
+
     for r in
         select id, organisation, actor_type, actor_id, actor_name, action, target_type, target_id,
                ip, details, status, created_at, seq, prev_hash, row_hash
@@ -197,6 +223,9 @@ returns trigger
 language plpgsql
 as $$
 begin
+    if TG_OP = 'DELETE' and current_setting('sgrn.allow_audit_purge', true) = 'on' then
+        return old;
+    end if;
     raise exception 'Audit logs are tamper-evident and append-only. UPDATE and DELETE operations are prohibited.';
 end;
 $$;
@@ -207,6 +236,62 @@ create trigger trg_audit_tamper_guard
     for each row
     execute function core.trg_prohibit_audit_tampering();
 
+-- Controlled audit retention purge function
+create or replace function core.purge_audit_logs(
+    p_organisation text,
+    p_older_than_interval interval
+)
+returns table (
+    purged_count bigint,
+    purged_up_to_seq bigint,
+    status_message text
+)
+language plpgsql
+security definer
+set search_path = core, pg_catalog, public
+as $$
+declare
+    v_lock_key bigint;
+    v_checkpoint record;
+    v_count bigint := 0;
+begin
+    if p_older_than_interval < interval '90 days' then
+        raise exception 'Audit log retention policy requires at least 90 days retention';
+    end if;
+
+    -- Per-organisation advisory transaction lock
+    v_lock_key := ('x' || substr(md5('sgrn_audit_purge_' || p_organisation), 1, 15))::bit(64)::bigint;
+    perform pg_advisory_xact_lock(v_lock_key);
+
+    -- Find most recent signed checkpoint older than the retention threshold
+    select id, last_seq, last_hash into v_checkpoint
+    from core.audit_checkpoints
+    where organisation = p_organisation
+      and created_at <= now() - p_older_than_interval
+    order by last_seq desc
+    limit 1;
+
+    if not found then
+        return query select 0::bigint, 0::bigint,
+            ('No verified checkpoint older than ' || p_older_than_interval::text || ' found. Purge refused to preserve chain continuity.')::text;
+        return;
+    end if;
+
+    -- Enable bypass in current transaction for the tamper guard trigger
+    perform set_config('sgrn.allow_audit_purge', 'on', true);
+
+    delete from core.audit_logs
+    where organisation = p_organisation
+      and seq <= v_checkpoint.last_seq;
+
+    get diagnostics v_count = row_count;
+
+    return query select v_count, v_checkpoint.last_seq,
+        ('Successfully purged ' || v_count || ' records up to checkpoint seq ' || v_checkpoint.last_seq)::text;
+end;
+$$;
+
 grant execute on function core.append_audit_log to public;
 grant execute on function core.verify_audit_chain to public;
+grant execute on function core.purge_audit_logs to public;
 grant select on core.audit_checkpoints to public;

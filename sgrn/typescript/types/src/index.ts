@@ -238,6 +238,8 @@ export interface DriveFile {
   part_count?: number | null;
   sha256?: string;
   etag?: string;
+  is_encrypted?: boolean;
+  key_id?: string | null;
 }
 
 export interface DirectoryListing {

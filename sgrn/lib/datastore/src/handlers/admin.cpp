@@ -1201,15 +1201,29 @@ Task<HttpResponsePtr> AdminApiHandler::handlePurgeAuditLogs(HttpRequestPtr tsp_r
             co_return sgrn::createJsonResponse(db_res);
         auto db = db_res.value();
 
-        auto res =
-            (!org_filter.empty())
-                ? co_await db->execSqlCoro(
-                      "DELETE FROM core.audit_logs WHERE organisation = $1 AND created_at < NOW() - ($2 || ' days')::interval RETURNING id",
-                      org_filter, std::to_string(days))
-                : co_await db->execSqlCoro("DELETE FROM core.audit_logs WHERE created_at < NOW() - ($1 || ' days')::interval RETURNING id",
-                      std::to_string(days));
+        int64_t purged_count = 0;
+        std::vector<std::string> orgs_to_purge;
+        if (!org_filter.empty()) {
+            orgs_to_purge.push_back(org_filter);
+        } else {
+            auto org_rows = co_await db->execSqlCoro("SELECT DISTINCT organisation FROM core.audit_logs ORDER BY organisation");
+            for (const auto& r : org_rows) {
+                orgs_to_purge.push_back(r["organisation"].as<std::string>());
+            }
+        }
 
-        const int64_t purged_count = res.size();
+        std::string purge_status_msg;
+        for (const auto& target_org : orgs_to_purge) {
+            auto res = co_await db->execSqlCoro(
+                "SELECT purged_count, purged_up_to_seq, status_message FROM core.purge_audit_logs($1::text, ($2 || ' days')::interval)",
+                target_org, std::to_string(days));
+            if (!res.empty()) {
+                purged_count += res[0]["purged_count"].as<int64_t>();
+                if (purge_status_msg.empty()) {
+                    purge_status_msg = res[0]["status_message"].as<std::string>();
+                }
+            }
+        }
 
         // Auditable Clearance: Log an immutable audit entry documenting the purge operation!
         Json::Value details;
@@ -1217,6 +1231,7 @@ Task<HttpResponsePtr> AdminApiHandler::handlePurgeAuditLogs(HttpRequestPtr tsp_r
         details["records_purged"] = purged_count;
         details["cleared_by"] = actor_name;
         details["target_organisation"] = org_filter.empty() ? "all" : org_filter;
+        details["status_message"] = purge_status_msg;
 
         const std::string log_org = org_filter.empty() ? "platform" : org_filter;
         co_await sgrn::datastore::audit::AuditLogger::log(db, log_org, "user", actor_id, actor_name, "audit.purged", "audit_logs", log_org,
@@ -1226,7 +1241,7 @@ Task<HttpResponsePtr> AdminApiHandler::handlePurgeAuditLogs(HttpRequestPtr tsp_r
         resp["success"] = true;
         resp["records_purged"] = purged_count;
         resp["older_than_days"] = days;
-        resp["message"] = "Audit logs purged successfully";
+        resp["message"] = purge_status_msg.empty() ? "Audit logs purged successfully" : purge_status_msg;
         co_return createJsonResponse(resp, k200OK);
     } catch (const std::exception& e) {
         ERROR_LOG("Failed to purge audit logs: {}", e.what());

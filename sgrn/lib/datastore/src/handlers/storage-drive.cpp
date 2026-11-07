@@ -1,6 +1,7 @@
 #include <drogon/orm/Exception.h>
 #include <fmt/core.h>
 #include <sgrn/datastore/core/db.hpp>
+#include <sgrn/datastore/crypto/key-store.hpp>
 #include <sgrn/datastore/error/ApiErrors.hpp>
 #include <sgrn/datastore/handlers/storage.hpp>
 #include <sgrn/datastore/services/helpers/magic.hpp>
@@ -469,6 +470,7 @@ folder_page AS (
 ),
 files_cte AS (
   SELECT f.id, f.name, f.full_path, f.extension, f.created_at::text AS created_at,
+    f.is_encrypted, f.key_id,
     (SELECT COALESCE(SUM(so_sum.size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = fo_sum.object_id WHERE fo_sum.file_id = f.id) AS compressed_size,
     (SELECT COALESCE(SUM(so_sum.original_size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = fo_sum.object_id WHERE fo_sum.file_id = f.id) AS original_size,
     so.upload_mode,
@@ -497,7 +499,8 @@ SELECT
   COALESCE((SELECT jsonb_agg(jsonb_build_object(
     'id', s.id, 'name', s.name, 'path', $6 || s.full_path, 'extension', coalesce(s.extension, ''),
     'size', s.compressed_size, 'original_size', s.original_size, 'upload_mode', s.upload_mode,
-    'part_count', s.part_count, 'created_at', s.created_at)
+    'part_count', s.part_count, 'created_at', s.created_at,
+    'is_encrypted', coalesce(s.is_encrypted, false), 'key_id', s.key_id)
     ORDER BY %FILE_AGG_ORDER%) FROM file_page s), '[]'::jsonb) AS files,
   (SELECT n FROM folder_totals) AS total_folders,
   (SELECT n FROM file_totals) AS total_files
@@ -519,6 +522,7 @@ folder_page AS (
 ),
 files_cte AS (
   SELECT f.id, f.name, f.full_path, f.extension, f.created_at::text AS created_at,
+    f.is_encrypted, f.key_id,
     (SELECT COALESCE(SUM(so_sum.size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = fo_sum.object_id WHERE fo_sum.file_id = f.id) AS compressed_size,
     (SELECT COALESCE(SUM(so_sum.original_size), 0) FROM storage.file_objects fo_sum JOIN storage.objects so_sum ON so_sum.id = fo_sum.object_id WHERE fo_sum.file_id = f.id) AS original_size,
     so.upload_mode,
@@ -547,7 +551,8 @@ SELECT
   COALESCE((SELECT jsonb_agg(jsonb_build_object(
     'id', s.id, 'name', s.name, 'path', $6 || s.full_path, 'extension', coalesce(s.extension, ''),
     'size', s.compressed_size, 'original_size', s.original_size, 'upload_mode', s.upload_mode,
-    'part_count', s.part_count, 'created_at', s.created_at)
+    'part_count', s.part_count, 'created_at', s.created_at,
+    'is_encrypted', coalesce(s.is_encrypted, false), 'key_id', s.key_id)
     ORDER BY %FILE_AGG_ORDER%) FROM file_page s), '[]'::jsonb) AS files,
   (SELECT n FROM folder_totals) AS total_folders,
   (SELECT n FROM file_totals) AS total_files
@@ -1152,6 +1157,16 @@ Task<HttpResponsePtr> StorageApiHandler::deleteFile(
     const std::string bucket = file_meta[0]["bucket"].as<std::string>();
     const std::string key = file_meta[0]["key"].as<std::string>();
 
+    // Crypto-shred if encrypted
+    auto enc_rows = co_await tsp_db_client->execSqlCoro("SELECT key_id, is_encrypted FROM storage.files WHERE id = $1", t_entity_id);
+    if (!enc_rows.empty() && enc_rows[0]["is_encrypted"].as<bool>() && !enc_rows[0]["key_id"].isNull()) {
+        std::string kid = enc_rows[0]["key_id"].as<std::string>();
+        auto ks = sgrn::datastore::crypto::getKeyStore();
+        if (ks) {
+            (void)ks->shred(kid);
+        }
+    }
+
     auto delete_res = co_await tsp_db_client->execSqlCoro("DELETE FROM storage.files WHERE id = $1", t_entity_id);
     if (delete_res.affectedRows() == 0) {
         co_return createJsonErrorResponse("File deletion failed", k404NotFound);
@@ -1376,13 +1391,18 @@ Task<HttpResponsePtr> StorageApiHandler::handlePresignedUrl(HttpRequestPtr tsp_r
         if (expiry > 604800)
             expiry = 604800;
 
-        // Look up the file to get object_id, bucket, key
-        auto file_rows = co_await db->execSqlCoro("SELECT fo.object_id, o.bucket, o.key FROM storage.file_objects fo "
+        // Look up the file to get object_id, bucket, key, is_encrypted
+        auto file_rows = co_await db->execSqlCoro("SELECT fo.object_id, o.bucket, o.key, f.is_encrypted FROM storage.file_objects fo "
                                                   "JOIN storage.objects o ON o.id = fo.object_id "
+                                                  "JOIN storage.files f ON f.id = fo.file_id "
                                                   "WHERE fo.file_id = $1 AND fo.part_index = 0",
             file_id);
         if (file_rows.empty()) {
             co_return createJsonErrorResponse("File not found", k404NotFound);
+        }
+
+        if (file_rows[0]["is_encrypted"].as<bool>()) {
+            co_return createJsonErrorResponse("Presigned URLs are not supported for encrypted files", k403Forbidden);
         }
 
         int64_t object_id = file_rows[0]["object_id"].as<int64_t>();

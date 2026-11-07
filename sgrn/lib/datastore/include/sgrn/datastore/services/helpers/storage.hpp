@@ -68,6 +68,8 @@ struct UserFileRecord {
     std::string extension;
     std::optional<int64_t> directory_id;
     std::optional<std::string> created_at;
+    std::optional<std::string> key_id;
+    bool is_encrypted{false};
     bool is_compressed_ = false;
     std::optional<std::string> compression_algorithm;
     std::optional<uint8_t> compression_level;
@@ -269,7 +271,8 @@ drogon::Task<::sgrn::datastore::BackendResult<void>> updateObjectChunking(drogon
 
 drogon::Task<::sgrn::datastore::BackendResult<int64_t>> insertFile(drogon::orm::DbClientPtr tsp_db_client, std::string t_name,
     int64_t t_object_id, std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id,
-    std::string t_extension, std::optional<int64_t> t_directory_id = std::nullopt, std::string t_domain = "");
+    std::string t_extension, std::optional<int64_t> t_directory_id = std::nullopt, std::string t_domain = "",
+    std::optional<std::string> t_key_id = std::nullopt, bool t_is_encrypted = false);
 
 drogon::Task<::sgrn::datastore::BackendResult<std::optional<int64_t>>> resolveDirectoryPath(drogon::orm::DbClientPtr tsp_db_client,
     std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_virtual_path,

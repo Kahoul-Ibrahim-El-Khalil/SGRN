@@ -103,6 +103,11 @@ private:
         // Uploaded chunks that have been processed into segments.
         int32_t processed_chunks{0};
 
+        // Encryption fields
+        bool is_encrypted{false};
+        std::string pending_key_id;
+        std::string domain;
+
         UploadSessionState() = default;
         UploadSessionState(const UploadSessionState&) = delete;
         UploadSessionState& operator=(const UploadSessionState&) = delete;

@@ -1,5 +1,5 @@
 import React from "react";
-import { X, File, Folder, Calendar, HardDrive, User, Info } from "lucide-react";
+import { X, File, Folder, Calendar, HardDrive, User, Info, Lock } from "lucide-react";
 import type { DriveFolder, DriveFile } from "@sgrn/types";
 import { toDisplayDrivePath } from "@/pages/drive/pathDisplay";
 
@@ -131,6 +131,17 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({ item, onClose }) => 
                                 (item as DriveFile).upload_mode === "multipart"
                                     ? `Multipart · ${(item as DriveFile).part_count ?? "?"} parts`
                                     : "Single PUT"
+                            }
+                        />
+                    )}
+                    {!isFolder && (
+                        <DetailItem
+                            icon={<Lock size={16} />}
+                            label="Encryption"
+                            value={
+                                (item as DriveFile).is_encrypted
+                                    ? `AES-256-GCM (Protected${(item as DriveFile).key_id ? ` · ${(item as DriveFile).key_id?.slice(0, 8)}...` : ""})`
+                                    : "Plaintext"
                             }
                         />
                     )}

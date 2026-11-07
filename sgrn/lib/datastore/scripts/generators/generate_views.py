@@ -793,6 +793,7 @@ def main():
             f.write("#pragma once\n" + "".join(f'#include "{n}"\n' for n in names))
 
         update_registration_file(specs, reg_file)
+        formatGeneratedViews(args.out, reg_file)
     finally:
         if build_db_name and not args.keep_db:
             dropDatabase(
@@ -802,6 +803,18 @@ def main():
                 superuser_password=args.superuser_password,
                 dbname=target_dbname,
             )
+
+def formatGeneratedViews(out_dir: str, reg_file: str):
+    repo_root = Path(__file__).resolve().parent.parent.parent.parent.parent.parent
+    formatter_script = repo_root / "scripts" / "format.py"
+    if not formatter_script.exists():
+        return
+    print(f">> Formatting generated CRUD views in '{out_dir}'...")
+    cmd = [sys.executable, str(formatter_script), "cpp", "--dir", str(out_dir), "--files", str(reg_file)]
+    try:
+        subprocess.run(cmd, check=False)
+    except Exception as e:
+        print(f">> Warning: Failed to run formatter on generated views: {e}")
 
 class PsqlCursorAdapter:
     def __init__(self, host, port, dbname, user, password):

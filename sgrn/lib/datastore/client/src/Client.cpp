@@ -952,7 +952,7 @@ bool DatastoreClient::deleteDriveItem(int64_t t_id, DriveItemType t_type, Storag
 // ── Resumable upload session management ──────────────────────────────────────
 
 sgrn::Result<DatastoreClient::ResumableUploadSession, std::string> DatastoreClient::initUploadSession(const std::string& t_filename,
-    const std::string& t_target_path, int64_t t_total_size, int64_t t_chunk_size, const std::string& t_mime_type) {
+    const std::string& t_target_path, int64_t t_total_size, int64_t t_chunk_size, const std::string& t_mime_type, bool t_encrypt) {
     rapidjson::Document body;
     auto& alloc = body.GetAllocator();
     body.SetObject();
@@ -961,6 +961,7 @@ sgrn::Result<DatastoreClient::ResumableUploadSession, std::string> DatastoreClie
     body.AddMember("mime_type", rapidjson::Value(t_mime_type.c_str(), alloc), alloc);
     body.AddMember("total_size", t_total_size, alloc);
     body.AddMember("chunk_size", t_chunk_size, alloc);
+    body.AddMember("encrypt", t_encrypt, alloc);
     auto doc = makeRequest("POST", "/api/v1/storage/upload/init", sgrn::utils::json::serializeCompact(body));
     if (doc.IsNull())
         return sgrn::Result<ResumableUploadSession, std::string>::Error("init upload session failed: empty response");
@@ -976,6 +977,8 @@ sgrn::Result<DatastoreClient::ResumableUploadSession, std::string> DatastoreClie
         s.total_chunks = doc["total_chunks"].GetInt();
     if (doc.HasMember("status") && doc["status"].IsString())
         s.status = doc["status"].GetString();
+    if (doc.HasMember("is_encrypted") && doc["is_encrypted"].IsBool())
+        s.is_encrypted = doc["is_encrypted"].GetBool();
     return s;
 }
 

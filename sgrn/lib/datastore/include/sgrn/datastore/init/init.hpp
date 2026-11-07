@@ -7,6 +7,7 @@
 #include "s3.hpp"
 
 #include <drogon/drogon.h>
+#include <sgrn/datastore/crypto/key-store.hpp>
 #include <sgrn/datastore/services/upload-cleanup.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/app.hpp>
@@ -30,6 +31,7 @@ inline void runServer() {
     assets::registerDashboardAssets();
     filters::createAndRegisterFilters();
     handlers::initHandlers();
+    crypto::initKeyStore();
     plugins::initS3();
     ratelimit::initRateLimiting();
     services::upload_cleanup::startUploadCleanupJob();

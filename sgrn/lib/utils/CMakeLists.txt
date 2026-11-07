@@ -7,6 +7,10 @@ set(sgrn_utils_LIB_TYPE SHARED)
 set(SOURCES
     src/compression.cpp
     src/crypto.cpp
+    src/crypto/dek.cpp
+    src/crypto/key-provider.cpp
+    src/crypto/aead.cpp
+    src/crypto/stream.cpp
     src/jwt.cpp
     src/xml.cpp
     src/xml_impl.c
@@ -18,6 +22,10 @@ set(HEADERS
     include/sgrn/utils/compression.hpp
     include/sgrn/utils/concurrent-queue.hpp
     include/sgrn/utils/crypto.hpp
+    include/sgrn/utils/crypto/dek.hpp
+    include/sgrn/utils/crypto/key-provider.hpp
+    include/sgrn/utils/crypto/aead.hpp
+    include/sgrn/utils/crypto/stream.hpp
     include/sgrn/utils/encoding.hpp
     include/sgrn/utils/endianess.hpp
     include/sgrn/utils/env.hpp
@@ -99,4 +107,16 @@ if(SGRN_BUILD_TESTS)
     )
     add_test(NAME compression_test COMMAND compression_test)
     target_compile_features(compression_test PRIVATE cxx_std_23)
+
+    sgrn_add_component_executable(
+        TARGET crypto_test
+        SOURCES tests/crypto-test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn_utils
+            fmt::fmt
+            sgrn::openssl
+    )
+    add_test(NAME crypto_test COMMAND crypto_test)
+    target_compile_features(crypto_test PRIVATE cxx_std_23)
 endif()

@@ -32,6 +32,8 @@ create table if not exists storage.upload_sessions (
 -- Idempotent column additions for existing databases
 alter table storage.upload_sessions add column if not exists file_hash text default null;
 alter table storage.upload_sessions add column if not exists compressed_size bigint default null;
+alter table storage.upload_sessions add column if not exists is_encrypted boolean not null default false;
+alter table storage.upload_sessions add column if not exists pending_key_id text default null;
 
 create table if not exists storage.upload_chunks (
     id bigserial primary key,

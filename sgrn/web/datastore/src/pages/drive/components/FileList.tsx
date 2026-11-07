@@ -17,6 +17,7 @@ import {
     Eye,
     ArrowUp,
     ArrowDown,
+    Lock,
 } from "lucide-react";
 import type { DriveFolder, DriveFile } from "@sgrn/types";
 import type { DriveMoveItem } from "@/pages/drive/types";
@@ -327,7 +328,18 @@ export function FileList({
                                 </td>
                                 <td>{getFileIcon(file.extension)}</td>
                                 <td className="font-bold whitespace-nowrap">
-                                    <Highlight text={file.name} query={searchQuery} />
+                                    <div className="flex items-center gap-2">
+                                        <Highlight text={file.name} query={searchQuery} />
+                                        {file.is_encrypted && (
+                                            <span
+                                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                                                title={`Encrypted at rest (Key: ${file.key_id || "AES-256-GCM"})`}
+                                            >
+                                                <Lock size={10} className="stroke-[2.5]" />
+                                                <span>ENC</span>
+                                            </span>
+                                        )}
+                                    </div>
                                 </td>
                                 <td className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">
                                     {file.extension || "DATA"}

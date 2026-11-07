@@ -94,4 +94,16 @@ int backupGarage(const std::string& t_base_dir);
 
 int verifyBackup(const std::string& t_base_dir, const std::string& t_target = "");
 
+// ---------------------------------------------------------------------------
+// --backup-keys : SQLite online backup of keys.db (mode 0600, separate storage)
+// ---------------------------------------------------------------------------
+
+int backupKeyDb(const std::string& t_base_dir, const std::string& t_target = "");
+
+// ---------------------------------------------------------------------------
+// --verify-keys : Cross-reconcile SQLite key records with PostgreSQL files
+// ---------------------------------------------------------------------------
+
+int verifyKeys(const std::string& t_base_dir);
+
 } // namespace sgrn::datastore::bootstrap::backup

@@ -53,6 +53,8 @@ struct DriveFileInfo {
     std::string created_at{};
     std::string sha256{};
     std::string etag{};
+    bool is_encrypted{false};
+    std::string key_id{};
 };
 
 struct DriveListing {
@@ -303,6 +305,12 @@ inline DriveFileInfo parseDriveFileInfo(const rapidjson::Value& t_value) {
     }
     if (t_value.HasMember("etag") && t_value["etag"].IsString()) {
         file.etag = t_value["etag"].GetString();
+    }
+    if (t_value.HasMember("is_encrypted") && t_value["is_encrypted"].IsBool()) {
+        file.is_encrypted = t_value["is_encrypted"].GetBool();
+    }
+    if (t_value.HasMember("key_id") && t_value["key_id"].IsString()) {
+        file.key_id = t_value["key_id"].GetString();
     }
     return file;
 }

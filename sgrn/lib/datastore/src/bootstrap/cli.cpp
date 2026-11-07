@@ -111,6 +111,15 @@ std::optional<int> dispatch(int t_argc, char** tp_argv) {
         return audit::verifyAuditTrail(org) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
+    if (first_arg == "--backup-keys") {
+        const std::string target = t_argc > 2 ? tp_argv[2] : "";
+        return bootstrap::backup::backupKeyDb(base_dir(), target) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    if (first_arg == "--verify-keys") {
+        return bootstrap::backup::verifyKeys(base_dir()) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
     return std::nullopt; // unrecognised argument → fall through to server mode
 }
 

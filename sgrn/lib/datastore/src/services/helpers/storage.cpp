@@ -271,7 +271,7 @@ Task<BackendResult<void>> updateObjectChunking(drogon::orm::DbClientPtr tsp_db_c
 
 Task<BackendResult<int64_t>> insertFile(drogon::orm::DbClientPtr tsp_db_client, std::string t_name, int64_t t_object_id,
     std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_extension,
-    std::optional<int64_t> t_directory_id, std::string t_domain) {
+    std::optional<int64_t> t_directory_id, std::string t_domain, std::optional<std::string> t_key_id, bool t_is_encrypted) {
     try {
         // The formats registry decides what counts as a format: store the
         // canonical (lowercased) extension only when storage.formats has a row
@@ -285,10 +285,11 @@ Task<BackendResult<int64_t>> insertFile(drogon::orm::DbClientPtr tsp_db_client, 
         }
 
         drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro(
-            "INSERT INTO storage.files (name, user_id, automated_service_id, session_id, extension, directory_id, domain) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+            "INSERT INTO storage.files (name, user_id, automated_service_id, session_id, extension, directory_id, domain, key_id, "
+            "is_encrypted) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
             std::move(t_name), t_user_id, t_automated_service_id, t_session_id, std::move(stored_extension), t_directory_id,
-            t_domain.empty() ? std::optional<std::string>(std::nullopt) : std::optional<std::string>(t_domain));
+            t_domain.empty() ? std::optional<std::string>(std::nullopt) : std::optional<std::string>(t_domain), t_key_id, t_is_encrypted);
 
         if (tp_res.empty()) {
             co_return BackendResult<int64_t>::Error(BackendError(BackendErrorKind::Database, "Failed to insert file"));
@@ -362,7 +363,7 @@ Task<std::optional<UserFileRecord>> getFile(drogon::orm::DbClientPtr tsp_db_clie
     try {
         drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro(
             "SELECT f.id, f.name, f.full_path, fo.object_id, f.user_id, f.automated_service_id, f.session_id, f.extension, "
-            "f.directory_id, f.created_at, so.is_compressed, so.compression_algorithm, so.compression_level "
+            "f.directory_id, f.created_at, f.key_id, f.is_encrypted, so.is_compressed, so.compression_algorithm, so.compression_level "
             "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
             "JOIN storage.objects so ON fo.object_id = so.id WHERE f.id = $1",
             t_file_id);
@@ -384,6 +385,10 @@ Task<std::optional<UserFileRecord>> getFile(drogon::orm::DbClientPtr tsp_db_clie
         if (!row["directory_id"].isNull())
             rec.directory_id = row["directory_id"].as<int64_t>();
         rec.created_at = row["created_at"].as<std::string>();
+        if (!row["key_id"].isNull())
+            rec.key_id = row["key_id"].as<std::string>();
+        if (!row["is_encrypted"].isNull())
+            rec.is_encrypted = row["is_encrypted"].as<bool>();
         rec.is_compressed_ = row["is_compressed"].as<bool>();
         if (!row["compression_algorithm"].isNull())
             rec.compression_algorithm = row["compression_algorithm"].as<std::string>();
@@ -400,12 +405,12 @@ Task<std::optional<UserFileRecord>> findFileByPath(drogon::orm::DbClientPtr tsp_
         const std::string query =
             t_ctx.is_automated_service
                 ? "SELECT f.id, f.name, f.full_path, fo.object_id, f.user_id, f.automated_service_id, f.session_id, "
-                  "f.extension, f.directory_id, f.created_at, so.is_compressed, so.compression_algorithm, "
+                  "f.extension, f.directory_id, f.created_at, f.key_id, f.is_encrypted, so.is_compressed, so.compression_algorithm, "
                   "so.compression_level FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
                   "JOIN storage.objects so ON fo.object_id = so.id "
                   "WHERE f.automated_service_id = $1 AND f.full_path = $2"
                 : "SELECT f.id, f.name, f.full_path, fo.object_id, f.user_id, f.automated_service_id, f.session_id, "
-                  "f.extension, f.directory_id, f.created_at, so.is_compressed, so.compression_algorithm, "
+                  "f.extension, f.directory_id, f.created_at, f.key_id, f.is_encrypted, so.is_compressed, so.compression_algorithm, "
                   "so.compression_level FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
                   "JOIN storage.objects so ON fo.object_id = so.id "
                   "WHERE f.user_id = $1 AND f.full_path = $2";
@@ -428,6 +433,10 @@ Task<std::optional<UserFileRecord>> findFileByPath(drogon::orm::DbClientPtr tsp_
         if (!row["directory_id"].isNull())
             rec.directory_id = row["directory_id"].as<int64_t>();
         rec.created_at = row["created_at"].as<std::string>();
+        if (!row["key_id"].isNull())
+            rec.key_id = row["key_id"].as<std::string>();
+        if (!row["is_encrypted"].isNull())
+            rec.is_encrypted = row["is_encrypted"].as<bool>();
         rec.is_compressed_ = row["is_compressed"].as<bool>();
         if (!row["compression_algorithm"].isNull())
             rec.compression_algorithm = row["compression_algorithm"].as<std::string>();

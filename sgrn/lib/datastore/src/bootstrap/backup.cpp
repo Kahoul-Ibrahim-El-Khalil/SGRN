@@ -11,6 +11,7 @@
 #include <fmt/core.h>
 #include <sgrn/Result.hpp>
 #include <sgrn/datastore/bootstrap/secrets.hpp> // resolveEnvPlaceholderKey
+#include <sgrn/datastore/crypto/sqlite-key-provider.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/env.hpp>
 #include <sgrn/utils/hashing.hpp> // computeSha256File
@@ -28,7 +29,9 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <sqlite3.h>
 #include <string>
+#include <sys/stat.h>
 #include <system_error>
 #include <trantor/net/EventLoopThread.h>
 #include <unistd.h>
@@ -90,24 +93,25 @@ std::string envOrDefault(const char* t_key, const std::string& t_default) {
 DbContext connectDbContext(const std::string& t_base_dir) {
     namespace fs = std::filesystem;
     const fs::path env_path = fs::path(t_base_dir) / ".env";
-    if (!fs::exists(env_path)) {
-        SGRN_ERROR("DatastoreBackup", "Configuration file .env not found. Please run --generate-config first.");
-        std::exit(EXIT_FAILURE);
+    if (fs::exists(env_path)) {
+        if (auto env_result = loadEnvFile(env_path); env_result.hasError()) {
+            SGRN_ERROR("DatastoreBackup", "Failed to load .env: {}", env_result.error());
+        }
+        resolveEnvPlaceholderKey(env_path, "SGRN_DEPLOYMENT_ENV");
+    } else {
+        SGRN_WARN("DatastoreBackup", "Configuration file .env not found at {}. Using environment variables.", env_path.string());
     }
-    if (auto env_result = loadEnvFile(env_path); env_result.hasError()) {
-        SGRN_ERROR("DatastoreBackup", "Failed to load .env: {}", env_result.error());
-        std::exit(EXIT_FAILURE);
-    }
-    resolveEnvPlaceholderKey(env_path, "SGRN_DEPLOYMENT_ENV");
 
     DbContext ctx;
-    ctx.host = envOrDefault("POSTGRES_HOST", "127.0.0.1");
-    ctx.port = envOrDefault("POSTGRES_PORT", "5432");
-    ctx.db = envOrDefault("POSTGRES_DB", "sgrn");
-    ctx.superuser = envOrDefault("POSTGRES_SUPERUSER", "postgres");
+    ctx.host = envOrDefault("POSTGRES_HOST", envOrDefault("PGHOST", "127.0.0.1"));
+    ctx.port = envOrDefault("POSTGRES_PORT", envOrDefault("PGPORT", "5432"));
+    ctx.db = envOrDefault("POSTGRES_DB", envOrDefault("PGDATABASE", "sgrn"));
+    ctx.superuser = envOrDefault("POSTGRES_SUPERUSER", envOrDefault("PGUSER", "postgres"));
     ctx.conn = fmt::format("host={} port={} dbname={} user={}", ctx.host, ctx.port, ctx.db, ctx.superuser);
     if (const char* su_pass = ::getenv("POSTGRES_SUPERUSER_PASSWORD"); su_pass != nullptr) {
         ctx.conn += fmt::format(" password={}", su_pass);
+    } else if (const char* pg_pass = ::getenv("PGPASSWORD"); pg_pass != nullptr) {
+        ctx.conn += fmt::format(" password={}", pg_pass);
     }
     return ctx;
 }
@@ -837,6 +841,189 @@ int verifyBackup(const std::string& t_base_dir, const std::string& t_target) {
         }
     }
     return rc;
+}
+
+int backupKeyDb(const std::string& t_base_dir, const std::string& t_target) {
+    fmt::print(stderr, "================================================================================\n"
+                       "WARNING: KEY BACKUP SEPARATION NOTICE\n"
+                       "The key store backup contains cryptographic keys (DEKs) used to encrypt data.\n"
+                       "IT MUST BE STORED SEPARATELY FROM DATA AND POSTGRESQL BACKUPS.\n"
+                       "Storing key backups on the same machine/medium as ciphertext backups nullifies\n"
+                       "encryption-at-rest. If this key backup is lost, ALL encrypted files are lost.\n"
+                       "================================================================================\n");
+
+    const fs::path keys_db = fs::path(t_base_dir) / "keys" / "keys.db";
+    if (!fs::exists(keys_db)) {
+        fmt::print(stderr, "error: Key database not found at {}\n", keys_db.string());
+        return 1;
+    }
+
+    fs::path target_file;
+    if (!t_target.empty()) {
+        target_file = fs::path(t_target);
+    } else {
+        const fs::path backup_dir = fs::path(t_base_dir) / "backup" / "keys";
+        std::error_code ec;
+        fs::create_directories(backup_dir, ec);
+        ::chmod(backup_dir.c_str(), 0700);
+        target_file = backup_dir / fmt::format("keys-{}.db", utcStamp());
+    }
+
+    const fs::path tmp_target = target_file.string() + ".tmp";
+
+    sqlite3* src_db = nullptr;
+    if (sqlite3_open_v2(keys_db.c_str(), &src_db, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) {
+        fmt::print(stderr, "error: cannot open source key database: {}\n", sqlite3_errmsg(src_db));
+        if (src_db)
+            sqlite3_close_v2(src_db);
+        return 1;
+    }
+
+    sqlite3* dst_db = nullptr;
+    if (sqlite3_open_v2(tmp_target.c_str(), &dst_db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr) != SQLITE_OK) {
+        fmt::print(stderr, "error: cannot create destination backup file: {}\n", sqlite3_errmsg(dst_db));
+        sqlite3_close_v2(src_db);
+        if (dst_db)
+            sqlite3_close_v2(dst_db);
+        return 1;
+    }
+
+    sqlite3_backup* pBackup = sqlite3_backup_init(dst_db, "main", src_db, "main");
+    if (!pBackup) {
+        fmt::print(stderr, "error: sqlite3_backup_init failed: {}\n", sqlite3_errmsg(dst_db));
+        sqlite3_close_v2(dst_db);
+        sqlite3_close_v2(src_db);
+        return 1;
+    }
+
+    int rc = sqlite3_backup_step(pBackup, -1);
+    sqlite3_backup_finish(pBackup);
+    sqlite3_close_v2(dst_db);
+    sqlite3_close_v2(src_db);
+
+    if (rc != SQLITE_DONE) {
+        fmt::print(stderr, "error: backup failed with code {}\n", rc);
+        std::error_code ec;
+        fs::remove(tmp_target, ec);
+        return 1;
+    }
+
+    ::chmod(tmp_target.c_str(), 0600);
+    std::error_code ec;
+    fs::rename(tmp_target, target_file, ec);
+    if (ec) {
+        fmt::print(stderr, "error: failed to rename backup file: {}\n", ec.message());
+        return 1;
+    }
+
+    fmt::print("✓ Key database backed up to '{}' (mode 0600)\n", target_file.string());
+    return 0;
+}
+
+int verifyKeys(const std::string& t_base_dir) {
+    fmt::print("Reconciling encryption keys between SQLite and PostgreSQL...\n");
+    const fs::path keys_db = fs::path(t_base_dir) / "keys" / "keys.db";
+
+    auto perm_res = sgrn::datastore::crypto::verifyKeyDbPermissions(keys_db.string());
+    if (perm_res.hasError()) {
+        fmt::print(stderr, "✗ Key DB permissions check failed: {}\n", perm_res.error());
+        return 1;
+    }
+
+    auto provider_res = sgrn::datastore::crypto::SqliteKeyProvider::open(keys_db.string());
+    if (provider_res.hasError()) {
+        fmt::print(stderr, "✗ Cannot open key store: {}\n", provider_res.error());
+        return 1;
+    }
+    auto provider = std::move(provider_res.value());
+
+    auto keys_res = provider->listForReconcile();
+    if (keys_res.hasError()) {
+        fmt::print(stderr, "✗ Failed to list keys from key store: {}\n", keys_res.error());
+        return 1;
+    }
+    const auto& keys = keys_res.value();
+
+    std::unordered_map<std::string, const sgrn::utils::crypto::KeyRecord*> key_map;
+    int active_keys = 0;
+    int pending_keys = 0;
+    int shredded_keys = 0;
+    for (const auto& k : keys) {
+        key_map[k.key_id] = &k;
+        if (k.status == sgrn::utils::crypto::KeyStatus::ACTIVE)
+            ++active_keys;
+        else if (k.status == sgrn::utils::crypto::KeyStatus::PENDING)
+            ++pending_keys;
+        else if (k.status == sgrn::utils::crypto::KeyStatus::SHREDDED)
+            ++shredded_keys;
+    }
+
+    const DbContext ctx = connectDbContext(t_base_dir);
+    trantor::EventLoopThread loop_thread;
+    loop_thread.run();
+    auto client = drogon::orm::DbClient::newPgClient(ctx.conn, 1, loop_thread.getLoop());
+
+    int discrepancies = 0;
+    int verified_encrypted_files = 0;
+
+    try {
+        auto file_rows = client->execSqlSync("SELECT id, name, key_id, is_encrypted, created_at FROM storage.files "
+                                             "WHERE is_encrypted = true OR key_id IS NOT NULL");
+
+        std::unordered_set<std::string> referenced_key_ids;
+
+        for (const auto& row : file_rows) {
+            const int64_t fid = row["id"].as<int64_t>();
+            const std::string fname = row["name"].as<std::string>();
+            const bool is_enc = row["is_encrypted"].as<bool>();
+            const bool has_key_id = !row["key_id"].isNull();
+            const std::string kid = has_key_id ? row["key_id"].as<std::string>() : "";
+
+            if (is_enc && !has_key_id) {
+                fmt::print(stderr, "✗ File id={} ('{}') is_encrypted=true but key_id is NULL!\n", fid, fname);
+                ++discrepancies;
+                continue;
+            }
+
+            if (has_key_id) {
+                referenced_key_ids.insert(kid);
+                auto it = key_map.find(kid);
+                if (it == key_map.end()) {
+                    fmt::print(stderr, "✗ File id={} ('{}') references key_id '{}' which is missing from SQLite!\n", fid, fname, kid);
+                    ++discrepancies;
+                } else if (it->second->status == sgrn::utils::crypto::KeyStatus::SHREDDED) {
+                    fmt::print("! Note: File id={} ('{}') references shredded key '{}' (unrecoverable)\n", fid, fname, kid);
+                } else {
+                    ++verified_encrypted_files;
+                }
+            }
+        }
+
+        // Check active keys in SQLite with no file row
+        for (const auto& k : keys) {
+            if (k.status == sgrn::utils::crypto::KeyStatus::ACTIVE) {
+                if (!k.file_id.has_value() || referenced_key_ids.find(k.key_id) == referenced_key_ids.end()) {
+                    fmt::print("! Warning: Active key '{}' has no corresponding row in storage.files\n", k.key_id);
+                }
+            }
+        }
+
+    } catch (const std::exception& e) {
+        fmt::print(stderr, "error: database query failed: {}\n", e.what());
+        return 1;
+    }
+
+    fmt::print("--------------------------------------------------\n");
+    fmt::print(
+        "Key store summary: {} total keys ({} active, {} pending, {} shredded)\n", keys.size(), active_keys, pending_keys, shredded_keys);
+    fmt::print("PostgreSQL verified encrypted files: {}\n", verified_encrypted_files);
+    if (discrepancies == 0) {
+        fmt::print("✓ Key reconciliation PASSED (0 fatal discrepancies)\n");
+        return 0;
+    } else {
+        fmt::print(stderr, "✗ Key reconciliation FAILED ({} fatal discrepancies)\n", discrepancies);
+        return 1;
+    }
 }
 
 } // namespace sgrn::datastore::bootstrap::backup

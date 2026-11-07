@@ -9,6 +9,7 @@
 #include <sgrn/datastore/bootstrap/bootstrap-helpers.hpp>
 #include <sgrn/datastore/bootstrap/secrets.hpp>
 #include <sgrn/datastore/bootstrap/systemd.hpp>
+#include <sgrn/datastore/crypto/sqlite-key-provider.hpp>
 #include <sgrn/utils/env.hpp>
 #include <sgrn/utils/filesystem.hpp>
 #include <sgrn/utils/process.hpp>
@@ -214,6 +215,27 @@ int verifyInstall(const std::string& t_base_dir, bool t_allow_insecure) {
     fs::path runtime_pghba = fs::path(t_base_dir) / "Postgres" / "data" / "pg_hba.conf";
     if (fs::exists(runtime_pghba)) {
         verifyPgHbaSecurity(runtime_pghba, report);
+    }
+
+    // 0c. Key DB permissions & isolation
+    fs::path keys_dir = fs::path(t_base_dir) / "keys";
+    fs::path keys_db = keys_dir / "keys.db";
+    if (fs::exists(keys_dir)) {
+        auto perm_res = crypto::verifyKeyDbPermissions(keys_db.string());
+        if (perm_res.hasError()) {
+            report.fail(perm_res.error());
+        } else {
+            report.pass("key store directory mode 0700 and db mode 0600");
+        }
+
+        fs::path garage_dir = fs::path(t_base_dir) / "Garage";
+        fs::path pg_dir = fs::path(t_base_dir) / "Postgres";
+        auto iso_res = crypto::verifyKeyDbIsolation(keys_db.string(), garage_dir.string(), pg_dir.string());
+        if (iso_res.hasError()) {
+            report.fail(iso_res.error());
+        } else {
+            report.pass("key store path isolation verified");
+        }
     }
 
     // 1. staged unit templates exist and are non-empty.

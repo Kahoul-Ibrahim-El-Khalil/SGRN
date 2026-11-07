@@ -26,1638 +26,1202 @@ const std::string AdminAssignments::primaryKeyName = "id";
 const bool AdminAssignments::hasPrimaryKey = true;
 const std::string AdminAssignments::tableName = "core.\"admin_assignments\"";
 
-const std::vector<typename AdminAssignments::MetaData> AdminAssignments::metaData_={
-{"id","int64_t","bigint",8,1,1,1},
-{"user_id","int32_t","integer",4,0,0,1},
-{"scope","std::string","text",0,0,0,1},
-{"organisation","std::string","text",0,0,0,1},
-{"domain_id","int32_t","integer",4,0,0,0},
-{"can_manage_users","bool","boolean",1,0,0,1},
-{"can_manage_keys","bool","boolean",1,0,0,1},
-{"granted_by","int32_t","integer",4,0,0,0},
-{"created_at","::trantor::Date","timestamp with time zone",0,0,0,1}
-};
-const std::string &AdminAssignments::getColumnName(size_t index) noexcept(false)
-{
+const std::vector<typename AdminAssignments::MetaData> AdminAssignments::metaData_ = {{"id", "int64_t", "bigint", 8, 1, 1, 1},
+    {"user_id", "int32_t", "integer", 4, 0, 0, 1}, {"scope", "std::string", "text", 0, 0, 0, 1},
+    {"organisation", "std::string", "text", 0, 0, 0, 1}, {"domain_id", "int32_t", "integer", 4, 0, 0, 0},
+    {"can_manage_users", "bool", "boolean", 1, 0, 0, 1}, {"can_manage_keys", "bool", "boolean", 1, 0, 0, 1},
+    {"granted_by", "int32_t", "integer", 4, 0, 0, 0}, {"created_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1}};
+const std::string& AdminAssignments::getColumnName(size_t index) noexcept(false) {
     assert(index < metaData_.size());
     return metaData_[index].colName_;
 }
-AdminAssignments::AdminAssignments(const Row &r, const ssize_t indexOffset) noexcept
-{
-    if(indexOffset < 0)
-    {
-        if(!r["id"].isNull())
-        {
-            id_=std::make_shared<int64_t>(r["id"].as<int64_t>());
+AdminAssignments::AdminAssignments(const Row& r, const ssize_t indexOffset) noexcept {
+    if (indexOffset < 0) {
+        if (!r["id"].isNull()) {
+            id_ = std::make_shared<int64_t>(r["id"].as<int64_t>());
         }
-        if(!r["user_id"].isNull())
-        {
-            userId_=std::make_shared<int32_t>(r["user_id"].as<int32_t>());
+        if (!r["user_id"].isNull()) {
+            userId_ = std::make_shared<int32_t>(r["user_id"].as<int32_t>());
         }
-        if(!r["scope"].isNull())
-        {
-            scope_=std::make_shared<std::string>(r["scope"].as<std::string>());
+        if (!r["scope"].isNull()) {
+            scope_ = std::make_shared<std::string>(r["scope"].as<std::string>());
         }
-        if(!r["organisation"].isNull())
-        {
-            organisation_=std::make_shared<std::string>(r["organisation"].as<std::string>());
+        if (!r["organisation"].isNull()) {
+            organisation_ = std::make_shared<std::string>(r["organisation"].as<std::string>());
         }
-        if(!r["domain_id"].isNull())
-        {
-            domainId_=std::make_shared<int32_t>(r["domain_id"].as<int32_t>());
+        if (!r["domain_id"].isNull()) {
+            domainId_ = std::make_shared<int32_t>(r["domain_id"].as<int32_t>());
         }
-        if(!r["can_manage_users"].isNull())
-        {
-            canManageUsers_=std::make_shared<bool>(r["can_manage_users"].as<bool>());
+        if (!r["can_manage_users"].isNull()) {
+            canManageUsers_ = std::make_shared<bool>(r["can_manage_users"].as<bool>());
         }
-        if(!r["can_manage_keys"].isNull())
-        {
-            canManageKeys_=std::make_shared<bool>(r["can_manage_keys"].as<bool>());
+        if (!r["can_manage_keys"].isNull()) {
+            canManageKeys_ = std::make_shared<bool>(r["can_manage_keys"].as<bool>());
         }
-        if(!r["granted_by"].isNull())
-        {
-            grantedBy_=std::make_shared<int32_t>(r["granted_by"].as<int32_t>());
+        if (!r["granted_by"].isNull()) {
+            grantedBy_ = std::make_shared<int32_t>(r["granted_by"].as<int32_t>());
         }
-        if(!r["created_at"].isNull())
-        {
+        if (!r["created_at"].isNull()) {
             auto timeStr = r["created_at"].as<std::string>();
             struct tm stm;
-            memset(&stm,0,sizeof(stm));
-            auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
+            memset(&stm, 0, sizeof(stm));
+            auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
-            if(p)
-            {
-                if(*p=='.')
-                {
-                    std::string decimals(p+1,&timeStr[timeStr.length()]);
-                    while(decimals.length()<6)
-                    {
+            if (p) {
+                if (*p == '.') {
+                    std::string decimals(p + 1, &timeStr[timeStr.length()]);
+                    while (decimals.length() < 6) {
                         decimals += "0";
                     }
                     decimalNum = (size_t)atol(decimals.c_str());
                 }
-                createdAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
+                createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
-    }
-    else
-    {
+    } else {
         size_t offset = (size_t)indexOffset;
-        if(offset + 9 > r.size())
-        {
+        if (offset + 9 > r.size()) {
             LOG_FATAL << "Invalid SQL result for this model";
             return;
         }
         size_t index;
         index = offset + 0;
-        if(!r[index].isNull())
-        {
-            id_=std::make_shared<int64_t>(r[index].as<int64_t>());
+        if (!r[index].isNull()) {
+            id_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
         index = offset + 1;
-        if(!r[index].isNull())
-        {
-            userId_=std::make_shared<int32_t>(r[index].as<int32_t>());
+        if (!r[index].isNull()) {
+            userId_ = std::make_shared<int32_t>(r[index].as<int32_t>());
         }
         index = offset + 2;
-        if(!r[index].isNull())
-        {
-            scope_=std::make_shared<std::string>(r[index].as<std::string>());
+        if (!r[index].isNull()) {
+            scope_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
         index = offset + 3;
-        if(!r[index].isNull())
-        {
-            organisation_=std::make_shared<std::string>(r[index].as<std::string>());
+        if (!r[index].isNull()) {
+            organisation_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
         index = offset + 4;
-        if(!r[index].isNull())
-        {
-            domainId_=std::make_shared<int32_t>(r[index].as<int32_t>());
+        if (!r[index].isNull()) {
+            domainId_ = std::make_shared<int32_t>(r[index].as<int32_t>());
         }
         index = offset + 5;
-        if(!r[index].isNull())
-        {
-            canManageUsers_=std::make_shared<bool>(r[index].as<bool>());
+        if (!r[index].isNull()) {
+            canManageUsers_ = std::make_shared<bool>(r[index].as<bool>());
         }
         index = offset + 6;
-        if(!r[index].isNull())
-        {
-            canManageKeys_=std::make_shared<bool>(r[index].as<bool>());
+        if (!r[index].isNull()) {
+            canManageKeys_ = std::make_shared<bool>(r[index].as<bool>());
         }
         index = offset + 7;
-        if(!r[index].isNull())
-        {
-            grantedBy_=std::make_shared<int32_t>(r[index].as<int32_t>());
+        if (!r[index].isNull()) {
+            grantedBy_ = std::make_shared<int32_t>(r[index].as<int32_t>());
         }
         index = offset + 8;
-        if(!r[index].isNull())
-        {
+        if (!r[index].isNull()) {
             auto timeStr = r[index].as<std::string>();
             struct tm stm;
-            memset(&stm,0,sizeof(stm));
-            auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
+            memset(&stm, 0, sizeof(stm));
+            auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
-            if(p)
-            {
-                if(*p=='.')
-                {
-                    std::string decimals(p+1,&timeStr[timeStr.length()]);
-                    while(decimals.length()<6)
-                    {
+            if (p) {
+                if (*p == '.') {
+                    std::string decimals(p + 1, &timeStr[timeStr.length()]);
+                    while (decimals.length() < 6) {
                         decimals += "0";
                     }
                     decimalNum = (size_t)atol(decimals.c_str());
                 }
-                createdAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
+                createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
     }
-
 }
 
-AdminAssignments::AdminAssignments(const Json::Value &pJson, const std::vector<std::string> &pMasqueradingVector) noexcept(false)
-{
-    if(pMasqueradingVector.size() != 9)
-    {
+AdminAssignments::AdminAssignments(const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector) noexcept(false) {
+    if (pMasqueradingVector.size() != 9) {
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
-    if(!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0]))
-    {
+    if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         dirtyFlag_[0] = true;
-        if(!pJson[pMasqueradingVector[0]].isNull())
-        {
-            id_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[0]].asInt64());
+        if (!pJson[pMasqueradingVector[0]].isNull()) {
+            id_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
-    if(!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1]))
-    {
+    if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
-        if(!pJson[pMasqueradingVector[1]].isNull())
-        {
-            userId_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[1]].asInt64());
+        if (!pJson[pMasqueradingVector[1]].isNull()) {
+            userId_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[1]].asInt64());
         }
     }
-    if(!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2]))
-    {
+    if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
-        if(!pJson[pMasqueradingVector[2]].isNull())
-        {
-            scope_=std::make_shared<std::string>(pJson[pMasqueradingVector[2]].asString());
+        if (!pJson[pMasqueradingVector[2]].isNull()) {
+            scope_ = std::make_shared<std::string>(pJson[pMasqueradingVector[2]].asString());
         }
     }
-    if(!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3]))
-    {
+    if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
-        if(!pJson[pMasqueradingVector[3]].isNull())
-        {
-            organisation_=std::make_shared<std::string>(pJson[pMasqueradingVector[3]].asString());
+        if (!pJson[pMasqueradingVector[3]].isNull()) {
+            organisation_ = std::make_shared<std::string>(pJson[pMasqueradingVector[3]].asString());
         }
     }
-    if(!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4]))
-    {
+    if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
         dirtyFlag_[4] = true;
-        if(!pJson[pMasqueradingVector[4]].isNull())
-        {
-            domainId_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[4]].asInt64());
+        if (!pJson[pMasqueradingVector[4]].isNull()) {
+            domainId_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[4]].asInt64());
         }
     }
-    if(!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5]))
-    {
+    if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
         dirtyFlag_[5] = true;
-        if(!pJson[pMasqueradingVector[5]].isNull())
-        {
-            canManageUsers_=std::make_shared<bool>(pJson[pMasqueradingVector[5]].asBool());
+        if (!pJson[pMasqueradingVector[5]].isNull()) {
+            canManageUsers_ = std::make_shared<bool>(pJson[pMasqueradingVector[5]].asBool());
         }
     }
-    if(!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6]))
-    {
+    if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
         dirtyFlag_[6] = true;
-        if(!pJson[pMasqueradingVector[6]].isNull())
-        {
-            canManageKeys_=std::make_shared<bool>(pJson[pMasqueradingVector[6]].asBool());
+        if (!pJson[pMasqueradingVector[6]].isNull()) {
+            canManageKeys_ = std::make_shared<bool>(pJson[pMasqueradingVector[6]].asBool());
         }
     }
-    if(!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7]))
-    {
+    if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
         dirtyFlag_[7] = true;
-        if(!pJson[pMasqueradingVector[7]].isNull())
-        {
-            grantedBy_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[7]].asInt64());
+        if (!pJson[pMasqueradingVector[7]].isNull()) {
+            grantedBy_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[7]].asInt64());
         }
     }
-    if(!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8]))
-    {
+    if (!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8])) {
         dirtyFlag_[8] = true;
-        if(!pJson[pMasqueradingVector[8]].isNull())
-        {
+        if (!pJson[pMasqueradingVector[8]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[8]].asString();
             struct tm stm;
-            memset(&stm,0,sizeof(stm));
-            auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
+            memset(&stm, 0, sizeof(stm));
+            auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
-            if(p)
-            {
-                if(*p=='.')
-                {
-                    std::string decimals(p+1,&timeStr[timeStr.length()]);
-                    while(decimals.length()<6)
-                    {
+            if (p) {
+                if (*p == '.') {
+                    std::string decimals(p + 1, &timeStr[timeStr.length()]);
+                    while (decimals.length() < 6) {
                         decimals += "0";
                     }
                     decimalNum = (size_t)atol(decimals.c_str());
                 }
-                createdAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
+                createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
     }
 }
 
-AdminAssignments::AdminAssignments(const Json::Value &pJson) noexcept(false)
-{
-    if(pJson.isMember("id"))
-    {
-        dirtyFlag_[0]=true;
-        if(!pJson["id"].isNull())
-        {
-            id_=std::make_shared<int64_t>((int64_t)pJson["id"].asInt64());
+AdminAssignments::AdminAssignments(const Json::Value& pJson) noexcept(false) {
+    if (pJson.isMember("id")) {
+        dirtyFlag_[0] = true;
+        if (!pJson["id"].isNull()) {
+            id_ = std::make_shared<int64_t>((int64_t)pJson["id"].asInt64());
         }
     }
-    if(pJson.isMember("user_id"))
-    {
-        dirtyFlag_[1]=true;
-        if(!pJson["user_id"].isNull())
-        {
-            userId_=std::make_shared<int32_t>((int32_t)pJson["user_id"].asInt64());
+    if (pJson.isMember("user_id")) {
+        dirtyFlag_[1] = true;
+        if (!pJson["user_id"].isNull()) {
+            userId_ = std::make_shared<int32_t>((int32_t)pJson["user_id"].asInt64());
         }
     }
-    if(pJson.isMember("scope"))
-    {
-        dirtyFlag_[2]=true;
-        if(!pJson["scope"].isNull())
-        {
-            scope_=std::make_shared<std::string>(pJson["scope"].asString());
+    if (pJson.isMember("scope")) {
+        dirtyFlag_[2] = true;
+        if (!pJson["scope"].isNull()) {
+            scope_ = std::make_shared<std::string>(pJson["scope"].asString());
         }
     }
-    if(pJson.isMember("organisation"))
-    {
-        dirtyFlag_[3]=true;
-        if(!pJson["organisation"].isNull())
-        {
-            organisation_=std::make_shared<std::string>(pJson["organisation"].asString());
+    if (pJson.isMember("organisation")) {
+        dirtyFlag_[3] = true;
+        if (!pJson["organisation"].isNull()) {
+            organisation_ = std::make_shared<std::string>(pJson["organisation"].asString());
         }
     }
-    if(pJson.isMember("domain_id"))
-    {
-        dirtyFlag_[4]=true;
-        if(!pJson["domain_id"].isNull())
-        {
-            domainId_=std::make_shared<int32_t>((int32_t)pJson["domain_id"].asInt64());
+    if (pJson.isMember("domain_id")) {
+        dirtyFlag_[4] = true;
+        if (!pJson["domain_id"].isNull()) {
+            domainId_ = std::make_shared<int32_t>((int32_t)pJson["domain_id"].asInt64());
         }
     }
-    if(pJson.isMember("can_manage_users"))
-    {
-        dirtyFlag_[5]=true;
-        if(!pJson["can_manage_users"].isNull())
-        {
-            canManageUsers_=std::make_shared<bool>(pJson["can_manage_users"].asBool());
+    if (pJson.isMember("can_manage_users")) {
+        dirtyFlag_[5] = true;
+        if (!pJson["can_manage_users"].isNull()) {
+            canManageUsers_ = std::make_shared<bool>(pJson["can_manage_users"].asBool());
         }
     }
-    if(pJson.isMember("can_manage_keys"))
-    {
-        dirtyFlag_[6]=true;
-        if(!pJson["can_manage_keys"].isNull())
-        {
-            canManageKeys_=std::make_shared<bool>(pJson["can_manage_keys"].asBool());
+    if (pJson.isMember("can_manage_keys")) {
+        dirtyFlag_[6] = true;
+        if (!pJson["can_manage_keys"].isNull()) {
+            canManageKeys_ = std::make_shared<bool>(pJson["can_manage_keys"].asBool());
         }
     }
-    if(pJson.isMember("granted_by"))
-    {
-        dirtyFlag_[7]=true;
-        if(!pJson["granted_by"].isNull())
-        {
-            grantedBy_=std::make_shared<int32_t>((int32_t)pJson["granted_by"].asInt64());
+    if (pJson.isMember("granted_by")) {
+        dirtyFlag_[7] = true;
+        if (!pJson["granted_by"].isNull()) {
+            grantedBy_ = std::make_shared<int32_t>((int32_t)pJson["granted_by"].asInt64());
         }
     }
-    if(pJson.isMember("created_at"))
-    {
-        dirtyFlag_[8]=true;
-        if(!pJson["created_at"].isNull())
-        {
+    if (pJson.isMember("created_at")) {
+        dirtyFlag_[8] = true;
+        if (!pJson["created_at"].isNull()) {
             auto timeStr = pJson["created_at"].asString();
             struct tm stm;
-            memset(&stm,0,sizeof(stm));
-            auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
+            memset(&stm, 0, sizeof(stm));
+            auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
-            if(p)
-            {
-                if(*p=='.')
-                {
-                    std::string decimals(p+1,&timeStr[timeStr.length()]);
-                    while(decimals.length()<6)
-                    {
+            if (p) {
+                if (*p == '.') {
+                    std::string decimals(p + 1, &timeStr[timeStr.length()]);
+                    while (decimals.length() < 6) {
                         decimals += "0";
                     }
                     decimalNum = (size_t)atol(decimals.c_str());
                 }
-                createdAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
+                createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
     }
 }
 
-void AdminAssignments::updateByMasqueradedJson(const Json::Value &pJson,
-                                            const std::vector<std::string> &pMasqueradingVector) noexcept(false)
-{
-    if(pMasqueradingVector.size() != 9)
-    {
+void AdminAssignments::updateByMasqueradedJson(const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector) noexcept(
+    false) {
+    if (pMasqueradingVector.size() != 9) {
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
-    if(!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0]))
-    {
-        if(!pJson[pMasqueradingVector[0]].isNull())
-        {
-            id_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[0]].asInt64());
+    if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
+        if (!pJson[pMasqueradingVector[0]].isNull()) {
+            id_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
-    if(!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1]))
-    {
+    if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
-        if(!pJson[pMasqueradingVector[1]].isNull())
-        {
-            userId_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[1]].asInt64());
+        if (!pJson[pMasqueradingVector[1]].isNull()) {
+            userId_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[1]].asInt64());
         }
     }
-    if(!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2]))
-    {
+    if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
-        if(!pJson[pMasqueradingVector[2]].isNull())
-        {
-            scope_=std::make_shared<std::string>(pJson[pMasqueradingVector[2]].asString());
+        if (!pJson[pMasqueradingVector[2]].isNull()) {
+            scope_ = std::make_shared<std::string>(pJson[pMasqueradingVector[2]].asString());
         }
     }
-    if(!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3]))
-    {
+    if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
-        if(!pJson[pMasqueradingVector[3]].isNull())
-        {
-            organisation_=std::make_shared<std::string>(pJson[pMasqueradingVector[3]].asString());
+        if (!pJson[pMasqueradingVector[3]].isNull()) {
+            organisation_ = std::make_shared<std::string>(pJson[pMasqueradingVector[3]].asString());
         }
     }
-    if(!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4]))
-    {
+    if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
         dirtyFlag_[4] = true;
-        if(!pJson[pMasqueradingVector[4]].isNull())
-        {
-            domainId_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[4]].asInt64());
+        if (!pJson[pMasqueradingVector[4]].isNull()) {
+            domainId_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[4]].asInt64());
         }
     }
-    if(!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5]))
-    {
+    if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
         dirtyFlag_[5] = true;
-        if(!pJson[pMasqueradingVector[5]].isNull())
-        {
-            canManageUsers_=std::make_shared<bool>(pJson[pMasqueradingVector[5]].asBool());
+        if (!pJson[pMasqueradingVector[5]].isNull()) {
+            canManageUsers_ = std::make_shared<bool>(pJson[pMasqueradingVector[5]].asBool());
         }
     }
-    if(!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6]))
-    {
+    if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
         dirtyFlag_[6] = true;
-        if(!pJson[pMasqueradingVector[6]].isNull())
-        {
-            canManageKeys_=std::make_shared<bool>(pJson[pMasqueradingVector[6]].asBool());
+        if (!pJson[pMasqueradingVector[6]].isNull()) {
+            canManageKeys_ = std::make_shared<bool>(pJson[pMasqueradingVector[6]].asBool());
         }
     }
-    if(!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7]))
-    {
+    if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
         dirtyFlag_[7] = true;
-        if(!pJson[pMasqueradingVector[7]].isNull())
-        {
-            grantedBy_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[7]].asInt64());
+        if (!pJson[pMasqueradingVector[7]].isNull()) {
+            grantedBy_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[7]].asInt64());
         }
     }
-    if(!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8]))
-    {
+    if (!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8])) {
         dirtyFlag_[8] = true;
-        if(!pJson[pMasqueradingVector[8]].isNull())
-        {
+        if (!pJson[pMasqueradingVector[8]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[8]].asString();
             struct tm stm;
-            memset(&stm,0,sizeof(stm));
-            auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
+            memset(&stm, 0, sizeof(stm));
+            auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
-            if(p)
-            {
-                if(*p=='.')
-                {
-                    std::string decimals(p+1,&timeStr[timeStr.length()]);
-                    while(decimals.length()<6)
-                    {
+            if (p) {
+                if (*p == '.') {
+                    std::string decimals(p + 1, &timeStr[timeStr.length()]);
+                    while (decimals.length() < 6) {
                         decimals += "0";
                     }
                     decimalNum = (size_t)atol(decimals.c_str());
                 }
-                createdAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
+                createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
     }
 }
 
-void AdminAssignments::updateByJson(const Json::Value &pJson) noexcept(false)
-{
-    if(pJson.isMember("id"))
-    {
-        if(!pJson["id"].isNull())
-        {
-            id_=std::make_shared<int64_t>((int64_t)pJson["id"].asInt64());
+void AdminAssignments::updateByJson(const Json::Value& pJson) noexcept(false) {
+    if (pJson.isMember("id")) {
+        if (!pJson["id"].isNull()) {
+            id_ = std::make_shared<int64_t>((int64_t)pJson["id"].asInt64());
         }
     }
-    if(pJson.isMember("user_id"))
-    {
+    if (pJson.isMember("user_id")) {
         dirtyFlag_[1] = true;
-        if(!pJson["user_id"].isNull())
-        {
-            userId_=std::make_shared<int32_t>((int32_t)pJson["user_id"].asInt64());
+        if (!pJson["user_id"].isNull()) {
+            userId_ = std::make_shared<int32_t>((int32_t)pJson["user_id"].asInt64());
         }
     }
-    if(pJson.isMember("scope"))
-    {
+    if (pJson.isMember("scope")) {
         dirtyFlag_[2] = true;
-        if(!pJson["scope"].isNull())
-        {
-            scope_=std::make_shared<std::string>(pJson["scope"].asString());
+        if (!pJson["scope"].isNull()) {
+            scope_ = std::make_shared<std::string>(pJson["scope"].asString());
         }
     }
-    if(pJson.isMember("organisation"))
-    {
+    if (pJson.isMember("organisation")) {
         dirtyFlag_[3] = true;
-        if(!pJson["organisation"].isNull())
-        {
-            organisation_=std::make_shared<std::string>(pJson["organisation"].asString());
+        if (!pJson["organisation"].isNull()) {
+            organisation_ = std::make_shared<std::string>(pJson["organisation"].asString());
         }
     }
-    if(pJson.isMember("domain_id"))
-    {
+    if (pJson.isMember("domain_id")) {
         dirtyFlag_[4] = true;
-        if(!pJson["domain_id"].isNull())
-        {
-            domainId_=std::make_shared<int32_t>((int32_t)pJson["domain_id"].asInt64());
+        if (!pJson["domain_id"].isNull()) {
+            domainId_ = std::make_shared<int32_t>((int32_t)pJson["domain_id"].asInt64());
         }
     }
-    if(pJson.isMember("can_manage_users"))
-    {
+    if (pJson.isMember("can_manage_users")) {
         dirtyFlag_[5] = true;
-        if(!pJson["can_manage_users"].isNull())
-        {
-            canManageUsers_=std::make_shared<bool>(pJson["can_manage_users"].asBool());
+        if (!pJson["can_manage_users"].isNull()) {
+            canManageUsers_ = std::make_shared<bool>(pJson["can_manage_users"].asBool());
         }
     }
-    if(pJson.isMember("can_manage_keys"))
-    {
+    if (pJson.isMember("can_manage_keys")) {
         dirtyFlag_[6] = true;
-        if(!pJson["can_manage_keys"].isNull())
-        {
-            canManageKeys_=std::make_shared<bool>(pJson["can_manage_keys"].asBool());
+        if (!pJson["can_manage_keys"].isNull()) {
+            canManageKeys_ = std::make_shared<bool>(pJson["can_manage_keys"].asBool());
         }
     }
-    if(pJson.isMember("granted_by"))
-    {
+    if (pJson.isMember("granted_by")) {
         dirtyFlag_[7] = true;
-        if(!pJson["granted_by"].isNull())
-        {
-            grantedBy_=std::make_shared<int32_t>((int32_t)pJson["granted_by"].asInt64());
+        if (!pJson["granted_by"].isNull()) {
+            grantedBy_ = std::make_shared<int32_t>((int32_t)pJson["granted_by"].asInt64());
         }
     }
-    if(pJson.isMember("created_at"))
-    {
+    if (pJson.isMember("created_at")) {
         dirtyFlag_[8] = true;
-        if(!pJson["created_at"].isNull())
-        {
+        if (!pJson["created_at"].isNull()) {
             auto timeStr = pJson["created_at"].asString();
             struct tm stm;
-            memset(&stm,0,sizeof(stm));
-            auto p = strptime(timeStr.c_str(),"%Y-%m-%d %H:%M:%S",&stm);
+            memset(&stm, 0, sizeof(stm));
+            auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
-            if(p)
-            {
-                if(*p=='.')
-                {
-                    std::string decimals(p+1,&timeStr[timeStr.length()]);
-                    while(decimals.length()<6)
-                    {
+            if (p) {
+                if (*p == '.') {
+                    std::string decimals(p + 1, &timeStr[timeStr.length()]);
+                    while (decimals.length() < 6) {
                         decimals += "0";
                     }
                     decimalNum = (size_t)atol(decimals.c_str());
                 }
-                createdAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
+                createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
     }
 }
 
-const int64_t &AdminAssignments::getValueOfId() const noexcept
-{
+const int64_t& AdminAssignments::getValueOfId() const noexcept {
     static const int64_t defaultValue = int64_t();
-    if(id_)
+    if (id_)
         return *id_;
     return defaultValue;
 }
-const std::shared_ptr<int64_t> &AdminAssignments::getId() const noexcept
-{
+const std::shared_ptr<int64_t>& AdminAssignments::getId() const noexcept {
     return id_;
 }
-void AdminAssignments::setId(const int64_t &pId) noexcept
-{
+void AdminAssignments::setId(const int64_t& pId) noexcept {
     id_ = std::make_shared<int64_t>(pId);
     dirtyFlag_[0] = true;
 }
-const typename AdminAssignments::PrimaryKeyType & AdminAssignments::getPrimaryKey() const
-{
+const typename AdminAssignments::PrimaryKeyType& AdminAssignments::getPrimaryKey() const {
     assert(id_);
     return *id_;
 }
 
-const int32_t &AdminAssignments::getValueOfUserId() const noexcept
-{
+const int32_t& AdminAssignments::getValueOfUserId() const noexcept {
     static const int32_t defaultValue = int32_t();
-    if(userId_)
+    if (userId_)
         return *userId_;
     return defaultValue;
 }
-const std::shared_ptr<int32_t> &AdminAssignments::getUserId() const noexcept
-{
+const std::shared_ptr<int32_t>& AdminAssignments::getUserId() const noexcept {
     return userId_;
 }
-void AdminAssignments::setUserId(const int32_t &pUserId) noexcept
-{
+void AdminAssignments::setUserId(const int32_t& pUserId) noexcept {
     userId_ = std::make_shared<int32_t>(pUserId);
     dirtyFlag_[1] = true;
 }
 
-const std::string &AdminAssignments::getValueOfScope() const noexcept
-{
+const std::string& AdminAssignments::getValueOfScope() const noexcept {
     static const std::string defaultValue = std::string();
-    if(scope_)
+    if (scope_)
         return *scope_;
     return defaultValue;
 }
-const std::shared_ptr<std::string> &AdminAssignments::getScope() const noexcept
-{
+const std::shared_ptr<std::string>& AdminAssignments::getScope() const noexcept {
     return scope_;
 }
-void AdminAssignments::setScope(const std::string &pScope) noexcept
-{
+void AdminAssignments::setScope(const std::string& pScope) noexcept {
     scope_ = std::make_shared<std::string>(pScope);
     dirtyFlag_[2] = true;
 }
-void AdminAssignments::setScope(std::string &&pScope) noexcept
-{
+void AdminAssignments::setScope(std::string&& pScope) noexcept {
     scope_ = std::make_shared<std::string>(std::move(pScope));
     dirtyFlag_[2] = true;
 }
 
-const std::string &AdminAssignments::getValueOfOrganisation() const noexcept
-{
+const std::string& AdminAssignments::getValueOfOrganisation() const noexcept {
     static const std::string defaultValue = std::string();
-    if(organisation_)
+    if (organisation_)
         return *organisation_;
     return defaultValue;
 }
-const std::shared_ptr<std::string> &AdminAssignments::getOrganisation() const noexcept
-{
+const std::shared_ptr<std::string>& AdminAssignments::getOrganisation() const noexcept {
     return organisation_;
 }
-void AdminAssignments::setOrganisation(const std::string &pOrganisation) noexcept
-{
+void AdminAssignments::setOrganisation(const std::string& pOrganisation) noexcept {
     organisation_ = std::make_shared<std::string>(pOrganisation);
     dirtyFlag_[3] = true;
 }
-void AdminAssignments::setOrganisation(std::string &&pOrganisation) noexcept
-{
+void AdminAssignments::setOrganisation(std::string&& pOrganisation) noexcept {
     organisation_ = std::make_shared<std::string>(std::move(pOrganisation));
     dirtyFlag_[3] = true;
 }
 
-const int32_t &AdminAssignments::getValueOfDomainId() const noexcept
-{
+const int32_t& AdminAssignments::getValueOfDomainId() const noexcept {
     static const int32_t defaultValue = int32_t();
-    if(domainId_)
+    if (domainId_)
         return *domainId_;
     return defaultValue;
 }
-const std::shared_ptr<int32_t> &AdminAssignments::getDomainId() const noexcept
-{
+const std::shared_ptr<int32_t>& AdminAssignments::getDomainId() const noexcept {
     return domainId_;
 }
-void AdminAssignments::setDomainId(const int32_t &pDomainId) noexcept
-{
+void AdminAssignments::setDomainId(const int32_t& pDomainId) noexcept {
     domainId_ = std::make_shared<int32_t>(pDomainId);
     dirtyFlag_[4] = true;
 }
-void AdminAssignments::setDomainIdToNull() noexcept
-{
+void AdminAssignments::setDomainIdToNull() noexcept {
     domainId_.reset();
     dirtyFlag_[4] = true;
 }
 
-const bool &AdminAssignments::getValueOfCanManageUsers() const noexcept
-{
+const bool& AdminAssignments::getValueOfCanManageUsers() const noexcept {
     static const bool defaultValue = bool();
-    if(canManageUsers_)
+    if (canManageUsers_)
         return *canManageUsers_;
     return defaultValue;
 }
-const std::shared_ptr<bool> &AdminAssignments::getCanManageUsers() const noexcept
-{
+const std::shared_ptr<bool>& AdminAssignments::getCanManageUsers() const noexcept {
     return canManageUsers_;
 }
-void AdminAssignments::setCanManageUsers(const bool &pCanManageUsers) noexcept
-{
+void AdminAssignments::setCanManageUsers(const bool& pCanManageUsers) noexcept {
     canManageUsers_ = std::make_shared<bool>(pCanManageUsers);
     dirtyFlag_[5] = true;
 }
 
-const bool &AdminAssignments::getValueOfCanManageKeys() const noexcept
-{
+const bool& AdminAssignments::getValueOfCanManageKeys() const noexcept {
     static const bool defaultValue = bool();
-    if(canManageKeys_)
+    if (canManageKeys_)
         return *canManageKeys_;
     return defaultValue;
 }
-const std::shared_ptr<bool> &AdminAssignments::getCanManageKeys() const noexcept
-{
+const std::shared_ptr<bool>& AdminAssignments::getCanManageKeys() const noexcept {
     return canManageKeys_;
 }
-void AdminAssignments::setCanManageKeys(const bool &pCanManageKeys) noexcept
-{
+void AdminAssignments::setCanManageKeys(const bool& pCanManageKeys) noexcept {
     canManageKeys_ = std::make_shared<bool>(pCanManageKeys);
     dirtyFlag_[6] = true;
 }
 
-const int32_t &AdminAssignments::getValueOfGrantedBy() const noexcept
-{
+const int32_t& AdminAssignments::getValueOfGrantedBy() const noexcept {
     static const int32_t defaultValue = int32_t();
-    if(grantedBy_)
+    if (grantedBy_)
         return *grantedBy_;
     return defaultValue;
 }
-const std::shared_ptr<int32_t> &AdminAssignments::getGrantedBy() const noexcept
-{
+const std::shared_ptr<int32_t>& AdminAssignments::getGrantedBy() const noexcept {
     return grantedBy_;
 }
-void AdminAssignments::setGrantedBy(const int32_t &pGrantedBy) noexcept
-{
+void AdminAssignments::setGrantedBy(const int32_t& pGrantedBy) noexcept {
     grantedBy_ = std::make_shared<int32_t>(pGrantedBy);
     dirtyFlag_[7] = true;
 }
-void AdminAssignments::setGrantedByToNull() noexcept
-{
+void AdminAssignments::setGrantedByToNull() noexcept {
     grantedBy_.reset();
     dirtyFlag_[7] = true;
 }
 
-const ::trantor::Date &AdminAssignments::getValueOfCreatedAt() const noexcept
-{
+const ::trantor::Date& AdminAssignments::getValueOfCreatedAt() const noexcept {
     static const ::trantor::Date defaultValue = ::trantor::Date();
-    if(createdAt_)
+    if (createdAt_)
         return *createdAt_;
     return defaultValue;
 }
-const std::shared_ptr<::trantor::Date> &AdminAssignments::getCreatedAt() const noexcept
-{
+const std::shared_ptr<::trantor::Date>& AdminAssignments::getCreatedAt() const noexcept {
     return createdAt_;
 }
-void AdminAssignments::setCreatedAt(const ::trantor::Date &pCreatedAt) noexcept
-{
+void AdminAssignments::setCreatedAt(const ::trantor::Date& pCreatedAt) noexcept {
     createdAt_ = std::make_shared<::trantor::Date>(pCreatedAt);
     dirtyFlag_[8] = true;
 }
 
-void AdminAssignments::updateId(const uint64_t id)
-{
+void AdminAssignments::updateId(const uint64_t id) {
 }
 
-const std::vector<std::string> &AdminAssignments::insertColumns() noexcept
-{
-    static const std::vector<std::string> inCols={
-        "user_id",
-        "scope",
-        "organisation",
-        "domain_id",
-        "can_manage_users",
-        "can_manage_keys",
-        "granted_by",
-        "created_at"
-    };
+const std::vector<std::string>& AdminAssignments::insertColumns() noexcept {
+    static const std::vector<std::string> inCols = {
+        "user_id", "scope", "organisation", "domain_id", "can_manage_users", "can_manage_keys", "granted_by", "created_at"};
     return inCols;
 }
 
-void AdminAssignments::outputArgs(drogon::orm::internal::SqlBinder &binder) const
-{
-    if(dirtyFlag_[1])
-    {
-        if(getUserId())
-        {
+void AdminAssignments::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
+    if (dirtyFlag_[1]) {
+        if (getUserId()) {
             binder << getValueOfUserId();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[2])
-    {
-        if(getScope())
-        {
+    if (dirtyFlag_[2]) {
+        if (getScope()) {
             binder << getValueOfScope();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[3])
-    {
-        if(getOrganisation())
-        {
+    if (dirtyFlag_[3]) {
+        if (getOrganisation()) {
             binder << getValueOfOrganisation();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[4])
-    {
-        if(getDomainId())
-        {
+    if (dirtyFlag_[4]) {
+        if (getDomainId()) {
             binder << getValueOfDomainId();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[5])
-    {
-        if(getCanManageUsers())
-        {
+    if (dirtyFlag_[5]) {
+        if (getCanManageUsers()) {
             binder << getValueOfCanManageUsers();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[6])
-    {
-        if(getCanManageKeys())
-        {
+    if (dirtyFlag_[6]) {
+        if (getCanManageKeys()) {
             binder << getValueOfCanManageKeys();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[7])
-    {
-        if(getGrantedBy())
-        {
+    if (dirtyFlag_[7]) {
+        if (getGrantedBy()) {
             binder << getValueOfGrantedBy();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[8])
-    {
-        if(getCreatedAt())
-        {
+    if (dirtyFlag_[8]) {
+        if (getCreatedAt()) {
             binder << getValueOfCreatedAt();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
 }
 
-const std::vector<std::string> AdminAssignments::updateColumns() const
-{
+const std::vector<std::string> AdminAssignments::updateColumns() const {
     std::vector<std::string> ret;
-    if(dirtyFlag_[1])
-    {
+    if (dirtyFlag_[1]) {
         ret.push_back(getColumnName(1));
     }
-    if(dirtyFlag_[2])
-    {
+    if (dirtyFlag_[2]) {
         ret.push_back(getColumnName(2));
     }
-    if(dirtyFlag_[3])
-    {
+    if (dirtyFlag_[3]) {
         ret.push_back(getColumnName(3));
     }
-    if(dirtyFlag_[4])
-    {
+    if (dirtyFlag_[4]) {
         ret.push_back(getColumnName(4));
     }
-    if(dirtyFlag_[5])
-    {
+    if (dirtyFlag_[5]) {
         ret.push_back(getColumnName(5));
     }
-    if(dirtyFlag_[6])
-    {
+    if (dirtyFlag_[6]) {
         ret.push_back(getColumnName(6));
     }
-    if(dirtyFlag_[7])
-    {
+    if (dirtyFlag_[7]) {
         ret.push_back(getColumnName(7));
     }
-    if(dirtyFlag_[8])
-    {
+    if (dirtyFlag_[8]) {
         ret.push_back(getColumnName(8));
     }
     return ret;
 }
 
-void AdminAssignments::updateArgs(drogon::orm::internal::SqlBinder &binder) const
-{
-    if(dirtyFlag_[1])
-    {
-        if(getUserId())
-        {
+void AdminAssignments::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
+    if (dirtyFlag_[1]) {
+        if (getUserId()) {
             binder << getValueOfUserId();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[2])
-    {
-        if(getScope())
-        {
+    if (dirtyFlag_[2]) {
+        if (getScope()) {
             binder << getValueOfScope();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[3])
-    {
-        if(getOrganisation())
-        {
+    if (dirtyFlag_[3]) {
+        if (getOrganisation()) {
             binder << getValueOfOrganisation();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[4])
-    {
-        if(getDomainId())
-        {
+    if (dirtyFlag_[4]) {
+        if (getDomainId()) {
             binder << getValueOfDomainId();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[5])
-    {
-        if(getCanManageUsers())
-        {
+    if (dirtyFlag_[5]) {
+        if (getCanManageUsers()) {
             binder << getValueOfCanManageUsers();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[6])
-    {
-        if(getCanManageKeys())
-        {
+    if (dirtyFlag_[6]) {
+        if (getCanManageKeys()) {
             binder << getValueOfCanManageKeys();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[7])
-    {
-        if(getGrantedBy())
-        {
+    if (dirtyFlag_[7]) {
+        if (getGrantedBy()) {
             binder << getValueOfGrantedBy();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[8])
-    {
-        if(getCreatedAt())
-        {
+    if (dirtyFlag_[8]) {
+        if (getCreatedAt()) {
             binder << getValueOfCreatedAt();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
 }
-Json::Value AdminAssignments::toJson() const
-{
+Json::Value AdminAssignments::toJson() const {
     Json::Value ret;
-    if(getId())
-    {
-        ret["id"]=(Json::Int64)getValueOfId();
+    if (getId()) {
+        ret["id"] = (Json::Int64)getValueOfId();
+    } else {
+        ret["id"] = Json::Value();
     }
-    else
-    {
-        ret["id"]=Json::Value();
+    if (getUserId()) {
+        ret["user_id"] = getValueOfUserId();
+    } else {
+        ret["user_id"] = Json::Value();
     }
-    if(getUserId())
-    {
-        ret["user_id"]=getValueOfUserId();
+    if (getScope()) {
+        ret["scope"] = getValueOfScope();
+    } else {
+        ret["scope"] = Json::Value();
     }
-    else
-    {
-        ret["user_id"]=Json::Value();
+    if (getOrganisation()) {
+        ret["organisation"] = getValueOfOrganisation();
+    } else {
+        ret["organisation"] = Json::Value();
     }
-    if(getScope())
-    {
-        ret["scope"]=getValueOfScope();
+    if (getDomainId()) {
+        ret["domain_id"] = getValueOfDomainId();
+    } else {
+        ret["domain_id"] = Json::Value();
     }
-    else
-    {
-        ret["scope"]=Json::Value();
+    if (getCanManageUsers()) {
+        ret["can_manage_users"] = getValueOfCanManageUsers();
+    } else {
+        ret["can_manage_users"] = Json::Value();
     }
-    if(getOrganisation())
-    {
-        ret["organisation"]=getValueOfOrganisation();
+    if (getCanManageKeys()) {
+        ret["can_manage_keys"] = getValueOfCanManageKeys();
+    } else {
+        ret["can_manage_keys"] = Json::Value();
     }
-    else
-    {
-        ret["organisation"]=Json::Value();
+    if (getGrantedBy()) {
+        ret["granted_by"] = getValueOfGrantedBy();
+    } else {
+        ret["granted_by"] = Json::Value();
     }
-    if(getDomainId())
-    {
-        ret["domain_id"]=getValueOfDomainId();
-    }
-    else
-    {
-        ret["domain_id"]=Json::Value();
-    }
-    if(getCanManageUsers())
-    {
-        ret["can_manage_users"]=getValueOfCanManageUsers();
-    }
-    else
-    {
-        ret["can_manage_users"]=Json::Value();
-    }
-    if(getCanManageKeys())
-    {
-        ret["can_manage_keys"]=getValueOfCanManageKeys();
-    }
-    else
-    {
-        ret["can_manage_keys"]=Json::Value();
-    }
-    if(getGrantedBy())
-    {
-        ret["granted_by"]=getValueOfGrantedBy();
-    }
-    else
-    {
-        ret["granted_by"]=Json::Value();
-    }
-    if(getCreatedAt())
-    {
-        ret["created_at"]=getCreatedAt()->toDbStringLocal();
-    }
-    else
-    {
-        ret["created_at"]=Json::Value();
+    if (getCreatedAt()) {
+        ret["created_at"] = getCreatedAt()->toDbStringLocal();
+    } else {
+        ret["created_at"] = Json::Value();
     }
     return ret;
 }
 
-std::string AdminAssignments::toString() const
-{
+std::string AdminAssignments::toString() const {
     return toJson().toStyledString();
 }
 
-Json::Value AdminAssignments::toMasqueradedJson(
-    const std::vector<std::string> &pMasqueradingVector) const
-{
+Json::Value AdminAssignments::toMasqueradedJson(const std::vector<std::string>& pMasqueradingVector) const {
     Json::Value ret;
-    if(pMasqueradingVector.size() == 9)
-    {
-        if(!pMasqueradingVector[0].empty())
-        {
-            if(getId())
-            {
-                ret[pMasqueradingVector[0]]=(Json::Int64)getValueOfId();
-            }
-            else
-            {
-                ret[pMasqueradingVector[0]]=Json::Value();
+    if (pMasqueradingVector.size() == 9) {
+        if (!pMasqueradingVector[0].empty()) {
+            if (getId()) {
+                ret[pMasqueradingVector[0]] = (Json::Int64)getValueOfId();
+            } else {
+                ret[pMasqueradingVector[0]] = Json::Value();
             }
         }
-        if(!pMasqueradingVector[1].empty())
-        {
-            if(getUserId())
-            {
-                ret[pMasqueradingVector[1]]=getValueOfUserId();
-            }
-            else
-            {
-                ret[pMasqueradingVector[1]]=Json::Value();
+        if (!pMasqueradingVector[1].empty()) {
+            if (getUserId()) {
+                ret[pMasqueradingVector[1]] = getValueOfUserId();
+            } else {
+                ret[pMasqueradingVector[1]] = Json::Value();
             }
         }
-        if(!pMasqueradingVector[2].empty())
-        {
-            if(getScope())
-            {
-                ret[pMasqueradingVector[2]]=getValueOfScope();
-            }
-            else
-            {
-                ret[pMasqueradingVector[2]]=Json::Value();
+        if (!pMasqueradingVector[2].empty()) {
+            if (getScope()) {
+                ret[pMasqueradingVector[2]] = getValueOfScope();
+            } else {
+                ret[pMasqueradingVector[2]] = Json::Value();
             }
         }
-        if(!pMasqueradingVector[3].empty())
-        {
-            if(getOrganisation())
-            {
-                ret[pMasqueradingVector[3]]=getValueOfOrganisation();
-            }
-            else
-            {
-                ret[pMasqueradingVector[3]]=Json::Value();
+        if (!pMasqueradingVector[3].empty()) {
+            if (getOrganisation()) {
+                ret[pMasqueradingVector[3]] = getValueOfOrganisation();
+            } else {
+                ret[pMasqueradingVector[3]] = Json::Value();
             }
         }
-        if(!pMasqueradingVector[4].empty())
-        {
-            if(getDomainId())
-            {
-                ret[pMasqueradingVector[4]]=getValueOfDomainId();
-            }
-            else
-            {
-                ret[pMasqueradingVector[4]]=Json::Value();
+        if (!pMasqueradingVector[4].empty()) {
+            if (getDomainId()) {
+                ret[pMasqueradingVector[4]] = getValueOfDomainId();
+            } else {
+                ret[pMasqueradingVector[4]] = Json::Value();
             }
         }
-        if(!pMasqueradingVector[5].empty())
-        {
-            if(getCanManageUsers())
-            {
-                ret[pMasqueradingVector[5]]=getValueOfCanManageUsers();
-            }
-            else
-            {
-                ret[pMasqueradingVector[5]]=Json::Value();
+        if (!pMasqueradingVector[5].empty()) {
+            if (getCanManageUsers()) {
+                ret[pMasqueradingVector[5]] = getValueOfCanManageUsers();
+            } else {
+                ret[pMasqueradingVector[5]] = Json::Value();
             }
         }
-        if(!pMasqueradingVector[6].empty())
-        {
-            if(getCanManageKeys())
-            {
-                ret[pMasqueradingVector[6]]=getValueOfCanManageKeys();
-            }
-            else
-            {
-                ret[pMasqueradingVector[6]]=Json::Value();
+        if (!pMasqueradingVector[6].empty()) {
+            if (getCanManageKeys()) {
+                ret[pMasqueradingVector[6]] = getValueOfCanManageKeys();
+            } else {
+                ret[pMasqueradingVector[6]] = Json::Value();
             }
         }
-        if(!pMasqueradingVector[7].empty())
-        {
-            if(getGrantedBy())
-            {
-                ret[pMasqueradingVector[7]]=getValueOfGrantedBy();
-            }
-            else
-            {
-                ret[pMasqueradingVector[7]]=Json::Value();
+        if (!pMasqueradingVector[7].empty()) {
+            if (getGrantedBy()) {
+                ret[pMasqueradingVector[7]] = getValueOfGrantedBy();
+            } else {
+                ret[pMasqueradingVector[7]] = Json::Value();
             }
         }
-        if(!pMasqueradingVector[8].empty())
-        {
-            if(getCreatedAt())
-            {
-                ret[pMasqueradingVector[8]]=getCreatedAt()->toDbStringLocal();
-            }
-            else
-            {
-                ret[pMasqueradingVector[8]]=Json::Value();
+        if (!pMasqueradingVector[8].empty()) {
+            if (getCreatedAt()) {
+                ret[pMasqueradingVector[8]] = getCreatedAt()->toDbStringLocal();
+            } else {
+                ret[pMasqueradingVector[8]] = Json::Value();
             }
         }
         return ret;
     }
     LOG_ERROR << "Masquerade failed";
-    if(getId())
-    {
-        ret["id"]=(Json::Int64)getValueOfId();
+    if (getId()) {
+        ret["id"] = (Json::Int64)getValueOfId();
+    } else {
+        ret["id"] = Json::Value();
     }
-    else
-    {
-        ret["id"]=Json::Value();
+    if (getUserId()) {
+        ret["user_id"] = getValueOfUserId();
+    } else {
+        ret["user_id"] = Json::Value();
     }
-    if(getUserId())
-    {
-        ret["user_id"]=getValueOfUserId();
+    if (getScope()) {
+        ret["scope"] = getValueOfScope();
+    } else {
+        ret["scope"] = Json::Value();
     }
-    else
-    {
-        ret["user_id"]=Json::Value();
+    if (getOrganisation()) {
+        ret["organisation"] = getValueOfOrganisation();
+    } else {
+        ret["organisation"] = Json::Value();
     }
-    if(getScope())
-    {
-        ret["scope"]=getValueOfScope();
+    if (getDomainId()) {
+        ret["domain_id"] = getValueOfDomainId();
+    } else {
+        ret["domain_id"] = Json::Value();
     }
-    else
-    {
-        ret["scope"]=Json::Value();
+    if (getCanManageUsers()) {
+        ret["can_manage_users"] = getValueOfCanManageUsers();
+    } else {
+        ret["can_manage_users"] = Json::Value();
     }
-    if(getOrganisation())
-    {
-        ret["organisation"]=getValueOfOrganisation();
+    if (getCanManageKeys()) {
+        ret["can_manage_keys"] = getValueOfCanManageKeys();
+    } else {
+        ret["can_manage_keys"] = Json::Value();
     }
-    else
-    {
-        ret["organisation"]=Json::Value();
+    if (getGrantedBy()) {
+        ret["granted_by"] = getValueOfGrantedBy();
+    } else {
+        ret["granted_by"] = Json::Value();
     }
-    if(getDomainId())
-    {
-        ret["domain_id"]=getValueOfDomainId();
-    }
-    else
-    {
-        ret["domain_id"]=Json::Value();
-    }
-    if(getCanManageUsers())
-    {
-        ret["can_manage_users"]=getValueOfCanManageUsers();
-    }
-    else
-    {
-        ret["can_manage_users"]=Json::Value();
-    }
-    if(getCanManageKeys())
-    {
-        ret["can_manage_keys"]=getValueOfCanManageKeys();
-    }
-    else
-    {
-        ret["can_manage_keys"]=Json::Value();
-    }
-    if(getGrantedBy())
-    {
-        ret["granted_by"]=getValueOfGrantedBy();
-    }
-    else
-    {
-        ret["granted_by"]=Json::Value();
-    }
-    if(getCreatedAt())
-    {
-        ret["created_at"]=getCreatedAt()->toDbStringLocal();
-    }
-    else
-    {
-        ret["created_at"]=Json::Value();
+    if (getCreatedAt()) {
+        ret["created_at"] = getCreatedAt()->toDbStringLocal();
+    } else {
+        ret["created_at"] = Json::Value();
     }
     return ret;
 }
 
-bool AdminAssignments::validateJsonForCreation(const Json::Value &pJson, std::string &err)
-{
-    if(pJson.isMember("id"))
-    {
-        if(!validJsonOfField(0, "id", pJson["id"], err, true))
+bool AdminAssignments::validateJsonForCreation(const Json::Value& pJson, std::string& err) {
+    if (pJson.isMember("id")) {
+        if (!validJsonOfField(0, "id", pJson["id"], err, true))
             return false;
     }
-    if(pJson.isMember("user_id"))
-    {
-        if(!validJsonOfField(1, "user_id", pJson["user_id"], err, true))
+    if (pJson.isMember("user_id")) {
+        if (!validJsonOfField(1, "user_id", pJson["user_id"], err, true))
             return false;
-    }
-    else
-    {
-        err="The user_id column cannot be null";
+    } else {
+        err = "The user_id column cannot be null";
         return false;
     }
-    if(pJson.isMember("scope"))
-    {
-        if(!validJsonOfField(2, "scope", pJson["scope"], err, true))
+    if (pJson.isMember("scope")) {
+        if (!validJsonOfField(2, "scope", pJson["scope"], err, true))
             return false;
-    }
-    else
-    {
-        err="The scope column cannot be null";
+    } else {
+        err = "The scope column cannot be null";
         return false;
     }
-    if(pJson.isMember("organisation"))
-    {
-        if(!validJsonOfField(3, "organisation", pJson["organisation"], err, true))
+    if (pJson.isMember("organisation")) {
+        if (!validJsonOfField(3, "organisation", pJson["organisation"], err, true))
             return false;
-    }
-    else
-    {
-        err="The organisation column cannot be null";
+    } else {
+        err = "The organisation column cannot be null";
         return false;
     }
-    if(pJson.isMember("domain_id"))
-    {
-        if(!validJsonOfField(4, "domain_id", pJson["domain_id"], err, true))
+    if (pJson.isMember("domain_id")) {
+        if (!validJsonOfField(4, "domain_id", pJson["domain_id"], err, true))
             return false;
     }
-    if(pJson.isMember("can_manage_users"))
-    {
-        if(!validJsonOfField(5, "can_manage_users", pJson["can_manage_users"], err, true))
+    if (pJson.isMember("can_manage_users")) {
+        if (!validJsonOfField(5, "can_manage_users", pJson["can_manage_users"], err, true))
             return false;
     }
-    if(pJson.isMember("can_manage_keys"))
-    {
-        if(!validJsonOfField(6, "can_manage_keys", pJson["can_manage_keys"], err, true))
+    if (pJson.isMember("can_manage_keys")) {
+        if (!validJsonOfField(6, "can_manage_keys", pJson["can_manage_keys"], err, true))
             return false;
     }
-    if(pJson.isMember("granted_by"))
-    {
-        if(!validJsonOfField(7, "granted_by", pJson["granted_by"], err, true))
+    if (pJson.isMember("granted_by")) {
+        if (!validJsonOfField(7, "granted_by", pJson["granted_by"], err, true))
             return false;
     }
-    if(pJson.isMember("created_at"))
-    {
-        if(!validJsonOfField(8, "created_at", pJson["created_at"], err, true))
+    if (pJson.isMember("created_at")) {
+        if (!validJsonOfField(8, "created_at", pJson["created_at"], err, true))
             return false;
     }
     return true;
 }
-bool AdminAssignments::validateMasqueradedJsonForCreation(const Json::Value &pJson,
-                                                          const std::vector<std::string> &pMasqueradingVector,
-                                                          std::string &err)
-{
-    if(pMasqueradingVector.size() != 9)
-    {
+bool AdminAssignments::validateMasqueradedJsonForCreation(
+    const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector, std::string& err) {
+    if (pMasqueradingVector.size() != 9) {
         err = "Bad masquerading vector";
         return false;
     }
     try {
-      if(!pMasqueradingVector[0].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[0]))
-          {
-              if(!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, true))
-                  return false;
-          }
-      }
-      if(!pMasqueradingVector[1].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[1]))
-          {
-              if(!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, true))
-                  return false;
-          }
-        else
-        {
-            err="The " + pMasqueradingVector[1] + " column cannot be null";
-            return false;
+        if (!pMasqueradingVector[0].empty()) {
+            if (pJson.isMember(pMasqueradingVector[0])) {
+                if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, true))
+                    return false;
+            }
         }
-      }
-      if(!pMasqueradingVector[2].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[2]))
-          {
-              if(!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, true))
-                  return false;
-          }
-        else
-        {
-            err="The " + pMasqueradingVector[2] + " column cannot be null";
-            return false;
+        if (!pMasqueradingVector[1].empty()) {
+            if (pJson.isMember(pMasqueradingVector[1])) {
+                if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, true))
+                    return false;
+            } else {
+                err = "The " + pMasqueradingVector[1] + " column cannot be null";
+                return false;
+            }
         }
-      }
-      if(!pMasqueradingVector[3].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[3]))
-          {
-              if(!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, true))
-                  return false;
-          }
-        else
-        {
-            err="The " + pMasqueradingVector[3] + " column cannot be null";
-            return false;
+        if (!pMasqueradingVector[2].empty()) {
+            if (pJson.isMember(pMasqueradingVector[2])) {
+                if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, true))
+                    return false;
+            } else {
+                err = "The " + pMasqueradingVector[2] + " column cannot be null";
+                return false;
+            }
         }
-      }
-      if(!pMasqueradingVector[4].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[4]))
-          {
-              if(!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, true))
-                  return false;
-          }
-      }
-      if(!pMasqueradingVector[5].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[5]))
-          {
-              if(!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, true))
-                  return false;
-          }
-      }
-      if(!pMasqueradingVector[6].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[6]))
-          {
-              if(!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, true))
-                  return false;
-          }
-      }
-      if(!pMasqueradingVector[7].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[7]))
-          {
-              if(!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, true))
-                  return false;
-          }
-      }
-      if(!pMasqueradingVector[8].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[8]))
-          {
-              if(!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, true))
-                  return false;
-          }
-      }
-    }
-    catch(const Json::LogicError &e)
-    {
-      err = e.what();
-      return false;
+        if (!pMasqueradingVector[3].empty()) {
+            if (pJson.isMember(pMasqueradingVector[3])) {
+                if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, true))
+                    return false;
+            } else {
+                err = "The " + pMasqueradingVector[3] + " column cannot be null";
+                return false;
+            }
+        }
+        if (!pMasqueradingVector[4].empty()) {
+            if (pJson.isMember(pMasqueradingVector[4])) {
+                if (!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, true))
+                    return false;
+            }
+        }
+        if (!pMasqueradingVector[5].empty()) {
+            if (pJson.isMember(pMasqueradingVector[5])) {
+                if (!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, true))
+                    return false;
+            }
+        }
+        if (!pMasqueradingVector[6].empty()) {
+            if (pJson.isMember(pMasqueradingVector[6])) {
+                if (!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, true))
+                    return false;
+            }
+        }
+        if (!pMasqueradingVector[7].empty()) {
+            if (pJson.isMember(pMasqueradingVector[7])) {
+                if (!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, true))
+                    return false;
+            }
+        }
+        if (!pMasqueradingVector[8].empty()) {
+            if (pJson.isMember(pMasqueradingVector[8])) {
+                if (!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, true))
+                    return false;
+            }
+        }
+    } catch (const Json::LogicError& e) {
+        err = e.what();
+        return false;
     }
     return true;
 }
-bool AdminAssignments::validateJsonForUpdate(const Json::Value &pJson, std::string &err)
-{
-    if(pJson.isMember("id"))
-    {
-        if(!validJsonOfField(0, "id", pJson["id"], err, false))
+bool AdminAssignments::validateJsonForUpdate(const Json::Value& pJson, std::string& err) {
+    if (pJson.isMember("id")) {
+        if (!validJsonOfField(0, "id", pJson["id"], err, false))
             return false;
-    }
-    else
-    {
+    } else {
         err = "The value of primary key must be set in the json object for update";
         return false;
     }
-    if(pJson.isMember("user_id"))
-    {
-        if(!validJsonOfField(1, "user_id", pJson["user_id"], err, false))
+    if (pJson.isMember("user_id")) {
+        if (!validJsonOfField(1, "user_id", pJson["user_id"], err, false))
             return false;
     }
-    if(pJson.isMember("scope"))
-    {
-        if(!validJsonOfField(2, "scope", pJson["scope"], err, false))
+    if (pJson.isMember("scope")) {
+        if (!validJsonOfField(2, "scope", pJson["scope"], err, false))
             return false;
     }
-    if(pJson.isMember("organisation"))
-    {
-        if(!validJsonOfField(3, "organisation", pJson["organisation"], err, false))
+    if (pJson.isMember("organisation")) {
+        if (!validJsonOfField(3, "organisation", pJson["organisation"], err, false))
             return false;
     }
-    if(pJson.isMember("domain_id"))
-    {
-        if(!validJsonOfField(4, "domain_id", pJson["domain_id"], err, false))
+    if (pJson.isMember("domain_id")) {
+        if (!validJsonOfField(4, "domain_id", pJson["domain_id"], err, false))
             return false;
     }
-    if(pJson.isMember("can_manage_users"))
-    {
-        if(!validJsonOfField(5, "can_manage_users", pJson["can_manage_users"], err, false))
+    if (pJson.isMember("can_manage_users")) {
+        if (!validJsonOfField(5, "can_manage_users", pJson["can_manage_users"], err, false))
             return false;
     }
-    if(pJson.isMember("can_manage_keys"))
-    {
-        if(!validJsonOfField(6, "can_manage_keys", pJson["can_manage_keys"], err, false))
+    if (pJson.isMember("can_manage_keys")) {
+        if (!validJsonOfField(6, "can_manage_keys", pJson["can_manage_keys"], err, false))
             return false;
     }
-    if(pJson.isMember("granted_by"))
-    {
-        if(!validJsonOfField(7, "granted_by", pJson["granted_by"], err, false))
+    if (pJson.isMember("granted_by")) {
+        if (!validJsonOfField(7, "granted_by", pJson["granted_by"], err, false))
             return false;
     }
-    if(pJson.isMember("created_at"))
-    {
-        if(!validJsonOfField(8, "created_at", pJson["created_at"], err, false))
+    if (pJson.isMember("created_at")) {
+        if (!validJsonOfField(8, "created_at", pJson["created_at"], err, false))
             return false;
     }
     return true;
 }
-bool AdminAssignments::validateMasqueradedJsonForUpdate(const Json::Value &pJson,
-                                                        const std::vector<std::string> &pMasqueradingVector,
-                                                        std::string &err)
-{
-    if(pMasqueradingVector.size() != 9)
-    {
+bool AdminAssignments::validateMasqueradedJsonForUpdate(
+    const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector, std::string& err) {
+    if (pMasqueradingVector.size() != 9) {
         err = "Bad masquerading vector";
         return false;
     }
     try {
-      if(!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0]))
-      {
-          if(!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, false))
-              return false;
-      }
-    else
-    {
-        err = "The value of primary key must be set in the json object for update";
+        if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
+            if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, false))
+                return false;
+        } else {
+            err = "The value of primary key must be set in the json object for update";
+            return false;
+        }
+        if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
+            if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
+            if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
+            if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
+            if (!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
+            if (!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
+            if (!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
+            if (!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8])) {
+            if (!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, false))
+                return false;
+        }
+    } catch (const Json::LogicError& e) {
+        err = e.what();
         return false;
-    }
-      if(!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1]))
-      {
-          if(!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, false))
-              return false;
-      }
-      if(!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2]))
-      {
-          if(!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, false))
-              return false;
-      }
-      if(!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3]))
-      {
-          if(!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, false))
-              return false;
-      }
-      if(!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4]))
-      {
-          if(!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, false))
-              return false;
-      }
-      if(!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5]))
-      {
-          if(!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, false))
-              return false;
-      }
-      if(!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6]))
-      {
-          if(!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, false))
-              return false;
-      }
-      if(!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7]))
-      {
-          if(!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, false))
-              return false;
-      }
-      if(!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8]))
-      {
-          if(!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, false))
-              return false;
-      }
-    }
-    catch(const Json::LogicError &e)
-    {
-      err = e.what();
-      return false;
     }
     return true;
 }
-bool AdminAssignments::validJsonOfField(size_t index,
-                                        const std::string &fieldName,
-                                        const Json::Value &pJson,
-                                        std::string &err,
-                                        bool isForCreation)
-{
-    switch(index)
-    {
+bool AdminAssignments::validJsonOfField(
+    size_t index, const std::string& fieldName, const Json::Value& pJson, std::string& err, bool isForCreation) {
+    switch (index) {
         case 0:
-            if(pJson.isNull())
-            {
-                err="The " + fieldName + " column cannot be null";
+            if (pJson.isNull()) {
+                err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-            if(isForCreation)
-            {
-                err="The automatic primary key cannot be set";
+            if (isForCreation) {
+                err = "The automatic primary key cannot be set";
                 return false;
             }
-            if(!pJson.isInt64())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isInt64()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 1:
-            if(pJson.isNull())
-            {
-                err="The " + fieldName + " column cannot be null";
+            if (pJson.isNull()) {
+                err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-            if(!pJson.isInt())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isInt()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 2:
-            if(pJson.isNull())
-            {
-                err="The " + fieldName + " column cannot be null";
+            if (pJson.isNull()) {
+                err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-            if(!pJson.isString())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isString()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 3:
-            if(pJson.isNull())
-            {
-                err="The " + fieldName + " column cannot be null";
+            if (pJson.isNull()) {
+                err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-            if(!pJson.isString())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isString()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 4:
-            if(pJson.isNull())
-            {
+            if (pJson.isNull()) {
                 return true;
             }
-            if(!pJson.isInt())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isInt()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 5:
-            if(pJson.isNull())
-            {
-                err="The " + fieldName + " column cannot be null";
+            if (pJson.isNull()) {
+                err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-            if(!pJson.isBool())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isBool()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 6:
-            if(pJson.isNull())
-            {
-                err="The " + fieldName + " column cannot be null";
+            if (pJson.isNull()) {
+                err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-            if(!pJson.isBool())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isBool()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 7:
-            if(pJson.isNull())
-            {
+            if (pJson.isNull()) {
                 return true;
             }
-            if(!pJson.isInt())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isInt()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 8:
-            if(pJson.isNull())
-            {
-                err="The " + fieldName + " column cannot be null";
+            if (pJson.isNull()) {
+                err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-            if(!pJson.isString())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isString()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         default:
-            err="Internal error in the server";
+            err = "Internal error in the server";
             return false;
     }
     return true;

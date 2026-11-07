@@ -1,6 +1,7 @@
 #include <drogon/orm/Exception.h>
 #include <fmt/core.h>
 #include <sgrn/datastore/core/db.hpp>
+#include <sgrn/datastore/crypto/key-store.hpp>
 #include <sgrn/datastore/error/ApiErrors.hpp>
 #include <sgrn/datastore/handlers/storage.hpp>
 #include <sgrn/datastore/services/helpers/magic.hpp>
@@ -8,6 +9,7 @@
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe-access.hpp>
 #include <sgrn/debug.hpp>
+#include <sgrn/utils/crypto/stream.hpp>
 #include <sgrn/utils/encoding.hpp>
 #include <sgrn/utils/hashing.hpp>
 #include <sgrn/utils/strings.hpp>
@@ -119,13 +121,47 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleInitUploadSession
         // Recalculate total_chunks if chunk_size was adjusted
         total_chunks = static_cast<int32_t>((total_size + chunk_size - 1) / chunk_size);
 
-        co_await db->execSqlCoro(
-            "INSERT INTO storage.upload_sessions (id, user_id, target_path, filename, mime_type, total_size, chunk_size, total_chunks) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-            upload_id, user_id, target_path, filename, mime_type, total_size, chunk_size, total_chunks);
+        // ── Check encryption policy for the target domain ────────────────────
+        std::string path_no_slash = (target_path.front() == '/') ? target_path.substr(1) : target_path;
+        std::string domain_name = "";
+        if (path_no_slash.rfind("domains/", 0) == 0) {
+            std::string rem = path_no_slash.substr(8);
+            auto next_slash = rem.find('/');
+            domain_name = (next_slash == std::string::npos) ? rem : rem.substr(0, next_slash);
+        } else if (session.isMember("user") && session["user"].isMember("domain")) {
+            domain_name = session["user"]["domain"].asString();
+        }
 
-        co_return createJsonResponse(fmt::format(
-            R"({{"upload_id":"{}","chunk_size":{},"total_chunks":{},"status":"active"}})", upload_id, chunk_size, total_chunks));
+        std::string enc_policy = "none";
+        if (!domain_name.empty()) {
+            auto dom_rows = co_await db->execSqlCoro("SELECT encryption_policy FROM core.domains WHERE name = $1", domain_name);
+            if (!dom_rows.empty() && !dom_rows[0]["encryption_policy"].isNull()) {
+                enc_policy = dom_rows[0]["encryption_policy"].as<std::string>();
+            }
+        }
+
+        bool client_req_encrypt = p_json->get("encrypt", false).asBool();
+        if (enc_policy == "required") {
+            if (p_json->isMember("encrypt") && !client_req_encrypt) {
+                co_return createJsonErrorResponse("Encryption is required for domain '" + domain_name + "'", k400BadRequest);
+            }
+            client_req_encrypt = true;
+        } else if (enc_policy == "none") {
+            if (client_req_encrypt) {
+                co_return createJsonErrorResponse("Encryption is disabled for domain '" + domain_name + "'", k400BadRequest);
+            }
+            client_req_encrypt = false;
+        }
+
+        co_await db->execSqlCoro("INSERT INTO storage.upload_sessions (id, user_id, target_path, filename, mime_type, total_size, "
+                                 "chunk_size, total_chunks, is_encrypted, domain) "
+                                 "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+            upload_id, user_id, target_path, filename, mime_type, total_size, chunk_size, total_chunks, client_req_encrypt,
+            domain_name.empty() ? std::optional<std::string>(std::nullopt) : std::optional<std::string>(domain_name));
+
+        co_return createJsonResponse(
+            fmt::format(R"({{"upload_id":"{}","chunk_size":{},"total_chunks":{},"status":"active","is_encrypted":{}}})", upload_id,
+                chunk_size, total_chunks, client_req_encrypt ? "true" : "false"));
     } catch (const std::exception& e) {
         ERROR_LOG("Init upload session error: {}", e.what());
         co_return createJsonErrorResponse("Failed to initialize upload session", k500InternalServerError);
@@ -396,10 +432,10 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
         auto db = db_res.value();
 
         // -- 1. Load and validate session
-        auto s_rows =
-            co_await db->execSqlCoro("SELECT user_id, total_chunks, uploaded_chunks_count, filename, target_path, total_size, mime_type "
-                                     "FROM storage.upload_sessions WHERE id = $1",
-                upload_id);
+        auto s_rows = co_await db->execSqlCoro("SELECT user_id, total_chunks, uploaded_chunks_count, filename, target_path, total_size, "
+                                               "mime_type, is_encrypted, domain, pending_key_id "
+                                               "FROM storage.upload_sessions WHERE id = $1",
+            upload_id);
         if (s_rows.empty())
             co_return createJsonErrorResponse("Upload session not found", k404NotFound);
 
@@ -412,6 +448,8 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
         const std::string filename = s["filename"].as<std::string>();
         const std::string target_path = s["target_path"].as<std::string>();
         const std::string mime_type = s["mime_type"].isNull() ? "application/octet-stream" : s["mime_type"].as<std::string>();
+        const bool is_encrypted = !s["is_encrypted"].isNull() && s["is_encrypted"].as<bool>();
+        const std::string domain_str = s["domain"].isNull() ? "" : s["domain"].as<std::string>();
 
         const Json::Value& auth_session = tsp_req->attributes()->get<Json::Value>("session_json");
         const int64_t session_id = auth_session.isMember("session_id") ? auth_session["session_id"].asInt64() : 0;
@@ -552,36 +590,111 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
             }
         }
 
-        // -- 6. Rename provisional keys to final content-addressed keys
-        // Final key: uploads/<file_hash>/<part_index>
+        // -- 6. Prepare final objects (encrypt if policy requested, else dedup & rename)
         std::vector<std::pair<int32_t, int64_t>> final_segments;
-        int32_t part_idx = 0;
-        for (const auto& [old_seg_idx, old_obj_id] : existing_segs) {
-            std::string prov_key = "pending/" + upload_id + "/" + std::to_string(old_seg_idx);
-            std::string final_key = "uploads/" + file_hash + "/" + std::to_string(part_idx);
+        std::string final_key_id = "";
 
-            auto dedup_rows = co_await db->execSqlCoro("SELECT id FROM storage.objects WHERE bucket = $1 AND key = $2", bucket, final_key);
+        if (is_encrypted) {
+            auto key_store = sgrn::datastore::crypto::getKeyStore();
+            if (!key_store) {
+                removeUploadState(upload_id);
+                co_return createJsonErrorResponse("Key store is not initialized", k500InternalServerError);
+            }
 
-            int64_t final_obj_id = 0;
-            if (!dedup_rows.empty()) {
-                // Deduplicated: reuse existing object
-                final_obj_id = dedup_rows[0]["id"].as<int64_t>();
+            std::string final_obj_key = "uploads/" + file_hash + "/0";
+
+            auto pending_res = key_store->createPending(final_obj_key);
+            if (pending_res.hasError()) {
+                removeUploadState(upload_id);
+                co_return createJsonErrorResponse("Failed to create key record: " + pending_res.error(), k500InternalServerError);
+            }
+            auto key_rec = std::move(pending_res.value());
+            final_key_id = key_rec.key_id;
+
+            co_await db->execSqlCoro("UPDATE storage.upload_sessions SET pending_key_id = $1 WHERE id = $2", final_key_id, upload_id);
+
+            // Read all provisional segments into contiguous payload
+            std::string payload_to_encrypt;
+            for (const auto& [old_seg_idx, old_obj_id] : existing_segs) {
+                std::string prov_key = "pending/" + upload_id + "/" + std::to_string(old_seg_idx);
+                auto get_res = co_await s3->getObjectContent(bucket, prov_key);
+                if (get_res.hasError()) {
+                    (void)key_store->shred(final_key_id);
+                    removeUploadState(upload_id);
+                    co_return createJsonErrorResponse("Failed to read segment for encryption", k500InternalServerError);
+                }
+                payload_to_encrypt.append(*get_res);
+            }
+
+            // Encrypt with AEAD stream
+            std::span<const uint8_t> plain_span(reinterpret_cast<const uint8_t*>(payload_to_encrypt.data()), payload_to_encrypt.size());
+            auto enc_res = sgrn::utils::crypto::encryptBuffer(plain_span, key_rec.dek, final_key_id, key_rec.chunk_size);
+            if (enc_res.hasError()) {
+                (void)key_store->shred(final_key_id);
+                removeUploadState(upload_id);
+                co_return createJsonErrorResponse("Encryption failed: " + enc_res.error(), k500InternalServerError);
+            }
+            const auto& ciphertext = enc_res.value();
+
+            // Upload ciphertext to Garage
+            auto put_res = co_await s3->uploadFromMemory(bucket, final_obj_key,
+                std::string(reinterpret_cast<const char*>(ciphertext.data()), ciphertext.size()), "application/octet-stream");
+            if (put_res.hasError()) {
+                (void)key_store->shred(final_key_id);
+                removeUploadState(upload_id);
+                co_return createJsonErrorResponse("Failed to upload ciphertext to storage", k500InternalServerError);
+            }
+
+            // Delete provisional segments from S3 & DB
+            for (const auto& [old_seg_idx, old_obj_id] : existing_segs) {
+                std::string prov_key = "pending/" + upload_id + "/" + std::to_string(old_seg_idx);
                 co_await s3->deleteFile(bucket, prov_key);
                 co_await db->execSqlCoro("DELETE FROM storage.objects WHERE id = $1", old_obj_id);
-            } else {
-                auto copy_res = co_await s3->copyFile(bucket, prov_key, bucket, final_key);
-                if (copy_res.hasError())
-                    co_return createJsonErrorResponse(
-                        fmt::format("Failed to rename segment {}: {}", part_idx, copy_res.error().message_), k500InternalServerError);
-                co_await s3->deleteFile(bucket, prov_key);
-                co_await db->execSqlCoro(
-                    "UPDATE storage.objects SET key = $1, sha256 = $2 WHERE id = $3", final_key, file_hash, old_obj_id);
-                final_obj_id = old_obj_id;
             }
-            // Update sha256 for deduplicated objects too
-            co_await db->execSqlCoro("UPDATE storage.objects SET sha256 = $1 WHERE id = $2", file_hash, final_obj_id);
-            final_segments.emplace_back(part_idx, final_obj_id);
-            ++part_idx;
+
+            // Create object row (Dedup bypassed for encrypted files)
+            std::string ct_sha;
+            auto sha_res = sgrn::utils::computeSha256Data(
+                std::string_view(reinterpret_cast<const char*>(ciphertext.data()), ciphertext.size()), sgrn::utils::HashEncoding::hex);
+            if (sha_res.hasValue()) {
+                ct_sha = sha_res.value();
+            }
+            auto obj_res = co_await db->execSqlCoro(
+                "INSERT INTO storage.objects (bucket, key, size, original_size, sha256, is_compressed, upload_mode) "
+                "VALUES ($1, $2, $3, $4, $5, $6, 'single') RETURNING id",
+                bucket, final_obj_key, static_cast<int64_t>(ciphertext.size()), original_bytes, ct_sha, server_compressed);
+            int64_t final_obj_id = obj_res[0]["id"].as<int64_t>();
+            final_segments.emplace_back(0, final_obj_id);
+        } else {
+            int32_t part_idx = 0;
+            for (const auto& [old_seg_idx, old_obj_id] : existing_segs) {
+                std::string prov_key = "pending/" + upload_id + "/" + std::to_string(old_seg_idx);
+                std::string final_key = "uploads/" + file_hash + "/" + std::to_string(part_idx);
+
+                auto dedup_rows =
+                    co_await db->execSqlCoro("SELECT id FROM storage.objects WHERE bucket = $1 AND key = $2", bucket, final_key);
+
+                int64_t final_obj_id = 0;
+                if (!dedup_rows.empty()) {
+                    // Deduplicated: reuse existing object
+                    final_obj_id = dedup_rows[0]["id"].as<int64_t>();
+                    co_await s3->deleteFile(bucket, prov_key);
+                    co_await db->execSqlCoro("DELETE FROM storage.objects WHERE id = $1", old_obj_id);
+                } else {
+                    auto copy_res = co_await s3->copyFile(bucket, prov_key, bucket, final_key);
+                    if (copy_res.hasError())
+                        co_return createJsonErrorResponse(
+                            fmt::format("Failed to rename segment {}: {}", part_idx, copy_res.error().message_), k500InternalServerError);
+                    co_await s3->deleteFile(bucket, prov_key);
+                    co_await db->execSqlCoro(
+                        "UPDATE storage.objects SET key = $1, sha256 = $2 WHERE id = $3", final_key, file_hash, old_obj_id);
+                    final_obj_id = old_obj_id;
+                }
+                // Update sha256 for deduplicated objects too
+                co_await db->execSqlCoro("UPDATE storage.objects SET sha256 = $1 WHERE id = $2", file_hash, final_obj_id);
+                final_segments.emplace_back(part_idx, final_obj_id);
+                ++part_idx;
+            }
         }
 
         // -- 7. Write DB records (only after all S3 operations confirmed)
@@ -596,24 +709,36 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
         }
 
         auto dir_res =
-            co_await services::storage::helpers::resolveDirectoryPath(db, user_id, std::nullopt, session_id, virtual_file_path, "");
+            co_await services::storage::helpers::resolveDirectoryPath(db, user_id, std::nullopt, session_id, virtual_file_path, domain_str);
         std::optional<int64_t> directory_id = (dir_res.hasValue() && dir_res.value().has_value()) ? dir_res.value() : std::nullopt;
 
-        // Compression-aware suffix (same rule as the single-upload path);
-        // insertFile() stores it only when the formats registry acknowledges
-        // it, otherwise the extension stays NULL and the suffix stays part of
-        // the name. (ext already extracted earlier for sniffing validation)
-        // std::string ext(services::storage::helpers::extractExtension(filename));
-
-        auto file_res = co_await services::storage::helpers::insertFile(
-            db, filename, final_segments[0].second, user_id, std::nullopt, session_id, ext, directory_id, "");
+        auto file_res =
+            co_await services::storage::helpers::insertFile(db, filename, final_segments[0].second, user_id, std::nullopt, session_id, ext,
+                directory_id, domain_str, is_encrypted ? std::optional<std::string>(final_key_id) : std::nullopt, is_encrypted);
         if (file_res.hasError()) {
+            if (is_encrypted) {
+                auto ks = sgrn::datastore::crypto::getKeyStore();
+                if (ks)
+                    (void)ks->shred(final_key_id);
+                co_await s3->deleteFile(bucket, "uploads/" + file_hash + "/0");
+                co_await db->execSqlCoro("DELETE FROM storage.objects WHERE id = $1", final_segments[0].second);
+            }
             const BackendError& err = file_res.error();
             if (err.kind_ == BackendErrorKind::AlreadyExists)
                 co_return createJsonErrorResponse("A file with that name already exists in this location.", k409Conflict);
             co_return createJsonErrorResponse(err.message_, k500InternalServerError);
         }
         const int64_t file_id = file_res.value();
+
+        if (is_encrypted) {
+            auto ks = sgrn::datastore::crypto::getKeyStore();
+            if (ks) {
+                auto act_res = ks->activate(final_key_id, std::to_string(file_id));
+                if (act_res.hasError()) {
+                    SGRN_ERROR("StorageUpload", "Key activation failed for key {}: {}", final_key_id, act_res.error());
+                }
+            }
+        }
 
         // Insert ordered segment manifest
         const std::string seg_role = (final_segments.size() == 1) ? "primary" : "part";
@@ -634,8 +759,8 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
             upload_id, file_hash, file_id);
 
         co_return createJsonResponse(fmt::format(
-            R"({{"success":true,"upload_id":"{}","file_id":{},"file_hash":"{}","segment_count":{},"original_bytes":{},"message":"Upload completed successfully"}})",
-            upload_id, file_id, file_hash, final_segments.size(), original_bytes));
+            R"({{"success":true,"upload_id":"{}","file_id":{},"file_hash":"{}","segment_count":{},"original_bytes":{},"is_encrypted":{},"message":"Upload completed successfully"}})",
+            upload_id, file_id, file_hash, final_segments.size(), original_bytes, is_encrypted ? "true" : "false"));
 
     } catch (const std::exception& e) {
         removeUploadState(upload_id);

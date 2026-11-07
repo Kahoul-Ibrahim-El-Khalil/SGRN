@@ -1,6 +1,8 @@
-import { useState, useCallback } from "react";
-import { Loader2, Search, Plus, Trash2, Save } from "lucide-react";
+import { useState, useCallback, useEffect } from "react";
+import { Loader2, Search, Plus, Trash2, Save, Lock, ShieldCheck, RefreshCw } from "lucide-react";
 import { useEvent } from "@/contexts/EventContext";
+import { QueryListBackendApiEndpoints } from "@/backend/endpoints";
+import { authenticatedFetch } from "@/backend/api/fetcher";
 import {
     fetchFormats,
     upsertFormat,
@@ -552,6 +554,191 @@ export function QuotasPanel() {
                 <strong>Granular Constraints</strong> allow setting custom Storage Quotas, Maximum File Size (MB), Upload Chunk Size (MB),
                 Upload Rate (RPM), and General API Rate (RPM) per User, Service, or Organisation. Empty fields seamlessly fall back to
                 system defaults.
+            </div>
+        </div>
+    );
+}
+
+interface DomainRecord {
+    id: number;
+    name: string;
+    path: string;
+    parent_id?: number | null;
+    encryption_policy?: "none" | "optional" | "required" | string;
+}
+
+export function EncryptionPoliciesPanel() {
+    const { showEvent } = useEvent();
+    const [domains, setDomains] = useState<DomainRecord[]>([]);
+    const [policies, setPolicies] = useState<Record<number, string>>({});
+    const [loading, setLoading] = useState(false);
+    const [savingId, setSavingId] = useState<number | null>(null);
+
+    const load = useCallback(async () => {
+        setLoading(true);
+        try {
+            const res = await authenticatedFetch(QueryListBackendApiEndpoints.LIST_DOMAINS);
+            if (!res.ok) {
+                throw new Error(`Failed to load domains (HTTP ${res.status})`);
+            }
+            const data = await res.json();
+            if (Array.isArray(data)) {
+                setDomains(data);
+                const map: Record<number, string> = {};
+                for (const d of data) {
+                    map[d.id] = d.encryption_policy || "optional";
+                }
+                setPolicies(map);
+            }
+        } catch (err: any) {
+            console.error("Failed to load domain encryption policies:", err);
+            showEvent("error", err?.message || "Unable to load domain encryption policies");
+        } finally {
+            setLoading(false);
+        }
+    }, [showEvent]);
+
+    useEffect(() => {
+        load();
+    }, [load]);
+
+    const handleSave = useCallback(
+        async (domain: DomainRecord) => {
+            const newPolicy = policies[domain.id] || "optional";
+            setSavingId(domain.id);
+            try {
+                const res = await authenticatedFetch(`/api/v1/domains/${domain.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ encryption_policy: newPolicy }),
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.message || `Failed to update policy (HTTP ${res.status})`);
+                }
+                showEvent("success", `Domain "${domain.name}" encryption policy set to: ${newPolicy}`);
+                await load();
+            } catch (err: any) {
+                showEvent("error", err?.message || "Failed to update encryption policy");
+            } finally {
+                setSavingId(null);
+            }
+        },
+        [policies, load, showEvent],
+    );
+
+    return (
+        <div className="governance-panel">
+            <div className="query-controls-row flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <ShieldCheck size={18} className="text-primary" />
+                    <span className="font-semibold text-sm tracking-wider">DOMAIN ENCRYPTION POLICIES</span>
+                </div>
+                <button className="btn-desktop h-8 px-3" onClick={load} disabled={loading} title="Reload domains">
+                    <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+                    <span>&nbsp;RELOAD</span>
+                </button>
+            </div>
+
+            {loading && domains.length === 0 ? (
+                <div className="governance-loading">
+                    <Loader2 className="animate-spin" size={24} />
+                    <span>LOADING DOMAIN POLICIES...</span>
+                </div>
+            ) : domains.length === 0 ? (
+                <div className="governance-empty">NO DOMAINS FOUND</div>
+            ) : (
+                <div className="roster-card">
+                    <div className="roster-table-wrap">
+                        <table className="datagrid-industrial">
+                            <thead>
+                                <tr>
+                                    <th>DOMAIN</th>
+                                    <th>PATH</th>
+                                    <th>ENCRYPTION POLICY</th>
+                                    <th>STATUS</th>
+                                    <th className="text-right">OPERATIONS</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {domains.map((d) => {
+                                    const currentPolicy = policies[d.id] ?? (d.encryption_policy || "optional");
+                                    const hasChanged = currentPolicy !== (d.encryption_policy || "optional");
+                                    return (
+                                        <tr key={d.id}>
+                                            <td className="admin-cell-primary">{d.name}</td>
+                                            <td className="font-mono text-xs text-muted-foreground">{d.path || "/"}</td>
+                                            <td>
+                                                <select
+                                                    className="input-desktop text-xs py-1 px-2 h-7"
+                                                    value={currentPolicy}
+                                                    onChange={(e) =>
+                                                        setPolicies((prev) => ({
+                                                            ...prev,
+                                                            [d.id]: e.target.value,
+                                                        }))
+                                                    }
+                                                >
+                                                    <option value="none">none (Plaintext only)</option>
+                                                    <option value="optional">optional (Client selects)</option>
+                                                    <option value="required">required (Enforce AES-256-GCM)</option>
+                                                </select>
+                                            </td>
+                                            <td>
+                                                {currentPolicy === "required" ? (
+                                                    <span className="badge-status badge-status--active">
+                                                        <Lock size={10} className="inline mr-1" />
+                                                        ENFORCED
+                                                    </span>
+                                                ) : currentPolicy === "optional" ? (
+                                                    <span className="badge-status">OPTIONAL</span>
+                                                ) : (
+                                                    <span className="badge-status text-muted-foreground">DISABLED</span>
+                                                )}
+                                            </td>
+                                            <td>
+                                                <div className="admin-actions-right">
+                                                    <button
+                                                        className={`btn-desktop h-7 px-3 ${hasChanged ? "btn-desktop-primary" : ""}`}
+                                                        onClick={() => handleSave(d)}
+                                                        disabled={savingId === d.id || !hasChanged}
+                                                        title={hasChanged ? "Save policy changes" : "No changes to save"}
+                                                    >
+                                                        {savingId === d.id ? (
+                                                            <Loader2 className="animate-spin" size={14} />
+                                                        ) : (
+                                                            <Save size={14} />
+                                                        )}
+                                                        <span>&nbsp;SAVE</span>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            <div className="query-help">
+                <strong>Encryption Policies:</strong>
+                <ul className="list-disc pl-5 mt-1 space-y-1">
+                    <li>
+                        <strong>none:</strong> Encryption requests are ignored; files are stored in plaintext. Presigned S3 URLs are
+                        supported.
+                    </li>
+                    <li>
+                        <strong>optional (default):</strong> Uploads are encrypted when requested by the client (
+                        <code className="font-mono">encrypt: true</code>) and plaintext otherwise.
+                    </li>
+                    <li>
+                        <strong>required:</strong> Every file uploaded to this domain is strictly encrypted with AES-256-GCM AEAD at rest
+                        with its own unique DEK stored in the hardware-protected key store. Deduplication is automatically bypassed to
+                        ensure maximum data privacy.
+                    </li>
+                </ul>
             </div>
         </div>
     );

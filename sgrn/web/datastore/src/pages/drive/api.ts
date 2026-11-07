@@ -248,9 +248,10 @@ export async function uploadResumableDriveFile(
     t_directory_path: string,
     t_file: File,
     t_on_progress?: (progress: ChunkUploadProgress) => void,
+    t_encrypt: boolean = false,
 ): Promise<SgrnResult<void>> {
     try {
-        const uploader = new ResumableUploader(t_file, t_directory_path);
+        const uploader = new ResumableUploader(t_file, t_directory_path, 5 * 1024 * 1024, t_encrypt);
         if (t_on_progress) {
             uploader.onProgress(t_on_progress);
         }

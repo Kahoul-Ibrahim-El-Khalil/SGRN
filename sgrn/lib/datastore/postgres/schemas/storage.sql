@@ -221,6 +221,15 @@ create table if not exists storage.files (
   object_id bigint references storage.objects (id) on delete restrict,
   extension varchar(15) references storage.formats (extension) on update cascade,
   full_path text not null,
+  -- Encryption metadata: key_id references keys.db (never Postgres), is_encrypted
+  -- is false for plaintext files and true for files encrypted with the key store.
+  -- No key material is stored here; key bytes live in $SGRN_DATA_DIR/keys/keys.db.
+  key_id text default null,
+  is_encrypted boolean not null default false,
+  constraint chk_files_encryption_consistency check (
+    (is_encrypted = false and key_id is null)
+    or (is_encrypted = true and key_id is not null)
+  ),
   created_at timestamptz not null default now()
 );
 
@@ -378,6 +387,15 @@ drop index if exists uq_files_object_root;
 drop index if exists uq_files_object_directory;
 drop index if exists uq_files_object_root_service;
 drop index if exists uq_files_object_directory_service;
+
+-- Encryption metadata columns (idempotent for existing databases)
+alter table if exists storage.files add column if not exists key_id text default null;
+alter table if exists storage.files add column if not exists is_encrypted boolean not null default false;
+
+-- Partial unique index: each non-null key_id must map to exactly one file
+create unique index if not exists uq_files_key_id
+    on storage.files (key_id)
+    where key_id is not null;
 
 -- ============================================================
 -- indexes

@@ -16,12 +16,28 @@ file(GLOB_RECURSE SGRN_SQL_FILES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/postgr
 set(SGRN_ORM_GEN_SCRIPT "${PROJECT_SOURCE_DIR}/scripts/generators/generate_orm.py")
 set(SGRN_VIEWS_GEN_SCRIPT "${PROJECT_SOURCE_DIR}/scripts/generators/generate_views.py")
 set(SGRN_INIT_DB_SCRIPT "${CMAKE_SOURCE_DIR}/init-db.py")
+set(SGRN_FORMAT_SCRIPT "${CMAKE_SOURCE_DIR}/scripts/format.py")
 set(SGRN_CODEGEN_STAMP "${CMAKE_CURRENT_BINARY_DIR}/sgrn_codegen.stamp")
+
+find_program(CLANG_FORMAT_BIN NAMES clang-format clang-format-22 clang-format-21 clang-format-20 clang-format-19
+    HINTS
+        "${CMAKE_CXX_COMPILER}/../"
+        "${CMAKE_CXX_COMPILER}/../../bin"
+        "$ENV{CONDA_PREFIX}/bin"
+        "$ENV{HOME}/micromamba/envs/SGRN/bin"
+        "$ENV{HOME}/.micromamba/envs/SGRN/bin"
+)
+
+set(SGRN_FORMAT_ARGS cpp --dir "${PROJECT_SOURCE_DIR}/src/orm/models" --dir "${PROJECT_SOURCE_DIR}/src/handlers/generated")
+if(CLANG_FORMAT_BIN)
+    list(APPEND SGRN_FORMAT_ARGS --clang-format "${CLANG_FORMAT_BIN}")
+endif()
 
 if(SGRN_AUTO_CODEGEN)
     add_custom_command(
         OUTPUT "${SGRN_CODEGEN_STAMP}"
         COMMAND "${Python3_EXECUTABLE}" "${SGRN_ORM_GEN_SCRIPT}" --build-db --views
+        COMMAND "${Python3_EXECUTABLE}" "${SGRN_FORMAT_SCRIPT}" ${SGRN_FORMAT_ARGS}
         COMMAND "${CMAKE_COMMAND}" -E touch "${SGRN_CODEGEN_STAMP}"
         DEPENDS
             "${SGRN_MANIFEST_FILE}"
@@ -29,8 +45,9 @@ if(SGRN_AUTO_CODEGEN)
             "${SGRN_ORM_GEN_SCRIPT}"
             "${SGRN_VIEWS_GEN_SCRIPT}"
             "${SGRN_INIT_DB_SCRIPT}"
+            "${SGRN_FORMAT_SCRIPT}"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        COMMENT "SQL schemas or manifest changed: regenerating Drogon ORM models and CRUD views via isolated build database..."
+        COMMENT "SQL schemas or manifest changed: regenerating Drogon ORM models and CRUD views via isolated build database and formatting generated C++ code..."
         VERBATIM
     )
 
@@ -49,8 +66,9 @@ endif()
 # Manual regeneration target
 add_custom_target(sgrn_generate_views
     COMMAND "${Python3_EXECUTABLE}" "${SGRN_ORM_GEN_SCRIPT}" --build-db --views
+    COMMAND "${Python3_EXECUTABLE}" "${SGRN_FORMAT_SCRIPT}" ${SGRN_FORMAT_ARGS}
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    COMMENT "Manual regeneration of Drogon ORM models and CRUD views via isolated build database"
+    COMMENT "Manual regeneration of Drogon ORM models and CRUD views via isolated build database with formatting"
 )
 
 # src/query/ holds the hand-written runtime engine (CrudViewEngine.cpp).

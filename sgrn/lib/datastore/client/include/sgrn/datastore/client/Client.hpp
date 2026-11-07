@@ -170,6 +170,7 @@ public:
         int64_t chunk_size{5 * 1024 * 1024};
         int32_t total_chunks{0};
         std::string status;
+        bool is_encrypted{false};
     };
     struct ResumableUploadStatus {
         std::string upload_id;
@@ -183,7 +184,8 @@ public:
         std::vector<int32_t> uploaded_chunk_indices;
     };
     sgrn::Result<ResumableUploadSession, std::string> initUploadSession(const std::string& t_filename, const std::string& t_target_path,
-        int64_t t_total_size, int64_t t_chunk_size = 5 * 1024 * 1024, const std::string& t_mime_type = "application/octet-stream");
+        int64_t t_total_size, int64_t t_chunk_size = 5 * 1024 * 1024, const std::string& t_mime_type = "application/octet-stream",
+        bool t_encrypt = false);
     sgrn::Result<bool, std::string> uploadChunk(const std::string& t_upload_id, int32_t t_chunk_index, const char* t_data, size_t t_size);
     sgrn::Result<ResumableUploadStatus, std::string> getUploadStatus(const std::string& t_upload_id);
     sgrn::Result<std::string, std::string> completeUploadSession(const std::string& t_upload_id);

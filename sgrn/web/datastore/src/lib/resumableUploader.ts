@@ -20,11 +20,13 @@ export class ResumableUploader {
     private status: ChunkUploadProgress["status"] = "idle";
     private onProgressCallback?: (progress: ChunkUploadProgress) => void;
     private isAborted = false;
+    private encrypt: boolean = false;
 
-    constructor(file: File, targetPath: string = "/", chunkSize: number = 5 * 1024 * 1024) {
+    constructor(file: File, targetPath: string = "/", chunkSize: number = 5 * 1024 * 1024, encrypt: boolean = false) {
         this.file = file;
         this.targetPath = targetPath;
         this.chunkSize = chunkSize;
+        this.encrypt = encrypt;
     }
 
     public onProgress(callback: (progress: ChunkUploadProgress) => void) {
@@ -113,6 +115,7 @@ export class ResumableUploader {
                     mime_type: this.file.type || "application/octet-stream",
                     total_size: this.file.size,
                     chunk_size: this.chunkSize,
+                    encrypt: this.encrypt,
                 }),
             });
 

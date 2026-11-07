@@ -28,1828 +28,1331 @@ const std::string Organisations::primaryKeyName = "id";
 const bool Organisations::hasPrimaryKey = true;
 const std::string Organisations::tableName = "core.\"organisations\"";
 
-const std::vector<typename Organisations::MetaData> Organisations::metaData_={
-{"id","int32_t","integer",4,1,1,1},
-{"name","std::string","text",0,0,0,1},
-{"description","std::string","text",0,0,0,0},
-{"domain","std::string","text",0,0,0,0},
-{"status","std::string","text",0,0,0,1},
-{"total_virtual_size","int64_t","bigint",8,0,0,1},
-{"total_real_size","int64_t","bigint",8,0,0,1},
-{"storage_limit","int64_t","bigint",8,0,0,0},
-{"total_entry_count","int64_t","bigint",8,0,0,1},
-{"entry_count_limit","int64_t","bigint",8,0,0,0},
-{"rate_limit_rpm","int32_t","integer",4,0,0,0}
-};
-const std::string &Organisations::getColumnName(size_t index) noexcept(false)
-{
+const std::vector<typename Organisations::MetaData> Organisations::metaData_ = {{"id", "int32_t", "integer", 4, 1, 1, 1},
+    {"name", "std::string", "text", 0, 0, 0, 1}, {"description", "std::string", "text", 0, 0, 0, 0},
+    {"domain", "std::string", "text", 0, 0, 0, 0}, {"status", "std::string", "text", 0, 0, 0, 1},
+    {"total_virtual_size", "int64_t", "bigint", 8, 0, 0, 1}, {"total_real_size", "int64_t", "bigint", 8, 0, 0, 1},
+    {"storage_limit", "int64_t", "bigint", 8, 0, 0, 0}, {"total_entry_count", "int64_t", "bigint", 8, 0, 0, 1},
+    {"entry_count_limit", "int64_t", "bigint", 8, 0, 0, 0}, {"rate_limit_rpm", "int32_t", "integer", 4, 0, 0, 0}};
+const std::string& Organisations::getColumnName(size_t index) noexcept(false) {
     assert(index < metaData_.size());
     return metaData_[index].colName_;
 }
-Organisations::Organisations(const Row &r, const ssize_t indexOffset) noexcept
-{
-    if(indexOffset < 0)
-    {
-        if(!r["id"].isNull())
-        {
-            id_=std::make_shared<int32_t>(r["id"].as<int32_t>());
+Organisations::Organisations(const Row& r, const ssize_t indexOffset) noexcept {
+    if (indexOffset < 0) {
+        if (!r["id"].isNull()) {
+            id_ = std::make_shared<int32_t>(r["id"].as<int32_t>());
         }
-        if(!r["name"].isNull())
-        {
-            name_=std::make_shared<std::string>(r["name"].as<std::string>());
+        if (!r["name"].isNull()) {
+            name_ = std::make_shared<std::string>(r["name"].as<std::string>());
         }
-        if(!r["description"].isNull())
-        {
-            description_=std::make_shared<std::string>(r["description"].as<std::string>());
+        if (!r["description"].isNull()) {
+            description_ = std::make_shared<std::string>(r["description"].as<std::string>());
         }
-        if(!r["domain"].isNull())
-        {
-            domain_=std::make_shared<std::string>(r["domain"].as<std::string>());
+        if (!r["domain"].isNull()) {
+            domain_ = std::make_shared<std::string>(r["domain"].as<std::string>());
         }
-        if(!r["status"].isNull())
-        {
-            status_=std::make_shared<std::string>(r["status"].as<std::string>());
+        if (!r["status"].isNull()) {
+            status_ = std::make_shared<std::string>(r["status"].as<std::string>());
         }
-        if(!r["total_virtual_size"].isNull())
-        {
-            totalVirtualSize_=std::make_shared<int64_t>(r["total_virtual_size"].as<int64_t>());
+        if (!r["total_virtual_size"].isNull()) {
+            totalVirtualSize_ = std::make_shared<int64_t>(r["total_virtual_size"].as<int64_t>());
         }
-        if(!r["total_real_size"].isNull())
-        {
-            totalRealSize_=std::make_shared<int64_t>(r["total_real_size"].as<int64_t>());
+        if (!r["total_real_size"].isNull()) {
+            totalRealSize_ = std::make_shared<int64_t>(r["total_real_size"].as<int64_t>());
         }
-        if(!r["storage_limit"].isNull())
-        {
-            storageLimit_=std::make_shared<int64_t>(r["storage_limit"].as<int64_t>());
+        if (!r["storage_limit"].isNull()) {
+            storageLimit_ = std::make_shared<int64_t>(r["storage_limit"].as<int64_t>());
         }
-        if(!r["total_entry_count"].isNull())
-        {
-            totalEntryCount_=std::make_shared<int64_t>(r["total_entry_count"].as<int64_t>());
+        if (!r["total_entry_count"].isNull()) {
+            totalEntryCount_ = std::make_shared<int64_t>(r["total_entry_count"].as<int64_t>());
         }
-        if(!r["entry_count_limit"].isNull())
-        {
-            entryCountLimit_=std::make_shared<int64_t>(r["entry_count_limit"].as<int64_t>());
+        if (!r["entry_count_limit"].isNull()) {
+            entryCountLimit_ = std::make_shared<int64_t>(r["entry_count_limit"].as<int64_t>());
         }
-        if(!r["rate_limit_rpm"].isNull())
-        {
-            rateLimitRpm_=std::make_shared<int32_t>(r["rate_limit_rpm"].as<int32_t>());
+        if (!r["rate_limit_rpm"].isNull()) {
+            rateLimitRpm_ = std::make_shared<int32_t>(r["rate_limit_rpm"].as<int32_t>());
         }
-    }
-    else
-    {
+    } else {
         size_t offset = (size_t)indexOffset;
-        if(offset + 11 > r.size())
-        {
+        if (offset + 11 > r.size()) {
             LOG_FATAL << "Invalid SQL result for this model";
             return;
         }
         size_t index;
         index = offset + 0;
-        if(!r[index].isNull())
-        {
-            id_=std::make_shared<int32_t>(r[index].as<int32_t>());
+        if (!r[index].isNull()) {
+            id_ = std::make_shared<int32_t>(r[index].as<int32_t>());
         }
         index = offset + 1;
-        if(!r[index].isNull())
-        {
-            name_=std::make_shared<std::string>(r[index].as<std::string>());
+        if (!r[index].isNull()) {
+            name_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
         index = offset + 2;
-        if(!r[index].isNull())
-        {
-            description_=std::make_shared<std::string>(r[index].as<std::string>());
+        if (!r[index].isNull()) {
+            description_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
         index = offset + 3;
-        if(!r[index].isNull())
-        {
-            domain_=std::make_shared<std::string>(r[index].as<std::string>());
+        if (!r[index].isNull()) {
+            domain_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
         index = offset + 4;
-        if(!r[index].isNull())
-        {
-            status_=std::make_shared<std::string>(r[index].as<std::string>());
+        if (!r[index].isNull()) {
+            status_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
         index = offset + 5;
-        if(!r[index].isNull())
-        {
-            totalVirtualSize_=std::make_shared<int64_t>(r[index].as<int64_t>());
+        if (!r[index].isNull()) {
+            totalVirtualSize_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
         index = offset + 6;
-        if(!r[index].isNull())
-        {
-            totalRealSize_=std::make_shared<int64_t>(r[index].as<int64_t>());
+        if (!r[index].isNull()) {
+            totalRealSize_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
         index = offset + 7;
-        if(!r[index].isNull())
-        {
-            storageLimit_=std::make_shared<int64_t>(r[index].as<int64_t>());
+        if (!r[index].isNull()) {
+            storageLimit_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
         index = offset + 8;
-        if(!r[index].isNull())
-        {
-            totalEntryCount_=std::make_shared<int64_t>(r[index].as<int64_t>());
+        if (!r[index].isNull()) {
+            totalEntryCount_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
         index = offset + 9;
-        if(!r[index].isNull())
-        {
-            entryCountLimit_=std::make_shared<int64_t>(r[index].as<int64_t>());
+        if (!r[index].isNull()) {
+            entryCountLimit_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
         index = offset + 10;
-        if(!r[index].isNull())
-        {
-            rateLimitRpm_=std::make_shared<int32_t>(r[index].as<int32_t>());
+        if (!r[index].isNull()) {
+            rateLimitRpm_ = std::make_shared<int32_t>(r[index].as<int32_t>());
         }
     }
-
 }
 
-Organisations::Organisations(const Json::Value &pJson, const std::vector<std::string> &pMasqueradingVector) noexcept(false)
-{
-    if(pMasqueradingVector.size() != 11)
-    {
+Organisations::Organisations(const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector) noexcept(false) {
+    if (pMasqueradingVector.size() != 11) {
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
-    if(!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0]))
-    {
+    if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         dirtyFlag_[0] = true;
-        if(!pJson[pMasqueradingVector[0]].isNull())
-        {
-            id_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[0]].asInt64());
+        if (!pJson[pMasqueradingVector[0]].isNull()) {
+            id_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
-    if(!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1]))
-    {
+    if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
-        if(!pJson[pMasqueradingVector[1]].isNull())
-        {
-            name_=std::make_shared<std::string>(pJson[pMasqueradingVector[1]].asString());
+        if (!pJson[pMasqueradingVector[1]].isNull()) {
+            name_ = std::make_shared<std::string>(pJson[pMasqueradingVector[1]].asString());
         }
     }
-    if(!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2]))
-    {
+    if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
-        if(!pJson[pMasqueradingVector[2]].isNull())
-        {
-            description_=std::make_shared<std::string>(pJson[pMasqueradingVector[2]].asString());
+        if (!pJson[pMasqueradingVector[2]].isNull()) {
+            description_ = std::make_shared<std::string>(pJson[pMasqueradingVector[2]].asString());
         }
     }
-    if(!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3]))
-    {
+    if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
-        if(!pJson[pMasqueradingVector[3]].isNull())
-        {
-            domain_=std::make_shared<std::string>(pJson[pMasqueradingVector[3]].asString());
+        if (!pJson[pMasqueradingVector[3]].isNull()) {
+            domain_ = std::make_shared<std::string>(pJson[pMasqueradingVector[3]].asString());
         }
     }
-    if(!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4]))
-    {
+    if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
         dirtyFlag_[4] = true;
-        if(!pJson[pMasqueradingVector[4]].isNull())
-        {
-            status_=std::make_shared<std::string>(pJson[pMasqueradingVector[4]].asString());
+        if (!pJson[pMasqueradingVector[4]].isNull()) {
+            status_ = std::make_shared<std::string>(pJson[pMasqueradingVector[4]].asString());
         }
     }
-    if(!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5]))
-    {
+    if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
         dirtyFlag_[5] = true;
-        if(!pJson[pMasqueradingVector[5]].isNull())
-        {
-            totalVirtualSize_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[5]].asInt64());
+        if (!pJson[pMasqueradingVector[5]].isNull()) {
+            totalVirtualSize_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[5]].asInt64());
         }
     }
-    if(!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6]))
-    {
+    if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
         dirtyFlag_[6] = true;
-        if(!pJson[pMasqueradingVector[6]].isNull())
-        {
-            totalRealSize_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[6]].asInt64());
+        if (!pJson[pMasqueradingVector[6]].isNull()) {
+            totalRealSize_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[6]].asInt64());
         }
     }
-    if(!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7]))
-    {
+    if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
         dirtyFlag_[7] = true;
-        if(!pJson[pMasqueradingVector[7]].isNull())
-        {
-            storageLimit_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[7]].asInt64());
+        if (!pJson[pMasqueradingVector[7]].isNull()) {
+            storageLimit_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[7]].asInt64());
         }
     }
-    if(!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8]))
-    {
+    if (!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8])) {
         dirtyFlag_[8] = true;
-        if(!pJson[pMasqueradingVector[8]].isNull())
-        {
-            totalEntryCount_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[8]].asInt64());
+        if (!pJson[pMasqueradingVector[8]].isNull()) {
+            totalEntryCount_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[8]].asInt64());
         }
     }
-    if(!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9]))
-    {
+    if (!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9])) {
         dirtyFlag_[9] = true;
-        if(!pJson[pMasqueradingVector[9]].isNull())
-        {
-            entryCountLimit_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[9]].asInt64());
+        if (!pJson[pMasqueradingVector[9]].isNull()) {
+            entryCountLimit_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[9]].asInt64());
         }
     }
-    if(!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10]))
-    {
+    if (!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10])) {
         dirtyFlag_[10] = true;
-        if(!pJson[pMasqueradingVector[10]].isNull())
-        {
-            rateLimitRpm_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[10]].asInt64());
+        if (!pJson[pMasqueradingVector[10]].isNull()) {
+            rateLimitRpm_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[10]].asInt64());
         }
     }
 }
 
-Organisations::Organisations(const Json::Value &pJson) noexcept(false)
-{
-    if(pJson.isMember("id"))
-    {
-        dirtyFlag_[0]=true;
-        if(!pJson["id"].isNull())
-        {
-            id_=std::make_shared<int32_t>((int32_t)pJson["id"].asInt64());
+Organisations::Organisations(const Json::Value& pJson) noexcept(false) {
+    if (pJson.isMember("id")) {
+        dirtyFlag_[0] = true;
+        if (!pJson["id"].isNull()) {
+            id_ = std::make_shared<int32_t>((int32_t)pJson["id"].asInt64());
         }
     }
-    if(pJson.isMember("name"))
-    {
-        dirtyFlag_[1]=true;
-        if(!pJson["name"].isNull())
-        {
-            name_=std::make_shared<std::string>(pJson["name"].asString());
+    if (pJson.isMember("name")) {
+        dirtyFlag_[1] = true;
+        if (!pJson["name"].isNull()) {
+            name_ = std::make_shared<std::string>(pJson["name"].asString());
         }
     }
-    if(pJson.isMember("description"))
-    {
-        dirtyFlag_[2]=true;
-        if(!pJson["description"].isNull())
-        {
-            description_=std::make_shared<std::string>(pJson["description"].asString());
+    if (pJson.isMember("description")) {
+        dirtyFlag_[2] = true;
+        if (!pJson["description"].isNull()) {
+            description_ = std::make_shared<std::string>(pJson["description"].asString());
         }
     }
-    if(pJson.isMember("domain"))
-    {
-        dirtyFlag_[3]=true;
-        if(!pJson["domain"].isNull())
-        {
-            domain_=std::make_shared<std::string>(pJson["domain"].asString());
+    if (pJson.isMember("domain")) {
+        dirtyFlag_[3] = true;
+        if (!pJson["domain"].isNull()) {
+            domain_ = std::make_shared<std::string>(pJson["domain"].asString());
         }
     }
-    if(pJson.isMember("status"))
-    {
-        dirtyFlag_[4]=true;
-        if(!pJson["status"].isNull())
-        {
-            status_=std::make_shared<std::string>(pJson["status"].asString());
+    if (pJson.isMember("status")) {
+        dirtyFlag_[4] = true;
+        if (!pJson["status"].isNull()) {
+            status_ = std::make_shared<std::string>(pJson["status"].asString());
         }
     }
-    if(pJson.isMember("total_virtual_size"))
-    {
-        dirtyFlag_[5]=true;
-        if(!pJson["total_virtual_size"].isNull())
-        {
-            totalVirtualSize_=std::make_shared<int64_t>((int64_t)pJson["total_virtual_size"].asInt64());
+    if (pJson.isMember("total_virtual_size")) {
+        dirtyFlag_[5] = true;
+        if (!pJson["total_virtual_size"].isNull()) {
+            totalVirtualSize_ = std::make_shared<int64_t>((int64_t)pJson["total_virtual_size"].asInt64());
         }
     }
-    if(pJson.isMember("total_real_size"))
-    {
-        dirtyFlag_[6]=true;
-        if(!pJson["total_real_size"].isNull())
-        {
-            totalRealSize_=std::make_shared<int64_t>((int64_t)pJson["total_real_size"].asInt64());
+    if (pJson.isMember("total_real_size")) {
+        dirtyFlag_[6] = true;
+        if (!pJson["total_real_size"].isNull()) {
+            totalRealSize_ = std::make_shared<int64_t>((int64_t)pJson["total_real_size"].asInt64());
         }
     }
-    if(pJson.isMember("storage_limit"))
-    {
-        dirtyFlag_[7]=true;
-        if(!pJson["storage_limit"].isNull())
-        {
-            storageLimit_=std::make_shared<int64_t>((int64_t)pJson["storage_limit"].asInt64());
+    if (pJson.isMember("storage_limit")) {
+        dirtyFlag_[7] = true;
+        if (!pJson["storage_limit"].isNull()) {
+            storageLimit_ = std::make_shared<int64_t>((int64_t)pJson["storage_limit"].asInt64());
         }
     }
-    if(pJson.isMember("total_entry_count"))
-    {
-        dirtyFlag_[8]=true;
-        if(!pJson["total_entry_count"].isNull())
-        {
-            totalEntryCount_=std::make_shared<int64_t>((int64_t)pJson["total_entry_count"].asInt64());
+    if (pJson.isMember("total_entry_count")) {
+        dirtyFlag_[8] = true;
+        if (!pJson["total_entry_count"].isNull()) {
+            totalEntryCount_ = std::make_shared<int64_t>((int64_t)pJson["total_entry_count"].asInt64());
         }
     }
-    if(pJson.isMember("entry_count_limit"))
-    {
-        dirtyFlag_[9]=true;
-        if(!pJson["entry_count_limit"].isNull())
-        {
-            entryCountLimit_=std::make_shared<int64_t>((int64_t)pJson["entry_count_limit"].asInt64());
+    if (pJson.isMember("entry_count_limit")) {
+        dirtyFlag_[9] = true;
+        if (!pJson["entry_count_limit"].isNull()) {
+            entryCountLimit_ = std::make_shared<int64_t>((int64_t)pJson["entry_count_limit"].asInt64());
         }
     }
-    if(pJson.isMember("rate_limit_rpm"))
-    {
-        dirtyFlag_[10]=true;
-        if(!pJson["rate_limit_rpm"].isNull())
-        {
-            rateLimitRpm_=std::make_shared<int32_t>((int32_t)pJson["rate_limit_rpm"].asInt64());
+    if (pJson.isMember("rate_limit_rpm")) {
+        dirtyFlag_[10] = true;
+        if (!pJson["rate_limit_rpm"].isNull()) {
+            rateLimitRpm_ = std::make_shared<int32_t>((int32_t)pJson["rate_limit_rpm"].asInt64());
         }
     }
 }
 
-void Organisations::updateByMasqueradedJson(const Json::Value &pJson,
-                                            const std::vector<std::string> &pMasqueradingVector) noexcept(false)
-{
-    if(pMasqueradingVector.size() != 11)
-    {
+void Organisations::updateByMasqueradedJson(const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector) noexcept(false) {
+    if (pMasqueradingVector.size() != 11) {
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
-    if(!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0]))
-    {
-        if(!pJson[pMasqueradingVector[0]].isNull())
-        {
-            id_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[0]].asInt64());
+    if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
+        if (!pJson[pMasqueradingVector[0]].isNull()) {
+            id_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
-    if(!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1]))
-    {
+    if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
-        if(!pJson[pMasqueradingVector[1]].isNull())
-        {
-            name_=std::make_shared<std::string>(pJson[pMasqueradingVector[1]].asString());
+        if (!pJson[pMasqueradingVector[1]].isNull()) {
+            name_ = std::make_shared<std::string>(pJson[pMasqueradingVector[1]].asString());
         }
     }
-    if(!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2]))
-    {
+    if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
-        if(!pJson[pMasqueradingVector[2]].isNull())
-        {
-            description_=std::make_shared<std::string>(pJson[pMasqueradingVector[2]].asString());
+        if (!pJson[pMasqueradingVector[2]].isNull()) {
+            description_ = std::make_shared<std::string>(pJson[pMasqueradingVector[2]].asString());
         }
     }
-    if(!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3]))
-    {
+    if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
-        if(!pJson[pMasqueradingVector[3]].isNull())
-        {
-            domain_=std::make_shared<std::string>(pJson[pMasqueradingVector[3]].asString());
+        if (!pJson[pMasqueradingVector[3]].isNull()) {
+            domain_ = std::make_shared<std::string>(pJson[pMasqueradingVector[3]].asString());
         }
     }
-    if(!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4]))
-    {
+    if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
         dirtyFlag_[4] = true;
-        if(!pJson[pMasqueradingVector[4]].isNull())
-        {
-            status_=std::make_shared<std::string>(pJson[pMasqueradingVector[4]].asString());
+        if (!pJson[pMasqueradingVector[4]].isNull()) {
+            status_ = std::make_shared<std::string>(pJson[pMasqueradingVector[4]].asString());
         }
     }
-    if(!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5]))
-    {
+    if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
         dirtyFlag_[5] = true;
-        if(!pJson[pMasqueradingVector[5]].isNull())
-        {
-            totalVirtualSize_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[5]].asInt64());
+        if (!pJson[pMasqueradingVector[5]].isNull()) {
+            totalVirtualSize_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[5]].asInt64());
         }
     }
-    if(!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6]))
-    {
+    if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
         dirtyFlag_[6] = true;
-        if(!pJson[pMasqueradingVector[6]].isNull())
-        {
-            totalRealSize_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[6]].asInt64());
+        if (!pJson[pMasqueradingVector[6]].isNull()) {
+            totalRealSize_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[6]].asInt64());
         }
     }
-    if(!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7]))
-    {
+    if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
         dirtyFlag_[7] = true;
-        if(!pJson[pMasqueradingVector[7]].isNull())
-        {
-            storageLimit_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[7]].asInt64());
+        if (!pJson[pMasqueradingVector[7]].isNull()) {
+            storageLimit_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[7]].asInt64());
         }
     }
-    if(!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8]))
-    {
+    if (!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8])) {
         dirtyFlag_[8] = true;
-        if(!pJson[pMasqueradingVector[8]].isNull())
-        {
-            totalEntryCount_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[8]].asInt64());
+        if (!pJson[pMasqueradingVector[8]].isNull()) {
+            totalEntryCount_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[8]].asInt64());
         }
     }
-    if(!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9]))
-    {
+    if (!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9])) {
         dirtyFlag_[9] = true;
-        if(!pJson[pMasqueradingVector[9]].isNull())
-        {
-            entryCountLimit_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[9]].asInt64());
+        if (!pJson[pMasqueradingVector[9]].isNull()) {
+            entryCountLimit_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[9]].asInt64());
         }
     }
-    if(!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10]))
-    {
+    if (!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10])) {
         dirtyFlag_[10] = true;
-        if(!pJson[pMasqueradingVector[10]].isNull())
-        {
-            rateLimitRpm_=std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[10]].asInt64());
+        if (!pJson[pMasqueradingVector[10]].isNull()) {
+            rateLimitRpm_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[10]].asInt64());
         }
     }
 }
 
-void Organisations::updateByJson(const Json::Value &pJson) noexcept(false)
-{
-    if(pJson.isMember("id"))
-    {
-        if(!pJson["id"].isNull())
-        {
-            id_=std::make_shared<int32_t>((int32_t)pJson["id"].asInt64());
+void Organisations::updateByJson(const Json::Value& pJson) noexcept(false) {
+    if (pJson.isMember("id")) {
+        if (!pJson["id"].isNull()) {
+            id_ = std::make_shared<int32_t>((int32_t)pJson["id"].asInt64());
         }
     }
-    if(pJson.isMember("name"))
-    {
+    if (pJson.isMember("name")) {
         dirtyFlag_[1] = true;
-        if(!pJson["name"].isNull())
-        {
-            name_=std::make_shared<std::string>(pJson["name"].asString());
+        if (!pJson["name"].isNull()) {
+            name_ = std::make_shared<std::string>(pJson["name"].asString());
         }
     }
-    if(pJson.isMember("description"))
-    {
+    if (pJson.isMember("description")) {
         dirtyFlag_[2] = true;
-        if(!pJson["description"].isNull())
-        {
-            description_=std::make_shared<std::string>(pJson["description"].asString());
+        if (!pJson["description"].isNull()) {
+            description_ = std::make_shared<std::string>(pJson["description"].asString());
         }
     }
-    if(pJson.isMember("domain"))
-    {
+    if (pJson.isMember("domain")) {
         dirtyFlag_[3] = true;
-        if(!pJson["domain"].isNull())
-        {
-            domain_=std::make_shared<std::string>(pJson["domain"].asString());
+        if (!pJson["domain"].isNull()) {
+            domain_ = std::make_shared<std::string>(pJson["domain"].asString());
         }
     }
-    if(pJson.isMember("status"))
-    {
+    if (pJson.isMember("status")) {
         dirtyFlag_[4] = true;
-        if(!pJson["status"].isNull())
-        {
-            status_=std::make_shared<std::string>(pJson["status"].asString());
+        if (!pJson["status"].isNull()) {
+            status_ = std::make_shared<std::string>(pJson["status"].asString());
         }
     }
-    if(pJson.isMember("total_virtual_size"))
-    {
+    if (pJson.isMember("total_virtual_size")) {
         dirtyFlag_[5] = true;
-        if(!pJson["total_virtual_size"].isNull())
-        {
-            totalVirtualSize_=std::make_shared<int64_t>((int64_t)pJson["total_virtual_size"].asInt64());
+        if (!pJson["total_virtual_size"].isNull()) {
+            totalVirtualSize_ = std::make_shared<int64_t>((int64_t)pJson["total_virtual_size"].asInt64());
         }
     }
-    if(pJson.isMember("total_real_size"))
-    {
+    if (pJson.isMember("total_real_size")) {
         dirtyFlag_[6] = true;
-        if(!pJson["total_real_size"].isNull())
-        {
-            totalRealSize_=std::make_shared<int64_t>((int64_t)pJson["total_real_size"].asInt64());
+        if (!pJson["total_real_size"].isNull()) {
+            totalRealSize_ = std::make_shared<int64_t>((int64_t)pJson["total_real_size"].asInt64());
         }
     }
-    if(pJson.isMember("storage_limit"))
-    {
+    if (pJson.isMember("storage_limit")) {
         dirtyFlag_[7] = true;
-        if(!pJson["storage_limit"].isNull())
-        {
-            storageLimit_=std::make_shared<int64_t>((int64_t)pJson["storage_limit"].asInt64());
+        if (!pJson["storage_limit"].isNull()) {
+            storageLimit_ = std::make_shared<int64_t>((int64_t)pJson["storage_limit"].asInt64());
         }
     }
-    if(pJson.isMember("total_entry_count"))
-    {
+    if (pJson.isMember("total_entry_count")) {
         dirtyFlag_[8] = true;
-        if(!pJson["total_entry_count"].isNull())
-        {
-            totalEntryCount_=std::make_shared<int64_t>((int64_t)pJson["total_entry_count"].asInt64());
+        if (!pJson["total_entry_count"].isNull()) {
+            totalEntryCount_ = std::make_shared<int64_t>((int64_t)pJson["total_entry_count"].asInt64());
         }
     }
-    if(pJson.isMember("entry_count_limit"))
-    {
+    if (pJson.isMember("entry_count_limit")) {
         dirtyFlag_[9] = true;
-        if(!pJson["entry_count_limit"].isNull())
-        {
-            entryCountLimit_=std::make_shared<int64_t>((int64_t)pJson["entry_count_limit"].asInt64());
+        if (!pJson["entry_count_limit"].isNull()) {
+            entryCountLimit_ = std::make_shared<int64_t>((int64_t)pJson["entry_count_limit"].asInt64());
         }
     }
-    if(pJson.isMember("rate_limit_rpm"))
-    {
+    if (pJson.isMember("rate_limit_rpm")) {
         dirtyFlag_[10] = true;
-        if(!pJson["rate_limit_rpm"].isNull())
-        {
-            rateLimitRpm_=std::make_shared<int32_t>((int32_t)pJson["rate_limit_rpm"].asInt64());
+        if (!pJson["rate_limit_rpm"].isNull()) {
+            rateLimitRpm_ = std::make_shared<int32_t>((int32_t)pJson["rate_limit_rpm"].asInt64());
         }
     }
 }
 
-const int32_t &Organisations::getValueOfId() const noexcept
-{
+const int32_t& Organisations::getValueOfId() const noexcept {
     static const int32_t defaultValue = int32_t();
-    if(id_)
+    if (id_)
         return *id_;
     return defaultValue;
 }
-const std::shared_ptr<int32_t> &Organisations::getId() const noexcept
-{
+const std::shared_ptr<int32_t>& Organisations::getId() const noexcept {
     return id_;
 }
-void Organisations::setId(const int32_t &pId) noexcept
-{
+void Organisations::setId(const int32_t& pId) noexcept {
     id_ = std::make_shared<int32_t>(pId);
     dirtyFlag_[0] = true;
 }
-const typename Organisations::PrimaryKeyType & Organisations::getPrimaryKey() const
-{
+const typename Organisations::PrimaryKeyType& Organisations::getPrimaryKey() const {
     assert(id_);
     return *id_;
 }
 
-const std::string &Organisations::getValueOfName() const noexcept
-{
+const std::string& Organisations::getValueOfName() const noexcept {
     static const std::string defaultValue = std::string();
-    if(name_)
+    if (name_)
         return *name_;
     return defaultValue;
 }
-const std::shared_ptr<std::string> &Organisations::getName() const noexcept
-{
+const std::shared_ptr<std::string>& Organisations::getName() const noexcept {
     return name_;
 }
-void Organisations::setName(const std::string &pName) noexcept
-{
+void Organisations::setName(const std::string& pName) noexcept {
     name_ = std::make_shared<std::string>(pName);
     dirtyFlag_[1] = true;
 }
-void Organisations::setName(std::string &&pName) noexcept
-{
+void Organisations::setName(std::string&& pName) noexcept {
     name_ = std::make_shared<std::string>(std::move(pName));
     dirtyFlag_[1] = true;
 }
 
-const std::string &Organisations::getValueOfDescription() const noexcept
-{
+const std::string& Organisations::getValueOfDescription() const noexcept {
     static const std::string defaultValue = std::string();
-    if(description_)
+    if (description_)
         return *description_;
     return defaultValue;
 }
-const std::shared_ptr<std::string> &Organisations::getDescription() const noexcept
-{
+const std::shared_ptr<std::string>& Organisations::getDescription() const noexcept {
     return description_;
 }
-void Organisations::setDescription(const std::string &pDescription) noexcept
-{
+void Organisations::setDescription(const std::string& pDescription) noexcept {
     description_ = std::make_shared<std::string>(pDescription);
     dirtyFlag_[2] = true;
 }
-void Organisations::setDescription(std::string &&pDescription) noexcept
-{
+void Organisations::setDescription(std::string&& pDescription) noexcept {
     description_ = std::make_shared<std::string>(std::move(pDescription));
     dirtyFlag_[2] = true;
 }
-void Organisations::setDescriptionToNull() noexcept
-{
+void Organisations::setDescriptionToNull() noexcept {
     description_.reset();
     dirtyFlag_[2] = true;
 }
 
-const std::string &Organisations::getValueOfDomain() const noexcept
-{
+const std::string& Organisations::getValueOfDomain() const noexcept {
     static const std::string defaultValue = std::string();
-    if(domain_)
+    if (domain_)
         return *domain_;
     return defaultValue;
 }
-const std::shared_ptr<std::string> &Organisations::getDomain() const noexcept
-{
+const std::shared_ptr<std::string>& Organisations::getDomain() const noexcept {
     return domain_;
 }
-void Organisations::setDomain(const std::string &pDomain) noexcept
-{
+void Organisations::setDomain(const std::string& pDomain) noexcept {
     domain_ = std::make_shared<std::string>(pDomain);
     dirtyFlag_[3] = true;
 }
-void Organisations::setDomain(std::string &&pDomain) noexcept
-{
+void Organisations::setDomain(std::string&& pDomain) noexcept {
     domain_ = std::make_shared<std::string>(std::move(pDomain));
     dirtyFlag_[3] = true;
 }
-void Organisations::setDomainToNull() noexcept
-{
+void Organisations::setDomainToNull() noexcept {
     domain_.reset();
     dirtyFlag_[3] = true;
 }
 
-const std::string &Organisations::getValueOfStatus() const noexcept
-{
+const std::string& Organisations::getValueOfStatus() const noexcept {
     static const std::string defaultValue = std::string();
-    if(status_)
+    if (status_)
         return *status_;
     return defaultValue;
 }
-const std::shared_ptr<std::string> &Organisations::getStatus() const noexcept
-{
+const std::shared_ptr<std::string>& Organisations::getStatus() const noexcept {
     return status_;
 }
-void Organisations::setStatus(const std::string &pStatus) noexcept
-{
+void Organisations::setStatus(const std::string& pStatus) noexcept {
     status_ = std::make_shared<std::string>(pStatus);
     dirtyFlag_[4] = true;
 }
-void Organisations::setStatus(std::string &&pStatus) noexcept
-{
+void Organisations::setStatus(std::string&& pStatus) noexcept {
     status_ = std::make_shared<std::string>(std::move(pStatus));
     dirtyFlag_[4] = true;
 }
 
-const int64_t &Organisations::getValueOfTotalVirtualSize() const noexcept
-{
+const int64_t& Organisations::getValueOfTotalVirtualSize() const noexcept {
     static const int64_t defaultValue = int64_t();
-    if(totalVirtualSize_)
+    if (totalVirtualSize_)
         return *totalVirtualSize_;
     return defaultValue;
 }
-const std::shared_ptr<int64_t> &Organisations::getTotalVirtualSize() const noexcept
-{
+const std::shared_ptr<int64_t>& Organisations::getTotalVirtualSize() const noexcept {
     return totalVirtualSize_;
 }
-void Organisations::setTotalVirtualSize(const int64_t &pTotalVirtualSize) noexcept
-{
+void Organisations::setTotalVirtualSize(const int64_t& pTotalVirtualSize) noexcept {
     totalVirtualSize_ = std::make_shared<int64_t>(pTotalVirtualSize);
     dirtyFlag_[5] = true;
 }
 
-const int64_t &Organisations::getValueOfTotalRealSize() const noexcept
-{
+const int64_t& Organisations::getValueOfTotalRealSize() const noexcept {
     static const int64_t defaultValue = int64_t();
-    if(totalRealSize_)
+    if (totalRealSize_)
         return *totalRealSize_;
     return defaultValue;
 }
-const std::shared_ptr<int64_t> &Organisations::getTotalRealSize() const noexcept
-{
+const std::shared_ptr<int64_t>& Organisations::getTotalRealSize() const noexcept {
     return totalRealSize_;
 }
-void Organisations::setTotalRealSize(const int64_t &pTotalRealSize) noexcept
-{
+void Organisations::setTotalRealSize(const int64_t& pTotalRealSize) noexcept {
     totalRealSize_ = std::make_shared<int64_t>(pTotalRealSize);
     dirtyFlag_[6] = true;
 }
 
-const int64_t &Organisations::getValueOfStorageLimit() const noexcept
-{
+const int64_t& Organisations::getValueOfStorageLimit() const noexcept {
     static const int64_t defaultValue = int64_t();
-    if(storageLimit_)
+    if (storageLimit_)
         return *storageLimit_;
     return defaultValue;
 }
-const std::shared_ptr<int64_t> &Organisations::getStorageLimit() const noexcept
-{
+const std::shared_ptr<int64_t>& Organisations::getStorageLimit() const noexcept {
     return storageLimit_;
 }
-void Organisations::setStorageLimit(const int64_t &pStorageLimit) noexcept
-{
+void Organisations::setStorageLimit(const int64_t& pStorageLimit) noexcept {
     storageLimit_ = std::make_shared<int64_t>(pStorageLimit);
     dirtyFlag_[7] = true;
 }
-void Organisations::setStorageLimitToNull() noexcept
-{
+void Organisations::setStorageLimitToNull() noexcept {
     storageLimit_.reset();
     dirtyFlag_[7] = true;
 }
 
-const int64_t &Organisations::getValueOfTotalEntryCount() const noexcept
-{
+const int64_t& Organisations::getValueOfTotalEntryCount() const noexcept {
     static const int64_t defaultValue = int64_t();
-    if(totalEntryCount_)
+    if (totalEntryCount_)
         return *totalEntryCount_;
     return defaultValue;
 }
-const std::shared_ptr<int64_t> &Organisations::getTotalEntryCount() const noexcept
-{
+const std::shared_ptr<int64_t>& Organisations::getTotalEntryCount() const noexcept {
     return totalEntryCount_;
 }
-void Organisations::setTotalEntryCount(const int64_t &pTotalEntryCount) noexcept
-{
+void Organisations::setTotalEntryCount(const int64_t& pTotalEntryCount) noexcept {
     totalEntryCount_ = std::make_shared<int64_t>(pTotalEntryCount);
     dirtyFlag_[8] = true;
 }
 
-const int64_t &Organisations::getValueOfEntryCountLimit() const noexcept
-{
+const int64_t& Organisations::getValueOfEntryCountLimit() const noexcept {
     static const int64_t defaultValue = int64_t();
-    if(entryCountLimit_)
+    if (entryCountLimit_)
         return *entryCountLimit_;
     return defaultValue;
 }
-const std::shared_ptr<int64_t> &Organisations::getEntryCountLimit() const noexcept
-{
+const std::shared_ptr<int64_t>& Organisations::getEntryCountLimit() const noexcept {
     return entryCountLimit_;
 }
-void Organisations::setEntryCountLimit(const int64_t &pEntryCountLimit) noexcept
-{
+void Organisations::setEntryCountLimit(const int64_t& pEntryCountLimit) noexcept {
     entryCountLimit_ = std::make_shared<int64_t>(pEntryCountLimit);
     dirtyFlag_[9] = true;
 }
-void Organisations::setEntryCountLimitToNull() noexcept
-{
+void Organisations::setEntryCountLimitToNull() noexcept {
     entryCountLimit_.reset();
     dirtyFlag_[9] = true;
 }
 
-const int32_t &Organisations::getValueOfRateLimitRpm() const noexcept
-{
+const int32_t& Organisations::getValueOfRateLimitRpm() const noexcept {
     static const int32_t defaultValue = int32_t();
-    if(rateLimitRpm_)
+    if (rateLimitRpm_)
         return *rateLimitRpm_;
     return defaultValue;
 }
-const std::shared_ptr<int32_t> &Organisations::getRateLimitRpm() const noexcept
-{
+const std::shared_ptr<int32_t>& Organisations::getRateLimitRpm() const noexcept {
     return rateLimitRpm_;
 }
-void Organisations::setRateLimitRpm(const int32_t &pRateLimitRpm) noexcept
-{
+void Organisations::setRateLimitRpm(const int32_t& pRateLimitRpm) noexcept {
     rateLimitRpm_ = std::make_shared<int32_t>(pRateLimitRpm);
     dirtyFlag_[10] = true;
 }
-void Organisations::setRateLimitRpmToNull() noexcept
-{
+void Organisations::setRateLimitRpmToNull() noexcept {
     rateLimitRpm_.reset();
     dirtyFlag_[10] = true;
 }
 
-void Organisations::updateId(const uint64_t id)
-{
+void Organisations::updateId(const uint64_t id) {
 }
 
-const std::vector<std::string> &Organisations::insertColumns() noexcept
-{
-    static const std::vector<std::string> inCols={
-        "name",
-        "description",
-        "domain",
-        "status",
-        "total_virtual_size",
-        "total_real_size",
-        "storage_limit",
-        "total_entry_count",
-        "entry_count_limit",
-        "rate_limit_rpm"
-    };
+const std::vector<std::string>& Organisations::insertColumns() noexcept {
+    static const std::vector<std::string> inCols = {"name", "description", "domain", "status", "total_virtual_size", "total_real_size",
+        "storage_limit", "total_entry_count", "entry_count_limit", "rate_limit_rpm"};
     return inCols;
 }
 
-void Organisations::outputArgs(drogon::orm::internal::SqlBinder &binder) const
-{
-    if(dirtyFlag_[1])
-    {
-        if(getName())
-        {
+void Organisations::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
+    if (dirtyFlag_[1]) {
+        if (getName()) {
             binder << getValueOfName();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[2])
-    {
-        if(getDescription())
-        {
+    if (dirtyFlag_[2]) {
+        if (getDescription()) {
             binder << getValueOfDescription();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[3])
-    {
-        if(getDomain())
-        {
+    if (dirtyFlag_[3]) {
+        if (getDomain()) {
             binder << getValueOfDomain();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[4])
-    {
-        if(getStatus())
-        {
+    if (dirtyFlag_[4]) {
+        if (getStatus()) {
             binder << getValueOfStatus();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[5])
-    {
-        if(getTotalVirtualSize())
-        {
+    if (dirtyFlag_[5]) {
+        if (getTotalVirtualSize()) {
             binder << getValueOfTotalVirtualSize();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[6])
-    {
-        if(getTotalRealSize())
-        {
+    if (dirtyFlag_[6]) {
+        if (getTotalRealSize()) {
             binder << getValueOfTotalRealSize();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[7])
-    {
-        if(getStorageLimit())
-        {
+    if (dirtyFlag_[7]) {
+        if (getStorageLimit()) {
             binder << getValueOfStorageLimit();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[8])
-    {
-        if(getTotalEntryCount())
-        {
+    if (dirtyFlag_[8]) {
+        if (getTotalEntryCount()) {
             binder << getValueOfTotalEntryCount();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[9])
-    {
-        if(getEntryCountLimit())
-        {
+    if (dirtyFlag_[9]) {
+        if (getEntryCountLimit()) {
             binder << getValueOfEntryCountLimit();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[10])
-    {
-        if(getRateLimitRpm())
-        {
+    if (dirtyFlag_[10]) {
+        if (getRateLimitRpm()) {
             binder << getValueOfRateLimitRpm();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
 }
 
-const std::vector<std::string> Organisations::updateColumns() const
-{
+const std::vector<std::string> Organisations::updateColumns() const {
     std::vector<std::string> ret;
-    if(dirtyFlag_[1])
-    {
+    if (dirtyFlag_[1]) {
         ret.push_back(getColumnName(1));
     }
-    if(dirtyFlag_[2])
-    {
+    if (dirtyFlag_[2]) {
         ret.push_back(getColumnName(2));
     }
-    if(dirtyFlag_[3])
-    {
+    if (dirtyFlag_[3]) {
         ret.push_back(getColumnName(3));
     }
-    if(dirtyFlag_[4])
-    {
+    if (dirtyFlag_[4]) {
         ret.push_back(getColumnName(4));
     }
-    if(dirtyFlag_[5])
-    {
+    if (dirtyFlag_[5]) {
         ret.push_back(getColumnName(5));
     }
-    if(dirtyFlag_[6])
-    {
+    if (dirtyFlag_[6]) {
         ret.push_back(getColumnName(6));
     }
-    if(dirtyFlag_[7])
-    {
+    if (dirtyFlag_[7]) {
         ret.push_back(getColumnName(7));
     }
-    if(dirtyFlag_[8])
-    {
+    if (dirtyFlag_[8]) {
         ret.push_back(getColumnName(8));
     }
-    if(dirtyFlag_[9])
-    {
+    if (dirtyFlag_[9]) {
         ret.push_back(getColumnName(9));
     }
-    if(dirtyFlag_[10])
-    {
+    if (dirtyFlag_[10]) {
         ret.push_back(getColumnName(10));
     }
     return ret;
 }
 
-void Organisations::updateArgs(drogon::orm::internal::SqlBinder &binder) const
-{
-    if(dirtyFlag_[1])
-    {
-        if(getName())
-        {
+void Organisations::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
+    if (dirtyFlag_[1]) {
+        if (getName()) {
             binder << getValueOfName();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[2])
-    {
-        if(getDescription())
-        {
+    if (dirtyFlag_[2]) {
+        if (getDescription()) {
             binder << getValueOfDescription();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[3])
-    {
-        if(getDomain())
-        {
+    if (dirtyFlag_[3]) {
+        if (getDomain()) {
             binder << getValueOfDomain();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[4])
-    {
-        if(getStatus())
-        {
+    if (dirtyFlag_[4]) {
+        if (getStatus()) {
             binder << getValueOfStatus();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[5])
-    {
-        if(getTotalVirtualSize())
-        {
+    if (dirtyFlag_[5]) {
+        if (getTotalVirtualSize()) {
             binder << getValueOfTotalVirtualSize();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[6])
-    {
-        if(getTotalRealSize())
-        {
+    if (dirtyFlag_[6]) {
+        if (getTotalRealSize()) {
             binder << getValueOfTotalRealSize();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[7])
-    {
-        if(getStorageLimit())
-        {
+    if (dirtyFlag_[7]) {
+        if (getStorageLimit()) {
             binder << getValueOfStorageLimit();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[8])
-    {
-        if(getTotalEntryCount())
-        {
+    if (dirtyFlag_[8]) {
+        if (getTotalEntryCount()) {
             binder << getValueOfTotalEntryCount();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[9])
-    {
-        if(getEntryCountLimit())
-        {
+    if (dirtyFlag_[9]) {
+        if (getEntryCountLimit()) {
             binder << getValueOfEntryCountLimit();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
-    if(dirtyFlag_[10])
-    {
-        if(getRateLimitRpm())
-        {
+    if (dirtyFlag_[10]) {
+        if (getRateLimitRpm()) {
             binder << getValueOfRateLimitRpm();
-        }
-        else
-        {
+        } else {
             binder << nullptr;
         }
     }
 }
-Json::Value Organisations::toJson() const
-{
+Json::Value Organisations::toJson() const {
     Json::Value ret;
-    if(getId())
-    {
-        ret["id"]=getValueOfId();
+    if (getId()) {
+        ret["id"] = getValueOfId();
+    } else {
+        ret["id"] = Json::Value();
     }
-    else
-    {
-        ret["id"]=Json::Value();
+    if (getName()) {
+        ret["name"] = getValueOfName();
+    } else {
+        ret["name"] = Json::Value();
     }
-    if(getName())
-    {
-        ret["name"]=getValueOfName();
+    if (getDescription()) {
+        ret["description"] = getValueOfDescription();
+    } else {
+        ret["description"] = Json::Value();
     }
-    else
-    {
-        ret["name"]=Json::Value();
+    if (getDomain()) {
+        ret["domain"] = getValueOfDomain();
+    } else {
+        ret["domain"] = Json::Value();
     }
-    if(getDescription())
-    {
-        ret["description"]=getValueOfDescription();
+    if (getStatus()) {
+        ret["status"] = getValueOfStatus();
+    } else {
+        ret["status"] = Json::Value();
     }
-    else
-    {
-        ret["description"]=Json::Value();
+    if (getTotalVirtualSize()) {
+        ret["total_virtual_size"] = (Json::Int64)getValueOfTotalVirtualSize();
+    } else {
+        ret["total_virtual_size"] = Json::Value();
     }
-    if(getDomain())
-    {
-        ret["domain"]=getValueOfDomain();
+    if (getTotalRealSize()) {
+        ret["total_real_size"] = (Json::Int64)getValueOfTotalRealSize();
+    } else {
+        ret["total_real_size"] = Json::Value();
     }
-    else
-    {
-        ret["domain"]=Json::Value();
+    if (getStorageLimit()) {
+        ret["storage_limit"] = (Json::Int64)getValueOfStorageLimit();
+    } else {
+        ret["storage_limit"] = Json::Value();
     }
-    if(getStatus())
-    {
-        ret["status"]=getValueOfStatus();
+    if (getTotalEntryCount()) {
+        ret["total_entry_count"] = (Json::Int64)getValueOfTotalEntryCount();
+    } else {
+        ret["total_entry_count"] = Json::Value();
     }
-    else
-    {
-        ret["status"]=Json::Value();
+    if (getEntryCountLimit()) {
+        ret["entry_count_limit"] = (Json::Int64)getValueOfEntryCountLimit();
+    } else {
+        ret["entry_count_limit"] = Json::Value();
     }
-    if(getTotalVirtualSize())
-    {
-        ret["total_virtual_size"]=(Json::Int64)getValueOfTotalVirtualSize();
-    }
-    else
-    {
-        ret["total_virtual_size"]=Json::Value();
-    }
-    if(getTotalRealSize())
-    {
-        ret["total_real_size"]=(Json::Int64)getValueOfTotalRealSize();
-    }
-    else
-    {
-        ret["total_real_size"]=Json::Value();
-    }
-    if(getStorageLimit())
-    {
-        ret["storage_limit"]=(Json::Int64)getValueOfStorageLimit();
-    }
-    else
-    {
-        ret["storage_limit"]=Json::Value();
-    }
-    if(getTotalEntryCount())
-    {
-        ret["total_entry_count"]=(Json::Int64)getValueOfTotalEntryCount();
-    }
-    else
-    {
-        ret["total_entry_count"]=Json::Value();
-    }
-    if(getEntryCountLimit())
-    {
-        ret["entry_count_limit"]=(Json::Int64)getValueOfEntryCountLimit();
-    }
-    else
-    {
-        ret["entry_count_limit"]=Json::Value();
-    }
-    if(getRateLimitRpm())
-    {
-        ret["rate_limit_rpm"]=getValueOfRateLimitRpm();
-    }
-    else
-    {
-        ret["rate_limit_rpm"]=Json::Value();
+    if (getRateLimitRpm()) {
+        ret["rate_limit_rpm"] = getValueOfRateLimitRpm();
+    } else {
+        ret["rate_limit_rpm"] = Json::Value();
     }
     return ret;
 }
 
-std::string Organisations::toString() const
-{
+std::string Organisations::toString() const {
     return toJson().toStyledString();
 }
 
-Json::Value Organisations::toMasqueradedJson(
-    const std::vector<std::string> &pMasqueradingVector) const
-{
+Json::Value Organisations::toMasqueradedJson(const std::vector<std::string>& pMasqueradingVector) const {
     Json::Value ret;
-    if(pMasqueradingVector.size() == 11)
-    {
-        if(!pMasqueradingVector[0].empty())
-        {
-            if(getId())
-            {
-                ret[pMasqueradingVector[0]]=getValueOfId();
-            }
-            else
-            {
-                ret[pMasqueradingVector[0]]=Json::Value();
+    if (pMasqueradingVector.size() == 11) {
+        if (!pMasqueradingVector[0].empty()) {
+            if (getId()) {
+                ret[pMasqueradingVector[0]] = getValueOfId();
+            } else {
+                ret[pMasqueradingVector[0]] = Json::Value();
             }
         }
-        if(!pMasqueradingVector[1].empty())
-        {
-            if(getName())
-            {
-                ret[pMasqueradingVector[1]]=getValueOfName();
-            }
-            else
-            {
-                ret[pMasqueradingVector[1]]=Json::Value();
+        if (!pMasqueradingVector[1].empty()) {
+            if (getName()) {
+                ret[pMasqueradingVector[1]] = getValueOfName();
+            } else {
+                ret[pMasqueradingVector[1]] = Json::Value();
             }
         }
-        if(!pMasqueradingVector[2].empty())
-        {
-            if(getDescription())
-            {
-                ret[pMasqueradingVector[2]]=getValueOfDescription();
-            }
-            else
-            {
-                ret[pMasqueradingVector[2]]=Json::Value();
+        if (!pMasqueradingVector[2].empty()) {
+            if (getDescription()) {
+                ret[pMasqueradingVector[2]] = getValueOfDescription();
+            } else {
+                ret[pMasqueradingVector[2]] = Json::Value();
             }
         }
-        if(!pMasqueradingVector[3].empty())
-        {
-            if(getDomain())
-            {
-                ret[pMasqueradingVector[3]]=getValueOfDomain();
-            }
-            else
-            {
-                ret[pMasqueradingVector[3]]=Json::Value();
+        if (!pMasqueradingVector[3].empty()) {
+            if (getDomain()) {
+                ret[pMasqueradingVector[3]] = getValueOfDomain();
+            } else {
+                ret[pMasqueradingVector[3]] = Json::Value();
             }
         }
-        if(!pMasqueradingVector[4].empty())
-        {
-            if(getStatus())
-            {
-                ret[pMasqueradingVector[4]]=getValueOfStatus();
-            }
-            else
-            {
-                ret[pMasqueradingVector[4]]=Json::Value();
+        if (!pMasqueradingVector[4].empty()) {
+            if (getStatus()) {
+                ret[pMasqueradingVector[4]] = getValueOfStatus();
+            } else {
+                ret[pMasqueradingVector[4]] = Json::Value();
             }
         }
-        if(!pMasqueradingVector[5].empty())
-        {
-            if(getTotalVirtualSize())
-            {
-                ret[pMasqueradingVector[5]]=(Json::Int64)getValueOfTotalVirtualSize();
-            }
-            else
-            {
-                ret[pMasqueradingVector[5]]=Json::Value();
+        if (!pMasqueradingVector[5].empty()) {
+            if (getTotalVirtualSize()) {
+                ret[pMasqueradingVector[5]] = (Json::Int64)getValueOfTotalVirtualSize();
+            } else {
+                ret[pMasqueradingVector[5]] = Json::Value();
             }
         }
-        if(!pMasqueradingVector[6].empty())
-        {
-            if(getTotalRealSize())
-            {
-                ret[pMasqueradingVector[6]]=(Json::Int64)getValueOfTotalRealSize();
-            }
-            else
-            {
-                ret[pMasqueradingVector[6]]=Json::Value();
+        if (!pMasqueradingVector[6].empty()) {
+            if (getTotalRealSize()) {
+                ret[pMasqueradingVector[6]] = (Json::Int64)getValueOfTotalRealSize();
+            } else {
+                ret[pMasqueradingVector[6]] = Json::Value();
             }
         }
-        if(!pMasqueradingVector[7].empty())
-        {
-            if(getStorageLimit())
-            {
-                ret[pMasqueradingVector[7]]=(Json::Int64)getValueOfStorageLimit();
-            }
-            else
-            {
-                ret[pMasqueradingVector[7]]=Json::Value();
+        if (!pMasqueradingVector[7].empty()) {
+            if (getStorageLimit()) {
+                ret[pMasqueradingVector[7]] = (Json::Int64)getValueOfStorageLimit();
+            } else {
+                ret[pMasqueradingVector[7]] = Json::Value();
             }
         }
-        if(!pMasqueradingVector[8].empty())
-        {
-            if(getTotalEntryCount())
-            {
-                ret[pMasqueradingVector[8]]=(Json::Int64)getValueOfTotalEntryCount();
-            }
-            else
-            {
-                ret[pMasqueradingVector[8]]=Json::Value();
+        if (!pMasqueradingVector[8].empty()) {
+            if (getTotalEntryCount()) {
+                ret[pMasqueradingVector[8]] = (Json::Int64)getValueOfTotalEntryCount();
+            } else {
+                ret[pMasqueradingVector[8]] = Json::Value();
             }
         }
-        if(!pMasqueradingVector[9].empty())
-        {
-            if(getEntryCountLimit())
-            {
-                ret[pMasqueradingVector[9]]=(Json::Int64)getValueOfEntryCountLimit();
-            }
-            else
-            {
-                ret[pMasqueradingVector[9]]=Json::Value();
+        if (!pMasqueradingVector[9].empty()) {
+            if (getEntryCountLimit()) {
+                ret[pMasqueradingVector[9]] = (Json::Int64)getValueOfEntryCountLimit();
+            } else {
+                ret[pMasqueradingVector[9]] = Json::Value();
             }
         }
-        if(!pMasqueradingVector[10].empty())
-        {
-            if(getRateLimitRpm())
-            {
-                ret[pMasqueradingVector[10]]=getValueOfRateLimitRpm();
-            }
-            else
-            {
-                ret[pMasqueradingVector[10]]=Json::Value();
+        if (!pMasqueradingVector[10].empty()) {
+            if (getRateLimitRpm()) {
+                ret[pMasqueradingVector[10]] = getValueOfRateLimitRpm();
+            } else {
+                ret[pMasqueradingVector[10]] = Json::Value();
             }
         }
         return ret;
     }
     LOG_ERROR << "Masquerade failed";
-    if(getId())
-    {
-        ret["id"]=getValueOfId();
+    if (getId()) {
+        ret["id"] = getValueOfId();
+    } else {
+        ret["id"] = Json::Value();
     }
-    else
-    {
-        ret["id"]=Json::Value();
+    if (getName()) {
+        ret["name"] = getValueOfName();
+    } else {
+        ret["name"] = Json::Value();
     }
-    if(getName())
-    {
-        ret["name"]=getValueOfName();
+    if (getDescription()) {
+        ret["description"] = getValueOfDescription();
+    } else {
+        ret["description"] = Json::Value();
     }
-    else
-    {
-        ret["name"]=Json::Value();
+    if (getDomain()) {
+        ret["domain"] = getValueOfDomain();
+    } else {
+        ret["domain"] = Json::Value();
     }
-    if(getDescription())
-    {
-        ret["description"]=getValueOfDescription();
+    if (getStatus()) {
+        ret["status"] = getValueOfStatus();
+    } else {
+        ret["status"] = Json::Value();
     }
-    else
-    {
-        ret["description"]=Json::Value();
+    if (getTotalVirtualSize()) {
+        ret["total_virtual_size"] = (Json::Int64)getValueOfTotalVirtualSize();
+    } else {
+        ret["total_virtual_size"] = Json::Value();
     }
-    if(getDomain())
-    {
-        ret["domain"]=getValueOfDomain();
+    if (getTotalRealSize()) {
+        ret["total_real_size"] = (Json::Int64)getValueOfTotalRealSize();
+    } else {
+        ret["total_real_size"] = Json::Value();
     }
-    else
-    {
-        ret["domain"]=Json::Value();
+    if (getStorageLimit()) {
+        ret["storage_limit"] = (Json::Int64)getValueOfStorageLimit();
+    } else {
+        ret["storage_limit"] = Json::Value();
     }
-    if(getStatus())
-    {
-        ret["status"]=getValueOfStatus();
+    if (getTotalEntryCount()) {
+        ret["total_entry_count"] = (Json::Int64)getValueOfTotalEntryCount();
+    } else {
+        ret["total_entry_count"] = Json::Value();
     }
-    else
-    {
-        ret["status"]=Json::Value();
+    if (getEntryCountLimit()) {
+        ret["entry_count_limit"] = (Json::Int64)getValueOfEntryCountLimit();
+    } else {
+        ret["entry_count_limit"] = Json::Value();
     }
-    if(getTotalVirtualSize())
-    {
-        ret["total_virtual_size"]=(Json::Int64)getValueOfTotalVirtualSize();
-    }
-    else
-    {
-        ret["total_virtual_size"]=Json::Value();
-    }
-    if(getTotalRealSize())
-    {
-        ret["total_real_size"]=(Json::Int64)getValueOfTotalRealSize();
-    }
-    else
-    {
-        ret["total_real_size"]=Json::Value();
-    }
-    if(getStorageLimit())
-    {
-        ret["storage_limit"]=(Json::Int64)getValueOfStorageLimit();
-    }
-    else
-    {
-        ret["storage_limit"]=Json::Value();
-    }
-    if(getTotalEntryCount())
-    {
-        ret["total_entry_count"]=(Json::Int64)getValueOfTotalEntryCount();
-    }
-    else
-    {
-        ret["total_entry_count"]=Json::Value();
-    }
-    if(getEntryCountLimit())
-    {
-        ret["entry_count_limit"]=(Json::Int64)getValueOfEntryCountLimit();
-    }
-    else
-    {
-        ret["entry_count_limit"]=Json::Value();
-    }
-    if(getRateLimitRpm())
-    {
-        ret["rate_limit_rpm"]=getValueOfRateLimitRpm();
-    }
-    else
-    {
-        ret["rate_limit_rpm"]=Json::Value();
+    if (getRateLimitRpm()) {
+        ret["rate_limit_rpm"] = getValueOfRateLimitRpm();
+    } else {
+        ret["rate_limit_rpm"] = Json::Value();
     }
     return ret;
 }
 
-bool Organisations::validateJsonForCreation(const Json::Value &pJson, std::string &err)
-{
-    if(pJson.isMember("id"))
-    {
-        if(!validJsonOfField(0, "id", pJson["id"], err, true))
+bool Organisations::validateJsonForCreation(const Json::Value& pJson, std::string& err) {
+    if (pJson.isMember("id")) {
+        if (!validJsonOfField(0, "id", pJson["id"], err, true))
             return false;
     }
-    if(pJson.isMember("name"))
-    {
-        if(!validJsonOfField(1, "name", pJson["name"], err, true))
+    if (pJson.isMember("name")) {
+        if (!validJsonOfField(1, "name", pJson["name"], err, true))
             return false;
-    }
-    else
-    {
-        err="The name column cannot be null";
+    } else {
+        err = "The name column cannot be null";
         return false;
     }
-    if(pJson.isMember("description"))
-    {
-        if(!validJsonOfField(2, "description", pJson["description"], err, true))
+    if (pJson.isMember("description")) {
+        if (!validJsonOfField(2, "description", pJson["description"], err, true))
             return false;
     }
-    if(pJson.isMember("domain"))
-    {
-        if(!validJsonOfField(3, "domain", pJson["domain"], err, true))
+    if (pJson.isMember("domain")) {
+        if (!validJsonOfField(3, "domain", pJson["domain"], err, true))
             return false;
     }
-    if(pJson.isMember("status"))
-    {
-        if(!validJsonOfField(4, "status", pJson["status"], err, true))
+    if (pJson.isMember("status")) {
+        if (!validJsonOfField(4, "status", pJson["status"], err, true))
             return false;
     }
-    if(pJson.isMember("total_virtual_size"))
-    {
-        if(!validJsonOfField(5, "total_virtual_size", pJson["total_virtual_size"], err, true))
+    if (pJson.isMember("total_virtual_size")) {
+        if (!validJsonOfField(5, "total_virtual_size", pJson["total_virtual_size"], err, true))
             return false;
     }
-    if(pJson.isMember("total_real_size"))
-    {
-        if(!validJsonOfField(6, "total_real_size", pJson["total_real_size"], err, true))
+    if (pJson.isMember("total_real_size")) {
+        if (!validJsonOfField(6, "total_real_size", pJson["total_real_size"], err, true))
             return false;
     }
-    if(pJson.isMember("storage_limit"))
-    {
-        if(!validJsonOfField(7, "storage_limit", pJson["storage_limit"], err, true))
+    if (pJson.isMember("storage_limit")) {
+        if (!validJsonOfField(7, "storage_limit", pJson["storage_limit"], err, true))
             return false;
     }
-    if(pJson.isMember("total_entry_count"))
-    {
-        if(!validJsonOfField(8, "total_entry_count", pJson["total_entry_count"], err, true))
+    if (pJson.isMember("total_entry_count")) {
+        if (!validJsonOfField(8, "total_entry_count", pJson["total_entry_count"], err, true))
             return false;
     }
-    if(pJson.isMember("entry_count_limit"))
-    {
-        if(!validJsonOfField(9, "entry_count_limit", pJson["entry_count_limit"], err, true))
+    if (pJson.isMember("entry_count_limit")) {
+        if (!validJsonOfField(9, "entry_count_limit", pJson["entry_count_limit"], err, true))
             return false;
     }
-    if(pJson.isMember("rate_limit_rpm"))
-    {
-        if(!validJsonOfField(10, "rate_limit_rpm", pJson["rate_limit_rpm"], err, true))
+    if (pJson.isMember("rate_limit_rpm")) {
+        if (!validJsonOfField(10, "rate_limit_rpm", pJson["rate_limit_rpm"], err, true))
             return false;
     }
     return true;
 }
-bool Organisations::validateMasqueradedJsonForCreation(const Json::Value &pJson,
-                                                       const std::vector<std::string> &pMasqueradingVector,
-                                                       std::string &err)
-{
-    if(pMasqueradingVector.size() != 11)
-    {
+bool Organisations::validateMasqueradedJsonForCreation(
+    const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector, std::string& err) {
+    if (pMasqueradingVector.size() != 11) {
         err = "Bad masquerading vector";
         return false;
     }
     try {
-      if(!pMasqueradingVector[0].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[0]))
-          {
-              if(!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, true))
-                  return false;
-          }
-      }
-      if(!pMasqueradingVector[1].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[1]))
-          {
-              if(!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, true))
-                  return false;
-          }
-        else
-        {
-            err="The " + pMasqueradingVector[1] + " column cannot be null";
+        if (!pMasqueradingVector[0].empty()) {
+            if (pJson.isMember(pMasqueradingVector[0])) {
+                if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, true))
+                    return false;
+            }
+        }
+        if (!pMasqueradingVector[1].empty()) {
+            if (pJson.isMember(pMasqueradingVector[1])) {
+                if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, true))
+                    return false;
+            } else {
+                err = "The " + pMasqueradingVector[1] + " column cannot be null";
+                return false;
+            }
+        }
+        if (!pMasqueradingVector[2].empty()) {
+            if (pJson.isMember(pMasqueradingVector[2])) {
+                if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, true))
+                    return false;
+            }
+        }
+        if (!pMasqueradingVector[3].empty()) {
+            if (pJson.isMember(pMasqueradingVector[3])) {
+                if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, true))
+                    return false;
+            }
+        }
+        if (!pMasqueradingVector[4].empty()) {
+            if (pJson.isMember(pMasqueradingVector[4])) {
+                if (!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, true))
+                    return false;
+            }
+        }
+        if (!pMasqueradingVector[5].empty()) {
+            if (pJson.isMember(pMasqueradingVector[5])) {
+                if (!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, true))
+                    return false;
+            }
+        }
+        if (!pMasqueradingVector[6].empty()) {
+            if (pJson.isMember(pMasqueradingVector[6])) {
+                if (!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, true))
+                    return false;
+            }
+        }
+        if (!pMasqueradingVector[7].empty()) {
+            if (pJson.isMember(pMasqueradingVector[7])) {
+                if (!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, true))
+                    return false;
+            }
+        }
+        if (!pMasqueradingVector[8].empty()) {
+            if (pJson.isMember(pMasqueradingVector[8])) {
+                if (!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, true))
+                    return false;
+            }
+        }
+        if (!pMasqueradingVector[9].empty()) {
+            if (pJson.isMember(pMasqueradingVector[9])) {
+                if (!validJsonOfField(9, pMasqueradingVector[9], pJson[pMasqueradingVector[9]], err, true))
+                    return false;
+            }
+        }
+        if (!pMasqueradingVector[10].empty()) {
+            if (pJson.isMember(pMasqueradingVector[10])) {
+                if (!validJsonOfField(10, pMasqueradingVector[10], pJson[pMasqueradingVector[10]], err, true))
+                    return false;
+            }
+        }
+    } catch (const Json::LogicError& e) {
+        err = e.what();
+        return false;
+    }
+    return true;
+}
+bool Organisations::validateJsonForUpdate(const Json::Value& pJson, std::string& err) {
+    if (pJson.isMember("id")) {
+        if (!validJsonOfField(0, "id", pJson["id"], err, false))
+            return false;
+    } else {
+        err = "The value of primary key must be set in the json object for update";
+        return false;
+    }
+    if (pJson.isMember("name")) {
+        if (!validJsonOfField(1, "name", pJson["name"], err, false))
+            return false;
+    }
+    if (pJson.isMember("description")) {
+        if (!validJsonOfField(2, "description", pJson["description"], err, false))
+            return false;
+    }
+    if (pJson.isMember("domain")) {
+        if (!validJsonOfField(3, "domain", pJson["domain"], err, false))
+            return false;
+    }
+    if (pJson.isMember("status")) {
+        if (!validJsonOfField(4, "status", pJson["status"], err, false))
+            return false;
+    }
+    if (pJson.isMember("total_virtual_size")) {
+        if (!validJsonOfField(5, "total_virtual_size", pJson["total_virtual_size"], err, false))
+            return false;
+    }
+    if (pJson.isMember("total_real_size")) {
+        if (!validJsonOfField(6, "total_real_size", pJson["total_real_size"], err, false))
+            return false;
+    }
+    if (pJson.isMember("storage_limit")) {
+        if (!validJsonOfField(7, "storage_limit", pJson["storage_limit"], err, false))
+            return false;
+    }
+    if (pJson.isMember("total_entry_count")) {
+        if (!validJsonOfField(8, "total_entry_count", pJson["total_entry_count"], err, false))
+            return false;
+    }
+    if (pJson.isMember("entry_count_limit")) {
+        if (!validJsonOfField(9, "entry_count_limit", pJson["entry_count_limit"], err, false))
+            return false;
+    }
+    if (pJson.isMember("rate_limit_rpm")) {
+        if (!validJsonOfField(10, "rate_limit_rpm", pJson["rate_limit_rpm"], err, false))
+            return false;
+    }
+    return true;
+}
+bool Organisations::validateMasqueradedJsonForUpdate(
+    const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector, std::string& err) {
+    if (pMasqueradingVector.size() != 11) {
+        err = "Bad masquerading vector";
+        return false;
+    }
+    try {
+        if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
+            if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, false))
+                return false;
+        } else {
+            err = "The value of primary key must be set in the json object for update";
             return false;
         }
-      }
-      if(!pMasqueradingVector[2].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[2]))
-          {
-              if(!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, true))
-                  return false;
-          }
-      }
-      if(!pMasqueradingVector[3].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[3]))
-          {
-              if(!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, true))
-                  return false;
-          }
-      }
-      if(!pMasqueradingVector[4].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[4]))
-          {
-              if(!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, true))
-                  return false;
-          }
-      }
-      if(!pMasqueradingVector[5].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[5]))
-          {
-              if(!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, true))
-                  return false;
-          }
-      }
-      if(!pMasqueradingVector[6].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[6]))
-          {
-              if(!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, true))
-                  return false;
-          }
-      }
-      if(!pMasqueradingVector[7].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[7]))
-          {
-              if(!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, true))
-                  return false;
-          }
-      }
-      if(!pMasqueradingVector[8].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[8]))
-          {
-              if(!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, true))
-                  return false;
-          }
-      }
-      if(!pMasqueradingVector[9].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[9]))
-          {
-              if(!validJsonOfField(9, pMasqueradingVector[9], pJson[pMasqueradingVector[9]], err, true))
-                  return false;
-          }
-      }
-      if(!pMasqueradingVector[10].empty())
-      {
-          if(pJson.isMember(pMasqueradingVector[10]))
-          {
-              if(!validJsonOfField(10, pMasqueradingVector[10], pJson[pMasqueradingVector[10]], err, true))
-                  return false;
-          }
-      }
-    }
-    catch(const Json::LogicError &e)
-    {
-      err = e.what();
-      return false;
+        if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
+            if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
+            if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
+            if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
+            if (!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
+            if (!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
+            if (!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
+            if (!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8])) {
+            if (!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9])) {
+            if (!validJsonOfField(9, pMasqueradingVector[9], pJson[pMasqueradingVector[9]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10])) {
+            if (!validJsonOfField(10, pMasqueradingVector[10], pJson[pMasqueradingVector[10]], err, false))
+                return false;
+        }
+    } catch (const Json::LogicError& e) {
+        err = e.what();
+        return false;
     }
     return true;
 }
-bool Organisations::validateJsonForUpdate(const Json::Value &pJson, std::string &err)
-{
-    if(pJson.isMember("id"))
-    {
-        if(!validJsonOfField(0, "id", pJson["id"], err, false))
-            return false;
-    }
-    else
-    {
-        err = "The value of primary key must be set in the json object for update";
-        return false;
-    }
-    if(pJson.isMember("name"))
-    {
-        if(!validJsonOfField(1, "name", pJson["name"], err, false))
-            return false;
-    }
-    if(pJson.isMember("description"))
-    {
-        if(!validJsonOfField(2, "description", pJson["description"], err, false))
-            return false;
-    }
-    if(pJson.isMember("domain"))
-    {
-        if(!validJsonOfField(3, "domain", pJson["domain"], err, false))
-            return false;
-    }
-    if(pJson.isMember("status"))
-    {
-        if(!validJsonOfField(4, "status", pJson["status"], err, false))
-            return false;
-    }
-    if(pJson.isMember("total_virtual_size"))
-    {
-        if(!validJsonOfField(5, "total_virtual_size", pJson["total_virtual_size"], err, false))
-            return false;
-    }
-    if(pJson.isMember("total_real_size"))
-    {
-        if(!validJsonOfField(6, "total_real_size", pJson["total_real_size"], err, false))
-            return false;
-    }
-    if(pJson.isMember("storage_limit"))
-    {
-        if(!validJsonOfField(7, "storage_limit", pJson["storage_limit"], err, false))
-            return false;
-    }
-    if(pJson.isMember("total_entry_count"))
-    {
-        if(!validJsonOfField(8, "total_entry_count", pJson["total_entry_count"], err, false))
-            return false;
-    }
-    if(pJson.isMember("entry_count_limit"))
-    {
-        if(!validJsonOfField(9, "entry_count_limit", pJson["entry_count_limit"], err, false))
-            return false;
-    }
-    if(pJson.isMember("rate_limit_rpm"))
-    {
-        if(!validJsonOfField(10, "rate_limit_rpm", pJson["rate_limit_rpm"], err, false))
-            return false;
-    }
-    return true;
-}
-bool Organisations::validateMasqueradedJsonForUpdate(const Json::Value &pJson,
-                                                     const std::vector<std::string> &pMasqueradingVector,
-                                                     std::string &err)
-{
-    if(pMasqueradingVector.size() != 11)
-    {
-        err = "Bad masquerading vector";
-        return false;
-    }
-    try {
-      if(!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0]))
-      {
-          if(!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, false))
-              return false;
-      }
-    else
-    {
-        err = "The value of primary key must be set in the json object for update";
-        return false;
-    }
-      if(!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1]))
-      {
-          if(!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, false))
-              return false;
-      }
-      if(!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2]))
-      {
-          if(!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, false))
-              return false;
-      }
-      if(!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3]))
-      {
-          if(!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, false))
-              return false;
-      }
-      if(!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4]))
-      {
-          if(!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, false))
-              return false;
-      }
-      if(!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5]))
-      {
-          if(!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, false))
-              return false;
-      }
-      if(!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6]))
-      {
-          if(!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, false))
-              return false;
-      }
-      if(!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7]))
-      {
-          if(!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, false))
-              return false;
-      }
-      if(!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8]))
-      {
-          if(!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, false))
-              return false;
-      }
-      if(!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9]))
-      {
-          if(!validJsonOfField(9, pMasqueradingVector[9], pJson[pMasqueradingVector[9]], err, false))
-              return false;
-      }
-      if(!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10]))
-      {
-          if(!validJsonOfField(10, pMasqueradingVector[10], pJson[pMasqueradingVector[10]], err, false))
-              return false;
-      }
-    }
-    catch(const Json::LogicError &e)
-    {
-      err = e.what();
-      return false;
-    }
-    return true;
-}
-bool Organisations::validJsonOfField(size_t index,
-                                     const std::string &fieldName,
-                                     const Json::Value &pJson,
-                                     std::string &err,
-                                     bool isForCreation)
-{
-    switch(index)
-    {
+bool Organisations::validJsonOfField(
+    size_t index, const std::string& fieldName, const Json::Value& pJson, std::string& err, bool isForCreation) {
+    switch (index) {
         case 0:
-            if(pJson.isNull())
-            {
-                err="The " + fieldName + " column cannot be null";
+            if (pJson.isNull()) {
+                err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-            if(isForCreation)
-            {
-                err="The automatic primary key cannot be set";
+            if (isForCreation) {
+                err = "The automatic primary key cannot be set";
                 return false;
             }
-            if(!pJson.isInt())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isInt()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 1:
-            if(pJson.isNull())
-            {
-                err="The " + fieldName + " column cannot be null";
+            if (pJson.isNull()) {
+                err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-            if(!pJson.isString())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isString()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 2:
-            if(pJson.isNull())
-            {
+            if (pJson.isNull()) {
                 return true;
             }
-            if(!pJson.isString())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isString()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 3:
-            if(pJson.isNull())
-            {
+            if (pJson.isNull()) {
                 return true;
             }
-            if(!pJson.isString())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isString()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 4:
-            if(pJson.isNull())
-            {
-                err="The " + fieldName + " column cannot be null";
+            if (pJson.isNull()) {
+                err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-            if(!pJson.isString())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isString()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 5:
-            if(pJson.isNull())
-            {
-                err="The " + fieldName + " column cannot be null";
+            if (pJson.isNull()) {
+                err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-            if(!pJson.isInt64())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isInt64()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 6:
-            if(pJson.isNull())
-            {
-                err="The " + fieldName + " column cannot be null";
+            if (pJson.isNull()) {
+                err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-            if(!pJson.isInt64())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isInt64()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 7:
-            if(pJson.isNull())
-            {
+            if (pJson.isNull()) {
                 return true;
             }
-            if(!pJson.isInt64())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isInt64()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 8:
-            if(pJson.isNull())
-            {
-                err="The " + fieldName + " column cannot be null";
+            if (pJson.isNull()) {
+                err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-            if(!pJson.isInt64())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isInt64()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 9:
-            if(pJson.isNull())
-            {
+            if (pJson.isNull()) {
                 return true;
             }
-            if(!pJson.isInt64())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isInt64()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 10:
-            if(pJson.isNull())
-            {
+            if (pJson.isNull()) {
                 return true;
             }
-            if(!pJson.isInt())
-            {
-                err="Type error in the "+fieldName+" field";
+            if (!pJson.isInt()) {
+                err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         default:
-            err="Internal error in the server";
+            err = "Internal error in the server";
             return false;
     }
     return true;

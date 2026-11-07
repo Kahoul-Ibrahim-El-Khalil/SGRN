@@ -61,6 +61,8 @@ public:
         static const std::string _created_at;
         static const std::string _updated_at;
         static const std::string _expires_at;
+        static const std::string _is_encrypted;
+        static const std::string _pending_key_id;
     };
 
     static const int primaryKeyNumber;
@@ -253,8 +255,26 @@ public:
     /// Set the value of the column expires_at
     void setExpiresAt(const ::trantor::Date& pExpiresAt) noexcept;
 
+    /**  For column is_encrypted  */
+    /// Get the value of the column is_encrypted, returns the default value if the column is null
+    const bool& getValueOfIsEncrypted() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<bool>& getIsEncrypted() const noexcept;
+    /// Set the value of the column is_encrypted
+    void setIsEncrypted(const bool& pIsEncrypted) noexcept;
+
+    /**  For column pending_key_id  */
+    /// Get the value of the column pending_key_id, returns the default value if the column is null
+    const std::string& getValueOfPendingKeyId() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<std::string>& getPendingKeyId() const noexcept;
+    /// Set the value of the column pending_key_id
+    void setPendingKeyId(const std::string& pPendingKeyId) noexcept;
+    void setPendingKeyId(std::string&& pPendingKeyId) noexcept;
+    void setPendingKeyIdToNull() noexcept;
+
     static size_t getColumnNumber() noexcept {
-        return 17;
+        return 19;
     }
     static const std::string& getColumnName(size_t index) noexcept(false);
 
@@ -294,6 +314,8 @@ private:
     std::shared_ptr<::trantor::Date> createdAt_;
     std::shared_ptr<::trantor::Date> updatedAt_;
     std::shared_ptr<::trantor::Date> expiresAt_;
+    std::shared_ptr<bool> isEncrypted_;
+    std::shared_ptr<std::string> pendingKeyId_;
     struct MetaData {
         const std::string colName_;
         const std::string colType_;
@@ -304,7 +326,7 @@ private:
         const bool notNull_;
     };
     static const std::vector<MetaData> metaData_;
-    bool dirtyFlag_[17] = {false};
+    bool dirtyFlag_[19] = {false};
 
 public:
     static const std::string& sqlForFindingByPrimaryKey() {
@@ -394,6 +416,15 @@ public:
         if (!dirtyFlag_[16]) {
             needSelection = true;
         }
+        sql += "is_encrypted,";
+        ++parametersCount;
+        if (!dirtyFlag_[17]) {
+            needSelection = true;
+        }
+        if (dirtyFlag_[18]) {
+            sql += "pending_key_id,";
+            ++parametersCount;
+        }
         if (parametersCount > 0) {
             sql[sql.length() - 1] = ')';
             sql += " values (";
@@ -482,6 +513,16 @@ public:
             sql.append(placeholderStr, n);
         } else {
             sql += "default,";
+        }
+        if (dirtyFlag_[17]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        } else {
+            sql += "default,";
+        }
+        if (dirtyFlag_[18]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
         }
         if (parametersCount > 0) {
             sql.resize(sql.length() - 1);

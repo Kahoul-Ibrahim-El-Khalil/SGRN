@@ -15,6 +15,7 @@ import {
     Info,
     Edit3,
     Eye,
+    Lock,
 } from "lucide-react";
 import type { DriveFolder, DriveFile } from "@sgrn/types";
 import type { DriveMoveItem } from "@/pages/drive/types";
@@ -262,6 +263,15 @@ export function FileGrid({
                             <div className="file-card-meta">
                                 <span className="file-card-type">{file.extension || "DATA"}</span>
                                 <span className="file-card-size">{formatFileSize(file.size)}</span>
+                                {file.is_encrypted && (
+                                    <span
+                                        className="inline-flex items-center gap-0.5 text-[9px] font-mono text-amber-500 font-semibold"
+                                        title={`Encrypted (Key: ${file.key_id || "AES-256-GCM"})`}
+                                    >
+                                        <Lock size={10} className="stroke-[2.5]" />
+                                        <span>ENC</span>
+                                    </span>
+                                )}
                             </div>
                         </div>
 

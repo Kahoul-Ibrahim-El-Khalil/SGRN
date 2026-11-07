@@ -21,7 +21,7 @@ import { fetchOrganisations, fetchDomains, fetchStatuses } from "@/pages/signin/
 import SystemConfigPanel from "@/pages/admin/system_config";
 import PermissionsPanel from "@/pages/admin/access";
 import AnalyticsPanel from "@/pages/admin/analytics";
-import { FormatsPanel, QuotasPanel } from "@/pages/admin/storage_governance";
+import { FormatsPanel, QuotasPanel, EncryptionPoliciesPanel } from "@/pages/admin/storage_governance";
 
 import { UserStatus } from "@/types";
 
@@ -129,7 +129,7 @@ export default function AdminTab() {
     const [scanningOrphans, setScanningOrphans] = useState(false);
     const [purgeResult, setPurgeResult] = useState<any>(null);
     const [purgingOrphans, setPurgingOrphans] = useState(false);
-    const [storageView, setStorageView] = useState<"census" | "formats" | "quotas">("census");
+    const [storageView, setStorageView] = useState<"census" | "formats" | "quotas" | "encryption">("census");
 
     useEffect(() => {
         fetchOrganisations().then(setOrganisations);
@@ -858,6 +858,12 @@ export default function AdminTab() {
                                     >
                                         <span>Quotas</span>
                                     </button>
+                                    <button
+                                        className={`admin-mode-btn ${storageView === "encryption" ? "admin-mode-btn-active" : ""}`}
+                                        onClick={() => setStorageView("encryption")}
+                                    >
+                                        <span>Encryption</span>
+                                    </button>
                                 </div>
                             </div>
                             {storageView === "census" && (
@@ -1043,7 +1049,10 @@ export default function AdminTab() {
                                                 </div>
                                             ) : (
                                                 <div className="query-help">
-                                                    <em>Orphan physical purge requires Platform Administrator privileges. Inspection is read-only for tenant administrators.</em>
+                                                    <em>
+                                                        Orphan physical purge requires Platform Administrator privileges. Inspection is
+                                                        read-only for tenant administrators.
+                                                    </em>
                                                 </div>
                                             )}
                                             {purgeResult && (
@@ -1063,6 +1072,7 @@ export default function AdminTab() {
                             )}
                             {storageView === "formats" && <FormatsPanel />}
                             {storageView === "quotas" && <QuotasPanel />}
+                            {storageView === "encryption" && <EncryptionPoliciesPanel />}
                         </div>
                     )}
 
