@@ -122,6 +122,14 @@ Task<HttpResponsePtr> AdminApiHandler::handleRegisterUser(HttpRequestPtr tsp_req
     const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
 
     if (!is_platform) {
+        if (json->isMember("is_platform_admin") && (*json)["is_platform_admin"].asBool()) {
+            co_return createErrorResponse(
+                "Forbidden: cannot grant platform admin status (escalation prohibited)", k403Forbidden, "AdminApi");
+        }
+        std::string req_role = json->get("role", "user").asString();
+        if (req_role == "platform_admin") {
+            co_return createErrorResponse("Forbidden: cannot grant platform admin role (escalation prohibited)", k403Forbidden, "AdminApi");
+        }
         if (!payload_opt->organisation.empty() && payload_opt->organisation != session_org) {
             co_return createErrorResponse("Forbidden: cannot register user in another organisation", k403Forbidden, "AdminApi");
         }
@@ -501,6 +509,35 @@ Task<HttpResponsePtr> AdminApiHandler::handleGrantPermission(HttpRequestPtr tsp_
         const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
         const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
 
+        // Resolve caller session user ID for self-grant prevention
+        int32_t actor_id = 0;
+        std::string actor_name;
+        if (tsp_req->attributes()->find("session_json")) {
+            const auto& session = tsp_req->attributes()->get<Json::Value>("session_json");
+            if (session.isMember("user")) {
+                if (session["user"].isMember("id") && session["user"]["id"].isInt()) {
+                    actor_id = session["user"]["id"].asInt();
+                }
+                if (session["user"].isMember("email") && session["user"]["email"].isString()) {
+                    actor_name = session["user"]["email"].asString();
+                }
+            }
+        }
+
+        // Escalation guard: self-grant is strictly forbidden (checked before DB dependency)
+        if ((actor_id > 0 && json->isMember("user_id") && (*json)["user_id"].isInt() && (*json)["user_id"].asInt() == actor_id) ||
+            (!actor_name.empty() && json->isMember("email") && (*json)["email"].isString() &&
+                sgrn::utils::strings::trim((*json)["email"].asString()) == actor_name)) {
+            auto db_res = sgrn::datastore::core::getDbClient();
+            if (!db_res.hasError()) {
+                co_await sgrn::datastore::audit::AuditLogger::log(db_res.value(), session_org, "user", actor_id, actor_name,
+                    "permission.grant_rejected_self_grant", "user", std::to_string(actor_id), tsp_req->getPeerAddr().toIp(), *json,
+                    "failed");
+            }
+            co_return createErrorResponse(
+                "Forbidden: cannot grant permissions to yourself (self-grant prohibited)", k403Forbidden, "AdminApi");
+        }
+
         // Resolve the user by id or email (must exist and not be soft-deleted).
         int32_t user_id = 0;
         std::string email;
@@ -596,6 +633,8 @@ Task<HttpResponsePtr> AdminApiHandler::handleGrantPermission(HttpRequestPtr tsp_
         if (first_grant) {
             out["note"] = "First domain grant for this user — storage access unlocked (zero-trust default was deny-all).";
         }
+        co_await sgrn::datastore::audit::AuditLogger::log(db, organisation, "user", actor_id, actor_name, "permission.granted", "user",
+            std::to_string(user_id), tsp_req->getPeerAddr().toIp(), *json, "success");
         co_return createJsonResponse(out, k200OK);
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Permission grant DB error: {}", e.base().what());
@@ -902,15 +941,30 @@ Task<HttpResponsePtr> AdminApiHandler::handleAssignRole(HttpRequestPtr tsp_req) 
             co_return createErrorResponse("Specify either 'user_id' or 'automated_service_id'", k400BadRequest, "AdminApi");
         }
 
+        // Escalation guard: self-grant is strictly forbidden (checked before DB dependency)
+        if (user_id.has_value() && *user_id == actor_id) {
+            auto db_res = sgrn::datastore::core::getDbClient();
+            if (!db_res.hasError()) {
+                co_await sgrn::datastore::audit::AuditLogger::log(db_res.value(), org, "user", actor_id, actor_name,
+                    "role.assign_rejected_self_grant", "user", std::to_string(*user_id), tsp_req->getPeerAddr().toIp(), *json, "failed");
+            }
+            co_return createErrorResponse("Forbidden: cannot assign roles to yourself (self-grant prohibited)", k403Forbidden, "AdminApi");
+        }
+
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError())
             co_return sgrn::createJsonResponse(db_res);
         auto db = db_res.value();
 
         if (!is_platform) {
-            auto role_hit = co_await db->execSqlCoro("SELECT organisation FROM core.roles WHERE id = $1", role_id);
+            auto role_hit = co_await db->execSqlCoro("SELECT organisation, is_system FROM core.roles WHERE id = $1", role_id);
             if (role_hit.empty() || role_hit[0]["organisation"].as<std::string>() != org) {
                 co_return createErrorResponse("Role not found in caller's organisation", k404NotFound, "AdminApi");
+            }
+            if (role_hit[0]["is_system"].as<bool>()) {
+                co_await sgrn::datastore::audit::AuditLogger::log(db, org, "user", actor_id, actor_name, "role.assign_rejected_above_level",
+                    "role", std::to_string(role_id), tsp_req->getPeerAddr().toIp(), *json, "failed");
+                co_return createErrorResponse("Forbidden: cannot assign system roles (above level)", k403Forbidden, "AdminApi");
             }
             if (user_id.has_value()) {
                 auto u_hit = co_await db->execSqlCoro("SELECT organisation FROM core.users WHERE id = $1 AND deleted_at IS NULL", *user_id);
@@ -974,10 +1028,32 @@ Task<HttpResponsePtr> AdminApiHandler::handleRevokeRole(HttpRequestPtr tsp_req) 
             co_return sgrn::createJsonResponse(db_res);
         auto db = db_res.value();
 
+        // Escalation guard: protect the last active platform administrator
+        if (user_id.has_value()) {
+            auto u_hit =
+                co_await db->execSqlCoro("SELECT is_platform_admin FROM core.users WHERE id = $1 AND deleted_at IS NULL", *user_id);
+            if (!u_hit.empty() && u_hit[0]["is_platform_admin"].as<bool>()) {
+                auto cnt =
+                    co_await db->execSqlCoro("SELECT COUNT(*) FROM core.users WHERE is_platform_admin = true AND deleted_at IS NULL");
+                if (!cnt.empty() && cnt[0][0].as<int64_t>() <= 1) {
+                    co_await sgrn::datastore::audit::AuditLogger::log(db, org, "user", actor_id, actor_name,
+                        "role.revoke_rejected_last_admin", "user", std::to_string(*user_id), tsp_req->getPeerAddr().toIp(), *json,
+                        "failed");
+                    co_return createErrorResponse(
+                        "Forbidden: cannot revoke role from the last active platform administrator", k403Forbidden, "AdminApi");
+                }
+            }
+        }
+
         if (!is_platform) {
-            auto role_hit = co_await db->execSqlCoro("SELECT organisation FROM core.roles WHERE id = $1", role_id);
+            auto role_hit = co_await db->execSqlCoro("SELECT organisation, is_system FROM core.roles WHERE id = $1", role_id);
             if (role_hit.empty() || role_hit[0]["organisation"].as<std::string>() != org) {
                 co_return createErrorResponse("Role not found in caller's organisation", k404NotFound, "AdminApi");
+            }
+            if (role_hit[0]["is_system"].as<bool>()) {
+                co_await sgrn::datastore::audit::AuditLogger::log(db, org, "user", actor_id, actor_name, "role.revoke_rejected_above_level",
+                    "role", std::to_string(role_id), tsp_req->getPeerAddr().toIp(), *json, "failed");
+                co_return createErrorResponse("Forbidden: cannot revoke system roles (above level)", k403Forbidden, "AdminApi");
             }
             if (user_id.has_value()) {
                 auto u_hit = co_await db->execSqlCoro("SELECT organisation FROM core.users WHERE id = $1 AND deleted_at IS NULL", *user_id);
@@ -1155,6 +1231,65 @@ Task<HttpResponsePtr> AdminApiHandler::handlePurgeAuditLogs(HttpRequestPtr tsp_r
     } catch (const std::exception& e) {
         ERROR_LOG("Failed to purge audit logs: {}", e.what());
         co_return createErrorResponse(std::string("Failed to purge audit logs: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handleVerifyAuditLogs(HttpRequestPtr tsp_req) {
+    try {
+        const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
+        const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
+
+        std::string target_org = session_org;
+        const std::string q_org = tsp_req->getParameter("organisation");
+        if (!q_org.empty()) {
+            if (!is_platform && q_org != session_org) {
+                co_return createErrorResponse("Forbidden: cannot verify audit logs of another organisation", k403Forbidden, "AdminApi");
+            }
+            target_org = q_org;
+        } else if (is_platform) {
+            target_org = ""; // verify all
+        }
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError())
+            co_return sgrn::createJsonResponse(db_res);
+        auto db = db_res.value();
+
+        auto verify_res = co_await sgrn::datastore::audit::AuditLogger::verifyChain(db, target_org);
+
+        // Audit the verification run
+        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
+        const int32_t actor_id = session["user"]["id"].asInt();
+        const std::string actor_name = session["user"]["email"].asString();
+
+        Json::Value log_details;
+        log_details["target_organisation"] = target_org.empty() ? "all" : target_org;
+        log_details["is_valid"] = verify_res.is_valid;
+        log_details["total_rows"] = static_cast<Json::Int64>(verify_res.total_rows);
+        log_details["verified_checkpoints"] = static_cast<Json::Int64>(verify_res.verified_checkpoints);
+
+        co_await sgrn::datastore::audit::AuditLogger::log(db, session_org, "user", actor_id, actor_name, "audit.verified", "audit_logs",
+            target_org, tsp_req->getPeerAddr().toIp(), log_details, verify_res.is_valid ? "success" : "failure");
+
+        Json::Value resp;
+        resp["is_valid"] = verify_res.is_valid;
+        resp["total_rows"] = static_cast<Json::Int64>(verify_res.total_rows);
+        resp["verified_checkpoints"] = static_cast<Json::Int64>(verify_res.verified_checkpoints);
+        resp["status"] = verify_res.is_valid ? "verified" : "tampered";
+        resp["message"] = verify_res.failure_reason;
+        if (!verify_res.is_valid) {
+            if (verify_res.first_broken_seq.has_value()) {
+                resp["first_broken_seq"] = static_cast<Json::Int64>(*verify_res.first_broken_seq);
+            }
+            if (verify_res.first_broken_id.has_value()) {
+                resp["first_broken_id"] = static_cast<Json::Int64>(*verify_res.first_broken_id);
+            }
+        }
+
+        co_return createJsonResponse(resp, verify_res.is_valid ? k200OK : k409Conflict);
+    } catch (const std::exception& e) {
+        ERROR_LOG("Failed to verify audit logs: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to verify audit logs: ") + e.what(), k400BadRequest, "AdminApi");
     }
 }
 

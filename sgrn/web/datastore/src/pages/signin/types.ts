@@ -30,6 +30,10 @@ export interface User {
     storage_limit?: number | null;
     total_entry_count?: number;
     entry_count_limit?: number | null;
+
+    admin_level?: number;
+    admin_level_name?: string;
+    is_platform_admin?: boolean;
 }
 
 export interface LoginResponse {

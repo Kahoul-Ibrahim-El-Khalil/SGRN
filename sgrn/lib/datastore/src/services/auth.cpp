@@ -69,6 +69,8 @@ Task<HttpResponsePtr> performSignInProcess(HttpRequestPtr tsp_http_req, std::str
     }
 
     if (!result_opt || result_opt->empty()) {
+        co_await sgrn::datastore::audit::AuditLogger::log(
+            db_client, "system", "user", std::nullopt, t_email, "auth.failed", "user", t_email, peer_ip, Json::objectValue, "failure");
         co_return sgrn::createJsonResponse(
             BackendError(BackendErrorKind::Auth, "Invalid email or password").setSubCode("Auth.Credentials"));
     }
@@ -102,6 +104,12 @@ Task<HttpResponsePtr> performSignInProcess(HttpRequestPtr tsp_http_req, std::str
         user_data["role"] = Json::Value(Json::objectValue);
         user_data["role"]["name"] = role;
         user_data["role"]["code"] = role_code;
+
+        bool is_platform_admin = row["is_platform_admin"].isNull() ? false : row["is_platform_admin"].as<bool>();
+        user_data["is_platform_admin"] = is_platform_admin;
+        int32_t admin_lvl = is_platform_admin ? 3 : (role == "admin" ? 2 : 0);
+        user_data["admin_level"] = admin_lvl;
+        user_data["admin_level_name"] = admin_lvl == 3 ? "PLATFORM" : (admin_lvl == 2 ? "ORG" : "NONE");
 
         user_data["organisation"] = row["organisation"].isNull() ? "" : row["organisation"].as<std::string>();
         user_data["total_virtual_size"] = row["total_virtual_size"].as<int64_t>();

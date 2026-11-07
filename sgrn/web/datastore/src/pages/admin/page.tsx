@@ -78,6 +78,18 @@ interface AdminUserListEntry {
 export default function AdminTab() {
     const { showEvent } = useEvent();
     const [mode, setMode] = useState<RegistrationMode>("user");
+    const [isPlatformAdmin] = useState<boolean>(() => {
+        try {
+            const raw = sessionStorage.getItem("user_info") || localStorage.getItem("user_info");
+            if (raw) {
+                const u = JSON.parse(raw);
+                return u.is_platform_admin === true || u.admin_level === 3;
+            }
+        } catch {
+            // fallback
+        }
+        return false;
+    });
 
     // User State
     const [organisations, setOrganisations] = useState<IdNamePair[]>([]);
@@ -510,12 +522,14 @@ export default function AdminTab() {
                         >
                             <Database size={16} /> <span>Storage Admin</span>
                         </button>
-                        <button
-                            className={`admin-mode-btn ${mode === "system" ? "admin-mode-btn-active" : ""}`}
-                            onClick={() => setMode("system")}
-                        >
-                            <SlidersHorizontal size={16} /> <span>System Config</span>
-                        </button>
+                        {isPlatformAdmin && (
+                            <button
+                                className={`admin-mode-btn ${mode === "system" ? "admin-mode-btn-active" : ""}`}
+                                onClick={() => setMode("system")}
+                            >
+                                <SlidersHorizontal size={16} /> <span>System Config</span>
+                            </button>
+                        )}
                         <button
                             className={`admin-mode-btn ${mode === "permissions" ? "admin-mode-btn-active" : ""}`}
                             onClick={() => setMode("permissions")}
@@ -1006,26 +1020,32 @@ export default function AdminTab() {
                                                     </table>
                                                 </div>
                                             )}
-                                            <div className="query-controls-row">
-                                                <button
-                                                    className="btn-desktop"
-                                                    onClick={() => purgeStorageOrphans(true)}
-                                                    disabled={purgingOrphans}
-                                                >
-                                                    DRY-RUN PURGE
-                                                </button>
-                                                <button
-                                                    className="btn-desktop-primary"
-                                                    onClick={() => purgeStorageOrphans(false)}
-                                                    disabled={purgingOrphans}
-                                                >
-                                                    {purgingOrphans ? (
-                                                        <Loader2 className="animate-spin" size={18} />
-                                                    ) : (
-                                                        <span>CONFIRM PURGE</span>
-                                                    )}
-                                                </button>
-                                            </div>
+                                            {isPlatformAdmin ? (
+                                                <div className="query-controls-row">
+                                                    <button
+                                                        className="btn-desktop"
+                                                        onClick={() => purgeStorageOrphans(true)}
+                                                        disabled={purgingOrphans}
+                                                    >
+                                                        DRY-RUN PURGE
+                                                    </button>
+                                                    <button
+                                                        className="btn-desktop-primary"
+                                                        onClick={() => purgeStorageOrphans(false)}
+                                                        disabled={purgingOrphans}
+                                                    >
+                                                        {purgingOrphans ? (
+                                                            <Loader2 className="animate-spin" size={18} />
+                                                        ) : (
+                                                            <span>CONFIRM PURGE</span>
+                                                        )}
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <div className="query-help">
+                                                    <em>Orphan physical purge requires Platform Administrator privileges. Inspection is read-only for tenant administrators.</em>
+                                                </div>
+                                            )}
                                             {purgeResult && (
                                                 <div className="explorer-body">
                                                     <pre>{JSON.stringify(purgeResult, null, 2)}</pre>
@@ -1046,7 +1066,7 @@ export default function AdminTab() {
                         </div>
                     )}
 
-                    {mode === "system" && <SystemConfigPanel />}
+                    {mode === "system" && isPlatformAdmin && <SystemConfigPanel />}
 
                     {mode === "permissions" && <PermissionsPanel />}
 

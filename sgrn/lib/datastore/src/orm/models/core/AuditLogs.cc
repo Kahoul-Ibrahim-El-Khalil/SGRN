@@ -25,6 +25,9 @@ const std::string AuditLogs::Cols::_ip = "\"ip\"";
 const std::string AuditLogs::Cols::_details = "\"details\"";
 const std::string AuditLogs::Cols::_status = "\"status\"";
 const std::string AuditLogs::Cols::_created_at = "\"created_at\"";
+const std::string AuditLogs::Cols::_seq = "\"seq\"";
+const std::string AuditLogs::Cols::_prev_hash = "\"prev_hash\"";
+const std::string AuditLogs::Cols::_row_hash = "\"row_hash\"";
 const std::string AuditLogs::primaryKeyName = "id";
 const bool AuditLogs::hasPrimaryKey = true;
 const std::string AuditLogs::tableName = "core.\"audit_logs\"";
@@ -41,7 +44,10 @@ const std::vector<typename AuditLogs::MetaData> AuditLogs::metaData_={
 {"ip","std::string","inet",0,0,0,0},
 {"details","std::string","jsonb",0,0,0,0},
 {"status","std::string","text",0,0,0,1},
-{"created_at","::trantor::Date","timestamp with time zone",0,0,0,1}
+{"created_at","::trantor::Date","timestamp with time zone",0,0,0,1},
+{"seq","int64_t","bigint",8,0,0,1},
+{"prev_hash","std::string","text",0,0,0,1},
+{"row_hash","std::string","text",0,0,0,1}
 };
 const std::string &AuditLogs::getColumnName(size_t index) noexcept(false)
 {
@@ -118,11 +124,23 @@ AuditLogs::AuditLogs(const Row &r, const ssize_t indexOffset) noexcept
                 createdAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
             }
         }
+        if(!r["seq"].isNull())
+        {
+            seq_=std::make_shared<int64_t>(r["seq"].as<int64_t>());
+        }
+        if(!r["prev_hash"].isNull())
+        {
+            prevHash_=std::make_shared<std::string>(r["prev_hash"].as<std::string>());
+        }
+        if(!r["row_hash"].isNull())
+        {
+            rowHash_=std::make_shared<std::string>(r["row_hash"].as<std::string>());
+        }
     }
     else
     {
         size_t offset = (size_t)indexOffset;
-        if(offset + 12 > r.size())
+        if(offset + 15 > r.size())
         {
             LOG_FATAL << "Invalid SQL result for this model";
             return;
@@ -206,13 +224,28 @@ AuditLogs::AuditLogs(const Row &r, const ssize_t indexOffset) noexcept
                 createdAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
             }
         }
+        index = offset + 12;
+        if(!r[index].isNull())
+        {
+            seq_=std::make_shared<int64_t>(r[index].as<int64_t>());
+        }
+        index = offset + 13;
+        if(!r[index].isNull())
+        {
+            prevHash_=std::make_shared<std::string>(r[index].as<std::string>());
+        }
+        index = offset + 14;
+        if(!r[index].isNull())
+        {
+            rowHash_=std::make_shared<std::string>(r[index].as<std::string>());
+        }
     }
 
 }
 
 AuditLogs::AuditLogs(const Json::Value &pJson, const std::vector<std::string> &pMasqueradingVector) noexcept(false)
 {
-    if(pMasqueradingVector.size() != 12)
+    if(pMasqueradingVector.size() != 15)
     {
         LOG_ERROR << "Bad masquerading vector";
         return;
@@ -329,6 +362,30 @@ AuditLogs::AuditLogs(const Json::Value &pJson, const std::vector<std::string> &p
                 }
                 createdAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
             }
+        }
+    }
+    if(!pMasqueradingVector[12].empty() && pJson.isMember(pMasqueradingVector[12]))
+    {
+        dirtyFlag_[12] = true;
+        if(!pJson[pMasqueradingVector[12]].isNull())
+        {
+            seq_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[12]].asInt64());
+        }
+    }
+    if(!pMasqueradingVector[13].empty() && pJson.isMember(pMasqueradingVector[13]))
+    {
+        dirtyFlag_[13] = true;
+        if(!pJson[pMasqueradingVector[13]].isNull())
+        {
+            prevHash_=std::make_shared<std::string>(pJson[pMasqueradingVector[13]].asString());
+        }
+    }
+    if(!pMasqueradingVector[14].empty() && pJson.isMember(pMasqueradingVector[14]))
+    {
+        dirtyFlag_[14] = true;
+        if(!pJson[pMasqueradingVector[14]].isNull())
+        {
+            rowHash_=std::make_shared<std::string>(pJson[pMasqueradingVector[14]].asString());
         }
     }
 }
@@ -449,12 +506,36 @@ AuditLogs::AuditLogs(const Json::Value &pJson) noexcept(false)
             }
         }
     }
+    if(pJson.isMember("seq"))
+    {
+        dirtyFlag_[12]=true;
+        if(!pJson["seq"].isNull())
+        {
+            seq_=std::make_shared<int64_t>((int64_t)pJson["seq"].asInt64());
+        }
+    }
+    if(pJson.isMember("prev_hash"))
+    {
+        dirtyFlag_[13]=true;
+        if(!pJson["prev_hash"].isNull())
+        {
+            prevHash_=std::make_shared<std::string>(pJson["prev_hash"].asString());
+        }
+    }
+    if(pJson.isMember("row_hash"))
+    {
+        dirtyFlag_[14]=true;
+        if(!pJson["row_hash"].isNull())
+        {
+            rowHash_=std::make_shared<std::string>(pJson["row_hash"].asString());
+        }
+    }
 }
 
 void AuditLogs::updateByMasqueradedJson(const Json::Value &pJson,
                                             const std::vector<std::string> &pMasqueradingVector) noexcept(false)
 {
-    if(pMasqueradingVector.size() != 12)
+    if(pMasqueradingVector.size() != 15)
     {
         LOG_ERROR << "Bad masquerading vector";
         return;
@@ -572,6 +653,30 @@ void AuditLogs::updateByMasqueradedJson(const Json::Value &pJson,
             }
         }
     }
+    if(!pMasqueradingVector[12].empty() && pJson.isMember(pMasqueradingVector[12]))
+    {
+        dirtyFlag_[12] = true;
+        if(!pJson[pMasqueradingVector[12]].isNull())
+        {
+            seq_=std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[12]].asInt64());
+        }
+    }
+    if(!pMasqueradingVector[13].empty() && pJson.isMember(pMasqueradingVector[13]))
+    {
+        dirtyFlag_[13] = true;
+        if(!pJson[pMasqueradingVector[13]].isNull())
+        {
+            prevHash_=std::make_shared<std::string>(pJson[pMasqueradingVector[13]].asString());
+        }
+    }
+    if(!pMasqueradingVector[14].empty() && pJson.isMember(pMasqueradingVector[14]))
+    {
+        dirtyFlag_[14] = true;
+        if(!pJson[pMasqueradingVector[14]].isNull())
+        {
+            rowHash_=std::make_shared<std::string>(pJson[pMasqueradingVector[14]].asString());
+        }
+    }
 }
 
 void AuditLogs::updateByJson(const Json::Value &pJson) noexcept(false)
@@ -687,6 +792,30 @@ void AuditLogs::updateByJson(const Json::Value &pJson) noexcept(false)
                 }
                 createdAt_=std::make_shared<::trantor::Date>(t*1000000+decimalNum);
             }
+        }
+    }
+    if(pJson.isMember("seq"))
+    {
+        dirtyFlag_[12] = true;
+        if(!pJson["seq"].isNull())
+        {
+            seq_=std::make_shared<int64_t>((int64_t)pJson["seq"].asInt64());
+        }
+    }
+    if(pJson.isMember("prev_hash"))
+    {
+        dirtyFlag_[13] = true;
+        if(!pJson["prev_hash"].isNull())
+        {
+            prevHash_=std::make_shared<std::string>(pJson["prev_hash"].asString());
+        }
+    }
+    if(pJson.isMember("row_hash"))
+    {
+        dirtyFlag_[14] = true;
+        if(!pJson["row_hash"].isNull())
+        {
+            rowHash_=std::make_shared<std::string>(pJson["row_hash"].asString());
         }
     }
 }
@@ -970,6 +1099,67 @@ void AuditLogs::setCreatedAt(const ::trantor::Date &pCreatedAt) noexcept
     dirtyFlag_[11] = true;
 }
 
+const int64_t &AuditLogs::getValueOfSeq() const noexcept
+{
+    static const int64_t defaultValue = int64_t();
+    if(seq_)
+        return *seq_;
+    return defaultValue;
+}
+const std::shared_ptr<int64_t> &AuditLogs::getSeq() const noexcept
+{
+    return seq_;
+}
+void AuditLogs::setSeq(const int64_t &pSeq) noexcept
+{
+    seq_ = std::make_shared<int64_t>(pSeq);
+    dirtyFlag_[12] = true;
+}
+
+const std::string &AuditLogs::getValueOfPrevHash() const noexcept
+{
+    static const std::string defaultValue = std::string();
+    if(prevHash_)
+        return *prevHash_;
+    return defaultValue;
+}
+const std::shared_ptr<std::string> &AuditLogs::getPrevHash() const noexcept
+{
+    return prevHash_;
+}
+void AuditLogs::setPrevHash(const std::string &pPrevHash) noexcept
+{
+    prevHash_ = std::make_shared<std::string>(pPrevHash);
+    dirtyFlag_[13] = true;
+}
+void AuditLogs::setPrevHash(std::string &&pPrevHash) noexcept
+{
+    prevHash_ = std::make_shared<std::string>(std::move(pPrevHash));
+    dirtyFlag_[13] = true;
+}
+
+const std::string &AuditLogs::getValueOfRowHash() const noexcept
+{
+    static const std::string defaultValue = std::string();
+    if(rowHash_)
+        return *rowHash_;
+    return defaultValue;
+}
+const std::shared_ptr<std::string> &AuditLogs::getRowHash() const noexcept
+{
+    return rowHash_;
+}
+void AuditLogs::setRowHash(const std::string &pRowHash) noexcept
+{
+    rowHash_ = std::make_shared<std::string>(pRowHash);
+    dirtyFlag_[14] = true;
+}
+void AuditLogs::setRowHash(std::string &&pRowHash) noexcept
+{
+    rowHash_ = std::make_shared<std::string>(std::move(pRowHash));
+    dirtyFlag_[14] = true;
+}
+
 void AuditLogs::updateId(const uint64_t id)
 {
 }
@@ -987,7 +1177,10 @@ const std::vector<std::string> &AuditLogs::insertColumns() noexcept
         "ip",
         "details",
         "status",
-        "created_at"
+        "created_at",
+        "seq",
+        "prev_hash",
+        "row_hash"
     };
     return inCols;
 }
@@ -1115,6 +1308,39 @@ void AuditLogs::outputArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
+    if(dirtyFlag_[12])
+    {
+        if(getSeq())
+        {
+            binder << getValueOfSeq();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
+    if(dirtyFlag_[13])
+    {
+        if(getPrevHash())
+        {
+            binder << getValueOfPrevHash();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
+    if(dirtyFlag_[14])
+    {
+        if(getRowHash())
+        {
+            binder << getValueOfRowHash();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
 }
 
 const std::vector<std::string> AuditLogs::updateColumns() const
@@ -1163,6 +1389,18 @@ const std::vector<std::string> AuditLogs::updateColumns() const
     if(dirtyFlag_[11])
     {
         ret.push_back(getColumnName(11));
+    }
+    if(dirtyFlag_[12])
+    {
+        ret.push_back(getColumnName(12));
+    }
+    if(dirtyFlag_[13])
+    {
+        ret.push_back(getColumnName(13));
+    }
+    if(dirtyFlag_[14])
+    {
+        ret.push_back(getColumnName(14));
     }
     return ret;
 }
@@ -1290,6 +1528,39 @@ void AuditLogs::updateArgs(drogon::orm::internal::SqlBinder &binder) const
             binder << nullptr;
         }
     }
+    if(dirtyFlag_[12])
+    {
+        if(getSeq())
+        {
+            binder << getValueOfSeq();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
+    if(dirtyFlag_[13])
+    {
+        if(getPrevHash())
+        {
+            binder << getValueOfPrevHash();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
+    if(dirtyFlag_[14])
+    {
+        if(getRowHash())
+        {
+            binder << getValueOfRowHash();
+        }
+        else
+        {
+            binder << nullptr;
+        }
+    }
 }
 Json::Value AuditLogs::toJson() const
 {
@@ -1390,6 +1661,30 @@ Json::Value AuditLogs::toJson() const
     {
         ret["created_at"]=Json::Value();
     }
+    if(getSeq())
+    {
+        ret["seq"]=(Json::Int64)getValueOfSeq();
+    }
+    else
+    {
+        ret["seq"]=Json::Value();
+    }
+    if(getPrevHash())
+    {
+        ret["prev_hash"]=getValueOfPrevHash();
+    }
+    else
+    {
+        ret["prev_hash"]=Json::Value();
+    }
+    if(getRowHash())
+    {
+        ret["row_hash"]=getValueOfRowHash();
+    }
+    else
+    {
+        ret["row_hash"]=Json::Value();
+    }
     return ret;
 }
 
@@ -1402,7 +1697,7 @@ Json::Value AuditLogs::toMasqueradedJson(
     const std::vector<std::string> &pMasqueradingVector) const
 {
     Json::Value ret;
-    if(pMasqueradingVector.size() == 12)
+    if(pMasqueradingVector.size() == 15)
     {
         if(!pMasqueradingVector[0].empty())
         {
@@ -1536,6 +1831,39 @@ Json::Value AuditLogs::toMasqueradedJson(
                 ret[pMasqueradingVector[11]]=Json::Value();
             }
         }
+        if(!pMasqueradingVector[12].empty())
+        {
+            if(getSeq())
+            {
+                ret[pMasqueradingVector[12]]=(Json::Int64)getValueOfSeq();
+            }
+            else
+            {
+                ret[pMasqueradingVector[12]]=Json::Value();
+            }
+        }
+        if(!pMasqueradingVector[13].empty())
+        {
+            if(getPrevHash())
+            {
+                ret[pMasqueradingVector[13]]=getValueOfPrevHash();
+            }
+            else
+            {
+                ret[pMasqueradingVector[13]]=Json::Value();
+            }
+        }
+        if(!pMasqueradingVector[14].empty())
+        {
+            if(getRowHash())
+            {
+                ret[pMasqueradingVector[14]]=getValueOfRowHash();
+            }
+            else
+            {
+                ret[pMasqueradingVector[14]]=Json::Value();
+            }
+        }
         return ret;
     }
     LOG_ERROR << "Masquerade failed";
@@ -1635,6 +1963,30 @@ Json::Value AuditLogs::toMasqueradedJson(
     {
         ret["created_at"]=Json::Value();
     }
+    if(getSeq())
+    {
+        ret["seq"]=(Json::Int64)getValueOfSeq();
+    }
+    else
+    {
+        ret["seq"]=Json::Value();
+    }
+    if(getPrevHash())
+    {
+        ret["prev_hash"]=getValueOfPrevHash();
+    }
+    else
+    {
+        ret["prev_hash"]=Json::Value();
+    }
+    if(getRowHash())
+    {
+        ret["row_hash"]=getValueOfRowHash();
+    }
+    else
+    {
+        ret["row_hash"]=Json::Value();
+    }
     return ret;
 }
 
@@ -1725,13 +2077,43 @@ bool AuditLogs::validateJsonForCreation(const Json::Value &pJson, std::string &e
         if(!validJsonOfField(11, "created_at", pJson["created_at"], err, true))
             return false;
     }
+    if(pJson.isMember("seq"))
+    {
+        if(!validJsonOfField(12, "seq", pJson["seq"], err, true))
+            return false;
+    }
+    else
+    {
+        err="The seq column cannot be null";
+        return false;
+    }
+    if(pJson.isMember("prev_hash"))
+    {
+        if(!validJsonOfField(13, "prev_hash", pJson["prev_hash"], err, true))
+            return false;
+    }
+    else
+    {
+        err="The prev_hash column cannot be null";
+        return false;
+    }
+    if(pJson.isMember("row_hash"))
+    {
+        if(!validJsonOfField(14, "row_hash", pJson["row_hash"], err, true))
+            return false;
+    }
+    else
+    {
+        err="The row_hash column cannot be null";
+        return false;
+    }
     return true;
 }
 bool AuditLogs::validateMasqueradedJsonForCreation(const Json::Value &pJson,
                                                    const std::vector<std::string> &pMasqueradingVector,
                                                    std::string &err)
 {
-    if(pMasqueradingVector.size() != 12)
+    if(pMasqueradingVector.size() != 15)
     {
         err = "Bad masquerading vector";
         return false;
@@ -1858,6 +2240,45 @@ bool AuditLogs::validateMasqueradedJsonForCreation(const Json::Value &pJson,
                   return false;
           }
       }
+      if(!pMasqueradingVector[12].empty())
+      {
+          if(pJson.isMember(pMasqueradingVector[12]))
+          {
+              if(!validJsonOfField(12, pMasqueradingVector[12], pJson[pMasqueradingVector[12]], err, true))
+                  return false;
+          }
+        else
+        {
+            err="The " + pMasqueradingVector[12] + " column cannot be null";
+            return false;
+        }
+      }
+      if(!pMasqueradingVector[13].empty())
+      {
+          if(pJson.isMember(pMasqueradingVector[13]))
+          {
+              if(!validJsonOfField(13, pMasqueradingVector[13], pJson[pMasqueradingVector[13]], err, true))
+                  return false;
+          }
+        else
+        {
+            err="The " + pMasqueradingVector[13] + " column cannot be null";
+            return false;
+        }
+      }
+      if(!pMasqueradingVector[14].empty())
+      {
+          if(pJson.isMember(pMasqueradingVector[14]))
+          {
+              if(!validJsonOfField(14, pMasqueradingVector[14], pJson[pMasqueradingVector[14]], err, true))
+                  return false;
+          }
+        else
+        {
+            err="The " + pMasqueradingVector[14] + " column cannot be null";
+            return false;
+        }
+      }
     }
     catch(const Json::LogicError &e)
     {
@@ -1933,13 +2354,28 @@ bool AuditLogs::validateJsonForUpdate(const Json::Value &pJson, std::string &err
         if(!validJsonOfField(11, "created_at", pJson["created_at"], err, false))
             return false;
     }
+    if(pJson.isMember("seq"))
+    {
+        if(!validJsonOfField(12, "seq", pJson["seq"], err, false))
+            return false;
+    }
+    if(pJson.isMember("prev_hash"))
+    {
+        if(!validJsonOfField(13, "prev_hash", pJson["prev_hash"], err, false))
+            return false;
+    }
+    if(pJson.isMember("row_hash"))
+    {
+        if(!validJsonOfField(14, "row_hash", pJson["row_hash"], err, false))
+            return false;
+    }
     return true;
 }
 bool AuditLogs::validateMasqueradedJsonForUpdate(const Json::Value &pJson,
                                                  const std::vector<std::string> &pMasqueradingVector,
                                                  std::string &err)
 {
-    if(pMasqueradingVector.size() != 12)
+    if(pMasqueradingVector.size() != 15)
     {
         err = "Bad masquerading vector";
         return false;
@@ -2008,6 +2444,21 @@ bool AuditLogs::validateMasqueradedJsonForUpdate(const Json::Value &pJson,
       if(!pMasqueradingVector[11].empty() && pJson.isMember(pMasqueradingVector[11]))
       {
           if(!validJsonOfField(11, pMasqueradingVector[11], pJson[pMasqueradingVector[11]], err, false))
+              return false;
+      }
+      if(!pMasqueradingVector[12].empty() && pJson.isMember(pMasqueradingVector[12]))
+      {
+          if(!validJsonOfField(12, pMasqueradingVector[12], pJson[pMasqueradingVector[12]], err, false))
+              return false;
+      }
+      if(!pMasqueradingVector[13].empty() && pJson.isMember(pMasqueradingVector[13]))
+      {
+          if(!validJsonOfField(13, pMasqueradingVector[13], pJson[pMasqueradingVector[13]], err, false))
+              return false;
+      }
+      if(!pMasqueradingVector[14].empty() && pJson.isMember(pMasqueradingVector[14]))
+      {
+          if(!validJsonOfField(14, pMasqueradingVector[14], pJson[pMasqueradingVector[14]], err, false))
               return false;
       }
     }
@@ -2175,6 +2626,42 @@ bool AuditLogs::validJsonOfField(size_t index,
             }
             break;
         case 11:
+            if(pJson.isNull())
+            {
+                err="The " + fieldName + " column cannot be null";
+                return false;
+            }
+            if(!pJson.isString())
+            {
+                err="Type error in the "+fieldName+" field";
+                return false;
+            }
+            break;
+        case 12:
+            if(pJson.isNull())
+            {
+                err="The " + fieldName + " column cannot be null";
+                return false;
+            }
+            if(!pJson.isInt64())
+            {
+                err="Type error in the "+fieldName+" field";
+                return false;
+            }
+            break;
+        case 13:
+            if(pJson.isNull())
+            {
+                err="The " + fieldName + " column cannot be null";
+                return false;
+            }
+            if(!pJson.isString())
+            {
+                err="Type error in the "+fieldName+" field";
+                return false;
+            }
+            break;
+        case 14:
             if(pJson.isNull())
             {
                 err="The " + fieldName + " column cannot be null";

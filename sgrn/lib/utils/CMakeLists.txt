@@ -6,6 +6,7 @@ set(sgrn_utils_LIB_TYPE SHARED)
 # ── Sources ───────────────────────────────────────────────────────────────────
 set(SOURCES
     src/compression.cpp
+    src/crypto.cpp
     src/jwt.cpp
     src/xml.cpp
     src/xml_impl.c
@@ -16,6 +17,7 @@ set(HEADERS
     include/sgrn/utils/app.hpp
     include/sgrn/utils/compression.hpp
     include/sgrn/utils/concurrent-queue.hpp
+    include/sgrn/utils/crypto.hpp
     include/sgrn/utils/encoding.hpp
     include/sgrn/utils/endianess.hpp
     include/sgrn/utils/env.hpp
@@ -25,6 +27,7 @@ set(HEADERS
     include/sgrn/utils/jsoncpp.hpp
     include/sgrn/utils/json.hpp
     include/sgrn/utils/jwt.hpp
+    include/sgrn/utils/keygen.hpp
     include/sgrn/utils/mime.hpp
     include/sgrn/utils/network.hpp
     include/sgrn/utils/process.hpp

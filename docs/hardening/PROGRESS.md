@@ -9,8 +9,8 @@
 | 3 | Fix cross-organisation leaks and audit purge | done | datastore/hardening | working tree | `docs/admin-route-audit.md` (38 routes, 0 unscoped), `cross_org_auth_test` (7/7 passed) | None |
 | 12 | Fuzzing and regression suite (start early) | todo | datastore/hardening | - | - | - |
 | 4 | Schema for platform/org/domain admins | done | datastore/hardening | working tree | `migrations/003_scoped_admins.sql`, `scoped_admins_test` (ALL CHECKS PASSED) | None |
-| 5 | ScopeFilter and route classification | in progress | datastore/hardening | - | - | - |
-| 6 | Tamper-evident audit log | todo | datastore/hardening | - | - | - |
+| 5 | ScopeFilter and route classification | ready for verification | datastore/hardening | working tree | `docs/authz-matrix.md`, `authz_matrix_test` (>=200 cases evaluated), escalation guards | None |
+| 6 | Tamper-evident audit log | ready for verification | datastore/hardening | working tree | `migrations/004_tamper_evident_audit_log.sql`, `audit_tamper_test` (5 test cases: sequential, tamper, delete, 8-writer concurrency, Ed25519 checkpoint) | Needs build + live Postgres to run `audit_tamper_test` |
 | 7 | Crypto core library | todo | datastore/hardening | - | - | - |
 | 8 | Encrypted storage & SQLite key store | todo | datastore/hardening | - | - | - |
 | 9 | Key lifecycle, crypto-shred, backups | todo | datastore/hardening | - | - | - |
@@ -159,3 +159,74 @@
    - Upgraded `generate_orm.py` and `generate_views.py` with `--build-db` to dynamically provision an isolated build database (`sgrn_build_orm`) or fallback to an ephemeral Postgres cluster in `/tmp`.
    - Added `detectSuperuser` in `init-db.py`, `generate_orm.py`, and `generate_views.py` to auto-resolve OS-user superusers (`odahim`) and maintenance databases without hardcoded role dependencies.
    - Integrated dependency-tracked codegen into `cmake/sgrn_views_codegen.cmake`: Ninja/Make monitors `crud/manifest.json` and all `postgres/**/*.sql` files, automatically executing `generate_orm.py --build-db --views` whenever schemas or manifest change, zero-overhead when unchanged.
+
+---
+
+## Task 5: Completed Changes
+
+1. **AdminLevel & TargetResource Types (`filters/types.hpp`)**:
+   - Added `AdminLevel` enum: `NONE = 0`, `DOMAIN = 1`, `ORG = 2`, `PLATFORM = 3`.
+   - Added `TargetResource` struct with `organisation` and `optional<int32_t> domain_id`.
+   - Added string conversion helpers `adminLevelToString()` and `adminLevelFromString()`.
+
+2. **ScopeFilter & AdminLevelCache (`filters/admin.hpp`, `filters/admin.cpp`)**:
+   - Implemented `AdminLevelCache`: In-process TTL cache over `core.admin_level()`, with fail-closed semantics (`NONE` on DB failure/disconnect).
+   - Implemented `ScopeFilter`: Enforces tenant boundaries (blocks foreign `?organisation=` and cross-tenant JSON bodies for non-platform users), hydrates request attributes (`admin_level`, `is_platform_admin`, `target_organisation`), and checks level hierarchy.
+   - Provided concrete filter classes `PlatformAdminFilter`, `OrgAdminFilter`, and `DomainAdminFilter`.
+   - Wired `requireLevel(level, resolver)` filter factory.
+
+3. **Session Layer Invalidation & Hydration (`src/session/SessionStore.cpp`, `src/filters/auth.cpp`, `src/services/auth.cpp`)**:
+   - Integrated `AdminLevelCache::instance().invalidateUser(uid)` into the PostgreSQL LISTEN/NOTIFY loop on session `revoke` and `refresh` actions.
+   - Hydrated session JSON and user details at login and session resolution with authoritative server-computed `is_platform_admin`, `admin_level`, and `admin_level_name`.
+
+4. **Route Reclassification & Authorization Matrix (`handlers/admin.hpp`, `handlers/storage-admin.hpp`, `docs/authz-matrix.md`)**:
+   - Classified and registered all `/api/v1/admin/*` routes with explicit `PlatformAdminFilter` or `OrgAdminFilter`.
+   - Destructive operations (`DELETE /admin/audit-logs`, `POST /admin/storage/orphans/purge`, `GET/PUT /admin/system/config`) gated strictly to `PlatformAdminFilter`.
+   - Published full route authorization classification table in `docs/authz-matrix.md`.
+   - Added `operation_filters` to `crud/manifest.json` for `admin_assignments` to restrict all CRUD operations to `OrgAdminFilter`.
+
+5. **Privilege Escalation Guards (`handlers/admin.cpp`)**:
+   - **Self-grant protection**: Prohibited admins from granting permissions or assigning roles to themselves (`user_id == caller_id`), returning 403 Forbidden and auditing the attempt.
+   - **Above-level grant protection**: Prohibited non-platform admins from assigning system roles, granting platform admin status, or registering users with `is_platform_admin = true` or `role = 'platform_admin'`.
+   - **Last platform admin protection**: Prevented revoking roles or admin status from the last active platform administrator.
+   - **Auditing**: All elevation attempts and permission grants audited via `AuditLogger`.
+
+6. **Frontend UI Scoping (`sgrn/web/datastore/src/pages/signin/types.ts`, `sgrn/web/datastore/src/pages/admin/page.tsx`)**:
+   - Extended `User` interface with `admin_level`, `admin_level_name`, and `is_platform_admin`.
+   - Conditionally hid Platform-only UI controls (System Config navigation tab, Garage Storage orphan purge buttons) when caller is not a platform administrator.
+
+7. **Authorization Matrix Regression Test (`tests/authz-matrix-test.cpp`)**:
+   - Implemented unit test suite `authz_matrix_test` evaluating 256 matrix cells (8 caller types × 32 routes) plus cross-tenant tampering checks, totaling > 200 cases.
+   - Tested privilege escalation defenses: self-grant, self-assign, above-level registration, cross-tenant registration, and cache invalidation hooks.
+   - Registered `authz_matrix_test` in `CMakeLists.txt`.
+
+---
+
+## Task 6: Completed Changes
+
+1. **Schema & Migration (`migrations/004_tamper_evident_audit_log.sql`, `postgres/schemas/audit_logs.sql`)**:
+   - Added monotonic `seq`, cryptographic `prev_hash`, and canonical `row_hash = SHA-256(prev_hash || canonical row)` columns to `core.audit_logs`.
+   - Created `core.audit_checkpoints` table for Ed25519-signed checkpoints (`organisation`, `last_seq`, `last_hash`, `signature`, `public_key`).
+   - Implemented `core.append_audit_log()` `SECURITY DEFINER` function using per-organisation advisory transaction locks (`pg_advisory_xact_lock`) ensuring serialized sequence numbering and chain integrity under high concurrency.
+   - Implemented `core.verify_audit_chain()` SQL function checking sequence continuity, prev_hash chaining, and SHA-256 row hash verification.
+   - Installed `trg_audit_tamper_guard` trigger prohibiting direct `UPDATE` or `DELETE` on `core.audit_logs`.
+
+2. **Audit Logging Integration (`include/sgrn/datastore/audit/AuditLogger.hpp`, `src/audit/AuditLogger.cpp`)**:
+   - Updated `AuditLogger::log()` to use `core.append_audit_log()`.
+   - Added `AuditLogger::verifyChain()` and `AuditLogger::createCheckpoint()`.
+   - Wired critical audit hooks across services: `auth.login`, `auth.failed`, `session.revoked`, `system.config_updated`, `audit.purged`, and role/permission changes.
+   - Added route `GET /api/v1/admin/audit-logs/verify` and CLI `--verify-audit [org]`.
+
+3. **Key Generators & Crypto Utilities (`sgrn/utils`)**:
+   - Created `include/sgrn/utils/crypto.hpp` and `include/sgrn/utils/keygen.hpp` in `sgrn_utils`.
+   - Implemented Ed25519 key pair generation, raw signing, and verification.
+   - Implemented cryptographically secure random bytes and hex key generation.
+   - Delegated datastore audit signing routines to `sgrn::utils::crypto`.
+
+4. **Tamper & Concurrency Test Suite (`tests/audit-tamper-test.cpp`)**:
+   - Sequential append and chain verification (seq 1..10).
+   - SQL tamper detection (direct superuser UPDATE on row 5 causes verify failure at seq 5).
+   - SQL delete detection (superuser DELETE of row 3 causes verify failure at seq 4).
+   - 8-writer concurrency load test (400 concurrent writes serialized without gaps or duplicate seqs).
+   - Ed25519 checkpoint signing and verification (validates signature; rejects corrupted signature or tampered hash).
+

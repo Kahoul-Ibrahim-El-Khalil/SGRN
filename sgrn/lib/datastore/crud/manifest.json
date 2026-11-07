@@ -59,6 +59,13 @@
           "default_order": "id",
           "max_limit": 500,
           "operations": ["list", "get", "create", "update", "delete"],
+          "operation_filters": {
+            "list": ["sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"],
+            "get": ["sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"],
+            "create": ["sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"],
+            "update": ["sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"],
+            "delete": ["sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"]
+          },
           "columns": {
             "user_id": {
               "filter_ops": ["eq", "in"]

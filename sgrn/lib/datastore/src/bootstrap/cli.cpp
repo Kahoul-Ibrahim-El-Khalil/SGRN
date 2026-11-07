@@ -6,6 +6,7 @@
 #include <sgrn/datastore/bootstrap/cli.hpp>
 
 #include <fmt/core.h>
+#include <sgrn/datastore/audit/AuditLogger.hpp>
 #include <sgrn/datastore/bootstrap/backup.hpp>
 #include <sgrn/datastore/bootstrap/bootstrap.hpp>
 #include <sgrn/utils/filesystem.hpp>
@@ -103,6 +104,11 @@ std::optional<int> dispatch(int t_argc, char** tp_argv) {
     if (first_arg == "--verify-backup") {
         const std::string target = t_argc > 2 ? tp_argv[2] : "";
         return bootstrap::backup::verifyBackup(base_dir(), target) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    if (first_arg == "--verify-audit") {
+        const std::string org = t_argc > 2 ? tp_argv[2] : "";
+        return audit::verifyAuditTrail(org) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     return std::nullopt; // unrecognised argument → fall through to server mode

@@ -1,3 +1,4 @@
+#include <sgrn/datastore/filters/admin.hpp>
 #include <sgrn/datastore/filters/auth.hpp>
 #include <sgrn/datastore/session/SessionStore.hpp>
 
@@ -77,6 +78,32 @@ void UserAuthFilter::doFilter(
             role = static_cast<UserRoleEnum>(session_claims["user"]["role"]["code"].asUInt());
         }
 
+        // Hydrate session JSON with caller's computed admin level (fail closed to NONE)
+        AdminLevel level = AdminLevel::NONE;
+        int32_t uid = 0;
+        std::string org = "";
+        std::string email = "";
+        if (session_claims.isMember("user")) {
+            if (session_claims["user"].isMember("id")) {
+                uid = session_claims["user"]["id"].asInt();
+            }
+            if (session_claims["user"].isMember("organisation")) {
+                org = session_claims["user"]["organisation"].asString();
+            }
+            if (session_claims["user"].isMember("email")) {
+                email = session_claims["user"]["email"].asString();
+            }
+        }
+        if (uid > 0) {
+            level = co_await sgrn::datastore::filters::AdminLevelCache::instance().resolveAdminLevel(uid, org, std::nullopt, email);
+        }
+        session_claims["user"]["admin_level"] = static_cast<int>(level);
+        session_claims["user"]["admin_level_name"] = adminLevelToString(level);
+        session_claims["user"]["is_platform_admin"] = (level == AdminLevel::PLATFORM);
+
+        tsp_req->attributes()->insert("admin_level", level);
+        tsp_req->attributes()->insert("caller_admin_level", level);
+        tsp_req->attributes()->insert("is_platform_admin", level == AdminLevel::PLATFORM);
         tsp_req->attributes()->insert("session_json", std::move(session_claims));
         tsp_req->attributes()->insert("user_role_code", role);
 

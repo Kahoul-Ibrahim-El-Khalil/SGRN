@@ -6,6 +6,8 @@
 #include <mutex>
 #include <trantor/utils/Logger.h>
 
+#include <sgrn/datastore/audit/AuditLogger.hpp>
+#include <sgrn/datastore/filters/admin.hpp>
 #include <sgrn/datastore/services/WebhookService.hpp>
 
 namespace sgrn::datastore::session
@@ -256,6 +258,19 @@ Task<void> SessionStore::revokeSession(const std::string& token, std::string ter
         // 6. Fire the webhook (async, fire-and-forget)
         services::WebhookService::instance().dispatchEvent(org, event, payload);
 
+        // 7. Record immutable audit log
+        std::optional<int32_t> act_id;
+        std::string act_name = "unknown";
+        if (payload.isMember("user_id") && payload["user_id"].isInt()) {
+            act_id = payload["user_id"].asInt();
+        }
+        if (payload.isMember("email") && payload["email"].isString()) {
+            act_name = payload["email"].asString();
+        }
+        std::string client_ip = payload.isMember("ip") && payload["ip"].isString() ? payload["ip"].asString() : "127.0.0.1";
+        co_await sgrn::datastore::audit::AuditLogger::log(
+            db, org, "user", act_id, act_name, "session.revoked", "session", token, client_ip, payload, "success");
+
     } catch (const std::exception& e) {
         LOG_ERROR << "SessionStore revoke error: " << e.what();
     }
@@ -374,10 +389,25 @@ void SessionStore::startPgListener() {
                         std::string tok = row["token"].as<std::string>();
 
                         if (action == "revoke") {
+                            // Invalidate the admin-level cache for this token's user before
+                            // eviction so stale level entries don't linger in memory.
+                            {
+                                std::shared_lock rlock(cache_mutex_);
+                                auto it = ram_cache_.find(tok);
+                                if (it != ram_cache_.end()) {
+                                    const Json::Value& c = it->second;
+                                    if (c.isMember("user") && c["user"].isMember("id") && c["user"]["id"].isInt()) {
+                                        int32_t uid = c["user"]["id"].asInt();
+                                        sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(uid);
+                                    }
+                                }
+                            }
                             evictLocal(tok);
                             LOG_INFO << "SessionStore: NOTIFY evict token " << tok.substr(0, 8) << "...";
                         } else if (action == "refresh") {
-                            // Re-fetch session_data but don't re-notify (avoid loop)
+                            // Re-fetch session_data but don't re-notify (avoid loop).
+                            // Also invalidate the admin-level cache so the next request
+                            // re-resolves the user's level from the DB.
                             try {
                                 auto res = co_await listen_db->execSqlCoro(
                                     "SELECT session_data FROM core.sessions WHERE token = $1::uuid "
@@ -390,6 +420,11 @@ void SessionStore::startPgListener() {
                                     std::string err;
                                     auto reader = std::unique_ptr<Json::CharReader>(b.newCharReader());
                                     if (reader->parse(raw.data(), raw.data() + raw.size(), &claims, &err)) {
+                                        // Invalidate admin-level cache before updating RAM cache
+                                        if (claims.isMember("user") && claims["user"].isMember("id") && claims["user"]["id"].isInt()) {
+                                            int32_t uid = claims["user"]["id"].asInt();
+                                            sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(uid);
+                                        }
                                         std::unique_lock lock(cache_mutex_);
                                         ram_cache_[tok] = claims;
                                         active_tokens_.insert(tok);

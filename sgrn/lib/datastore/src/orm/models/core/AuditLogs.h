@@ -56,6 +56,9 @@ public:
         static const std::string _details;
         static const std::string _status;
         static const std::string _created_at;
+        static const std::string _seq;
+        static const std::string _prev_hash;
+        static const std::string _row_hash;
     };
 
     static const int primaryKeyNumber;
@@ -210,8 +213,34 @@ public:
     /// Set the value of the column created_at
     void setCreatedAt(const ::trantor::Date& pCreatedAt) noexcept;
 
+    /**  For column seq  */
+    /// Get the value of the column seq, returns the default value if the column is null
+    const int64_t& getValueOfSeq() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<int64_t>& getSeq() const noexcept;
+    /// Set the value of the column seq
+    void setSeq(const int64_t& pSeq) noexcept;
+
+    /**  For column prev_hash  */
+    /// Get the value of the column prev_hash, returns the default value if the column is null
+    const std::string& getValueOfPrevHash() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<std::string>& getPrevHash() const noexcept;
+    /// Set the value of the column prev_hash
+    void setPrevHash(const std::string& pPrevHash) noexcept;
+    void setPrevHash(std::string&& pPrevHash) noexcept;
+
+    /**  For column row_hash  */
+    /// Get the value of the column row_hash, returns the default value if the column is null
+    const std::string& getValueOfRowHash() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<std::string>& getRowHash() const noexcept;
+    /// Set the value of the column row_hash
+    void setRowHash(const std::string& pRowHash) noexcept;
+    void setRowHash(std::string&& pRowHash) noexcept;
+
     static size_t getColumnNumber() noexcept {
-        return 12;
+        return 15;
     }
     static const std::string& getColumnName(size_t index) noexcept(false);
 
@@ -246,6 +275,9 @@ private:
     std::shared_ptr<std::string> details_;
     std::shared_ptr<std::string> status_;
     std::shared_ptr<::trantor::Date> createdAt_;
+    std::shared_ptr<int64_t> seq_;
+    std::shared_ptr<std::string> prevHash_;
+    std::shared_ptr<std::string> rowHash_;
     struct MetaData {
         const std::string colName_;
         const std::string colType_;
@@ -256,7 +288,7 @@ private:
         const bool notNull_;
     };
     static const std::vector<MetaData> metaData_;
-    bool dirtyFlag_[12] = {false};
+    bool dirtyFlag_[15] = {false};
 
 public:
     static const std::string& sqlForFindingByPrimaryKey() {
@@ -320,6 +352,18 @@ public:
         if (!dirtyFlag_[11]) {
             needSelection = true;
         }
+        if (dirtyFlag_[12]) {
+            sql += "seq,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[13]) {
+            sql += "prev_hash,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[14]) {
+            sql += "row_hash,";
+            ++parametersCount;
+        }
         needSelection = true;
         if (parametersCount > 0) {
             sql[sql.length() - 1] = ')';
@@ -378,6 +422,18 @@ public:
             sql.append(placeholderStr, n);
         } else {
             sql += "default,";
+        }
+        if (dirtyFlag_[12]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[13]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[14]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
         }
         if (parametersCount > 0) {
             sql.resize(sql.length() - 1);

@@ -1,5 +1,6 @@
 #include <sgrn/datastore/handlers/storage-admin.hpp>
 
+#include <sgrn/datastore/audit/AuditLogger.hpp>
 #include <sgrn/datastore/config/config.hpp>
 #include <sgrn/datastore/core/db.hpp>
 #include <sgrn/datastore/init/rate-limit.hpp>
@@ -52,7 +53,7 @@ Task<T> s3unwrap(Task<BackendResult<T>> t_task) {
     co_return std::move(res).value();
 }
 
-Task<void> s3check(Task<BackendResult<void>> t_task) {
+[[maybe_unused]] Task<void> s3check(Task<BackendResult<void>> t_task) {
     BackendResult<void> res = co_await std::move(t_task);
     if (res.hasError()) {
         throw S3UpstreamError(res.error().message_);
@@ -865,6 +866,25 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpdateSystemConfig(HttpRequestP
             warnings.append(w);
         }
         out["warnings"] = std::move(warnings);
+
+        // --- Audit: system.config_updated ------------------------------------
+        {
+            auto db_res = sgrn::datastore::core::getDbClient();
+            if (!db_res.hasError()) {
+                const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
+                const int32_t actor_id = session["user"]["id"].asInt();
+                const std::string actor_name = session["user"]["email"].asString();
+                // Platform-level config is owned by the platform organisation ("platform").
+                const std::string config_org = session["user"]["organisation"].asString();
+                Json::Value detail;
+                detail["applied_hot"] = out["applied_hot"];
+                detail["restart_required"] = out["restart_required"];
+                detail["config_path"] = path;
+                co_await sgrn::datastore::audit::AuditLogger::log(db_res.value(), config_org, "user", actor_id, actor_name,
+                    "system.config_updated", "system_config", path, tsp_req->getPeerAddr().toIp(), detail, "success");
+            }
+        }
+
         co_return sgrn::createJsonResponse(out, k200OK);
     } catch (const std::exception& e) {
         co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "SystemConfig");
@@ -878,11 +898,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpdateSystemConfig(HttpRequestP
 namespace
 {
 
-std::string lowerAscii(std::string t_in) {
-    for (char& c : t_in) {
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    }
-    return t_in;
+inline std::string lowerAscii(std::string t_in) {
+    return sgrn::utils::strings::toLower(std::move(t_in));
 }
 
 bool jsonBool(const Json::Value& t_v, bool t_dflt) {

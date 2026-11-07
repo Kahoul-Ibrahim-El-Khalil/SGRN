@@ -41,15 +41,18 @@ public:
 
 private:
     static inline const std::array<RouteConfig, 2> kRoutes = {{
-        {"/api/v1/admin-assignments", &AdminAssignmentsView::handleList, {drogon::Get}, {"sgrn::datastore::filters::UserAuthFilter"}},
-        {"/api/v1/admin-assignments", &AdminAssignmentsView::handleCreate, {drogon::Post}, {"sgrn::datastore::filters::UserAuthFilter"}},
+        {"/api/v1/admin-assignments", &AdminAssignmentsView::handleList, {drogon::Get},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"}},
+        {"/api/v1/admin-assignments", &AdminAssignmentsView::handleCreate, {drogon::Post},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"}},
     }};
     static inline const std::array<ItemRouteConfig, 3> kItemRoutes = {{
-        {"/api/v1/admin-assignments/{id}", &AdminAssignmentsView::handleGet, {drogon::Get}, {"sgrn::datastore::filters::UserAuthFilter"}},
+        {"/api/v1/admin-assignments/{id}", &AdminAssignmentsView::handleGet, {drogon::Get},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"}},
         {"/api/v1/admin-assignments/{id}", &AdminAssignmentsView::handleUpdate, {drogon::Patch},
-            {"sgrn::datastore::filters::UserAuthFilter"}},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"}},
         {"/api/v1/admin-assignments/{id}", &AdminAssignmentsView::handleDelete, {drogon::Delete},
-            {"sgrn::datastore::filters::UserAuthFilter"}},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"}},
     }};
 };
 

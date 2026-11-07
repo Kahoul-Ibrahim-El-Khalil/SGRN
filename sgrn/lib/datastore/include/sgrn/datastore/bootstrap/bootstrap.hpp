@@ -14,7 +14,7 @@
  *   verifyInstall()        – health / drift report (--verify-install)
  *
  * The sub-headers below declare their helpers; the implementations live in
- * src/bootstrap/*.cpp (this file's orchestration is src/bootstrap/bootstrap.cpp).
+ * `src/bootstrap/` cpp files (this file's orchestration is src/bootstrap/bootstrap.cpp).
  */
 
 // ── Sub-system headers ────────────────────────────────────────────────────
