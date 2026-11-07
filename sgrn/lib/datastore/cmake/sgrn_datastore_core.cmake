@@ -75,10 +75,48 @@ foreach(flag ${DEBUG_OPTIONS})
     endif()
 endforeach()
 
-# ==================== Sanitizers ====================
-if(SANITIZE)
-    target_compile_options(sgrn_datastore_core INTERFACE -fsanitize=address,undefined)
-    target_link_options(sgrn_datastore_core INTERFACE -fsanitize=address,undefined)
+# ==================== Build Hardening & Sanitizers ====================
+include(${CMAKE_SOURCE_DIR}/cmake/build_hardening.cmake)
+
+# Apply hardening options to core interface
+target_compile_options(sgrn_datastore_core INTERFACE
+    -fstack-protector-strong
+    -Wformat
+    -Wformat-security
+)
+
+if(NOT WIN32 AND NOT APPLE)
+    target_compile_options(sgrn_datastore_core INTERFACE -fstack-clash-protection)
+endif()
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|i[3-6]86")
+    target_compile_options(sgrn_datastore_core INTERFACE -fcf-protection)
+endif()
+
+target_compile_definitions(sgrn_datastore_core INTERFACE
+    $<$<CONFIG:Release>:_FORTIFY_SOURCE=3>
+)
+
+# Sanitizers
+if(SGRN_SANITIZE OR SANITIZE)
+    set(_active_san "${SGRN_SANITIZE}")
+    if(NOT _active_san AND SANITIZE)
+        set(_active_san "asan,ubsan")
+    endif()
+    string(TOLOWER "${_active_san}" _san)
+    if(_san STREQUAL "asan")
+        target_compile_options(sgrn_datastore_core INTERFACE -fsanitize=address -fno-omit-frame-pointer)
+        target_link_options(sgrn_datastore_core INTERFACE -fsanitize=address -fno-omit-frame-pointer)
+    elseif(_san STREQUAL "ubsan")
+        target_compile_options(sgrn_datastore_core INTERFACE -fsanitize=undefined -fno-omit-frame-pointer)
+        target_link_options(sgrn_datastore_core INTERFACE -fsanitize=undefined -fno-omit-frame-pointer)
+    elseif(_san STREQUAL "tsan")
+        target_compile_options(sgrn_datastore_core INTERFACE -fsanitize=thread)
+        target_link_options(sgrn_datastore_core INTERFACE -fsanitize=thread)
+    elseif(_san STREQUAL "asan,ubsan" OR _san STREQUAL "asan+ubsan")
+        target_compile_options(sgrn_datastore_core INTERFACE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(sgrn_datastore_core INTERFACE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    endif()
 endif()
 
 # ==================== Release Optimizations ====================
@@ -90,6 +128,7 @@ endif()
 # ==================== Helper Functions ====================
 function(sgrn_target target)
     target_link_libraries(${target} PRIVATE sgrn_datastore_core)
+    sgrn_apply_target_hardening(${target})
 endfunction()
 
 function(sgrn_install_library target)

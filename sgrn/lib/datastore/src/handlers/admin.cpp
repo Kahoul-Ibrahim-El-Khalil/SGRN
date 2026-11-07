@@ -65,21 +65,42 @@ Task<HttpResponsePtr> AdminApiHandler::handleGetStatus(HttpRequestPtr tsp_req) {
 
 Task<HttpResponsePtr> AdminApiHandler::handleGetUsers(HttpRequestPtr tsp_req) {
     try {
+        const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
+        const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
+        const std::string org_param = tsp_req->getParameter("organisation");
+
+        std::string target_org;
+        if (!is_platform) {
+            if (!org_param.empty() && org_param != session_org) {
+                co_return createErrorResponse("Forbidden: cannot list users from another organisation", k403Forbidden, "AdminApi");
+            }
+            target_org = session_org;
+        } else {
+            target_org = org_param;
+        }
+
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
             co_return sgrn::createJsonResponse(db_res);
         }
         auto db = db_res.value();
-        orm::CoroMapper<drogon_model::sgrn::core::Users> mapper(db);
-        auto users = co_await mapper.findAll();
+
+        auto rows =
+            (!target_org.empty())
+                ? co_await db->execSqlCoro("SELECT id, email, first_name, family_name, organisation FROM core.users WHERE deleted_at IS "
+                                           "NULL AND organisation = $1 ORDER BY id",
+                      target_org)
+                : co_await db->execSqlCoro(
+                      "SELECT id, email, first_name, family_name, organisation FROM core.users WHERE deleted_at IS NULL ORDER BY id");
 
         Json::Value users_json = Json::arrayValue;
-        for (const auto& user : users) {
+        for (const auto& user : rows) {
             Json::Value u;
-            u["id"] = user.getValueOfId();
-            u["email"] = user.getValueOfEmail();
-            u["first_name"] = user.getValueOfFirstName();
-            u["family_name"] = user.getValueOfFamilyName();
+            u["id"] = user["id"].as<int32_t>();
+            u["email"] = user["email"].as<std::string>();
+            u["first_name"] = user["first_name"].as<std::string>();
+            u["family_name"] = user["family_name"].as<std::string>();
+            u["organisation"] = user["organisation"].as<std::string>();
             users_json.append(u);
         }
 
@@ -95,6 +116,20 @@ Task<HttpResponsePtr> AdminApiHandler::handleRegisterUser(HttpRequestPtr tsp_req
     auto payload_opt = deserializeRegisterUserPayload(json, error_msg);
     if (payload_opt.has_value() == false) {
         co_return createErrorResponse(error_msg, k400BadRequest);
+    }
+
+    const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
+    const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
+
+    if (!is_platform) {
+        if (!payload_opt->organisation.empty() && payload_opt->organisation != session_org) {
+            co_return createErrorResponse("Forbidden: cannot register user in another organisation", k403Forbidden, "AdminApi");
+        }
+        payload_opt->organisation = session_org;
+    } else {
+        if (payload_opt->organisation.empty()) {
+            payload_opt->organisation = session_org;
+        }
     }
 
     try {
@@ -384,10 +419,21 @@ bool rowBool(const drogon::orm::Row& t_row, const char* t_col) {
 
 Task<HttpResponsePtr> AdminApiHandler::handleListPermissions(HttpRequestPtr tsp_req) {
     try {
+        const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
+        const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
+
         const std::string user_id_raw = tsp_req->getParameter("user_id");
         const std::string email = tsp_req->getParameter("email");
         const std::string domain = tsp_req->getParameter("domain");
-        const std::string organisation = tsp_req->getParameter("organisation");
+        std::string organisation = tsp_req->getParameter("organisation");
+
+        if (!is_platform) {
+            if (!organisation.empty() && organisation != session_org) {
+                co_return createErrorResponse("Forbidden: cannot view permissions of another organisation", k403Forbidden, "AdminApi");
+            }
+            organisation = session_org;
+        }
+
         std::size_t limit = 100;
         try {
             const std::size_t asked = static_cast<std::size_t>(std::stoul(tsp_req->getParameter("limit")));
@@ -452,6 +498,9 @@ Task<HttpResponsePtr> AdminApiHandler::handleGrantPermission(HttpRequestPtr tsp_
         co_return createErrorResponse(AdminApiError::InvalidPayload);
     }
     try {
+        const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
+        const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
+
         // Resolve the user by id or email (must exist and not be soft-deleted).
         int32_t user_id = 0;
         std::string email;
@@ -482,6 +531,11 @@ Task<HttpResponsePtr> AdminApiHandler::handleGrantPermission(HttpRequestPtr tsp_
             co_return createErrorResponse("user_id or email is required", k400BadRequest, "AdminApi");
         }
 
+        if (!is_platform && user_org != session_org) {
+            co_return createErrorResponse(
+                "Forbidden: cannot grant permissions to users in another organisation", k403Forbidden, "AdminApi");
+        }
+
         if (!json->isMember("domain") || !(*json)["domain"].isString() || (*json)["domain"].asString().empty()) {
             co_return createErrorResponse("domain is required", k400BadRequest, "AdminApi");
         }
@@ -496,6 +550,9 @@ Task<HttpResponsePtr> AdminApiHandler::handleGrantPermission(HttpRequestPtr tsp_
             if (organisation != user_org) {
                 co_return createErrorResponse("organisation must match the user's own organisation", k400BadRequest, "AdminApi");
             }
+        }
+        if (!is_platform && organisation != session_org) {
+            co_return createErrorResponse("Forbidden: cannot grant permissions for another organisation", k403Forbidden, "AdminApi");
         }
 
         // The FK would 500 on an unknown domain — pre-check for a clean 400.
@@ -551,6 +608,9 @@ Task<HttpResponsePtr> AdminApiHandler::handleGrantPermission(HttpRequestPtr tsp_
 
 Task<HttpResponsePtr> AdminApiHandler::handleRevokePermission(HttpRequestPtr tsp_req) {
     try {
+        const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
+        const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
+
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
             co_return sgrn::createJsonResponse(db_res);
@@ -568,12 +628,18 @@ Task<HttpResponsePtr> AdminApiHandler::handleRevokePermission(HttpRequestPtr tsp
             } catch (const std::exception&) {
                 co_return createErrorResponse("id must be an integer", k400BadRequest, "AdminApi");
             }
+            if (!is_platform) {
+                auto hit = co_await db->execSqlCoro("SELECT organisation FROM core.user_domain_permissions WHERE id = $1", id);
+                if (hit.empty() || hit[0]["organisation"].as<std::string>() != session_org) {
+                    co_return createErrorResponse("No such permission grant", k404NotFound, "AdminApi");
+                }
+            }
             revoke_sql = "DELETE FROM core.user_domain_permissions WHERE id = $1 RETURNING user_id";
             revoke_binds.push_back(std::to_string(id));
             id_desc = "id " + std::to_string(id);
         } else {
             const std::string user_id_raw = tsp_req->getParameter("user_id");
-            const std::string organisation = tsp_req->getParameter("organisation");
+            std::string organisation = tsp_req->getParameter("organisation");
             const std::string domain = tsp_req->getParameter("domain");
             int32_t user_id = 0;
             try {
@@ -581,9 +647,19 @@ Task<HttpResponsePtr> AdminApiHandler::handleRevokePermission(HttpRequestPtr tsp
             } catch (const std::exception&) {
                 co_return createErrorResponse("supply ?id= or ?user_id=&organisation=&domain=", k400BadRequest, "AdminApi");
             }
-            if (user_id <= 0 || organisation.empty() || domain.empty()) {
+            if (user_id <= 0 || domain.empty()) {
                 co_return createErrorResponse("supply ?id= or ?user_id=&organisation=&domain=", k400BadRequest, "AdminApi");
             }
+            if (!is_platform) {
+                if (!organisation.empty() && organisation != session_org) {
+                    co_return createErrorResponse(
+                        "Forbidden: cannot revoke permissions for another organisation", k403Forbidden, "AdminApi");
+                }
+                organisation = session_org;
+            } else if (organisation.empty()) {
+                organisation = session_org;
+            }
+
             revoke_sql = "DELETE FROM core.user_domain_permissions WHERE user_id = $1 AND organisation = $2 AND domain = $3 "
                          "RETURNING user_id";
             revoke_binds = {std::to_string(user_id), organisation, domain};
@@ -803,8 +879,9 @@ Task<HttpResponsePtr> AdminApiHandler::handleDeleteRole(HttpRequestPtr tsp_req, 
 
 Task<HttpResponsePtr> AdminApiHandler::handleAssignRole(HttpRequestPtr tsp_req) {
     try {
+        const std::string org = sgrn::datastore::getSessionOrganisation(tsp_req);
+        const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
         const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
-        const std::string org = session["user"]["organisation"].asString();
         const int32_t actor_id = session["user"]["id"].asInt();
         const std::string actor_name = session["user"]["email"].asString();
 
@@ -829,6 +906,26 @@ Task<HttpResponsePtr> AdminApiHandler::handleAssignRole(HttpRequestPtr tsp_req) 
         if (db_res.hasError())
             co_return sgrn::createJsonResponse(db_res);
         auto db = db_res.value();
+
+        if (!is_platform) {
+            auto role_hit = co_await db->execSqlCoro("SELECT organisation FROM core.roles WHERE id = $1", role_id);
+            if (role_hit.empty() || role_hit[0]["organisation"].as<std::string>() != org) {
+                co_return createErrorResponse("Role not found in caller's organisation", k404NotFound, "AdminApi");
+            }
+            if (user_id.has_value()) {
+                auto u_hit = co_await db->execSqlCoro("SELECT organisation FROM core.users WHERE id = $1 AND deleted_at IS NULL", *user_id);
+                if (u_hit.empty() || u_hit[0]["organisation"].as<std::string>() != org) {
+                    co_return createErrorResponse("User not found in caller's organisation", k404NotFound, "AdminApi");
+                }
+            }
+            if (service_id.has_value()) {
+                auto s_hit = co_await db->execSqlCoro(
+                    "SELECT organisation FROM core.automated_services WHERE id = $1 AND deleted_at IS NULL", *service_id);
+                if (s_hit.empty() || s_hit[0]["organisation"].as<std::string>() != org) {
+                    co_return createErrorResponse("Automated service not found in caller's organisation", k404NotFound, "AdminApi");
+                }
+            }
+        }
 
         co_await db->execSqlCoro(
             "INSERT INTO core.user_roles (user_id, automated_service_id, role_id) VALUES ($1, $2, $3)", user_id, service_id, role_id);
@@ -849,8 +946,9 @@ Task<HttpResponsePtr> AdminApiHandler::handleAssignRole(HttpRequestPtr tsp_req) 
 
 Task<HttpResponsePtr> AdminApiHandler::handleRevokeRole(HttpRequestPtr tsp_req) {
     try {
+        const std::string org = sgrn::datastore::getSessionOrganisation(tsp_req);
+        const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
         const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
-        const std::string org = session["user"]["organisation"].asString();
         const int32_t actor_id = session["user"]["id"].asInt();
         const std::string actor_name = session["user"]["email"].asString();
 
@@ -875,6 +973,26 @@ Task<HttpResponsePtr> AdminApiHandler::handleRevokeRole(HttpRequestPtr tsp_req) 
         if (db_res.hasError())
             co_return sgrn::createJsonResponse(db_res);
         auto db = db_res.value();
+
+        if (!is_platform) {
+            auto role_hit = co_await db->execSqlCoro("SELECT organisation FROM core.roles WHERE id = $1", role_id);
+            if (role_hit.empty() || role_hit[0]["organisation"].as<std::string>() != org) {
+                co_return createErrorResponse("Role not found in caller's organisation", k404NotFound, "AdminApi");
+            }
+            if (user_id.has_value()) {
+                auto u_hit = co_await db->execSqlCoro("SELECT organisation FROM core.users WHERE id = $1 AND deleted_at IS NULL", *user_id);
+                if (u_hit.empty() || u_hit[0]["organisation"].as<std::string>() != org) {
+                    co_return createErrorResponse("User not found in caller's organisation", k404NotFound, "AdminApi");
+                }
+            }
+            if (service_id.has_value()) {
+                auto s_hit = co_await db->execSqlCoro(
+                    "SELECT organisation FROM core.automated_services WHERE id = $1 AND deleted_at IS NULL", *service_id);
+                if (s_hit.empty() || s_hit[0]["organisation"].as<std::string>() != org) {
+                    co_return createErrorResponse("Automated service not found in caller's organisation", k404NotFound, "AdminApi");
+                }
+            }
+        }
 
         if (user_id.has_value()) {
             co_await db->execSqlCoro("DELETE FROM core.user_roles WHERE user_id = $1 AND role_id = $2", *user_id, role_id);
@@ -985,24 +1103,35 @@ Task<HttpResponsePtr> AdminApiHandler::handleGetAuditLogs(HttpRequestPtr tsp_req
 
 Task<HttpResponsePtr> AdminApiHandler::handlePurgeAuditLogs(HttpRequestPtr tsp_req) {
     try {
+        if (!sgrn::datastore::isPlatformAdmin(tsp_req)) {
+            co_return createErrorResponse(
+                "Forbidden: Platform administrator privileges required to purge audit logs", k403Forbidden, "AdminApi");
+        }
+
         const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
-        const std::string org = session["user"]["organisation"].asString();
         const int32_t actor_id = session["user"]["id"].asInt();
         const std::string actor_name = session["user"]["email"].asString();
 
         const std::string days_raw = tsp_req->getParameter("older_than_days");
-        int32_t days = days_raw.empty() ? 30 : std::stoi(days_raw);
-        if (days < 1)
-            days = 1;
+        int32_t days = days_raw.empty() ? 90 : std::stoi(days_raw);
+        if (days < 90) {
+            co_return createErrorResponse("Audit logs purge requires a minimum retention period of 90 days", k400BadRequest, "AdminApi");
+        }
+
+        const std::string org_filter = tsp_req->getParameter("organisation");
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError())
             co_return sgrn::createJsonResponse(db_res);
         auto db = db_res.value();
 
-        auto res = co_await db->execSqlCoro(
-            "DELETE FROM core.audit_logs WHERE organisation = $1 AND created_at < NOW() - ($2 || ' days')::interval RETURNING id", org,
-            std::to_string(days));
+        auto res =
+            (!org_filter.empty())
+                ? co_await db->execSqlCoro(
+                      "DELETE FROM core.audit_logs WHERE organisation = $1 AND created_at < NOW() - ($2 || ' days')::interval RETURNING id",
+                      org_filter, std::to_string(days))
+                : co_await db->execSqlCoro("DELETE FROM core.audit_logs WHERE created_at < NOW() - ($1 || ' days')::interval RETURNING id",
+                      std::to_string(days));
 
         const int64_t purged_count = res.size();
 
@@ -1011,9 +1140,11 @@ Task<HttpResponsePtr> AdminApiHandler::handlePurgeAuditLogs(HttpRequestPtr tsp_r
         details["older_than_days"] = days;
         details["records_purged"] = purged_count;
         details["cleared_by"] = actor_name;
+        details["target_organisation"] = org_filter.empty() ? "all" : org_filter;
 
-        co_await sgrn::datastore::audit::AuditLogger::log(
-            db, org, "user", actor_id, actor_name, "audit.purged", "audit_logs", org, tsp_req->getPeerAddr().toIp(), details, "success");
+        const std::string log_org = org_filter.empty() ? "platform" : org_filter;
+        co_await sgrn::datastore::audit::AuditLogger::log(db, log_org, "user", actor_id, actor_name, "audit.purged", "audit_logs", log_org,
+            tsp_req->getPeerAddr().toIp(), details, "success");
 
         Json::Value resp;
         resp["success"] = true;
@@ -1305,6 +1436,24 @@ Task<HttpResponsePtr> AdminApiHandler::handleUpdateServiceQuota(HttpRequestPtr t
 Task<HttpResponsePtr> AdminApiHandler::handleGetMetaProbeSessions(HttpRequestPtr tsp_req) {
     try {
         Json::Value sessions = co_await sgrn::datastore::session::SessionStore::instance().getActiveSessions();
+        const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
+        const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
+
+        if (!is_platform && !session_org.empty()) {
+            Json::Value filtered = Json::arrayValue;
+            if (sessions.isArray()) {
+                for (const auto& s : sessions) {
+                    if (s.isMember("organisation") && s["organisation"].asString() == session_org) {
+                        filtered.append(s);
+                    } else if (s.isMember("user") && s["user"].isMember("organisation") &&
+                               s["user"]["organisation"].asString() == session_org) {
+                        filtered.append(s);
+                    }
+                }
+            }
+            co_return createJsonResponse(filtered, k200OK);
+        }
+
         co_return createJsonResponse(sessions, k200OK);
     } catch (const std::exception& e) {
         ERROR_LOG("Failed to get live sessions: {}", e.what());

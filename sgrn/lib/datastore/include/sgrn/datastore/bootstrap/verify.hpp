@@ -21,6 +21,7 @@
  */
 
 #include <sgrn/debug.hpp>
+#include <filesystem>
 #include <string>
 
 namespace sgrn::datastore::bootstrap
@@ -46,9 +47,17 @@ struct VerifyReport {
 };
 
 // ---------------------------------------------------------------------------
+// Granular security checks
+// ---------------------------------------------------------------------------
+
+bool verifyEnvPermissions(const std::filesystem::path& t_env_path, VerifyReport& t_report);
+bool verifyPgHbaSecurity(const std::filesystem::path& t_pghba_path, VerifyReport& t_report);
+bool verifyTlsCertificate(const std::filesystem::path& t_cert_path, bool t_allow_insecure, VerifyReport& t_report);
+
+// ---------------------------------------------------------------------------
 // verifyInstall orchestrator
 // ---------------------------------------------------------------------------
 
-int verifyInstall(const std::string& t_base_dir);
+int verifyInstall(const std::string& t_base_dir, bool t_allow_insecure = false);
 
 } // namespace sgrn::datastore::bootstrap

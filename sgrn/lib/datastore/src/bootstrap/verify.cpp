@@ -15,6 +15,11 @@
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+#include <openssl/x509v3.h>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -74,16 +79,123 @@ int firstConfiguredPort(const std::string& t_sgrn_json_text) {
 } // namespace
 
 // ---------------------------------------------------------------------------
+// Granular security checks
+// ---------------------------------------------------------------------------
+
+bool verifyEnvPermissions(const std::filesystem::path& t_env_path, VerifyReport& t_report) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    auto status = fs::status(t_env_path, ec);
+    if (ec || !fs::exists(status)) {
+        t_report.fail(fmt::format(".env not found at {}", t_env_path.string()));
+        return false;
+    }
+    const auto perms_val = static_cast<unsigned>(status.permissions()) & 0777;
+    if (perms_val != 0600) {
+        t_report.fail(fmt::format(".env permissions are 0{:o} (must be 0600)", perms_val));
+        return false;
+    }
+    t_report.pass(".env permissions are 0600");
+    return true;
+}
+
+bool verifyPgHbaSecurity(const std::filesystem::path& t_pghba_path, VerifyReport& t_report) {
+    namespace fs = std::filesystem;
+    if (!fs::exists(t_pghba_path)) {
+        t_report.fail(fmt::format("pg_hba.conf not found at {}", t_pghba_path.string()));
+        return false;
+    }
+    std::ifstream in(t_pghba_path);
+    if (!in.is_open()) {
+        t_report.fail(fmt::format("cannot open pg_hba.conf at {}", t_pghba_path.string()));
+        return false;
+    }
+    std::string line;
+    int line_num = 0;
+    bool secure = true;
+    while (std::getline(in, line)) {
+        ++line_num;
+        size_t start = line.find_first_not_of(" \t\r\n");
+        if (start == std::string::npos || line[start] == '#') {
+            continue;
+        }
+        std::string non_comment = line.substr(start);
+        std::vector<std::string> tokens;
+        std::istringstream iss(non_comment);
+        std::string tok;
+        while (iss >> tok) {
+            tokens.push_back(tok);
+        }
+        for (const auto& t : tokens) {
+            if (t == "trust") {
+                t_report.fail(fmt::format("pg_hba.conf contains 'trust' at line {}: '{}'", line_num, non_comment));
+                secure = false;
+            }
+            if (t.find("0.0.0.0/0") != std::string::npos) {
+                t_report.fail(fmt::format("pg_hba.conf allows all network access '0.0.0.0/0' at line {}: '{}'", line_num, non_comment));
+                secure = false;
+            }
+        }
+    }
+    if (secure) {
+        t_report.pass(fmt::format("{} has no trust or 0.0.0.0/0 entries", t_pghba_path.filename().string()));
+    }
+    return secure;
+}
+
+bool verifyTlsCertificate(const std::filesystem::path& t_cert_path, bool t_allow_insecure, VerifyReport& t_report) {
+    namespace fs = std::filesystem;
+    if (!fs::exists(t_cert_path)) {
+        t_report.fail(fmt::format("TLS certificate not found at {}", t_cert_path.string()));
+        return false;
+    }
+    FILE* fp = std::fopen(t_cert_path.c_str(), "r");
+    if (!fp) {
+        t_report.fail(fmt::format("Could not open TLS certificate at {}", t_cert_path.string()));
+        return false;
+    }
+    X509* cert = PEM_read_X509(fp, nullptr, nullptr, nullptr);
+    std::fclose(fp);
+    if (!cert) {
+        t_report.fail(fmt::format("Could not parse PEM certificate at {}", t_cert_path.string()));
+        return false;
+    }
+
+    bool is_self_signed = false;
+    X509_NAME* issuer = X509_get_issuer_name(cert);
+    X509_NAME* subject = X509_get_subject_name(cert);
+    if (issuer && subject && X509_NAME_cmp(issuer, subject) == 0) {
+        is_self_signed = true;
+    } else if (X509_check_issued(cert, cert) == X509_V_OK) {
+        is_self_signed = true;
+    }
+
+    X509_free(cert);
+
+    if (is_self_signed) {
+        if (!t_allow_insecure) {
+            t_report.fail("TLS certificate is self-signed default (--allow-insecure not set)");
+            return false;
+        }
+        t_report.pass("TLS certificate is self-signed default (allowed by --allow-insecure)");
+        return true;
+    }
+
+    t_report.pass("TLS certificate is signed by external CA");
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // verifyInstall orchestrator
 // ---------------------------------------------------------------------------
 
-int verifyInstall(const std::string& t_base_dir) {
+int verifyInstall(const std::string& t_base_dir, bool t_allow_insecure) {
     namespace fs = std::filesystem;
     VerifyReport report;
 
     SGRN_INFO("DatastoreInit", "Verifying SGRN datastore install under {}...", t_base_dir);
 
-    // 0. .env present + parseable
+    // 0. .env present + parseable + 0600 permissions
     fs::path env_path = fs::path(t_base_dir) / ".env";
     if (auto env_result = sgrn::utils::env::loadFile(env_path); env_result.hasError()) {
         report.fail(fmt::format(".env not loadable ({}): run --generate-config first", env_path.string()));
@@ -91,6 +203,17 @@ int verifyInstall(const std::string& t_base_dir) {
         report.fail(".env still contains change_me_* placeholder secrets — run --init or --rotate KEY=VALUE");
     } else {
         report.pass(".env loaded");
+    }
+    verifyEnvPermissions(env_path, report);
+
+    // 0b. pg_hba security checks (both staged and runtime if present)
+    fs::path staged_pghba = fs::path(t_base_dir) / "postgres" / "pg_hba.conf";
+    if (fs::exists(staged_pghba)) {
+        verifyPgHbaSecurity(staged_pghba, report);
+    }
+    fs::path runtime_pghba = fs::path(t_base_dir) / "Postgres" / "data" / "pg_hba.conf";
+    if (fs::exists(runtime_pghba)) {
+        verifyPgHbaSecurity(runtime_pghba, report);
     }
 
     // 1. staged unit templates exist and are non-empty.
@@ -176,8 +299,11 @@ int verifyInstall(const std::string& t_base_dir) {
 
         std::string data_dir = sgrn::utils::env::get("SGRN_DATA_DIR", t_base_dir);
         fs::path cert_dir = fs::path(data_dir) / "certs";
-        if (fs::exists(cert_dir / "server.crt") && fs::exists(cert_dir / "server.key")) {
+        fs::path cert_file = cert_dir / "server.crt";
+        fs::path key_file = cert_dir / "server.key";
+        if (fs::exists(cert_file) && fs::exists(key_file)) {
             report.pass("TLS certs present (certs/server.crt + server.key)");
+            verifyTlsCertificate(cert_file, t_allow_insecure, report);
         } else {
             report.fail(fmt::format("TLS certs missing at {} — --generate-config generates them", cert_dir.string()));
         }

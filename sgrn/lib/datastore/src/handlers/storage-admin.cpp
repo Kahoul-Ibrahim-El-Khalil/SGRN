@@ -5,6 +5,7 @@
 #include <sgrn/datastore/init/rate-limit.hpp>
 #include <sgrn/datastore/plugins/aws/S3Client.hpp>
 #include <sgrn/datastore/services/storage.hpp>
+#include <sgrn/datastore/utils/helpers.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe-access.hpp>
 #include <sgrn/datastore/utils/system-config.hpp>
@@ -170,6 +171,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOverview(HttpRequestPtr tsp_req
     try {
         auto s3 = s3plugin();
         const uint32_t max_pages = static_cast<uint32_t>(clampParam(queryParam(tsp_req, "max_pages", ""), 10, 100));
+        const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
+        const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
@@ -194,12 +197,30 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOverview(HttpRequestPtr tsp_req
             entry["garage"]["truncated"] = scan.truncated;
             entry["garage"]["pages"] = scan.pages;
 
-            auto objs = co_await sgrn::datastore::core::execSqlCoroVec(
-                db, "SELECT COUNT(*), COALESCE(SUM(size),0) FROM storage.objects WHERE bucket = $1", {name});
-            auto files = co_await sgrn::datastore::core::execSqlCoroVec(db,
-                "SELECT COUNT(*) FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN "
-                "storage.objects o ON o.id = fo.object_id WHERE o.bucket = $1",
-                {name});
+            auto objs = is_platform ? co_await sgrn::datastore::core::execSqlCoroVec(
+                                          db, "SELECT COUNT(*), COALESCE(SUM(size),0) FROM storage.objects WHERE bucket = $1", {name})
+                                    : co_await sgrn::datastore::core::execSqlCoroVec(db,
+                                          "SELECT COUNT(DISTINCT o.id), COALESCE(SUM(o.size),0) FROM storage.objects o "
+                                          "JOIN storage.file_objects fo ON fo.object_id = o.id "
+                                          "JOIN storage.files f ON f.id = fo.file_id "
+                                          "LEFT JOIN core.users u ON u.id = f.user_id "
+                                          "LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
+                                          "WHERE o.bucket = $1 AND COALESCE(u.organisation, s.organisation) = $2",
+                                          {name, session_org});
+
+            auto files = is_platform ? co_await sgrn::datastore::core::execSqlCoroVec(db,
+                                           "SELECT COUNT(*) FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND "
+                                           "fo.part_index = 0 JOIN "
+                                           "storage.objects o ON o.id = fo.object_id WHERE o.bucket = $1",
+                                           {name})
+                                     : co_await sgrn::datastore::core::execSqlCoroVec(db,
+                                           "SELECT COUNT(*) FROM storage.files f "
+                                           "JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
+                                           "JOIN storage.objects o ON o.id = fo.object_id "
+                                           "LEFT JOIN core.users u ON u.id = f.user_id "
+                                           "LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
+                                           "WHERE o.bucket = $1 AND COALESCE(u.organisation, s.organisation) = $2",
+                                           {name, session_org});
             entry["db"]["objects"] = static_cast<Json::Int64>(fieldInt(objs[0][0]));
             entry["db"]["bytes"] = static_cast<Json::Int64>(fieldInt(objs[0][1]));
             entry["db"]["files"] = static_cast<Json::Int64>(fieldInt(files[0][0]));
@@ -300,6 +321,10 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOrphans(HttpRequestPtr tsp_req)
 
 Task<HttpResponsePtr> StorageAdminHandler::handlePurgeOrphans(HttpRequestPtr tsp_req) {
     try {
+        if (!sgrn::datastore::isPlatformAdmin(tsp_req)) {
+            co_return sgrn::createErrorResponse("Forbidden: Platform administrator privileges required", k403Forbidden, "StorageAdmin");
+        }
+
         auto json = tsp_req->getJsonObject();
         if (!json || !json->isObject()) {
             co_return sgrn::createErrorResponse("Expected JSON body", k400BadRequest, "StorageAdmin");
@@ -472,12 +497,28 @@ Task<HttpResponsePtr> StorageAdminHandler::handleSearch(HttpRequestPtr tsp_req) 
                 obj["created_at"] = row["created_at"].as<std::string>();
                 out["db"] = std::move(obj);
 
-                auto files = co_await sgrn::datastore::core::execSqlCoroVec(db,
-                    "SELECT f.id, f.full_path, f.user_id, f.automated_service_id, f.created_at"
-                    " FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o "
-                    "ON o.id = fo.object_id"
-                    " WHERE o.bucket = $1 AND o.key = $2 ORDER BY f.id LIMIT 100",
-                    {bucket, key});
+                const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
+                const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
+
+                std::string file_sql;
+                std::vector<std::string> file_binds = {bucket, key};
+                if (!is_platform) {
+                    file_sql = "SELECT f.id, f.full_path, f.user_id, f.automated_service_id, f.created_at "
+                               "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
+                               "JOIN storage.objects o ON o.id = fo.object_id "
+                               "LEFT JOIN core.users u ON u.id = f.user_id "
+                               "LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
+                               "WHERE o.bucket = $1 AND o.key = $2 AND COALESCE(u.organisation, s.organisation) = $3 "
+                               "ORDER BY f.id LIMIT 100";
+                    file_binds.push_back(session_org);
+                } else {
+                    file_sql = "SELECT f.id, f.full_path, f.user_id, f.automated_service_id, f.created_at "
+                               "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
+                               "JOIN storage.objects o ON o.id = fo.object_id "
+                               "WHERE o.bucket = $1 AND o.key = $2 ORDER BY f.id LIMIT 100";
+                }
+
+                auto files = co_await sgrn::datastore::core::execSqlCoroVec(db, file_sql, file_binds);
                 Json::Value refs = Json::arrayValue;
                 for (const auto& f : files) {
                     Json::Value e;
@@ -701,7 +742,9 @@ bool startsWithPath(const std::string& t_path, const std::string& t_prefix) {
 } // namespace
 
 Task<HttpResponsePtr> StorageAdminHandler::handleGetSystemConfig(HttpRequestPtr tsp_req) {
-    (void)tsp_req;
+    if (!sgrn::datastore::isPlatformAdmin(tsp_req)) {
+        co_return sgrn::createErrorResponse("Forbidden: Platform administrator privileges required", k403Forbidden, "SystemConfig");
+    }
     try {
         const std::string path = sgrn::datastore::config::currentConfigPath();
         Json::Value root;
@@ -734,6 +777,9 @@ Task<HttpResponsePtr> StorageAdminHandler::handleGetSystemConfig(HttpRequestPtr 
 }
 
 Task<HttpResponsePtr> StorageAdminHandler::handleUpdateSystemConfig(HttpRequestPtr tsp_req) {
+    if (!sgrn::datastore::isPlatformAdmin(tsp_req)) {
+        co_return sgrn::createErrorResponse("Forbidden: Platform administrator privileges required", k403Forbidden, "SystemConfig");
+    }
     try {
         auto json = tsp_req->getJsonObject();
         if (!json || !json->isObject() || !json->isMember("values") || !(*json)["values"].isObject()) {
@@ -1017,6 +1063,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleListQuotas(HttpRequestPtr tsp_r
         }
         const std::string search = queryParam(tsp_req, "search", "");
         const std::size_t limit = clampParam(queryParam(tsp_req, "limit", ""), 100, 1000);
+        const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
+        const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
@@ -1025,25 +1073,35 @@ Task<HttpResponsePtr> StorageAdminHandler::handleListQuotas(HttpRequestPtr tsp_r
         auto db = db_res.value();
 
         std::string quota_sql;
+        std::vector<std::string> quota_binds = {escapeLike(search)};
         if (kind == "user") {
             quota_sql = "SELECT id, email, organisation, total_virtual_size, storage_limit, total_entry_count, entry_count_limit "
                         "FROM core.users WHERE deleted_at IS NULL AND (email ILIKE '%' || $1 || '%' ESCAPE '\\' "
-                        "OR organisation ILIKE '%' || $1 || '%' ESCAPE '\\') "
-                        "ORDER BY id LIMIT " +
-                        std::to_string(limit);
+                        "OR organisation ILIKE '%' || $1 || '%' ESCAPE '\\') ";
+            if (!is_platform) {
+                quota_sql += "AND organisation = $2 ";
+                quota_binds.push_back(session_org);
+            }
+            quota_sql += "ORDER BY id LIMIT " + std::to_string(limit);
         } else if (kind == "service") {
             quota_sql = "SELECT id, name, organisation, total_virtual_size, storage_limit, total_entry_count, entry_count_limit "
                         "FROM core.automated_services WHERE deleted_at IS NULL AND (name ILIKE '%' || $1 || '%' ESCAPE '\\' "
-                        "OR organisation ILIKE '%' || $1 || '%' ESCAPE '\\') "
-                        "ORDER BY id LIMIT " +
-                        std::to_string(limit);
+                        "OR organisation ILIKE '%' || $1 || '%' ESCAPE '\\') ";
+            if (!is_platform) {
+                quota_sql += "AND organisation = $2 ";
+                quota_binds.push_back(session_org);
+            }
+            quota_sql += "ORDER BY id LIMIT " + std::to_string(limit);
         } else {
             quota_sql = "SELECT name, total_virtual_size, storage_limit, total_entry_count, entry_count_limit "
-                        "FROM core.organisations WHERE name ILIKE '%' || $1 || '%' ESCAPE '\\' "
-                        "ORDER BY name LIMIT " +
-                        std::to_string(limit);
+                        "FROM core.organisations WHERE (name ILIKE '%' || $1 || '%' ESCAPE '\\') ";
+            if (!is_platform) {
+                quota_sql += "AND name = $2 ";
+                quota_binds.push_back(session_org);
+            }
+            quota_sql += "ORDER BY name LIMIT " + std::to_string(limit);
         }
-        auto rows = co_await sgrn::datastore::core::execSqlCoroVec(db, quota_sql, {escapeLike(search)});
+        auto rows = co_await sgrn::datastore::core::execSqlCoroVec(db, quota_sql, quota_binds);
 
         Json::Value list = Json::arrayValue;
         for (const auto& row : rows) {
@@ -1151,14 +1209,28 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpdateQuota(HttpRequestPtr tsp_
             push_set("entry_count_limit", entries_is_null, entries_bind);
         }
 
+        // Deliberately no self-exclusion: an admin tunes their own quota
+        // through the same call as anyone else's.
+        const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
+        const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
+
+        if (kind == "organisation") {
+            if (!json->isMember("name") || !(*json)["name"].isString() || (*json)["name"].asString().empty()) {
+                co_return sgrn::createErrorResponse("name is required for kind organisation", k400BadRequest, "StorageAdmin");
+            }
+            const std::string target_org = (*json)["name"].asString();
+            if (!is_platform && target_org != session_org) {
+                co_return sgrn::createErrorResponse(
+                    "Forbidden: cannot modify quota of another organisation", k403Forbidden, "StorageAdmin");
+            }
+        }
+
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
             co_return sgrn::createJsonResponse(db_res);
         }
         auto db = db_res.value();
 
-        // Deliberately no self-exclusion: an admin tunes their own quota
-        // through the same call as anyone else's.
         std::string quota_sql;
         if (kind == "user" || kind == "service") {
             if (!json->isMember("id") || !(*json)["id"].isInt() || (*json)["id"].asInt() <= 0) {
@@ -1168,14 +1240,16 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpdateQuota(HttpRequestPtr tsp_
             binds.push_back(std::to_string((*json)["id"].asInt()));
             const std::string table = kind == "user" ? "core.users" : "core.automated_services";
             const std::string idcol = kind == "user" ? "email" : "name";
-            quota_sql = "UPDATE " + table + " SET " + sets + " WHERE id = $" + std::to_string(binds.size()) +
-                        " AND deleted_at IS NULL RETURNING id, " + idcol +
-                        " AS label, organisation, total_virtual_size, storage_limit, total_entry_count, entry_count_limit";
-        } else {
-            if (!json->isMember("name") || !(*json)["name"].isString() || (*json)["name"].asString().empty()) {
-                co_return sgrn::createErrorResponse("name is required for kind organisation", k400BadRequest, "StorageAdmin");
+            quota_sql = "UPDATE " + table + " SET " + sets + " WHERE id = $" + std::to_string(binds.size()) + " AND deleted_at IS NULL ";
+            if (!is_platform) {
+                binds.push_back(session_org);
+                quota_sql += "AND organisation = $" + std::to_string(binds.size()) + " ";
             }
-            binds.push_back((*json)["name"].asString());
+            quota_sql += "RETURNING id, " + idcol +
+                         " AS label, organisation, total_virtual_size, storage_limit, total_entry_count, entry_count_limit";
+        } else {
+            const std::string target_org = (*json)["name"].asString();
+            binds.push_back(target_org);
             quota_sql = "UPDATE core.organisations SET " + sets + " WHERE name = $" + std::to_string(binds.size()) +
                         " RETURNING name AS label, name AS organisation, total_virtual_size, storage_limit, total_entry_count, "
                         "entry_count_limit";
@@ -1209,32 +1283,77 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpdateQuota(HttpRequestPtr tsp_
 // ============================================================================
 
 Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPtr tsp_req) {
-    (void)tsp_req;
     try {
+        const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
+        const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
+
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
             co_return sgrn::createJsonResponse(db_res);
         }
         auto db = db_res.value();
 
-        // --- headline counts (soft-deleted actors excluded) ---
-        auto users = co_await sgrn::datastore::core::execSqlCoroVec(db,
-            "SELECT COUNT(*), COALESCE(SUM(total_virtual_size),0), COALESCE(SUM(total_entry_count),0) FROM core.users "
-            "WHERE deleted_at IS NULL",
-            {});
-        auto services = co_await sgrn::datastore::core::execSqlCoroVec(db,
-            "SELECT COUNT(*), COALESCE(SUM(total_virtual_size),0), COALESCE(SUM(total_entry_count),0) FROM "
-            "core.automated_services WHERE deleted_at IS NULL",
-            {});
-        auto orgs = co_await sgrn::datastore::core::execSqlCoroVec(
-            db, "SELECT COUNT(*), COALESCE(SUM(total_virtual_size),0), COALESCE(SUM(total_entry_count),0) FROM core.organisations", {});
-        auto domains = co_await sgrn::datastore::core::execSqlCoroVec(db, "SELECT COUNT(*) FROM core.domains", {});
-        auto files = co_await sgrn::datastore::core::execSqlCoroVec(db, "SELECT COUNT(*) FROM storage.files", {});
-        auto objects = co_await sgrn::datastore::core::execSqlCoroVec(
-            db, "SELECT COUNT(*), COALESCE(SUM(size),0), COALESCE(SUM(original_size),0) FROM storage.objects", {});
+        auto users = is_platform
+                         ? co_await sgrn::datastore::core::execSqlCoroVec(db,
+                               "SELECT COUNT(*), COALESCE(SUM(total_virtual_size),0), COALESCE(SUM(total_entry_count),0) FROM core.users "
+                               "WHERE deleted_at IS NULL",
+                               {})
+                         : co_await sgrn::datastore::core::execSqlCoroVec(db,
+                               "SELECT COUNT(*), COALESCE(SUM(total_virtual_size),0), COALESCE(SUM(total_entry_count),0) FROM core.users "
+                               "WHERE deleted_at IS NULL AND organisation = $1",
+                               {session_org});
+
+        auto services = is_platform ? co_await sgrn::datastore::core::execSqlCoroVec(db,
+                                          "SELECT COUNT(*), COALESCE(SUM(total_virtual_size),0), COALESCE(SUM(total_entry_count),0) FROM "
+                                          "core.automated_services WHERE deleted_at IS NULL",
+                                          {})
+                                    : co_await sgrn::datastore::core::execSqlCoroVec(db,
+                                          "SELECT COUNT(*), COALESCE(SUM(total_virtual_size),0), COALESCE(SUM(total_entry_count),0) FROM "
+                                          "core.automated_services WHERE deleted_at IS NULL AND organisation = $1",
+                                          {session_org});
+
+        auto orgs =
+            is_platform
+                ? co_await sgrn::datastore::core::execSqlCoroVec(db,
+                      "SELECT COUNT(*), COALESCE(SUM(total_virtual_size),0), COALESCE(SUM(total_entry_count),0) FROM core.organisations",
+                      {})
+                : co_await sgrn::datastore::core::execSqlCoroVec(db,
+                      "SELECT COUNT(*), COALESCE(SUM(total_virtual_size),0), COALESCE(SUM(total_entry_count),0) FROM core.organisations "
+                      "WHERE "
+                      "name = $1",
+                      {session_org});
+
+        auto domains = is_platform ? co_await sgrn::datastore::core::execSqlCoroVec(db, "SELECT COUNT(*) FROM core.domains", {})
+                                   : co_await sgrn::datastore::core::execSqlCoroVec(
+                                         db, "SELECT COUNT(*) FROM core.domains WHERE organisation = $1", {session_org});
+
+        auto files =
+            is_platform
+                ? co_await sgrn::datastore::core::execSqlCoroVec(db, "SELECT COUNT(*) FROM storage.files", {})
+                : co_await sgrn::datastore::core::execSqlCoroVec(db,
+                      "SELECT COUNT(*) FROM storage.files f "
+                      "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
+                      "WHERE COALESCE(u.organisation, s.organisation) = $1",
+                      {session_org});
+
+        auto objects =
+            is_platform
+                ? co_await sgrn::datastore::core::execSqlCoroVec(
+                      db, "SELECT COUNT(*), COALESCE(SUM(size),0), COALESCE(SUM(original_size),0) FROM storage.objects", {})
+                : co_await sgrn::datastore::core::execSqlCoroVec(db,
+                      "SELECT COUNT(DISTINCT o.id), COALESCE(SUM(o.size),0), COALESCE(SUM(o.original_size),0) FROM storage.objects o "
+                      "JOIN storage.file_objects fo ON fo.object_id = o.id JOIN storage.files f ON f.id = fo.file_id "
+                      "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
+                      "WHERE COALESCE(u.organisation, s.organisation) = $1",
+                      {session_org});
+
         auto formats = co_await sgrn::datastore::core::execSqlCoroVec(
             db, "SELECT COUNT(*), COALESCE(SUM(CASE WHEN is_allowed THEN 1 ELSE 0 END),0) FROM storage.formats", {});
-        auto grants = co_await sgrn::datastore::core::execSqlCoroVec(db, "SELECT COUNT(*) FROM core.user_domain_permissions", {});
+
+        auto grants = is_platform
+                          ? co_await sgrn::datastore::core::execSqlCoroVec(db, "SELECT COUNT(*) FROM core.user_domain_permissions", {})
+                          : co_await sgrn::datastore::core::execSqlCoroVec(
+                                db, "SELECT COUNT(*) FROM core.user_domain_permissions WHERE organisation = $1", {session_org});
 
         const int64_t bytes_stored = objects.empty() ? 0 : fieldInt(objects[0][1]);
         const int64_t bytes_virtual = objects.empty() ? 0 : fieldInt(objects[0][2]);
@@ -1258,15 +1377,25 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPt
         out["bytes"] = std::move(bytes);
 
         // --- 30-day upload timeseries (day, files, virtual bytes) ---
-        // --- 30-day upload timeseries (day, files, virtual bytes) ---
-        auto series = co_await sgrn::datastore::core::execSqlCoroVec(db,
-            "SELECT to_char(date_trunc('day', f.created_at), 'YYYY-MM-DD') AS day, COUNT(DISTINCT f.id) AS files, "
-            "COALESCE(SUM(o.original_size),0) AS bytes_virtual "
-            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
-            "fo.object_id "
-            "WHERE f.created_at >= now() - interval '30 days' "
-            "GROUP BY 1 ORDER BY 1",
-            {});
+        auto series =
+            is_platform
+                ? co_await sgrn::datastore::core::execSqlCoroVec(db,
+                      "SELECT to_char(date_trunc('day', f.created_at), 'YYYY-MM-DD') AS day, COUNT(DISTINCT f.id) AS files, "
+                      "COALESCE(SUM(o.original_size),0) AS bytes_virtual "
+                      "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
+                      "fo.object_id "
+                      "WHERE f.created_at >= now() - interval '30 days' "
+                      "GROUP BY 1 ORDER BY 1",
+                      {})
+                : co_await sgrn::datastore::core::execSqlCoroVec(db,
+                      "SELECT to_char(date_trunc('day', f.created_at), 'YYYY-MM-DD') AS day, COUNT(DISTINCT f.id) AS files, "
+                      "COALESCE(SUM(o.original_size),0) AS bytes_virtual "
+                      "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
+                      "fo.object_id "
+                      "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
+                      "WHERE f.created_at >= now() - interval '30 days' AND COALESCE(u.organisation, s.organisation) = $1 "
+                      "GROUP BY 1 ORDER BY 1",
+                      {session_org});
         Json::Value timeseries = Json::arrayValue;
         for (const auto& row : series) {
             Json::Value e;
@@ -1278,13 +1407,24 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPt
         out["timeseries_30d"] = std::move(timeseries);
 
         // --- top extensions by file count ---
-        auto exts = co_await sgrn::datastore::core::execSqlCoroVec(db,
-            "SELECT COALESCE(f.extension, '(none)') AS ext, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS "
-            "bytes_virtual "
-            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
-            "fo.object_id "
-            "GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
-            {});
+        auto exts =
+            is_platform
+                ? co_await sgrn::datastore::core::execSqlCoroVec(db,
+                      "SELECT COALESCE(f.extension, '(none)') AS ext, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS "
+                      "bytes_virtual "
+                      "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
+                      "fo.object_id "
+                      "GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
+                      {})
+                : co_await sgrn::datastore::core::execSqlCoroVec(db,
+                      "SELECT COALESCE(f.extension, '(none)') AS ext, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS "
+                      "bytes_virtual "
+                      "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
+                      "fo.object_id "
+                      "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
+                      "WHERE COALESCE(u.organisation, s.organisation) = $1 "
+                      "GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
+                      {session_org});
         Json::Value top_ext = Json::arrayValue;
         for (const auto& row : exts) {
             Json::Value e;
@@ -1296,18 +1436,37 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPt
         out["top_extensions"] = std::move(top_ext);
 
         // --- top uploaders (users + services in one list) ---
-        auto uploaders = co_await sgrn::datastore::core::execSqlCoroVec(db,
-            "SELECT 'user:' || u.email AS actor, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual "
-            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
-            "fo.object_id JOIN core.users u ON u.id = f.user_id "
-            "GROUP BY 1 "
-            "UNION ALL "
-            "SELECT 'service:' || s.name AS actor, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual "
-            "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
-            "fo.object_id JOIN core.automated_services s "
-            "ON s.id = f.automated_service_id "
-            "GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
-            {});
+        auto uploaders =
+            is_platform ? co_await sgrn::datastore::core::execSqlCoroVec(db,
+                              "SELECT 'user:' || u.email AS actor, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS "
+                              "bytes_virtual "
+                              "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
+                              "fo.object_id JOIN core.users u ON u.id = f.user_id "
+                              "GROUP BY 1 "
+                              "UNION ALL "
+                              "SELECT 'service:' || s.name AS actor, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS "
+                              "bytes_virtual "
+                              "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
+                              "fo.object_id JOIN core.automated_services s "
+                              "ON s.id = f.automated_service_id "
+                              "GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
+                              {})
+                        : co_await sgrn::datastore::core::execSqlCoroVec(db,
+                              "SELECT 'user:' || u.email AS actor, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS "
+                              "bytes_virtual "
+                              "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
+                              "fo.object_id JOIN core.users u ON u.id = f.user_id "
+                              "WHERE u.organisation = $1 "
+                              "GROUP BY 1 "
+                              "UNION ALL "
+                              "SELECT 'service:' || s.name AS actor, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS "
+                              "bytes_virtual "
+                              "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
+                              "fo.object_id JOIN core.automated_services s "
+                              "ON s.id = f.automated_service_id "
+                              "WHERE s.organisation = $1 "
+                              "GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
+                              {session_org});
         Json::Value top_actors = Json::arrayValue;
         for (const auto& row : uploaders) {
             Json::Value e;
@@ -1319,16 +1478,33 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPt
         out["top_uploaders"] = std::move(top_actors);
 
         // --- most recent files ---
-        auto recent = co_await sgrn::datastore::core::execSqlCoroVec(db,
-            "SELECT f.name, COALESCE(f.extension, '') AS ext, "
-            "(SELECT COALESCE(SUM(so.original_size), 0) FROM storage.file_objects fo JOIN storage.objects so ON so.id = fo.object_id WHERE "
-            "fo.file_id = f.id) AS original_size, "
-            "COALESCE('user:' || u.email, 'service:' || s.name, '(unknown)') AS actor, "
-            "to_char(f.created_at, 'YYYY-MM-DD HH24:MI:SS') AS at "
-            "FROM storage.files f "
-            "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
-            "ORDER BY f.id DESC LIMIT 10",
-            {});
+        auto recent =
+            is_platform
+                ? co_await sgrn::datastore::core::execSqlCoroVec(db,
+                      "SELECT f.name, COALESCE(f.extension, '') AS ext, "
+                      "(SELECT COALESCE(SUM(so.original_size), 0) FROM storage.file_objects fo JOIN storage.objects so ON so.id = "
+                      "fo.object_id "
+                      "WHERE "
+                      "fo.file_id = f.id) AS original_size, "
+                      "COALESCE('user:' || u.email, 'service:' || s.name, '(unknown)') AS actor, "
+                      "to_char(f.created_at, 'YYYY-MM-DD HH24:MI:SS') AS at "
+                      "FROM storage.files f "
+                      "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
+                      "ORDER BY f.id DESC LIMIT 10",
+                      {})
+                : co_await sgrn::datastore::core::execSqlCoroVec(db,
+                      "SELECT f.name, COALESCE(f.extension, '') AS ext, "
+                      "(SELECT COALESCE(SUM(so.original_size), 0) FROM storage.file_objects fo JOIN storage.objects so ON so.id = "
+                      "fo.object_id "
+                      "WHERE "
+                      "fo.file_id = f.id) AS original_size, "
+                      "COALESCE('user:' || u.email, 'service:' || s.name, '(unknown)') AS actor, "
+                      "to_char(f.created_at, 'YYYY-MM-DD HH24:MI:SS') AS at "
+                      "FROM storage.files f "
+                      "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
+                      "WHERE COALESCE(u.organisation, s.organisation) = $1 "
+                      "ORDER BY f.id DESC LIMIT 10",
+                      {session_org});
         Json::Value recent_json = Json::arrayValue;
         for (const auto& row : recent) {
             Json::Value e;
@@ -1355,6 +1531,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsBreakdown(HttpRequestP
         }
         const std::string search = queryParam(tsp_req, "search", "");
         const std::size_t limit = clampParam(queryParam(tsp_req, "limit", ""), 100, 1000);
+        const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
+        const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
@@ -1363,14 +1541,22 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsBreakdown(HttpRequestP
         auto db = db_res.value();
 
         std::string sql;
+        std::vector<std::string> binds = {escapeLike(search)};
+
         if (kind == "domain") {
             sql = "SELECT COALESCE(f.domain, '(none)') AS slice, COUNT(*) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual, "
                   "COUNT(DISTINCT COALESCE('u' || f.user_id::text, 's' || f.automated_service_id::text)) AS actors "
                   "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o ON "
-                  "o.id = fo.object_id "
-                  "WHERE COALESCE(f.domain, '(none)') ILIKE '%' || $1 || '%' ESCAPE '\\' "
-                  "GROUP BY 1 ORDER BY 2 DESC LIMIT " +
-                  std::to_string(limit);
+                  "o.id = fo.object_id ";
+            if (!is_platform) {
+                sql += "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
+                       "WHERE COALESCE(f.domain, '(none)') ILIKE '%' || $1 || '%' ESCAPE '\\' AND COALESCE(u.organisation, s.organisation) "
+                       "= $2 ";
+                binds.push_back(session_org);
+            } else {
+                sql += "WHERE COALESCE(f.domain, '(none)') ILIKE '%' || $1 || '%' ESCAPE '\\' ";
+            }
+            sql += "GROUP BY 1 ORDER BY 2 DESC LIMIT " + std::to_string(limit);
         } else if (kind == "organisation") {
             sql = "SELECT g.organisation AS slice, COUNT(*) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual, "
                   "COUNT(DISTINCT COALESCE('u' || f.user_id::text, 's' || f.automated_service_id::text)) AS actors "
@@ -1378,28 +1564,37 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsBreakdown(HttpRequestP
                   "o.id = fo.object_id "
                   "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
                   "LEFT JOIN LATERAL (SELECT COALESCE(u.organisation, s.organisation, '(none)') AS organisation) g ON true "
-                  "WHERE g.organisation ILIKE '%' || $1 || '%' ESCAPE '\\' "
-                  "GROUP BY 1 ORDER BY 2 DESC LIMIT " +
-                  std::to_string(limit);
+                  "WHERE g.organisation ILIKE '%' || $1 || '%' ESCAPE '\\' ";
+            if (!is_platform) {
+                sql += "AND g.organisation = $2 ";
+                binds.push_back(session_org);
+            }
+            sql += "GROUP BY 1 ORDER BY 2 DESC LIMIT " + std::to_string(limit);
         } else if (kind == "user") {
             sql = "SELECT u.email AS slice, COUNT(*) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual, "
                   "COALESCE(u.storage_limit, -1) AS storage_cap, COALESCE(u.entry_count_limit, -1) AS entry_cap "
                   "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o ON "
                   "o.id = fo.object_id JOIN core.users u ON u.id = f.user_id "
-                  "WHERE u.deleted_at IS NULL AND u.email ILIKE '%' || $1 || '%' ESCAPE '\\' "
-                  "GROUP BY u.email, u.storage_limit, u.entry_count_limit ORDER BY 2 DESC LIMIT " +
-                  std::to_string(limit);
+                  "WHERE u.deleted_at IS NULL AND u.email ILIKE '%' || $1 || '%' ESCAPE '\\' ";
+            if (!is_platform) {
+                sql += "AND u.organisation = $2 ";
+                binds.push_back(session_org);
+            }
+            sql += "GROUP BY u.email, u.storage_limit, u.entry_count_limit ORDER BY 2 DESC LIMIT " + std::to_string(limit);
         } else {
             sql = "SELECT s.name AS slice, COUNT(*) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual, "
                   "COALESCE(s.storage_limit, -1) AS storage_cap, COALESCE(s.entry_count_limit, -1) AS entry_cap "
                   "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 JOIN storage.objects o ON "
                   "o.id = fo.object_id JOIN core.automated_services s "
                   "ON s.id = f.automated_service_id "
-                  "WHERE s.deleted_at IS NULL AND s.name ILIKE '%' || $1 || '%' ESCAPE '\\' "
-                  "GROUP BY s.name, s.storage_limit, s.entry_count_limit ORDER BY 2 DESC LIMIT " +
-                  std::to_string(limit);
+                  "WHERE s.deleted_at IS NULL AND s.name ILIKE '%' || $1 || '%' ESCAPE '\\' ";
+            if (!is_platform) {
+                sql += "AND s.organisation = $2 ";
+                binds.push_back(session_org);
+            }
+            sql += "GROUP BY s.name, s.storage_limit, s.entry_count_limit ORDER BY 2 DESC LIMIT " + std::to_string(limit);
         }
-        auto rows = co_await sgrn::datastore::core::execSqlCoroVec(db, sql, {escapeLike(search)});
+        auto rows = co_await sgrn::datastore::core::execSqlCoroVec(db, sql, binds);
 
         Json::Value list = Json::arrayValue;
         for (const auto& row : rows) {

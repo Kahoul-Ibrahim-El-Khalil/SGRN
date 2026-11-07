@@ -1,5 +1,5 @@
 ---
-Checks: "-*,readability-identifier-naming"
+Checks: "-*,readability-identifier-naming,bugprone-*,cert-*,clang-analyzer-*"
 CheckOptions:
   - key: readability-identifier-naming.ClassCase
     value: CamelCase

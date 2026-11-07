@@ -23,7 +23,7 @@ foreach(flag ${DEBUG_OPTIONS})
 endforeach()
 
 # In RELEASE mode, force all debug flags OFF
-if(RELEASE)
+if(RELEASE OR CMAKE_BUILD_TYPE STREQUAL "Release")
     message(STATUS "RELEASE mode: all debug flags forcibly disabled")
     foreach(flag ${DEBUG_OPTIONS})
         set(${flag} OFF CACHE BOOL "Disabled in RELEASE" FORCE)

@@ -1,5 +1,6 @@
 /*sgrn/core/utils/helpers.hpp*/
 #pragma once
+#include <drogon/HttpAppFramework.h>
 #include <drogon/HttpTypes.h>
 #include <sgrn/Result.hpp>
 #include <sgrn/datastore/BackendError.hpp>
@@ -8,7 +9,9 @@
 #include <sgrn/debug.hpp>
 #include <sgrn/types/HttpResponseCallback.hpp>
 #include <sgrn/utils/jsoncpp.hpp>
+#include <sgrn/utils/strings.hpp>
 #include <charconv> // ADDED: Required for std::from_chars
+#include <cstdlib>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -155,6 +158,95 @@ inline bool isValidStorageKey(std::string_view t_key) {
     if (t_key.empty())
         return false;
     return true;
+}
+
+namespace datastore::auth
+{
+
+inline bool isPlatformAdmin(const drogon::HttpRequestPtr& tsp_req) {
+    if (!tsp_req || !tsp_req->attributes()->find("session_json")) {
+        return false;
+    }
+    const auto& session = tsp_req->attributes()->get<Json::Value>("session_json");
+    if (!session.isMember("user") || !session["user"].isMember("email") || !session["user"]["email"].isString()) {
+        return false;
+    }
+    const std::string email = sgrn::utils::strings::toLower(sgrn::utils::strings::trim(session["user"]["email"].asString()));
+    if (email.empty()) {
+        return false;
+    }
+
+    // 1. Environment variable SGRN_SYSTEM_ADMIN_EMAILS (comma-separated list)
+    const char* env_emails = std::getenv("SGRN_SYSTEM_ADMIN_EMAILS");
+    if (env_emails) {
+        std::string env_str(env_emails);
+        size_t start = 0;
+        while (start < env_str.size()) {
+            size_t comma = env_str.find(',', start);
+            std::string item = sgrn::utils::strings::toLower(
+                sgrn::utils::strings::trim(env_str.substr(start, comma == std::string::npos ? std::string::npos : comma - start)));
+            if (!item.empty() && item == email) {
+                return true;
+            }
+            if (comma == std::string::npos)
+                break;
+            start = comma + 1;
+        }
+    }
+
+    // 2. Custom config security.system_admin_emails
+    try {
+        const Json::Value& cfg = drogon::app().getCustomConfig();
+        if (cfg.isMember("security") && cfg["security"].isMember("system_admin_emails")) {
+            const auto& val = cfg["security"]["system_admin_emails"];
+            if (val.isArray()) {
+                for (const auto& item : val) {
+                    if (item.isString() && sgrn::utils::strings::toLower(sgrn::utils::strings::trim(item.asString())) == email) {
+                        return true;
+                    }
+                }
+            } else if (val.isString()) {
+                if (sgrn::utils::strings::toLower(sgrn::utils::strings::trim(val.asString())) == email) {
+                    return true;
+                }
+            }
+        }
+    } catch (...) {
+    }
+
+    return false;
+}
+
+inline std::string getSessionOrganisation(const drogon::HttpRequestPtr& tsp_req) {
+    if (!tsp_req || !tsp_req->attributes()->find("session_json")) {
+        return "";
+    }
+    const auto& session = tsp_req->attributes()->get<Json::Value>("session_json");
+    if (session.isMember("user") && session["user"].isMember("organisation") && session["user"]["organisation"].isString()) {
+        return session["user"]["organisation"].asString();
+    }
+    return "";
+}
+
+} // namespace datastore::auth
+
+namespace datastore
+{
+inline bool isPlatformAdmin(const drogon::HttpRequestPtr& tsp_req) {
+    return auth::isPlatformAdmin(tsp_req);
+}
+
+inline std::string getSessionOrganisation(const drogon::HttpRequestPtr& tsp_req) {
+    return auth::getSessionOrganisation(tsp_req);
+}
+} // namespace datastore
+
+inline bool isPlatformAdmin(const drogon::HttpRequestPtr& tsp_req) {
+    return datastore::auth::isPlatformAdmin(tsp_req);
+}
+
+inline std::string getSessionOrganisation(const drogon::HttpRequestPtr& tsp_req) {
+    return datastore::auth::getSessionOrganisation(tsp_req);
 }
 
 } // namespace sgrn

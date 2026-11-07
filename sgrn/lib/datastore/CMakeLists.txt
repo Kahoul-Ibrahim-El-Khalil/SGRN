@@ -49,6 +49,18 @@ if(SGRN_BUILD_TESTS)
     add_executable(backup_test tests/backup-test.cpp)
     target_link_libraries(backup_test PRIVATE sgrn_datastore_lib)
     add_test(NAME backup_test COMMAND backup_test)
+    # Verification & hardening tests (verify command catches planted misconfigurations)
+    add_executable(verify_test tests/verify-test.cpp)
+    target_link_libraries(verify_test PRIVATE sgrn_datastore_lib OpenSSL::Crypto)
+    add_test(NAME verify_test COMMAND verify_test)
+    # ASan scratch test (out-of-bounds read detection under sanitizers)
+    add_executable(asan_scratch_test tests/asan-scratch-test.cpp)
+    target_link_libraries(asan_scratch_test PRIVATE sgrn_datastore_lib)
+    add_test(NAME asan_scratch_test COMMAND asan_scratch_test)
+    # Cross-organisation authorization & audit purge regression tests
+    add_executable(cross_org_auth_test tests/cross-org-auth-test.cpp)
+    target_link_libraries(cross_org_auth_test PRIVATE sgrn_datastore_lib)
+    add_test(NAME cross_org_auth_test COMMAND cross_org_auth_test)
 endif()
 
 # ==================== Summary ====================

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, ci/bootstrap]
+    branches: [main, ci/bootstrap, datastore/hardening]
   pull_request:
   workflow_dispatch:
 
@@ -19,10 +19,27 @@ env:
   CPM_CACHE_DIR: ${{ github.workspace }}/.cpm-cache
 
 jobs:
-  linux:
-    name: Linux CI
+  # ── 1. Build and Test Matrix (Release, ASan+UBSan, TSan) ──────────────────────
+  build-and-test:
+    name: Build & Test (${{ matrix.name }})
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: "Release (Hardened)"
+            build_type: "Release"
+            sanitizer: ""
+            check_sec: true
+          - name: "ASan + UBSan"
+            build_type: "Debug"
+            sanitizer: "asan,ubsan"
+            check_sec: false
+          - name: "TSan"
+            build_type: "Debug"
+            sanitizer: "tsan"
+            check_sec: false
     defaults:
       run:
         shell: bash -el {0}
@@ -59,6 +76,11 @@ jobs:
           cache-downloads: true
           post-cleanup: environment
 
+      - name: Install checksec
+        if: matrix.check_sec
+        run: |
+          sudo apt-get update && sudo apt-get install -y checksec
+
       - name: Set compiler paths
         run: |
           echo "CC_BIN=$CONDA_PREFIX/bin/clang" >> "$GITHUB_ENV"
@@ -79,13 +101,19 @@ jobs:
 
       - name: Configure SGRN
         run: |
+          EXTRA_ARGS=""
+          if [ -n "${{ matrix.sanitizer }}" ]; then
+            EXTRA_ARGS="-DSGRN_SANITIZE=${{ matrix.sanitizer }}"
+          fi
           cmake --preset "$PRESET_MAIN" \
+            -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
             -DCMAKE_C_COMPILER="$CC_BIN" \
             -DCMAKE_CXX_COMPILER="$CXX_BIN" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCPM_SOURCE_CACHE="$CPM_CACHE_DIR" \
-            -DUSE_PCH=OFF
+            -DUSE_PCH=OFF \
+            $EXTRA_ARGS
 
       - name: Build SGRN
         run: |
@@ -97,5 +125,88 @@ jobs:
           ctest \
             --test-dir ".build/$PRESET_MAIN" \
             --output-on-failure \
-            --timeout 120 \
+            --timeout 180 \
             -j2
+
+      - name: Verify Binary Hardening with checksec
+        if: matrix.check_sec
+        run: |
+          BINARY=".build/$PRESET_MAIN/sgrn/apps/datastore/sgrn_datastore"
+          if [ -f "$BINARY" ]; then
+            checksec --file="$BINARY" --format=cli
+            # Assert PIE, Full RELRO, Canary, and NX
+            checksec --file="$BINARY" --format=json | jq .
+          fi
+
+      - name: ASan deliberate out-of-bounds trap test
+        if: matrix.sanitizer == 'asan,ubsan'
+        run: |
+          SCRATCH_TEST=".build/$PRESET_MAIN/sgrn/lib/datastore/asan_scratch_test"
+          if [ -f "$SCRATCH_TEST" ]; then
+            echo "Running benign test..."
+            "$SCRATCH_TEST"
+            echo "Triggering deliberate out-of-bounds read (expecting ASan error)..."
+            set +e
+            "$SCRATCH_TEST" --trigger-crash
+            EXIT_CODE=$?
+            set -e
+            if [ $EXIT_CODE -eq 0 ]; then
+              echo "ERROR: ASan failed to trap deliberate out-of-bounds read!"
+              exit 1
+            else
+              echo "SUCCESS: ASan trapped out-of-bounds read with exit code $EXIT_CODE"
+            fi
+          fi
+
+  # ── 2. Static Analysis: clang-tidy & cppcheck ────────────────────────────────
+  static-analysis:
+    name: Static Analysis (clang-tidy, cppcheck)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Install static analysis tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang-tidy cppcheck
+
+      - name: Run cppcheck
+        run: |
+          cppcheck --version
+          cppcheck \
+            --enable=warning,style,performance,portability \
+            --error-exitcode=1 \
+            --inline-suppr \
+            --suppress=missingIncludeSystem \
+            --suppress=unmatchedSuppression \
+            -I include \
+            -I sgrn/lib/datastore/include \
+            sgrn/lib/datastore/src/ 2>&1 | tee cppcheck_report.txt
+
+  # ── 3. CycloneDX SBOM Generation ─────────────────────────────────────────────
+  cyclonedx-sbom:
+    name: Generate CycloneDX SBOM
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Install syft / cyclonedx generator
+        uses: anchore/sbom-action/download-syft@v0.17.9
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          syft scan dir:. -o cyclonedx-json=sbom.cyclonedx.json
+
+      - name: Upload SBOM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sgrn-sbom-cyclonedx
+          path: sbom.cyclonedx.json

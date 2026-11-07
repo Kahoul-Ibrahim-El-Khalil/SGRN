@@ -5,6 +5,7 @@ Requires=SGRN-postgres.service SGRN-garage.service SGRN-nginx.service
 
 [Service]
 User=${SGRN_USER}
+Group=${SGRN_USER}
 Type=simple
 WorkingDirectory=${SGRN_DATA_DIR}
 
@@ -22,9 +23,31 @@ ExecStart=${SGRN_BIN_DIR}/sgrn_datastore
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
+LimitCORE=0
 
-ProtectSystem=full
-ProtectHome=false
+# Security Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+ProtectHostname=true
+ProtectClock=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+ReadWritePaths=${SGRN_DATA_DIR}
 
 [Install]
 WantedBy=default.target

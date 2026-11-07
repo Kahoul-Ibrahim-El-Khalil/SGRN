@@ -137,13 +137,13 @@ set(SGRN_DEP_libmodbus_URL
     "https://github.com/stephane/libmodbus/archive/refs/tags/v3.2.0.tar.gz"
 )
 
-# OpENer master branch
+# OpENer — pinned upstream release tag for reproducible builds
 set(SGRN_DEP_opener_REPO
     "https://github.com/EIPStackGroup/OpENer.git"
 )
 
 set(SGRN_DEP_opener_TAG
-    "master"
+    "2.3.1"
 )
 
 # reproc v14.2.4 — cross-platform child-process control (C99 core + C++11
@@ -318,9 +318,15 @@ macro(sgrn_fetch_source DEP_NAME)
 
         if(_sfs_url)
 
+            set(_cpm_hash_args)
+            if(DEFINED SGRN_DEP_${DEP_NAME}_HASH AND NOT SGRN_DEP_${DEP_NAME}_HASH STREQUAL "")
+                list(APPEND _cpm_hash_args URL_HASH "${SGRN_DEP_${DEP_NAME}_HASH}")
+            endif()
+
             CPMAddPackage(
                 NAME           ${DEP_NAME}
                 URL            "${_sfs_url}"
+                ${_cpm_hash_args}
                 DOWNLOAD_ONLY  YES
             )
 

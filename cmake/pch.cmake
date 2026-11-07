@@ -301,6 +301,12 @@ function(sgrn_create_pch_targets)
     if(SGRN_BUILD_S7)
         sgrn_create_pch_s7()
     endif()
+
+    foreach(_pch_target sgrn_pch_std sgrn_pch_third sgrn_pch_s7_third_party sgrn_pch_net sgrn_pch_s7)
+        if(TARGET ${_pch_target})
+            sgrn_apply_target_hardening(${_pch_target})
+        endif()
+    endforeach()
 endfunction()
 
 macro(sgrn_use_pch target_name pch_target)

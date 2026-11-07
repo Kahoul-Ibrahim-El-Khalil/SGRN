@@ -125,6 +125,7 @@ void generateSelfSignedCert(const std::filesystem::path& t_cert_dir) {
             key_path.string(), cert_path.string());
     int ret = sgrn::utils::process::execute(cmd);
     if (ret == 0) {
+        ensureOwnerOnlyPerms(key_path);
         SGRN_INFO("DatastoreInit", "  -> Generated: {} and {}", cert_path.string(), key_path.string());
     } else {
         SGRN_WARN("DatastoreInit", "Failed to generate self-signed SSL certificate automatically (openssl returned {})", ret);

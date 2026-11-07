@@ -20,6 +20,9 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/env_guard.cmake)
 # 1. Modern Project Definition (Loads toolchain if --preset win64 is used)
 project(SGRN_Monorepo LANGUAGES CXX C)
 
+# 1.1 Compiler & Linker Hardening (NIST SP 800-53 / FIPS Baseline)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/build_hardening.cmake)
+
 # 3.1 Build Workflow Toggles
 #
 # `SGRN_DEPS_ONLY`: configure only third-party deps (extern/) and stop. Use this

@@ -106,6 +106,8 @@ function(sgrn_add_component_library)
     if(SGRN_ENABLE_ORIGIN_RPATH)
         sgrn_enable_origin_rpath(${SGRN_TARGET})
     endif()
+
+    sgrn_apply_target_hardening(${SGRN_TARGET})
 endfunction()
 
 function(sgrn_install_component_library)
@@ -175,6 +177,8 @@ function(sgrn_add_component_executable)
     if(SGRN_ENABLE_ORIGIN_RPATH)
         sgrn_enable_origin_rpath(${SGRN_TARGET})
     endif()
+
+    sgrn_apply_target_hardening(${SGRN_TARGET})
 endfunction()
 
 function(sgrn_install_component_executable)

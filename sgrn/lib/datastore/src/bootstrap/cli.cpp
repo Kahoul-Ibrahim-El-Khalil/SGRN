@@ -88,8 +88,8 @@ std::optional<int> dispatch(int t_argc, char** tp_argv) {
         return EXIT_SUCCESS;
     }
 
-    if (first_arg == "--verify-install") {
-        return bootstrap::verifyInstall(base_dir()) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    if (first_arg == "--verify-install" || first_arg == "--verify") {
+        return bootstrap::verifyInstall(base_dir(), flags.allow_insecure) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     if (first_arg == "--backup-db") {

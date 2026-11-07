@@ -1,6 +1,7 @@
 #include <sgrn/datastore/filters/admin.hpp>
 
 #include <sgrn/datastore/filters/types.hpp>
+#include <sgrn/datastore/utils/helpers.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/debug.hpp>
 #include <string>
@@ -30,7 +31,11 @@ void AdminFilter::doFilter(const drogon::HttpRequestPtr& tsp_req, drogon::Filter
         return;
     }
 
-    // 3. Access granted
+    // 3. Populate platform admin status
+    const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
+    tsp_req->attributes()->insert("is_platform_admin", is_platform);
+
+    // 4. Access granted
     t_filter_chain_callback();
 }
 

@@ -68,6 +68,11 @@
   ],
   "custom_config": {
     "jwt_secret": "${JWT_SECRET}",
+    "security": {
+      "system_admin_emails": [
+        "admin@sgrn.local"
+      ]
+    },
     "rate_limiting": {
       "enabled": true,
       "auth_endpoint_limit": 30,
