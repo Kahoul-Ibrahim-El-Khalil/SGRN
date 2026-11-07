@@ -16,16 +16,100 @@
 # consulted only for structural facts that must never drift from reality:
 # column existence, udt_name -> FieldType mapping, and the primary key.
 import argparse
+import getpass
 import json
 import os
 import re
 import sys
+import subprocess
 from pathlib import Path
 
 # sgrn/lib/datastore — derived from this script's location so the filter
 # scan and default paths work regardless of the caller's CWD (invoke from
 # the repo root, e.g. `python3 sgrn/lib/datastore/scripts/generators/...`).
 DATASTORE_ROOT = Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = DATASTORE_ROOT.parent.parent.parent
+
+def detectSuperuser(host: str, port: int, requested_user: str | None, password: str = "") -> tuple[str, str]:
+    candidates = []
+    if requested_user:
+        candidates.append(requested_user)
+    env_super = os.environ.get("POSTGRES_SUPERUSER")
+    if env_super and env_super not in candidates:
+        candidates.append(env_super)
+    try:
+        current_os_user = getpass.getuser()
+        if current_os_user not in candidates:
+            candidates.append(current_os_user)
+    except Exception:
+        pass
+    for fallback in ["sgrn_datastore", "postgres"]:
+        if fallback not in candidates:
+            candidates.append(fallback)
+
+    env = os.environ.copy()
+    if password:
+        env["PGPASSWORD"] = password
+
+    for user in candidates:
+        for db in ["postgres", "template1", "sgrn"]:
+            try:
+                res = subprocess.run(
+                    ["psql", "-h", host, "-p", str(port), "-U", user, "-d", db, "-c", "SELECT 1;"],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                )
+                if res.returncode == 0:
+                    return user, db
+            except Exception:
+                pass
+    return requested_user or (candidates[0] if candidates else "postgres"), "postgres"
+
+def dropDatabase(host, port, superuser, superuser_password, dbname):
+    try:
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            if s.connect_ex((host, int(port))) != 0:
+                return
+    except Exception:
+        return
+
+    real_superuser, maint_db = detectSuperuser(host, port, superuser, superuser_password)
+    env = os.environ.copy()
+    if superuser_password:
+        env["PGPASSWORD"] = superuser_password
+    try:
+        subprocess.run(
+            ["psql", "-h", host, "-p", str(port), "-U", real_superuser, "-d", maint_db, "-c", f'DROP DATABASE IF EXISTS "{dbname}" WITH (FORCE);'],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        print(f">> Dropped build database '{dbname}'")
+    except Exception as e:
+        print(f">> Warning: Failed to drop database '{dbname}': {e}")
+
+def initBuildDatabase(host, port, dbname, user, password, superuser, superuser_password):
+    init_db_script = REPO_ROOT / "init-db.py"
+    if not init_db_script.exists():
+        raise FileNotFoundError(f"init-db.py not found at {init_db_script}")
+    
+    real_superuser, _ = detectSuperuser(host, port, superuser, superuser_password)
+    cmd = [
+        sys.executable, str(init_db_script),
+        "--host", host,
+        "--port", str(port),
+        "--dbname", dbname,
+        "--user", user,
+        "--password", password,
+        "--superuser", real_superuser,
+        "--superuser-password", superuser_password,
+    ]
+    print(f">> Initializing isolated build database '{dbname}' at {host}:{port} using role '{real_superuser}'...")
+    subprocess.run(cmd, check=True)
 
 DEFAULT_MANIFEST = str(DATASTORE_ROOT / "crud" / "manifest.json")
 
@@ -628,7 +712,12 @@ def main():
     parser = argparse.ArgumentParser(description="Generate compile-time CRUD view handlers from crud/manifest.json + live schema")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5432)
-    parser.add_argument("--dbname", default="sgrn")
+    parser.add_argument("--dbname", default=None)
+    parser.add_argument("--build-db", nargs="?", const="sgrn_build_views", default=None,
+                        help="Create an isolated build database from scratch, run generation against it, and drop it on completion (default: sgrn_build_views)")
+    parser.add_argument("--keep-db", action="store_true", help="Keep the build database instead of dropping it on completion")
+    parser.add_argument("--superuser", default=os.environ.get("POSTGRES_SUPERUSER", "postgres"), help="PostgreSQL superuser")
+    parser.add_argument("--superuser-password", default=os.environ.get("POSTGRES_SUPERUSER_PASSWORD", "dracaeris"), help="PostgreSQL superuser password")
     parser.add_argument("--user", default="sgrn_datastore")
     parser.add_argument(
         "--manifest",
@@ -650,43 +739,69 @@ def main():
     )
     args = parser.parse_args()
 
-    known_filters = scan_known_filters()
-    manifest, default_filters = load_manifest(args.manifest, known_filters)
+    build_db_name = None
+    if args.build_db:
+        build_db_name = args.build_db
+        target_dbname = args.dbname if args.dbname else build_db_name
+    else:
+        target_dbname = args.dbname if args.dbname else "sgrn"
 
-    if args.schemas is not None:
-        for schema in args.schemas:
-            if schema not in manifest["schemas"]:
-                fail(f"manifest {args.manifest}: --schemas requested '{schema}', which is not listed under 'schemas'")
-
-    reg_file = args.registration or f"{args.out}/RegisteredViews.cpp"
-    conn = connect_db(args.host, args.port, args.dbname, args.user, args.password)
-    specs = []
     try:
-        for schema, schema_cfg in manifest["schemas"].items():
-            if args.schemas is not None and schema not in args.schemas:
-                continue
-            for table, table_cfg in schema_cfg.get("tables", {}).items():
-                spec = build_view_spec(conn, args.manifest, schema, table, table_cfg, default_filters)
-                if spec:
-                    specs.append(spec)
-                    emit_header(spec, args.out)
-    except Exception as e:
-        print(f"[ERROR] Could not connect to or query PostgreSQL database '{args.dbname}' at {args.host}:{args.port}.", file=sys.stderr)
-        print(f"Details: {e}", file=sys.stderr)
-        print("Make sure PostgreSQL is running and initialized (e.g. run 'python3 init-db.py' first).", file=sys.stderr)
-        sys.exit(1)
+        if build_db_name:
+            initBuildDatabase(
+                host=args.host,
+                port=args.port,
+                dbname=target_dbname,
+                user=args.user,
+                password=args.password,
+                superuser=args.superuser,
+                superuser_password=args.superuser_password,
+            )
 
-    agg = f"{args.out}/AllViews.gen.hpp"
-    os.makedirs(args.out, exist_ok=True)
-    with open(agg, "w") as f:
-        # Sorted: matches clang-format's SortIncludes so regen is diff-stable.
-        names = sorted(f'{s["name"]}.gen.hpp' for s in specs)
-        f.write("// GENERATED by generate_views.py — DO NOT EDIT.\n")
-        f.write("#pragma once\n" + "".join(f'#include "{n}"\n' for n in names))
+        known_filters = scan_known_filters()
+        manifest, default_filters = load_manifest(args.manifest, known_filters)
 
-    update_registration_file(specs, reg_file)
+        if args.schemas is not None:
+            for schema in args.schemas:
+                if schema not in manifest["schemas"]:
+                    fail(f"manifest {args.manifest}: --schemas requested '{schema}', which is not listed under 'schemas'")
 
-import subprocess
+        reg_file = args.registration or f"{args.out}/RegisteredViews.cpp"
+        conn = connect_db(args.host, args.port, target_dbname, args.user, args.password)
+        specs = []
+        try:
+            for schema, schema_cfg in manifest["schemas"].items():
+                if args.schemas is not None and schema not in args.schemas:
+                    continue
+                for table, table_cfg in schema_cfg.get("tables", {}).items():
+                    spec = build_view_spec(conn, args.manifest, schema, table, table_cfg, default_filters)
+                    if spec:
+                        specs.append(spec)
+                        emit_header(spec, args.out)
+        except Exception as e:
+            print(f"[ERROR] Could not connect to or query PostgreSQL database '{target_dbname}' at {args.host}:{args.port}.", file=sys.stderr)
+            print(f"Details: {e}", file=sys.stderr)
+            print("Make sure PostgreSQL is running and initialized (e.g. run 'python3 init-db.py' first).", file=sys.stderr)
+            sys.exit(1)
+
+        agg = f"{args.out}/AllViews.gen.hpp"
+        os.makedirs(args.out, exist_ok=True)
+        with open(agg, "w") as f:
+            # Sorted: matches clang-format's SortIncludes so regen is diff-stable.
+            names = sorted(f'{s["name"]}.gen.hpp' for s in specs)
+            f.write("// GENERATED by generate_views.py — DO NOT EDIT.\n")
+            f.write("#pragma once\n" + "".join(f'#include "{n}"\n' for n in names))
+
+        update_registration_file(specs, reg_file)
+    finally:
+        if build_db_name and not args.keep_db:
+            dropDatabase(
+                host=args.host,
+                port=args.port,
+                superuser=args.superuser,
+                superuser_password=args.superuser_password,
+                dbname=target_dbname,
+            )
 
 class PsqlCursorAdapter:
     def __init__(self, host, port, dbname, user, password):

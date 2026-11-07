@@ -1,25 +1,56 @@
-# cmake/sgrn_views_codegen.cmake — compile-time CRUD view handlers.
+# cmake/sgrn_views_codegen.cmake — compile-time CRUD view handlers & ORM codegen.
 #
-# The generated `.gen.hpp` files and RegisteredViews.cpp are real, checked-in
-# sources (see src/handlers/generated/). They are compiled normally; the
-# ordinary build never needs DB connectivity.
+# The generated `.gen.hpp` files, RegisteredViews.cpp, and ORM models are
+# real, checked-in sources (see src/handlers/generated/ and src/orm/models/).
+# They are compiled normally.
 #
-# NOTE: the `sgrn_generate_views` target below is intentionally NOT part of
-# the default build graph and does NOT run against a live database during
-# `cmake --build`. It is invoked manually (like generate_orm.py) after a
-# migration changes the schema; its outputs are committed to the repo.
+# When SQL schemas or manifest change, this automatically triggers regeneration
+# against an isolated build database via `generate_orm.py --build-db --views`.
 
 set(VIEWS_GEN_DIR "${CMAKE_BINARY_DIR}/generated/views" CACHE INTERNAL "")
 
-# Invoke with the DB password in the environment, e.g.:
-#   PGPASSWORD=<pw> cmake --build <dir> --target sgrn_generate_views
-# (the script reads PGPASSWORD itself at run time, so nothing secret is
-# baked into the build files).
+option(SGRN_AUTO_CODEGEN "Automatically regenerate ORM and CRUD views when SQL schemas or manifest change" ON)
+
+set(SGRN_MANIFEST_FILE "${PROJECT_SOURCE_DIR}/crud/manifest.json")
+file(GLOB_RECURSE SGRN_SQL_FILES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/postgres/*.sql")
+set(SGRN_ORM_GEN_SCRIPT "${PROJECT_SOURCE_DIR}/scripts/generators/generate_orm.py")
+set(SGRN_VIEWS_GEN_SCRIPT "${PROJECT_SOURCE_DIR}/scripts/generators/generate_views.py")
+set(SGRN_INIT_DB_SCRIPT "${CMAKE_SOURCE_DIR}/init-db.py")
+set(SGRN_CODEGEN_STAMP "${CMAKE_CURRENT_BINARY_DIR}/sgrn_codegen.stamp")
+
+if(SGRN_AUTO_CODEGEN)
+    add_custom_command(
+        OUTPUT "${SGRN_CODEGEN_STAMP}"
+        COMMAND "${Python3_EXECUTABLE}" "${SGRN_ORM_GEN_SCRIPT}" --build-db --views
+        COMMAND "${CMAKE_COMMAND}" -E touch "${SGRN_CODEGEN_STAMP}"
+        DEPENDS
+            "${SGRN_MANIFEST_FILE}"
+            ${SGRN_SQL_FILES}
+            "${SGRN_ORM_GEN_SCRIPT}"
+            "${SGRN_VIEWS_GEN_SCRIPT}"
+            "${SGRN_INIT_DB_SCRIPT}"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "SQL schemas or manifest changed: regenerating Drogon ORM models and CRUD views via isolated build database..."
+        VERBATIM
+    )
+
+    add_custom_target(sgrn_codegen ALL
+        DEPENDS "${SGRN_CODEGEN_STAMP}"
+    )
+
+    if(TARGET sgrn_datastore_orm)
+        add_dependencies(sgrn_datastore_orm sgrn_codegen)
+    endif()
+    if(TARGET sgrn_datastore_lib)
+        add_dependencies(sgrn_datastore_lib sgrn_codegen)
+    endif()
+endif()
+
+# Manual regeneration target
 add_custom_target(sgrn_generate_views
-    COMMAND ${Python3_EXECUTABLE} "${PROJECT_SOURCE_DIR}/scripts/generators/generate_views.py"
-            --manifest "${PROJECT_SOURCE_DIR}/crud/manifest.json"
-            --out "${PROJECT_SOURCE_DIR}/src/handlers/generated"
-    COMMENT "Regenerating CRUD view handlers from live schema + crud/manifest.json (manual step; needs PGPASSWORD in the environment)"
+    COMMAND "${Python3_EXECUTABLE}" "${SGRN_ORM_GEN_SCRIPT}" --build-db --views
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Manual regeneration of Drogon ORM models and CRUD views via isolated build database"
 )
 
 # src/query/ holds the hand-written runtime engine (CrudViewEngine.cpp).

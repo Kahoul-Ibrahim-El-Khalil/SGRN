@@ -43,6 +43,31 @@
           "columns": {
             "name": {
               "filter_ops": ["eq", "like"]
+            },
+            "parent_id": {
+              "filter_ops": ["eq"]
+            },
+            "path": {
+              "filter_ops": ["eq", "like"]
+            }
+          }
+        },
+        "admin_assignments": {
+          "tenant_column": "organisation",
+          "read_relation": "core.admin_assignments",
+          "write_table": "core.admin_assignments",
+          "default_order": "id",
+          "max_limit": 500,
+          "operations": ["list", "get", "create", "update", "delete"],
+          "columns": {
+            "user_id": {
+              "filter_ops": ["eq", "in"]
+            },
+            "scope": {
+              "filter_ops": ["eq"]
+            },
+            "domain_id": {
+              "filter_ops": ["eq"]
             }
           }
         },
@@ -81,6 +106,9 @@
             },
             "email": {
               "filter_ops": ["eq", "like"]
+            },
+            "is_platform_admin": {
+              "filter_ops": ["eq"]
             },
             "role": {
               "filter_ops": ["eq"]

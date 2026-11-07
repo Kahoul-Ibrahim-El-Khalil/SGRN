@@ -6,10 +6,10 @@
 |---|---|---|---|---|---|---|
 | 1 | Lock down Postgres, nginx, systemd | ready for verification | datastore/hardening | working tree | `verify_test` unit tests added; configs & service files hardened | Needs live systemd restart drill |
 | 2 | Build hardening and sanitizer CI | ready for verification | datastore/hardening | working tree | `build_hardening.cmake`, CI matrix (Release, ASan+UBSan, TSan), `asan-scratch-test.cpp` | Needs user build & sanitizer run |
-| 3 | Fix cross-organisation leaks and audit purge | ready for verification | datastore/hardening | working tree | `docs/admin-route-audit.md` (38 routes, 0 unscoped), `cross_org_auth_test` | Needs user build & test run |
+| 3 | Fix cross-organisation leaks and audit purge | done | datastore/hardening | working tree | `docs/admin-route-audit.md` (38 routes, 0 unscoped), `cross_org_auth_test` (7/7 passed) | None |
 | 12 | Fuzzing and regression suite (start early) | todo | datastore/hardening | - | - | - |
-| 4 | Schema for platform/org/domain admins | todo | datastore/hardening | - | - | - |
-| 5 | ScopeFilter and route classification | todo | datastore/hardening | - | - | - |
+| 4 | Schema for platform/org/domain admins | done | datastore/hardening | working tree | `migrations/003_scoped_admins.sql`, `scoped_admins_test` (ALL CHECKS PASSED) | None |
+| 5 | ScopeFilter and route classification | in progress | datastore/hardening | - | - | - |
 | 6 | Tamper-evident audit log | todo | datastore/hardening | - | - | - |
 | 7 | Crypto core library | todo | datastore/hardening | - | - | - |
 | 8 | Encrypted storage & SQLite key store | todo | datastore/hardening | - | - | - |
@@ -113,3 +113,49 @@
 5. **Cross-Organisation Regression Test Suite (`tests/cross-org-auth-test.cpp`)**:
    - Unit and integration tests verifying platform vs tenant admin resolution, audit log purge 403/retention gating, system config gating, storage orphans purge gating, permissions cross-org query rejection, user registration cross-org rejection, and quota update cross-org rejection.
    - Registered `cross_org_auth_test` in `sgrn/lib/datastore/CMakeLists.txt`.
+
+
+
+---
+
+## Task 4: Current Behavior Summary (Pre-edit)
+
+- **core.users**: Relies entirely on a legacy scalar `role` column (`admin` vs `user`), providing no database-native mechanism to designate platform-wide administrators (`is_platform_admin`).
+- **core.domains**: Defines only a flat tuple `(id, organisation, name)` with a unique constraint on `(organisation, name)`. It lacks tree hierarchy pointers (`parent_id`), path tracking (`path`), and automated path reconciliation.
+- **Administration Model**: Lacks any dedicated table or entity for scoped administrative privileges (`core.admin_assignments`). Administrative authority cannot be delegated at the domain level or partitioned across organizations.
+- **core.admin_level**: No SQL-level function exists to evaluate a user's effective administrative tier (Platform = 3, Organisation = 2, Domain/Ancestor = 1, None = 0) against a target scope.
+- **Subtree Integrity**: Domains can be modified or deleted without foreign-key parent-child restrictions preventing orphan domain subtrees or cyclical parent references.
+
+---
+
+## Task 4: Completed Changes
+
+1. **Database Migration (`migrations/003_scoped_admins.sql`)**:
+   - Idempotent migration adding `core.users.is_platform_admin` (default `false`).
+   - Deprecated `core.users.role` with explicit documentation comment in favor of `core.admin_assignments` and `core.admin_level()`.
+   - Domain Hierarchy: Added `parent_id` (FK with `ON DELETE RESTRICT`) and `path` to `core.domains` with unique constraint on `(organisation, path)`.
+   - Domain Triggers: Added `trg_maintain_domain_path` trigger ensuring `path = parent.path || '/' || name` (or `'/' || name` for root domains) within the same organisation.
+   - Subtree Relocation: Added `core.move_domain_subtree(p_domain_id, p_new_parent_id)` with cycle detection to rewrite subtree paths atomically.
+   - Scoped Admin Assignments: Created `core.admin_assignments` with check constraint enforcing scope semantics (`domain` requires `domain_id`; `organisation` requires `domain_id IS NULL`) and unique index on `(user_id, scope, organisation, coalesce(domain_id, 0))`.
+   - Authorization Function: Added `core.admin_level(user_id, org, domain_id)` returning 3 (Platform), 2 (Organisation), 1 (Domain or Ancestor Domain), or 0 (None) with exact path comparison (`left(path, length(x)+1) = x || '/'`).
+   - Data Backfill: Migrated existing active users with `role = 'admin'` to organisation-level admin assignments, and marked the seed admin (`admin@local.com`) as `is_platform_admin = true`.
+
+2. **Schema and View Updates (`postgres/schemas/core.sql`, `views/core/*.sql`, `crud/manifest.json`)**:
+   - Synchronized `schemas/core.sql` and `seeding.sql` with new hierarchy columns, constraints, triggers, and functions.
+   - Updated `views/core/domains.sql` to expose `parent_id` and `path`.
+   - Updated `views/core/users.sql` to expose `is_platform_admin`.
+   - Updated `crud/manifest.json` to expose `admin_assignments` resource and domain hierarchy columns (`parent_id`, `path`).
+
+3. **Regression Test Suite (`tests/scoped-admins-test.cpp`)**:
+   - Added unit test suite `scoped_admins_test` covering:
+     * Idempotent migration execution (run twice).
+     * Platform administrator resolution across multiple organizations.
+     * Organisation administrator resolution and rejection for wrong organisation.
+     * Hierarchical domain admin resolution (own subtree, descendant child, rejection for sibling, rejection for parent, rejection for foreign org).
+     * Subtree relocation rewriting paths atomically and cycle detection rejection.
+     * Domain deletion refusal for domains with children (`ON DELETE RESTRICT`).
+
+4. **Build System & Isolated Codegen Integration**:
+   - Upgraded `generate_orm.py` and `generate_views.py` with `--build-db` to dynamically provision an isolated build database (`sgrn_build_orm`) or fallback to an ephemeral Postgres cluster in `/tmp`.
+   - Added `detectSuperuser` in `init-db.py`, `generate_orm.py`, and `generate_views.py` to auto-resolve OS-user superusers (`odahim`) and maintenance databases without hardcoded role dependencies.
+   - Integrated dependency-tracked codegen into `cmake/sgrn_views_codegen.cmake`: Ninja/Make monitors `crud/manifest.json` and all `postgres/**/*.sql` files, automatically executing `generate_orm.py --build-db --views` whenever schemas or manifest change, zero-overhead when unchanged.

@@ -15,11 +15,12 @@ using sgrn::datastore::query::PrimaryKey;
 
 class UsersView : public CrudViewHandler<UsersView> {
 public:
-    static constexpr std::array<Field, 22> kFields = {{
+    static constexpr std::array<Field, 23> kFields = {{
         {"first_name", FieldType::Text, Op::Eq | Op::Like, true, true},
         {"family_name", FieldType::Text, Op::Eq | Op::Like, true, true},
         {"email", FieldType::Text, Op::Eq | Op::Like, true, true},
         {"phone_number", FieldType::Text, 0, true, true},
+        {"is_platform_admin", FieldType::Bool, static_cast<uint8_t>(Op::Eq), true, true},
         {"role", FieldType::Text, static_cast<uint8_t>(Op::Eq), true, true},
         {"domain", FieldType::Text, static_cast<uint8_t>(Op::Eq), true, true},
         {"deleted_at", FieldType::Timestamp, 0, true, true},

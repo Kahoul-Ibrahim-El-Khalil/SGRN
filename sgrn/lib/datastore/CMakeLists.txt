@@ -61,6 +61,12 @@ if(SGRN_BUILD_TESTS)
     add_executable(cross_org_auth_test tests/cross-org-auth-test.cpp)
     target_link_libraries(cross_org_auth_test PRIVATE sgrn_datastore_lib)
     add_test(NAME cross_org_auth_test COMMAND cross_org_auth_test)
+    # Scoped admins and domain hierarchy tests (Prompt 4)
+    add_executable(scoped_admins_test tests/scoped-admins-test.cpp)
+    target_link_libraries(scoped_admins_test PRIVATE sgrn_datastore_lib reproc::reproc++)
+    target_include_directories(scoped_admins_test PRIVATE ${CMAKE_SOURCE_DIR}/sgrn/lib/tests/support)
+    target_compile_definitions(scoped_admins_test PRIVATE SGRN_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    add_test(NAME scoped_admins_test COMMAND scoped_admins_test)
 endif()
 
 # ==================== Summary ====================

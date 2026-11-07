@@ -51,6 +51,7 @@ public:
         static const std::string _email;
         static const std::string _password;
         static const std::string _phone_number;
+        static const std::string _is_platform_admin;
         static const std::string _role;
         static const std::string _domain;
         static const std::string _deleted_at;
@@ -175,6 +176,14 @@ public:
     void setPhoneNumber(const std::string& pPhoneNumber) noexcept;
     void setPhoneNumber(std::string&& pPhoneNumber) noexcept;
     void setPhoneNumberToNull() noexcept;
+
+    /**  For column is_platform_admin  */
+    /// Get the value of the column is_platform_admin, returns the default value if the column is null
+    const bool& getValueOfIsPlatformAdmin() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<bool>& getIsPlatformAdmin() const noexcept;
+    /// Set the value of the column is_platform_admin
+    void setIsPlatformAdmin(const bool& pIsPlatformAdmin) noexcept;
 
     /**  For column role  */
     /// Get the value of the column role, returns the default value if the column is null
@@ -332,7 +341,7 @@ public:
     void setCreatedAt(const ::trantor::Date& pCreatedAt) noexcept;
 
     static size_t getColumnNumber() noexcept {
-        return 25;
+        return 26;
     }
     static const std::string& getColumnName(size_t index) noexcept(false);
 
@@ -362,6 +371,7 @@ private:
     std::shared_ptr<std::string> email_;
     std::shared_ptr<std::string> password_;
     std::shared_ptr<std::string> phoneNumber_;
+    std::shared_ptr<bool> isPlatformAdmin_;
     std::shared_ptr<std::string> role_;
     std::shared_ptr<std::string> domain_;
     std::shared_ptr<::trantor::Date> deletedAt_;
@@ -390,7 +400,7 @@ private:
         const bool notNull_;
     };
     static const std::vector<MetaData> metaData_;
-    bool dirtyFlag_[25] = {false};
+    bool dirtyFlag_[26] = {false};
 
 public:
     static const std::string& sqlForFindingByPrimaryKey() {
@@ -432,87 +442,92 @@ public:
             sql += "phone_number,";
             ++parametersCount;
         }
-        sql += "role,";
+        sql += "is_platform_admin,";
         ++parametersCount;
         if (!dirtyFlag_[7]) {
             needSelection = true;
         }
-        if (dirtyFlag_[8]) {
+        sql += "role,";
+        ++parametersCount;
+        if (!dirtyFlag_[8]) {
+            needSelection = true;
+        }
+        if (dirtyFlag_[9]) {
             sql += "domain,";
             ++parametersCount;
         }
-        if (dirtyFlag_[9]) {
+        if (dirtyFlag_[10]) {
             sql += "deleted_at,";
             ++parametersCount;
         }
         sql += "status,";
         ++parametersCount;
-        if (!dirtyFlag_[10]) {
+        if (!dirtyFlag_[11]) {
             needSelection = true;
         }
         sql += "is_active,";
         ++parametersCount;
-        if (!dirtyFlag_[11]) {
+        if (!dirtyFlag_[12]) {
             needSelection = true;
         }
         sql += "can_read_personal,";
         ++parametersCount;
-        if (!dirtyFlag_[12]) {
+        if (!dirtyFlag_[13]) {
             needSelection = true;
         }
         sql += "can_write_personal,";
         ++parametersCount;
-        if (!dirtyFlag_[13]) {
+        if (!dirtyFlag_[14]) {
             needSelection = true;
         }
         sql += "can_delete_personal,";
         ++parametersCount;
-        if (!dirtyFlag_[14]) {
+        if (!dirtyFlag_[15]) {
             needSelection = true;
         }
         sql += "total_virtual_size,";
         ++parametersCount;
-        if (!dirtyFlag_[15]) {
+        if (!dirtyFlag_[16]) {
             needSelection = true;
         }
         sql += "total_real_size,";
         ++parametersCount;
-        if (!dirtyFlag_[16]) {
+        if (!dirtyFlag_[17]) {
             needSelection = true;
         }
-        if (dirtyFlag_[17]) {
+        if (dirtyFlag_[18]) {
             sql += "storage_limit,";
             ++parametersCount;
         }
         sql += "total_entry_count,";
         ++parametersCount;
-        if (!dirtyFlag_[18]) {
+        if (!dirtyFlag_[19]) {
             needSelection = true;
         }
         sql += "entry_count_limit,";
         ++parametersCount;
-        if (!dirtyFlag_[19]) {
+        if (!dirtyFlag_[20]) {
             needSelection = true;
         }
-        if (dirtyFlag_[20]) {
+        if (dirtyFlag_[21]) {
             sql += "rate_limit_rpm,";
             ++parametersCount;
         }
-        if (dirtyFlag_[21]) {
+        if (dirtyFlag_[22]) {
             sql += "max_file_size_mb,";
             ++parametersCount;
         }
-        if (dirtyFlag_[22]) {
+        if (dirtyFlag_[23]) {
             sql += "preferred_chunk_size_mb,";
             ++parametersCount;
         }
-        if (dirtyFlag_[23]) {
+        if (dirtyFlag_[24]) {
             sql += "rate_limit_upload_rpm,";
             ++parametersCount;
         }
         sql += "created_at,";
         ++parametersCount;
-        if (!dirtyFlag_[24]) {
+        if (!dirtyFlag_[25]) {
             needSelection = true;
         }
         needSelection = true;
@@ -559,6 +574,8 @@ public:
         if (dirtyFlag_[8]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
+        } else {
+            sql += "default,";
         }
         if (dirtyFlag_[9]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
@@ -567,8 +584,6 @@ public:
         if (dirtyFlag_[10]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-        } else {
-            sql += "default,";
         }
         if (dirtyFlag_[11]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
@@ -609,12 +624,12 @@ public:
         if (dirtyFlag_[17]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
+        } else {
+            sql += "default,";
         }
         if (dirtyFlag_[18]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-        } else {
-            sql += "default,";
         }
         if (dirtyFlag_[19]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
@@ -625,6 +640,8 @@ public:
         if (dirtyFlag_[20]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
+        } else {
+            sql += "default,";
         }
         if (dirtyFlag_[21]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
@@ -639,6 +656,10 @@ public:
             sql.append(placeholderStr, n);
         }
         if (dirtyFlag_[24]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[25]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         } else {

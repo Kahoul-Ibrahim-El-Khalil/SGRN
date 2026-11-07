@@ -18,6 +18,7 @@ void initGeneratedViews() {
     static UsersView s_users;
     static AutomatedServicesView s_automated_services;
     static UserDomainPermissionsView s_user_domain_permissions;
+    static AdminAssignmentsView s_admin_assignments;
 }
 
 } // namespace sgrn::datastore::handlers::query

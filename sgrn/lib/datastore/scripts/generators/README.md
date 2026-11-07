@@ -98,17 +98,20 @@ micromamba activate SGRN
 python3 init-db.py              # drops + recreates, applies postgres/init.sql
 # (or `sgrn_datastore --init-db` if binary is compiled)
 
-# 3. Regenerate the Drogon ORM models from the live schema:
+# 3. Regenerate both Drogon ORM models and compile-time CRUD views cleanly
+#    against an isolated build database (never touches your dev/prod database):
+python3 sgrn/lib/datastore/scripts/generators/generate_orm.py --build-db --views
+
+# Or run individually against a specific/live database:
 python3 sgrn/lib/datastore/scripts/generators/generate_orm.py --password "$POSTGRES_PASSWORD"
 #    --host/--port default to 127.0.0.1:5432. --clean wipes src/orm/models
 #    first (rarely needed). Needs `drogon_ctl` on PATH.
 
-# 4. Regenerate the compile-time CRUD view handlers from the live schema:
+# 4. Regenerate the compile-time CRUD view handlers:
 PGPASSWORD="$POSTGRES_PASSWORD" \
 python3 sgrn/lib/datastore/scripts/generators/generate_views.py
-#    --host/--port/--dbname/--user default to 127.0.0.1:5432/sgrn/sgrn_datastore,
-#    --password to "dracaeris" (same dev defaults as generate_orm.py; override
-#    via --password or PGPASSWORD for real databases).
+#    Supports `--build-db` for an isolated build database, or connects to
+#    --host/--port/--dbname/--user (default 127.0.0.1:5432/sgrn/sgrn_datastore).
 #    Needs `psycopg2` (pip install psycopg2-binary).
 #    Only ever APPENDS to src/handlers/generated/RegisteredViews.cpp —
 #    a registration line you delete stays deleted (see below).

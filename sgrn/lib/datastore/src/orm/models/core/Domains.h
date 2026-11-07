@@ -47,6 +47,8 @@ public:
         static const std::string _id;
         static const std::string _organisation;
         static const std::string _name;
+        static const std::string _parent_id;
+        static const std::string _path;
     };
 
     static const int primaryKeyNumber;
@@ -117,8 +119,26 @@ public:
     void setName(const std::string& pName) noexcept;
     void setName(std::string&& pName) noexcept;
 
+    /**  For column parent_id  */
+    /// Get the value of the column parent_id, returns the default value if the column is null
+    const int32_t& getValueOfParentId() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<int32_t>& getParentId() const noexcept;
+    /// Set the value of the column parent_id
+    void setParentId(const int32_t& pParentId) noexcept;
+    void setParentIdToNull() noexcept;
+
+    /**  For column path  */
+    /// Get the value of the column path, returns the default value if the column is null
+    const std::string& getValueOfPath() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<std::string>& getPath() const noexcept;
+    /// Set the value of the column path
+    void setPath(const std::string& pPath) noexcept;
+    void setPath(std::string&& pPath) noexcept;
+
     static size_t getColumnNumber() noexcept {
-        return 3;
+        return 5;
     }
     static const std::string& getColumnName(size_t index) noexcept(false);
 
@@ -144,6 +164,8 @@ private:
     std::shared_ptr<int32_t> id_;
     std::shared_ptr<std::string> organisation_;
     std::shared_ptr<std::string> name_;
+    std::shared_ptr<int32_t> parentId_;
+    std::shared_ptr<std::string> path_;
     struct MetaData {
         const std::string colName_;
         const std::string colType_;
@@ -154,7 +176,7 @@ private:
         const bool notNull_;
     };
     static const std::vector<MetaData> metaData_;
-    bool dirtyFlag_[3] = {false};
+    bool dirtyFlag_[5] = {false};
 
 public:
     static const std::string& sqlForFindingByPrimaryKey() {
@@ -180,6 +202,15 @@ public:
             sql += "name,";
             ++parametersCount;
         }
+        if (dirtyFlag_[3]) {
+            sql += "parent_id,";
+            ++parametersCount;
+        }
+        sql += "path,";
+        ++parametersCount;
+        if (!dirtyFlag_[4]) {
+            needSelection = true;
+        }
         needSelection = true;
         if (parametersCount > 0) {
             sql[sql.length() - 1] = ')';
@@ -198,6 +229,16 @@ public:
         if (dirtyFlag_[2]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[3]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[4]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        } else {
+            sql += "default,";
         }
         if (parametersCount > 0) {
             sql.resize(sql.length() - 1);

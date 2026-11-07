@@ -18,6 +18,7 @@ select
   u.can_write_personal,
   u.can_delete_personal,
   u.created_at,
+  u.is_platform_admin,
   u.role,
   u.organisation,
   u.domain,

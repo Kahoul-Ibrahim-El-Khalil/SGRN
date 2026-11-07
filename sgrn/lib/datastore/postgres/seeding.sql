@@ -648,6 +648,7 @@ insert into
     family_name,
     email,
     password,
+    is_platform_admin,
     role,
     status,
     is_active
@@ -659,8 +660,33 @@ values
     'Admin',
     'admin@local.com',
     crypt ('adminroot', gen_salt ('bf', 4)),
+    true,
     'admin',
     'active',
     true
   )
-on conflict (email) do nothing;
+on conflict (email) do update
+set is_platform_admin = true;
+
+-- 6. initial admin assignment
+insert into
+  core.admin_assignments (
+    user_id,
+    scope,
+    organisation,
+    domain_id,
+    can_manage_users,
+    can_manage_keys
+  )
+select
+  u.id,
+  'organisation',
+  u.organisation,
+  null,
+  true,
+  true
+from
+  core.users u
+where
+  u.email = 'admin@local.com'
+on conflict (user_id, scope, organisation, coalesce(domain_id, 0)) do nothing;

@@ -8,6 +8,7 @@ or running `sgrn_datastore --init-db`.
 """
 
 import argparse
+import getpass
 import os
 import re
 import subprocess
@@ -27,6 +28,42 @@ except ImportError:
     flattenSql = None
     def loadEnv(root: Path) -> dict:
         return {}
+
+def detectSuperuser(host: str, port: int, requested_user: str | None, password: str = "") -> tuple[str, str]:
+    candidates = []
+    if requested_user:
+        candidates.append(requested_user)
+    env_super = os.environ.get("POSTGRES_SUPERUSER")
+    if env_super and env_super not in candidates:
+        candidates.append(env_super)
+    try:
+        current_os_user = getpass.getuser()
+        if current_os_user not in candidates:
+            candidates.append(current_os_user)
+    except Exception:
+        pass
+    for fallback in ["sgrn_datastore", "postgres"]:
+        if fallback not in candidates:
+            candidates.append(fallback)
+
+    env = os.environ.copy()
+    if password:
+        env["PGPASSWORD"] = password
+
+    for user in candidates:
+        for db in ["postgres", "template1", "sgrn"]:
+            try:
+                res = subprocess.run(
+                    ["psql", "-h", host, "-p", str(port), "-U", user, "-d", db, "-c", "SELECT 1;"],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                )
+                if res.returncode == 0:
+                    return user, db
+            except Exception:
+                pass
+    return requested_user or (candidates[0] if candidates else "postgres"), "postgres"
 
 def flatten_sql_pure(file_path: Path, variables: dict, visited: set = None) -> str:
     if visited is None:
@@ -106,12 +143,16 @@ def main():
         print(f"[ERROR] Failed to flatten SQL files: {e}")
         sys.exit(1)
 
+    # Auto-detect working superuser and maintenance DB if default 'postgres' was provided
+    superuser, maint_db = detectSuperuser(args.host, args.port, args.superuser, args.superuser_password)
+    args.superuser = superuser
+
     # 2. Setup env for PGPASSWORD
     env = os.environ.copy()
     env["PGPASSWORD"] = args.superuser_password
 
     # 3. Drop and Recreate DB via psql or psycopg2
-    print(f"[init-db] Recreating database '{args.dbname}'...")
+    print(f"[init-db] Recreating database '{args.dbname}' using role '{args.superuser}'...")
     
     recreate_sql = f"""
     DROP DATABASE IF EXISTS "{args.dbname}" WITH (FORCE);
@@ -121,14 +162,14 @@ def main():
     psql_available = False
     try:
         subprocess.run(
-            ["psql", "-h", args.host, "-p", str(args.port), "-U", args.superuser, "-d", "postgres", "-c", f'DROP DATABASE IF EXISTS "{args.dbname}" WITH (FORCE);'],
+            ["psql", "-h", args.host, "-p", str(args.port), "-U", args.superuser, "-d", maint_db, "-c", f'DROP DATABASE IF EXISTS "{args.dbname}" WITH (FORCE);'],
             env=env,
             capture_output=True,
             text=True,
             check=True
         )
         subprocess.run(
-            ["psql", "-h", args.host, "-p", str(args.port), "-U", args.superuser, "-d", "postgres", "-c", f'CREATE DATABASE "{args.dbname}" ENCODING \'UTF8\';'],
+            ["psql", "-h", args.host, "-p", str(args.port), "-U", args.superuser, "-d", maint_db, "-c", f'CREATE DATABASE "{args.dbname}" ENCODING \'UTF8\';'],
             env=env,
             capture_output=True,
             text=True,

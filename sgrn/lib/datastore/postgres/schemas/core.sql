@@ -39,7 +39,10 @@ create table if not exists core.domains (
   id int generated always as identity primary key,
   organisation text not null references core.organisations (name) on delete cascade on update cascade,
   name text not null,
-  unique (organisation, name)
+  parent_id int references core.domains (id) on delete restrict default null,
+  path text not null default '',
+  unique (organisation, name),
+  unique (organisation, path)
 );
 
 create table if not exists core.automated_services (
@@ -83,6 +86,8 @@ create table if not exists core.users (
   email varchar(128) not null unique,
   password text not null,
   phone_number varchar(15) unique check (phone_number ~ '^\+?[0-9]{7,15}$'),
+  is_platform_admin boolean not null default false,
+  -- DEPRECATED: Retained for backward compatibility. Authoritative access control is resolved via core.admin_assignments and core.admin_level().
   role text not null default 'user' check (role in ('admin', 'user')),
   -- FIX #5: domain is now a composite FK to core.domains(organisation, name).
   domain text default null,
@@ -121,6 +126,196 @@ create table if not exists core.user_domain_permissions (
   constraint fk_user_domain_permission_org_domain foreign key (organisation, domain) references core.domains (organisation, name) on update cascade on delete cascade,
   constraint uq_user_organisation_domain unique (user_id, organisation, domain)
 );
+
+create table if not exists core.admin_assignments (
+  id bigserial primary key,
+  user_id int not null references core.users(id) on delete cascade,
+  scope text not null check (scope in ('organisation', 'domain')),
+  organisation text not null references core.organisations(name) on delete cascade on update cascade,
+  domain_id int references core.domains(id) on delete cascade,
+  can_manage_users boolean not null default true,
+  can_manage_keys boolean not null default true,
+  granted_by int references core.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  constraint chk_admin_assignment_scope check (
+    (scope = 'organisation' and domain_id is null) or
+    (scope = 'domain' and domain_id is not null)
+  )
+);
+
+create unique index if not exists uq_admin_assignment
+  on core.admin_assignments (user_id, scope, organisation, coalesce(domain_id, 0));
+
+create index if not exists idx_admin_assignments_user on core.admin_assignments (user_id);
+create index if not exists idx_admin_assignments_org on core.admin_assignments (organisation);
+create index if not exists idx_admin_assignments_domain on core.admin_assignments (domain_id) where domain_id is not null;
+
+-- ============================================================
+-- Domain path trigger & hierarchy functions
+-- ============================================================
+create or replace function core.trg_maintain_domain_path() returns trigger language plpgsql as $$
+declare
+  v_parent_org text;
+  v_parent_path text;
+begin
+  if new.parent_id is null then
+    new.path := '/' || new.name;
+  else
+    select organisation, path into v_parent_org, v_parent_path
+    from core.domains where id = new.parent_id;
+
+    if not found then
+      raise exception 'Parent domain id % does not exist', new.parent_id;
+    end if;
+
+    if v_parent_org != new.organisation then
+      raise exception 'Parent domain % belongs to organisation %, expected %',
+        new.parent_id, v_parent_org, new.organisation;
+    end if;
+
+    new.path := v_parent_path || '/' || new.name;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_domain_path on core.domains;
+create trigger trg_domain_path
+before insert or update of name, parent_id, organisation on core.domains
+for each row execute function core.trg_maintain_domain_path();
+
+create or replace function core.move_domain_subtree(
+  p_domain_id int,
+  p_new_parent_id int
+) returns void language plpgsql as $$
+declare
+  v_org text;
+  v_name text;
+  v_old_path text;
+  v_new_path text;
+  v_parent_org text;
+  v_parent_path text;
+begin
+  select organisation, name, path into v_org, v_name, v_old_path
+  from core.domains where id = p_domain_id;
+
+  if not found then
+    raise exception 'Domain % does not exist', p_domain_id;
+  end if;
+
+  if p_new_parent_id is not null then
+    if p_new_parent_id = p_domain_id then
+      raise exception 'Domain cannot be parent of itself';
+    end if;
+
+    select organisation, path into v_parent_org, v_parent_path
+    from core.domains where id = p_new_parent_id;
+
+    if not found then
+      raise exception 'Target parent domain % does not exist', p_new_parent_id;
+    end if;
+
+    if v_parent_org != v_org then
+      raise exception 'Target parent domain belongs to different organisation';
+    end if;
+
+    if v_parent_path = v_old_path or left(v_parent_path, length(v_old_path) + 1) = v_old_path || '/' then
+      raise exception 'Cannot move domain into its own descendant subtree';
+    end if;
+
+    v_new_path := v_parent_path || '/' || v_name;
+  else
+    v_new_path := '/' || v_name;
+  end if;
+
+  update core.domains
+  set parent_id = p_new_parent_id,
+      path = v_new_path
+  where id = p_domain_id;
+
+  update core.domains
+  set path = v_new_path || substring(path from length(v_old_path) + 1)
+  where organisation = v_org
+    and left(path, length(v_old_path) + 1) = v_old_path || '/';
+end;
+$$;
+
+-- ============================================================
+-- Three-level administrative authorization resolver:
+--   3 = Platform Administrator
+--   2 = Organisation Administrator
+--   1 = Domain (or Domain Ancestor) Administrator
+--   0 = None
+-- ============================================================
+create or replace function core.admin_level(
+  p_user_id int,
+  p_org text,
+  p_domain_id int default null
+) returns int language plpgsql stable as $$
+declare
+  v_is_platform boolean;
+  v_user_deleted timestamptz;
+  v_target_path text;
+  v_target_org text;
+begin
+  -- 1. Check user exists, not soft-deleted, and platform admin status
+  select is_platform_admin, deleted_at into v_is_platform, v_user_deleted
+  from core.users where id = p_user_id;
+
+  if not found or v_user_deleted is not null then
+    return 0;
+  end if;
+
+  if v_is_platform then
+    return 3;
+  end if;
+
+  if p_org is null then
+    return 0;
+  end if;
+
+  -- 2. Check organisation admin assignment
+  if exists (
+    select 1 from core.admin_assignments
+    where user_id = p_user_id
+      and scope = 'organisation'
+      and organisation = p_org
+  ) then
+    return 2;
+  end if;
+
+  -- 3. Check domain admin assignment (if p_domain_id provided)
+  if p_domain_id is not null then
+    select organisation, path into v_target_org, v_target_path
+    from core.domains where id = p_domain_id;
+
+    if not found or v_target_org != p_org then
+      return 0;
+    end if;
+
+    if exists (
+      select 1
+      from core.admin_assignments a
+      join core.domains d on d.id = a.domain_id
+      where a.user_id = p_user_id
+        and a.scope = 'domain'
+        and a.organisation = p_org
+        and (
+          d.path = v_target_path
+          or (
+            length(v_target_path) > length(d.path)
+            and left(v_target_path, length(d.path) + 1) = d.path || '/'
+          )
+        )
+    ) then
+      return 1;
+    end if;
+  end if;
+
+  return 0;
+end;
+$$;
 
 create index if not exists idx_user_domain_perms on core.user_domain_permissions (user_id, organisation, domain);
 
