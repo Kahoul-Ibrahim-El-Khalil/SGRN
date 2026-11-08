@@ -23,10 +23,7 @@ namespace sgrn::datastore::init
  * have been dispatched.  Does not return until the application shuts down.
  */
 inline void runServer() {
-    sgrn::utils::app::setupSignals([](int t_signum) {
-        SGRN_INFO("SGRN-Datastore", "Received signal {}. Shutting down gracefully...", t_signum);
-        drogon::app().quit();
-    });
+    sgrn::utils::app::setupSignals([](int t_signum) { drogon::app().quit(); });
 
     assets::registerDashboardAssets();
     filters::createAndRegisterFilters();

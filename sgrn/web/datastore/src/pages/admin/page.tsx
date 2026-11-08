@@ -15,6 +15,7 @@ import {
     SlidersHorizontal,
     KeyRound,
     BarChart3,
+    Network,
 } from "lucide-react";
 import { PageLayout } from "@/components/PageLayout";
 import { fetchOrganisations, fetchDomains, fetchStatuses } from "@/pages/signin/backend";
@@ -22,8 +23,7 @@ import SystemConfigPanel from "@/pages/admin/system_config";
 import PermissionsPanel from "@/pages/admin/access";
 import AnalyticsPanel from "@/pages/admin/analytics";
 import { FormatsPanel, QuotasPanel, EncryptionPoliciesPanel } from "@/pages/admin/storage_governance";
-
-import { UserStatus } from "@/types";
+import { UserConfigPanel, DomainConfigPanel } from "@/pages/admin/accounts";
 
 import type { IdNamePair } from "@/types/IdNamePair";
 import { AdminBackendApiEndpoints } from "@/backend/endpoints";
@@ -54,7 +54,7 @@ function useOrgDependencies(t_selected_org: string | null) {
     return { domains, statuses };
 }
 
-type RegistrationMode = "user" | "automated_service" | "query_builder" | "storage" | "system" | "permissions" | "analytics";
+type RegistrationMode = "user" | "domains" | "automated_service" | "query_builder" | "storage" | "system" | "permissions" | "analytics";
 
 interface AutomatedServiceListEntry {
     id: number;
@@ -64,15 +64,6 @@ interface AutomatedServiceListEntry {
     is_active: boolean;
     domain: string;
     created_at: string;
-}
-
-interface AdminUserListEntry {
-    id: number;
-    email: string;
-    first_name: string;
-    family_name: string;
-    domain: string;
-    status: UserStatus | string;
 }
 
 export default function AdminTab() {
@@ -90,6 +81,8 @@ export default function AdminTab() {
         }
         return false;
     });
+    // Bumped after a registration so the UserConfigPanel remounts and refetches.
+    const [userRefreshKey, setUserRefreshKey] = useState(0);
 
     // User State
     const [organisations, setOrganisations] = useState<IdNamePair[]>([]);
@@ -104,10 +97,6 @@ export default function AdminTab() {
     const [automatedServiceListError, setAutomatedServiceListError] = useState<string | null>(null);
     const [loadingAutomatedServices, setLoadingAutomatedServices] = useState(false);
     const [rotatingAutomatedServiceId, setRotatingAutomatedServiceId] = useState<number | null>(null);
-
-    // Users State
-    const [users, setUsers] = useState<AdminUserListEntry[]>([]);
-    const [loadingUsers, setLoadingUsers] = useState(false);
 
     const [submitting, setSubmitting] = useState(false);
 
@@ -194,40 +183,6 @@ export default function AdminTab() {
         }
     }, [fetchAutomatedServices, mode]);
 
-    const fetchUsers = useCallback(async () => {
-        setLoadingUsers(true);
-        try {
-            const response = await authenticatedFetch(AdminBackendApiEndpoints.LIST_USERS);
-            if (!response.ok) {
-                throw new Error("Failed to load users");
-            }
-            const payload = await response.json();
-            if (!Array.isArray(payload)) {
-                throw new Error("Unexpected user list format");
-            }
-            const parsed: AdminUserListEntry[] = payload.map((entry) => ({
-                id: Number(entry.id) || 0,
-                email: String(entry.email || ""),
-                first_name: String(entry.first_name || ""),
-                family_name: String(entry.family_name || ""),
-                domain: String(entry.domain || ""),
-                status: (entry.status as UserStatus) || UserStatus.ACTIVE,
-            }));
-            setUsers(parsed);
-        } catch (error) {
-            console.error("Failed to fetch users:", error);
-            showEvent("error", "Unable to load user directory");
-        } finally {
-            setLoadingUsers(false);
-        }
-    }, [showEvent]);
-
-    useEffect(() => {
-        if (mode === "user") {
-            fetchUsers();
-        }
-    }, [fetchUsers, mode]);
-
     const rotateAutomatedServiceToken = useCallback(
         async (svcId: number, svcName: string) => {
             setRotatingAutomatedServiceId(svcId);
@@ -298,7 +253,7 @@ export default function AdminTab() {
                     showEvent("success", `User ${payload.email} registered!`);
                     formEl.reset();
                     setSelectedOrg(null);
-                    fetchUsers();
+                    setUserRefreshKey((k) => k + 1);
                 } else {
                     showEvent("error", result.message || "Registration failed");
                 }
@@ -308,7 +263,7 @@ export default function AdminTab() {
                 setSubmitting(false);
             }
         },
-        [showEvent, fetchUsers],
+        [showEvent],
     );
 
     const handleRegisterAutomatedService = useCallback(
@@ -511,6 +466,12 @@ export default function AdminTab() {
                             <Users size={16} /> <span>User Management</span>
                         </button>
                         <button
+                            className={`admin-mode-btn ${mode === "domains" ? "admin-mode-btn-active" : ""}`}
+                            onClick={() => setMode("domains")}
+                        >
+                            <Network size={16} /> <span>Domain Registry</span>
+                        </button>
+                        <button
                             className={`admin-mode-btn ${mode === "automated_service" ? "admin-mode-btn-active" : ""}`}
                             onClick={() => setMode("automated_service")}
                         >
@@ -546,6 +507,7 @@ export default function AdminTab() {
 
                     <div className="reg-header">
                         {mode === "user" && <UserPlus size={20} className="text-primary" />}
+                        {mode === "domains" && <Network size={20} className="text-primary" />}
                         {mode === "automated_service" && <Shield size={20} className="text-primary" />}
                         {mode === "query_builder" && <Search size={20} className="text-primary" />}
                         {mode === "storage" && <Database size={20} className="text-primary" />}
@@ -554,6 +516,7 @@ export default function AdminTab() {
                         {mode === "analytics" && <BarChart3 size={20} className="text-primary" />}
                         <h2 className="reg-title">
                             {mode === "user" && "Register User"}
+                            {mode === "domains" && "Domain Configuration"}
                             {mode === "automated_service" && "Register Service"}
                             {mode === "query_builder" && "Data Explorer"}
                             {mode === "storage" && "Garage Storage Admin"}
@@ -627,44 +590,11 @@ export default function AdminTab() {
                                 </div>
                             </form>
 
-                            <div className="roster-container">
-                                <div className="roster-toolbar">
-                                    <h3 className="roster-title">User Directory</h3>
-                                    <button onClick={fetchUsers} className="btn-desktop">
-                                        <RefreshCw size={14} className={loadingUsers ? "drive-spin" : ""} />
-                                    </button>
-                                </div>
-                                <div className="panel">
-                                    <table className="datagrid-industrial">
-                                        <thead>
-                                            <tr>
-                                                <th>ID</th>
-                                                <th>NAME</th>
-                                                <th>EMAIL</th>
-                                                <th>DOMAIN</th>
-                                                <th>STATUS</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {users.map((u) => (
-                                                <tr key={u.id}>
-                                                    <td className="admin-cell-muted">#{u.id}</td>
-                                                    <td className="admin-cell-bold">
-                                                        {u.first_name} {u.family_name}
-                                                    </td>
-                                                    <td>{u.email}</td>
-                                                    <td className="admin-cell-primary">{u.domain || "GLOBAL"}</td>
-                                                    <td>
-                                                        <span className="badge-status badge-status--active">ACTIVE</span>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
+                            <UserConfigPanel key={userRefreshKey} />
                         </>
                     )}
+
+                    {mode === "domains" && <DomainConfigPanel />}
 
                     {mode === "automated_service" && (
                         <>

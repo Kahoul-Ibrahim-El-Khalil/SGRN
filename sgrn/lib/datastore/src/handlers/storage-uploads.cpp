@@ -36,6 +36,10 @@
 #define ERROR_LOG(...) ((void)0)
 #endif
 
+#include "debug-http-request.hpp"
+#include "debug-pretty-json.hpp"
+#include "storage-shared.hpp"
+
 // storage-uploads.cpp — chunked upload session state machine
 // (init/upload/status/complete/abort; split out of storage.cpp).
 
@@ -43,47 +47,108 @@ namespace sgrn::datastore::handlers::storage
 {
 using namespace drogon;
 
+using sgrn::datastore::services::storage::ScopeContext;
 using sgrn::datastore::services::storage::StorageScope;
 
+namespace
+{
+
+struct SessionActor {
+    std::optional<int32_t> user_id;
+    std::optional<int32_t> service_id;
+};
+
+SessionActor sessionActor(const Json::Value& t_session) {
+    SessionActor a;
+    const Json::Value& u = t_session["user"];
+    if (u.isMember("automated_service_id") && !u["automated_service_id"].isNull())
+        a.service_id = u["automated_service_id"].asInt();
+    else if (u.isMember("id") && !u["id"].isNull())
+        a.user_id = u["id"].asInt();
+    return a;
+}
+
+bool hasUnsafePath(std::string_view t_path) {
+    if (t_path.find('\0') != std::string_view::npos || t_path.find('\\') != std::string_view::npos)
+        return true;
+    size_t i = 0;
+    while (i <= t_path.size()) {
+        size_t j = t_path.find('/', i);
+        if (j == std::string_view::npos)
+            j = t_path.size();
+        if (t_path.substr(i, j - i) == "..")
+            return true;
+        i = j + 1;
+    }
+    return false;
+}
+
+const char* scopeName(StorageScope t_scope) {
+    switch (t_scope) {
+        case StorageScope::Domain:
+            return "domain";
+        case StorageScope::Users:
+            return "users";
+        case StorageScope::AutomatedServices:
+            return "automated_services";
+        default:
+            return "personal";
+    }
+}
+
+} // namespace
+
 drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleInitUploadSession(drogon::HttpRequestPtr tsp_req) {
+    DEBUG_HTTP_REQUEST(tsp_req, "handleInitUploadSession");
     auto p_json = tsp_req->getJsonObject();
     if (!p_json) {
         co_return createJsonErrorResponse("Invalid JSON payload", k400BadRequest);
     }
 
-    std::string filename = p_json->get("filename", "").asString();
-    std::string target_path = p_json->get("target_path", "/").asString();
-    std::string mime_type = p_json->get("mime_type", "application/octet-stream").asString();
-    int64_t total_size = p_json->get("total_size", 0).asInt64();
+    const std::string filename = p_json->get("filename", "").asString();
+    const std::string raw_target = p_json->get("target_path", "/").asString();
+    std::string scope_str = p_json->get("scope", "").asString();
+    const std::string mime_type = p_json->get("mime_type", "application/octet-stream").asString();
+    const int64_t total_size = p_json->get("total_size", 0).asInt64();
     int64_t chunk_size = 0;
     if (p_json->isMember("chunk_size") && (*p_json)["chunk_size"].asInt64() > 0) {
         chunk_size = (*p_json)["chunk_size"].asInt64();
+    } else if (total_size > static_cast<int64_t>(5ULL * 1024ULL * 1024ULL * 1024ULL)) {
+        chunk_size = 32 * 1024 * 1024;
+    } else if (total_size > 500 * 1024 * 1024) {
+        chunk_size = 16 * 1024 * 1024;
+    } else if (total_size > 50 * 1024 * 1024) {
+        chunk_size = 8 * 1024 * 1024;
     } else {
-        // Adaptive chunk negotiation based on file size:
-        // <= 50MB: 5MB chunks (<= 10 HTTP requests)
-        // 50MB - 500MB: 8MB chunks (6 to 63 HTTP requests)
-        // 500MB - 5GB: 16MB chunks (31 to 312 HTTP requests)
-        // > 5GB: 32MB chunks
-        if (total_size > static_cast<int64_t>(5ULL * 1024ULL * 1024ULL * 1024ULL)) {
-            chunk_size = 32 * 1024 * 1024;
-        } else if (total_size > 500 * 1024 * 1024) {
-            chunk_size = 16 * 1024 * 1024;
-        } else if (total_size > 50 * 1024 * 1024) {
-            chunk_size = 8 * 1024 * 1024;
-        } else {
-            chunk_size = 5 * 1024 * 1024;
-        }
+        chunk_size = 5 * 1024 * 1024;
     }
 
     if (filename.empty() || total_size <= 0 || chunk_size <= 0) {
         co_return createJsonErrorResponse("filename, total_size, and chunk_size are required", k400BadRequest);
     }
+    if (filename.find_first_of("/\\") != std::string::npos || filename.find('\0') != std::string::npos || filename == "." ||
+        filename == "..") {
+        co_return createJsonErrorResponse("Invalid filename", k400BadRequest);
+    }
+    if (hasUnsafePath(raw_target)) {
+        co_return createJsonErrorResponse("Invalid target_path", k400BadRequest);
+    }
+    auto norm = normalizePath(raw_target.empty() ? std::string("/") : raw_target);
+    if (!norm) {
+        co_return createJsonErrorResponse("Invalid target_path", k400BadRequest);
+    }
+    const std::string requested_path = *norm;
 
-    int32_t total_chunks = static_cast<int32_t>((total_size + chunk_size - 1) / chunk_size);
-    std::string upload_id = drogon::utils::getUuid();
+    // Older clients (CLI rput) send no scope: infer it from the canonical prefix.
+    if (scope_str.empty()) {
+        scope_str = (requested_path.rfind("/domains/", 0) == 0) ? "domain" : "personal";
+    }
 
     const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
-    int32_t user_id = session["user"]["id"].asInt();
+    const SessionActor actor = sessionActor(session);
+    if (!actor.user_id && !actor.service_id) {
+        co_return createJsonErrorResponse("Unauthenticated", k401Unauthorized);
+    }
 
     try {
         auto db_res = sgrn::datastore::core::getDbClient();
@@ -91,77 +156,90 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleInitUploadSession
             co_return sgrn::createJsonResponse(db_res);
         auto db = db_res.value();
 
-        // ── Check user constraints (quota, max file size, chunk size) ────────
-        auto user_row = co_await db->execSqlCoro(
-            "SELECT storage_limit, total_real_size, max_file_size_mb, preferred_chunk_size_mb FROM core.users WHERE id = $1", user_id);
-        if (!user_row.empty()) {
-            const auto& u = user_row[0];
-            if (!u["max_file_size_mb"].isNull()) {
-                const int64_t max_bytes = u["max_file_size_mb"].as<int64_t>() * 1024 * 1024;
-                if (total_size > max_bytes) {
-                    co_return createJsonErrorResponse(
-                        fmt::format("File size ({:.1f} MB) exceeds your account maximum allowed file size ({:.1f} MB)",
-                            static_cast<double>(total_size) / (1024.0 * 1024.0), static_cast<double>(max_bytes) / (1024.0 * 1024.0)),
-                        k400BadRequest);
+        // ── Resolve the real destination (same code path as the non-chunked upload) ──
+        const StorageScope scope = storage_service_.parseScope(scope_str);
+        auto scope_res = co_await storage_service_.resolveScopeSession(session, scope, requested_path);
+        if (scope_res.hasError())
+            co_return sgrn::createJsonResponse(scope_res);
+        const ScopeContext ctx = scope_res.value();
+
+        if (ctx.is_virtual_root) {
+            co_return createJsonErrorResponse("Select a folder inside a domain, user or service namespace", k400BadRequest);
+        }
+        if (!ctx.can_write) {
+            co_return createJsonErrorResponse("You do not have write permission for this location", k403Forbidden);
+        }
+        if (scope == StorageScope::Domain && ctx.domain.empty()) {
+            co_return createJsonErrorResponse("Could not resolve target domain", k400BadRequest);
+        }
+
+        // ── User constraints (quota, max file size, chunk size) ──
+        if (actor.user_id) {
+            auto user_row = co_await db->execSqlCoro(
+                "SELECT storage_limit, total_real_size, max_file_size_mb, preferred_chunk_size_mb FROM core.users WHERE id = $1",
+                *actor.user_id);
+            if (!user_row.empty()) {
+                const auto& u = user_row[0];
+                if (!u["max_file_size_mb"].isNull()) {
+                    const int64_t max_bytes = u["max_file_size_mb"].as<int64_t>() * 1024 * 1024;
+                    if (total_size > max_bytes) {
+                        co_return createJsonErrorResponse(
+                            fmt::format("File size ({:.1f} MB) exceeds your account maximum allowed file size ({:.1f} MB)",
+                                static_cast<double>(total_size) / (1024.0 * 1024.0), static_cast<double>(max_bytes) / (1024.0 * 1024.0)),
+                            k400BadRequest);
+                    }
+                }
+                if (!u["storage_limit"].isNull()) {
+                    if (u["total_real_size"].as<int64_t>() + total_size > u["storage_limit"].as<int64_t>()) {
+                        co_return createJsonErrorResponse(
+                            "Storage quota exceeded. Please delete unused files or request a quota increase.", k413RequestEntityTooLarge);
+                    }
+                }
+                if (!u["preferred_chunk_size_mb"].isNull() && u["preferred_chunk_size_mb"].as<int32_t>() > 0) {
+                    chunk_size = static_cast<int64_t>(u["preferred_chunk_size_mb"].as<int32_t>()) * 1024 * 1024;
                 }
             }
-            if (!u["storage_limit"].isNull()) {
-                const int64_t limit_bytes = u["storage_limit"].as<int64_t>();
-                const int64_t used_bytes = u["total_real_size"].as<int64_t>();
-                if (used_bytes + total_size > limit_bytes) {
-                    co_return createJsonErrorResponse(
-                        "Storage quota exceeded. Please delete unused files or request a quota increase.", k413RequestEntityTooLarge);
-                }
+        }
+        const int32_t total_chunks = static_cast<int32_t>((total_size + chunk_size - 1) / chunk_size);
+
+        // ── Encryption policy: only domain targets are governed, and it fails CLOSED ──
+        bool encrypt = p_json->get("encrypt", false).asBool();
+        if (!ctx.domain.empty()) {
+            const std::string org = (session["user"].isMember("organisation") && session["user"]["organisation"].isString())
+                                        ? session["user"]["organisation"].asString()
+                                        : std::string{};
+            if (org.empty()) {
+                co_return createJsonErrorResponse("Organisation claim missing from session", k403Forbidden);
             }
-            if (!u["preferred_chunk_size_mb"].isNull() && u["preferred_chunk_size_mb"].as<int32_t>() > 0) {
-                chunk_size = static_cast<int64_t>(u["preferred_chunk_size_mb"].as<int32_t>()) * 1024 * 1024;
+            auto dom_rows = co_await db->execSqlCoro(
+                "SELECT encryption_policy FROM core.domains WHERE name = $1 AND organisation = $2", ctx.domain, org);
+            if (dom_rows.empty() || dom_rows[0]["encryption_policy"].isNull()) {
+                co_return createJsonErrorResponse("Unknown domain '" + ctx.domain + "'", k404NotFound);
+            }
+            const std::string policy = dom_rows[0]["encryption_policy"].as<std::string>();
+            if (policy == "required") {
+                encrypt = true; // upgrade silently; the response tells the client
+            } else if (policy == "none") {
+                encrypt = false; // downgrade silently
+            } else if (policy != "optional") {
+                co_return createJsonErrorResponse("Domain has an invalid encryption policy", k500InternalServerError);
             }
         }
 
-        // Recalculate total_chunks if chunk_size was adjusted
-        total_chunks = static_cast<int32_t>((total_size + chunk_size - 1) / chunk_size);
+        const std::string upload_id = drogon::utils::getUuid();
+        std::optional<std::string> domain_opt = ctx.domain.empty() ? std::nullopt : std::optional<std::string>(ctx.domain);
+        std::optional<int64_t> owner_session = ctx.t_session_id > 0 ? std::optional<int64_t>(ctx.t_session_id) : std::nullopt;
 
-        // ── Check encryption policy for the target domain ────────────────────
-        std::string path_no_slash = (target_path.front() == '/') ? target_path.substr(1) : target_path;
-        std::string domain_name = "";
-        if (path_no_slash.rfind("domains/", 0) == 0) {
-            std::string rem = path_no_slash.substr(8);
-            auto next_slash = rem.find('/');
-            domain_name = (next_slash == std::string::npos) ? rem : rem.substr(0, next_slash);
-        } else if (session.isMember("user") && session["user"].isMember("domain")) {
-            domain_name = session["user"]["domain"].asString();
-        }
-
-        std::string enc_policy = "none";
-        if (!domain_name.empty()) {
-            auto dom_rows = co_await db->execSqlCoro("SELECT encryption_policy FROM core.domains WHERE name = $1", domain_name);
-            if (!dom_rows.empty() && !dom_rows[0]["encryption_policy"].isNull()) {
-                enc_policy = dom_rows[0]["encryption_policy"].as<std::string>();
-            }
-        }
-
-        bool client_req_encrypt = p_json->get("encrypt", false).asBool();
-        if (enc_policy == "required") {
-            if (p_json->isMember("encrypt") && !client_req_encrypt) {
-                co_return createJsonErrorResponse("Encryption is required for domain '" + domain_name + "'", k400BadRequest);
-            }
-            client_req_encrypt = true;
-        } else if (enc_policy == "none") {
-            if (client_req_encrypt) {
-                co_return createJsonErrorResponse("Encryption is disabled for domain '" + domain_name + "'", k400BadRequest);
-            }
-            client_req_encrypt = false;
-        }
-
-        co_await db->execSqlCoro("INSERT INTO storage.upload_sessions (id, user_id, target_path, filename, mime_type, total_size, "
-                                 "chunk_size, total_chunks, is_encrypted, domain) "
-                                 "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-            upload_id, user_id, target_path, filename, mime_type, total_size, chunk_size, total_chunks, client_req_encrypt,
-            domain_name.empty() ? std::optional<std::string>(std::nullopt) : std::optional<std::string>(domain_name));
+        co_await db->execSqlCoro(
+            "INSERT INTO storage.upload_sessions (id, user_id, automated_service_id, target_path, filename, mime_type, total_size, "
+            "chunk_size, total_chunks, is_encrypted, domain, scope, owner_user_id, owner_service_id, owner_session_id) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+            upload_id, actor.user_id, actor.service_id, ctx.actual_path, filename, mime_type, total_size, chunk_size, total_chunks, encrypt,
+            domain_opt, std::string(scopeName(scope)), ctx.user_id, ctx.t_automated_service_id, owner_session);
 
         co_return createJsonResponse(
             fmt::format(R"({{"upload_id":"{}","chunk_size":{},"total_chunks":{},"status":"active","is_encrypted":{}}})", upload_id,
-                chunk_size, total_chunks, client_req_encrypt ? "true" : "false"));
+                chunk_size, total_chunks, encrypt ? "true" : "false"));
     } catch (const std::exception& e) {
         ERROR_LOG("Init upload session error: {}", e.what());
         co_return createJsonErrorResponse("Failed to initialize upload session", k500InternalServerError);
@@ -247,6 +325,7 @@ static drogon::Task<sgrn::datastore::BackendResult<int64_t>> flushSegment(sgrn::
 }
 
 drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleUploadChunk(drogon::HttpRequestPtr tsp_req) {
+    DEBUG_HTTP_REQUEST(tsp_req, "handleUploadChunk");
     std::string upload_id = tsp_req->getParameter("upload_id");
     std::string chunk_idx_str = tsp_req->getParameter("chunk_index");
     if (upload_id.empty() || chunk_idx_str.empty()) {
@@ -272,7 +351,10 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleUploadChunk(drogo
         auto db = db_res.value();
 
         // ── 1. Load session to get mime_type ────────────────────────────────
-        auto s_rows = co_await db->execSqlCoro("SELECT mime_type, status FROM storage.upload_sessions WHERE id = $1", upload_id);
+        const SessionActor actor = sessionActor(tsp_req->attributes()->get<Json::Value>("session_json"));
+        auto s_rows = co_await db->execSqlCoro("SELECT mime_type, status FROM storage.upload_sessions WHERE id = $1 "
+                                               "AND (user_id = $2 OR automated_service_id = $3)",
+            upload_id, actor.user_id, actor.service_id);
         if (s_rows.empty())
             co_return createJsonErrorResponse("Upload session not found", k404NotFound);
         if (s_rows[0]["status"].as<std::string>() != "active")
@@ -283,6 +365,19 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleUploadChunk(drogo
         auto state = getOrCreateUploadState(upload_id, mime_type, kCompressionLevel);
         if (!state) {
             co_return createJsonErrorResponse("Failed to allocate upload stream state", k500InternalServerError);
+        }
+
+        // ── 2b. Streaming state is strictly sequential (hash + zstd + seg_buf) ──
+        if (chunk_index < state->processed_chunks) {
+            // client retry after a lost response: already consumed, do NOT feed it twice
+            co_return createJsonResponse(fmt::format(
+                R"({{"upload_id":"{}","chunk_index":{},"received":true,"duplicate":true,"segments_flushed":0}})", upload_id, chunk_index));
+        }
+        if (chunk_index != state->processed_chunks) {
+            co_return createJsonErrorResponse(
+                fmt::format("Out-of-order chunk: expected {} (stream state is in-memory; restart the upload if the server restarted)",
+                    state->processed_chunks),
+                k409Conflict);
         }
 
         auto s3_res = storage_service_.S3Client();
@@ -373,6 +468,7 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleUploadChunk(drogo
 }
 
 drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleGetUploadStatus(drogon::HttpRequestPtr tsp_req) {
+    DEBUG_HTTP_REQUEST(tsp_req, "handleGetUploadStatus");
     std::string upload_id = tsp_req->getParameter("upload_id");
     if (upload_id.empty()) {
         co_return createJsonErrorResponse("upload_id is required", k400BadRequest);
@@ -384,9 +480,11 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleGetUploadStatus(d
             co_return sgrn::createJsonResponse(db_res);
         auto db = db_res.value();
 
+        const SessionActor actor = sessionActor(tsp_req->attributes()->get<Json::Value>("session_json"));
         auto s_rows = co_await db->execSqlCoro("SELECT filename, target_path, total_size, chunk_size, total_chunks, uploaded_chunks_count, "
-                                               "status FROM storage.upload_sessions WHERE id = $1",
-            upload_id);
+                                               "status FROM storage.upload_sessions WHERE id = $1 "
+                                               "AND (user_id = $2 OR automated_service_id = $3)",
+            upload_id, actor.user_id, actor.service_id);
 
         if (s_rows.empty()) {
             co_return createJsonErrorResponse("Upload session not found", k404NotFound);
@@ -418,12 +516,23 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleGetUploadStatus(d
     }
 }
 
+static drogon::Task<void> rollbackEncryptedUpload(sgrn::datastore::plugins::aws::S3Client* s3, const drogon::orm::DbClientPtr& db,
+    const std::string& bucket, const std::string& obj_key, const std::string& key_id, int64_t object_id, std::optional<int64_t> file_id) {
+    if (auto ks = sgrn::datastore::crypto::getKeyStore())
+        (void)ks->shred(key_id);
+    if (file_id)
+        co_await db->execSqlCoro("DELETE FROM storage.files WHERE id = $1", *file_id);
+    co_await s3->deleteFile(bucket, obj_key);
+    co_await db->execSqlCoro("DELETE FROM storage.objects WHERE id = $1", object_id);
+}
+
 drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(drogon::HttpRequestPtr tsp_req) {
+    DEBUG_HTTP_REQUEST(tsp_req, "handleCompleteUploadSession");
     auto p_json = tsp_req->getJsonObject();
     if (!p_json || !p_json->isMember("upload_id"))
         co_return createJsonErrorResponse("upload_id is required", k400BadRequest);
 
-    std::string upload_id = (*p_json)["upload_id"].asString();
+    const std::string upload_id = (*p_json)["upload_id"].asString();
 
     try {
         auto db_res = sgrn::datastore::core::getDbClient();
@@ -432,27 +541,57 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
         auto db = db_res.value();
 
         // -- 1. Load and validate session
-        auto s_rows = co_await db->execSqlCoro("SELECT user_id, total_chunks, uploaded_chunks_count, filename, target_path, total_size, "
-                                               "mime_type, is_encrypted, domain, pending_key_id "
-                                               "FROM storage.upload_sessions WHERE id = $1",
+        auto s_rows = co_await db->execSqlCoro(
+            "SELECT user_id, automated_service_id, total_chunks, uploaded_chunks_count, filename, target_path, total_size, "
+            "mime_type, is_encrypted, domain, status, (expires_at < NOW()) AS expired, scope, owner_user_id, owner_service_id, "
+            "owner_session_id FROM storage.upload_sessions WHERE id = $1",
             upload_id);
         if (s_rows.empty())
             co_return createJsonErrorResponse("Upload session not found", k404NotFound);
 
         const auto& s = s_rows[0];
+        const Json::Value& auth_session = tsp_req->attributes()->get<Json::Value>("session_json");
+        const SessionActor actor = sessionActor(auth_session);
+        const bool is_uploader =
+            (!s["user_id"].isNull() && actor.user_id && s["user_id"].as<int32_t>() == *actor.user_id) ||
+            (!s["automated_service_id"].isNull() && actor.service_id && s["automated_service_id"].as<int32_t>() == *actor.service_id);
+        if (!is_uploader)
+            co_return createJsonErrorResponse("Upload session not found", k404NotFound);
+        if (s["status"].as<std::string>() != "active")
+            co_return createJsonErrorResponse("Upload session is not active", k409Conflict);
+        if (s["expired"].as<bool>())
+            co_return createJsonErrorResponse("Upload session expired", k410Gone);
+
         const int32_t total_chunks = s["total_chunks"].as<int32_t>();
         if (s["uploaded_chunks_count"].as<int32_t>() < total_chunks)
             co_return createJsonErrorResponse("Cannot complete: not all chunks have been uploaded", k400BadRequest);
 
-        const int32_t user_id = s["user_id"].as<int32_t>();
         const std::string filename = s["filename"].as<std::string>();
         const std::string target_path = s["target_path"].as<std::string>();
+        const int64_t declared_size = s["total_size"].as<int64_t>();
         const std::string mime_type = s["mime_type"].isNull() ? "application/octet-stream" : s["mime_type"].as<std::string>();
         const bool is_encrypted = !s["is_encrypted"].isNull() && s["is_encrypted"].as<bool>();
         const std::string domain_str = s["domain"].isNull() ? "" : s["domain"].as<std::string>();
+        const std::string scope_name = s["scope"].as<std::string>();
 
-        const Json::Value& auth_session = tsp_req->attributes()->get<Json::Value>("session_json");
-        const int64_t session_id = auth_session.isMember("session_id") ? auth_session["session_id"].asInt64() : 0;
+        // Owner of the resulting file (resolved at init, never re-derived from the path)
+        std::optional<int32_t> owner_user;
+        std::optional<int32_t> owner_service;
+        if (!s["owner_user_id"].isNull())
+            owner_user = s["owner_user_id"].as<int32_t>();
+        if (!s["owner_service_id"].isNull())
+            owner_service = s["owner_service_id"].as<int32_t>();
+        if (!owner_user && !owner_service) { // fallback: uploader
+            owner_user = s["user_id"].isNull() ? std::nullopt : std::optional<int32_t>(s["user_id"].as<int32_t>());
+            owner_service =
+                s["automated_service_id"].isNull() ? std::nullopt : std::optional<int32_t>(s["automated_service_id"].as<int32_t>());
+        }
+
+        int64_t owner_session = auth_session.isMember("session_id") ? auth_session["session_id"].asInt64() : 0;
+        if ((scope_name == "users" || scope_name == "automated_services") && !s["owner_session_id"].isNull() &&
+            s["owner_session_id"].as<int64_t>() > 0) {
+            owner_session = s["owner_session_id"].as<int64_t>();
+        }
 
         // -- 2. Recover streaming pipeline state
         auto state = getOrCreateUploadState(upload_id, mime_type, kCompressionLevel);
@@ -539,19 +678,21 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
         const bool server_compressed = state->server_compressed;
         removeUploadState(upload_id);
 
-        // Extract declared extension from filename for sniffing validation
+        // Integrity: a retried/duplicated chunk or a lost stream state shows up here.
+        if (original_bytes != declared_size) {
+            co_await db->execSqlCoro("UPDATE storage.upload_sessions SET status = 'aborted', updated_at = NOW() WHERE id = $1", upload_id);
+            co_return createJsonErrorResponse(
+                fmt::format("Size mismatch: received {} bytes, declared {}", original_bytes, declared_size), k422UnprocessableEntity);
+        }
+
         std::string ext(services::storage::helpers::extractExtension(filename));
 
-        // -- 5b. Content sniffing: read first 4096 bytes from S3 for magic detection.
-        // Skip when the server itself compressed the payload: the bytes on S3 will
-        // have a zstd magic header regardless of the declared extension (e.g. json),
-        // which is correct and expected — the sniff check would produce a false positive.
+        // -- 5b. Content sniffing (skipped when the server compressed the payload)
         std::string sniffed_ext;
         if (!server_compressed) {
             auto s3_res2 = storage_service_.S3Client();
             if (s3_res2.has_value()) {
                 auto* s3_sniff = s3_res2.value();
-                // Download first segment to read magic bytes (use existing_segs which has provisional segments)
                 std::string first_key = existing_segs.empty() ? "" : "pending/" + upload_id + "/0";
                 if (!first_key.empty()) {
                     BackendResult<std::string> content_res = co_await s3_sniff->getObjectContent(bucket, first_key, 4096);
@@ -569,7 +710,6 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
 
         // -- 5c. Validate sniffed extension against declared extension
         if (!sniffed_ext.empty()) {
-            // Normalize both to lowercase for comparison
             std::string declared_lower = ext;
             std::transform(declared_lower.begin(), declared_lower.end(), declared_lower.begin(),
                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -577,94 +717,84 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
             std::transform(sniffed_lower.begin(), sniffed_lower.end(), sniffed_lower.begin(),
                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             if (!::sgrn::datastore::services::helpers::isCompatibleSniffedFormat(declared_lower, sniffed_lower)) {
-                // Check if sniffed extension is a known format in registry
                 auto format_res = co_await services::storage::helpers::getFormat(db, sniffed_lower);
                 if (format_res.has_value()) {
-                    // Sniffed type is a known format but differs from declared → reject
                     co_return createJsonErrorResponse(
                         fmt::format("Content type mismatch: file content appears to be '{}' but was declared as '{}'", sniffed_lower,
                             declared_lower),
                         k422UnprocessableEntity);
                 }
-                // Sniffed type unknown → fall back to declared extension (registry will handle)
             }
         }
 
         // -- 6. Prepare final objects (encrypt if policy requested, else dedup & rename)
         std::vector<std::pair<int32_t, int64_t>> final_segments;
-        std::string final_key_id = "";
+        std::string final_key_id;
+        std::string final_obj_key;
 
         if (is_encrypted) {
             auto key_store = sgrn::datastore::crypto::getKeyStore();
-            if (!key_store) {
-                removeUploadState(upload_id);
+            if (!key_store)
                 co_return createJsonErrorResponse("Key store is not initialized", k500InternalServerError);
-            }
 
-            std::string final_obj_key = "uploads/" + file_hash + "/0";
+            // Ciphertext must NEVER share the content-addressed "uploads/<hash>/" namespace.
+            final_obj_key = "enc/" + upload_id + "/0";
 
             auto pending_res = key_store->createPending(final_obj_key);
-            if (pending_res.hasError()) {
-                removeUploadState(upload_id);
+            if (pending_res.hasError())
                 co_return createJsonErrorResponse("Failed to create key record: " + pending_res.error(), k500InternalServerError);
-            }
             auto key_rec = std::move(pending_res.value());
             final_key_id = key_rec.key_id;
 
             co_await db->execSqlCoro("UPDATE storage.upload_sessions SET pending_key_id = $1 WHERE id = $2", final_key_id, upload_id);
 
-            // Read all provisional segments into contiguous payload
             std::string payload_to_encrypt;
             for (const auto& [old_seg_idx, old_obj_id] : existing_segs) {
                 std::string prov_key = "pending/" + upload_id + "/" + std::to_string(old_seg_idx);
                 auto get_res = co_await s3->getObjectContent(bucket, prov_key);
                 if (get_res.hasError()) {
                     (void)key_store->shred(final_key_id);
-                    removeUploadState(upload_id);
                     co_return createJsonErrorResponse("Failed to read segment for encryption", k500InternalServerError);
                 }
                 payload_to_encrypt.append(*get_res);
             }
 
-            // Encrypt with AEAD stream
             std::span<const uint8_t> plain_span(reinterpret_cast<const uint8_t*>(payload_to_encrypt.data()), payload_to_encrypt.size());
             auto enc_res = sgrn::utils::crypto::encryptBuffer(plain_span, key_rec.dek, final_key_id, key_rec.chunk_size);
             if (enc_res.hasError()) {
                 (void)key_store->shred(final_key_id);
-                removeUploadState(upload_id);
                 co_return createJsonErrorResponse("Encryption failed: " + enc_res.error(), k500InternalServerError);
             }
             const auto& ciphertext = enc_res.value();
 
-            // Upload ciphertext to Garage
             auto put_res = co_await s3->uploadFromMemory(bucket, final_obj_key,
                 std::string(reinterpret_cast<const char*>(ciphertext.data()), ciphertext.size()), "application/octet-stream");
             if (put_res.hasError()) {
                 (void)key_store->shred(final_key_id);
-                removeUploadState(upload_id);
                 co_return createJsonErrorResponse("Failed to upload ciphertext to storage", k500InternalServerError);
             }
 
-            // Delete provisional segments from S3 & DB
             for (const auto& [old_seg_idx, old_obj_id] : existing_segs) {
                 std::string prov_key = "pending/" + upload_id + "/" + std::to_string(old_seg_idx);
                 co_await s3->deleteFile(bucket, prov_key);
                 co_await db->execSqlCoro("DELETE FROM storage.objects WHERE id = $1", old_obj_id);
             }
 
-            // Create object row (Dedup bypassed for encrypted files)
             std::string ct_sha;
             auto sha_res = sgrn::utils::computeSha256Data(
                 std::string_view(reinterpret_cast<const char*>(ciphertext.data()), ciphertext.size()), sgrn::utils::HashEncoding::hex);
             if (sha_res.hasValue()) {
                 ct_sha = sha_res.value();
             }
+            // Record the zstd layer so the read path knows to decompress after decrypting.
+            std::optional<std::string> comp_alg = server_compressed ? std::optional<std::string>("zstd") : std::nullopt;
+            std::optional<int32_t> comp_lvl = server_compressed ? std::optional<int32_t>(kCompressionLevel) : std::nullopt;
             auto obj_res = co_await db->execSqlCoro(
-                "INSERT INTO storage.objects (bucket, key, size, original_size, sha256, is_compressed, upload_mode) "
-                "VALUES ($1, $2, $3, $4, $5, $6, 'single') RETURNING id",
-                bucket, final_obj_key, static_cast<int64_t>(ciphertext.size()), original_bytes, ct_sha, server_compressed);
-            int64_t final_obj_id = obj_res[0]["id"].as<int64_t>();
-            final_segments.emplace_back(0, final_obj_id);
+                "INSERT INTO storage.objects (bucket, key, size, original_size, sha256, is_compressed, compression_algorithm, "
+                "compression_level, upload_mode) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'single') RETURNING id",
+                bucket, final_obj_key, static_cast<int64_t>(ciphertext.size()), original_bytes, ct_sha, server_compressed, comp_alg,
+                comp_lvl);
+            final_segments.emplace_back(0, obj_res[0]["id"].as<int64_t>());
         } else {
             int32_t part_idx = 0;
             for (const auto& [old_seg_idx, old_obj_id] : existing_segs) {
@@ -676,7 +806,6 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
 
                 int64_t final_obj_id = 0;
                 if (!dedup_rows.empty()) {
-                    // Deduplicated: reuse existing object
                     final_obj_id = dedup_rows[0]["id"].as<int64_t>();
                     co_await s3->deleteFile(bucket, prov_key);
                     co_await db->execSqlCoro("DELETE FROM storage.objects WHERE id = $1", old_obj_id);
@@ -690,7 +819,6 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
                         "UPDATE storage.objects SET key = $1, sha256 = $2 WHERE id = $3", final_key, file_hash, old_obj_id);
                     final_obj_id = old_obj_id;
                 }
-                // Update sha256 for deduplicated objects too
                 co_await db->execSqlCoro("UPDATE storage.objects SET sha256 = $1 WHERE id = $2", file_hash, final_obj_id);
                 final_segments.emplace_back(part_idx, final_obj_id);
                 ++part_idx;
@@ -708,21 +836,16 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
             virtual_file_path += filename;
         }
 
-        auto dir_res =
-            co_await services::storage::helpers::resolveDirectoryPath(db, user_id, std::nullopt, session_id, virtual_file_path, domain_str);
+        auto dir_res = co_await services::storage::helpers::resolveDirectoryPath(
+            db, owner_user, owner_service, owner_session, virtual_file_path, domain_str);
         std::optional<int64_t> directory_id = (dir_res.hasValue() && dir_res.value().has_value()) ? dir_res.value() : std::nullopt;
 
-        auto file_res =
-            co_await services::storage::helpers::insertFile(db, filename, final_segments[0].second, user_id, std::nullopt, session_id, ext,
-                directory_id, domain_str, is_encrypted ? std::optional<std::string>(final_key_id) : std::nullopt, is_encrypted);
+        auto file_res = co_await services::storage::helpers::insertFile(db, filename, final_segments[0].second, owner_user, owner_service,
+            owner_session, ext, directory_id, domain_str, is_encrypted ? std::optional<std::string>(final_key_id) : std::nullopt,
+            is_encrypted);
         if (file_res.hasError()) {
-            if (is_encrypted) {
-                auto ks = sgrn::datastore::crypto::getKeyStore();
-                if (ks)
-                    (void)ks->shred(final_key_id);
-                co_await s3->deleteFile(bucket, "uploads/" + file_hash + "/0");
-                co_await db->execSqlCoro("DELETE FROM storage.objects WHERE id = $1", final_segments[0].second);
-            }
+            if (is_encrypted)
+                co_await rollbackEncryptedUpload(s3, db, bucket, final_obj_key, final_key_id, final_segments[0].second, std::nullopt);
             const BackendError& err = file_res.error();
             if (err.kind_ == BackendErrorKind::AlreadyExists)
                 co_return createJsonErrorResponse("A file with that name already exists in this location.", k409Conflict);
@@ -732,15 +855,19 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
 
         if (is_encrypted) {
             auto ks = sgrn::datastore::crypto::getKeyStore();
-            if (ks) {
-                auto act_res = ks->activate(final_key_id, std::to_string(file_id));
-                if (act_res.hasError()) {
-                    SGRN_ERROR("StorageUpload", "Key activation failed for key {}: {}", final_key_id, act_res.error());
-                }
+            if (!ks) {
+                co_await rollbackEncryptedUpload(s3, db, bucket, final_obj_key, final_key_id, final_segments[0].second, file_id);
+                co_return createJsonErrorResponse("Key store is not initialized", k500InternalServerError);
+            }
+            auto act_res = ks->activate(final_key_id, std::to_string(file_id));
+            if (act_res.hasError()) {
+                // A file whose key never activates is undecryptable: do not leave it behind.
+                SGRN_ERROR("StorageUpload", "Key activation failed for key {}: {}", final_key_id, act_res.error());
+                co_await rollbackEncryptedUpload(s3, db, bucket, final_obj_key, final_key_id, final_segments[0].second, file_id);
+                co_return createJsonErrorResponse("Failed to activate encryption key", k500InternalServerError);
             }
         }
 
-        // Insert ordered segment manifest
         const std::string seg_role = (final_segments.size() == 1) ? "primary" : "part";
         for (const auto& [pidx, obj_id] : final_segments) {
             co_await db->execSqlCoro("INSERT INTO storage.file_objects (file_id, object_id, part_index, role) "
@@ -770,6 +897,7 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
 }
 
 drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleAbortUploadSession(drogon::HttpRequestPtr tsp_req) {
+    DEBUG_HTTP_REQUEST(tsp_req, "handleAbortUploadSession");
     std::string upload_id = tsp_req->getParameter("upload_id");
     if (upload_id.empty()) {
         auto p_json = tsp_req->getJsonObject();
@@ -788,7 +916,12 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleAbortUploadSessio
             co_return sgrn::createJsonResponse(db_res);
         auto db = db_res.value();
 
-        co_await db->execSqlCoro("UPDATE storage.upload_sessions SET status = 'aborted', updated_at = NOW() WHERE id = $1", upload_id);
+        const SessionActor actor = sessionActor(tsp_req->attributes()->get<Json::Value>("session_json"));
+        auto res = co_await db->execSqlCoro("UPDATE storage.upload_sessions SET status = 'aborted', updated_at = NOW() WHERE id = $1 "
+                                            "AND (user_id = $2 OR automated_service_id = $3)",
+            upload_id, actor.user_id, actor.service_id);
+        if (res.affectedRows() == 0)
+            co_return createJsonErrorResponse("Upload session not found", k404NotFound);
 
         co_return createJsonResponse(R"({"success":true,"message":"Upload session aborted"})");
 

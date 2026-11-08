@@ -277,7 +277,10 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(
                     std::string chunk(reinterpret_cast<const char*>(range_res.value().data()), range_res.value().size());
                     sp_resp->setStatusCode(k206PartialContent);
                     sp_resp->addHeader("Content-Range", fmt::format("bytes {}-{}/{}", start_byte, end_byte, total_plain_size));
-                    sp_resp->addHeader("Content-Length", std::to_string(content_length));
+                    // NOTE: no manual Content-Length — Drogon derives it from the
+                    // response body; adding it by hand yields a duplicate header
+                    // (nginx rejects upstream responses with double
+                    // Content-Length as "duplicate ... header" → 502/truncated).
                     if (record_res->is_compressed_) {
                         sp_resp->setContentTypeString("application/zstd");
                         sp_resp->addHeader("X-Compressed", "true");
@@ -285,6 +288,7 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(
                         sp_resp->setContentTypeString(helpers::inferMimeType(record_res->name));
                     }
                     sp_resp->addHeader("Content-Disposition", fmt::format("attachment; filename=\"{}\"", download_name));
+                    sp_resp->addHeader("X-Original-Size", std::to_string(total_plain_size));
                     sp_resp->setBody(std::move(chunk));
                     co_return sp_resp;
                 }
@@ -331,7 +335,7 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(
 
             sp_resp->setStatusCode(k206PartialContent);
             sp_resp->addHeader("Content-Range", fmt::format("bytes {}-{}/{}", start_byte, end_byte, total_size));
-            sp_resp->addHeader("Content-Length", std::to_string(content_length));
+            // No manual Content-Length — see the encrypted branch above.
             if (record_res->is_compressed_) {
                 sp_resp->setContentTypeString("application/zstd");
                 sp_resp->addHeader("X-Compressed", "true");
@@ -339,6 +343,7 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(
                 sp_resp->setContentTypeString(helpers::inferMimeType(record_res->name));
             }
             sp_resp->addHeader("Content-Disposition", fmt::format("attachment; filename=\"{}\"", download_name));
+            sp_resp->addHeader("X-Original-Size", std::to_string(total_size));
             sp_resp->setBody(std::move(chunk));
             co_return sp_resp;
         }
@@ -352,6 +357,8 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(
         sp_resp->setContentTypeString(helpers::inferMimeType(record_res->name));
     }
     sp_resp->addHeader("Content-Disposition", fmt::format("attachment; filename=\"{}\"", download_name));
+    // Total size of the entity after decryption (i.e. the file's stored bytes).
+    sp_resp->addHeader("X-Original-Size", std::to_string(file_data.size()));
     sp_resp->setBody(std::move(file_data));
     co_return sp_resp;
 }

@@ -12,21 +12,35 @@ export interface ChunkUploadProgress {
     error?: string;
 }
 
+export interface ResumableUploadReceipt {
+    /** Whether the backend actually stored the file encrypted. May differ from the requested
+     *  flag when the target domain's encryption_policy is `none` (requests are disregarded). */
+    is_encrypted: boolean;
+}
+
 export class ResumableUploader {
     private file: File;
     private targetPath: string;
+    private scope: string;
     private chunkSize: number; // default 5MB
     private uploadId: string | null = null;
     private status: ChunkUploadProgress["status"] = "idle";
     private onProgressCallback?: (progress: ChunkUploadProgress) => void;
     private isAborted = false;
     private encrypt: boolean = false;
+    private serverEncrypted: boolean | null = null;
 
-    constructor(file: File, targetPath: string = "/", chunkSize: number = 5 * 1024 * 1024, encrypt: boolean = false) {
+    constructor(file: File, targetPath: string = "/", scope: string = "personal", chunkSize: number = 5 * 1024 * 1024, encrypt: boolean = false) {
         this.file = file;
         this.targetPath = targetPath;
+        this.scope = scope;
         this.chunkSize = chunkSize;
         this.encrypt = encrypt;
+    }
+
+    /** Server-reported encryption state for the completed upload, or null if unset. */
+    public get serverIsEncrypted(): boolean | null {
+        return this.serverEncrypted;
     }
 
     public onProgress(callback: (progress: ChunkUploadProgress) => void) {
@@ -112,6 +126,7 @@ export class ResumableUploader {
                 body: JSON.stringify({
                     filename: this.file.name,
                     target_path: this.targetPath,
+                    scope: this.scope,
                     mime_type: this.file.type || "application/octet-stream",
                     total_size: this.file.size,
                     chunk_size: this.chunkSize,
@@ -119,13 +134,20 @@ export class ResumableUploader {
                 }),
             });
 
+            // Backend error bodies are {"error": "...", "scope": "..."} — read
+            // the `error` key so the real reason reaches the UI (not just the
+            // generic HTTP-status line).
             if (!initResp.ok) {
                 const errData = await initResp.json().catch(() => ({}));
-                throw new Error(errData.message || `Failed to initialize upload session (HTTP ${initResp.status})`);
+                throw new Error(errData.error || errData.message || `Failed to initialize upload session (HTTP ${initResp.status})`);
             }
 
             const initData = await initResp.json();
             this.uploadId = initData.upload_id;
+            // init answers the effective early: `required` upgrades, `none` downgrades.
+            if (typeof initData.is_encrypted === "boolean") {
+                this.serverEncrypted = initData.is_encrypted;
+            }
 
             this.emitProgress(0, totalChunks);
 
@@ -157,7 +179,17 @@ export class ResumableUploader {
 
             if (!completeResp.ok) {
                 const errData = await completeResp.json().catch(() => ({}));
-                throw new Error(errData.message || `Failed to finalize upload (HTTP ${completeResp.status})`);
+                throw new Error(errData.error || errData.message || `Failed to finalize upload (HTTP ${completeResp.status})`);
+            }
+
+            // The completion receipt is authoritative for the encryption state.
+            try {
+                const completeData = await completeResp.json();
+                if (typeof completeData.is_encrypted === "boolean") {
+                    this.serverEncrypted = completeData.is_encrypted;
+                }
+            } catch {
+                // receipt body is not strict JSON — keep the init-time value
             }
 
             this.status = "completed";

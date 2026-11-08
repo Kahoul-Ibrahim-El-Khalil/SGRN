@@ -61,6 +61,10 @@ public:
         static const std::string _created_at;
         static const std::string _updated_at;
         static const std::string _expires_at;
+        static const std::string _scope;
+        static const std::string _owner_user_id;
+        static const std::string _owner_service_id;
+        static const std::string _owner_session_id;
         static const std::string _is_encrypted;
         static const std::string _pending_key_id;
     };
@@ -255,6 +259,42 @@ public:
     /// Set the value of the column expires_at
     void setExpiresAt(const ::trantor::Date& pExpiresAt) noexcept;
 
+    /**  For column scope  */
+    /// Get the value of the column scope, returns the default value if the column is null
+    const std::string& getValueOfScope() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<std::string>& getScope() const noexcept;
+    /// Set the value of the column scope
+    void setScope(const std::string& pScope) noexcept;
+    void setScope(std::string&& pScope) noexcept;
+
+    /**  For column owner_user_id  */
+    /// Get the value of the column owner_user_id, returns the default value if the column is null
+    const int32_t& getValueOfOwnerUserId() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<int32_t>& getOwnerUserId() const noexcept;
+    /// Set the value of the column owner_user_id
+    void setOwnerUserId(const int32_t& pOwnerUserId) noexcept;
+    void setOwnerUserIdToNull() noexcept;
+
+    /**  For column owner_service_id  */
+    /// Get the value of the column owner_service_id, returns the default value if the column is null
+    const int32_t& getValueOfOwnerServiceId() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<int32_t>& getOwnerServiceId() const noexcept;
+    /// Set the value of the column owner_service_id
+    void setOwnerServiceId(const int32_t& pOwnerServiceId) noexcept;
+    void setOwnerServiceIdToNull() noexcept;
+
+    /**  For column owner_session_id  */
+    /// Get the value of the column owner_session_id, returns the default value if the column is null
+    const int64_t& getValueOfOwnerSessionId() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<int64_t>& getOwnerSessionId() const noexcept;
+    /// Set the value of the column owner_session_id
+    void setOwnerSessionId(const int64_t& pOwnerSessionId) noexcept;
+    void setOwnerSessionIdToNull() noexcept;
+
     /**  For column is_encrypted  */
     /// Get the value of the column is_encrypted, returns the default value if the column is null
     const bool& getValueOfIsEncrypted() const noexcept;
@@ -274,7 +314,7 @@ public:
     void setPendingKeyIdToNull() noexcept;
 
     static size_t getColumnNumber() noexcept {
-        return 19;
+        return 23;
     }
     static const std::string& getColumnName(size_t index) noexcept(false);
 
@@ -314,6 +354,10 @@ private:
     std::shared_ptr<::trantor::Date> createdAt_;
     std::shared_ptr<::trantor::Date> updatedAt_;
     std::shared_ptr<::trantor::Date> expiresAt_;
+    std::shared_ptr<std::string> scope_;
+    std::shared_ptr<int32_t> ownerUserId_;
+    std::shared_ptr<int32_t> ownerServiceId_;
+    std::shared_ptr<int64_t> ownerSessionId_;
     std::shared_ptr<bool> isEncrypted_;
     std::shared_ptr<std::string> pendingKeyId_;
     struct MetaData {
@@ -326,7 +370,7 @@ private:
         const bool notNull_;
     };
     static const std::vector<MetaData> metaData_;
-    bool dirtyFlag_[19] = {false};
+    bool dirtyFlag_[23] = {false};
 
 public:
     static const std::string& sqlForFindingByPrimaryKey() {
@@ -416,12 +460,29 @@ public:
         if (!dirtyFlag_[16]) {
             needSelection = true;
         }
-        sql += "is_encrypted,";
+        sql += "scope,";
         ++parametersCount;
         if (!dirtyFlag_[17]) {
             needSelection = true;
         }
         if (dirtyFlag_[18]) {
+            sql += "owner_user_id,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[19]) {
+            sql += "owner_service_id,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[20]) {
+            sql += "owner_session_id,";
+            ++parametersCount;
+        }
+        sql += "is_encrypted,";
+        ++parametersCount;
+        if (!dirtyFlag_[21]) {
+            needSelection = true;
+        }
+        if (dirtyFlag_[22]) {
             sql += "pending_key_id,";
             ++parametersCount;
         }
@@ -521,6 +582,24 @@ public:
             sql += "default,";
         }
         if (dirtyFlag_[18]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[19]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[20]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[21]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        } else {
+            sql += "default,";
+        }
+        if (dirtyFlag_[22]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }

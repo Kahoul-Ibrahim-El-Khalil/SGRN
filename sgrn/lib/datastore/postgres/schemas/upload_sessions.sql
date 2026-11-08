@@ -22,6 +22,12 @@ create table if not exists storage.upload_sessions (
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
     expires_at timestamptz not null default (now() + interval '24 hours'),
+    -- Scope of the upload destination: personal, domain, users, or automated_services.
+    scope text not null default 'personal'
+        check (scope in ('personal', 'domain', 'users', 'automated_services')),
+    owner_user_id int,
+    owner_service_id int,
+    owner_session_id bigint,
     constraint chk_upload_owner check (
         (user_id is not null and automated_service_id is null) or
         (user_id is null and automated_service_id is not null) or
@@ -34,6 +40,11 @@ alter table storage.upload_sessions add column if not exists file_hash text defa
 alter table storage.upload_sessions add column if not exists compressed_size bigint default null;
 alter table storage.upload_sessions add column if not exists is_encrypted boolean not null default false;
 alter table storage.upload_sessions add column if not exists pending_key_id text default null;
+alter table storage.upload_sessions add column if not exists scope text not null default 'personal'
+    check (scope in ('personal', 'domain', 'users', 'automated_services'));
+alter table storage.upload_sessions add column if not exists owner_user_id int;
+alter table storage.upload_sessions add column if not exists owner_service_id int;
+alter table storage.upload_sessions add column if not exists owner_session_id bigint;
 
 create table if not exists storage.upload_chunks (
     id bigserial primary key,

@@ -201,8 +201,26 @@ function useDriveUpload(
 ) {
     const [uploading, setUploading] = useState(false);
     const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
-    const [encryptUploads, setEncryptUploads] = useState<boolean>(false);
-    const toggleEncrypt = useCallback(() => setEncryptUploads((prev) => !prev), []);
+    // Encryption-at-rest preference persists across sessions so the default
+    // upload mode (plaintext vs AES-256-GCM) survives a page reload.
+    const [encryptUploads, setEncryptUploads] = useState<boolean>(() => {
+        try {
+            return localStorage.getItem("sgrn:encrypt-uploads") === "1";
+        } catch {
+            return false;
+        }
+    });
+    const toggleEncrypt = useCallback(() => {
+        setEncryptUploads((prev) => {
+            const next = !prev;
+            try {
+                localStorage.setItem("sgrn:encrypt-uploads", next ? "1" : "0");
+            } catch {
+                // storage unavailable — the toggle stays session-local
+            }
+            return next;
+        });
+    }, []);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const folderInputRef = useRef<HTMLInputElement>(null);
 
@@ -234,6 +252,7 @@ function useDriveUpload(
                 const result = await uploadResumableDriveFile(
                     currentPath,
                     file,
+                    currentScope,
                     (p) => {
                         updateItem(id, {
                             percent: p.percent,
@@ -249,7 +268,14 @@ function useDriveUpload(
                     showEvent("error", `${file.name}: ${result.error}`);
                 } else {
                     updateItem(id, { status: "completed", percent: 100, uploadedBytes: file.size });
-                    showEvent("success", `${file.name} uploaded successfully${encryptUploads ? " (AES-256-GCM encrypted)" : ""}.`);
+                    // The server has the final say: a domain with policy 'none'
+                    // disregards encryption requests and stores plaintext.
+                    const stored_encrypted = result.data?.is_encrypted ?? encryptUploads;
+                    if (encryptUploads && !stored_encrypted) {
+                        showEvent("info", `${file.name} uploaded (stored in plaintext: encryption is not allowed for this domain).`);
+                    } else {
+                        showEvent("success", `${file.name} uploaded successfully${stored_encrypted ? " (AES-256-GCM encrypted)" : ""}.`);
+                    }
                 }
             } else {
                 updateItem(id, { percent: 50 });

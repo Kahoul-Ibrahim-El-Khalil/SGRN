@@ -2,7 +2,7 @@
 
 import { authenticatedFetch } from "@/backend/api/fetcher";
 import { StorageBackendApiEndpoints } from "@/backend/endpoints";
-import { ResumableUploader, type ChunkUploadProgress } from "@/lib/resumableUploader";
+import { ResumableUploader, type ChunkUploadProgress, type ResumableUploadReceipt } from "@/lib/resumableUploader";
 import type { DirectoryListing, SgrnResult } from "@sgrn/types";
 import { ErrorScope } from "@sgrn/types";
 
@@ -143,6 +143,21 @@ export async function fetchDriveFileContent(t_file_path: string, t_scope: Storag
         }
 
         const buffer = await res.arrayBuffer();
+
+        // Transfer-integrity check: the server stamps the *stored* entity size
+        // (post-decryption bytes, compressed or not) in X-Original-Size. A
+        // short body means the response was truncated in transit — fail
+        // loudly instead of handing the preview a silently corrupted payload.
+        const original_size = res.headers.get("X-Original-Size");
+        if (original_size) {
+            const expected = Number(original_size);
+            if (Number.isFinite(expected) && expected > 0 && buffer.byteLength !== expected) {
+                return {
+                    error: `File data truncated in transit: received ${buffer.byteLength} of ${expected} bytes`,
+                    scope: ErrorScope.Network,
+                };
+            }
+        }
         return { data: buffer };
     } catch (e) {
         return { error: `Fetch failed: ${e instanceof Error ? e.message : String(e)}`, scope: ErrorScope.Network };
@@ -222,7 +237,9 @@ export async function uploadDriveFile(
                     let receipt: DriveUploadReceipt = {};
                     try {
                         receipt = (JSON.parse(xhr.responseText) as DriveUploadReceipt) ?? {};
-                    } catch (_) {}
+                    } catch {
+                        receipt = {};
+                    }
                     resolve({ data: receipt });
                 } else {
                     let error_msg = `Upload failed: ${xhr.status}`;
@@ -231,7 +248,9 @@ export async function uploadDriveFile(
                         const resp = JSON.parse(xhr.responseText);
                         if (resp.error) error_msg = resp.error;
                         if (resp.scope) scope = resp.scope;
-                    } catch (_) {}
+                    } catch {
+                        scope = ErrorScope.Network;
+                    }
                     resolve({ error: error_msg, scope });
                 }
             };
@@ -247,17 +266,19 @@ export async function uploadDriveFile(
 export async function uploadResumableDriveFile(
     t_directory_path: string,
     t_file: File,
+    t_scope: StorageScope = "personal",
     t_on_progress?: (progress: ChunkUploadProgress) => void,
     t_encrypt: boolean = false,
-): Promise<SgrnResult<void>> {
+): Promise<SgrnResult<ResumableUploadReceipt | undefined>> {
     try {
-        const uploader = new ResumableUploader(t_file, t_directory_path, 5 * 1024 * 1024, t_encrypt);
+        const uploader = new ResumableUploader(t_file, t_directory_path, t_scope, 5 * 1024 * 1024, t_encrypt);
         if (t_on_progress) {
             uploader.onProgress(t_on_progress);
         }
         const success = await uploader.start(authenticatedFetch);
         if (success) {
-            return { data: undefined };
+            const server_encrypted = uploader.serverIsEncrypted;
+            return { data: server_encrypted === null ? undefined : { is_encrypted: server_encrypted } };
         }
         return { error: "Resumable upload failed", scope: ErrorScope.Network };
     } catch (e) {

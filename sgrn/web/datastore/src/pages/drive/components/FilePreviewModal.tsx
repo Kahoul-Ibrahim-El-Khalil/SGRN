@@ -250,26 +250,29 @@ export function FilePreviewModal({ isOpen, file, currentScope, onClose, onDownlo
             }
             const buffer = result.data;
 
-            if (kind) {
-                const url = URL.createObjectURL(new Blob([buffer], { type: getMimeType(file.name) }));
-                objectUrlRef.current = url;
-                setMedia({ url, kind });
-                setLoading(false);
-                return;
-            }
-
             const view = new Uint8Array(buffer);
-            // Zstd magic: 0x28 0xB5 0x2F 0xFD
+            // Zstd magic: 0x28 0xB5 0x2F 0xFD — sniff for every preview kind,
+            // not just text: an object stored compressed must never reach the
+            // media blob, or the PDF viewer (native iframe) renders a blank
+            // page instead of the document.
             const isZstd = view.length >= 4 && view[0] === 0x28 && view[1] === 0xb5 && view[2] === 0x2f && view[3] === 0xfd;
-            let bytes: Uint8Array = view;
+            let bytes: Uint8Array<ArrayBuffer> = view;
             if (isZstd) {
                 try {
-                    bytes = decompress(view) as unknown as Uint8Array;
+                    bytes = decompress(view) as unknown as Uint8Array<ArrayBuffer>;
                 } catch {
                     setError("Failed to decompress file.");
                     setLoading(false);
                     return;
                 }
+            }
+
+            if (kind) {
+                const url = URL.createObjectURL(new Blob([bytes], { type: getMimeType(file.name) }));
+                objectUrlRef.current = url;
+                setMedia({ url, kind });
+                setLoading(false);
+                return;
             }
 
             let text = new TextDecoder("utf-8").decode(bytes);

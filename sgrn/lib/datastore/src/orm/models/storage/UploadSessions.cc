@@ -30,6 +30,10 @@ const std::string UploadSessions::Cols::_compressed_size = "\"compressed_size\""
 const std::string UploadSessions::Cols::_created_at = "\"created_at\"";
 const std::string UploadSessions::Cols::_updated_at = "\"updated_at\"";
 const std::string UploadSessions::Cols::_expires_at = "\"expires_at\"";
+const std::string UploadSessions::Cols::_scope = "\"scope\"";
+const std::string UploadSessions::Cols::_owner_user_id = "\"owner_user_id\"";
+const std::string UploadSessions::Cols::_owner_service_id = "\"owner_service_id\"";
+const std::string UploadSessions::Cols::_owner_session_id = "\"owner_session_id\"";
 const std::string UploadSessions::Cols::_is_encrypted = "\"is_encrypted\"";
 const std::string UploadSessions::Cols::_pending_key_id = "\"pending_key_id\"";
 const std::string UploadSessions::primaryKeyName = "id";
@@ -45,7 +49,9 @@ const std::vector<typename UploadSessions::MetaData> UploadSessions::metaData_ =
     {"status", "std::string", "text", 0, 0, 0, 1}, {"file_hash", "std::string", "text", 0, 0, 0, 0},
     {"compressed_size", "int64_t", "bigint", 8, 0, 0, 0}, {"created_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1},
     {"updated_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1},
-    {"expires_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1}, {"is_encrypted", "bool", "boolean", 1, 0, 0, 1},
+    {"expires_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1}, {"scope", "std::string", "text", 0, 0, 0, 1},
+    {"owner_user_id", "int32_t", "integer", 4, 0, 0, 0}, {"owner_service_id", "int32_t", "integer", 4, 0, 0, 0},
+    {"owner_session_id", "int64_t", "bigint", 8, 0, 0, 0}, {"is_encrypted", "bool", "boolean", 1, 0, 0, 1},
     {"pending_key_id", "std::string", "text", 0, 0, 0, 0}};
 const std::string& UploadSessions::getColumnName(size_t index) noexcept(false) {
     assert(index < metaData_.size());
@@ -149,6 +155,18 @@ UploadSessions::UploadSessions(const Row& r, const ssize_t indexOffset) noexcept
                 expiresAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
+        if (!r["scope"].isNull()) {
+            scope_ = std::make_shared<std::string>(r["scope"].as<std::string>());
+        }
+        if (!r["owner_user_id"].isNull()) {
+            ownerUserId_ = std::make_shared<int32_t>(r["owner_user_id"].as<int32_t>());
+        }
+        if (!r["owner_service_id"].isNull()) {
+            ownerServiceId_ = std::make_shared<int32_t>(r["owner_service_id"].as<int32_t>());
+        }
+        if (!r["owner_session_id"].isNull()) {
+            ownerSessionId_ = std::make_shared<int64_t>(r["owner_session_id"].as<int64_t>());
+        }
         if (!r["is_encrypted"].isNull()) {
             isEncrypted_ = std::make_shared<bool>(r["is_encrypted"].as<bool>());
         }
@@ -157,7 +175,7 @@ UploadSessions::UploadSessions(const Row& r, const ssize_t indexOffset) noexcept
         }
     } else {
         size_t offset = (size_t)indexOffset;
-        if (offset + 19 > r.size()) {
+        if (offset + 23 > r.size()) {
             LOG_FATAL << "Invalid SQL result for this model";
             return;
         }
@@ -277,9 +295,25 @@ UploadSessions::UploadSessions(const Row& r, const ssize_t indexOffset) noexcept
         }
         index = offset + 17;
         if (!r[index].isNull()) {
-            isEncrypted_ = std::make_shared<bool>(r[index].as<bool>());
+            scope_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
         index = offset + 18;
+        if (!r[index].isNull()) {
+            ownerUserId_ = std::make_shared<int32_t>(r[index].as<int32_t>());
+        }
+        index = offset + 19;
+        if (!r[index].isNull()) {
+            ownerServiceId_ = std::make_shared<int32_t>(r[index].as<int32_t>());
+        }
+        index = offset + 20;
+        if (!r[index].isNull()) {
+            ownerSessionId_ = std::make_shared<int64_t>(r[index].as<int64_t>());
+        }
+        index = offset + 21;
+        if (!r[index].isNull()) {
+            isEncrypted_ = std::make_shared<bool>(r[index].as<bool>());
+        }
+        index = offset + 22;
         if (!r[index].isNull()) {
             pendingKeyId_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
@@ -287,7 +321,7 @@ UploadSessions::UploadSessions(const Row& r, const ssize_t indexOffset) noexcept
 }
 
 UploadSessions::UploadSessions(const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector) noexcept(false) {
-    if (pMasqueradingVector.size() != 19) {
+    if (pMasqueradingVector.size() != 23) {
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
@@ -441,13 +475,37 @@ UploadSessions::UploadSessions(const Json::Value& pJson, const std::vector<std::
     if (!pMasqueradingVector[17].empty() && pJson.isMember(pMasqueradingVector[17])) {
         dirtyFlag_[17] = true;
         if (!pJson[pMasqueradingVector[17]].isNull()) {
-            isEncrypted_ = std::make_shared<bool>(pJson[pMasqueradingVector[17]].asBool());
+            scope_ = std::make_shared<std::string>(pJson[pMasqueradingVector[17]].asString());
         }
     }
     if (!pMasqueradingVector[18].empty() && pJson.isMember(pMasqueradingVector[18])) {
         dirtyFlag_[18] = true;
         if (!pJson[pMasqueradingVector[18]].isNull()) {
-            pendingKeyId_ = std::make_shared<std::string>(pJson[pMasqueradingVector[18]].asString());
+            ownerUserId_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[18]].asInt64());
+        }
+    }
+    if (!pMasqueradingVector[19].empty() && pJson.isMember(pMasqueradingVector[19])) {
+        dirtyFlag_[19] = true;
+        if (!pJson[pMasqueradingVector[19]].isNull()) {
+            ownerServiceId_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[19]].asInt64());
+        }
+    }
+    if (!pMasqueradingVector[20].empty() && pJson.isMember(pMasqueradingVector[20])) {
+        dirtyFlag_[20] = true;
+        if (!pJson[pMasqueradingVector[20]].isNull()) {
+            ownerSessionId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[20]].asInt64());
+        }
+    }
+    if (!pMasqueradingVector[21].empty() && pJson.isMember(pMasqueradingVector[21])) {
+        dirtyFlag_[21] = true;
+        if (!pJson[pMasqueradingVector[21]].isNull()) {
+            isEncrypted_ = std::make_shared<bool>(pJson[pMasqueradingVector[21]].asBool());
+        }
+    }
+    if (!pMasqueradingVector[22].empty() && pJson.isMember(pMasqueradingVector[22])) {
+        dirtyFlag_[22] = true;
+        if (!pJson[pMasqueradingVector[22]].isNull()) {
+            pendingKeyId_ = std::make_shared<std::string>(pJson[pMasqueradingVector[22]].asString());
         }
     }
 }
@@ -600,14 +658,38 @@ UploadSessions::UploadSessions(const Json::Value& pJson) noexcept(false) {
             }
         }
     }
-    if (pJson.isMember("is_encrypted")) {
+    if (pJson.isMember("scope")) {
         dirtyFlag_[17] = true;
+        if (!pJson["scope"].isNull()) {
+            scope_ = std::make_shared<std::string>(pJson["scope"].asString());
+        }
+    }
+    if (pJson.isMember("owner_user_id")) {
+        dirtyFlag_[18] = true;
+        if (!pJson["owner_user_id"].isNull()) {
+            ownerUserId_ = std::make_shared<int32_t>((int32_t)pJson["owner_user_id"].asInt64());
+        }
+    }
+    if (pJson.isMember("owner_service_id")) {
+        dirtyFlag_[19] = true;
+        if (!pJson["owner_service_id"].isNull()) {
+            ownerServiceId_ = std::make_shared<int32_t>((int32_t)pJson["owner_service_id"].asInt64());
+        }
+    }
+    if (pJson.isMember("owner_session_id")) {
+        dirtyFlag_[20] = true;
+        if (!pJson["owner_session_id"].isNull()) {
+            ownerSessionId_ = std::make_shared<int64_t>((int64_t)pJson["owner_session_id"].asInt64());
+        }
+    }
+    if (pJson.isMember("is_encrypted")) {
+        dirtyFlag_[21] = true;
         if (!pJson["is_encrypted"].isNull()) {
             isEncrypted_ = std::make_shared<bool>(pJson["is_encrypted"].asBool());
         }
     }
     if (pJson.isMember("pending_key_id")) {
-        dirtyFlag_[18] = true;
+        dirtyFlag_[22] = true;
         if (!pJson["pending_key_id"].isNull()) {
             pendingKeyId_ = std::make_shared<std::string>(pJson["pending_key_id"].asString());
         }
@@ -616,7 +698,7 @@ UploadSessions::UploadSessions(const Json::Value& pJson) noexcept(false) {
 
 void UploadSessions::updateByMasqueradedJson(const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector) noexcept(
     false) {
-    if (pMasqueradingVector.size() != 19) {
+    if (pMasqueradingVector.size() != 23) {
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
@@ -769,13 +851,37 @@ void UploadSessions::updateByMasqueradedJson(const Json::Value& pJson, const std
     if (!pMasqueradingVector[17].empty() && pJson.isMember(pMasqueradingVector[17])) {
         dirtyFlag_[17] = true;
         if (!pJson[pMasqueradingVector[17]].isNull()) {
-            isEncrypted_ = std::make_shared<bool>(pJson[pMasqueradingVector[17]].asBool());
+            scope_ = std::make_shared<std::string>(pJson[pMasqueradingVector[17]].asString());
         }
     }
     if (!pMasqueradingVector[18].empty() && pJson.isMember(pMasqueradingVector[18])) {
         dirtyFlag_[18] = true;
         if (!pJson[pMasqueradingVector[18]].isNull()) {
-            pendingKeyId_ = std::make_shared<std::string>(pJson[pMasqueradingVector[18]].asString());
+            ownerUserId_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[18]].asInt64());
+        }
+    }
+    if (!pMasqueradingVector[19].empty() && pJson.isMember(pMasqueradingVector[19])) {
+        dirtyFlag_[19] = true;
+        if (!pJson[pMasqueradingVector[19]].isNull()) {
+            ownerServiceId_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[19]].asInt64());
+        }
+    }
+    if (!pMasqueradingVector[20].empty() && pJson.isMember(pMasqueradingVector[20])) {
+        dirtyFlag_[20] = true;
+        if (!pJson[pMasqueradingVector[20]].isNull()) {
+            ownerSessionId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[20]].asInt64());
+        }
+    }
+    if (!pMasqueradingVector[21].empty() && pJson.isMember(pMasqueradingVector[21])) {
+        dirtyFlag_[21] = true;
+        if (!pJson[pMasqueradingVector[21]].isNull()) {
+            isEncrypted_ = std::make_shared<bool>(pJson[pMasqueradingVector[21]].asBool());
+        }
+    }
+    if (!pMasqueradingVector[22].empty() && pJson.isMember(pMasqueradingVector[22])) {
+        dirtyFlag_[22] = true;
+        if (!pJson[pMasqueradingVector[22]].isNull()) {
+            pendingKeyId_ = std::make_shared<std::string>(pJson[pMasqueradingVector[22]].asString());
         }
     }
 }
@@ -927,14 +1033,38 @@ void UploadSessions::updateByJson(const Json::Value& pJson) noexcept(false) {
             }
         }
     }
-    if (pJson.isMember("is_encrypted")) {
+    if (pJson.isMember("scope")) {
         dirtyFlag_[17] = true;
+        if (!pJson["scope"].isNull()) {
+            scope_ = std::make_shared<std::string>(pJson["scope"].asString());
+        }
+    }
+    if (pJson.isMember("owner_user_id")) {
+        dirtyFlag_[18] = true;
+        if (!pJson["owner_user_id"].isNull()) {
+            ownerUserId_ = std::make_shared<int32_t>((int32_t)pJson["owner_user_id"].asInt64());
+        }
+    }
+    if (pJson.isMember("owner_service_id")) {
+        dirtyFlag_[19] = true;
+        if (!pJson["owner_service_id"].isNull()) {
+            ownerServiceId_ = std::make_shared<int32_t>((int32_t)pJson["owner_service_id"].asInt64());
+        }
+    }
+    if (pJson.isMember("owner_session_id")) {
+        dirtyFlag_[20] = true;
+        if (!pJson["owner_session_id"].isNull()) {
+            ownerSessionId_ = std::make_shared<int64_t>((int64_t)pJson["owner_session_id"].asInt64());
+        }
+    }
+    if (pJson.isMember("is_encrypted")) {
+        dirtyFlag_[21] = true;
         if (!pJson["is_encrypted"].isNull()) {
             isEncrypted_ = std::make_shared<bool>(pJson["is_encrypted"].asBool());
         }
     }
     if (pJson.isMember("pending_key_id")) {
-        dirtyFlag_[18] = true;
+        dirtyFlag_[22] = true;
         if (!pJson["pending_key_id"].isNull()) {
             pendingKeyId_ = std::make_shared<std::string>(pJson["pending_key_id"].asString());
         }
@@ -1231,6 +1361,78 @@ void UploadSessions::setExpiresAt(const ::trantor::Date& pExpiresAt) noexcept {
     dirtyFlag_[16] = true;
 }
 
+const std::string& UploadSessions::getValueOfScope() const noexcept {
+    static const std::string defaultValue = std::string();
+    if (scope_)
+        return *scope_;
+    return defaultValue;
+}
+const std::shared_ptr<std::string>& UploadSessions::getScope() const noexcept {
+    return scope_;
+}
+void UploadSessions::setScope(const std::string& pScope) noexcept {
+    scope_ = std::make_shared<std::string>(pScope);
+    dirtyFlag_[17] = true;
+}
+void UploadSessions::setScope(std::string&& pScope) noexcept {
+    scope_ = std::make_shared<std::string>(std::move(pScope));
+    dirtyFlag_[17] = true;
+}
+
+const int32_t& UploadSessions::getValueOfOwnerUserId() const noexcept {
+    static const int32_t defaultValue = int32_t();
+    if (ownerUserId_)
+        return *ownerUserId_;
+    return defaultValue;
+}
+const std::shared_ptr<int32_t>& UploadSessions::getOwnerUserId() const noexcept {
+    return ownerUserId_;
+}
+void UploadSessions::setOwnerUserId(const int32_t& pOwnerUserId) noexcept {
+    ownerUserId_ = std::make_shared<int32_t>(pOwnerUserId);
+    dirtyFlag_[18] = true;
+}
+void UploadSessions::setOwnerUserIdToNull() noexcept {
+    ownerUserId_.reset();
+    dirtyFlag_[18] = true;
+}
+
+const int32_t& UploadSessions::getValueOfOwnerServiceId() const noexcept {
+    static const int32_t defaultValue = int32_t();
+    if (ownerServiceId_)
+        return *ownerServiceId_;
+    return defaultValue;
+}
+const std::shared_ptr<int32_t>& UploadSessions::getOwnerServiceId() const noexcept {
+    return ownerServiceId_;
+}
+void UploadSessions::setOwnerServiceId(const int32_t& pOwnerServiceId) noexcept {
+    ownerServiceId_ = std::make_shared<int32_t>(pOwnerServiceId);
+    dirtyFlag_[19] = true;
+}
+void UploadSessions::setOwnerServiceIdToNull() noexcept {
+    ownerServiceId_.reset();
+    dirtyFlag_[19] = true;
+}
+
+const int64_t& UploadSessions::getValueOfOwnerSessionId() const noexcept {
+    static const int64_t defaultValue = int64_t();
+    if (ownerSessionId_)
+        return *ownerSessionId_;
+    return defaultValue;
+}
+const std::shared_ptr<int64_t>& UploadSessions::getOwnerSessionId() const noexcept {
+    return ownerSessionId_;
+}
+void UploadSessions::setOwnerSessionId(const int64_t& pOwnerSessionId) noexcept {
+    ownerSessionId_ = std::make_shared<int64_t>(pOwnerSessionId);
+    dirtyFlag_[20] = true;
+}
+void UploadSessions::setOwnerSessionIdToNull() noexcept {
+    ownerSessionId_.reset();
+    dirtyFlag_[20] = true;
+}
+
 const bool& UploadSessions::getValueOfIsEncrypted() const noexcept {
     static const bool defaultValue = bool();
     if (isEncrypted_)
@@ -1242,7 +1444,7 @@ const std::shared_ptr<bool>& UploadSessions::getIsEncrypted() const noexcept {
 }
 void UploadSessions::setIsEncrypted(const bool& pIsEncrypted) noexcept {
     isEncrypted_ = std::make_shared<bool>(pIsEncrypted);
-    dirtyFlag_[17] = true;
+    dirtyFlag_[21] = true;
 }
 
 const std::string& UploadSessions::getValueOfPendingKeyId() const noexcept {
@@ -1256,15 +1458,15 @@ const std::shared_ptr<std::string>& UploadSessions::getPendingKeyId() const noex
 }
 void UploadSessions::setPendingKeyId(const std::string& pPendingKeyId) noexcept {
     pendingKeyId_ = std::make_shared<std::string>(pPendingKeyId);
-    dirtyFlag_[18] = true;
+    dirtyFlag_[22] = true;
 }
 void UploadSessions::setPendingKeyId(std::string&& pPendingKeyId) noexcept {
     pendingKeyId_ = std::make_shared<std::string>(std::move(pPendingKeyId));
-    dirtyFlag_[18] = true;
+    dirtyFlag_[22] = true;
 }
 void UploadSessions::setPendingKeyIdToNull() noexcept {
     pendingKeyId_.reset();
-    dirtyFlag_[18] = true;
+    dirtyFlag_[22] = true;
 }
 
 void UploadSessions::updateId(const uint64_t id) {
@@ -1273,7 +1475,8 @@ void UploadSessions::updateId(const uint64_t id) {
 const std::vector<std::string>& UploadSessions::insertColumns() noexcept {
     static const std::vector<std::string> inCols = {"id", "user_id", "automated_service_id", "domain", "target_path", "filename",
         "mime_type", "total_size", "chunk_size", "total_chunks", "uploaded_chunks_count", "status", "file_hash", "compressed_size",
-        "created_at", "updated_at", "expires_at", "is_encrypted", "pending_key_id"};
+        "created_at", "updated_at", "expires_at", "scope", "owner_user_id", "owner_service_id", "owner_session_id", "is_encrypted",
+        "pending_key_id"};
     return inCols;
 }
 
@@ -1398,13 +1601,41 @@ void UploadSessions::outputArgs(drogon::orm::internal::SqlBinder& binder) const 
         }
     }
     if (dirtyFlag_[17]) {
+        if (getScope()) {
+            binder << getValueOfScope();
+        } else {
+            binder << nullptr;
+        }
+    }
+    if (dirtyFlag_[18]) {
+        if (getOwnerUserId()) {
+            binder << getValueOfOwnerUserId();
+        } else {
+            binder << nullptr;
+        }
+    }
+    if (dirtyFlag_[19]) {
+        if (getOwnerServiceId()) {
+            binder << getValueOfOwnerServiceId();
+        } else {
+            binder << nullptr;
+        }
+    }
+    if (dirtyFlag_[20]) {
+        if (getOwnerSessionId()) {
+            binder << getValueOfOwnerSessionId();
+        } else {
+            binder << nullptr;
+        }
+    }
+    if (dirtyFlag_[21]) {
         if (getIsEncrypted()) {
             binder << getValueOfIsEncrypted();
         } else {
             binder << nullptr;
         }
     }
-    if (dirtyFlag_[18]) {
+    if (dirtyFlag_[22]) {
         if (getPendingKeyId()) {
             binder << getValueOfPendingKeyId();
         } else {
@@ -1471,6 +1702,18 @@ const std::vector<std::string> UploadSessions::updateColumns() const {
     }
     if (dirtyFlag_[18]) {
         ret.push_back(getColumnName(18));
+    }
+    if (dirtyFlag_[19]) {
+        ret.push_back(getColumnName(19));
+    }
+    if (dirtyFlag_[20]) {
+        ret.push_back(getColumnName(20));
+    }
+    if (dirtyFlag_[21]) {
+        ret.push_back(getColumnName(21));
+    }
+    if (dirtyFlag_[22]) {
+        ret.push_back(getColumnName(22));
     }
     return ret;
 }
@@ -1596,13 +1839,41 @@ void UploadSessions::updateArgs(drogon::orm::internal::SqlBinder& binder) const 
         }
     }
     if (dirtyFlag_[17]) {
+        if (getScope()) {
+            binder << getValueOfScope();
+        } else {
+            binder << nullptr;
+        }
+    }
+    if (dirtyFlag_[18]) {
+        if (getOwnerUserId()) {
+            binder << getValueOfOwnerUserId();
+        } else {
+            binder << nullptr;
+        }
+    }
+    if (dirtyFlag_[19]) {
+        if (getOwnerServiceId()) {
+            binder << getValueOfOwnerServiceId();
+        } else {
+            binder << nullptr;
+        }
+    }
+    if (dirtyFlag_[20]) {
+        if (getOwnerSessionId()) {
+            binder << getValueOfOwnerSessionId();
+        } else {
+            binder << nullptr;
+        }
+    }
+    if (dirtyFlag_[21]) {
         if (getIsEncrypted()) {
             binder << getValueOfIsEncrypted();
         } else {
             binder << nullptr;
         }
     }
-    if (dirtyFlag_[18]) {
+    if (dirtyFlag_[22]) {
         if (getPendingKeyId()) {
             binder << getValueOfPendingKeyId();
         } else {
@@ -1697,6 +1968,26 @@ Json::Value UploadSessions::toJson() const {
     } else {
         ret["expires_at"] = Json::Value();
     }
+    if (getScope()) {
+        ret["scope"] = getValueOfScope();
+    } else {
+        ret["scope"] = Json::Value();
+    }
+    if (getOwnerUserId()) {
+        ret["owner_user_id"] = getValueOfOwnerUserId();
+    } else {
+        ret["owner_user_id"] = Json::Value();
+    }
+    if (getOwnerServiceId()) {
+        ret["owner_service_id"] = getValueOfOwnerServiceId();
+    } else {
+        ret["owner_service_id"] = Json::Value();
+    }
+    if (getOwnerSessionId()) {
+        ret["owner_session_id"] = (Json::Int64)getValueOfOwnerSessionId();
+    } else {
+        ret["owner_session_id"] = Json::Value();
+    }
     if (getIsEncrypted()) {
         ret["is_encrypted"] = getValueOfIsEncrypted();
     } else {
@@ -1716,7 +2007,7 @@ std::string UploadSessions::toString() const {
 
 Json::Value UploadSessions::toMasqueradedJson(const std::vector<std::string>& pMasqueradingVector) const {
     Json::Value ret;
-    if (pMasqueradingVector.size() == 19) {
+    if (pMasqueradingVector.size() == 23) {
         if (!pMasqueradingVector[0].empty()) {
             if (getId()) {
                 ret[pMasqueradingVector[0]] = getValueOfId();
@@ -1837,17 +2128,45 @@ Json::Value UploadSessions::toMasqueradedJson(const std::vector<std::string>& pM
             }
         }
         if (!pMasqueradingVector[17].empty()) {
-            if (getIsEncrypted()) {
-                ret[pMasqueradingVector[17]] = getValueOfIsEncrypted();
+            if (getScope()) {
+                ret[pMasqueradingVector[17]] = getValueOfScope();
             } else {
                 ret[pMasqueradingVector[17]] = Json::Value();
             }
         }
         if (!pMasqueradingVector[18].empty()) {
-            if (getPendingKeyId()) {
-                ret[pMasqueradingVector[18]] = getValueOfPendingKeyId();
+            if (getOwnerUserId()) {
+                ret[pMasqueradingVector[18]] = getValueOfOwnerUserId();
             } else {
                 ret[pMasqueradingVector[18]] = Json::Value();
+            }
+        }
+        if (!pMasqueradingVector[19].empty()) {
+            if (getOwnerServiceId()) {
+                ret[pMasqueradingVector[19]] = getValueOfOwnerServiceId();
+            } else {
+                ret[pMasqueradingVector[19]] = Json::Value();
+            }
+        }
+        if (!pMasqueradingVector[20].empty()) {
+            if (getOwnerSessionId()) {
+                ret[pMasqueradingVector[20]] = (Json::Int64)getValueOfOwnerSessionId();
+            } else {
+                ret[pMasqueradingVector[20]] = Json::Value();
+            }
+        }
+        if (!pMasqueradingVector[21].empty()) {
+            if (getIsEncrypted()) {
+                ret[pMasqueradingVector[21]] = getValueOfIsEncrypted();
+            } else {
+                ret[pMasqueradingVector[21]] = Json::Value();
+            }
+        }
+        if (!pMasqueradingVector[22].empty()) {
+            if (getPendingKeyId()) {
+                ret[pMasqueradingVector[22]] = getValueOfPendingKeyId();
+            } else {
+                ret[pMasqueradingVector[22]] = Json::Value();
             }
         }
         return ret;
@@ -1937,6 +2256,26 @@ Json::Value UploadSessions::toMasqueradedJson(const std::vector<std::string>& pM
         ret["expires_at"] = getExpiresAt()->toDbStringLocal();
     } else {
         ret["expires_at"] = Json::Value();
+    }
+    if (getScope()) {
+        ret["scope"] = getValueOfScope();
+    } else {
+        ret["scope"] = Json::Value();
+    }
+    if (getOwnerUserId()) {
+        ret["owner_user_id"] = getValueOfOwnerUserId();
+    } else {
+        ret["owner_user_id"] = Json::Value();
+    }
+    if (getOwnerServiceId()) {
+        ret["owner_service_id"] = getValueOfOwnerServiceId();
+    } else {
+        ret["owner_service_id"] = Json::Value();
+    }
+    if (getOwnerSessionId()) {
+        ret["owner_session_id"] = (Json::Int64)getValueOfOwnerSessionId();
+    } else {
+        ret["owner_session_id"] = Json::Value();
     }
     if (getIsEncrypted()) {
         ret["is_encrypted"] = getValueOfIsEncrypted();
@@ -2038,19 +2377,35 @@ bool UploadSessions::validateJsonForCreation(const Json::Value& pJson, std::stri
         if (!validJsonOfField(16, "expires_at", pJson["expires_at"], err, true))
             return false;
     }
+    if (pJson.isMember("scope")) {
+        if (!validJsonOfField(17, "scope", pJson["scope"], err, true))
+            return false;
+    }
+    if (pJson.isMember("owner_user_id")) {
+        if (!validJsonOfField(18, "owner_user_id", pJson["owner_user_id"], err, true))
+            return false;
+    }
+    if (pJson.isMember("owner_service_id")) {
+        if (!validJsonOfField(19, "owner_service_id", pJson["owner_service_id"], err, true))
+            return false;
+    }
+    if (pJson.isMember("owner_session_id")) {
+        if (!validJsonOfField(20, "owner_session_id", pJson["owner_session_id"], err, true))
+            return false;
+    }
     if (pJson.isMember("is_encrypted")) {
-        if (!validJsonOfField(17, "is_encrypted", pJson["is_encrypted"], err, true))
+        if (!validJsonOfField(21, "is_encrypted", pJson["is_encrypted"], err, true))
             return false;
     }
     if (pJson.isMember("pending_key_id")) {
-        if (!validJsonOfField(18, "pending_key_id", pJson["pending_key_id"], err, true))
+        if (!validJsonOfField(22, "pending_key_id", pJson["pending_key_id"], err, true))
             return false;
     }
     return true;
 }
 bool UploadSessions::validateMasqueradedJsonForCreation(
     const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector, std::string& err) {
-    if (pMasqueradingVector.size() != 19) {
+    if (pMasqueradingVector.size() != 23) {
         err = "Bad masquerading vector";
         return false;
     }
@@ -2187,6 +2542,30 @@ bool UploadSessions::validateMasqueradedJsonForCreation(
                     return false;
             }
         }
+        if (!pMasqueradingVector[19].empty()) {
+            if (pJson.isMember(pMasqueradingVector[19])) {
+                if (!validJsonOfField(19, pMasqueradingVector[19], pJson[pMasqueradingVector[19]], err, true))
+                    return false;
+            }
+        }
+        if (!pMasqueradingVector[20].empty()) {
+            if (pJson.isMember(pMasqueradingVector[20])) {
+                if (!validJsonOfField(20, pMasqueradingVector[20], pJson[pMasqueradingVector[20]], err, true))
+                    return false;
+            }
+        }
+        if (!pMasqueradingVector[21].empty()) {
+            if (pJson.isMember(pMasqueradingVector[21])) {
+                if (!validJsonOfField(21, pMasqueradingVector[21], pJson[pMasqueradingVector[21]], err, true))
+                    return false;
+            }
+        }
+        if (!pMasqueradingVector[22].empty()) {
+            if (pJson.isMember(pMasqueradingVector[22])) {
+                if (!validJsonOfField(22, pMasqueradingVector[22], pJson[pMasqueradingVector[22]], err, true))
+                    return false;
+            }
+        }
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -2265,19 +2644,35 @@ bool UploadSessions::validateJsonForUpdate(const Json::Value& pJson, std::string
         if (!validJsonOfField(16, "expires_at", pJson["expires_at"], err, false))
             return false;
     }
+    if (pJson.isMember("scope")) {
+        if (!validJsonOfField(17, "scope", pJson["scope"], err, false))
+            return false;
+    }
+    if (pJson.isMember("owner_user_id")) {
+        if (!validJsonOfField(18, "owner_user_id", pJson["owner_user_id"], err, false))
+            return false;
+    }
+    if (pJson.isMember("owner_service_id")) {
+        if (!validJsonOfField(19, "owner_service_id", pJson["owner_service_id"], err, false))
+            return false;
+    }
+    if (pJson.isMember("owner_session_id")) {
+        if (!validJsonOfField(20, "owner_session_id", pJson["owner_session_id"], err, false))
+            return false;
+    }
     if (pJson.isMember("is_encrypted")) {
-        if (!validJsonOfField(17, "is_encrypted", pJson["is_encrypted"], err, false))
+        if (!validJsonOfField(21, "is_encrypted", pJson["is_encrypted"], err, false))
             return false;
     }
     if (pJson.isMember("pending_key_id")) {
-        if (!validJsonOfField(18, "pending_key_id", pJson["pending_key_id"], err, false))
+        if (!validJsonOfField(22, "pending_key_id", pJson["pending_key_id"], err, false))
             return false;
     }
     return true;
 }
 bool UploadSessions::validateMasqueradedJsonForUpdate(
     const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector, std::string& err) {
-    if (pMasqueradingVector.size() != 19) {
+    if (pMasqueradingVector.size() != 23) {
         err = "Bad masquerading vector";
         return false;
     }
@@ -2359,6 +2754,22 @@ bool UploadSessions::validateMasqueradedJsonForUpdate(
         }
         if (!pMasqueradingVector[18].empty() && pJson.isMember(pMasqueradingVector[18])) {
             if (!validJsonOfField(18, pMasqueradingVector[18], pJson[pMasqueradingVector[18]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[19].empty() && pJson.isMember(pMasqueradingVector[19])) {
+            if (!validJsonOfField(19, pMasqueradingVector[19], pJson[pMasqueradingVector[19]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[20].empty() && pJson.isMember(pMasqueradingVector[20])) {
+            if (!validJsonOfField(20, pMasqueradingVector[20], pJson[pMasqueradingVector[20]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[21].empty() && pJson.isMember(pMasqueradingVector[21])) {
+            if (!validJsonOfField(21, pMasqueradingVector[21], pJson[pMasqueradingVector[21]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[22].empty() && pJson.isMember(pMasqueradingVector[22])) {
+            if (!validJsonOfField(22, pMasqueradingVector[22], pJson[pMasqueradingVector[22]], err, false))
                 return false;
         }
     } catch (const Json::LogicError& e) {
@@ -2540,12 +2951,49 @@ bool UploadSessions::validJsonOfField(
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-            if (!pJson.isBool()) {
+            if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
             break;
         case 18:
+            if (pJson.isNull()) {
+                return true;
+            }
+            if (!pJson.isInt()) {
+                err = "Type error in the " + fieldName + " field";
+                return false;
+            }
+            break;
+        case 19:
+            if (pJson.isNull()) {
+                return true;
+            }
+            if (!pJson.isInt()) {
+                err = "Type error in the " + fieldName + " field";
+                return false;
+            }
+            break;
+        case 20:
+            if (pJson.isNull()) {
+                return true;
+            }
+            if (!pJson.isInt64()) {
+                err = "Type error in the " + fieldName + " field";
+                return false;
+            }
+            break;
+        case 21:
+            if (pJson.isNull()) {
+                err = "The " + fieldName + " column cannot be null";
+                return false;
+            }
+            if (!pJson.isBool()) {
+                err = "Type error in the " + fieldName + " field";
+                return false;
+            }
+            break;
+        case 22:
             if (pJson.isNull()) {
                 return true;
             }
