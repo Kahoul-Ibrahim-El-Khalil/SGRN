@@ -4,12 +4,14 @@
 #include <sgrn/datastore/init/init.hpp>
 #include <sgrn/utils/app.hpp>
 #include <cstdlib>
+#include <sys/stat.h>
 
 using sgrn::Result;
 using sgrn::datastore::config::configDrogonApp;
 using sgrn::datastore::init::runServer;
 
 int main(int t_argc, char** tp_argv) {
+    ::umask(0077);
     // Dispatch subcommands (--init, --backup-*, --rotate, --help, …).
     // Returns the process exit code when a subcommand ran; nullopt → server mode.
     if (const std::optional<int> rc = sgrn::datastore::bootstrap::cli::dispatch(t_argc, tp_argv)) {

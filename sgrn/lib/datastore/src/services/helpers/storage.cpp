@@ -273,6 +273,15 @@ Task<BackendResult<int64_t>> insertFile(drogon::orm::DbClientPtr tsp_db_client, 
     std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_extension,
     std::optional<int64_t> t_directory_id, std::string t_domain, std::optional<std::string> t_key_id, bool t_is_encrypted) {
     try {
+        // A domain file belongs to the domain namespace, never to the
+        // uploader's personal/service namespace.  Keeping the actor id here
+        // makes the same row eligible for personal-owner queries and is the
+        // source of the cross-scope appearance bug.
+        const bool domain_scoped = !t_domain.empty();
+        if (domain_scoped) {
+            t_user_id.reset();
+            t_automated_service_id.reset();
+        }
         // The formats registry decides what counts as a format: store the
         // canonical (lowercased) extension only when storage.formats has a row
         // for the suffix, otherwise NULL — the suffix then simply remains part
@@ -403,19 +412,26 @@ Task<std::optional<UserFileRecord>> getFile(drogon::orm::DbClientPtr tsp_db_clie
 Task<std::optional<UserFileRecord>> findFileByPath(drogon::orm::DbClientPtr tsp_db_client, const ScopeContext& t_ctx) {
     try {
         const std::string query =
-            t_ctx.is_automated_service
+            !t_ctx.domain.empty()
+                ? "SELECT f.id, f.name, f.full_path, fo.object_id, f.user_id, f.automated_service_id, f.session_id, "
+                  "f.extension, f.directory_id, f.created_at, f.key_id, f.is_encrypted, so.is_compressed, so.compression_algorithm, "
+                  "so.compression_level FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
+                  "JOIN storage.objects so ON fo.object_id = so.id WHERE f.domain = $1 AND f.full_path = $2"
+                : t_ctx.is_automated_service
                 ? "SELECT f.id, f.name, f.full_path, fo.object_id, f.user_id, f.automated_service_id, f.session_id, "
                   "f.extension, f.directory_id, f.created_at, f.key_id, f.is_encrypted, so.is_compressed, so.compression_algorithm, "
                   "so.compression_level FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
                   "JOIN storage.objects so ON fo.object_id = so.id "
-                  "WHERE f.automated_service_id = $1 AND f.full_path = $2"
+                  "WHERE f.automated_service_id = $1 AND f.domain IS NULL AND f.full_path = $2"
                 : "SELECT f.id, f.name, f.full_path, fo.object_id, f.user_id, f.automated_service_id, f.session_id, "
                   "f.extension, f.directory_id, f.created_at, f.key_id, f.is_encrypted, so.is_compressed, so.compression_algorithm, "
                   "so.compression_level FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
                   "JOIN storage.objects so ON fo.object_id = so.id "
-                  "WHERE f.user_id = $1 AND f.full_path = $2";
+                  "WHERE f.user_id = $1 AND f.domain IS NULL AND f.full_path = $2";
 
-        drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro(query, t_ctx.owner_id, t_ctx.actual_path);
+        drogon::orm::Result tp_res = !t_ctx.domain.empty()
+            ? co_await tsp_db_client->execSqlCoro(query, t_ctx.domain, t_ctx.actual_path)
+            : co_await tsp_db_client->execSqlCoro(query, t_ctx.owner_id, t_ctx.actual_path);
         if (tp_res.empty())
             co_return std::nullopt;
         const drogon::orm::Row& row = tp_res[0];
@@ -614,6 +630,19 @@ Task<BackendResult<ScopeContext>> resolveScopeSession(
 
         std::string actor_domain = t_session["user"].isMember("domain") ? t_session["user"]["domain"].asString() : "";
         std::string actor_role = t_session["user"]["role"]["name"].asString();
+        const std::string session_org = t_session["user"].isMember("organisation")
+            ? t_session["user"]["organisation"].asString() : "";
+
+        // A bare domain name is only meaningful inside the caller's
+        // organisation.  Never let an admin's role turn a name shared by two
+        // tenants into an arbitrary cross-tenant selector.
+        auto domain_rows = co_await tsp_db_client->execSqlCoro(
+            "SELECT organisation FROM core.domains WHERE name = $1 AND organisation = $2",
+            target_domain, session_org);
+        if (domain_rows.empty()) {
+            co_return BackendResult<ScopeContext>::Error(
+                BackendError(BackendErrorKind::Auth, "Access Denied: domain is outside the caller organisation."));
+        }
 
         // Zero-Trust verification: enforce operational boundaries
         if (actor_role != "global_admin" && actor_role != "admin") {
@@ -635,9 +664,10 @@ Task<BackendResult<ScopeContext>> resolveScopeSession(
 
         // Fetch Domain-specific capabilities for non-administrators
         if (actor_role != "global_admin" && actor_role != "admin") {
-            auto perm_res = co_await tsp_db_client->execSqlCoro("SELECT allowed_subpath, can_read, can_write, can_delete "
-                                                                "FROM core.user_domain_permissions WHERE user_id = $1 AND domain = $2",
-                t_ctx.user_id.value(), target_domain);
+            auto perm_res = co_await tsp_db_client->execSqlCoro(
+                "SELECT allowed_subpath, can_read, can_write, can_delete FROM core.user_domain_permissions "
+                "WHERE user_id = $1 AND organisation = $2 AND domain = $3",
+                t_ctx.user_id.value(), session_org, target_domain);
             if (perm_res.empty()) {
                 // Zero-Trust Default: access denied if no capability is registered
                 co_return BackendResult<ScopeContext>::Error(
@@ -652,13 +682,15 @@ Task<BackendResult<ScopeContext>> resolveScopeSession(
             // Sandbox boundary check: ensure traverse is constrained inside the allowed subpath
             if (t_ctx.allowed_subpath != "/") {
                 std::string check_path = t_ctx.actual_path;
-                if (check_path.front() != '/')
+                if (check_path.empty() || check_path.front() != '/')
                     check_path = "/" + check_path;
                 std::string rule_path = t_ctx.allowed_subpath;
-                if (rule_path.front() != '/')
+                if (rule_path.empty() || rule_path.front() != '/')
                     rule_path = "/" + rule_path;
 
-                if (check_path.rfind(rule_path, 0) != 0) {
+                const bool exact = check_path == rule_path;
+                const bool descendant = check_path.size() > rule_path.size() && check_path.rfind(rule_path + "/", 0) == 0;
+                if (!exact && !descendant) {
                     co_return BackendResult<ScopeContext>::Error(BackendError(
                         BackendErrorKind::Auth, "Access Denied: Path is outside your operational sandbox boundary (" + rule_path + ")."));
                 }

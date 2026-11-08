@@ -6,6 +6,7 @@ create table if not exists storage.upload_sessions (
     user_id int references core.users(id) on delete cascade,
     automated_service_id int references core.automated_services(id) on delete cascade,
     domain text,
+    domain_id int references core.domains(id) on delete restrict,
     target_path text not null,
     filename text not null,
     mime_type text not null default 'application/octet-stream',
@@ -28,23 +29,14 @@ create table if not exists storage.upload_sessions (
     owner_user_id int,
     owner_service_id int,
     owner_session_id bigint,
+    is_encrypted boolean not null default false,
+    pending_key_id text default null,
     constraint chk_upload_owner check (
         (user_id is not null and automated_service_id is null) or
         (user_id is null and automated_service_id is not null) or
         (domain is not null)
     )
 );
-
--- Idempotent column additions for existing databases
-alter table storage.upload_sessions add column if not exists file_hash text default null;
-alter table storage.upload_sessions add column if not exists compressed_size bigint default null;
-alter table storage.upload_sessions add column if not exists is_encrypted boolean not null default false;
-alter table storage.upload_sessions add column if not exists pending_key_id text default null;
-alter table storage.upload_sessions add column if not exists scope text not null default 'personal'
-    check (scope in ('personal', 'domain', 'users', 'automated_services'));
-alter table storage.upload_sessions add column if not exists owner_user_id int;
-alter table storage.upload_sessions add column if not exists owner_service_id int;
-alter table storage.upload_sessions add column if not exists owner_session_id bigint;
 
 create table if not exists storage.upload_chunks (
     id bigserial primary key,

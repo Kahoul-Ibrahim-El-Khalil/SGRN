@@ -29,6 +29,7 @@ import type { IdNamePair } from "@/types/IdNamePair";
 import { AdminBackendApiEndpoints } from "@/backend/endpoints";
 import { useEvent } from "@/contexts/EventContext";
 import { authenticatedFetch } from "@/backend/api/fetcher";
+import { useAuth } from "@/contexts/AuthContext";
 
 // Utility hook for fetching dependencies
 function useOrgDependencies(t_selected_org: string | null) {
@@ -68,19 +69,9 @@ interface AutomatedServiceListEntry {
 
 export default function AdminTab() {
     const { showEvent } = useEvent();
+    const { user } = useAuth();
     const [mode, setMode] = useState<RegistrationMode>("user");
-    const [isPlatformAdmin] = useState<boolean>(() => {
-        try {
-            const raw = sessionStorage.getItem("user_info") || localStorage.getItem("user_info");
-            if (raw) {
-                const u = JSON.parse(raw);
-                return u.is_platform_admin === true || u.admin_level === 3;
-            }
-        } catch {
-            // fallback
-        }
-        return false;
-    });
+    const isPlatformAdmin = user?.is_platform_admin === true || user?.admin_level === 3;
     // Bumped after a registration so the UserConfigPanel remounts and refetches.
     const [userRefreshKey, setUserRefreshKey] = useState(0);
 

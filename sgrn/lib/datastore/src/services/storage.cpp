@@ -375,6 +375,23 @@ Task<HttpResponsePtr> StorageService::handleUploadFileRequest(
         co_return createJsonErrorResponse("Upload Denied: Write privileges missing for this scope space.", drogon::k403Forbidden);
     }
 
+    // The single-shot endpoint has no encryption pipeline. Never let it
+    // bypass a domain's required-encryption policy.
+    if (!scope_res->domain.empty()) {
+        const std::string organisation = t_session["user"].isMember("organisation")
+            ? t_session["user"]["organisation"].asString() : "";
+        auto db_res = getDbClient();
+        if (db_res.hasError()) co_return sgrn::createJsonResponse(db_res);
+        auto policy = co_await db_res.value()->execSqlCoro(
+            "SELECT encryption_policy FROM core.domains WHERE organisation = $1 AND name = $2",
+            organisation, scope_res->domain);
+        if (policy.empty()) co_return createJsonErrorResponse("Unknown domain", drogon::k404NotFound);
+        if (policy[0]["encryption_policy"].as<std::string>() == "required") {
+            co_return createJsonErrorResponse(
+                "This domain requires encryption: use the chunked upload endpoint.", drogon::k428PreconditionRequired);
+        }
+    }
+
     if (scope_res->t_session_id <= 0 || scope_res->owner_id <= 0) {
         co_return createJsonErrorResponse("Upload session is missing or invalid", drogon::k401Unauthorized);
     }

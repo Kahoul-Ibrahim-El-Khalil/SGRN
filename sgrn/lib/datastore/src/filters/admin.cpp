@@ -63,19 +63,14 @@ drogon::Task<AdminLevel> AdminLevelCache::resolveAdminLevel(
         SGRN_WARN_LOG("AdminLevelCache: core.admin_level() failed: {}", e.what());
     }
 
-    // 3. Fallback check for bootstrap/offline platform admin email list
-    if (!db_queried && !t_email.empty()) {
-        try {
-            // Check system admin emails list directly if DB is offline
-            std::string admin_env = "";
-            if (const char* p_env = ::getenv("SGRN_SYSTEM_ADMIN_EMAILS"); p_env && *p_env) {
-                admin_env = p_env;
-            }
-            if (!admin_env.empty() && admin_env.find(t_email) != std::string::npos) {
-                resolved_level = AdminLevel::PLATFORM;
-            }
-        } catch (...) {
-        }
+    // Bootstrap admins are exact, case-insensitive matches. A DB failure is
+    // deliberately not cached, so a transient outage cannot lock admins out.
+    if (!db_queried) {
+        if (sgrn::datastore::auth::emailIsConfiguredPlatformAdmin(t_email)) resolved_level = AdminLevel::PLATFORM;
+        co_return resolved_level;
+    }
+    if (resolved_level != AdminLevel::PLATFORM && sgrn::datastore::auth::emailIsConfiguredPlatformAdmin(t_email)) {
+        resolved_level = AdminLevel::PLATFORM;
     }
 
     // 4. Update cache
@@ -164,7 +159,9 @@ void ScopeFilter::doFilter(const drogon::HttpRequestPtr& tsp_req, drogon::Filter
     const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
 
     // 2. Check if platform admin via configuration/email
-    const bool is_platform_caller = sgrn::datastore::isPlatformAdmin(tsp_req);
+    // The request attribute is populated by this filter, so before the async
+    // DB lookup only the bootstrap list can be known locally.
+    const bool is_platform_caller = sgrn::datastore::auth::emailIsConfiguredPlatformAdmin(caller_email);
 
     // 3. Resolve target resource
     TargetResource target_res;
@@ -219,13 +216,7 @@ void ScopeFilter::doFilter(const drogon::HttpRequestPtr& tsp_req, drogon::Filter
         return;
     }
 
-    // If route requires PLATFORM and caller is not a platform admin -> immediate 403
-    if (m_required_level == AdminLevel::PLATFORM) {
-        respondWithError("Forbidden: Platform Administrator Privileges Required", drogon::k403Forbidden, std::move(tsp_filter_callback));
-        return;
-    }
-
-    // 5. Asynchronously query AdminLevelCache / core.admin_level()
+    // Resolve DB-backed platform/org/domain assignments asynchronously.
     drogon::async_run(
         [tsp_req, tsp_filter_callback = std::move(tsp_filter_callback), t_filter_chain_callback = std::move(t_filter_chain_callback),
             caller_user_id, caller_email, target_res, req_level = m_required_level]() mutable -> drogon::Task<void> {

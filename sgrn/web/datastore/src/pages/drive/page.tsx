@@ -247,7 +247,7 @@ function useDriveUpload(
 
             setUploadItems((prev) => [newItem, ...prev]);
 
-            if (file.size >= 5 * 1024 * 1024 || encryptUploads) {
+            if (file.size >= 5 * 1024 * 1024 || encryptUploads || currentScope === "domains") {
                 showEvent("info", `Initiating ${encryptUploads ? "encrypted " : ""}chunked upload for ${file.name}...`);
                 const result = await uploadResumableDriveFile(
                     currentPath,

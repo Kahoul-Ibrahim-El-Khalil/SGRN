@@ -149,6 +149,8 @@ create table if not exists storage.directories (
   parent_id bigint default null references storage.directories (id) on delete cascade,
   name text not null,
   path text not null,
+  domain text default null,
+  domain_id int references core.domains (id) on delete restrict,
   count_sub_directories int not null default 0,
   count_sub_files int not null default 0,
   virtual_size bigint not null default 0,
@@ -169,6 +171,11 @@ create table if not exists storage.directories (
     or (
       user_id is null
       and automated_service_id is not null
+    )
+    or (
+      domain is not null
+      and user_id is null
+      and automated_service_id is null
     )
   )
 );
@@ -205,6 +212,8 @@ create table if not exists storage.files (
   user_id int references core.users (id) on delete cascade,
   automated_service_id int references core.automated_services (id) on delete cascade,
   session_id bigint not null references core.sessions (id) on delete cascade,
+  domain text default null,
+  domain_id int references core.domains (id) on delete restrict,
   directory_id bigint default null references storage.directories (id) on delete cascade,
   check (
     (
@@ -214,6 +223,11 @@ create table if not exists storage.files (
     or (
       user_id is null
       and automated_service_id is not null
+    )
+    or (
+      domain is not null
+      and user_id is null
+      and automated_service_id is null
     )
   ),
   -- Legacy 1:1 FK — kept nullable for zero-downtime migration.
@@ -226,6 +240,7 @@ create table if not exists storage.files (
   -- No key material is stored here; key bytes live in $SGRN_DATA_DIR/keys/keys.db.
   key_id text default null,
   is_encrypted boolean not null default false,
+  content_sha256 text default null,
   constraint chk_files_encryption_consistency check (
     (is_encrypted = false and key_id is null)
     or (is_encrypted = true and key_id is not null)
@@ -365,32 +380,32 @@ set not null;
 create unique index if not exists uq_files_root on storage.files (user_id, name)
 where
   directory_id is null
-  and user_id is not null;
+  and user_id is not null
+  and domain is null;
 
 create unique index if not exists uq_files_root_service on storage.files (automated_service_id, name)
 where
   directory_id is null
-  and automated_service_id is not null;
+  and automated_service_id is not null
+  and domain is null;
 
 create unique index if not exists uq_files_directory on storage.files (user_id, directory_id, name)
 where
   directory_id is not null
-  and user_id is not null;
+  and user_id is not null
+  and domain is null;
 
 create unique index if not exists uq_files_directory_service on storage.files (automated_service_id, directory_id, name)
 where
   directory_id is not null
-  and automated_service_id is not null;
+  and automated_service_id is not null
+  and domain is null;
 
 -- Legacy object-scoped unique indexes removed (replaced by file_objects).
 drop index if exists uq_files_object_root;
 drop index if exists uq_files_object_directory;
 drop index if exists uq_files_object_root_service;
 drop index if exists uq_files_object_directory_service;
-
--- Encryption metadata columns (idempotent for existing databases)
-alter table if exists storage.files add column if not exists key_id text default null;
-alter table if exists storage.files add column if not exists is_encrypted boolean not null default false;
 
 -- Partial unique index: each non-null key_id must map to exactly one file
 create unique index if not exists uq_files_key_id
@@ -1276,11 +1291,6 @@ execute function storage.update_owner_directory_count ();
 -- ===========================================================================
 -- MIGRATION: Domain Scoping and Domain Permission Systems
 -- ===========================================================================
-
--- 1. Extend storage.directories and storage.files to record domain context
-alter table storage.directories add column if not exists domain text default null;
-alter table storage.files add column if not exists domain text default null;
-
 
 -- 3. Unique indices for domain-scoped directories and files
 create unique index if not exists uq_directories_root_domain on storage.directories (domain, path) where domain is not null;

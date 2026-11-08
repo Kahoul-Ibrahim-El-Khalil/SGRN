@@ -30,7 +30,13 @@ export class ResumableUploader {
     private encrypt: boolean = false;
     private serverEncrypted: boolean | null = null;
 
-    constructor(file: File, targetPath: string = "/", scope: string = "personal", chunkSize: number = 5 * 1024 * 1024, encrypt: boolean = false) {
+    constructor(
+        file: File,
+        targetPath: string = "/",
+        scope: string = "personal",
+        chunkSize: number = 5 * 1024 * 1024,
+        encrypt: boolean = false,
+    ) {
         this.file = file;
         this.targetPath = targetPath;
         this.scope = scope;

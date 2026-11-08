@@ -853,7 +853,7 @@ DatastoreClient::DownloadResult DatastoreClient::doDownloadDriveZip(const std::s
     const auto actual_scope = (t_scope == StorageScope::Auto)
                                   ? (config_.auth_mode_ == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
                                   : t_scope;
-    std::string endpoint = sgrn::datastore::client::detail::resolveDriveBase(config_) + "/zip?path=" + t_path +
+    std::string endpoint = sgrn::datastore::client::detail::resolveDriveBase(config_) + "/zip?path=" + urlEncodeQueryValue(t_path) +
                            "&scope=" + sgrn::datastore::client::detail::storageScopeToString(actual_scope);
 
     httplib::Headers headers;

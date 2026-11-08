@@ -864,7 +864,8 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
                 // A file whose key never activates is undecryptable: do not leave it behind.
                 SGRN_ERROR("StorageUpload", "Key activation failed for key {}: {}", final_key_id, act_res.error());
                 co_await rollbackEncryptedUpload(s3, db, bucket, final_obj_key, final_key_id, final_segments[0].second, file_id);
-                co_return createJsonErrorResponse("Failed to activate encryption key", k500InternalServerError);
+                co_return createJsonErrorResponse(
+                    fmt::format("Failed to activate encryption key: {}", act_res.error()), k500InternalServerError);
             }
         }
 

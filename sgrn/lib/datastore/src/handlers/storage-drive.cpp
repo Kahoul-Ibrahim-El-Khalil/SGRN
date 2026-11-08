@@ -1361,7 +1361,7 @@ Task<HttpResponsePtr> StorageApiHandler::handlePresignedUrl(HttpRequestPtr tsp_r
 
         // Parse query parameters
         std::string file_id_str = tsp_req->getParameter("file_id");
-        std::string action = tsp_req->getParameter("action");     // "get" | "put" | "delete"
+        std::string action = tsp_req->getParameter("action");     // GET only: objects are content-addressed
         std::string expiry_str = tsp_req->getParameter("expiry"); // seconds, default 3600
 
         if (file_id_str.empty() || action.empty()) {
@@ -1375,8 +1375,8 @@ Task<HttpResponsePtr> StorageApiHandler::handlePresignedUrl(HttpRequestPtr tsp_r
             co_return createJsonErrorResponse("Invalid file_id", k400BadRequest);
         }
 
-        if (action != "get" && action != "put" && action != "delete") {
-            co_return createJsonErrorResponse("action must be 'get', 'put', or 'delete'", k400BadRequest);
+        if (action != "get") {
+            co_return createJsonErrorResponse("Only presigned GET is supported for content-addressed objects", k403Forbidden);
         }
 
         uint32_t expiry = 3600;

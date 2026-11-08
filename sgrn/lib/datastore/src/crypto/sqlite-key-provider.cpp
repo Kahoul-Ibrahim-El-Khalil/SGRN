@@ -11,6 +11,7 @@
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/crypto/dek.hpp>
 #include <chrono>
+#include <charconv>
 #include <cstring>
 #include <filesystem>
 #include <iomanip>
@@ -42,6 +43,11 @@ struct StmtGuard {
         }
     }
 };
+
+std::string sqliteDiag(sqlite3* t_db, const char* t_what) {
+    const int ext = sqlite3_extended_errcode(t_db);
+    return fmt::format("{}: sqlite rc={} ({}): {}", t_what, ext, sqlite3_errstr(ext), sqlite3_errmsg(t_db));
+}
 
 static std::string generateUuidV4() {
     uint8_t b[16];
@@ -89,6 +95,17 @@ static std::string generateUuidV4() {
     if (::stat(dir.c_str(), &dst) == 0) {
         const int dir_perm = dst.st_mode & 0777;
         SGRN_RETURN_ERROR_IF(dir_perm != 0700, "Key store directory permissions are too loose (must be 0700). Refusing to start.");
+    }
+
+    for (const char* suffix : {"-wal", "-shm"}) {
+        struct stat sidecar{};
+        const std::string sidecar_path = t_db_path + suffix;
+        if (::stat(sidecar_path.c_str(), &sidecar) == 0) {
+            SGRN_RETURN_ERROR_IF((sidecar.st_mode & 0777) != 0600,
+                fmt::format("Key store sidecar {} permissions are too loose (must be 0600). Refusing to start.", sidecar_path));
+            SGRN_RETURN_ERROR_IF(sidecar.st_uid != ::geteuid(),
+                fmt::format("Key store sidecar {} is not owned by the service user. Refusing to start.", sidecar_path));
+        }
     }
 
     return {};
@@ -197,7 +214,7 @@ SqliteKeyProvider::~SqliteKeyProvider() {
 
     // Open database
     sqlite3* raw_db = nullptr;
-    const int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX;
+    const int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX;
     if (sqlite3_open_v2(t_db_path.c_str(), &raw_db, flags, nullptr) != SQLITE_OK) {
         const std::string msg = raw_db ? sqlite3_errmsg(raw_db) : "sqlite3_open failed";
         if (raw_db) {
@@ -210,6 +227,9 @@ SqliteKeyProvider::~SqliteKeyProvider() {
     if (::chmod(t_db_path.c_str(), 0600) != 0) {
         SGRN_WARN("SqliteKeyProvider", "Could not set key store file mode to 0600");
     }
+    // SQLite creates WAL/SHM lazily.  Keep the process umask restrictive so
+    // those files cannot inherit world-readable permissions.
+    ::umask(0077);
 
     auto provider = std::unique_ptr<SqliteKeyProvider>(new SqliteKeyProvider(raw_db, t_chunk_size_bytes));
 
@@ -238,24 +258,20 @@ SqliteKeyProvider::~SqliteKeyProvider() {
     std::string key_id = generateUuidV4();
     SGRN_RETURN_ERROR_IF(key_id.empty(), "Failed to generate UUID for key_id");
 
-    // Insert pending row — commit + fsync BEFORE any ciphertext is uploaded.
-    StmtGuard sg;
-    const char* sql = "INSERT INTO file_keys "
-                      "(key_id, object_key, dek, wrap_scheme, algorithm, chunk_size, state) "
-                      "VALUES (?, ?, ?, ?, 'AES-256-GCM', ?, 'pending')";
-    SGRN_RETURN_ERROR_IF(sqlite3_prepare_v2(m_db, sql, -1, &sg.stmt, nullptr) != SQLITE_OK, "Key store insert prepare failed");
-
-    sqlite3_bind_text(sg.stmt, 1, key_id.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(sg.stmt, 2, t_object_key.c_str(), -1, SQLITE_STATIC);
-    // Bind raw DEK bytes — NEVER log these
-    sqlite3_bind_blob(sg.stmt, 3, dek_res.value().data(), static_cast<int>(dek_res.value().size()), SQLITE_STATIC);
-    sqlite3_bind_text(sg.stmt, 4, scheme.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_int(sg.stmt, 5, static_cast<int>(m_default_chunk_size));
-
-    SGRN_RETURN_ERROR_IF(sqlite3_step(sg.stmt) != SQLITE_DONE, "Key store insert failed");
-
-    // fsync the WAL so the row survives a crash before ciphertext upload.
-    sqlite3_exec(m_db, "PRAGMA wal_checkpoint(FULL);", nullptr, nullptr, nullptr);
+    {
+        std::lock_guard lock(m_mutex);
+        StmtGuard sg;
+        const char* sql = "INSERT INTO file_keys (key_id, object_key, dek, wrap_scheme, algorithm, chunk_size, state) "
+                          "VALUES (?, ?, ?, ?, 'AES-256-GCM', ?, 'pending')";
+        SGRN_RETURN_ERROR_IF(sqlite3_prepare_v2(m_db, sql, -1, &sg.stmt, nullptr) != SQLITE_OK,
+            sqliteDiag(m_db, "Key store insert prepare"));
+        sqlite3_bind_text(sg.stmt, 1, key_id.c_str(), -1, SQLITE_STATIC);
+        sqlite3_bind_text(sg.stmt, 2, t_object_key.c_str(), -1, SQLITE_STATIC);
+        sqlite3_bind_blob(sg.stmt, 3, dek_res.value().data(), static_cast<int>(dek_res.value().size()), SQLITE_STATIC);
+        sqlite3_bind_text(sg.stmt, 4, scheme.c_str(), -1, SQLITE_STATIC);
+        sqlite3_bind_int(sg.stmt, 5, static_cast<int>(m_default_chunk_size));
+        SGRN_RETURN_ERROR_IF(sqlite3_step(sg.stmt) != SQLITE_DONE, sqliteDiag(m_db, "Key store insert"));
+    }
 
     KeyRecord record;
     record.key_id = key_id;
@@ -276,21 +292,35 @@ SqliteKeyProvider::~SqliteKeyProvider() {
     SGRN_RETURN_ERROR_IF(t_key_id.empty() || t_file_id.empty(), "key_id and file_id are required for activation");
 
     int64_t file_id_int = 0;
-    try {
-        file_id_int = std::stoll(t_file_id);
-    } catch (...) {
-        return ::sgrn::Error("Invalid file_id for key activation");
-    }
+    const char* first = t_file_id.data();
+    const char* last = first + t_file_id.size();
+    auto [ptr, ec] = std::from_chars(first, last, file_id_int);
+    SGRN_RETURN_ERROR_IF(ec != std::errc{} || ptr != last, "Invalid file_id for key activation");
 
+    std::lock_guard lock(m_mutex);
     StmtGuard sg;
+    StmtGuard check;
+    const char* lookup = "SELECT state, file_id FROM file_keys WHERE key_id=?";
+    SGRN_RETURN_ERROR_IF(sqlite3_prepare_v2(m_db, lookup, -1, &check.stmt, nullptr) != SQLITE_OK,
+        sqliteDiag(m_db, "Key store activate lookup"));
+    sqlite3_bind_text(check.stmt, 1, t_key_id.c_str(), -1, SQLITE_STATIC);
+    const int lookup_rc = sqlite3_step(check.stmt);
+    SGRN_RETURN_ERROR_IF(lookup_rc == SQLITE_DONE, "Key not found");
+    SGRN_RETURN_ERROR_IF(lookup_rc != SQLITE_ROW, sqliteDiag(m_db, "Key store activate lookup step"));
+    const std::string state = reinterpret_cast<const char*>(sqlite3_column_text(check.stmt, 0));
+    if (state == "active" && sqlite3_column_type(check.stmt, 1) != SQLITE_NULL && sqlite3_column_int64(check.stmt, 1) == file_id_int) return {};
+    SGRN_RETURN_ERROR_IF(state != "pending", fmt::format("Key is '{}', only a pending key can be activated", state));
+
     const char* sql = "UPDATE file_keys SET state='active', file_id=? "
                       "WHERE key_id=? AND state='pending'";
-    SGRN_RETURN_ERROR_IF(sqlite3_prepare_v2(m_db, sql, -1, &sg.stmt, nullptr) != SQLITE_OK, "Key store activate prepare failed");
+    SGRN_RETURN_ERROR_IF(sqlite3_prepare_v2(m_db, sql, -1, &sg.stmt, nullptr) != SQLITE_OK,
+        sqliteDiag(m_db, "Key store activate prepare"));
 
     sqlite3_bind_int64(sg.stmt, 1, file_id_int);
     sqlite3_bind_text(sg.stmt, 2, t_key_id.c_str(), -1, SQLITE_STATIC);
 
-    SGRN_RETURN_ERROR_IF(sqlite3_step(sg.stmt) != SQLITE_DONE, "Key store activate failed");
+    const int rc = sqlite3_step(sg.stmt);
+    SGRN_RETURN_ERROR_IF(rc != SQLITE_DONE, sqliteDiag(m_db, "Key store activate step"));
     SGRN_RETURN_ERROR_IF(sqlite3_changes(m_db) == 0, "Key not found or already activated/shredded");
 
     return {};
@@ -300,6 +330,7 @@ SqliteKeyProvider::~SqliteKeyProvider() {
 
 ::sgrn::Result<KeyRecord> SqliteKeyProvider::get(const std::string& t_key_id) {
     SGRN_RETURN_ERROR_IF(t_key_id.empty(), "key_id is required");
+    std::lock_guard lock(m_mutex);
 
     StmtGuard sg;
     const char* sql = "SELECT dek, wrap_scheme, algorithm, chunk_size, state, file_id, object_key, created_at "
@@ -352,6 +383,7 @@ SqliteKeyProvider::~SqliteKeyProvider() {
 
 ::sgrn::Result<void> SqliteKeyProvider::shred(const std::string& t_key_id) {
     SGRN_RETURN_ERROR_IF(t_key_id.empty(), "key_id is required for shredding");
+    std::lock_guard lock(m_mutex);
 
     // Zeroise the dek column in-place, then mark shredded.
     // secure_delete=ON means SQLite will overwrite freed pages.
@@ -365,7 +397,7 @@ SqliteKeyProvider::~SqliteKeyProvider() {
     sqlite3_bind_blob(sg.stmt, 1, zeros.data(), static_cast<int>(zeros.size()), SQLITE_STATIC);
     sqlite3_bind_text(sg.stmt, 2, t_key_id.c_str(), -1, SQLITE_STATIC);
 
-    SGRN_RETURN_ERROR_IF(sqlite3_step(sg.stmt) != SQLITE_DONE, "Key store shred update failed");
+    SGRN_RETURN_ERROR_IF(sqlite3_step(sg.stmt) != SQLITE_DONE, sqliteDiag(m_db, "Key store shred update"));
 
     // Checkpoint to ensure the zeroed bytes are flushed to disk.
     sqlite3_exec(m_db, "PRAGMA wal_checkpoint(FULL);", nullptr, nullptr, nullptr);
@@ -376,6 +408,7 @@ SqliteKeyProvider::~SqliteKeyProvider() {
 // ── listForReconcile ─────────────────────────────────────────────────────────
 
 ::sgrn::Result<std::vector<KeyRecord>> SqliteKeyProvider::listForReconcile() {
+    std::lock_guard lock(m_mutex);
     StmtGuard sg;
     const char* sql = "SELECT key_id, file_id, object_key, wrap_scheme, algorithm, chunk_size, state, created_at "
                       "FROM file_keys ORDER BY created_at ASC";
@@ -414,6 +447,7 @@ SqliteKeyProvider::~SqliteKeyProvider() {
 // ── getChunkSize ─────────────────────────────────────────────────────────────
 
 ::sgrn::Result<uint32_t> SqliteKeyProvider::getChunkSize(const std::string& t_key_id) {
+    std::lock_guard lock(m_mutex);
     StmtGuard sg;
     const char* sql = "SELECT chunk_size FROM file_keys WHERE key_id=?";
     SGRN_RETURN_ERROR_IF(sqlite3_prepare_v2(m_db, sql, -1, &sg.stmt, nullptr) != SQLITE_OK, "Key store chunk_size query failed");

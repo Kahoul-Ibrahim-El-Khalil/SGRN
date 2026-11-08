@@ -49,13 +49,15 @@ public:
         static const std::string _user_id;
         static const std::string _automated_service_id;
         static const std::string _session_id;
+        static const std::string _domain;
+        static const std::string _domain_id;
         static const std::string _directory_id;
         static const std::string _extension;
         static const std::string _full_path;
         static const std::string _key_id;
         static const std::string _is_encrypted;
+        static const std::string _content_sha256;
         static const std::string _created_at;
-        static const std::string _domain;
     };
 
     static const int primaryKeyNumber;
@@ -143,6 +145,25 @@ public:
     /// Set the value of the column session_id
     void setSessionId(const int64_t& pSessionId) noexcept;
 
+    /**  For column domain  */
+    /// Get the value of the column domain, returns the default value if the column is null
+    const std::string& getValueOfDomain() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<std::string>& getDomain() const noexcept;
+    /// Set the value of the column domain
+    void setDomain(const std::string& pDomain) noexcept;
+    void setDomain(std::string&& pDomain) noexcept;
+    void setDomainToNull() noexcept;
+
+    /**  For column domain_id  */
+    /// Get the value of the column domain_id, returns the default value if the column is null
+    const int32_t& getValueOfDomainId() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<int32_t>& getDomainId() const noexcept;
+    /// Set the value of the column domain_id
+    void setDomainId(const int32_t& pDomainId) noexcept;
+    void setDomainIdToNull() noexcept;
+
     /**  For column directory_id  */
     /// Get the value of the column directory_id, returns the default value if the column is null
     const int64_t& getValueOfDirectoryId() const noexcept;
@@ -189,6 +210,16 @@ public:
     /// Set the value of the column is_encrypted
     void setIsEncrypted(const bool& pIsEncrypted) noexcept;
 
+    /**  For column content_sha256  */
+    /// Get the value of the column content_sha256, returns the default value if the column is null
+    const std::string& getValueOfContentSha256() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<std::string>& getContentSha256() const noexcept;
+    /// Set the value of the column content_sha256
+    void setContentSha256(const std::string& pContentSha256) noexcept;
+    void setContentSha256(std::string&& pContentSha256) noexcept;
+    void setContentSha256ToNull() noexcept;
+
     /**  For column created_at  */
     /// Get the value of the column created_at, returns the default value if the column is null
     const ::trantor::Date& getValueOfCreatedAt() const noexcept;
@@ -197,18 +228,8 @@ public:
     /// Set the value of the column created_at
     void setCreatedAt(const ::trantor::Date& pCreatedAt) noexcept;
 
-    /**  For column domain  */
-    /// Get the value of the column domain, returns the default value if the column is null
-    const std::string& getValueOfDomain() const noexcept;
-    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
-    const std::shared_ptr<std::string>& getDomain() const noexcept;
-    /// Set the value of the column domain
-    void setDomain(const std::string& pDomain) noexcept;
-    void setDomain(std::string&& pDomain) noexcept;
-    void setDomainToNull() noexcept;
-
     static size_t getColumnNumber() noexcept {
-        return 12;
+        return 14;
     }
     static const std::string& getColumnName(size_t index) noexcept(false);
 
@@ -236,13 +257,15 @@ private:
     std::shared_ptr<int32_t> userId_;
     std::shared_ptr<int32_t> automatedServiceId_;
     std::shared_ptr<int64_t> sessionId_;
+    std::shared_ptr<std::string> domain_;
+    std::shared_ptr<int32_t> domainId_;
     std::shared_ptr<int64_t> directoryId_;
     std::shared_ptr<std::string> extension_;
     std::shared_ptr<std::string> fullPath_;
     std::shared_ptr<std::string> keyId_;
     std::shared_ptr<bool> isEncrypted_;
+    std::shared_ptr<std::string> contentSha256_;
     std::shared_ptr<::trantor::Date> createdAt_;
-    std::shared_ptr<std::string> domain_;
     struct MetaData {
         const std::string colName_;
         const std::string colType_;
@@ -253,7 +276,7 @@ private:
         const bool notNull_;
     };
     static const std::vector<MetaData> metaData_;
-    bool dirtyFlag_[12] = {false};
+    bool dirtyFlag_[14] = {false};
 
 public:
     static const std::string& sqlForFindingByPrimaryKey() {
@@ -288,34 +311,42 @@ public:
             ++parametersCount;
         }
         if (dirtyFlag_[5]) {
-            sql += "directory_id,";
+            sql += "domain,";
             ++parametersCount;
         }
         if (dirtyFlag_[6]) {
-            sql += "extension,";
+            sql += "domain_id,";
             ++parametersCount;
         }
         if (dirtyFlag_[7]) {
-            sql += "full_path,";
+            sql += "directory_id,";
             ++parametersCount;
         }
         if (dirtyFlag_[8]) {
+            sql += "extension,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[9]) {
+            sql += "full_path,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[10]) {
             sql += "key_id,";
             ++parametersCount;
         }
         sql += "is_encrypted,";
         ++parametersCount;
-        if (!dirtyFlag_[9]) {
+        if (!dirtyFlag_[11]) {
             needSelection = true;
+        }
+        if (dirtyFlag_[12]) {
+            sql += "content_sha256,";
+            ++parametersCount;
         }
         sql += "created_at,";
         ++parametersCount;
-        if (!dirtyFlag_[10]) {
+        if (!dirtyFlag_[13]) {
             needSelection = true;
-        }
-        if (dirtyFlag_[11]) {
-            sql += "domain,";
-            ++parametersCount;
         }
         needSelection = true;
         if (parametersCount > 0) {
@@ -363,18 +394,26 @@ public:
         if (dirtyFlag_[9]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-        } else {
-            sql += "default,";
         }
         if (dirtyFlag_[10]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-        } else {
-            sql += "default,";
         }
         if (dirtyFlag_[11]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
+        } else {
+            sql += "default,";
+        }
+        if (dirtyFlag_[12]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[13]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        } else {
+            sql += "default,";
         }
         if (parametersCount > 0) {
             sql.resize(sql.length() - 1);

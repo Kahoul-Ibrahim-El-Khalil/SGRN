@@ -18,7 +18,7 @@ $$ language plpgsql;
 -- These are kept in sync by core.sync_org_storage_totals() below.
 create table if not exists core.organisations (
   id int generated always as identity primary key,
-  name text unique not null,
+  name text unique not null check (name !~ '[.@/]'),
   description text,
   -- network / web domain for the organisation (free-form, not an FK to core.domains)
   domain text,
@@ -38,7 +38,7 @@ create table if not exists core.organisations (
 create table if not exists core.domains (
   id int generated always as identity primary key,
   organisation text not null references core.organisations (name) on delete cascade on update cascade,
-  name text not null,
+  name text not null check (name !~ '[.@/]'),
   parent_id int references core.domains (id) on delete restrict default null,
   path text not null default '',
   -- Encryption policy for files stored in this domain.
@@ -556,6 +556,12 @@ alter table core.automated_services add column if not exists rate_limit_upload_r
 -- Encryption policy on domains (idempotent for existing databases)
 alter table core.domains add column if not exists encryption_policy text not null default 'none'
     check (encryption_policy in ('none', 'optional', 'required'));
+
+create or replace function core.domain_canonical(p_domain_id int) returns text
+language sql stable as $$
+    select '@' || d.organisation || '.' || replace(ltrim(d.path, '/'), '/', '.')
+    from core.domains d where d.id = p_domain_id
+$$;
 
 -- secret hash is never exposed via CRUD: omitted from the field list entirely.
 

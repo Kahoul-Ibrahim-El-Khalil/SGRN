@@ -48,6 +48,7 @@ public:
         static const std::string _user_id;
         static const std::string _automated_service_id;
         static const std::string _domain;
+        static const std::string _domain_id;
         static const std::string _target_path;
         static const std::string _filename;
         static const std::string _mime_type;
@@ -147,6 +148,15 @@ public:
     void setDomain(const std::string& pDomain) noexcept;
     void setDomain(std::string&& pDomain) noexcept;
     void setDomainToNull() noexcept;
+
+    /**  For column domain_id  */
+    /// Get the value of the column domain_id, returns the default value if the column is null
+    const int32_t& getValueOfDomainId() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<int32_t>& getDomainId() const noexcept;
+    /// Set the value of the column domain_id
+    void setDomainId(const int32_t& pDomainId) noexcept;
+    void setDomainIdToNull() noexcept;
 
     /**  For column target_path  */
     /// Get the value of the column target_path, returns the default value if the column is null
@@ -314,7 +324,7 @@ public:
     void setPendingKeyIdToNull() noexcept;
 
     static size_t getColumnNumber() noexcept {
-        return 23;
+        return 24;
     }
     static const std::string& getColumnName(size_t index) noexcept(false);
 
@@ -341,6 +351,7 @@ private:
     std::shared_ptr<int32_t> userId_;
     std::shared_ptr<int32_t> automatedServiceId_;
     std::shared_ptr<std::string> domain_;
+    std::shared_ptr<int32_t> domainId_;
     std::shared_ptr<std::string> targetPath_;
     std::shared_ptr<std::string> filename_;
     std::shared_ptr<std::string> mimeType_;
@@ -370,7 +381,7 @@ private:
         const bool notNull_;
     };
     static const std::vector<MetaData> metaData_;
-    bool dirtyFlag_[23] = {false};
+    bool dirtyFlag_[24] = {false};
 
 public:
     static const std::string& sqlForFindingByPrimaryKey() {
@@ -403,86 +414,90 @@ public:
             ++parametersCount;
         }
         if (dirtyFlag_[4]) {
-            sql += "target_path,";
+            sql += "domain_id,";
             ++parametersCount;
         }
         if (dirtyFlag_[5]) {
+            sql += "target_path,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[6]) {
             sql += "filename,";
             ++parametersCount;
         }
         sql += "mime_type,";
         ++parametersCount;
-        if (!dirtyFlag_[6]) {
+        if (!dirtyFlag_[7]) {
             needSelection = true;
         }
-        if (dirtyFlag_[7]) {
+        if (dirtyFlag_[8]) {
             sql += "total_size,";
             ++parametersCount;
         }
-        if (dirtyFlag_[8]) {
+        if (dirtyFlag_[9]) {
             sql += "chunk_size,";
             ++parametersCount;
         }
-        if (dirtyFlag_[9]) {
+        if (dirtyFlag_[10]) {
             sql += "total_chunks,";
             ++parametersCount;
         }
         sql += "uploaded_chunks_count,";
         ++parametersCount;
-        if (!dirtyFlag_[10]) {
+        if (!dirtyFlag_[11]) {
             needSelection = true;
         }
         sql += "status,";
         ++parametersCount;
-        if (!dirtyFlag_[11]) {
+        if (!dirtyFlag_[12]) {
             needSelection = true;
         }
-        if (dirtyFlag_[12]) {
+        if (dirtyFlag_[13]) {
             sql += "file_hash,";
             ++parametersCount;
         }
-        if (dirtyFlag_[13]) {
+        if (dirtyFlag_[14]) {
             sql += "compressed_size,";
             ++parametersCount;
         }
         sql += "created_at,";
         ++parametersCount;
-        if (!dirtyFlag_[14]) {
+        if (!dirtyFlag_[15]) {
             needSelection = true;
         }
         sql += "updated_at,";
         ++parametersCount;
-        if (!dirtyFlag_[15]) {
+        if (!dirtyFlag_[16]) {
             needSelection = true;
         }
         sql += "expires_at,";
         ++parametersCount;
-        if (!dirtyFlag_[16]) {
+        if (!dirtyFlag_[17]) {
             needSelection = true;
         }
         sql += "scope,";
         ++parametersCount;
-        if (!dirtyFlag_[17]) {
+        if (!dirtyFlag_[18]) {
             needSelection = true;
         }
-        if (dirtyFlag_[18]) {
+        if (dirtyFlag_[19]) {
             sql += "owner_user_id,";
             ++parametersCount;
         }
-        if (dirtyFlag_[19]) {
+        if (dirtyFlag_[20]) {
             sql += "owner_service_id,";
             ++parametersCount;
         }
-        if (dirtyFlag_[20]) {
+        if (dirtyFlag_[21]) {
             sql += "owner_session_id,";
             ++parametersCount;
         }
         sql += "is_encrypted,";
         ++parametersCount;
-        if (!dirtyFlag_[21]) {
+        if (!dirtyFlag_[22]) {
             needSelection = true;
         }
-        if (dirtyFlag_[22]) {
+        if (dirtyFlag_[23]) {
             sql += "pending_key_id,";
             ++parametersCount;
         }
@@ -522,12 +537,12 @@ public:
         if (dirtyFlag_[6]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-        } else {
-            sql += "default,";
         }
         if (dirtyFlag_[7]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
+        } else {
+            sql += "default,";
         }
         if (dirtyFlag_[8]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
@@ -540,8 +555,6 @@ public:
         if (dirtyFlag_[10]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-        } else {
-            sql += "default,";
         }
         if (dirtyFlag_[11]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
@@ -552,6 +565,8 @@ public:
         if (dirtyFlag_[12]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
+        } else {
+            sql += "default,";
         }
         if (dirtyFlag_[13]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
@@ -560,8 +575,6 @@ public:
         if (dirtyFlag_[14]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-        } else {
-            sql += "default,";
         }
         if (dirtyFlag_[15]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
@@ -584,6 +597,8 @@ public:
         if (dirtyFlag_[18]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
+        } else {
+            sql += "default,";
         }
         if (dirtyFlag_[19]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
@@ -596,10 +611,14 @@ public:
         if (dirtyFlag_[21]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
+        }
+        if (dirtyFlag_[22]) {
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
         } else {
             sql += "default,";
         }
-        if (dirtyFlag_[22]) {
+        if (dirtyFlag_[23]) {
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }

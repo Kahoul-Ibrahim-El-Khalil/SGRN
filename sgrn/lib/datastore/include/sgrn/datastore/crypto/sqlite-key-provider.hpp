@@ -33,6 +33,7 @@
 #include <sgrn/Result.hpp>
 #include <sgrn/utils/crypto/key-provider.hpp>
 #include <memory>
+#include <mutex>
 #include <string>
 
 struct sqlite3;
@@ -121,6 +122,7 @@ private:
 
     sqlite3* m_db{nullptr};
     uint32_t m_default_chunk_size;
+    mutable std::mutex m_mutex;
 };
 
 // ── Permission checks (called from open() and bootstrap verify) ──────────────
