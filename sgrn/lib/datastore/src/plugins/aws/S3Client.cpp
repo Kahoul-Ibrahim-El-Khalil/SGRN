@@ -752,9 +752,7 @@ Task<BackendResult<int>> S3Client::uploadFileMultipart(
 
     // 1. Start the upload.
     BackendResult<std::string> upload_id_res = co_await createMultipartUpload(t_bucket, t_key, t_content_type);
-    if (upload_id_res.hasError()) {
-        co_return std::move(upload_id_res).error();
-    }
+    CO_RETURN_ERROR_IF(upload_id_res.hasError(), std::move(upload_id_res).error());
     std::string upload_id = std::move(*upload_id_res);
 
     // 2. Stream the (already-compressed) temp file through a bounded buffer,
@@ -803,9 +801,7 @@ Task<BackendResult<int>> S3Client::uploadFileMultipart(
     // (Capture the count first: parts is moved into the request below.)
     const int part_count = static_cast<int>(parts.size());
     BackendResult<void> fin_res = co_await completeMultipartUpload(t_bucket, t_key, upload_id, std::move(parts));
-    if (fin_res.hasError()) {
-        co_return std::move(fin_res).error();
-    }
+    CO_RETURN_ERROR_IF(fin_res.hasError(), std::move(fin_res).error());
     co_return part_count;
 }
 

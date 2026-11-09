@@ -61,15 +61,11 @@ Result<void> ColumnarDatasetWriter::open(const std::string& t_path, ModelManifes
 }
 
 Result<void> ColumnarDatasetWriter::pushRow(uint64_t t_timestamp_ns, std::span<const float> t_features, std::span<const float> t_labels) {
-    if (!is_open_) {
-        return Result<void>::Error("ColumnarDatasetWriter is not open");
-    }
-    if (t_features.size() != num_features_) {
-        return Result<void>::Error(fmt::format("Feature span size {} does not match expected {}", t_features.size(), num_features_));
-    }
-    if (!t_labels.empty() && t_labels.size() != num_labels_) {
-        return Result<void>::Error(fmt::format("Label span size {} does not match expected {}", t_labels.size(), num_labels_));
-    }
+    RETURN_ERROR_IF(!is_open_, "ColumnarDatasetWriter is not open");
+    RETURN_ERROR_IF(t_features.size() != num_features_,
+        fmt::format("Feature span size {} does not match expected {}", t_features.size(), num_features_));
+    RETURN_ERROR_IF(!t_labels.empty() && t_labels.size() != num_labels_,
+        fmt::format("Label span size {} does not match expected {}", t_labels.size(), num_labels_));
 
     timestamps_.push_back(t_timestamp_ns);
 
@@ -147,9 +143,7 @@ Result<void> ColumnarDatasetWriter::finalize() {
     }
 
     std::ofstream ofs(path_, std::ios::binary);
-    if (!ofs.is_open()) {
-        return Result<void>::Error("Failed to create dataset file: " + path_);
-    }
+    RETURN_ERROR_IF(!ofs.is_open(), "Failed to create dataset file: " + path_);
 
     ofs.write(reinterpret_cast<const char*>(&hdr), sizeof(hdr));
     ofs.write(manifest_json.data(), manifest_json.size());
@@ -277,35 +271,31 @@ ColumnarDatasetReader::~ColumnarDatasetReader() {
 }
 
 Result<std::unique_ptr<ColumnarDatasetReader>> ColumnarDatasetReader::open(const std::string& t_path) {
-    if (!std::filesystem::exists(t_path)) {
-        return Result<std::unique_ptr<ColumnarDatasetReader>>::Error("Dataset file not found: " + t_path);
-    }
+    RETURN_ERROR_IF(!std::filesystem::exists(t_path), "Dataset file not found: " + t_path);
 
     auto reader = std::make_unique<ColumnarDatasetReader>();
     reader->path_ = t_path;
 
 #ifndef _WIN32
     int fd = ::open(t_path.c_str(), O_RDONLY);
-    if (fd < 0) {
-        return Result<std::unique_ptr<ColumnarDatasetReader>>::Error("Failed to open file: " + t_path);
-    }
+    RETURN_ERROR_IF(fd < 0, "Failed to open file: " + t_path);
 
     struct stat st{};
     if (fstat(fd, &st) < 0) {
         close(fd);
-        return Result<std::unique_ptr<ColumnarDatasetReader>>::Error("Failed to stat file: " + t_path);
+        return ::sgrn::Error("Failed to stat file: " + t_path);
     }
 
     size_t file_size = static_cast<size_t>(st.st_size);
     if (file_size < sizeof(FileHeader)) {
         close(fd);
-        return Result<std::unique_ptr<ColumnarDatasetReader>>::Error("Dataset file too small: " + t_path);
+        return ::sgrn::Error("Dataset file too small: " + t_path);
     }
 
     void* mapped = mmap(nullptr, file_size, PROT_READ, MAP_SHARED, fd, 0);
     if (mapped == MAP_FAILED) {
         close(fd);
-        return Result<std::unique_ptr<ColumnarDatasetReader>>::Error("Failed to mmap file: " + t_path);
+        return ::sgrn::Error("Failed to mmap file: " + t_path);
     }
 
     reader->fd_ = fd;
@@ -313,25 +303,23 @@ Result<std::unique_ptr<ColumnarDatasetReader>> ColumnarDatasetReader::open(const
     reader->data_size_ = file_size;
 #else
     HANDLE hFile = CreateFileA(t_path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (hFile == INVALID_HANDLE_VALUE) {
-        return Result<std::unique_ptr<ColumnarDatasetReader>>::Error("Failed to open file: " + t_path);
-    }
+    RETURN_ERROR_IF(hFile == INVALID_HANDLE_VALUE, "Failed to open file: " + t_path);
     LARGE_INTEGER liSize;
     if (!GetFileSizeEx(hFile, &liSize)) {
         CloseHandle(hFile);
-        return Result<std::unique_ptr<ColumnarDatasetReader>>::Error("Failed to get file size: " + t_path);
+        return ::sgrn::Error("Failed to get file size: " + t_path);
     }
     size_t file_size = static_cast<size_t>(liSize.QuadPart);
     HANDLE hMap = CreateFileMappingA(hFile, nullptr, PAGE_READONLY, 0, 0, nullptr);
     if (!hMap) {
         CloseHandle(hFile);
-        return Result<std::unique_ptr<ColumnarDatasetReader>>::Error("Failed to create file mapping: " + t_path);
+        return ::sgrn::Error("Failed to create file mapping: " + t_path);
     }
     void* mapped = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
     CloseHandle(hMap);
     if (!mapped) {
         CloseHandle(hFile);
-        return Result<std::unique_ptr<ColumnarDatasetReader>>::Error("Failed to MapViewOfFile: " + t_path);
+        return ::sgrn::Error("Failed to MapViewOfFile: " + t_path);
     }
     reader->fd_ = static_cast<int>(reinterpret_cast<intptr_t>(hFile));
     reader->p_data_ = static_cast<uint8_t*>(mapped);
@@ -340,9 +328,7 @@ Result<std::unique_ptr<ColumnarDatasetReader>> ColumnarDatasetReader::open(const
 
     // Validate Header
     const auto* pHdr = reinterpret_cast<const FileHeader*>(reader->p_data_);
-    if (std::memcmp(pHdr->magic, kMagic, 8) != 0) {
-        return Result<std::unique_ptr<ColumnarDatasetReader>>::Error("Invalid .sgrnb magic signature in: " + t_path);
-    }
+    RETURN_ERROR_IF(std::memcmp(pHdr->magic, kMagic, 8) != 0, "Invalid .sgrnb magic signature in: " + t_path);
 
     reader->row_count_ = static_cast<size_t>(pHdr->row_count);
     reader->step_ns_ = pHdr->step_ns;
@@ -353,9 +339,7 @@ Result<std::unique_ptr<ColumnarDatasetReader>> ColumnarDatasetReader::open(const
     if (pHdr->header_len > 0) {
         std::string_view json_view(reinterpret_cast<const char*>(reader->p_data_ + sizeof(FileHeader)), pHdr->header_len);
         auto m_res = ModelManifest::fromJson(json_view);
-        if (m_res.hasError()) {
-            return Result<std::unique_ptr<ColumnarDatasetReader>>::Error("Corrupt embedded manifest JSON: " + m_res.error());
-        }
+        RETURN_ERROR_IF(m_res.hasError(), "Corrupt embedded manifest JSON: " + m_res.error());
         reader->manifest_ = std::move(m_res.value());
     }
 

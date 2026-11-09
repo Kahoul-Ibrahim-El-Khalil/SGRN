@@ -205,9 +205,9 @@ static Result<void, std::string> registerServerMethods(asIScriptEngine* tp_engin
 // Registration
 // ─────────────────────────────────────────────────────────────────────────────
 Result<void, std::string> registerGatewaySyncTypes(asIScriptEngine* tp_engine) {
-    SGRN_RETURN_IF(auto r1 = registerClientMethods(tp_engine, "GatewayClient"); r1.hasError(), r1.error());
-    SGRN_RETURN_IF(auto r2 = registerClientMethods(tp_engine, "GatewaySync"); r2.hasError(), r2.error());
-    SGRN_RETURN_IF(auto r3 = registerServerMethods(tp_engine); r3.hasError(), r3.error());
+    RETURN_IF(auto r1 = registerClientMethods(tp_engine, "GatewayClient"); r1.hasError(), r1.error());
+    RETURN_IF(auto r2 = registerClientMethods(tp_engine, "GatewaySync"); r2.hasError(), r2.error());
+    RETURN_IF(auto r3 = registerServerMethods(tp_engine); r3.hasError(), r3.error());
     return {};
 }
 

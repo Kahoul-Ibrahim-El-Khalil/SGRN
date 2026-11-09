@@ -59,7 +59,7 @@ CryptoException::CryptoException(CryptoError t_err, const std::string& t_msg)
 
 Result<std::array<uint8_t, kNoncePrefixSize>> generateNoncePrefix() {
     std::array<uint8_t, kNoncePrefixSize> prefix{};
-    SGRN_RETURN_ERROR_IF(RAND_bytes(prefix.data(), static_cast<int>(prefix.size())) != 1, "Failed to generate random nonce prefix");
+    RETURN_ERROR_IF(RAND_bytes(prefix.data(), static_cast<int>(prefix.size())) != 1, "Failed to generate random nonce prefix");
     return prefix;
 }
 
@@ -104,39 +104,38 @@ std::vector<uint8_t> buildChunkAad(std::string_view t_key_id, uint32_t t_chunk_i
 Result<void> encryptChunkGcm(std::span<const uint8_t> t_plaintext, const Dek& t_dek, std::span<const uint8_t, kNonceSize> t_nonce,
     std::span<const uint8_t> t_aad, std::vector<uint8_t>& t_out_ciphertext, std::array<uint8_t, kTagSize>& t_out_tag) {
 
-    SGRN_RETURN_ERROR_IF(!t_dek.isValid(), "Invalid or uninitialized DEK");
+    RETURN_ERROR_IF(!t_dek.isValid(), "Invalid or uninitialized DEK");
 
     EvpCipherCtxPtr ctx(EVP_CIPHER_CTX_new());
-    SGRN_RETURN_ERROR_IF(!ctx, "Failed to create EVP cipher context");
+    RETURN_ERROR_IF(!ctx, "Failed to create EVP cipher context");
 
-    SGRN_RETURN_ERROR_IF(
+    RETURN_ERROR_IF(
         EVP_EncryptInit_ex(ctx.get(), EVP_aes_256_gcm(), nullptr, nullptr, nullptr) != 1, "Failed to initialize AES-256-GCM cipher");
 
-    SGRN_RETURN_ERROR_IF(
+    RETURN_ERROR_IF(
         EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_GCM_SET_IVLEN, static_cast<int>(kNonceSize), nullptr) != 1, "Failed to set GCM IV length");
 
-    SGRN_RETURN_ERROR_IF(EVP_EncryptInit_ex(ctx.get(), nullptr, nullptr, t_dek.data(), t_nonce.data()) != 1,
+    RETURN_ERROR_IF(EVP_EncryptInit_ex(ctx.get(), nullptr, nullptr, t_dek.data(), t_nonce.data()) != 1,
         "Failed to set DEK and nonce in cipher context");
 
     int len = 0;
     // Set AAD
     if (!t_aad.empty()) {
-        SGRN_RETURN_ERROR_IF(
+        RETURN_ERROR_IF(
             EVP_EncryptUpdate(ctx.get(), nullptr, &len, t_aad.data(), static_cast<int>(t_aad.size())) != 1, "Failed to set AAD");
     }
 
     t_out_ciphertext.resize(t_plaintext.size());
     if (!t_plaintext.empty()) {
-        SGRN_RETURN_ERROR_IF(
+        RETURN_ERROR_IF(
             EVP_EncryptUpdate(ctx.get(), t_out_ciphertext.data(), &len, t_plaintext.data(), static_cast<int>(t_plaintext.size())) != 1,
             "Failed to encrypt plaintext chunk");
     }
 
     int final_len = 0;
-    SGRN_RETURN_ERROR_IF(
-        EVP_EncryptFinal_ex(ctx.get(), t_out_ciphertext.data() + len, &final_len) != 1, "Failed to finalize encryption chunk");
+    RETURN_ERROR_IF(EVP_EncryptFinal_ex(ctx.get(), t_out_ciphertext.data() + len, &final_len) != 1, "Failed to finalize encryption chunk");
 
-    SGRN_RETURN_ERROR_IF(EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_GCM_GET_TAG, static_cast<int>(kTagSize), t_out_tag.data()) != 1,
+    RETURN_ERROR_IF(EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_GCM_GET_TAG, static_cast<int>(kTagSize), t_out_tag.data()) != 1,
         "Failed to obtain GCM tag");
 
     return {};
@@ -145,43 +144,43 @@ Result<void> encryptChunkGcm(std::span<const uint8_t> t_plaintext, const Dek& t_
 Result<void> decryptChunkGcm(std::span<const uint8_t> t_ciphertext, const Dek& t_dek, std::span<const uint8_t, kNonceSize> t_nonce,
     std::span<const uint8_t> t_aad, std::span<const uint8_t, kTagSize> t_tag, std::vector<uint8_t>& t_out_plaintext) {
 
-    SGRN_RETURN_ERROR_IF(!t_dek.isValid(), "Invalid or uninitialized DEK");
+    RETURN_ERROR_IF(!t_dek.isValid(), "Invalid or uninitialized DEK");
 
     EvpCipherCtxPtr ctx(EVP_CIPHER_CTX_new());
-    SGRN_RETURN_ERROR_IF(!ctx, "Failed to create EVP cipher context");
+    RETURN_ERROR_IF(!ctx, "Failed to create EVP cipher context");
 
     const bool initalize_cipher_failed = EVP_DecryptInit_ex(ctx.get(), EVP_aes_256_gcm(), nullptr, nullptr, nullptr) != 1;
-    SGRN_RETURN_ERROR_IF(initalize_cipher_failed, "Failed to initialize AES-256-GCM cipher");
+    RETURN_ERROR_IF(initalize_cipher_failed, "Failed to initialize AES-256-GCM cipher");
 
-    SGRN_RETURN_ERROR_IF(
+    RETURN_ERROR_IF(
         EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_GCM_SET_IVLEN, static_cast<int>(kNonceSize), nullptr) != 1, "Failed to set GCM IV length");
 
-    SGRN_RETURN_ERROR_IF(EVP_DecryptInit_ex(ctx.get(), nullptr, nullptr, t_dek.data(), t_nonce.data()) != 1,
+    RETURN_ERROR_IF(EVP_DecryptInit_ex(ctx.get(), nullptr, nullptr, t_dek.data(), t_nonce.data()) != 1,
         "Failed to set DEK and nonce in cipher context");
 
     int len = 0;
     // Set AAD
     if (!t_aad.empty()) {
-        SGRN_RETURN_ERROR_IF(
+        RETURN_ERROR_IF(
             EVP_DecryptUpdate(ctx.get(), nullptr, &len, t_aad.data(), static_cast<int>(t_aad.size())) != 1, "Failed to process AAD");
     }
 
     t_out_plaintext.resize(t_ciphertext.size());
     if (!t_ciphertext.empty()) {
-        SGRN_RETURN_ERROR_IF(
+        RETURN_ERROR_IF(
             EVP_DecryptUpdate(ctx.get(), t_out_plaintext.data(), &len, t_ciphertext.data(), static_cast<int>(t_ciphertext.size())) != 1,
             "Failed to decrypt ciphertext chunk");
     }
 
     // Set expected GCM tag
-    SGRN_RETURN_ERROR_IF(
+    RETURN_ERROR_IF(
         EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_GCM_SET_TAG, static_cast<int>(kTagSize), const_cast<uint8_t*>(t_tag.data())) != 1,
         "Failed to set expected GCM tag");
 
     int final_len = 0;
     const int ret = EVP_DecryptFinal_ex(ctx.get(), t_out_plaintext.data() + len, &final_len);
 
-    SGRN_RETURN_ERROR_IF(ret <= 0, "AEAD tag verification failed: ciphertext or AAD has been tampered with");
+    RETURN_ERROR_IF(ret <= 0, "AEAD tag verification failed: ciphertext or AAD has been tampered with");
 
     return {};
 }

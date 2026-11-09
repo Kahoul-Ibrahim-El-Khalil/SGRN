@@ -64,8 +64,7 @@ sgrn::Result<std::string> readDecompressedFile(const std::filesystem::path& t_pa
 
     if (t_path.extension() == ".zst") {
         auto dec_res = sgrn::utils::compression::decompressStringZstd(content);
-        if (dec_res.hasError())
-            return dec_res.error();
+        RETURN_IF(dec_res.hasError(), dec_res.error());
         return std::move(dec_res).value();
     }
     return content;
@@ -89,8 +88,7 @@ sgrn::Result<void> DatasetProcessor::convertFormat(
     std::string decompressed;
     if (t_input_file.extension() == ".zst") {
         auto dec_res = sgrn::utils::compression::decompressStringZstd(content);
-        if (dec_res.hasError())
-            return dec_res.error();
+        RETURN_IF(dec_res.hasError(), dec_res.error());
         decompressed = std::move(dec_res).value();
     } else {
         decompressed = std::move(content);
@@ -264,8 +262,7 @@ sgrn::Result<void> DatasetProcessor::mergeArchives(const std::vector<std::filesy
         std::string first_schema;
         bool first_file = true;
         for (const auto& in : inputs) {
-            SGRN_RETURN_IF(auto r = mergeBinaryFrames(in.content, in.path.string(), first_file, first_schema, writer);
-                r.hasError(), r.error());
+            RETURN_IF(auto r = mergeBinaryFrames(in.content, in.path.string(), first_file, first_schema, writer); r.hasError(), r.error());
             if (first_file) {
                 uint32_t schema_len = 0;
                 std::memcpy(&schema_len, in.content.data() + 6, sizeof(schema_len));

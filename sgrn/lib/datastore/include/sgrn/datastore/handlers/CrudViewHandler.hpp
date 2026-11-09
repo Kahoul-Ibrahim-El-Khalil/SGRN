@@ -18,7 +18,7 @@ namespace sgrn::datastore::handlers::query
 // handlers below are members of `CrudViewHandler<Derived>`, so
 // `&DerivedView::handleList` has type
 // `Task (CrudViewHandler<Derived>::*)(HttpRequestPtr)` — exactly what this
-// IHandler specialization's route_config expects. (Had the base been
+// IHandler specialization's RouteConfig expects. (Had the base been
 // `IHandler<Derived>`, the inherited member-pointer would not convert to
 // `Task (Derived::*)(...)` and no generated `.gen.hpp` would compile.)
 // The derived view only provides `kSpec`/`kFields`/`kRoutes`/`kItemRoutes`
@@ -27,8 +27,8 @@ template <typename Derived>
 class CrudViewHandler : public sgrn::IHandler<CrudViewHandler<Derived>> {
 public:
     using BaseHandler = sgrn::IHandler<CrudViewHandler<Derived>>;
-    using RouteConfig = typename BaseHandler::route_config;
-    using ItemRouteConfig = typename BaseHandler::item_route_config;
+    using RouteConfig = typename BaseHandler::RouteConfig;
+    using ItemRouteConfig = typename BaseHandler::ItemRouteConfig;
     using BaseHandler::BaseHandler;
 
     drogon::Task<drogon::HttpResponsePtr> handleList(drogon::HttpRequestPtr tsp_req) {

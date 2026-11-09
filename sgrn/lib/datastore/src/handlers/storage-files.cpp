@@ -178,7 +178,7 @@ bool parseFileOrder(const std::string& t_raw, std::string& t_out_sql, std::strin
     return true;
 }
 
-std::size_t parseClampedSize(const drogon::HttpRequestPtr& tsp_req, const char* tp_key, std::size_t t_default, std::size_t t_max) {
+std::size_t parseClampedSize(const HttpRequestPtr& tsp_req, const char* tp_key, std::size_t t_default, std::size_t t_max) {
     auto opt = tsp_req->getOptionalParameter<std::string>(tp_key);
     if (!opt.has_value()) {
         return t_default;

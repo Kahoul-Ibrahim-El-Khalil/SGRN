@@ -293,13 +293,13 @@ inline sgrn::Result<Json::Value, std::string> mergeJsonDeltas(const fs::path& t_
     }
 
     auto baseline_res = deserializeFromFile(t_base_tree_path);
-    SGRN_IF_ERROR_PROPAGATE(baseline_res);
+    PROPAGATE_ERROR_IF(baseline_res);
 
     Json::Value result = std::move(baseline_res.value());
 
     for (const auto& t_path : t_deltas_paths) {
         auto delta_res = deserializeFromFile(t_path);
-        SGRN_IF_ERROR_PROPAGATE(delta_res);
+        PROPAGATE_ERROR_IF(delta_res);
         applyDelta(result, delta_res.value());
     }
 
@@ -508,7 +508,7 @@ inline sgrn::Result<const Json::Value*, std::string> requireMember(
 
 inline sgrn::Result<std::string, std::string> requireString(const Json::Value& t_parent, const std::string& t_key) {
     auto res = requireMember(t_parent, t_key, Json::stringValue);
-    SGRN_IF_ERROR_PROPAGATE(res);
+    PROPAGATE_ERROR_IF(res);
     return res.value()->asString();
 }
 
@@ -525,7 +525,7 @@ inline sgrn::Result<int, std::string> requireInt(const Json::Value& t_parent, co
 
 inline sgrn::Result<bool, std::string> requireBool(const Json::Value& t_parent, const std::string& t_key) {
     auto res = requireMember(t_parent, t_key, Json::booleanValue);
-    SGRN_IF_ERROR_PROPAGATE(res);
+    PROPAGATE_ERROR_IF(res);
     return res.value()->asBool();
 }
 

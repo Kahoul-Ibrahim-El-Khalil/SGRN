@@ -98,13 +98,13 @@ static bool isContiguousZeroBasedEnum(const EnumTypeDef& t_def) {
 }
 
 Result<void, std::string> registerEnumStringsProperty(UA_Server* tp_raw, const UA_DataType& t_type, const EnumTypeDef& t_def) {
-    SGRN_RETURN_IF(!isContiguousZeroBasedEnum(t_def), {});
+    RETURN_IF(!isContiguousZeroBasedEnum(t_def), {});
 
     const size_t n = t_def.values.size();
 
     auto* lts = static_cast<UA_LocalizedText*>(UA_Array_new(n, &UA_TYPES[UA_TYPES_LOCALIZEDTEXT]));
 
-    SGRN_RETURN_IF_NULL(lts, {});
+    RETURN_IF_NULL(lts, {});
 
     size_t index = 0;
     for (const auto& [value, name] : t_def.values) {

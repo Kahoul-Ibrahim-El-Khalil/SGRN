@@ -93,9 +93,7 @@ std::string FeatureSpec::toJson(bool t_pretty) const {
 }
 
 Result<FeatureSpec> FeatureSpec::fromJsonValue(const rapidjson::Value& t_val) {
-    if (!t_val.IsObject()) {
-        return Result<FeatureSpec>::Error("FeatureSpec JSON root must be an object");
-    }
+    RETURN_ERROR_IF(!t_val.IsObject(), "FeatureSpec JSON root must be an object");
 
     FeatureSpec spec;
     if (t_val.HasMember("name") && t_val["name"].IsString()) {
@@ -166,9 +164,7 @@ Result<FeatureSpec> FeatureSpec::fromJsonValue(const rapidjson::Value& t_val) {
 
 Result<FeatureSpec> FeatureSpec::fromJson(std::string_view t_json_str) {
     auto doc_res = sgrn::utils::json::deserialize(t_json_str);
-    if (doc_res.hasError()) {
-        return Result<FeatureSpec>::Error("Invalid JSON for FeatureSpec: " + doc_res.error());
-    }
+    RETURN_ERROR_IF(doc_res.hasError(), "Invalid JSON for FeatureSpec: " + doc_res.error());
     return fromJsonValue(doc_res.value());
 }
 

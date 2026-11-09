@@ -131,7 +131,7 @@ size_t PlcTagTable::tagCount() const noexcept {
 
 sgrn::Result<PlcTagTable::TagDescriptor, SclError> PlcTagTable::describeTag(const std::string& t_name) const {
     const sgrn::Result<const Block*, SclError> blk = findBlock_(t_name);
-    SGRN_RETURN_IF(blk.hasError(), blk.error());
+    RETURN_IF(blk.hasError(), blk.error());
     TagDescriptor d;
     d.name = blk.value()->name;
     d.addr = blk.value()->addr;
@@ -153,7 +153,7 @@ std::vector<std::string> PlcTagTable::tagNames() const {
 // Returns the JSON string cached during the last PLC read or local write.
 sgrn::Result<std::string, S7Error> PlcTagTable::read(const std::string& t_path) const {
     const sgrn::Result<const Block*, SclError> blk = findBlock_(t_path);
-    SGRN_RETURN_IF(blk.hasError(), fromSclErrorToS7Error(blk.error()));
+    RETURN_IF(blk.hasError(), fromSclErrorToS7Error(blk.error()));
     std::lock_guard<std::mutex> lk(blk.value()->mu);
     return blk.value()->json_cache;
 }
@@ -163,10 +163,10 @@ sgrn::Result<std::string, S7Error> PlcTagTable::read(const std::string& t_path) 
 // and the tag is marked dirty so it gets pushed to the PLC during the next synchronization cycle.
 sgrn::Result<void, S7Error> PlcTagTable::write(const std::string& t_path, const std::string& t_json_val) {
     const sgrn::Result<Block*, SclError> blk = findBlock_(t_path);
-    SGRN_RETURN_IF(blk.hasError(), fromSclErrorToS7Error(blk.error()));
+    RETURN_IF(blk.hasError(), fromSclErrorToS7Error(blk.error()));
 
     sgrn::Result<std::vector<uint8_t>, SclError> encoded = encodeValue_(*blk.value(), t_json_val);
-    SGRN_RETURN_IF(encoded.hasError(), fromSclErrorToS7Error(encoded.error()));
+    RETURN_IF(encoded.hasError(), fromSclErrorToS7Error(encoded.error()));
 
     std::lock_guard<std::mutex> lk(blk.value()->mu);
     std::memcpy(blk.value()->raw_data.data(), encoded.value().data(), encoded.value().size());
@@ -180,19 +180,19 @@ sgrn::Result<void, S7Error> PlcTagTable::write(const std::string& t_path, const 
 // back into JSON format, resets the dirty flag, and returns the JSON string representation.
 sgrn::Result<std::string, S7Error> PlcTagTable::get(S7Client& t_client, const std::string& t_path) {
     const sgrn::Result<Block*, SclError> blk = findBlock_(t_path);
-    SGRN_RETURN_IF(blk.hasError(), fromSclErrorToS7Error(blk.error()));
+    RETURN_IF(blk.hasError(), fromSclErrorToS7Error(blk.error()));
 
     S7DataItem t_item{};
     std::vector<uint8_t> t_buf;
     fillGetItem_(*blk.value(), t_item, t_buf);
 
     auto rc = t_client.readMultiVars(&t_item, 1);
-    SGRN_RETURN_IF(rc.hasError(), fromSclErrorToS7Error(SclError::Generic));
-    SGRN_RETURN_IF(t_item.Result != 0, fromSclErrorToS7Error(SclError::Generic));
+    RETURN_IF(rc.hasError(), fromSclErrorToS7Error(SclError::Generic));
+    RETURN_IF(t_item.Result != 0, fromSclErrorToS7Error(SclError::Generic));
 
     // commitRaw_ decodes the bytes from the PLC and populates json_cache
     auto commit_res = commitRaw_(*blk.value(), t_item.pdata, blk.value()->addr.byte_count);
-    SGRN_RETURN_IF(commit_res.hasError(), fromSclErrorToS7Error(commit_res.error()));
+    RETURN_IF(commit_res.hasError(), fromSclErrorToS7Error(commit_res.error()));
 
     std::lock_guard<std::mutex> lk(blk.value()->mu);
     return blk.value()->json_cache;
@@ -203,10 +203,10 @@ sgrn::Result<std::string, S7Error> PlcTagTable::get(S7Client& t_client, const st
 // updates the local shadow memory buffer, and marks the block clean.
 sgrn::Result<void, S7Error> PlcTagTable::put(S7Client& t_client, const std::string& t_path, const std::string& t_json_val) {
     const sgrn::Result<Block*, SclError> blk = findBlock_(t_path);
-    SGRN_RETURN_IF(blk.hasError(), fromSclErrorToS7Error(blk.error()));
+    RETURN_IF(blk.hasError(), fromSclErrorToS7Error(blk.error()));
 
     sgrn::Result<std::vector<uint8_t>, SclError> t_buf = encodeValue_(*blk.value(), t_json_val);
-    SGRN_RETURN_IF(t_buf.hasError(), fromSclErrorToS7Error(t_buf.error()));
+    RETURN_IF(t_buf.hasError(), fromSclErrorToS7Error(t_buf.error()));
 
     S7DataItem t_item{};
     t_item.Area = blk.value()->addr.area;
@@ -219,8 +219,8 @@ sgrn::Result<void, S7Error> PlcTagTable::put(S7Client& t_client, const std::stri
     t_item.pdata = t_buf.value().data();
 
     auto rc = t_client.writeMultiVars(&t_item, 1);
-    SGRN_RETURN_IF(rc.hasError(), fromSclErrorToS7Error(SclError::Generic));
-    SGRN_RETURN_IF(t_item.Result != 0, fromSclErrorToS7Error(SclError::Generic));
+    RETURN_IF(rc.hasError(), fromSclErrorToS7Error(SclError::Generic));
+    RETURN_IF(t_item.Result != 0, fromSclErrorToS7Error(SclError::Generic));
 
     std::lock_guard<std::mutex> lk(blk.value()->mu);
     std::memcpy(blk.value()->raw_data.data(), t_buf.value().data(), t_buf.value().size());
@@ -233,7 +233,7 @@ sgrn::Result<void, S7Error> PlcTagTable::buildGetItems(
     const std::vector<std::string>& t_paths, std::vector<S7DataItem>& t_out_items, std::vector<std::vector<uint8_t>>& t_out_bufs) {
     for (const auto& t_path : t_paths) {
         const sgrn::Result<Block*, SclError> blk = findBlock_(t_path);
-        SGRN_RETURN_IF(blk.hasError(), fromSclErrorToS7Error(blk.error()));
+        RETURN_IF(blk.hasError(), fromSclErrorToS7Error(blk.error()));
         t_out_bufs.emplace_back();
         t_out_items.emplace_back();
         fillGetItem_(*blk.value(), t_out_items.back(), t_out_bufs.back());
@@ -246,11 +246,11 @@ sgrn::Result<void, S7Error> PlcTagTable::buildPutItems(const std::vector<std::st
     std::vector<std::vector<uint8_t>>& t_out_bufs) {
     for (size_t i = 0; i < t_paths.size(); ++i) {
         const sgrn::Result<Block*, SclError> blk = findBlock_(t_paths[i]);
-        SGRN_RETURN_IF(blk.hasError(), fromSclErrorToS7Error(blk.error()));
+        RETURN_IF(blk.hasError(), fromSclErrorToS7Error(blk.error()));
 
         if (std::holds_alternative<std::string>(t_values[i])) {
             sgrn::Result<std::vector<uint8_t>, SclError> encoded = encodeValue_(*blk.value(), std::get<std::string>(t_values[i]));
-            SGRN_RETURN_IF(encoded.hasError(), fromSclErrorToS7Error(encoded.error()));
+            RETURN_IF(encoded.hasError(), fromSclErrorToS7Error(encoded.error()));
             t_out_bufs.push_back(std::move(encoded.value()));
         } else {
             const auto& dv = std::get<s7codec::DecodedValue>(t_values[i]);
@@ -301,7 +301,7 @@ sgrn::Result<void, S7Error> PlcTagTable::commitLocalPut(
     const std::vector<std::string>& t_paths, const std::vector<std::variant<std::string, s7codec::DecodedValue>>& t_values) {
     for (size_t i = 0; i < t_paths.size(); ++i) {
         const sgrn::Result<Block*, SclError> blk = findBlock_(t_paths[i]);
-        SGRN_RETURN_IF(blk.hasError(), fromSclErrorToS7Error(blk.error()));
+        RETURN_IF(blk.hasError(), fromSclErrorToS7Error(blk.error()));
 
         std::vector<uint8_t> encoded;
         std::string t_json_val;
@@ -309,7 +309,7 @@ sgrn::Result<void, S7Error> PlcTagTable::commitLocalPut(
         if (std::holds_alternative<std::string>(t_values[i])) {
             t_json_val = std::get<std::string>(t_values[i]);
             auto enc_res = encodeValue_(*blk.value(), t_json_val);
-            SGRN_RETURN_IF(enc_res.hasError(), fromSclErrorToS7Error(enc_res.error()));
+            RETURN_IF(enc_res.hasError(), fromSclErrorToS7Error(enc_res.error()));
             encoded = std::move(enc_res.value());
         } else {
             const auto& dv = std::get<s7codec::DecodedValue>(t_values[i]);
@@ -336,7 +336,7 @@ sgrn::Result<void, S7Error> PlcTagTable::commitLocalPut(
                     .bit_offset = s7codec::BitOffset{static_cast<uint8_t>(bit_idx)},
                     .string_capacity = s7codec::StringCapacity{fd.count}});
 
-            SGRN_RETURN_IF(!status.has_value(), fromSclErrorToS7Error(SclError::Generic));
+            RETURN_IF(!status.has_value(), fromSclErrorToS7Error(SclError::Generic));
         }
 
         std::lock_guard<std::mutex> lk(blk.value()->mu);
@@ -500,7 +500,7 @@ sgrn::Result<void, SclError> PlcTagTable::commitRaw_(Block& t_b, const void* tp_
     t_b.tracker.checkDirty(t_b.raw_data.data(), p_bytes, t_size);
     std::memcpy(t_b.raw_data.data(), p_bytes, t_size);
     auto decoded = decodeRaw_(t_b);
-    SGRN_RETURN_IF(decoded.hasError(), decoded.error());
+    RETURN_IF(decoded.hasError(), decoded.error());
     t_b.json_cache = std::move(decoded.value());
     t_b.tracker.captureBaseline(t_b.raw_data.data(), t_size);
     return {};

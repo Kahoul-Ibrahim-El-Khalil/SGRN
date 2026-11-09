@@ -32,10 +32,10 @@ bool PlcCommandProcessor::hasPendingCommands() const {
 }
 
 void PlcCommandProcessor::processCommands() {
-    SGRN_RETURN_IF(!memory_.state(), ;);
+    RETURN_IF(!memory_.state(), ;);
 
     auto commands = memory_.state()->drainCommands();
-    SGRN_RETURN_IF(commands.empty(), ;);
+    RETURN_IF(commands.empty(), ;);
 
     // WriteBinary no longer exists as a queued command type — OPC UA now
     // commits synchronously via PlcMemory::writeDbMemory() in writeValue.cpp.

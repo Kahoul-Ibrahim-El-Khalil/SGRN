@@ -28,8 +28,7 @@ inline BackendResult<drogon::orm::DbClientPtr> getDbClient() {
     auto db = drogon::app().getDbClient();
     if (!db) {
         DB_ERROR_LOG("Database client is not initialized or unavailable");
-        return BackendResult<drogon::orm::DbClientPtr>::Error(
-            BackendError{"Database", "Database client is not initialized or unavailable"});
+        RETURN_ERROR(BackendError{"Database", "Database client is not initialized or unavailable"});
     }
     return db;
 }
@@ -41,7 +40,7 @@ template <typename T>
 inline BackendResult<T*> getPlugin() {
     auto* p_plugin = drogon::app().getPlugin<T>();
     if (!p_plugin) {
-        return BackendResult<T*>::Error(BackendError{"Runtime", "Required system plugin is not initialized"});
+        RETURN_ERROR(BackendError{"Runtime", "Required system plugin is not initialized"});
     }
     return p_plugin;
 }

@@ -1,8 +1,9 @@
 # cmake/deps/FetchDeps.cmake — CPM.cmake-based dependency declarations.
 # ─────────────────────────────────────────────────────────────────────────────
-# CPM.cmake adds a persistent source cache (CPM_SOURCE_CACHE, default ~/.cache/CPM)
-# that survives `rm -rf .build/` — sources are never re-downloaded once cached.
-# CPM_SOURCE_CACHE is set to $HOME/.cache/CPM in CMakePresets.json (base-common).
+# CPM.cmake adds a persistent source cache (CPM_SOURCE_CACHE) that survives
+# `rm -rf .build/` — sources are never re-downloaded once cached. The default
+# presets keep it inside the repository so stale/permission-restricted user
+# caches cannot break configuration; CI may override it with its cache path.
 #
 # Deps with GitHub release archives use URL tarballs (faster: no git protocol).
 # Deps without release archives use shallow git clones as fallback.
@@ -127,9 +128,9 @@ set(SGRN_DEP_angelscript_TAG
     "v2.38.0"
 )
 
-# IXWebSocket v12.0.1
+# IXWebSocket v12.1.0
 set(SGRN_DEP_ixwebsocket_URL
-    "https://github.com/machinezone/IXWebSocket/archive/refs/tags/v12.0.1.tar.gz"
+    "https://github.com/machinezone/IXWebSocket/archive/refs/tags/v12.1.0.tar.gz"
 )
 
 # libmodbus v3.2.0
@@ -138,12 +139,10 @@ set(SGRN_DEP_libmodbus_URL
 )
 
 # OpENer — pinned upstream release tag for reproducible builds
-set(SGRN_DEP_opener_REPO
-    "https://github.com/EIPStackGroup/OpENer.git"
-)
-
-set(SGRN_DEP_opener_TAG
-    "2.3.1"
+# Use a commit archive instead of a mutable/dirty git checkout. This also
+# prevents an interrupted CPM clone from being reused with missing files.
+set(SGRN_DEP_opener_URL
+    "https://github.com/EIPStackGroup/OpENer/archive/8c8fa9f0df7d72ffe17a2443f8457017e71c68bf.tar.gz"
 )
 
 # reproc v14.2.4 — cross-platform child-process control (C99 core + C++11
@@ -158,23 +157,28 @@ set(SGRN_DEP_reproc_TAG
     "v14.2.4"
 )
 
-# Drogon v1.9.13
+# Drogon v1.9.14
 set(SGRN_DEP_drogon_REPO
     "https://github.com/drogonframework/drogon.git"
 )
 
 set(SGRN_DEP_drogon_TAG
-    "v1.9.13"
+    "v1.9.14"
 )
 
-# RapidJSON master snapshot — fixes C++20/23 standard compliance issues present in 1.1.0 release.
-set(SGRN_DEP_rapidjson_URL
-    "https://github.com/Tencent/rapidjson/archive/refs/heads/master.tar.gz"
+# RapidJSON master snapshot — pinned to an immutable commit so CI is reproducible.
+# This includes the C++20/23 compatibility work and the UTF-8 validation fix
+# that are not present in the v1.1.0 release.
+set(SGRN_DEP_rapidjson_REPO
+    "https://github.com/Tencent/rapidjson.git"
+)
+set(SGRN_DEP_rapidjson_TAG
+    "24b5e7a8b27f42fa16b96fc70aade9106cf7102f"
 )
 
-# cpp-httplib v0.54.1
+# cpp-httplib v0.58.0
 set(SGRN_DEP_cpp_httplib_URL
-    "https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.54.1.tar.gz"
+    "https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.58.0.tar.gz"
 )
 
 # Crow v1.3.3 — asio-based HTTP + WebSocket server (header-only).

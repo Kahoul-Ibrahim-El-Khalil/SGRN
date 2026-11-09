@@ -61,43 +61,27 @@ ScriptHost::~ScriptHost() {
 }
 
 Result<void> ScriptHost::loadFile(const std::string& t_path) {
-    if (!p_engine_) {
-        return Result<void>::Error("AngelScript engine is null");
-    }
+    RETURN_ERROR_IF(!p_engine_, "AngelScript engine is null");
     fs::path path = normalizePath(t_path);
-    if (!fs::exists(path)) {
-        return Result<void>::Error("Path does not exist: " + path.string());
-    }
-    if (!fs::is_regular_file(path)) {
-        return Result<void>::Error(fmt::format("{} is not a file", path.string()));
-    }
+    RETURN_ERROR_IF(!fs::exists(path), "Path does not exist: " + path.string());
+    RETURN_ERROR_IF(!fs::is_regular_file(path), fmt::format("{} is not a file", path.string()));
     std::ifstream ifs(path);
-    if (!ifs.is_open()) {
-        return Result<void>::Error("Cannot open script: " + path.string());
-    }
+    RETURN_ERROR_IF(!ifs.is_open(), "Cannot open script: " + path.string());
     std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
 
     CScriptBuilder builder;
-    if (builder.StartNewModule(p_engine_, "main") < 0) {
-        return Result<void>::Error("Failed to create module for script");
-    }
+    RETURN_ERROR_IF(builder.StartNewModule(p_engine_, "main") < 0, "Failed to create module for script");
 
-    if (builder.AddSectionFromMemory(t_path.c_str(), content.c_str()) < 0) {
-        return Result<void>::Error("Failed to add section from script content");
-    }
+    RETURN_ERROR_IF(builder.AddSectionFromMemory(t_path.c_str(), content.c_str()) < 0, "Failed to add section from script content");
 
-    if (builder.BuildModule() < 0) {
-        return Result<void>::Error("Compilation failed");
-    }
+    RETURN_ERROR_IF(builder.BuildModule() < 0, "Compilation failed");
 
     loaded_path_ = path.string();
     return {};
 }
 
 Result<void> ScriptHost::reload() {
-    if (loaded_path_.empty()) {
-        return Result<void>::Error("No script loaded to reload");
-    }
+    RETURN_ERROR_IF(loaded_path_.empty(), "No script loaded to reload");
     return loadFile(loaded_path_);
 }
 

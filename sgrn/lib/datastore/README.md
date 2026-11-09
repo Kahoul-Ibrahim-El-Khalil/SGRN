@@ -58,11 +58,38 @@ All endpoints are hosted under `/api/v1/`.
 
 The `sgrn_datastore_shell` CLI provides full administrative and storage management capabilities with built-in AngelScript automation.
 
+### Canonical storage names
+
+Storage authorities use this convention:
+
+- `/` separates storage paths.
+- `.` separates domain levels in a canonical authority.
+- Domain labels are lower-case only: `production.line1` is valid, while
+  `Production.Line1` is rejected.
+- Organisation-domain files use
+  `/file/<path>/<name>@<organisation>-<domain>[.<subdomain>...]`.
+- User-owned files use
+  `/file/<path>/<name>@<organisation>-<user>@<mail-domain>`.
+  The user is resolved inside the authenticated organisation; the prefix is
+  an authority label, not a client-side tenant override.
+
+The shell translates these names to the authenticated API namespaces. The
+explicit `/domains/...` and `/users/...` paths remain valid for compatibility.
+
+An account may be organisation-bound (`domain = NULL`) or assigned to one
+lower-case operational domain. Domain-assigned users are constrained by that
+domain's permissions and allowed subpath. Changing the authority text cannot
+select another organisation.
+
+Uploads requested with `--encrypt` use the resumable AES-256-GCM pipeline and
+SQLite key store. Domain policies still apply: `none` rejects encryption
+requests, `optional` permits them, and `required` mandates them.
+
 ### Available Commands
 
 | Command            | Arguments                           | Description                                                 |
 | :----------------- | :---------------------------------- | :---------------------------------------------------------- |
-| `rput`             | `<LOCAL> [REMOTE] [--chunk-size B]` | Resumable chunked upload with interactive progress bar      |
+| `rput`             | `<LOCAL> [REMOTE] [--chunk-size B] [--encrypt]` | Resumable chunked upload; `--encrypt` enables AES-256-GCM at rest |
 | `upload-status`    | `<UPLOAD-ID>`                       | Inspect status and uploaded chunk map of a resumable upload |
 | `upload-abort`     | `<UPLOAD-ID>`                       | Abort an ongoing upload session                             |
 | `sessions`         | —                                   | Display active user sessions table (admin)                  |

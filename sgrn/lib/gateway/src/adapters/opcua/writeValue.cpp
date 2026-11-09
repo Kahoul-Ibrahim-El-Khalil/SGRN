@@ -63,9 +63,9 @@ static std::string resolveCertSubject(UA_Server* /*server*/, const UA_NodeId* /*
 }
 
 static const UA_DataType* normalizeIncomingType(const NodeContext& ctx, const UA_Variant& value) {
-    SGRN_RETURN_IF_NULL(value.type, nullptr);
+    RETURN_IF_NULL(value.type, nullptr);
 
-    SGRN_RETURN_IF(ctx.enum_type && value.type == &UA_TYPES[UA_TYPES_INT32], ctx.enum_type);
+    RETURN_IF(ctx.enum_type && value.type == &UA_TYPES[UA_TYPES_INT32], ctx.enum_type);
 
     return value.type;
 }
@@ -85,7 +85,7 @@ static const UA_DataType* normalizeIncomingType(const NodeContext& ctx, const UA
  * already makes for its other caches.
  */
 static const UA_DataType* resolveExpectedUdtType(const NodeContext& ctx) {
-    SGRN_RETURN_IF(ctx.udt_name.empty(), nullptr);
+    RETURN_IF(ctx.udt_name.empty(), nullptr);
 
     return ctx.type_registry ? ctx.type_registry->find(ctx.udt_name) : nullptr;
 }
@@ -131,11 +131,11 @@ Result<std::vector<uint8_t>, OpcUaAdapterError> encodeBinaryWrite(NodeContext* p
     // any mismatch here, before members are ever zipped index-by-index
     // against our PlcNode schema tree — this must run for BOTH paths
     // above, not just the ExtensionObject one.
-    SGRN_RETURN_ERROR_IF(
+    RETURN_ERROR_IF(
         !p_ctx->udt_name.empty() && p_udt_type && p_udt_type->typeKind == UA_DATATYPEKIND_STRUCTURE && p_udt_type != p_expected_udt,
         OpcUaAdapterError::TYPE_MISMATCH);
 
-    SGRN_RETURN_ERROR_IF(!p_udt_type || !p_udt_data, OpcUaAdapterError::NULL_POINTER);
+    RETURN_ERROR_IF(!p_udt_type || !p_udt_data, OpcUaAdapterError::NULL_POINTER);
 
     const size_t element_span = std::max<size_t>(1, p_node->size_);
     const size_t input_count = is_array_input ? std::min(t_v.arrayLength, static_cast<size_t>(p_ctx->array_length)) : 1U;
@@ -156,7 +156,7 @@ Result<std::vector<uint8_t>, OpcUaAdapterError> encodeBinaryWrite(NodeContext* p
                 .p_destination = cannonical_memory_buf.data() + header_offset,
                 .destination_size = (size_t)(cannonical_memory_buf.size() - header_offset)};
 
-            SGRN_IF_ERROR_PROPAGATE(encodeArrayOfBoolsToMemory(ctx));
+            PROPAGATE_ERROR_IF(encodeArrayOfBoolsToMemory(ctx));
         } else {
             const bool is_eo_arr = UA_Variant_hasArrayType(&t_v, &UA_TYPES[UA_TYPES_EXTENSIONOBJECT]);
             for (size_t j = 0; j < input_count; ++j) {
@@ -178,14 +178,14 @@ Result<std::vector<uint8_t>, OpcUaAdapterError> encodeBinaryWrite(NodeContext* p
                 if (!p_current_udt_type || !p_current_ua_data)
                     continue;
 
-                SGRN_RETURN_ERROR_IF(!p_ctx->udt_name.empty() && p_current_udt_type->typeKind == UA_DATATYPEKIND_STRUCTURE &&
-                                         p_current_udt_type != p_expected_udt,
+                RETURN_ERROR_IF(!p_ctx->udt_name.empty() && p_current_udt_type->typeKind == UA_DATATYPEKIND_STRUCTURE &&
+                                    p_current_udt_type != p_expected_udt,
                     OpcUaAdapterError::TYPE_MISMATCH);
 
                 if (p_current_udt_type->typeKind == UA_DATATYPEKIND_STRUCTURE) {
                     OpcUaEncodingContext elem_ctx{p_current_udt_type, p_current_ua_data, p_s7_elem_ptr, p_node};
                     elem_ctx.depth = 0;
-                    SGRN_IF_ERROR_PROPAGATE(encodeStructOpcUaToMemory(elem_ctx));
+                    PROPAGATE_ERROR_IF(encodeStructOpcUaToMemory(elem_ctx));
                 } else {
                     PlcScalarView elem_view = makeScalarView(*p_node);
                     elem_view.size = static_cast<uint32_t>(element_span);
@@ -200,13 +200,13 @@ Result<std::vector<uint8_t>, OpcUaAdapterError> encodeBinaryWrite(NodeContext* p
                         elem_view.count = 1;
                     }
                     OpcUaEncodingContext elem_ctx{p_current_udt_type, p_current_ua_data, p_s7_elem_ptr, elem_view};
-                    SGRN_IF_ERROR_PROPAGATE(encodeScalarOpcUaToMemory(elem_ctx));
+                    PROPAGATE_ERROR_IF(encodeScalarOpcUaToMemory(elem_ctx));
                 }
             }
         }
     } else if (p_udt_type->typeKind == UA_DATATYPEKIND_STRUCTURE) {
         OpcUaEncodingContext elem_ctx{p_udt_type, p_udt_data, cannonical_memory_buf.data() + header_offset, p_node};
-        SGRN_IF_ERROR_PROPAGATE(encodeStructOpcUaToMemory(elem_ctx));
+        PROPAGATE_ERROR_IF(encodeStructOpcUaToMemory(elem_ctx));
     } else if (is_bool_array) {
         const auto* p_bools = static_cast<const UA_Boolean*>(t_v.data);
 
@@ -215,11 +215,11 @@ Result<std::vector<uint8_t>, OpcUaAdapterError> encodeBinaryWrite(NodeContext* p
             .p_destination = cannonical_memory_buf.data() + header_offset,
             .destination_size = (size_t)(cannonical_memory_buf.data() - header_offset)};
 
-        SGRN_IF_ERROR_PROPAGATE(encodeArrayOfBoolsToMemory(ctx));
+        PROPAGATE_ERROR_IF(encodeArrayOfBoolsToMemory(ctx));
 
     } else {
         OpcUaEncodingContext elem_ctx{p_udt_type, p_udt_data, cannonical_memory_buf.data() + header_offset, p_node};
-        SGRN_IF_ERROR_PROPAGATE(encodeScalarOpcUaToMemory(elem_ctx));
+        PROPAGATE_ERROR_IF(encodeScalarOpcUaToMemory(elem_ctx));
     }
 
     return cannonical_memory_buf;
@@ -272,7 +272,7 @@ UA_StatusCode writeValue(UA_Server* tp_ua_server, const UA_NodeId* tp_session_id
 
     auto* p_ctx = static_cast<NodeContext*>(tp_node_context);
 
-    SGRN_RETURN_IF(!p_ctx || (!p_ctx->server && !p_ctx->is_tag), UA_STATUSCODE_BADINTERNALERROR);
+    RETURN_IF(!p_ctx || (!p_ctx->server && !p_ctx->is_tag), UA_STATUSCODE_BADINTERNALERROR);
 
     const std::string client_ip = resolveSessionIp(tp_ua_server, tp_session_id);
     const std::string cert_subject = resolveCertSubject(tp_ua_server, tp_session_id);
@@ -280,13 +280,13 @@ UA_StatusCode writeValue(UA_Server* tp_ua_server, const UA_NodeId* tp_session_id
     if (p_ctx->is_tag)
         return writeTagValue(p_ctx, tp_data_value, client_ip, cert_subject);
 
-    SGRN_RETURN_IF(!p_ctx->security, UA_STATUSCODE_BADINTERNALERROR);
+    RETURN_IF(!p_ctx->security, UA_STATUSCODE_BADINTERNALERROR);
 
     if (!p_ctx->security->authorizeField(
             security::Protocol::OpcUA, client_ip, p_ctx->db_number, p_ctx->field_path, true, "", {}, cert_subject))
         return UA_STATUSCODE_BADUSERACCESSDENIED;
 
-    SGRN_RETURN_IF(!tp_data_value || !tp_data_value->hasValue, UA_STATUSCODE_BADNODATA);
+    RETURN_IF(!tp_data_value || !tp_data_value->hasValue, UA_STATUSCODE_BADNODATA);
 
     const UA_Variant& t_v = tp_data_value->value;
 
@@ -340,10 +340,10 @@ UA_StatusCode writeValue(UA_Server* tp_ua_server, const UA_NodeId* tp_session_id
 
     const PlcNode* p_node = p_ctx->server->findSymbol(p_ctx->db_number, p_ctx->field_path);
 
-    SGRN_RETURN_IF_NULL(p_node, UA_STATUSCODE_BADNODATA);
+    RETURN_IF_NULL(p_node, UA_STATUSCODE_BADNODATA);
 
     auto encoded = encodeBinaryWrite(p_ctx, t_v, p_node);
-    SGRN_RETURN_IF(encoded.hasError(), toUAStatusCode(encoded.error()));
+    RETURN_IF(encoded.hasError(), toUAStatusCode(encoded.error()));
 
     // Commit directly — the same call S7/Modbus/EtherNet/IP/HTTP PUT already
     // make. writeDbMemory() does the version bump (leaf + every ancestor,
@@ -354,7 +354,7 @@ UA_StatusCode writeValue(UA_Server* tp_ua_server, const UA_NodeId* tp_session_id
     // now reaches the client as a real bad status instead of the previous
     // always-GOOD-once-encoded behavior.
     auto write_res = p_ctx->server->writeDbMemory(p_ctx->db_number, p_node->offset_, encoded.value().size(), encoded.value().data());
-    SGRN_RETURN_IF(write_res.hasError(), toUAStatusCode(write_res.error()));
+    RETURN_IF(write_res.hasError(), toUAStatusCode(write_res.error()));
 
     return UA_STATUSCODE_GOOD;
 }

@@ -45,11 +45,11 @@ Result<void, PlcMemoryError> PlcMemory::updateField(
 Result<void, PlcMemoryError> PlcMemory::updateFieldWithTimestamp(
     uint16_t t_db_number, const std::string& t_field_path, const std::string& t_value_json, uint64_t t_timestamp) {
 
-    SGRN_RETURN_IF_NULL(p_plc_state_, PlcMemoryError::PLC_STATE_NOT_INITIALIZED);
+    RETURN_IF_NULL(p_plc_state_, PlcMemoryError::PLC_STATE_NOT_INITIALIZED);
 
     const DbEntry* p_entry = p_plc_state_->findSegmentById(t_db_number);
 
-    SGRN_RETURN_IF_NULL(p_entry, PlcMemoryError::DB_SEGMENT_NOT_FOUND);
+    RETURN_IF_NULL(p_entry, PlcMemoryError::DB_SEGMENT_NOT_FOUND);
 
     std::string path = p_entry->name;
 
@@ -78,11 +78,11 @@ Result<void, PlcMemoryError> PlcMemory::updateFieldWithTimestamp(
 
 Result<std::string, PlcMemoryError> PlcMemory::getFieldValue(uint16_t t_db_number, const std::string& t_field_path) const {
 
-    SGRN_RETURN_IF_NULL(p_plc_state_, PlcMemoryError::PLC_STATE_NOT_INITIALIZED);
+    RETURN_IF_NULL(p_plc_state_, PlcMemoryError::PLC_STATE_NOT_INITIALIZED);
 
     const DbEntry* p_entry = p_plc_state_->findSegmentById(t_db_number);
 
-    SGRN_RETURN_IF_NULL(p_entry, PlcMemoryError::DB_SEGMENT_NOT_FOUND);
+    RETURN_IF_NULL(p_entry, PlcMemoryError::DB_SEGMENT_NOT_FOUND);
 
     std::string path = p_entry->name;
 
@@ -97,18 +97,18 @@ Result<std::string, PlcMemoryError> PlcMemory::getFieldValue(uint16_t t_db_numbe
 
     std::string val = p_plc_state_->getScalarString(path);
 
-    SGRN_RETURN_IF(val == "null", PlcMemoryError::UNMAPPED_ARENA_REGION);
+    RETURN_IF(val == "null", PlcMemoryError::UNMAPPED_ARENA_REGION);
 
     return val;
 }
 
 const PlcNode* PlcMemory::findSymbol(uint16_t t_db_number, const std::string& t_field_path) const {
 
-    SGRN_RETURN_IF_NULL(p_plc_state_, nullptr);
+    RETURN_IF_NULL(p_plc_state_, nullptr);
 
     const DbEntry* p_entry = p_plc_state_->findSegmentById(t_db_number);
 
-    SGRN_RETURN_IF_NULL(p_entry, nullptr);
+    RETURN_IF_NULL(p_entry, nullptr);
 
     std::string path = p_entry->name;
 
@@ -126,11 +126,11 @@ const PlcNode* PlcMemory::findSymbol(uint16_t t_db_number, const std::string& t_
 
 Result<std::string, PlcMemoryError> PlcMemory::getDbJson(uint16_t t_db_number) const {
 
-    SGRN_RETURN_IF_NULL(p_plc_state_, PlcMemoryError::PLC_STATE_NOT_INITIALIZED);
+    RETURN_IF_NULL(p_plc_state_, PlcMemoryError::PLC_STATE_NOT_INITIALIZED);
 
     const DbEntry* p_entry = p_plc_state_->findSegmentById(t_db_number);
 
-    SGRN_RETURN_IF(!p_entry || p_entry->name.empty(), PlcMemoryError::DB_SEGMENT_NOT_FOUND);
+    RETURN_IF(!p_entry || p_entry->name.empty(), PlcMemoryError::DB_SEGMENT_NOT_FOUND);
 
     const std::string val = p_plc_state_->getJsonString(p_entry->name);
 
@@ -142,11 +142,11 @@ Result<std::string, PlcMemoryError> PlcMemory::getDbJson(uint16_t t_db_number) c
 
 Result<std::string, PlcMemoryError> PlcMemory::getSubtreeJson(uint16_t t_db_number, const std::string& t_field_path) const {
 
-    SGRN_RETURN_IF_NULL(p_plc_state_, PlcMemoryError::PLC_STATE_NOT_INITIALIZED);
+    RETURN_IF_NULL(p_plc_state_, PlcMemoryError::PLC_STATE_NOT_INITIALIZED);
 
     const DbEntry* p_entry = p_plc_state_->findSegmentById(t_db_number);
 
-    SGRN_RETURN_IF(!p_entry || p_entry->name.empty(), PlcMemoryError::DB_SEGMENT_NOT_FOUND);
+    RETURN_IF(!p_entry || p_entry->name.empty(), PlcMemoryError::DB_SEGMENT_NOT_FOUND);
 
     if (t_field_path.empty())
         return getDbJson(t_db_number);
@@ -163,15 +163,15 @@ Result<std::string, PlcMemoryError> PlcMemory::getSubtreeJson(uint16_t t_db_numb
 
 std::string PlcMemory::getDbJsonString(uint16_t t_db_number) const {
 
-    SGRN_RETURN_IF_NULL(p_plc_state_, "{}");
+    RETURN_IF_NULL(p_plc_state_, "{}");
 
     const DbEntry* p_entry = p_plc_state_->findSegmentById(t_db_number);
 
-    SGRN_RETURN_IF(!p_entry || p_entry->name.empty(), "{}");
+    RETURN_IF(!p_entry || p_entry->name.empty(), "{}");
 
     const PlcNode* node = p_plc_state_->find(p_entry->name);
 
-    SGRN_RETURN_IF_NULL(node, "{}");
+    RETURN_IF_NULL(node, "{}");
 
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
@@ -207,10 +207,10 @@ std::vector<uint8_t> PlcMemory::getFullPlantSnapshot() const {
 }
 
 bool PlcMemory::checkDirty() {
-    SGRN_RETURN_IF_NULL(p_plc_state_, false);
+    RETURN_IF_NULL(p_plc_state_, false);
 
     for (auto& [name_, seg] : p_plc_state_->segments()) {
-        SGRN_RETURN_IF(seg->is_dirty_.load(std::memory_order_acquire), true);
+        RETURN_IF(seg->is_dirty_.load(std::memory_order_acquire), true);
     }
 
     return false;
@@ -232,7 +232,7 @@ std::vector<FieldUpdateNotification> PlcMemory::collectTypedDirtyLeaves(uint16_t
 std::vector<uint16_t> PlcMemory::getDirtyDbNumbers() const {
     std::vector<uint16_t> out;
 
-    SGRN_RETURN_IF_NULL(p_plc_state_, out);
+    RETURN_IF_NULL(p_plc_state_, out);
 
     for (auto& [name_, seg] : p_plc_state_->segments()) {
         if (seg->is_dirty_.load(std::memory_order_acquire)) {

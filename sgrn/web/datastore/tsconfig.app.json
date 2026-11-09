@@ -16,12 +16,15 @@
         "composite": true,
         "declaration": true,
         "emitDeclarationOnly": true,
+        "rootDir": "../..",
         "outDir": "dist/types-app",
         "jsx": "react-jsx",
         /* Path alias support */
         "baseUrl": ".",
         "paths": {
-            "@/*": ["src/*"]
+            "@/*": ["src/*"],
+            "@sgrn/datastore": ["../../typescript/datastore/src/index.ts"],
+            "@sgrn/datastore/web": ["../../typescript/datastore/src/web.ts"]
         },
         /* Linting */
         "strict": true,
@@ -31,5 +34,5 @@
         "noFallthroughCasesInSwitch": true,
         "noUncheckedSideEffectImports": true
     },
-    "include": ["src"]
+    "include": ["src", "../../typescript/datastore/src/web.ts"]
 }

@@ -65,11 +65,11 @@ int S7API S7ProtocolAdapter::s7RequestCallback(void* tp_usr_ptr, int t_sender, i
 
     auto* p_adapter = static_cast<S7ProtocolAdapter*>(tp_usr_ptr);
 
-    SGRN_RETURN_IF(!p_adapter || !t_tag, ::evrErrException);
+    RETURN_IF(!p_adapter || !t_tag, ::evrErrException);
 
     std::optional<size_t> size_opt = TypeTranslation::requestByteSize(*t_tag);
 
-    SGRN_RETURN_IF_NULL(size_opt, evrErrTransportSize);
+    RETURN_IF_NULL(size_opt, evrErrTransportSize);
 
     const size_t start = t_tag->Start < 0 ? 0U : static_cast<size_t>(t_tag->Start);
     const size_t bytes = size_opt.value();

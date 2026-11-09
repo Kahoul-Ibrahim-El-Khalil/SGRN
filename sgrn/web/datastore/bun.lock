@@ -15,6 +15,7 @@
         "@radix-ui/react-separator": "^1.2.0",
         "@radix-ui/react-slot": "^1.5.0",
         "@radix-ui/react-tabs": "^1.2.1",
+        "@sgrn/datastore": "file:../../typescript/datastore",
         "@sgrn/types": "file:../../typescript/types",
         "@svar-ui/filemanager-data-provider": "^2.6.0",
         "@svar-ui/react-filemanager": "^2.6.0",
@@ -347,6 +348,8 @@
     "@rollup/rollup-win32-x64-gnu": ["@rollup/rollup-win32-x64-gnu@4.64.10", "", { "os": "win32", "cpu": "x64" }, "sha512-57Idx+VkEOQeG6Ys6sZOBFT7FfbeyxGv9A3k1m+Lf/z2SwqT40rNWbAINzjPHSMoCCBvY7Fnb9RGZWQin/HHAw=="],
 
     "@rollup/rollup-win32-x64-msvc": ["@rollup/rollup-win32-x64-msvc@4.64.10", "", { "os": "win32", "cpu": "x64" }, "sha512-vrvuasIpm/xf+BpZbzgirku0WnrQZMAc+H2Ai26jzqBxYEmQQE4DdJb7h8erkJMfRRipx0ma2Cty8jJwUm9ocQ=="],
+
+    "@sgrn/datastore": ["@sgrn/datastore@file:../../typescript/datastore", { "dependencies": { "@sgrn/types": "file:../types" }, "devDependencies": { "typescript": "^5.9.3" } }],
 
     "@sgrn/types": ["@sgrn/types@file:../../typescript/types", { "devDependencies": { "typescript": "^5.9.3" } }],
 
@@ -913,6 +916,8 @@
     "@eslint-community/eslint-utils/eslint-visitor-keys": ["eslint-visitor-keys@3.4.3", "", {}, "sha512-wpc+LXeiyiisxPlEkUzU6svyS1frIO3Mgxj1fdy7Pm8Ygzguax2N3Fa/D/ag1WqbOprdI+uY6wMUl8/a2G+iag=="],
 
     "@eslint/eslintrc/globals": ["globals@14.0.0", "", {}, "sha512-oahGvuMGQlPw/ivIYBjVSrWAfWLBeku5tpPE2fOPLi+WHffIWbuh2tCjhyQhTBPMf5E9jDEH4FOmTYgYwbKwtQ=="],
+
+    "@sgrn/datastore/@sgrn/types": ["@sgrn/types@file:../../typescript/types", { "devDependencies": { "typescript": "^5.9.3" } }],
 
     "@svar-ui/filter-store/@svar-ui/lib-state": ["@svar-ui/lib-state@1.9.6", "", {}, "sha512-twoHa8wZvzdxtES68s6Wnp4Xi1WivScNaFFK6sJ6WDgqVYOzJw0ZhVVrdwHQgieLITTKl/DYh/U3nuqtMetKYw=="],
 

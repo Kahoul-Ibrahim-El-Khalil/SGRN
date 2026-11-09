@@ -62,14 +62,10 @@ std::string ModelManifest::toJson(bool t_pretty) const {
 
 Result<ModelManifest> ModelManifest::fromJson(std::string_view t_json_str) {
     auto doc_res = sgrn::utils::json::deserialize(t_json_str);
-    if (doc_res.hasError()) {
-        return Result<ModelManifest>::Error("Failed to parse ModelManifest JSON: " + doc_res.error());
-    }
+    RETURN_ERROR_IF(doc_res.hasError(), "Failed to parse ModelManifest JSON: " + doc_res.error());
 
     const auto& doc = doc_res.value();
-    if (!doc.IsObject()) {
-        return Result<ModelManifest>::Error("ModelManifest JSON must be an object");
-    }
+    RETURN_ERROR_IF(!doc.IsObject(), "ModelManifest JSON must be an object");
 
     ModelManifest manifest;
     if (doc.HasMember("name") && doc["name"].IsString())
@@ -85,9 +81,7 @@ Result<ModelManifest> ModelManifest::fromJson(std::string_view t_json_str) {
 
     if (doc.HasMember("spec") && doc["spec"].IsObject()) {
         auto spec_res = FeatureSpec::fromJsonValue(doc["spec"]);
-        if (spec_res.hasError()) {
-            return Result<ModelManifest>::Error("Failed to parse FeatureSpec inside manifest: " + spec_res.error());
-        }
+        RETURN_ERROR_IF(spec_res.hasError(), "Failed to parse FeatureSpec inside manifest: " + spec_res.error());
         manifest.spec = std::move(spec_res.value());
     }
 
@@ -146,9 +140,7 @@ Result<ModelManifest> ModelManifest::fromJson(std::string_view t_json_str) {
 
 Result<ModelManifest> ModelManifest::fromFile(const std::filesystem::path& t_file_path) {
     std::ifstream ifs(t_file_path, std::ios::binary);
-    if (!ifs.is_open()) {
-        return Result<ModelManifest>::Error("Failed to open file: " + t_file_path.string());
-    }
+    RETURN_ERROR_IF(!ifs.is_open(), "Failed to open file: " + t_file_path.string());
     std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
     return fromJson(content);
 }
@@ -158,12 +150,9 @@ Result<void> ModelManifest::validateWeights(std::string_view t_bytes) const {
         return {}; // No checksum specified
     }
     auto hash_res = sgrn::utils::computeSha256Data(t_bytes, sgrn::utils::HashEncoding::hex);
-    if (hash_res.hasError()) {
-        return Result<void>::Error("Failed to compute SHA256 of weights: " + hash_res.error());
-    }
-    if (hash_res.value() != weights_sha256) {
-        return Result<void>::Error("Weights SHA256 mismatch: expected " + weights_sha256 + ", got " + hash_res.value());
-    }
+    RETURN_ERROR_IF(hash_res.hasError(), "Failed to compute SHA256 of weights: " + hash_res.error());
+    RETURN_ERROR_IF(
+        hash_res.value() != weights_sha256, "Weights SHA256 mismatch: expected " + weights_sha256 + ", got " + hash_res.value());
     return {};
 }
 
@@ -172,13 +161,9 @@ Result<void> ModelManifest::validateWeightsFile(const std::filesystem::path& t_f
         return {};
     }
     auto hash_res = sgrn::utils::computeSha256File(t_file_path, sgrn::utils::HashEncoding::hex);
-    if (hash_res.hasError()) {
-        return Result<void>::Error("Failed to compute SHA256 of file " + t_file_path.string() + ": " + hash_res.error());
-    }
-    if (hash_res.value() != weights_sha256) {
-        return Result<void>::Error(
-            "Weights file SHA256 mismatch for " + t_file_path.string() + ": expected " + weights_sha256 + ", got " + hash_res.value());
-    }
+    RETURN_ERROR_IF(hash_res.hasError(), "Failed to compute SHA256 of file " + t_file_path.string() + ": " + hash_res.error());
+    RETURN_ERROR_IF(hash_res.value() != weights_sha256,
+        "Weights file SHA256 mismatch for " + t_file_path.string() + ": expected " + weights_sha256 + ", got " + hash_res.value());
     return {};
 }
 

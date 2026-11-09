@@ -30,8 +30,7 @@ sgrn::Result<void> SecurityManager::reloadPolicy() {
         std::lock_guard<std::mutex> lock(legacy_mutex_);
         t_path = policy_script_path_;
     }
-    if (t_path.empty())
-        return sgrn::Result<void>::Error("No policy script previously loaded");
+    RETURN_ERROR_IF(t_path.empty(), "No policy script previously loaded");
     return loadPolicyScript(t_path);
 }
 

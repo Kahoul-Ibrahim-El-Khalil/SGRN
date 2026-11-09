@@ -49,7 +49,7 @@ Result<KeyRecord> KeyRecord::clone() const {
 
     if (dek.isValid()) {
         auto dek_copy = dek.clone();
-        SGRN_RETURN_ERROR_IF(dek_copy.hasError(), dek_copy.error());
+        RETURN_ERROR_IF(dek_copy.hasError(), dek_copy.error());
         copy.dek = std::move(dek_copy.value());
     }
     return copy;
@@ -84,10 +84,10 @@ static std::string generateRandomUuid() {
 
 Result<KeyRecord> InMemoryKeyProvider::createPending(const std::string& t_object_key, const std::string& t_wrap_scheme) {
     auto dek_res = Dek::generate();
-    SGRN_RETURN_ERROR_IF(dek_res.hasError(), dek_res.error());
+    RETURN_ERROR_IF(dek_res.hasError(), dek_res.error());
 
     std::string key_id = generateRandomUuid();
-    SGRN_RETURN_ERROR_IF(key_id.empty(), "Failed to generate UUID for key_id");
+    RETURN_ERROR_IF(key_id.empty(), "Failed to generate UUID for key_id");
 
     KeyRecord record;
     record.key_id = key_id;
@@ -101,7 +101,7 @@ Result<KeyRecord> InMemoryKeyProvider::createPending(const std::string& t_object
     record.created_at = std::chrono::system_clock::now();
 
     auto out_clone = record.clone();
-    SGRN_RETURN_ERROR_IF(out_clone.hasError(), out_clone.error());
+    RETURN_ERROR_IF(out_clone.hasError(), out_clone.error());
 
     {
         std::lock_guard lock(m_mutex);
@@ -112,14 +112,14 @@ Result<KeyRecord> InMemoryKeyProvider::createPending(const std::string& t_object
 }
 
 Result<void> InMemoryKeyProvider::activate(const std::string& t_key_id, const std::string& t_file_id) {
-    SGRN_RETURN_ERROR_IF(t_key_id.empty(), "key_id cannot be empty");
-    SGRN_RETURN_ERROR_IF(t_file_id.empty(), "file_id cannot be empty");
+    RETURN_ERROR_IF(t_key_id.empty(), "key_id cannot be empty");
+    RETURN_ERROR_IF(t_file_id.empty(), "file_id cannot be empty");
 
     std::lock_guard lock(m_mutex);
     auto it = m_keys.find(t_key_id);
-    SGRN_RETURN_ERROR_IF(it == m_keys.end(), "Key not found");
+    RETURN_ERROR_IF(it == m_keys.end(), "Key not found");
 
-    SGRN_RETURN_ERROR_IF(it->second.status == KeyStatus::SHREDDED, "Cannot activate a shredded key");
+    RETURN_ERROR_IF(it->second.status == KeyStatus::SHREDDED, "Cannot activate a shredded key");
 
     it->second.file_id = t_file_id;
     it->second.status = KeyStatus::ACTIVE;
@@ -131,8 +131,8 @@ Result<KeyRecord> InMemoryKeyProvider::get(const std::string& t_key_id) {
     std::lock_guard lock(m_mutex);
     auto it = m_keys.find(t_key_id);
 
-    SGRN_RETURN_ERROR_IF(it == m_keys.end(), "Key not found");
-    SGRN_RETURN_ERROR_IF(it->second.status == KeyStatus::SHREDDED, "Key is shredded and unrecoverable");
+    RETURN_ERROR_IF(it == m_keys.end(), "Key not found");
+    RETURN_ERROR_IF(it->second.status == KeyStatus::SHREDDED, "Key is shredded and unrecoverable");
 
     return it->second.clone();
 }
@@ -140,7 +140,7 @@ Result<KeyRecord> InMemoryKeyProvider::get(const std::string& t_key_id) {
 Result<void> InMemoryKeyProvider::shred(const std::string& t_key_id) {
     std::lock_guard lock(m_mutex);
     auto it = m_keys.find(t_key_id);
-    SGRN_RETURN_ERROR_IF(it == m_keys.end(), "Key not found");
+    RETURN_ERROR_IF(it == m_keys.end(), "Key not found");
 
     it->second.dek.zeroize();
     it->second.status = KeyStatus::SHREDDED;

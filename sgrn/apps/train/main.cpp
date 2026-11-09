@@ -24,14 +24,10 @@ struct LoadedCsv {
 
 static sgrn::Result<LoadedCsv> loadCsv(const std::filesystem::path& t_path) {
     std::ifstream file(t_path);
-    if (!file.is_open()) {
-        return sgrn::Result<LoadedCsv>::Error("Cannot open CSV file: " + t_path.string());
-    }
+    RETURN_ERROR_IF(!file.is_open(), "Cannot open CSV file: " + t_path.string());
 
     std::string line;
-    if (!std::getline(file, line)) {
-        return sgrn::Result<LoadedCsv>::Error("CSV file is empty: " + t_path.string());
-    }
+    RETURN_ERROR_IF(!std::getline(file, line), "CSV file is empty: " + t_path.string());
 
     LoadedCsv csv;
     csv.headers = sgrn::utils::strings::split(line, ',');
@@ -68,9 +64,7 @@ static sgrn::Result<LoadedCsv> loadCsv(const std::filesystem::path& t_path) {
         }
     }
 
-    if (csv.rows.empty()) {
-        return sgrn::Result<LoadedCsv>::Error("No valid numerical rows loaded from CSV");
-    }
+    RETURN_ERROR_IF(csv.rows.empty(), "No valid numerical rows loaded from CSV");
 
     return csv;
 }

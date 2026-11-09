@@ -17,30 +17,24 @@ namespace sgrn::utils::crypto
     }
 
     std::vector<uint8_t> bytes(count);
-    if (RAND_bytes(bytes.data(), static_cast<int>(count)) != 1) {
-        return ::sgrn::Result<std::vector<uint8_t>>::Error("OpenSSL RAND_bytes failed to generate secure random bytes");
-    }
+    RETURN_ERROR_IF(RAND_bytes(bytes.data(), static_cast<int>(count)) != 1, "OpenSSL RAND_bytes failed to generate secure random bytes");
     return bytes;
 }
 
 ::sgrn::Result<std::string> generateRandomKeyHex(std::size_t byte_count) {
     auto bytes_res = generateRandomBytes(byte_count);
-    if (bytes_res.hasError()) {
-        return ::sgrn::Result<std::string>::Error(bytes_res.error());
-    }
+    RETURN_IF(bytes_res.hasError(), bytes_res.error());
     return sgrn::utils::encoding::toHex(bytes_res.value().data(), bytes_res.value().size());
 }
 
 ::sgrn::Result<Ed25519KeyPair> generateEd25519KeyPair() {
     EVP_PKEY_CTX* pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_ED25519, nullptr);
-    if (!pctx) {
-        return ::sgrn::Result<Ed25519KeyPair>::Error("Failed to allocate EVP_PKEY_CTX for Ed25519");
-    }
+    RETURN_ERROR_IF(!pctx, "Failed to allocate EVP_PKEY_CTX for Ed25519");
 
     EVP_PKEY* pkey = nullptr;
     if (EVP_PKEY_keygen_init(pctx) <= 0 || EVP_PKEY_keygen(pctx, &pkey) <= 0 || !pkey) {
         EVP_PKEY_CTX_free(pctx);
-        return ::sgrn::Result<Ed25519KeyPair>::Error("Failed to generate Ed25519 key pair");
+        return ::sgrn::Error("Failed to generate Ed25519 key pair");
     }
     EVP_PKEY_CTX_free(pctx);
 
@@ -55,7 +49,7 @@ namespace sgrn::utils::crypto
     if (EVP_PKEY_get_raw_private_key(pkey, priv_bytes.data(), &priv_len) != 1 ||
         EVP_PKEY_get_raw_public_key(pkey, pub_bytes.data(), &pub_len) != 1) {
         EVP_PKEY_free(pkey);
-        return ::sgrn::Result<Ed25519KeyPair>::Error("Failed to extract raw Ed25519 keys");
+        return ::sgrn::Error("Failed to extract raw Ed25519 keys");
     }
 
     Ed25519KeyPair kp;
@@ -82,39 +76,35 @@ bool generateEd25519KeyPair(std::string& out_priv_hex, std::string& out_pub_hex)
 
 ::sgrn::Result<std::string> signEd25519(std::string_view message, std::string_view priv_hex) {
     auto priv_bytes = sgrn::utils::encoding::fromHex(priv_hex);
-    if (!priv_bytes.has_value() || priv_bytes->empty()) {
-        return ::sgrn::Result<std::string>::Error("Invalid hex encoded private key");
-    }
+    RETURN_ERROR_IF(!priv_bytes.has_value() || priv_bytes->empty(), "Invalid hex encoded private key");
 
     EVP_PKEY* pkey = EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, nullptr, priv_bytes->data(), priv_bytes->size());
-    if (!pkey) {
-        return ::sgrn::Result<std::string>::Error("Failed to initialize EVP_PKEY from raw Ed25519 private key");
-    }
+    RETURN_ERROR_IF(!pkey, "Failed to initialize EVP_PKEY from raw Ed25519 private key");
 
     EVP_MD_CTX* md_ctx = EVP_MD_CTX_new();
     if (!md_ctx) {
         EVP_PKEY_free(pkey);
-        return ::sgrn::Result<std::string>::Error("Failed to allocate EVP_MD_CTX for Ed25519 signing");
+        return ::sgrn::Error("Failed to allocate EVP_MD_CTX for Ed25519 signing");
     }
 
     if (EVP_DigestSignInit(md_ctx, nullptr, nullptr, nullptr, pkey) <= 0) {
         EVP_MD_CTX_free(md_ctx);
         EVP_PKEY_free(pkey);
-        return ::sgrn::Result<std::string>::Error("EVP_DigestSignInit failed");
+        return ::sgrn::Error("EVP_DigestSignInit failed");
     }
 
     size_t sig_len = 0;
     if (EVP_DigestSign(md_ctx, nullptr, &sig_len, reinterpret_cast<const unsigned char*>(message.data()), message.size()) <= 0) {
         EVP_MD_CTX_free(md_ctx);
         EVP_PKEY_free(pkey);
-        return ::sgrn::Result<std::string>::Error("EVP_DigestSign failed to determine signature length");
+        return ::sgrn::Error("EVP_DigestSign failed to determine signature length");
     }
 
     std::vector<unsigned char> sig(sig_len);
     if (EVP_DigestSign(md_ctx, sig.data(), &sig_len, reinterpret_cast<const unsigned char*>(message.data()), message.size()) <= 0) {
         EVP_MD_CTX_free(md_ctx);
         EVP_PKEY_free(pkey);
-        return ::sgrn::Result<std::string>::Error("EVP_DigestSign failed to produce signature");
+        return ::sgrn::Error("EVP_DigestSign failed to produce signature");
     }
 
     EVP_MD_CTX_free(md_ctx);

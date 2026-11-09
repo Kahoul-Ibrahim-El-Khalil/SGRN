@@ -67,8 +67,7 @@ NorthboundServer::~NorthboundServer() {
 }
 
 sgrn::Result<void> NorthboundServer::start(const std::string& t_ip, uint16_t t_port) {
-    if (running_.load(std::memory_order_acquire))
-        return sgrn::Result<void>::Error("NorthboundServer: already running");
+    RETURN_ERROR_IF(running_.load(std::memory_order_acquire), "NorthboundServer: already running");
 
     app_.bindaddr(t_ip).port(t_port);
     // Validate routes synchronously: Crow otherwise reports route errors

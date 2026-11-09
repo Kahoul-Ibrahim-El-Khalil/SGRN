@@ -353,9 +353,7 @@ inline sgrn::Result<Document, std::string> mergeWithSchemaCheck(
             const char* p_ey = it->name.GetString();
             if (result.HasMember(p_ey)) {
                 auto merged = mergeWithSchemaCheck(result[p_ey], it->value, t_alloc, t_path + "." + p_ey);
-                if (merged.hasError()) {
-                    return merged.error();
-                }
+                PROPAGATE_ERROR_IF(merged);
                 result[p_ey].CopyFrom(merged.value(), t_alloc);
             } else {
                 ::rapidjson::Value k(it->name, t_alloc);
@@ -383,17 +381,13 @@ inline sgrn::Result<Document, std::string> mergeJsonDeltas(const fs::path& t_bas
     }
 
     auto baseline_res = deserializeFromFile(t_base_tree_path);
-    if (baseline_res.hasError()) {
-        return baseline_res.error();
-    }
+    PROPAGATE_ERROR_IF(baseline_res);
 
     Document result = std::move(baseline_res.value());
 
     for (const auto& t_path : t_deltas_paths) {
         auto delta_res = deserializeFromFile(t_path);
-        if (delta_res.hasError()) {
-            return delta_res.error();
-        }
+        PROPAGATE_ERROR_IF(delta_res);
         applyDelta(result, delta_res.value());
     }
 
@@ -641,17 +635,13 @@ inline sgrn::Result<const Value*, std::string> requireMember(const Value& t_pare
 
 inline sgrn::Result<std::string, std::string> requireString(const Value& t_parent, const std::string& t_key) {
     auto res = requireMember(t_parent, t_key, "string");
-    if (res.hasError()) {
-        return res.error();
-    }
+    PROPAGATE_ERROR_IF(res);
     return std::string(res.value()->GetString(), res.value()->GetStringLength());
 }
 
 inline sgrn::Result<int, std::string> requireInt(const Value& t_parent, const std::string& t_key) {
     auto res = requireMember(t_parent, t_key, "integer");
-    if (res.hasError()) {
-        return res.error();
-    }
+    PROPAGATE_ERROR_IF(res);
     if (res.value()->IsInt()) {
         return res.value()->GetInt();
     }
@@ -672,9 +662,7 @@ inline sgrn::Result<int, std::string> requireInt(const Value& t_parent, const st
 
 inline sgrn::Result<bool, std::string> requireBool(const Value& t_parent, const std::string& t_key) {
     auto res = requireMember(t_parent, t_key, "boolean");
-    if (res.hasError()) {
-        return res.error();
-    }
+    PROPAGATE_ERROR_IF(res);
     return res.value()->GetBool();
 }
 

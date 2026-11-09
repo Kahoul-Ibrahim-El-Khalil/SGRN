@@ -46,12 +46,12 @@ static UA_StatusCode readScalarValue(const NodeContext* tp_ctx, UA_DataValue* tp
         return UA_STATUSCODE_BADINTERNALERROR;
 
     auto r = tp_ctx->server->readDbMemory(tp_ctx->db_number, off, size, tp_ctx->scratch_buf.data());
-    SGRN_RETURN_IF(r.hasError(), toUAStatusCode(r.error()));
+    RETURN_IF(r.hasError(), toUAStatusCode(r.error()));
 
     OpcUaDecodingContext raw_ctx{.p_node_ctx = tp_ctx, .p_raw_data = tp_ctx->scratch_buf.data(), .size = size};
 
     auto decoded = decodeMemoryBytesToDataValue(raw_ctx);
-    SGRN_RETURN_IF(decoded.hasError(), toUAStatusCode(decoded.error())); // was hard-coded BADINTERNALERROR
+    RETURN_IF(decoded.hasError(), toUAStatusCode(decoded.error())); // was hard-coded BADINTERNALERROR
 
     UA_DataValue_init(tp_data_value);
     *tp_data_value = std::move(decoded).value();
@@ -71,12 +71,12 @@ static UA_StatusCode readArrayValue(const NodeContext* tp_ctx, UA_DataValue* tp_
         return UA_STATUSCODE_BADINTERNALERROR;
 
     auto r = tp_ctx->server->readDbMemory(tp_ctx->db_number, off, size, tp_ctx->scratch_buf.data());
-    SGRN_RETURN_IF(r.hasError(), toUAStatusCode(r.error()));
+    RETURN_IF(r.hasError(), toUAStatusCode(r.error()));
 
     OpcUaDecodingContext raw_ctx{.p_node_ctx = tp_ctx, .p_raw_data = tp_ctx->scratch_buf.data(), .size = size};
 
     auto result = decodeMemoryBytesToDataValue(raw_ctx);
-    SGRN_RETURN_IF(result.hasError(), toUAStatusCode(result.error()));
+    RETURN_IF(result.hasError(), toUAStatusCode(result.error()));
 
     *tp_data_value = std::move(result).value();
     if (t_source_time_stamp) {
@@ -92,12 +92,12 @@ static UA_StatusCode readTagValue(const NodeContext* tp_ctx, UA_DataValue* tp_da
     if (!tp_ctx->tag_backing || tp_ctx->field_size == 0)
         return UA_STATUSCODE_BADINTERNALERROR;
     auto r = tp_ctx->tag_backing->read_bytes(tp_ctx->tag_name, tp_ctx->tag_byte_offset, tp_ctx->field_size, tp_ctx->tag_bit_index);
-    SGRN_RETURN_IF(r.hasError(), UA_STATUSCODE_BADINTERNALERROR);
+    RETURN_IF(r.hasError(), UA_STATUSCODE_BADINTERNALERROR);
     if (r.value().size() < tp_ctx->field_size)
         return UA_STATUSCODE_BADINTERNALERROR;
     OpcUaDecodingContext raw_ctx{.p_node_ctx = tp_ctx, .p_raw_data = r.value().data(), .size = tp_ctx->field_size};
     auto decoded = decodeMemoryBytesToDataValue(raw_ctx);
-    SGRN_RETURN_IF(decoded.hasError(), toUAStatusCode(decoded.error()));
+    RETURN_IF(decoded.hasError(), toUAStatusCode(decoded.error()));
     UA_DataValue_init(tp_data_value);
     *tp_data_value = std::move(decoded).value();
     if (t_source_time_stamp)
@@ -108,7 +108,7 @@ static UA_StatusCode readTagValue(const NodeContext* tp_ctx, UA_DataValue* tp_da
 UA_StatusCode readValue(UA_Server* /*server*/, const UA_NodeId* /*sessionId*/, void* /*sessionContext*/, const UA_NodeId* /*nodeId*/,
     void* tp_node_context, UA_Boolean t_source_time_stamp, const UA_NumericRange* /*range*/, UA_DataValue* tp_data_value) {
     auto* p_ctx = static_cast<NodeContext*>(tp_node_context);
-    SGRN_RETURN_IF(!p_ctx || (!p_ctx->server && !p_ctx->is_tag), UA_STATUSCODE_BADINTERNALERROR);
+    RETURN_IF(!p_ctx || (!p_ctx->server && !p_ctx->is_tag), UA_STATUSCODE_BADINTERNALERROR);
 
     if (p_ctx->security) {
         std::string client_ip = "";
@@ -117,7 +117,7 @@ UA_StatusCode readValue(UA_Server* /*server*/, const UA_NodeId* /*sessionId*/, v
         // the tag name for audit).
         const std::optional<uint16_t> db = p_ctx->is_tag ? std::nullopt : std::optional<uint16_t>(p_ctx->db_number);
         const std::string& path = p_ctx->is_tag ? p_ctx->tag_name : p_ctx->field_path;
-        SGRN_RETURN_IF(!p_ctx->security->authorizeField(security::Protocol::OpcUA, client_ip, db, path, false, "", {}, session_name),
+        RETURN_IF(!p_ctx->security->authorizeField(security::Protocol::OpcUA, client_ip, db, path, false, "", {}, session_name),
             UA_STATUSCODE_BADUSERACCESSDENIED);
     }
 
@@ -140,13 +140,13 @@ UA_StatusCode readAggregateValue(UA_Server* /*server*/, const UA_NodeId* /*sessi
     const UA_NodeId* /*nodeId*/, void* tp_node_context, UA_Boolean t_source_time_stamp, const UA_NumericRange* /*range*/,
     UA_DataValue* tp_data_value) {
     auto* p_ctx = static_cast<NodeContext*>(tp_node_context);
-    SGRN_RETURN_IF(!p_ctx || !p_ctx->server, UA_STATUSCODE_BADINTERNALERROR);
+    RETURN_IF(!p_ctx || !p_ctx->server, UA_STATUSCODE_BADINTERNALERROR);
 
     if (p_ctx->security) {
         std::string client_ip = "";
         std::string session_name = "";
-        SGRN_RETURN_IF(!p_ctx->security->authorizeField(
-                           security::Protocol::OpcUA, client_ip, p_ctx->db_number, p_ctx->field_path, false, "", {}, session_name),
+        RETURN_IF(!p_ctx->security->authorizeField(
+                      security::Protocol::OpcUA, client_ip, p_ctx->db_number, p_ctx->field_path, false, "", {}, session_name),
             UA_STATUSCODE_BADUSERACCESSDENIED);
     }
 
@@ -155,7 +155,7 @@ UA_StatusCode readAggregateValue(UA_Server* /*server*/, const UA_NodeId* /*sessi
         const PlcNode* p_node = p_ctx->resolveSymbol();
         if (p_udt_type && p_node && p_ctx->server->state()) {
             auto result = decodeStructObjectToExtensionObjectVariant(*p_node, *p_udt_type, p_ctx->server->state()->tree());
-            SGRN_RETURN_IF(result.hasError(), toUAStatusCode(result.error()));
+            RETURN_IF(result.hasError(), toUAStatusCode(result.error()));
 
             UA_Variant_init(&tp_data_value->value);
             tp_data_value->value = std::move(result).value();

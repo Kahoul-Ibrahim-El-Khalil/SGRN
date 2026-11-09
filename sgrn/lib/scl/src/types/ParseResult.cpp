@@ -37,9 +37,7 @@ namespace sgrn::scl::parsing
 
 Result<ParseResult, std::string> fromJson(const rapidjson::Value& t_node) {
     sgrn::scl::ParseResult t_result;
-    if (!t_node.IsObject()) {
-        return sgrn::Error("Object is Empty");
-    }
+    RETURN_ERROR_IF(!t_node.IsObject(), "Object is Empty");
 
     if (t_node.HasMember("dbs") && t_node["dbs"].IsArray()) {
         for (const auto& db_node : t_node["dbs"].GetArray())

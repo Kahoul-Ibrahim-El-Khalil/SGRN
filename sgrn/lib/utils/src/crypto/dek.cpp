@@ -39,13 +39,13 @@ void Dek::zeroize() noexcept {
 
 Result<Dek> Dek::generate() {
     Dek dek;
-    SGRN_RETURN_ERROR_IF(RAND_bytes(dek.m_key.data(), static_cast<int>(kKeySize)) != 1, "Failed to generate random bytes for DEK");
+    RETURN_ERROR_IF(RAND_bytes(dek.m_key.data(), static_cast<int>(kKeySize)) != 1, "Failed to generate random bytes for DEK");
     dek.m_valid = true;
     return dek;
 }
 
 Result<Dek> Dek::fromBytes(std::span<const uint8_t> t_bytes) {
-    SGRN_RETURN_ERROR_IF(t_bytes.size() != kKeySize, "Invalid key size: expected 32 bytes");
+    RETURN_ERROR_IF(t_bytes.size() != kKeySize, "Invalid key size: expected 32 bytes");
     Dek dek;
     std::memcpy(dek.m_key.data(), t_bytes.data(), kKeySize);
     dek.m_valid = true;
@@ -60,7 +60,7 @@ bool Dek::equals(const Dek& t_other) const noexcept {
 }
 
 Result<Dek> Dek::clone() const {
-    SGRN_RETURN_ERROR_IF(!m_valid, "Cannot clone uninitialized DEK");
+    RETURN_ERROR_IF(!m_valid, "Cannot clone uninitialized DEK");
     return fromBytes(span());
 }
 

@@ -156,7 +156,7 @@ inline ::sgrn::Result<std::string> computeSha512File(const std::filesystem::path
 
     if (EVP_DigestInit_ex(ctx_.get(), EVP_sha512(), nullptr) != 1) {
         ERROR_LOG("Digest init failed for file: {}", t_path.string());
-        return ::sgrn::Result<std::string>::Error("Digest init failed");
+        return ::sgrn::Error("Digest init failed");
     }
 
     constexpr std::size_t buffer_size = 16 * 1024;
@@ -167,9 +167,7 @@ inline ::sgrn::Result<std::string> computeSha512File(const std::filesystem::path
         std::streamsize read = file.gcount();
 
         if (read > 0) {
-            if (EVP_DigestUpdate(ctx_.get(), t_buffer.data(), static_cast<std::size_t>(read)) != 1) {
-                return ::sgrn::Result<std::string>::Error("Digest update failed");
-            }
+            RETURN_ERROR_IF(EVP_DigestUpdate(ctx_.get(), t_buffer.data(), static_cast<std::size_t>(read)) != 1, "Digest update failed");
         }
     }
 

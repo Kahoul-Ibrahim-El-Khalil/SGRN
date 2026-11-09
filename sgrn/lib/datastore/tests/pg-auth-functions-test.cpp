@@ -447,11 +447,11 @@ int main() {
         CHECK(q.ok);
         if (q.ok && nrows(q) == 1) {
             const Json::Value folders = parseJson(fieldById(q, 0, "folders"));
-            CHECK(folders.isArray() && folders.size() == 4); // Production/Maintenance/Logistics/Management
+            CHECK(folders.isArray() && folders.size() == 4); // logistics/maintenance/management/production
             if (!folders.empty()) {
                 CHECK(folders[0].isMember("display_name") == false); // jsonb_strip_nulls dropped it
-                CHECK(folders[0]["name"].asString() == "Logistics"); // ORDER BY name
-                CHECK(folders[0]["path"].asString() == "/domains/Logistics");
+                CHECK(folders[0]["name"].asString() == "logistics"); // ORDER BY name
+                CHECK(folders[0]["path"].asString() == "/domains/logistics");
             }
         }
     }

@@ -56,8 +56,7 @@ void WebSocketAdapter::setAreaWriteFn(AreaWriteFn t_fn) {
 sgrn::Result<void> WebSocketAdapter::start(const std::string& t_ip, uint16_t t_port, SecurityManagerSptr tsp_security_manager,
     const PlcSchemaStore* tp_registry, std::function<std::string()> t_full_snapshot_provider, BinaryReadFn t_binary_read_fn,
     BinaryWriteFn t_binary_write_fn) {
-    if (running_.load(std::memory_order_acquire))
-        return sgrn::Result<void>::Error("WebSocketAdapter: already running");
+    RETURN_ERROR_IF(running_.load(std::memory_order_acquire), "WebSocketAdapter: already running");
     configure(std::move(tsp_security_manager), tp_registry, std::move(t_full_snapshot_provider), std::move(t_binary_read_fn),
         std::move(t_binary_write_fn));
 

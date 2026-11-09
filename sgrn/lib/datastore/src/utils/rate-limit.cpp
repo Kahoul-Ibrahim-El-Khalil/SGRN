@@ -2,6 +2,7 @@
 
 #include <drogon/utils/Utilities.h>
 
+#include <sgrn/Result.hpp>
 #include <algorithm>
 #include <cctype>
 
@@ -166,9 +167,7 @@ std::string buildKey(RateClass t_class, std::string_view t_ip, std::string_view 
 }
 
 std::string authAccountId(const drogon::HttpRequestPtr& t_req) {
-    if (!t_req) {
-        return {};
-    }
+    RETURN_IF_NULL(t_req, {});
     Json::Value body;
     try {
         auto json = t_req->getJsonObject();

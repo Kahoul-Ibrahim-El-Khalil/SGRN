@@ -231,18 +231,15 @@ inline S7BatchEngine<Provider>& S7BatchEngine<Provider>::write(bool t_val) {
 }
 template <typename Provider>
 inline sgrn::Result<std::string, SclError> S7BatchEngine<Provider>::read() const {
-    if (last_error_.has_value())
-        return sgrn::Result<std::string, SclError>::Error(*last_error_);
-    if (pending_paths_.empty())
-        return sgrn::Result<std::string, SclError>::Error(::sgrn::scl::SclError::Generic);
+    RETURN_ERROR_IF(last_error_.has_value(), *last_error_);
+    RETURN_ERROR_IF(pending_paths_.empty(), ::sgrn::scl::SclError::Generic);
     auto raw = provider_.read(pending_paths_.back());
-    SGRN_RETURN_IF(raw.hasError(), proto_bridge(raw.error()));
+    RETURN_IF(raw.hasError(), proto_bridge(raw.error()));
     return std::move(raw).value();
 }
 template <typename Provider>
 inline sgrn::Result<std::string, SclError> S7BatchEngine<Provider>::toJson() const {
-    if (last_error_.has_value())
-        return sgrn::Result<std::string, SclError>::Error(*last_error_);
+    RETURN_ERROR_IF(last_error_.has_value(), *last_error_);
 
     rapidjson::StringBuffer sb;
     rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
@@ -250,7 +247,7 @@ inline sgrn::Result<std::string, SclError> S7BatchEngine<Provider>::toJson() con
     for (const auto& t_p : pending_paths_) {
         writer.Key(t_p.c_str());
         auto val_res = provider_.read(t_p);
-        SGRN_RETURN_IF(val_res.hasError(), proto_bridge(val_res.error()));
+        RETURN_IF(val_res.hasError(), proto_bridge(val_res.error()));
         rapidjson::Document d;
         d.Parse(val_res.value().c_str());
         d.Accept(writer);
@@ -260,26 +257,23 @@ inline sgrn::Result<std::string, SclError> S7BatchEngine<Provider>::toJson() con
 }
 template <typename Provider>
 inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::put(S7Client& t_client) {
-    if (last_error_.has_value())
-        return sgrn::Result<void, SclError>::Error(*last_error_);
+    RETURN_ERROR_IF(last_error_.has_value(), *last_error_);
     if (pending_paths_.empty())
         return {};
     return executePut_(t_client);
 }
 template <typename Provider>
 inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::commitLocal() {
-    if (last_error_.has_value())
-        return sgrn::Result<void, SclError>::Error(*last_error_);
+    RETURN_ERROR_IF(last_error_.has_value(), *last_error_);
     if (pending_paths_.empty())
         return {};
     auto res = provider_.commitLocalPut(pending_paths_, pending_values_);
-    SGRN_RETURN_IF(res.hasError(), proto_bridge(res.error()));
+    RETURN_IF(res.hasError(), proto_bridge(res.error()));
     return {};
 }
 template <typename Provider>
 inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::get(S7Client& t_client) {
-    if (last_error_.has_value())
-        return sgrn::Result<void, SclError>::Error(*last_error_);
+    RETURN_ERROR_IF(last_error_.has_value(), *last_error_);
     if (pending_paths_.empty())
         return {};
     return executeGet_(t_client);
@@ -298,7 +292,7 @@ inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::executePut_(S7Clien
     std::vector<S7DataItem> all_items;
     std::vector<std::vector<uint8_t>> all_bufs;
     auto build_res = provider_.buildPutItems(pending_paths_, pending_values_, all_items, all_bufs);
-    SGRN_RETURN_IF(build_res.hasError(), proto_bridge(build_res.error()));
+    RETURN_IF(build_res.hasError(), proto_bridge(build_res.error()));
 
     // Snap7 documented safe maximum for readMultiVars/writeMultiVars is 19 items per call.
     // Using a dynamic PDU-size based formula often produces incorrect batch boundaries
@@ -329,11 +323,11 @@ inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::executePut_(S7Clien
             }
             if (!ok_paths.empty()) {
                 auto ok_res = provider_.commitLocalPut(ok_paths, ok_values);
-                SGRN_RETURN_IF(ok_res.hasError(), proto_bridge(ok_res.error()));
+                RETURN_IF(ok_res.hasError(), proto_bridge(ok_res.error()));
             }
         }
 
-        SGRN_RETURN_IF(rc.hasError(), proto_bridge(rc.error()));
+        RETURN_IF(rc.hasError(), proto_bridge(rc.error()));
 
         offset += count;
     }
@@ -347,7 +341,7 @@ inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::executeGet_(S7Clien
     std::vector<S7DataItem> all_items;
     std::vector<std::vector<uint8_t>> all_bufs;
     auto build_res = provider_.buildGetItems(pending_paths_, all_items, all_bufs);
-    SGRN_RETURN_IF(build_res.hasError(), proto_bridge(build_res.error()));
+    RETURN_IF(build_res.hasError(), proto_bridge(build_res.error()));
 
     const size_t items_per_pdu = kMaxPduItems;
 
@@ -375,12 +369,12 @@ inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::executeGet_(S7Clien
             provider_.commitGetResults(chunk_paths, chunk_items);
         }
 
-        SGRN_RETURN_IF(rc.hasError(), proto_bridge(rc.error()));
+        RETURN_IF(rc.hasError(), proto_bridge(rc.error()));
 
         offset += count;
     }
 
-    SGRN_RETURN_ERROR_IF(any_item_error, SclError::Generic);
+    RETURN_ERROR_IF(any_item_error, SclError::Generic);
     return {};
 }
 } // namespace sgrn::s7shell

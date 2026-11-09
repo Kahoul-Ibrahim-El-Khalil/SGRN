@@ -430,8 +430,7 @@ void PlcRuntime::importSchemaTags() {
 sgrn::Result<PlcRuntime::RuntimeTag, std::string> PlcRuntime::describeTag(const std::string& t_name) const {
     std::lock_guard<std::mutex> lk(tag_mutex_);
     auto it = tags_.find(t_name);
-    if (it == tags_.end())
-        return sgrn::Result<RuntimeTag, std::string>::Error("describeTag: unknown tag '" + t_name + "'");
+    RETURN_ERROR_IF(it == tags_.end(), "describeTag: unknown tag '" + t_name + "'");
     return it->second;
 }
 
@@ -566,8 +565,7 @@ sgrn::Result<std::string, ::sgrn::scl::SclError> PlcRuntime::readTagJson(const s
         return std::string(bit ? "true" : "false");
     }
     auto decoded = ::sgrn::gateway::twin::decodeFieldAt(tag.field, buf.data(), buf.size());
-    if (decoded.hasError())
-        return decoded.error();
+    RETURN_IF(decoded.hasError(), decoded.error());
     return decoded.value();
 }
 

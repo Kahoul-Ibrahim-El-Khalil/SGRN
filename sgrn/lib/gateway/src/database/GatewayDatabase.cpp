@@ -126,9 +126,7 @@ sgrn::Result<std::filesystem::path, std::string> createDatabaseFile(const std::s
 }
 sgrn::Result<void, std::string> GatewayDatabase::initialize(const std::string& t_state_dir) {
     const auto db_path = createDatabaseFile(t_state_dir, kDatabaseFileName);
-    if (db_path.hasError()) {
-        return db_path.error();
-    }
+    PROPAGATE_ERROR_IF(db_path);
     std::lock_guard<std::mutex> lock(mu_);
     db_ = std::make_unique<sqlite::database>(db_path.value().string());
 

@@ -59,7 +59,7 @@ public:
 
     sgrn::Result<std::vector<float>> predict(std::span<const float> t_features) override {
         if (t_features.size() < 2) {
-            return sgrn::Result<std::vector<float>>::Error("Insufficient features for prediction");
+            RETURN_ERROR("Insufficient features for prediction");
         }
         const float temp = t_features[0];
         const float flow = t_features[1];

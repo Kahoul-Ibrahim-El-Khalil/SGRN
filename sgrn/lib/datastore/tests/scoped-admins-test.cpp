@@ -172,48 +172,48 @@ void testDomainAdminHierarchy(PGconn* conn) {
     std::printf("--- 4. Testing domain admin on subtree, child, sibling, and parent ---\n");
 
     // 1. Set up domain hierarchy in OrgA:
-    //    /Production (id: prod_id)
-    //      /Production/Line1 (id: line1_id)
-    //        /Production/Line1/CellA (id: cell_a_id)
-    //      /Production/Line2 (id: line2_id)
-    //    /Maintenance (id: maint_id)
+    //    /production (id: prod_id)
+    //      /production/line1 (id: line1_id)
+    //        /production/line1/cella (id: cell_a_id)
+    //      /production/line2 (id: line2_id)
+    //    /maintenance (id: maint_id)
     Query q_prod =
-        query(conn, "INSERT INTO core.domains (organisation, name, parent_id) VALUES ('OrgA', 'Production', NULL) RETURNING id, path");
+        query(conn, "INSERT INTO core.domains (organisation, name, parent_id) VALUES ('OrgA', 'production', NULL) RETURNING id, path");
     CHECK(q_prod.ok && nrows(q_prod) == 1);
     const std::string prod_id = field(q_prod, 0, 0);
-    CHECK(field(q_prod, 0, 1) == "/Production");
+    CHECK(field(q_prod, 0, 1) == "/production");
     if (q_prod.res)
         ::PQclear(q_prod.res);
 
     Query q_line1 = query(
-        conn, "INSERT INTO core.domains (organisation, name, parent_id) VALUES ('OrgA', 'Line1', $1::int) RETURNING id, path", {prod_id});
+        conn, "INSERT INTO core.domains (organisation, name, parent_id) VALUES ('OrgA', 'line1', $1::int) RETURNING id, path", {prod_id});
     CHECK(q_line1.ok && nrows(q_line1) == 1);
     const std::string line1_id = field(q_line1, 0, 0);
-    CHECK(field(q_line1, 0, 1) == "/Production/Line1");
+    CHECK(field(q_line1, 0, 1) == "/production/line1");
     if (q_line1.res)
         ::PQclear(q_line1.res);
 
     Query q_cell_a = query(
-        conn, "INSERT INTO core.domains (organisation, name, parent_id) VALUES ('OrgA', 'CellA', $1::int) RETURNING id, path", {line1_id});
+        conn, "INSERT INTO core.domains (organisation, name, parent_id) VALUES ('OrgA', 'cella', $1::int) RETURNING id, path", {line1_id});
     CHECK(q_cell_a.ok && nrows(q_cell_a) == 1);
     const std::string cell_a_id = field(q_cell_a, 0, 0);
-    CHECK(field(q_cell_a, 0, 1) == "/Production/Line1/CellA");
+    CHECK(field(q_cell_a, 0, 1) == "/production/line1/cella");
     if (q_cell_a.res)
         ::PQclear(q_cell_a.res);
 
     Query q_line2 = query(
-        conn, "INSERT INTO core.domains (organisation, name, parent_id) VALUES ('OrgA', 'Line2', $1::int) RETURNING id, path", {prod_id});
+        conn, "INSERT INTO core.domains (organisation, name, parent_id) VALUES ('OrgA', 'line2', $1::int) RETURNING id, path", {prod_id});
     CHECK(q_line2.ok && nrows(q_line2) == 1);
     const std::string line2_id = field(q_line2, 0, 0);
-    CHECK(field(q_line2, 0, 1) == "/Production/Line2");
+    CHECK(field(q_line2, 0, 1) == "/production/line2");
     if (q_line2.res)
         ::PQclear(q_line2.res);
 
     Query q_maint =
-        query(conn, "INSERT INTO core.domains (organisation, name, parent_id) VALUES ('OrgA', 'Maintenance', NULL) RETURNING id, path");
+        query(conn, "INSERT INTO core.domains (organisation, name, parent_id) VALUES ('OrgA', 'maintenance', NULL) RETURNING id, path");
     CHECK(q_maint.ok && nrows(q_maint) == 1);
     const std::string maint_id = field(q_maint, 0, 0);
-    CHECK(field(q_maint, 0, 1) == "/Maintenance");
+    CHECK(field(q_maint, 0, 1) == "/maintenance");
     if (q_maint.res)
         ::PQclear(q_maint.res);
 
@@ -285,15 +285,15 @@ void testSubtreeRelocationAndRestrictions(PGconn* conn) {
     std::string prod_id, line1_id, line2_id, maint_id, cell_a_id;
     for (int i = 0; i < nrows(q_domains); ++i) {
         std::string n = field(q_domains, i, 1);
-        if (n == "Production")
+        if (n == "production")
             prod_id = field(q_domains, i, 0);
-        else if (n == "Line1")
+        else if (n == "line1")
             line1_id = field(q_domains, i, 0);
-        else if (n == "Line2")
+        else if (n == "line2")
             line2_id = field(q_domains, i, 0);
-        else if (n == "Maintenance")
+        else if (n == "maintenance")
             maint_id = field(q_domains, i, 0);
-        else if (n == "CellA")
+        else if (n == "cella")
             cell_a_id = field(q_domains, i, 0);
     }
     if (q_domains.res)
@@ -307,16 +307,16 @@ void testSubtreeRelocationAndRestrictions(PGconn* conn) {
 
     Query q_check_l2 = query(conn, "SELECT path FROM core.domains WHERE id = $1::int", {line2_id});
     CHECK(q_check_l2.ok && nrows(q_check_l2) == 1);
-    CHECK(field(q_check_l2, 0, 0) == "/Maintenance/Line2");
+    CHECK(field(q_check_l2, 0, 0) == "/maintenance/line2");
     if (q_check_l2.res)
         ::PQclear(q_check_l2.res);
 
     // Add child Packer under Line2
     Query q_pack = query(
-        conn, "INSERT INTO core.domains (organisation, name, parent_id) VALUES ('OrgA', 'Packer', $1::int) RETURNING id, path", {line2_id});
+        conn, "INSERT INTO core.domains (organisation, name, parent_id) VALUES ('OrgA', 'packer', $1::int) RETURNING id, path", {line2_id});
     CHECK(q_pack.ok && nrows(q_pack) == 1);
     const std::string pack_id = field(q_pack, 0, 0);
-    CHECK(field(q_pack, 0, 1) == "/Maintenance/Line2/Packer");
+    CHECK(field(q_pack, 0, 1) == "/maintenance/line2/packer");
     if (q_pack.res)
         ::PQclear(q_pack.res);
 
@@ -329,13 +329,13 @@ void testSubtreeRelocationAndRestrictions(PGconn* conn) {
     // Both Line2 and its descendant Packer must reflect the new base path atomically
     Query q_chk_l2_root = query(conn, "SELECT path FROM core.domains WHERE id = $1::int", {line2_id});
     CHECK(q_chk_l2_root.ok && nrows(q_chk_l2_root) == 1);
-    CHECK(field(q_chk_l2_root, 0, 0) == "/Line2");
+    CHECK(field(q_chk_l2_root, 0, 0) == "/line2");
     if (q_chk_l2_root.res)
         ::PQclear(q_chk_l2_root.res);
 
     Query q_chk_pack = query(conn, "SELECT path FROM core.domains WHERE id = $1::int", {pack_id});
     CHECK(q_chk_pack.ok && nrows(q_chk_pack) == 1);
-    CHECK(field(q_chk_pack, 0, 0) == "/Line2/Packer");
+    CHECK(field(q_chk_pack, 0, 0) == "/line2/packer");
     if (q_chk_pack.res)
         ::PQclear(q_chk_pack.res);
 

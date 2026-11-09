@@ -32,13 +32,17 @@ create table if not exists core.organisations (
 );
 
 -- FIX #5: core.domains now holds the canonical operational-domain names
--- (Production, Maintenance, …). The unique (organisation, name) constraint
+-- (production, maintenance, …). Domain labels are lower-case by contract;
+-- dotted canonical authorities are rendered from the slash-separated path.
+-- The unique (organisation, name) constraint
 -- is the target for composite FKs on users and automated_services,
 -- making dangling domain text values impossible.
 create table if not exists core.domains (
   id int generated always as identity primary key,
   organisation text not null references core.organisations (name) on delete cascade on update cascade,
-  name text not null check (name !~ '[.@/]'),
+  name text not null,
+  constraint chk_domains_name check (name !~ '[.@/]'),
+  constraint chk_domains_name_lower check (name = lower(name)),
   parent_id int references core.domains (id) on delete restrict default null,
   path text not null default '',
   -- Encryption policy for files stored in this domain.
@@ -62,6 +66,7 @@ create table if not exists core.automated_services (
   token uuid not null unique,
   token_secret_hash text not null,
   domain text default null,
+  constraint chk_automated_service_domain_lower check (domain is null or domain = lower(domain)),
   -- FIX #7: soft-delete — set deleted_at instead of hard-deleting.
   -- Views and queries filter on deleted_at IS NULL.
   deleted_at timestamptz default null,
@@ -115,6 +120,7 @@ create table if not exists core.users (
   rate_limit_upload_rpm int default null,
   created_at timestamptz not null default now(),
   -- FIX #5: composite FK — domain must exist in core.domains for this organisation
+  constraint chk_users_domain_lower check (domain is null or domain = lower(domain)),
   constraint fk_users_domain foreign key (organisation, domain) references core.domains (organisation, name) on update cascade on delete set null
 );
 

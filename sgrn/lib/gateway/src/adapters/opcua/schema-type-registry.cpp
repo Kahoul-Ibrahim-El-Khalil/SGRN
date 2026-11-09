@@ -173,7 +173,7 @@ sgrn::Result<void> populateTypeRegistryFromSchema(
             const UA_DataType* mt = nullptr;
             if (!f.enum_map.empty()) {
                 int ua_base = 0;
-                SGRN_ASSIGN_OR_RETURN(ua_base, dataTypeToUaTypeIndex(f.type));
+                ASSIGN_OR_RETURN(ua_base, dataTypeToUaTypeIndex(f.type));
                 const std::string sig = enumTypeSignature(ua_base, f.enum_map);
                 auto enum_it = enum_index_by_sig.find(sig);
                 if (enum_it != enum_index_by_sig.end())
@@ -185,7 +185,7 @@ sgrn::Result<void> populateTypeRegistryFromSchema(
             }
             if (!mt) {
                 int idx = 0;
-                SGRN_ASSIGN_OR_RETURN(idx, dataTypeToUaTypeIndex(f.type));
+                ASSIGN_OR_RETURN(idx, dataTypeToUaTypeIndex(f.type));
                 mt = (idx >= 0) ? &UA_TYPES[idx] : &UA_TYPES[UA_TYPES_BYTE];
             }
             if (mt->typeKind == UA_DATATYPEKIND_STRING || f.count > 1 || !mt->pointerFree)

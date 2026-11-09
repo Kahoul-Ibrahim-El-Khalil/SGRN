@@ -35,11 +35,11 @@ Result<void, OpcUaAdapterError> encodeArrayOfBoolsToMemory(const ArrayOfBoolsEnc
 
     for (size_t index = 0; index < t_ctx.count; ++index) {
         const size_t byte_index = index / 8U;
-        SGRN_RETURN_ERROR_IF(byte_index >= t_ctx.destination_size, OpcUaAdapterError::OUT_OF_RANGE);
+        RETURN_ERROR_IF(byte_index >= t_ctx.destination_size, OpcUaAdapterError::OUT_OF_RANGE);
 
-        SGRN_RETURN_IF(!s7codec::encodeBool(t_ctx.p_source[index] != 0, s7codec::BitOffset{static_cast<uint8_t>(index % 8U)},
-                           s7codec::WriteBuffer{t_ctx.p_destination + byte_index, t_ctx.destination_size - byte_index})
-                           .has_value(),
+        RETURN_IF(!s7codec::encodeBool(t_ctx.p_source[index] != 0, s7codec::BitOffset{static_cast<uint8_t>(index % 8U)},
+                      s7codec::WriteBuffer{t_ctx.p_destination + byte_index, t_ctx.destination_size - byte_index})
+                      .has_value(),
             OpcUaAdapterError::ENCODE_FAILED);
     }
     return {};
@@ -47,13 +47,13 @@ Result<void, OpcUaAdapterError> encodeArrayOfBoolsToMemory(const ArrayOfBoolsEnc
 
 Result<void, OpcUaAdapterError> encodeStringOpcUaToMemory(const OpcUaEncodingContext& t_ctx) {
 
-    SGRN_RETURN_IF_NULL(t_ctx.p_ua_buf, OpcUaAdapterError::NULL_POINTER);
+    RETURN_IF_NULL(t_ctx.p_ua_buf, OpcUaAdapterError::NULL_POINTER);
 
-    SGRN_RETURN_IF_NULL(t_ctx.p_memory, OpcUaAdapterError::NULL_POINTER);
+    RETURN_IF_NULL(t_ctx.p_memory, OpcUaAdapterError::NULL_POINTER);
 
     const auto* p_string = reinterpret_cast<const UA_String*>(t_ctx.p_ua_buf);
 
-    SGRN_RETURN_IF_NULL(p_string->data, OpcUaAdapterError::TYPE_MISMATCH);
+    RETURN_IF_NULL(p_string->data, OpcUaAdapterError::TYPE_MISMATCH);
 
     const auto p_string_data_char = reinterpret_cast<const char*>(p_string->data);
 
@@ -62,13 +62,13 @@ Result<void, OpcUaAdapterError> encodeStringOpcUaToMemory(const OpcUaEncodingCon
     const uint32_t string_capacity = t_ctx.view.string_capacity;
 
     if (t_ctx.view.type == DataType::String) {
-        SGRN_RETURN_IF(!encodeString(std::string_view{p_string_data_char, static_cast<size_t>(string_length)},
-                           s7codec::StringCapacity{string_capacity}, s7codec::WriteBuffer{t_ctx.p_memory, t_ctx.effectiveSize()})
-                           .has_value(),
+        RETURN_IF(!encodeString(std::string_view{p_string_data_char, static_cast<size_t>(string_length)},
+                      s7codec::StringCapacity{string_capacity}, s7codec::WriteBuffer{t_ctx.p_memory, t_ctx.effectiveSize()})
+                      .has_value(),
             OpcUaAdapterError::OUT_OF_RANGE);
 
     } else if (t_ctx.view.type == DataType::XString) {
-        SGRN_RETURN_IF(
+        RETURN_IF(
             !encodeXString(std::string_view{p_string_data_char, static_cast<size_t>(string_length)},
                 s7codec::StringCapacity{string_capacity}, s7codec::WriteBuffer{t_ctx.p_memory, t_ctx.effectiveSize()}, t_ctx.view.endian)
                 .has_value(),
@@ -80,21 +80,21 @@ Result<void, OpcUaAdapterError> encodeStringOpcUaToMemory(const OpcUaEncodingCon
 
         std::optional<std::u16string> wide = sgrn::utils::strings::utf8ToUtf16(utf8);
 
-        SGRN_RETURN_IF_NULL(wide, OpcUaAdapterError::TYPE_MISMATCH);
+        RETURN_IF_NULL(wide, OpcUaAdapterError::TYPE_MISMATCH);
 
         const uint16_t* p_string_wide_char = reinterpret_cast<const uint16_t*>(wide->c_str());
 
         const auto wide_units = std::span<const uint16_t>{p_string_wide_char, wide->size()};
 
         if (t_ctx.view.type == DataType::WString) {
-            SGRN_RETURN_IF(!encodeWString(wide_units, s7codec::StringCapacity{string_capacity},
-                               s7codec::WriteBuffer{t_ctx.p_memory, t_ctx.effectiveSize()}, t_ctx.view.endian)
-                               .has_value(),
+            RETURN_IF(!encodeWString(wide_units, s7codec::StringCapacity{string_capacity},
+                          s7codec::WriteBuffer{t_ctx.p_memory, t_ctx.effectiveSize()}, t_ctx.view.endian)
+                          .has_value(),
                 OpcUaAdapterError::OUT_OF_RANGE);
         } else {
-            SGRN_RETURN_IF(!encodeXWString(wide_units, s7codec::StringCapacity{string_capacity},
-                               s7codec::WriteBuffer{t_ctx.p_memory, t_ctx.effectiveSize()}, t_ctx.view.endian)
-                               .has_value(),
+            RETURN_IF(!encodeXWString(wide_units, s7codec::StringCapacity{string_capacity},
+                          s7codec::WriteBuffer{t_ctx.p_memory, t_ctx.effectiveSize()}, t_ctx.view.endian)
+                          .has_value(),
                 OpcUaAdapterError::OUT_OF_RANGE);
         }
     }
@@ -104,20 +104,20 @@ Result<void, OpcUaAdapterError> encodeStringOpcUaToMemory(const OpcUaEncodingCon
 
 Result<void, OpcUaAdapterError> encodeTimeOfDayOpcUaToMemory(const OpcUaEncodingContext& tp_ctx) {
 
-    SGRN_RETURN_IF_NULL(tp_ctx.p_ua_buf, OpcUaAdapterError::NULL_POINTER);
+    RETURN_IF_NULL(tp_ctx.p_ua_buf, OpcUaAdapterError::NULL_POINTER);
 
-    SGRN_RETURN_IF_NULL(tp_ctx.p_memory, OpcUaAdapterError::NULL_POINTER);
+    RETURN_IF_NULL(tp_ctx.p_memory, OpcUaAdapterError::NULL_POINTER);
 
     // NOTE: p_node is intentionally null on the per-array-element scalar
     // path (tryBinaryWrite builds a PlcScalarView there instead of a full
     // PlcNode, to avoid deep-copying name_/children_/atomic per element —
     // see writeValue.cpp). Don't require p_node; view.endian already
     // mirrors p_node->endian_ in both OpcUaEncodingContext constructors.
-    SGRN_RETURN_ERROR_IF(tp_ctx.view.type != DataType::TimeOfDay, OpcUaAdapterError::TYPE_MISMATCH);
+    RETURN_ERROR_IF(tp_ctx.view.type != DataType::TimeOfDay, OpcUaAdapterError::TYPE_MISMATCH);
 
     const auto* ua_string = reinterpret_cast<const UA_String*>(tp_ctx.p_ua_buf);
 
-    SGRN_RETURN_IF_NULL(ua_string->data, OpcUaAdapterError::TYPE_MISMATCH);
+    RETURN_IF_NULL(ua_string->data, OpcUaAdapterError::TYPE_MISMATCH);
 
     const std::string value(reinterpret_cast<const char*>(ua_string->data), ua_string->length);
 
@@ -130,15 +130,15 @@ Result<void, OpcUaAdapterError> encodeTimeOfDayOpcUaToMemory(const OpcUaEncoding
 
     const int parsed = std::sscanf(value.c_str(), "%u:%u:%u.%u%c", &hour, &minute, &second, &millisecond, &trailing);
 
-    SGRN_RETURN_ERROR_IF(parsed < 3 || parsed > 4, OpcUaAdapterError::TYPE_MISMATCH);
+    RETURN_ERROR_IF(parsed < 3 || parsed > 4, OpcUaAdapterError::TYPE_MISMATCH);
 
-    SGRN_RETURN_ERROR_IF(hour > 23 || minute > 59 || second > 59, OpcUaAdapterError::OUT_OF_RANGE);
+    RETURN_ERROR_IF(hour > 23 || minute > 59 || second > 59, OpcUaAdapterError::OUT_OF_RANGE);
 
-    SGRN_RETURN_ERROR_IF(millisecond > 999, OpcUaAdapterError::OUT_OF_RANGE);
+    RETURN_ERROR_IF(millisecond > 999, OpcUaAdapterError::OUT_OF_RANGE);
 
     const uint64_t total_ms = (((static_cast<uint64_t>(hour) * 60ULL) + minute) * 60ULL + second) * 1000ULL + millisecond;
 
-    SGRN_RETURN_ERROR_IF(total_ms > std::numeric_limits<uint32_t>::max(), OpcUaAdapterError::OUT_OF_RANGE);
+    RETURN_ERROR_IF(total_ms > std::numeric_limits<uint32_t>::max(), OpcUaAdapterError::OUT_OF_RANGE);
 
     s7codec::toEndian<uint32_t>(static_cast<uint32_t>(total_ms), tp_ctx.p_memory, tp_ctx.view.endian);
 
@@ -146,9 +146,9 @@ Result<void, OpcUaAdapterError> encodeTimeOfDayOpcUaToMemory(const OpcUaEncoding
 }
 Result<void, OpcUaAdapterError> encodeDateTimeOpcUaToMemory(const OpcUaEncodingContext& t_ctx, size_t s7_size) {
 
-    SGRN_RETURN_IF_NULL(t_ctx.p_ua_buf, OpcUaAdapterError::NULL_POINTER);
+    RETURN_IF_NULL(t_ctx.p_ua_buf, OpcUaAdapterError::NULL_POINTER);
 
-    SGRN_RETURN_IF_NULL(t_ctx.p_memory, OpcUaAdapterError::NULL_POINTER);
+    RETURN_IF_NULL(t_ctx.p_memory, OpcUaAdapterError::NULL_POINTER);
 
     const UA_DateTime ua_date = *reinterpret_cast<const UA_DateTime*>(t_ctx.p_ua_buf);
 
@@ -156,7 +156,7 @@ Result<void, OpcUaAdapterError> encodeDateTimeOpcUaToMemory(const OpcUaEncodingC
     const int64_t unix_time_sec = UA_DateTime_toUnixTime(ua_date);
 
     if (t_ctx.view.type == DataType::DTL) {
-        SGRN_RETURN_ERROR_IF(unix_time_sec < 0 || unix_time_sec > 9223372036LL, OpcUaAdapterError::OUT_OF_RANGE);
+        RETURN_ERROR_IF(unix_time_sec < 0 || unix_time_sec > 9223372036LL, OpcUaAdapterError::OUT_OF_RANGE);
 
         struct tm tm_info = resolveOpcUaLocalTime(ua_date);
 
@@ -174,17 +174,17 @@ Result<void, OpcUaAdapterError> encodeDateTimeOpcUaToMemory(const OpcUaEncodingC
 
         dtl.nanosecond = (dts.milliSec * 1000000) + (dts.microSec * 1000) + dts.nanoSec;
 
-        SGRN_RETURN_IF(!s7codec::encodeDtl(dtl, s7codec::WriteBuffer{t_ctx.p_memory, s7_size}, t_ctx.view.endian).has_value(),
+        RETURN_IF(!s7codec::encodeDtl(dtl, s7codec::WriteBuffer{t_ctx.p_memory, s7_size}, t_ctx.view.endian).has_value(),
             OpcUaAdapterError::ENCODE_FAILED);
 
     } else if (t_ctx.view.type == DataType::DateTime) {
-        SGRN_RETURN_ERROR_IF(unix_time_sec < 631152000LL, OpcUaAdapterError::OUT_OF_RANGE);
+        RETURN_ERROR_IF(unix_time_sec < 631152000LL, OpcUaAdapterError::OUT_OF_RANGE);
 
         struct tm tm_info = resolveOpcUaLocalTime(ua_date);
 
-        SGRN_RETURN_IF(!s7codec::encodeDateTime(tm_info.tm_year + 1900, tm_info.tm_mon + 1, tm_info.tm_mday, tm_info.tm_hour,
-                           tm_info.tm_min, tm_info.tm_sec, 0, s7codec::WriteBuffer{t_ctx.p_memory, s7_size})
-                           .has_value(),
+        RETURN_IF(!s7codec::encodeDateTime(tm_info.tm_year + 1900, tm_info.tm_mon + 1, tm_info.tm_mday, tm_info.tm_hour, tm_info.tm_min,
+                      tm_info.tm_sec, 0, s7codec::WriteBuffer{t_ctx.p_memory, s7_size})
+                      .has_value(),
             OpcUaAdapterError::ENCODE_FAILED);
 
     } else if (t_ctx.view.type == DataType::LDT || t_ctx.view.type == DataType::LDTL) {
@@ -193,7 +193,7 @@ Result<void, OpcUaAdapterError> encodeDateTimeOpcUaToMemory(const OpcUaEncodingC
         // LDT is ns since 1970-01-01.
         constexpr int64_t ua_epoch_offset_100ns = 11644473600LL * 10000000LL;
 
-        SGRN_RETURN_ERROR_IF(ua_date < ua_epoch_offset_100ns, OpcUaAdapterError::OUT_OF_RANGE);
+        RETURN_ERROR_IF(ua_date < ua_epoch_offset_100ns, OpcUaAdapterError::OUT_OF_RANGE);
 
         const int64_t ldt_100ns = ua_date - ua_epoch_offset_100ns;
 
@@ -207,9 +207,9 @@ Result<void, OpcUaAdapterError> encodeDateTimeOpcUaToMemory(const OpcUaEncodingC
 
 Result<void, OpcUaAdapterError> encodeScalarOpcUaToMemory(const OpcUaEncodingContext& t_ctx) {
 
-    SGRN_RETURN_IF_NULL(t_ctx.p_ua_buf, OpcUaAdapterError::NULL_POINTER);
+    RETURN_IF_NULL(t_ctx.p_ua_buf, OpcUaAdapterError::NULL_POINTER);
 
-    SGRN_RETURN_IF_NULL(t_ctx.p_memory, OpcUaAdapterError::NULL_POINTER);
+    RETURN_IF_NULL(t_ctx.p_memory, OpcUaAdapterError::NULL_POINTER);
 
     const size_t s7_size = [&]() -> size_t {
         auto opt = s7codec::primitiveSize(t_ctx.view.type);
@@ -222,9 +222,9 @@ Result<void, OpcUaAdapterError> encodeScalarOpcUaToMemory(const OpcUaEncodingCon
 
         s7codec::DecodedValue dv = s7codec::DecodedValue::makeSigned(static_cast<int64_t>(raw));
 
-        SGRN_RETURN_IF(!s7codec::encodeScalar(dv, t_ctx.view.type, s7codec::WriteBuffer{t_ctx.p_memory, s7_size},
-                           s7codec::EncodeOptions{.endian = t_ctx.view.endian, .bit_offset = s7codec::BitOffset{t_ctx.view.bit_index}})
-                           .has_value(),
+        RETURN_IF(!s7codec::encodeScalar(dv, t_ctx.view.type, s7codec::WriteBuffer{t_ctx.p_memory, s7_size},
+                      s7codec::EncodeOptions{.endian = t_ctx.view.endian, .bit_offset = s7codec::BitOffset{t_ctx.view.bit_index}})
+                      .has_value(),
             OpcUaAdapterError::ENCODE_FAILED);
 
         return {};
@@ -269,23 +269,23 @@ Result<void, OpcUaAdapterError> encodeScalarOpcUaToMemory(const OpcUaEncodingCon
             v = static_cast<double>(*reinterpret_cast<const UA_SByte*>(t_ctx.p_ua_buf));
 
         if (v.has_value()) {
-            SGRN_RETURN_ERROR_IF((t_ctx.view.min_val.has_value() && *v < *t_ctx.view.min_val) ||
-                                     (t_ctx.view.max_val.has_value() && *v > *t_ctx.view.max_val),
+            RETURN_ERROR_IF((t_ctx.view.min_val.has_value() && *v < *t_ctx.view.min_val) ||
+                                (t_ctx.view.max_val.has_value() && *v > *t_ctx.view.max_val),
                 OpcUaAdapterError::OUT_OF_RANGE);
         }
     }
 
     const sgrn::codecs::CodecEntry* p_entry = sgrn::codecs::codecEntryFor(t_ctx.view.type);
 
-    SGRN_RETURN_IF_NULL(p_entry, OpcUaAdapterError::CODEC_ENTRY_NOT_FOUND);
+    RETURN_IF_NULL(p_entry, OpcUaAdapterError::CODEC_ENTRY_NOT_FOUND);
 
     s7codec::DecodedValue dv;
 
-    SGRN_RETURN_IF(!p_entry->from_ua(t_ctx.p_ua_type, t_ctx.p_ua_buf, dv), OpcUaAdapterError::TYPE_MISMATCH);
+    RETURN_IF(!p_entry->from_ua(t_ctx.p_ua_type, t_ctx.p_ua_buf, dv), OpcUaAdapterError::TYPE_MISMATCH);
 
-    SGRN_RETURN_IF(!s7codec::encodeScalar(dv, t_ctx.view.type, s7codec::WriteBuffer{t_ctx.p_memory, s7_size},
-                       s7codec::EncodeOptions{.endian = t_ctx.view.endian, .bit_offset = s7codec::BitOffset{t_ctx.view.bit_index}})
-                       .has_value(),
+    RETURN_IF(!s7codec::encodeScalar(dv, t_ctx.view.type, s7codec::WriteBuffer{t_ctx.p_memory, s7_size},
+                  s7codec::EncodeOptions{.endian = t_ctx.view.endian, .bit_offset = s7codec::BitOffset{t_ctx.view.bit_index}})
+                  .has_value(),
         OpcUaAdapterError::ENCODE_FAILED);
 
     return {};
@@ -305,12 +305,12 @@ constexpr uint16_t kMaxStructDepth = 32;
 }
 
 Result<void, OpcUaAdapterError> encodeStructOpcUaToMemory(const OpcUaEncodingContext& tp_ctx) {
-    SGRN_RETURN_IF_NULL(tp_ctx.p_node, OpcUaAdapterError::NULL_POINTER);
-    SGRN_RETURN_IF_NULL(tp_ctx.p_ua_type, OpcUaAdapterError::NULL_POINTER);
-    SGRN_RETURN_IF_NULL(tp_ctx.p_ua_buf, OpcUaAdapterError::NULL_POINTER);
-    SGRN_RETURN_IF_NULL(tp_ctx.p_memory, OpcUaAdapterError::NULL_POINTER);
+    RETURN_IF_NULL(tp_ctx.p_node, OpcUaAdapterError::NULL_POINTER);
+    RETURN_IF_NULL(tp_ctx.p_ua_type, OpcUaAdapterError::NULL_POINTER);
+    RETURN_IF_NULL(tp_ctx.p_ua_buf, OpcUaAdapterError::NULL_POINTER);
+    RETURN_IF_NULL(tp_ctx.p_memory, OpcUaAdapterError::NULL_POINTER);
 
-    SGRN_RETURN_ERROR_IF(tp_ctx.depth >= kMaxStructDepth, OpcUaAdapterError::OUT_OF_RANGE);
+    RETURN_ERROR_IF(tp_ctx.depth >= kMaxStructDepth, OpcUaAdapterError::OUT_OF_RANGE);
 
     // p_memory always points at the start of a region exactly this many
     // bytes long — every child offset/span below must fit inside it.
@@ -327,7 +327,7 @@ Result<void, OpcUaAdapterError> encodeStructOpcUaToMemory(const OpcUaEncodingCon
         ua_offset += m.padding;
 
         const size_t child_own_span = std::max<size_t>(1, child.size_);
-        SGRN_RETURN_ERROR_IF(child.offset_ + child_own_span > node_span, OpcUaAdapterError::OUT_OF_RANGE);
+        RETURN_ERROR_IF(child.offset_ + child_own_span > node_span, OpcUaAdapterError::OUT_OF_RANGE);
 
         if (m.isArray) {
             const size_t count_ = *reinterpret_cast<const size_t*>(tp_ctx.p_ua_buf + ua_offset);
@@ -337,7 +337,7 @@ Result<void, OpcUaAdapterError> encodeStructOpcUaToMemory(const OpcUaEncodingCon
                 const size_t elem_stride = std::max<size_t>(1, child.size_);
                 const size_t count = std::min(count_, static_cast<size_t>(child.count_));
 
-                SGRN_RETURN_ERROR_IF(child.offset_ + count * elem_stride > node_span, OpcUaAdapterError::OUT_OF_RANGE);
+                RETURN_ERROR_IF(child.offset_ + count * elem_stride > node_span, OpcUaAdapterError::OUT_OF_RANGE);
 
                 for (size_t j = 0; j < count; ++j) {
                     const uint8_t* p_ua_elem_ptr = p_array_data + (j * m.memberType->memSize);
@@ -345,14 +345,14 @@ Result<void, OpcUaAdapterError> encodeStructOpcUaToMemory(const OpcUaEncodingCon
                     if (child.type_ == DataType::Bool) {
 
                         const size_t required_bytes = boolArrayByteCount(count);
-                        SGRN_RETURN_ERROR_IF(child.offset_ + required_bytes > node_span, OpcUaAdapterError::OUT_OF_RANGE);
+                        RETURN_ERROR_IF(child.offset_ + required_bytes > node_span, OpcUaAdapterError::OUT_OF_RANGE);
 
                         const ArrayOfBoolsEncodingContext ctx{.p_source = reinterpret_cast<const UA_Boolean*>(p_array_data),
                             .count = count,
                             .p_destination = tp_ctx.p_memory + child.offset_,
                             .destination_size = required_bytes};
 
-                        SGRN_IF_ERROR_PROPAGATE(encodeArrayOfBoolsToMemory(ctx));
+                        PROPAGATE_ERROR_IF(encodeArrayOfBoolsToMemory(ctx));
                         break;
                     }
 
@@ -361,10 +361,10 @@ Result<void, OpcUaAdapterError> encodeStructOpcUaToMemory(const OpcUaEncodingCon
                     elem_ctx.depth = tp_ctx.depth + 1;
 
                     if (m.memberType->typeKind == UA_DATATYPEKIND_STRUCTURE) {
-                        SGRN_IF_ERROR_PROPAGATE(encodeStructOpcUaToMemory(elem_ctx));
+                        PROPAGATE_ERROR_IF(encodeStructOpcUaToMemory(elem_ctx));
                     } else {
                         elem_ctx.override_size = static_cast<uint32_t>(elem_stride);
-                        SGRN_IF_ERROR_PROPAGATE(encodeScalarOpcUaToMemory(elem_ctx));
+                        PROPAGATE_ERROR_IF(encodeScalarOpcUaToMemory(elem_ctx));
                     }
                 }
             }
@@ -376,9 +376,9 @@ Result<void, OpcUaAdapterError> encodeStructOpcUaToMemory(const OpcUaEncodingCon
             elem_ctx.depth = tp_ctx.depth + 1;
 
             if (m.memberType->typeKind == UA_DATATYPEKIND_STRUCTURE) {
-                SGRN_IF_ERROR_PROPAGATE(encodeStructOpcUaToMemory(elem_ctx));
+                PROPAGATE_ERROR_IF(encodeStructOpcUaToMemory(elem_ctx));
             } else {
-                SGRN_IF_ERROR_PROPAGATE(encodeScalarOpcUaToMemory(elem_ctx));
+                PROPAGATE_ERROR_IF(encodeScalarOpcUaToMemory(elem_ctx));
             }
             ua_offset += m.memberType->memSize;
         }

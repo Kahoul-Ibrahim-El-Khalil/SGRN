@@ -695,15 +695,11 @@ public:
                 advance();
         }
 
-        if (m_has_error_) {
-            return Result<ParseResult, SclError>::Error(SclError::ParseError);
-        }
+        RETURN_ERROR_IF(m_has_error_, SclError::ParseError);
 
         validateDimensions();
 
-        if (m_has_error_) {
-            return Result<ParseResult, SclError>::Error(SclError::ParseError);
-        }
+        RETURN_ERROR_IF(m_has_error_, SclError::ParseError);
 
         bool changed = true;
         for (int pass = 0; pass < 10 && changed; ++pass) {
@@ -1616,9 +1612,7 @@ Result<ParseResult, SclError> DbSymbolsParser::parseExportFile(
 
 Result<ParseResult, SclError> DbSymbolsParser::parseLines(
     const std::vector<std::string>& t_lines, std::map<std::string, UdtDefinition>* tp_global_udts) {
-    if (t_lines.empty()) {
-        return Result<ParseResult, SclError>::Error(SclError::ParseError);
-    }
+    RETURN_ERROR_IF(t_lines.empty(), SclError::ParseError);
 
     std::string source;
     for (const auto& l : t_lines)
@@ -1629,9 +1623,7 @@ Result<ParseResult, SclError> DbSymbolsParser::parseLines(
 
 Result<ParseResult, SclError> DbSymbolsParser::parseString(
     const std::string& t_content, std::map<std::string, UdtDefinition>* tp_global_udts) {
-    if (t_content.empty()) {
-        return Result<ParseResult, SclError>::Error(SclError::ParseError);
-    }
+    RETURN_ERROR_IF(t_content.empty(), SclError::ParseError);
 
     std::map<std::string, UdtDefinition> udt_map;
     if (tp_global_udts)

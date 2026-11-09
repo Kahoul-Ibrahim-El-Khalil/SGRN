@@ -10,9 +10,7 @@ namespace sgrn::gateway::adapters
 
 sgrn::Result<int, std::string> dataTypeToUaTypeIndex(DataType t_type) {
     auto* info = sgrn::scl::info_of(t_type);
-    if (!info) {
-        return sgrn::Error("Data Type unknown");
-    }
+    RETURN_ERROR_IF(!info, "Data Type unknown");
     return info->ua_type_index;
 }
 

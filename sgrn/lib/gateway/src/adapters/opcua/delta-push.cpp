@@ -76,7 +76,7 @@ bool DeltaPushHandler::buildDataValueFromEvent(const core::TelemetryEvent& t_eve
         .p_node_ctx = &typed_ctx, .p_raw_data = t_event.typed_leaf.bytes->data(), .size = t_event.typed_leaf.bytes->size()};
 
     auto result = decodeMemoryBytesToDataValue(context);
-    SGRN_RETURN_IF(result.hasError(), false);
+    RETURN_IF(result.hasError(), false);
 
     t_raw_dv = std::move(result).value();
     return true;

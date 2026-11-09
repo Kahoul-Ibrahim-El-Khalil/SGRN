@@ -78,9 +78,7 @@ static sgrn::Result<LoadedCsv> loadCsv(const std::filesystem::path& t_path) {
         }
     }
 
-    if (csv.rows.empty()) {
-        return sgrn::Result<LoadedCsv>::Error("No valid rows found in CSV: " + t_path.string());
-    }
+    RETURN_ERROR_IF(csv.rows.empty(), "No valid rows found in CSV: " + t_path.string());
 
     return csv;
 }

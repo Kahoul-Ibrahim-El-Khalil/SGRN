@@ -38,9 +38,7 @@ Result<void> TwinBridge::loadModel(ModelManifest t_manifest, std::unique_ptr<IMo
 Result<void> TwinBridge::bindState(PlcState& t_state) {
     p_state_ = &t_state;
 
-    if (!engine_.hasModel()) {
-        return Result<void>::Error("Cannot bind TwinBridge to state without a loaded model manifest");
-    }
+    RETURN_ERROR_IF(!engine_.hasModel(), "Cannot bind TwinBridge to state without a loaded model manifest");
 
     const auto* p_manifest = engine_.manifest();
     if (!p_manifest) {
@@ -57,14 +55,10 @@ Result<void> TwinBridge::bindState(PlcState& t_state) {
     for (size_t i = 0; i < features.size(); ++i) {
         const auto& feat = features[i];
         const PlcNode* p_node = t_state.find(feat.source_tag);
-        if (!p_node) {
-            return Result<void>::Error("Feature source tag not found in PlcState: " + feat.source_tag);
-        }
+        RETURN_ERROR_IF(!p_node, "Feature source tag not found in PlcState: " + feat.source_tag);
 
         DbEntry* p_entry = t_state.findSegmentById(p_node->db_number_);
-        if (!p_entry) {
-            return Result<void>::Error("DB segment not registered in PlcState for DB: " + std::to_string(p_node->db_number_));
-        }
+        RETURN_ERROR_IF(!p_entry, "DB segment not registered in PlcState for DB: " + std::to_string(p_node->db_number_));
 
         BoundFeatureNode bf;
         bf.p_node = p_node;
@@ -85,14 +79,10 @@ Result<void> TwinBridge::bindState(PlcState& t_state) {
     // 2. Resolve and bind output targets
     for (const auto& binding : config_.output_bindings) {
         const PlcNode* p_node = t_state.find(binding.tag_path);
-        if (!p_node) {
-            return Result<void>::Error("Output tag path not found in PlcState: " + binding.tag_path);
-        }
+        RETURN_ERROR_IF(!p_node, "Output tag path not found in PlcState: " + binding.tag_path);
 
         DbEntry* p_entry = t_state.findSegmentById(p_node->db_number_);
-        if (!p_entry) {
-            return Result<void>::Error("DB segment not registered in PlcState for output DB: " + std::to_string(p_node->db_number_));
-        }
+        RETURN_ERROR_IF(!p_entry, "DB segment not registered in PlcState for output DB: " + std::to_string(p_node->db_number_));
 
         BoundOutputNode bo;
         bo.p_node = p_node;
@@ -159,14 +149,10 @@ double TwinBridge::extractScalarValue(const uint8_t* tp_arena, const BoundFeatur
 }
 
 Result<Prediction> TwinBridge::step(uint64_t t_ts_ns) {
-    if (!isBound() || !p_state_) {
-        return Result<Prediction>::Error("TwinBridge is not bound to a PlcState");
-    }
+    RETURN_ERROR_IF(!isBound() || !p_state_, "TwinBridge is not bound to a PlcState");
 
     const uint8_t* p_arena = p_state_->arenaData();
-    if (!p_arena && !bound_inputs_.empty()) {
-        return Result<Prediction>::Error("PlcState arena data is null");
-    }
+    RETURN_ERROR_IF(!p_arena && !bound_inputs_.empty(), "PlcState arena data is null");
 
     for (size_t i = 0; i < bound_inputs_.size(); ++i) {
         const auto& bf = bound_inputs_[i];
@@ -186,18 +172,14 @@ Result<Prediction> TwinBridge::step(uint64_t t_ts_ns) {
 
     if (config_.write_outputs_to_twin) {
         auto write_res = writeOutputsToTwin(pred_res.value());
-        if (write_res.hasError()) {
-            return Result<Prediction>::Error("Failed to write prediction outputs to twin: " + write_res.error());
-        }
+        RETURN_ERROR_IF(write_res.hasError(), "Failed to write prediction outputs to twin: " + write_res.error());
     }
 
     return pred_res;
 }
 
 Result<Prediction> TwinBridge::stepSnapshot(uint64_t t_ts_ns, uint16_t t_db_number, std::span<const uint8_t> t_raw_db) {
-    if (!engine_.hasModel()) {
-        return Result<Prediction>::Error("Model is not loaded in TwinBridge");
-    }
+    RETURN_ERROR_IF(!engine_.hasModel(), "Model is not loaded in TwinBridge");
 
     if (raw_feature_scratch_.size() != bound_inputs_.size()) {
         raw_feature_scratch_.resize(bound_inputs_.size(), 0.0);
@@ -245,14 +227,10 @@ Result<Prediction> TwinBridge::stepSnapshot(uint64_t t_ts_ns, uint16_t t_db_numb
 }
 
 Result<void> TwinBridge::writeOutputsToTwin(const Prediction& t_pred) {
-    if (!isBound() || !p_state_) {
-        return Result<void>::Error("TwinBridge is not bound to a PlcState");
-    }
+    RETURN_ERROR_IF(!isBound() || !p_state_, "TwinBridge is not bound to a PlcState");
 
     uint8_t* p_arena = p_state_->arenaData();
-    if (!p_arena) {
-        return Result<void>::Error("PlcState arena data is null");
-    }
+    RETURN_ERROR_IF(!p_arena, "PlcState arena data is null");
 
     for (const auto& bo : bound_outputs_) {
         if (!bo.valid || !bo.p_entry) {

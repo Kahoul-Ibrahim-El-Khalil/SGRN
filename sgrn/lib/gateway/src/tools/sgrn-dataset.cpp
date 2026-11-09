@@ -59,7 +59,7 @@ static bool isCategoricalType(sgrn::scl::DataType t_type) {
 }
 
 sgrn::Result<void> DatasetProcessor::loadSchema(const std::string& t_scl_path) {
-    SGRN_RETURN_IF(t_scl_path.empty() || !std::filesystem::exists(t_scl_path), fmt::format("SCL Schema file not found: {}", t_scl_path));
+    RETURN_IF(t_scl_path.empty() || !std::filesystem::exists(t_scl_path), fmt::format("SCL Schema file not found: {}", t_scl_path));
 
     auto res = sgrn::scl::PlcSchemaStore::loadFromFile(t_scl_path);
     if (res.hasError()) {
@@ -244,9 +244,7 @@ static bool isBinaryArchiveContent(const std::string& t_content) {
 
 sgrn::Result<DatasetSummary> DatasetProcessor::process(const DatasetConfig& t_config) {
     auto schema_res = loadSchema(t_config.scl_schema_path);
-    if (schema_res.hasError()) {
-        return schema_res.error();
-    }
+    RETURN_IF(schema_res.hasError(), schema_res.error());
 
     auto files = discoverFiles(t_config.input_dir);
     if (files.empty()) {
@@ -254,9 +252,7 @@ sgrn::Result<DatasetSummary> DatasetProcessor::process(const DatasetConfig& t_co
     }
 
     auto writers = openWriters(t_config);
-    if (writers.hasError()) {
-        return writers.error();
-    }
+    RETURN_IF(writers.hasError(), writers.error());
 
     summary_ = DatasetSummary{};
     summary_.features = features_;

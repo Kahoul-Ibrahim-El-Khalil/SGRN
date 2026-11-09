@@ -41,8 +41,7 @@ inline void hookHttpTags(::sgrn::gateway::adapters::HttpAdapter* tp_http, const 
         },
         [t_rt](const std::string& t_name) -> sgrn::Result<std::string, std::string> {
             auto r = t_rt->readTagJson(t_name);
-            if (r.hasError())
-                return sgrn::Result<std::string, std::string>::Error(toString(r.error()));
+            RETURN_ERROR_IF(r.hasError(), toString(r.error()));
             return r.value();
         },
         [t_rt](const std::string& t_name, const std::string& t_json) -> sgrn::Result<void, std::string> {

@@ -98,7 +98,7 @@ const char* scopeName(StorageScope t_scope) {
 
 } // namespace
 
-drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleInitUploadSession(drogon::HttpRequestPtr tsp_req) {
+Task<HttpResponsePtr> StorageApiHandler::handleInitUploadSession(HttpRequestPtr tsp_req) {
     DEBUG_HTTP_REQUEST(tsp_req, "handleInitUploadSession");
     auto p_json = tsp_req->getJsonObject();
     if (!p_json) {
@@ -293,7 +293,7 @@ void StorageApiHandler::removeUploadState(const std::string& t_upload_id) {
 
 // ── Flush one full segment from seg_buf to Garage ─────────────────────────
 // Returns the new storage.objects id, or error.
-static drogon::Task<sgrn::datastore::BackendResult<int64_t>> flushSegment(sgrn::datastore::plugins::aws::S3Client* s3,
+static Task<sgrn::datastore::BackendResult<int64_t>> flushSegment(sgrn::datastore::plugins::aws::S3Client* s3,
     const drogon::orm::DbClientPtr& db, const std::string& bucket, const std::string& upload_id, int32_t seg_idx,
     std::vector<char>& seg_buf, const std::string& mime_type) {
     using namespace sgrn::datastore;
@@ -306,25 +306,21 @@ static drogon::Task<sgrn::datastore::BackendResult<int64_t>> flushSegment(sgrn::
 
     // Push segment to Garage
     auto put_res = co_await s3->uploadFromMemory(bucket, seg_key, seg_data, mime_type);
-    if (put_res.hasError()) {
-        co_return put_res.error();
-    }
+    CO_RETURN_ERROR_IF(put_res.hasError(), put_res.error());
 
     // original_size for a provisional segment is not known yet (we only know
     // total original_size at complete time). We store compressed_size as a
     // placeholder; it is corrected after the rename in handleCompleteUploadSession.
     // Compute SHA-256 of the compressed segment data as a placeholder.
     auto sha256_res = helpers::computeSha256InMemory(seg_data);
-    if (sha256_res.hasError()) {
-        co_return sha256_res.error();
-    }
+    CO_RETURN_ERROR_IF(sha256_res.hasError(), sha256_res.error());
     auto obj_res =
         co_await helpers::insertObject(db, bucket, seg_key, static_cast<size_t>(compressed_size), static_cast<size_t>(compressed_size),
             *sha256_res, /*is_compressed=*/true, std::string{"zstd"}, static_cast<std::optional<uint8_t>>(kCompressionLevel));
     co_return obj_res;
 }
 
-drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleUploadChunk(drogon::HttpRequestPtr tsp_req) {
+Task<HttpResponsePtr> StorageApiHandler::handleUploadChunk(HttpRequestPtr tsp_req) {
     DEBUG_HTTP_REQUEST(tsp_req, "handleUploadChunk");
     std::string upload_id = tsp_req->getParameter("upload_id");
     std::string chunk_idx_str = tsp_req->getParameter("chunk_index");
@@ -467,7 +463,7 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleUploadChunk(drogo
     }
 }
 
-drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleGetUploadStatus(drogon::HttpRequestPtr tsp_req) {
+Task<HttpResponsePtr> StorageApiHandler::handleGetUploadStatus(HttpRequestPtr tsp_req) {
     DEBUG_HTTP_REQUEST(tsp_req, "handleGetUploadStatus");
     std::string upload_id = tsp_req->getParameter("upload_id");
     if (upload_id.empty()) {
@@ -516,7 +512,7 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleGetUploadStatus(d
     }
 }
 
-static drogon::Task<void> rollbackEncryptedUpload(sgrn::datastore::plugins::aws::S3Client* s3, const drogon::orm::DbClientPtr& db,
+static Task<void> rollbackEncryptedUpload(sgrn::datastore::plugins::aws::S3Client* s3, const drogon::orm::DbClientPtr& db,
     const std::string& bucket, const std::string& obj_key, const std::string& key_id, int64_t object_id, std::optional<int64_t> file_id) {
     if (auto ks = sgrn::datastore::crypto::getKeyStore())
         (void)ks->shred(key_id);
@@ -526,7 +522,7 @@ static drogon::Task<void> rollbackEncryptedUpload(sgrn::datastore::plugins::aws:
     co_await db->execSqlCoro("DELETE FROM storage.objects WHERE id = $1", object_id);
 }
 
-drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(drogon::HttpRequestPtr tsp_req) {
+Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequestPtr tsp_req) {
     DEBUG_HTTP_REQUEST(tsp_req, "handleCompleteUploadSession");
     auto p_json = tsp_req->getJsonObject();
     if (!p_json || !p_json->isMember("upload_id"))
@@ -897,7 +893,7 @@ drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleCompleteUploadSes
     }
 }
 
-drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleAbortUploadSession(drogon::HttpRequestPtr tsp_req) {
+Task<HttpResponsePtr> StorageApiHandler::handleAbortUploadSession(HttpRequestPtr tsp_req) {
     DEBUG_HTTP_REQUEST(tsp_req, "handleAbortUploadSession");
     std::string upload_id = tsp_req->getParameter("upload_id");
     if (upload_id.empty()) {

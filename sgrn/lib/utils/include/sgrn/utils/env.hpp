@@ -55,9 +55,7 @@ inline std::string get(const char* t_key, const std::string& t_default = {}) {
 ///         error string if the file could not be opened.
 inline sgrn::Result<void, std::string> loadFile(const std::filesystem::path& t_env_path) {
     std::ifstream env_file(t_env_path);
-    if (!env_file.is_open()) {
-        return sgrn::Result<void, std::string>::Error(fmt::format("Failed to open .env file: {}", t_env_path.string()));
-    }
+    RETURN_ERROR_IF(!env_file.is_open(), fmt::format("Failed to open .env file: {}", t_env_path.string()));
     std::string line;
     while (std::getline(env_file, line)) {
         if (line.empty() || line[0] == '#')

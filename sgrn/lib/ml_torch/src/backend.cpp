@@ -97,21 +97,16 @@ Result<void> TorchBackend::load(const std::string& t_weights_path, const sgrn::m
         }
     }
 
-    if (!mlp_ && !jit_module_) {
-        return Result<void>::Error("Failed to load model weights from: " + t_weights_path);
-    }
+    RETURN_ERROR_IF(!mlp_ && !jit_module_, "Failed to load model weights from: " + t_weights_path);
 
     return {};
 }
 
 Result<std::vector<float>> TorchBackend::predict(std::span<const float> t_features) {
-    if (!mlp_ && !jit_module_) {
-        return Result<std::vector<float>>::Error("TorchBackend has no loaded model");
-    }
+    RETURN_ERROR_IF(!mlp_ && !jit_module_, "TorchBackend has no loaded model");
 
-    if (in_features_ > 0 && t_features.size() != in_features_) {
-        return Result<std::vector<float>>::Error(fmt::format("Input feature size {} != expected {}", t_features.size(), in_features_));
-    }
+    RETURN_ERROR_IF(in_features_ > 0 && t_features.size() != in_features_,
+        fmt::format("Input feature size {} != expected {}", t_features.size(), in_features_));
 
     try {
         torch::NoGradGuard no_grad;
@@ -138,7 +133,7 @@ Result<std::vector<float>> TorchBackend::predict(std::span<const float> t_featur
 
         return std::vector<float>(data_ptr, data_ptr + num_elements);
     } catch (const std::exception& ex) {
-        return Result<std::vector<float>>::Error(std::string("TorchBackend predict error: ") + ex.what());
+        return ::sgrn::Error(std::string("TorchBackend predict error: ") + ex.what());
     }
 }
 

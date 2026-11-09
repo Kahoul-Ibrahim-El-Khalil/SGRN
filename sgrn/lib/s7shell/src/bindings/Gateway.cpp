@@ -86,13 +86,13 @@ public:
                                                      uint16_t t_db, size_t t_offset, size_t t_size, uint8_t* tp_out) -> sgrn::Result<void> {
             if (rt->getMemory().readDbMemory(t_db, t_offset, t_size, tp_out))
                 return {};
-            return sgrn::Result<void>::Error("readDbMemory failed for DB" + std::to_string(t_db));
+            return ::sgrn::Error("readDbMemory failed for DB" + std::to_string(t_db));
         };
         WebSocketAdapter::BinaryWriteFn write_fn = [rt](uint16_t t_db, size_t t_offset, size_t t_size,
                                                        const uint8_t* tp_data) -> sgrn::Result<void> {
             if (rt->getMemory().writeDbMemory(t_db, t_offset, t_size, tp_data))
                 return {};
-            return sgrn::Result<void>::Error("writeDbMemory failed for DB" + std::to_string(t_db));
+            return ::sgrn::Error("writeDbMemory failed for DB" + std::to_string(t_db));
         };
 
         // Leaf dictionary for flat id-keyed deltas — the same wire form the

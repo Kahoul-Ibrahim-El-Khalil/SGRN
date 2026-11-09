@@ -25,17 +25,13 @@ void FeatureExtractor::reset() {
 }
 
 Result<void> FeatureExtractor::push(uint64_t t_ts_ns, std::span<const double> t_raw_inputs, std::span<float> t_out_features) {
-    if (t_out_features.size() != spec_.features.size()) {
-        return Result<void>::Error(
-            fmt::format("FeatureExtractor output span size {} != expected feature count {}", t_out_features.size(), spec_.features.size()));
-    }
+    RETURN_ERROR_IF(t_out_features.size() != spec_.features.size(),
+        fmt::format("FeatureExtractor output span size {} != expected feature count {}", t_out_features.size(), spec_.features.size()));
 
     for (size_t i = 0; i < spec_.features.size(); ++i) {
         const auto& f = spec_.features[i];
-        if (f.tag_index >= t_raw_inputs.size()) {
-            return Result<void>::Error(
-                fmt::format("Feature '{}' requests tag_index {}, but raw_inputs size is {}", f.name, f.tag_index, t_raw_inputs.size()));
-        }
+        RETURN_ERROR_IF(f.tag_index >= t_raw_inputs.size(),
+            fmt::format("Feature '{}' requests tag_index {}, but raw_inputs size is {}", f.name, f.tag_index, t_raw_inputs.size()));
 
         const double raw_val = t_raw_inputs[f.tag_index];
         auto& st = states_[i];
@@ -106,9 +102,7 @@ Result<void> FeatureExtractor::push(uint64_t t_ts_ns, std::span<const double> t_
 Result<std::vector<float>> FeatureExtractor::extract(uint64_t t_ts_ns, std::span<const double> t_raw_inputs) {
     std::vector<float> features(spec_.features.size());
     auto res = push(t_ts_ns, t_raw_inputs, features);
-    if (res.hasError()) {
-        return Result<std::vector<float>>::Error(res.error());
-    }
+    RETURN_IF(res.hasError(), res.error());
     return features;
 }
 

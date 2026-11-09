@@ -218,9 +218,8 @@ Task<HttpResponsePtr> updatePassword(
             co_await SessionStore::instance().revokeSession(tok);
         }
 
-        Json::Value resp;
-        resp["message"] = "Password updated successfully";
-        co_return HttpResponse::newHttpJsonResponse(resp);
+        auto resp = sgrn::JsonObjectBuilder(64).string("message", "Password updated successfully");
+        co_return sgrn::createJsonResponse(std::move(resp).finish());
     } catch (const std::exception& e) {
         ERROR_LOG("Update password error: {}", e.what());
         co_return sgrn::createJsonResponse(

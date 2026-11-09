@@ -82,14 +82,14 @@ Json::Value parseJson(const std::string& t_json, const char* t_what) {
 sgrn::Result<int64_t> readIntScalar(Client& t_client, const std::string& t_alias) {
     auto dv = t_client.readDataValue(NodeId::string(1, t_alias));
     if (dv.hasError())
-        return sgrn::Result<int64_t>::Error("OPC-UA read " + t_alias + ": " + dv.error());
+        RETURN_ERROR("OPC-UA read " + t_alias + ": " + dv.error());
     const auto& raw = (*dv).get();
     if (!raw.hasValue || raw.value.data == nullptr || raw.value.type == nullptr)
-        return sgrn::Result<int64_t>::Error("OPC-UA read " + t_alias + ": no scalar value");
+        RETURN_ERROR("OPC-UA read " + t_alias + ": no scalar value");
     const UA_DataType* t_type = raw.value.type;
     if (t_type->typeKind == UA_DATATYPEKIND_ENUM || t_type->typeKind == UA_DATATYPEKIND_INT32) {
         if (t_type->memSize != sizeof(int32_t))
-            return sgrn::Result<int64_t>::Error("OPC-UA read " + t_alias + ": odd enum width " + std::to_string(t_type->memSize));
+            RETURN_ERROR("OPC-UA read " + t_alias + ": odd enum width " + std::to_string(t_type->memSize));
         return static_cast<int64_t>(*static_cast<const int32_t*>(raw.value.data));
     }
     auto signedOf = [&](auto t_example) -> int64_t {
@@ -108,7 +108,7 @@ sgrn::Result<int64_t> readIntScalar(Client& t_client, const std::string& t_alias
         case UA_DATATYPEKIND_UINT32:
             return signedOf(uint32_t{});
         default:
-            return sgrn::Result<int64_t>::Error("OPC-UA read " + t_alias + ": unexpected type kind " + std::to_string(t_type->typeKind));
+            RETURN_ERROR("OPC-UA read " + t_alias + ": unexpected type kind " + std::to_string(t_type->typeKind));
     }
 }
 

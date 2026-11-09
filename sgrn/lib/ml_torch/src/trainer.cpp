@@ -21,12 +21,8 @@ static torch::Tensor computeLoss(const torch::Tensor& t_pred, const torch::Tenso
 }
 
 Result<TrainResult> Trainer::train(Mlp& t_model, torch::Tensor t_x, torch::Tensor t_y, const TrainerConfig& t_config) {
-    if (t_x.size(0) == 0 || t_y.size(0) == 0) {
-        return Result<TrainResult>::Error("Cannot train on empty dataset");
-    }
-    if (t_x.size(0) != t_y.size(0)) {
-        return Result<TrainResult>::Error("Input and target sample counts do not match");
-    }
+    RETURN_ERROR_IF(t_x.size(0) == 0 || t_y.size(0) == 0, "Cannot train on empty dataset");
+    RETURN_ERROR_IF(t_x.size(0) != t_y.size(0), "Input and target sample counts do not match");
 
     try {
         t_model->to(device_);
@@ -108,7 +104,7 @@ Result<TrainResult> Trainer::train(Mlp& t_model, torch::Tensor t_x, torch::Tenso
 
         return res;
     } catch (const std::exception& ex) {
-        return Result<TrainResult>::Error(std::string("Training failed: ") + ex.what());
+        return ::sgrn::Error(std::string("Training failed: ") + ex.what());
     }
 }
 
@@ -118,7 +114,7 @@ Result<void> Trainer::saveWeights(Mlp& t_model, const std::string& t_weights_pat
         torch::save(t_model, t_weights_path);
         return {};
     } catch (const std::exception& ex) {
-        return Result<void>::Error(std::string("Failed to save weights: ") + ex.what());
+        return ::sgrn::Error(std::string("Failed to save weights: ") + ex.what());
     }
 }
 
@@ -130,14 +126,10 @@ Result<TrainResult> Trainer::trainAndSave(Mlp& t_model, torch::Tensor t_x, torch
     }
 
     auto save_res = saveWeights(t_model, t_weights_path);
-    if (save_res.hasError()) {
-        return Result<TrainResult>::Error(save_res.error());
-    }
+    RETURN_IF(save_res.hasError(), save_res.error());
 
     auto hash_res = sgrn::utils::computeSha256File(t_weights_path, sgrn::utils::HashEncoding::hex);
-    if (hash_res.hasError()) {
-        return Result<TrainResult>::Error("Failed to hash weights file: " + hash_res.error());
-    }
+    RETURN_ERROR_IF(hash_res.hasError(), "Failed to hash weights file: " + hash_res.error());
 
     t_manifest.weights_file = t_weights_path;
     t_manifest.weights_sha256 = hash_res.value();

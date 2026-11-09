@@ -705,23 +705,23 @@ Result<void> PersistenceService::writeBinaryControlLine(const std::string& t_jso
     uint64_t ts = static_cast<uint64_t>(t_ts);
     uint16_t db_num = kControlFrameDbNum;
     uint32_t len = static_cast<uint32_t>(t_json.size());
-    SGRN_IF_ERROR_PROPAGATE(current_archive_->writeRaw(&ts, sizeof(ts)));
-    SGRN_IF_ERROR_PROPAGATE(current_archive_->writeRaw(&db_num, sizeof(db_num)));
-    SGRN_IF_ERROR_PROPAGATE(current_archive_->writeRaw(&len, sizeof(len)));
+    PROPAGATE_ERROR_IF(current_archive_->writeRaw(&ts, sizeof(ts)));
+    PROPAGATE_ERROR_IF(current_archive_->writeRaw(&db_num, sizeof(db_num)));
+    PROPAGATE_ERROR_IF(current_archive_->writeRaw(&len, sizeof(len)));
     if (len > 0) {
-        SGRN_IF_ERROR_PROPAGATE(current_archive_->writeRaw(t_json.data(), len));
+        PROPAGATE_ERROR_IF(current_archive_->writeRaw(t_json.data(), len));
     }
     return {};
 }
 
 void PersistenceService::writeBinaryDbImage(uint16_t t_db, uint64_t t_ts, int64_t t_now) {
-    SGRN_RETURN_IF(!current_archive_ || !read_db_fn_, ;);
+    RETURN_IF(!current_archive_ || !read_db_fn_, ;);
 
     auto full_res = read_db_fn_(t_db);
-    SGRN_RETURN_IF(full_res.hasError() || full_res.value().empty(), ;);
+    RETURN_IF(full_res.hasError() || full_res.value().empty(), ;);
 
     auto& last = last_db_bytes_[t_db];
-    SGRN_RETURN_IF(last == full_res.value(), ;);
+    RETURN_IF(last == full_res.value(), ;);
 
     const auto& full = full_res.value();
     const auto key_it = last_keyframe_ts_.find(t_db);
@@ -937,7 +937,7 @@ void PersistenceService::finalizeArchive(int64_t t_ts_end) {
 }
 
 void PersistenceService::maybeFlushBatch(int64_t t_now) {
-    SGRN_RETURN_IF(!current_archive_, ;);
+    RETURN_IF(!current_archive_, ;);
 
     const bool size_triggered = current_line_counter_ >= 2 + static_cast<size_t>(cfg_.batch_size);
     const bool time_triggered = (t_now - current_archive_start_ts_) >= static_cast<int64_t>(cfg_.batch_interval_s) * 1000;
@@ -964,8 +964,8 @@ void PersistenceService::maybeFlushBatch(int64_t t_now) {
 
 bool PersistenceService::anchorDue(int64_t t_now) const {
 
-    SGRN_RETURN_IF(cfg_.mode != "full_tree_with_anchor", false);
-    SGRN_RETURN_IF(needs_first_anchor_, false); // we're already waiting for the first anchor
+    RETURN_IF(cfg_.mode != "full_tree_with_anchor", false);
+    RETURN_IF(needs_first_anchor_, false); // we're already waiting for the first anchor
 
     const bool time_due = cfg_.anchor_interval_s > 0 && (t_now - last_anchor_ts_) >= static_cast<int64_t>(cfg_.anchor_interval_s) * 1000;
 

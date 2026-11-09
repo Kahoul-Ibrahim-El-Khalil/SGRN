@@ -32,13 +32,13 @@ namespace
 
 /// Case-insensitive string comparison for BOOL/enum initializer literals.
 bool initEqualsIgnoreCase(const std::string& t_a, const std::string& t_b) {
-    SGRN_RETURN_IF(t_a.size() != t_b.size(), false);
+    RETURN_IF(t_a.size() != t_b.size(), false);
 
     for (size_t i = 0; i < t_a.size(); ++i) {
         const char ca = (t_a[i] >= 'A' && t_a[i] <= 'Z') ? static_cast<char>(t_a[i] + ('a' - 'A')) : t_a[i];
         const char cb = (t_b[i] >= 'A' && t_b[i] <= 'Z') ? static_cast<char>(t_b[i] + ('a' - 'A')) : t_b[i];
 
-        SGRN_RETURN_IF(ca != cb, false);
+        RETURN_IF(ca != cb, false);
     }
 
     return true;
@@ -47,7 +47,7 @@ bool initEqualsIgnoreCase(const std::string& t_a, const std::string& t_b) {
 std::string trimInitValue(const std::string& t_s) {
     const size_t b = t_s.find_first_not_of(" \t\r\n");
 
-    SGRN_RETURN_IF(b == std::string::npos, {});
+    RETURN_IF(b == std::string::npos, {});
 
     const size_t e = t_s.find_last_not_of(" \t\r\n");
     return t_s.substr(b, e - b + 1);
@@ -69,16 +69,16 @@ void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field
         return;
     }
 
-    SGRN_RETURN_IF(t_field.init_value.empty(), );
+    RETURN_IF(t_field.init_value.empty(), );
 
     const bool is_string = t_field.type == scl::DataType::String || t_field.type == scl::DataType::WString ||
                            t_field.type == scl::DataType::XString || t_field.type == scl::DataType::XWString;
 
     const bool is_array = !is_string && t_field.count > 1;
-    SGRN_RETURN_IF(is_array, ;); // array initializers (TIA `[a, b, c]`) are not supported yet
+    RETURN_IF(is_array, ;); // array initializers (TIA `[a, b, c]`) are not supported yet
 
     std::string raw = trimInitValue(t_field.init_value);
-    SGRN_RETURN_IF(raw.empty(), ;);
+    RETURN_IF(raw.empty(), ;);
 
     // BOOL literal. Read-modify-write through writeBit: seeding a Bool must
     // not wipe the other Bools sharing its byte (each seed would otherwise
@@ -100,10 +100,10 @@ void applyFieldInit(PlcMemory& t_mem, uint16_t t_db, const scl::DbField& t_field
 
     const size_t span = static_cast<size_t>(s7codec::typeSpanBytes(t_field.type, is_string ? max_len : 1).value_or(0));
 
-    SGRN_RETURN_IF(span == 0, ;);
+    RETURN_IF(span == 0, ;);
 
     std::vector<uint8_t> buf(span, 0);
-    SGRN_RETURN_IF(buf.empty(), ;);
+    RETURN_IF(buf.empty(), ;);
 
     // Quoted string literal ("Siemens" or 'Siemens') → native string encode.
     if (is_string) {

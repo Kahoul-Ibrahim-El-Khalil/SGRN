@@ -111,7 +111,7 @@ public:
     drogon::Task<drogon::HttpResponsePtr> handleAnalyticsBreakdown(drogon::HttpRequestPtr tsp_req);
 
 private:
-    inline static const std::array<::sgrn::IHandler<StorageAdminHandler>::route_config, 13> kRoutes = {{
+    inline static const std::array<::sgrn::IHandler<StorageAdminHandler>::RouteConfig, 13> kRoutes = {{
         {"/api/v1/admin/storage/overview", &StorageAdminHandler::handleOverview, {drogon::Get},
             {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"}},
         {"/api/v1/admin/storage/orphans", &StorageAdminHandler::handleOrphans, {drogon::Get},
@@ -140,7 +140,7 @@ private:
             {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"}},
     }};
 
-    inline static const std::array<::sgrn::IHandler<StorageAdminHandler>::item_route_config, 0> kItemRoutes = {};
+    inline static const std::array<::sgrn::IHandler<StorageAdminHandler>::ItemRouteConfig, 0> kItemRoutes = {};
 };
 
 } // namespace sgrn::datastore::handlers::storage_admin

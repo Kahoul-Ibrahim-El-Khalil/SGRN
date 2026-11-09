@@ -9,8 +9,11 @@
 
 #include <drogon/HttpAppFramework.h>
 #include <drogon/HttpTypes.h>
+#include <initializer_list>
+#include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace sgrn
@@ -21,10 +24,27 @@ namespace sgrn
 // Drogon controller macros).  The default-empty filters parameter means
 // callers that only have methods don't need a second argument.
 inline std::vector<drogon::internal::HttpConstraint> makeConstraints(
-    const std::vector<drogon::HttpMethod>& t_methods, const std::vector<std::string>& t_filters = {}) {
+    std::span<const drogon::HttpMethod> t_methods, std::span<const std::string_view> t_filters = {}) {
     std::vector<drogon::internal::HttpConstraint> constraints;
     constraints.reserve(t_methods.size() + t_filters.size());
     for (const auto& method : t_methods) {
+        constraints.emplace_back(method);
+    }
+    for (const auto& filter : t_filters) {
+        // Drogon owns middleware names in HttpConstraint/std::string. The
+        // conversion is therefore required at this ownership boundary.
+        constraints.emplace_back(std::string(filter));
+    }
+    return constraints;
+}
+
+// Compatibility overload for the callback-style registration helpers, whose
+// public API still accepts dynamically supplied filter vectors.
+inline std::vector<drogon::internal::HttpConstraint> makeConstraints(
+    const std::vector<drogon::HttpMethod>& t_methods, const std::vector<std::string>& t_filters = {}) {
+    std::vector<drogon::internal::HttpConstraint> constraints;
+    constraints.reserve(t_methods.size() + t_filters.size());
+    for (const auto method : t_methods) {
         constraints.emplace_back(method);
     }
     for (const auto& filter : t_filters) {
@@ -37,7 +57,15 @@ inline std::vector<drogon::internal::HttpConstraint> makeConstraints(
 // sites that don't need filters can write makeConstraints({Get, Post}).
 inline std::vector<drogon::internal::HttpConstraint> makeConstraints(
     std::initializer_list<drogon::HttpMethod> t_methods, const std::vector<std::string>& t_filters = {}) {
-    return makeConstraints(std::vector<drogon::HttpMethod>(t_methods), t_filters);
+    std::vector<drogon::internal::HttpConstraint> constraints;
+    constraints.reserve(t_methods.size() + t_filters.size());
+    for (const auto method : t_methods) {
+        constraints.emplace_back(method);
+    }
+    for (const auto& filter : t_filters) {
+        constraints.emplace_back(filter);
+    }
+    return constraints;
 }
 
 inline std::string joinStrings(const std::vector<std::string>& t_strings, const std::string& t_delimiter) {

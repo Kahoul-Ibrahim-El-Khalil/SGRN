@@ -460,9 +460,7 @@ bool WalReplayer::run() {
 
     uint64_t replayed_frames = 0;
     const bool ok = is_binary ? replayBinaryArchive(decompressed, replayed_frames) : replayJsonlArchive(decompressed, replayed_frames);
-    if (!ok) {
-        return false;
-    }
+    RETURN_IF(!ok, false);
 
     fmt::print(fg(fmt::color::green), "[WalReplayer] Replayed {} frames from archive.\n", replayed_frames);
     fmt::print(fg(fmt::color::green), "[WalReplayer] Replay complete. Archive used: {}\n", archive_path_);

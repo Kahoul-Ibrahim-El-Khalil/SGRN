@@ -69,14 +69,14 @@ OpcUaAdapter::~OpcUaAdapter() {
 
 sgrn::Result<void> OpcUaAdapter::start(const std::string& /*ip*/, uint16_t t_port, const PlcSchemaStore& t_registry,
     twin::PlcMemory& t_plc_memory, std::shared_ptr<::sgrn::gateway::SecurityManager> tsp_security_manager) {
-    SGRN_RETURN_IF(impl_->server, "OPCUA adapter already started");
+    RETURN_IF(impl_->server, "OPCUA adapter already started");
 
     impl_->p_plc_memory = &t_plc_memory;
     impl_->ps_security_manager = std::move(tsp_security_manager);
     impl_->server = std::make_unique<wrappers::opcua::Server>(t_port);
     impl_->server->suppressInfoLogs();
 
-    SGRN_IF_ERROR_PROPAGATE(populateTypeRegistryFromSchema(t_registry, impl_->type_registry));
+    PROPAGATE_ERROR_IF(populateTypeRegistryFromSchema(t_registry, impl_->type_registry));
     impl_->server->installTypeRegistry(impl_->type_registry);
 
     impl_->session_registry.installAccessControl(impl_->server->raw());

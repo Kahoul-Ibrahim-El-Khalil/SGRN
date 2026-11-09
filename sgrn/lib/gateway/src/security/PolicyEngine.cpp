@@ -381,24 +381,20 @@ sgrn::Result<void> PolicyEngine::loadScript(const std::string& t_path) {
     auto staging = std::make_shared<RuleTable>();
 
     sgrn::scripting::ScriptHost t_host;
-    if (!t_host.getEngine()) {
-        return sgrn::Result<void>::Error("Failed to initialize AngelScript engine");
-    }
+    RETURN_ERROR_IF(!t_host.getEngine(), "Failed to initialize AngelScript engine");
     registerPolicyBindings(t_host, staging.get());
 
     if (auto t_r = t_host.loadFile(t_path); t_r.hasError())
         return t_r;
 
     asIScriptModule* p_mod = t_host.getEngine()->GetModule("main");
-    if (!p_mod)
-        return sgrn::Result<void>::Error("No compiled module");
+    RETURN_ERROR_IF(!p_mod, "No compiled module");
 
     // Script must export void setup()
     asIScriptFunction* p_fn = p_mod->GetFunctionByDecl("void setup()");
     if (!p_fn)
         p_fn = p_mod->GetFunctionByDecl("void main()");
-    if (!p_fn)
-        return sgrn::Result<void>::Error("security.as must define 'void setup()' (or 'void main()')");
+    RETURN_ERROR_IF(!p_fn, "security.as must define 'void setup()' (or 'void main()')");
 
     asIScriptContext* p_ctx = t_host.getEngine()->CreateContext();
     p_ctx->Prepare(p_fn);
@@ -406,7 +402,7 @@ sgrn::Result<void> PolicyEngine::loadScript(const std::string& t_path) {
     if (rc == asEXECUTION_EXCEPTION) {
         std::string err = fmt::format("[policy] Exception in setup(): {}", p_ctx->GetExceptionString());
         p_ctx->Release();
-        return sgrn::Result<void>::Error(err);
+        return ::sgrn::Error(err);
     }
     p_ctx->Release();
 

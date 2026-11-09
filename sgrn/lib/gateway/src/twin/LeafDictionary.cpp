@@ -114,7 +114,7 @@ void flattenWalk(const rapidjson::Value& t_node, const std::string& t_prefix,
         auto id_it = t_path_to_id.find(t_prefix);
         if (id_it != t_path_to_id.end()) {
 
-            SGRN_RETURN_IF(t_allowed && id_it->second < t_allowed->size() && !(*t_allowed)[id_it->second], ;);
+            RETURN_IF(t_allowed && id_it->second < t_allowed->size() && !(*t_allowed)[id_it->second], ;);
 
             std::string id_str = std::to_string(id_it->second);
 
@@ -132,9 +132,9 @@ void flattenWalk(const rapidjson::Value& t_node, const std::string& t_prefix,
     } else {
         // Leaf value — look up the dotted path in the dictionary.
         auto id_it = t_path_to_id.find(t_prefix);
-        SGRN_RETURN_IF(id_it == t_path_to_id.end(), ;);
+        RETURN_IF(id_it == t_path_to_id.end(), ;);
 
-        SGRN_RETURN_IF(t_allowed && id_it->second < t_allowed->size() && !(*t_allowed)[id_it->second], ;);
+        RETURN_IF(t_allowed && id_it->second < t_allowed->size() && !(*t_allowed)[id_it->second], ;);
 
         std::string id_str = std::to_string(id_it->second);
 
@@ -149,7 +149,7 @@ void flattenWalk(const rapidjson::Value& t_node, const std::string& t_prefix,
 Result<void, std::string> flattenNestedTree(const rapidjson::Value& t_nested,
     const ankerl::unordered_dense::map<std::string, LeafId>& t_path_to_id, rapidjson::Document::AllocatorType& t_alloc,
     rapidjson::Value& t_out) {
-    SGRN_RETURN_ERROR_IF(!t_nested.IsObject(), "flattenNestedTree: input is not a JSON object");
+    RETURN_ERROR_IF(!t_nested.IsObject(), "flattenNestedTree: input is not a JSON object");
     t_out.SetObject();
     flattenWalk(t_nested, "", t_path_to_id, nullptr, t_alloc, t_out);
     return {};
@@ -159,7 +159,7 @@ Result<void, std::string> flattenNestedTreeFiltered(const rapidjson::Value& t_ne
     const ankerl::unordered_dense::map<std::string, LeafId>& t_path_to_id, const std::vector<bool>& t_allowed,
     rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out) {
 
-    SGRN_RETURN_ERROR_IF(!t_nested.IsObject(), "flattenNestedTreeFiltered: input is not a JSON object");
+    RETURN_ERROR_IF(!t_nested.IsObject(), "flattenNestedTreeFiltered: input is not a JSON object");
 
     t_out.SetObject();
     flattenWalk(t_nested, "", t_path_to_id, &t_allowed, t_alloc, t_out);

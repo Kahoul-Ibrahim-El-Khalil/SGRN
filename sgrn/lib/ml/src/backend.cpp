@@ -28,9 +28,7 @@ Result<std::unique_ptr<IModelBackend>> BackendFactory::createBackend(std::string
     auto& reg = getRegistry();
     std::lock_guard<std::mutex> lock(reg.mtx);
     auto it = reg.creators.find(std::string(t_name));
-    if (it == reg.creators.end()) {
-        return Result<std::unique_ptr<IModelBackend>>::Error("Model backend not found: " + std::string(t_name));
-    }
+    RETURN_ERROR_IF(it == reg.creators.end(), "Model backend not found: " + std::string(t_name));
     return it->second();
 }
 

@@ -32,7 +32,7 @@
         "FMT_INSTALL": "ON",
         "TRANTOR_USE_TLS": "openssl",
         "FETCHCONTENT_BASE_DIR": "${sourceDir}/.build/_deps",
-        "CPM_SOURCE_CACHE": "$env{CONDA_PREFIX}/.cache/CPM",
+        "CPM_SOURCE_CACHE": "${sourceDir}/.cpm-cache",
         "CMAKE_CXX_SCAN_FOR_MODULES": "OFF"
       },
       "installDir": "${sourceDir}/.dist/${presetName}"

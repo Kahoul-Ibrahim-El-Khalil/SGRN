@@ -51,8 +51,7 @@ void Server::destroy() noexcept {
 sgrn::Result<Server> Server::createTcp(std::string_view t_host, uint16_t t_port) {
     std::string host_str(t_host);
     modbus_t* p_ctx = ::modbus_new_tcp(host_str.c_str(), static_cast<int>(t_port));
-    if (!p_ctx)
-        return sgrn::Result<Server>::Error(fmt::format("modbus_new_tcp({}:{}) failed: {}", t_host, t_port, ::modbus_strerror(errno)));
+    RETURN_ERROR_IF(!p_ctx, fmt::format("modbus_new_tcp({}:{}) failed: {}", t_host, t_port, ::modbus_strerror(errno)));
     return Server(p_ctx);
 }
 

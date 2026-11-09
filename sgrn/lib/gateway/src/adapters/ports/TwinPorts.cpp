@@ -22,9 +22,9 @@ std::vector<uint16_t> TwinMemoryPort::topLevelDbNumbers() const {
 }
 
 std::optional<size_t> TwinMemoryPort::dbSize(uint16_t t_db_number) const {
-    SGRN_RETURN_IF(!isReady(), std::nullopt);
+    RETURN_IF(!isReady(), std::nullopt);
     const auto* p_entry = memory_.state()->findSegmentById(t_db_number);
-    SGRN_RETURN_IF(!p_entry, std::nullopt);
+    RETURN_IF(!p_entry, std::nullopt);
     return p_entry->size;
 }
 
@@ -78,7 +78,7 @@ void TwinMemoryPort::flushCommands() {
 
 uint64_t TwinMemoryPort::dbVersion(uint16_t t_db_number) const {
     const twin::PlcState* p_state = memory_.state();
-    SGRN_RETURN_IF(!p_state, 0);
+    RETURN_IF(!p_state, 0);
     // DB number → node version via the segment registry. O(DBs) scan plus
     // one hashed node lookup; versions are lock-free atomics bumped on every
     // write up the ancestor chain, so this is safe to call per poll.

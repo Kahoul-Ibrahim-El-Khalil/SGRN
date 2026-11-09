@@ -2,6 +2,7 @@
 // DatastoreShell.hpp — AngelScript-powered administration shell for the SGRN datastore API.
 
 #include <sgrn/AngelScriptEngine.hpp>
+#include <sgrn/Result.hpp>
 #include <sgrn/datastore/client/Client.hpp>
 #include <sgrn/datastore/client/StorageClient.hpp>
 
@@ -89,66 +90,66 @@ private:
     };
 
     static std::vector<std::string> splitWords(const std::string& t_line);
-    std::string normalizePath(const std::string& t_arg) const;
+    std::string normalizePath(const std::string& t_arg);
     static std::string baseName(const std::string& t_path);
     static std::string dirName(const std::string& t_path);
     static std::string humanBytes(int64_t t_bytes);
-    std::optional<Resolved> resolve(const std::string& t_abs);
-    static bool requireId(const std::string& t_cmd, const std::string& t_path, const Resolved& t_hit);
-    uint64_t duRecursive(const std::string& t_abs, bool& t_ok);
-    void treeRecursive(const std::string& t_abs, const std::string& t_prefix, bool& t_ok);
+    sgrn::Result<std::optional<Resolved>> resolve(const std::string& t_abs);
+    static sgrn::Result<void> requireId(const std::string& t_path, const Resolved& t_hit);
+    sgrn::Result<uint64_t> duRecursive(const std::string& t_abs);
+    sgrn::Result<void> treeRecursive(const std::string& t_abs, const std::string& t_prefix);
 
     // ── connection helpers ───────────────────────────────────────────────────
-    int establish(sgrn::datastore::client::DatastoreClientConfig t_cfg, const std::string& t_desc);
+    sgrn::Result<void> establish(sgrn::datastore::client::DatastoreClientConfig t_cfg, const std::string& t_desc);
     static std::string promptVisibleInput(const std::string& t_prompt);
     static std::string promptSecretInput(const std::string& t_prompt);
-    int64_t resolveServiceId(const std::string& t_ref, bool& t_ok);
+    sgrn::Result<int64_t> resolveServiceId(const std::string& t_ref);
     static std::string maskSecret(const std::string& t_secret);
     static std::optional<sgrn::datastore::client::StorageScope> parseScope(const std::string& t_name);
 
     // ── command implementations ─────────────────────────────────────────────
-    int cmdConnect(const std::vector<std::string>& t_args);
-    int cmdLogin(const std::vector<std::string>& t_args);
-    int cmdLogout();
-    int cmdOrgs();
-    int cmdDomains(const std::vector<std::string>& t_args);
-    int cmdStatuses(const std::vector<std::string>& t_args);
-    int cmdUsers();
-    int cmdUseradd(const std::vector<std::string>& t_args);
-    int cmdServices();
-    int cmdServiceAdd(const std::vector<std::string>& t_args);
-    int cmdServiceRotate(const std::vector<std::string>& t_args);
-    int cmdPasswd(const std::vector<std::string>& t_args);
-    int cmdWhoami();
-    int cmdStats();
-    int cmdInfo();
-    int cmdStorageOverview(const std::vector<std::string>& t_args);
-    int cmdStorageOrphans(const std::vector<std::string>& t_args);
-    int cmdStoragePurge(const std::vector<std::string>& t_args);
-    int cmdStorageSearch(const std::vector<std::string>& t_args);
-    int cmdLs(const std::vector<std::string>& t_args);
-    int cmdCd(const std::vector<std::string>& t_args);
-    int cmdCat(const std::vector<std::string>& t_args);
-    int cmdGet(const std::vector<std::string>& t_args);
-    int cmdPut(const std::vector<std::string>& t_args);
-    int cmdMkdir(const std::vector<std::string>& t_args);
-    int cmdMv(const std::vector<std::string>& t_args);
-    int cmdRm(const std::vector<std::string>& t_args);
-    int cmdTree(const std::vector<std::string>& t_args);
-    int cmdDu(const std::vector<std::string>& t_args);
-    int cmdSession();
-    int cmdScope(const std::vector<std::string>& t_args);
-    int cmdSwitch(const std::vector<std::string>& t_args);
-    int cmdZip(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdConnect(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdLogin(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdLogout();
+    sgrn::Result<void> cmdOrgs();
+    sgrn::Result<void> cmdDomains(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdStatuses(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdUsers();
+    sgrn::Result<void> cmdUseradd(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdServices();
+    sgrn::Result<void> cmdServiceAdd(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdServiceRotate(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdPasswd(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdWhoami();
+    sgrn::Result<void> cmdStats();
+    sgrn::Result<void> cmdInfo();
+    sgrn::Result<void> cmdStorageOverview(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdStorageOrphans(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdStoragePurge(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdStorageSearch(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdLs(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdCd(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdCat(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdGet(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdPut(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdMkdir(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdMv(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdRm(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdTree(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdDu(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdSession();
+    sgrn::Result<void> cmdScope(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdSwitch(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdZip(const std::vector<std::string>& t_args);
     // Resumable upload
-    int cmdRput(const std::vector<std::string>& t_args);
-    int cmdUploadStatus(const std::vector<std::string>& t_args);
-    int cmdUploadAbort(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdRput(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdUploadStatus(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdUploadAbort(const std::vector<std::string>& t_args);
     // Live sessions & webhooks (admin)
-    int cmdSessions();
-    int cmdWebhooks();
-    int cmdWebhookAdd(const std::vector<std::string>& t_args);
-    int cmdWebhookDel(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdSessions();
+    sgrn::Result<void> cmdWebhooks();
+    sgrn::Result<void> cmdWebhookAdd(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdWebhookDel(const std::vector<std::string>& t_args);
     int dispatch(const std::vector<std::string>& t_words);
 
     // ── shell escape & process piping ─────────────────────────────────────

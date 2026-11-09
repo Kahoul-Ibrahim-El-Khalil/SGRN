@@ -23,6 +23,11 @@ install that binary must apply `002` first. Otherwise PostgreSQL interprets
 the literal provider (`'GARAGE'`) as the old function's boolean compression
 argument and rejects uploads.
 
+The `007_lowercase_domain_namespace.sql` migration normalizes existing domain
+labels and paths to lower-case, then prevents future mixed-case domain labels
+or user-domain assignments. Resolve any case-folding collision reported by
+the migration before retrying it.
+
 ## Conventions
 
 - Idempotent: safe to re-run (conditional DML, `IF NOT EXISTS` DDL,
@@ -32,3 +37,10 @@ argument and rejects uploads.
 - Kept **outside** `postgres/` on purpose: the SQL asset embedder globs
   `postgres/*.sql` into the init stream, where a migration would run in the
   wrong order on fresh installs.
+
+## Namespace convention
+
+Canonical authorities use dots for domain hierarchy and slashes for storage
+paths. Organisation-bound users have a null domain; all other users must be
+assigned to a lower-case domain. See the datastore README for the shell's
+`@organisation-...` authority forms.

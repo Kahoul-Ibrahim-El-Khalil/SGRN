@@ -54,13 +54,13 @@ Result<UA_DataValue, OpcUaAdapterError> decodeScalarToDataValue(const s7codec::D
     const bool is_time_or_datetime_type =
         t_ctx.type == DataType::DTL || t_ctx.type == DataType::DateTime || t_ctx.type == DataType::LDT || t_ctx.type == DataType::LDTL;
 
-    SGRN_RETURN_ERROR_IF(is_time_or_datetime_type, OpcUaAdapterError::TYPE_MISMATCH);
+    RETURN_ERROR_IF(is_time_or_datetime_type, OpcUaAdapterError::TYPE_MISMATCH);
 
     const sgrn::codecs::CodecEntry* p_entry = sgrn::codecs::codecEntryFor(t_ctx.type);
 
-    SGRN_RETURN_IF_NULL(p_entry, OpcUaAdapterError::CODEC_ENTRY_NOT_FOUND);
+    RETURN_IF_NULL(p_entry, OpcUaAdapterError::CODEC_ENTRY_NOT_FOUND);
 
-    SGRN_RETURN_IF(!p_entry->to_ua(t_dv, t_ctx.type, out.value), OpcUaAdapterError::NO_EQUIVALENT_TYPE);
+    RETURN_IF(!p_entry->to_ua(t_dv, t_ctx.type, out.value), OpcUaAdapterError::NO_EQUIVALENT_TYPE);
 
     return out;
 }
@@ -70,17 +70,17 @@ Result<UA_DataValue, OpcUaAdapterError> decodeTypedArrayToDataValue(const OpcUaD
     const size_t n = t_ctx.p_node_ctx->array_length;
     const int ua_type_idx = t_ctx.p_node_ctx->elem_ua_type_index;
 
-    SGRN_RETURN_ERROR_IF(n == 0, OpcUaAdapterError::INVALID_ARRAY);
+    RETURN_ERROR_IF(n == 0, OpcUaAdapterError::INVALID_ARRAY);
 
     const UA_DataType* p_ua_type = (t_ctx.p_node_ctx->enum_type != nullptr) ? &UA_TYPES[UA_TYPES_INT32] : &UA_TYPES[ua_type_idx];
 
     // Non-enum arrays need a resolved element type; enum arrays always decode
     // into the builtin Int32 above.
-    SGRN_RETURN_ERROR_IF(t_ctx.p_node_ctx->enum_type == nullptr && ua_type_idx < 0, OpcUaAdapterError::INVALID_ARRAY);
+    RETURN_ERROR_IF(t_ctx.p_node_ctx->enum_type == nullptr && ua_type_idx < 0, OpcUaAdapterError::INVALID_ARRAY);
 
     auto* p_arr = UA_Array_new(n, p_ua_type);
 
-    SGRN_RETURN_IF_NULL(p_arr, OpcUaAdapterError::ARRAY_ALLOC_FAILED);
+    RETURN_IF_NULL(p_arr, OpcUaAdapterError::ARRAY_ALLOC_FAILED);
 
     // Compute per-element stride. For strings field_size is the TOTAL array
     // size, so stride = field_size / n. For non-strings use primitiveSize.
@@ -172,7 +172,7 @@ Result<UA_DataValue, OpcUaAdapterError> decodeTypedArrayToDataValue(const OpcUaD
             }
         }
 
-        SGRN_RETURN_ERROR_IF(!appended, OpcUaAdapterError::DECODE_FAILED);
+        RETURN_ERROR_IF(!appended, OpcUaAdapterError::DECODE_FAILED);
     }
 
     UA_DataValue out;
@@ -183,7 +183,7 @@ Result<UA_DataValue, OpcUaAdapterError> decodeTypedArrayToDataValue(const OpcUaD
 
     out.value.arrayDimensions = static_cast<UA_UInt32*>(UA_Array_new(1, &UA_TYPES[UA_TYPES_UINT32]));
 
-    SGRN_RETURN_IF_NULL(out.value.arrayDimensions, OpcUaAdapterError::ARRAY_ALLOC_FAILED);
+    RETURN_IF_NULL(out.value.arrayDimensions, OpcUaAdapterError::ARRAY_ALLOC_FAILED);
 
     out.value.arrayDimensions[0] = static_cast<UA_UInt32>(n);
 
@@ -194,13 +194,13 @@ Result<UA_DataValue, OpcUaAdapterError> decodeTypedArrayToDataValue(const OpcUaD
 
 Result<UA_DataValue, OpcUaAdapterError> decodeMemoryBytesToDataValue(const OpcUaDecodingContext& t_ctx) {
 
-    SGRN_RETURN_IF_NULL(t_ctx.p_node_ctx, OpcUaAdapterError::NULL_POINTER);
+    RETURN_IF_NULL(t_ctx.p_node_ctx, OpcUaAdapterError::NULL_POINTER);
 
-    SGRN_RETURN_IF_NULL(t_ctx.p_raw_data, OpcUaAdapterError::NULL_POINTER);
+    RETURN_IF_NULL(t_ctx.p_raw_data, OpcUaAdapterError::NULL_POINTER);
 
-    SGRN_RETURN_ERROR_IF(t_ctx.size == 0, OpcUaAdapterError::NULL_POINTER);
+    RETURN_ERROR_IF(t_ctx.size == 0, OpcUaAdapterError::NULL_POINTER);
 
-    SGRN_RETURN_ERROR_IF(!t_ctx.p_node_ctx->udt_name.empty(), OpcUaAdapterError::INVALID_DB_ENTRY);
+    RETURN_ERROR_IF(!t_ctx.p_node_ctx->udt_name.empty(), OpcUaAdapterError::INVALID_DB_ENTRY);
 
     if (t_ctx.p_node_ctx->array_length > 0)
         return decodeTypedArrayToDataValue(t_ctx);
@@ -211,7 +211,7 @@ Result<UA_DataValue, OpcUaAdapterError> decodeMemoryBytesToDataValue(const OpcUa
 
         UA_DateTime ua_dt;
 
-        SGRN_ASSIGN_OR_RETURN(
+        ASSIGN_OR_RETURN(
             ua_dt, decodeTemporalBytesToUaDateTime(t_ctx.p_node_ctx->type, t_ctx.p_raw_data, t_ctx.size, nodeEndian(*t_ctx.p_node_ctx)));
 
         UA_DataValue out;
@@ -230,7 +230,7 @@ Result<UA_DataValue, OpcUaAdapterError> decodeMemoryBytesToDataValue(const OpcUa
             .endian = nodeEndian(*t_ctx.p_node_ctx),
             .string_capacity = s7codec::StringCapacity{decode_count}});
 
-    SGRN_RETURN_ERROR_IF(!decoded.valid(), OpcUaAdapterError::DECODE_FAILED);
+    RETURN_ERROR_IF(!decoded.valid(), OpcUaAdapterError::DECODE_FAILED);
 
     return decodeScalarToDataValue(decoded, *t_ctx.p_node_ctx);
 }
@@ -257,9 +257,9 @@ size_t leafS7Span(const PlcScalarView& t_view) {
 Result<void, OpcUaAdapterError> writeDecodedToUaMember(
     const s7codec::DecodedValue& t_dv, DataType t_type, const UA_DataType* tp_ua_type, uint8_t* tp_ua_ptr) {
 
-    SGRN_RETURN_IF_NULL(tp_ua_type, OpcUaAdapterError::NULL_POINTER);
+    RETURN_IF_NULL(tp_ua_type, OpcUaAdapterError::NULL_POINTER);
 
-    SGRN_RETURN_IF_NULL(tp_ua_ptr, OpcUaAdapterError::NULL_POINTER);
+    RETURN_IF_NULL(tp_ua_ptr, OpcUaAdapterError::NULL_POINTER);
 
     if (tp_ua_type->typeKind == UA_DATATYPEKIND_ENUM) {
         UA_Int32 val = 0;
@@ -278,12 +278,12 @@ Result<void, OpcUaAdapterError> writeDecodedToUaMember(
 
     const sgrn::codecs::CodecEntry* p_entry = sgrn::codecs::codecEntryFor(t_type);
 
-    SGRN_RETURN_IF_NULL(p_entry, OpcUaAdapterError::CODEC_ENTRY_NOT_FOUND);
+    RETURN_IF_NULL(p_entry, OpcUaAdapterError::CODEC_ENTRY_NOT_FOUND);
 
     UA_Variant tmp;
     UA_Variant_init(&tmp);
 
-    SGRN_RETURN_IF(!p_entry->to_ua(t_dv, t_type, tmp), OpcUaAdapterError::NO_EQUIVALENT_TYPE);
+    RETURN_IF(!p_entry->to_ua(t_dv, t_type, tmp), OpcUaAdapterError::NO_EQUIVALENT_TYPE);
 
     if (tmp.type != tp_ua_type) {
         UA_Variant_clear(&tmp);
@@ -307,7 +307,7 @@ Result<void, OpcUaAdapterError> decodeArrayOfBooleansFromMemory(const uint8_t* t
 
     t_out_arr = static_cast<UA_Boolean*>(UA_Array_new(t_count, &UA_TYPES[UA_TYPES_BOOLEAN]));
 
-    SGRN_RETURN_IF_NULL(t_out_arr, OpcUaAdapterError::BOOL_ARRAY_ALLOC_FAILED);
+    RETURN_IF_NULL(t_out_arr, OpcUaAdapterError::BOOL_ARRAY_ALLOC_FAILED);
 
     for (size_t j = 0; j < t_count; ++j) {
         const uint8_t* p_bit_ptr = tp_memory_buf + (j / 8U);
@@ -332,7 +332,7 @@ Result<void, OpcUaAdapterError> decodeScalarToUa(
 
         UA_DateTime dt;
 
-        SGRN_ASSIGN_OR_RETURN(dt, decodeTemporalBytesToUaDateTime(t_view.type, tp_memory_buf, leafS7Span(t_view), t_view.endian));
+        ASSIGN_OR_RETURN(dt, decodeTemporalBytesToUaDateTime(t_view.type, tp_memory_buf, leafS7Span(t_view), t_view.endian));
 
         *reinterpret_cast<UA_DateTime*>(tp_ua_ptr) = dt;
         return {};
@@ -348,7 +348,7 @@ Result<void, OpcUaAdapterError> decodeScalarToUa(
             .bit_offset = s7codec::BitOffset{t_view.bit_index},
             .string_capacity = s7codec::StringCapacity{decode_count}});
 
-    SGRN_RETURN_ERROR_IF(!dv.valid(), OpcUaAdapterError::DECODE_FAILED);
+    RETURN_ERROR_IF(!dv.valid(), OpcUaAdapterError::DECODE_FAILED);
 
     return writeDecodedToUaMember(dv, static_cast<DataType>(t_view.type), tp_ua_type, tp_ua_ptr);
 }
@@ -371,12 +371,12 @@ Result<void, OpcUaAdapterError> decodeToOpcUa(
         if (m.isArray) {
             const size_t t_count = static_cast<size_t>(child.count_);
 
-            SGRN_RETURN_ERROR_IF(t_count == 0, OpcUaAdapterError::INVALID_ARRAY);
+            RETURN_ERROR_IF(t_count == 0, OpcUaAdapterError::INVALID_ARRAY);
 
             if (child.type_ == DataType::Bool) {
                 UA_Boolean* p_bool_arr = nullptr;
 
-                SGRN_IF_ERROR_PROPAGATE(decodeArrayOfBooleansFromMemory(tp_memory_buf + child.offset_, t_count, p_bool_arr));
+                PROPAGATE_ERROR_IF(decodeArrayOfBooleansFromMemory(tp_memory_buf + child.offset_, t_count, p_bool_arr));
 
                 *reinterpret_cast<size_t*>(tp_ua_ptr + ua_offset) = t_count;
 
@@ -385,7 +385,7 @@ Result<void, OpcUaAdapterError> decodeToOpcUa(
             } else {
                 void* p_arr = UA_Array_new(t_count, m.memberType);
 
-                SGRN_RETURN_IF_NULL(p_arr, OpcUaAdapterError::ARRAY_ALLOC_FAILED);
+                RETURN_IF_NULL(p_arr, OpcUaAdapterError::ARRAY_ALLOC_FAILED);
 
                 const size_t elem_stride = std::max<size_t>(1, child.size_);
 
@@ -396,7 +396,7 @@ Result<void, OpcUaAdapterError> decodeToOpcUa(
 
                     if (m.memberType->typeKind == UA_DATATYPEKIND_STRUCTURE) {
 
-                        SGRN_IF_ERROR_PROPAGATE(decodeToOpcUa(*m.memberType, p_s7_elem, p_ua_elem, child));
+                        PROPAGATE_ERROR_IF(decodeToOpcUa(*m.memberType, p_s7_elem, p_ua_elem, child));
 
                     } else {
                         // Shallow POD projection instead of deep-copying the
@@ -407,7 +407,7 @@ Result<void, OpcUaAdapterError> decodeToOpcUa(
                         elem_view.size = static_cast<uint32_t>(elem_stride);
                         elem_view.bit_index = 0;
 
-                        SGRN_IF_ERROR_PROPAGATE(decodeScalarToUa(p_s7_elem, elem_view, m.memberType, p_ua_elem));
+                        PROPAGATE_ERROR_IF(decodeScalarToUa(p_s7_elem, elem_view, m.memberType, p_ua_elem));
                     }
                 }
 
@@ -425,10 +425,10 @@ Result<void, OpcUaAdapterError> decodeToOpcUa(
 
             if (m.memberType->typeKind == UA_DATATYPEKIND_STRUCTURE) {
 
-                SGRN_IF_ERROR_PROPAGATE(decodeToOpcUa(*m.memberType, p_s7_member, p_ua_member, child));
+                PROPAGATE_ERROR_IF(decodeToOpcUa(*m.memberType, p_s7_member, p_ua_member, child));
 
             } else {
-                SGRN_IF_ERROR_PROPAGATE(decodeScalarToUa(p_s7_member, makeScalarView(child), m.memberType, p_ua_member));
+                PROPAGATE_ERROR_IF(decodeScalarToUa(p_s7_member, makeScalarView(child), m.memberType, p_ua_member));
             }
 
             ua_offset += m.memberType->memSize;
@@ -458,7 +458,7 @@ struct UaMemoryGuard {
 Result<UA_Variant, OpcUaAdapterError> decodeStructObjectToExtensionObjectVariant(
     const twin::PlcNode& t_node, const UA_DataType& t_type, const ::sgrn::ArenaTree& t_arena) {
 
-    SGRN_RETURN_IF_NULL(t_node.cached_slot_, OpcUaAdapterError::INVALID_DB_ENTRY);
+    RETURN_IF_NULL(t_node.cached_slot_, OpcUaAdapterError::INVALID_DB_ENTRY);
 
     // Array of UDT (e.g. ReactorCore.thermocouples[16] -> 16 x TemperatureSensor):
     // t_node.count_ >1 and t_node.type==Struct, t_type is the element UDT.
@@ -468,7 +468,7 @@ Result<UA_Variant, OpcUaAdapterError> decodeStructObjectToExtensionObjectVariant
         const size_t elem_size = static_cast<size_t>(t_node.size_); // per-element
         const uint8_t* p_s7_base = t_arena.data() + t_node.cached_slot_->offset + t_node.offset_;
         UA_ExtensionObject* p_arr = static_cast<UA_ExtensionObject*>(UA_Array_new(count, &UA_TYPES[UA_TYPES_EXTENSIONOBJECT]));
-        SGRN_RETURN_IF_NULL(p_arr, OpcUaAdapterError::ALLOC_FAILED);
+        RETURN_IF_NULL(p_arr, OpcUaAdapterError::ALLOC_FAILED);
         for (size_t i = 0; i < count; ++i) {
             void* p_buf = UA_calloc(1, t_type.memSize);
             if (!p_buf) {
@@ -502,7 +502,7 @@ Result<UA_Variant, OpcUaAdapterError> decodeStructObjectToExtensionObjectVariant
 
     void* p_buf = UA_calloc(1, t_type.memSize);
 
-    SGRN_RETURN_IF_NULL(p_buf, OpcUaAdapterError::ALLOC_FAILED);
+    RETURN_IF_NULL(p_buf, OpcUaAdapterError::ALLOC_FAILED);
 
     const uint8_t* p_s7_base = t_arena.data() + t_node.cached_slot_->offset + t_node.offset_;
 
@@ -511,13 +511,13 @@ Result<UA_Variant, OpcUaAdapterError> decodeStructObjectToExtensionObjectVariant
     // transferred to the ExtensionObject before the guard leaves scope.
 
     UaMemoryGuard buf_guard{p_buf};
-    SGRN_IF_ERROR_PROPAGATE(decodeToOpcUa(t_type, p_s7_base, static_cast<uint8_t*>(buf_guard.p), t_node));
+    PROPAGATE_ERROR_IF(decodeToOpcUa(t_type, p_s7_base, static_cast<uint8_t*>(buf_guard.p), t_node));
 
     // Adopt p_buf directly instead of wrapping it in a stack
     // UA_ExtensionObject and deep-copying through UA_Variant_setScalarCopy.
     auto* p_eo = static_cast<UA_ExtensionObject*>(UA_ExtensionObject_new());
 
-    SGRN_RETURN_IF_NULL(p_eo, OpcUaAdapterError::ALLOC_FAILED);
+    RETURN_IF_NULL(p_eo, OpcUaAdapterError::ALLOC_FAILED);
 
     p_eo->encoding = UA_EXTENSIONOBJECT_DECODED;
     p_eo->content.decoded.type = &t_type;

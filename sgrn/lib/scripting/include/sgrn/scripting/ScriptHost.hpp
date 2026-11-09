@@ -50,21 +50,17 @@ public:
     /// Invoke a global function in the "main" module
     template <typename T, typename... Args>
     sgrn::Result<T> call(const std::string& t_function_name, Args... t_args) {
-        if (!p_engine_)
-            return sgrn::Result<T>::Error("Engine not initialized");
+        RETURN_ERROR_IF(!p_engine_, "Engine not initialized");
         asIScriptModule* p_mod = p_engine_->GetModule("main");
-        if (!p_mod)
-            return sgrn::Result<T>::Error("No module loaded");
+        RETURN_ERROR_IF(!p_mod, "No module loaded");
 
         // Construct declaration, assuming void if we don't care, but angelscript needs exact match.
         // Actually, getting function by name alone works if no overloads:
         asIScriptFunction* p_func = p_mod->GetFunctionByName(t_function_name.c_str());
-        if (!p_func)
-            return sgrn::Result<T>::Error("Function not found: " + t_function_name);
+        RETURN_ERROR_IF(!p_func, "Function not found: " + t_function_name);
 
         asIScriptContext* p_ctx = p_engine_->CreateContext();
-        if (!p_ctx)
-            return sgrn::Result<T>::Error("Failed to create context");
+        RETURN_ERROR_IF(!p_ctx, "Failed to create context");
 
         p_ctx->Prepare(p_func);
 
@@ -93,7 +89,7 @@ public:
             if (r == asEXECUTION_EXCEPTION)
                 err = "Exception: " + std::string(p_ctx->GetExceptionString());
             p_ctx->Release();
-            return sgrn::Result<T>::Error(err);
+            return ::sgrn::Error(err);
         }
 
         if constexpr (std::is_same_v<T, void>) {

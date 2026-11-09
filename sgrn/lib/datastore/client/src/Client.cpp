@@ -161,8 +161,7 @@ std::vector<IdNamePair> DatastoreClient::listOrganisations() {
 
 sgrn::Result<std::vector<IdNamePair>, std::string> DatastoreClient::tryListOrganisations() {
     auto doc = makeRequest("GET", "/api/v1/query/organisations");
-    if (doc.IsNull())
-        return sgrn::Result<std::vector<IdNamePair>, std::string>::Error("list organisations failed: empty response");
+    RETURN_ERROR_IF(doc.IsNull(), "list organisations failed: empty response");
     return parseIdNamePairs(doc);
 }
 
@@ -173,8 +172,7 @@ std::vector<IdNamePair> DatastoreClient::listDomains() {
 
 sgrn::Result<std::vector<IdNamePair>, std::string> DatastoreClient::tryListDomains() {
     auto doc = makeRequest("GET", "/api/v1/domains");
-    if (doc.IsNull())
-        return sgrn::Result<std::vector<IdNamePair>, std::string>::Error("list domains failed: empty response (check session)");
+    RETURN_ERROR_IF(doc.IsNull(), "list domains failed: empty response (check session)");
     return parseIdNamePairs(doc);
 }
 
@@ -210,8 +208,7 @@ int64_t parseIntField(const rapidjson::Value& t_val) {
 sgrn::Result<rapidjson::Document, std::string> postJson(
     DatastoreClient& t_client, const std::string& t_endpoint, rapidjson::Document t_body) {
     auto doc = t_client.makeRequest("POST", t_endpoint, sgrn::utils::json::serializeCompact(t_body));
-    if (doc.IsNull())
-        return sgrn::Result<rapidjson::Document, std::string>::Error("request failed: empty response from " + t_endpoint);
+    RETURN_ERROR_IF(doc.IsNull(), "request failed: empty response from " + t_endpoint);
     return sgrn::Result<rapidjson::Document, std::string>(std::move(doc));
 }
 
@@ -234,17 +231,14 @@ std::string responseMessage(const rapidjson::Document& t_doc, const std::string&
 
 sgrn::Result<std::vector<IdNamePair>, std::string> DatastoreClient::tryListStatuses(const std::string& t_organisation) {
     auto doc = makeRequest("GET", "/api/v1/query/statuses?organisation=" + urlEncodeQueryValue(t_organisation));
-    if (doc.IsNull())
-        return sgrn::Result<std::vector<IdNamePair>, std::string>::Error("list statuses failed: empty response");
+    RETURN_ERROR_IF(doc.IsNull(), "list statuses failed: empty response");
     return parseIdNamePairs(doc);
 }
 
 sgrn::Result<std::vector<AdminUserEntry>, std::string> DatastoreClient::tryListUsers() {
     auto doc = makeRequest("GET", "/api/v1/admin/users");
-    if (doc.IsNull())
-        return sgrn::Result<std::vector<AdminUserEntry>, std::string>::Error("list users failed: empty response (admin only?)");
-    if (!doc.IsArray())
-        return sgrn::Result<std::vector<AdminUserEntry>, std::string>::Error("list users failed: unexpected response shape");
+    RETURN_ERROR_IF(doc.IsNull(), "list users failed: empty response (admin only?)");
+    RETURN_ERROR_IF(!doc.IsArray(), "list users failed: unexpected response shape");
     std::vector<AdminUserEntry> out;
     for (const auto& e : doc.GetArray()) {
         if (!e.IsObject())
@@ -277,18 +271,15 @@ sgrn::Result<std::string, std::string> DatastoreClient::registerUser(const NewUs
     add("status", t_user.status_);
     add("domain", t_user.domain_);
     auto r = postJson(*this, "/api/v1/admin/users/register", std::move(body));
-    SGRN_IF_ERROR_PROPAGATE(r);
-    if (!responseOk(r.value()))
-        return sgrn::Result<std::string, std::string>::Error(responseMessage(r.value(), "registration failed"));
+    PROPAGATE_ERROR_IF(r);
+    RETURN_ERROR_IF(!responseOk(r.value()), responseMessage(r.value(), "registration failed"));
     return responseMessage(r.value(), "registered");
 }
 
 sgrn::Result<std::vector<ServiceEntry>, std::string> DatastoreClient::tryListServices() {
     auto doc = makeRequest("GET", "/api/v1/automated-services");
-    if (doc.IsNull())
-        return sgrn::Result<std::vector<ServiceEntry>, std::string>::Error("list services failed: empty response (admin only?)");
-    if (!doc.IsArray())
-        return sgrn::Result<std::vector<ServiceEntry>, std::string>::Error("list services failed: unexpected response shape");
+    RETURN_ERROR_IF(doc.IsNull(), "list services failed: empty response (admin only?)");
+    RETURN_ERROR_IF(!doc.IsArray(), "list services failed: unexpected response shape");
     std::vector<ServiceEntry> out;
     for (const auto& e : doc.GetArray()) {
         if (!e.IsObject())
@@ -326,9 +317,8 @@ sgrn::Result<ServiceCredentials, std::string> DatastoreClient::registerService(c
         body.AddMember("metadata", rapidjson::Value(rapidjson::kObjectType), alloc);
     }
     auto r = postJson(*this, "/api/v1/admin/automated-services/register", std::move(body));
-    SGRN_IF_ERROR_PROPAGATE(r);
-    if (!responseOk(r.value()))
-        return sgrn::Result<ServiceCredentials, std::string>::Error(responseMessage(r.value(), "registration failed"));
+    PROPAGATE_ERROR_IF(r);
+    RETURN_ERROR_IF(!responseOk(r.value()), responseMessage(r.value(), "registration failed"));
     ServiceCredentials creds;
     creds.message_ = responseMessage(r.value(), "registered");
     creds.token_ = strField(r.value(), "token");
@@ -342,9 +332,8 @@ sgrn::Result<ServiceCredentials, std::string> DatastoreClient::rotateServiceToke
     body.SetObject();
     body.AddMember("automated_service_id", t_service_id, alloc);
     auto r = postJson(*this, "/api/v1/admin/automated-services/rotate-token", std::move(body));
-    SGRN_IF_ERROR_PROPAGATE(r);
-    if (!responseOk(r.value()))
-        return sgrn::Result<ServiceCredentials, std::string>::Error(responseMessage(r.value(), "rotation failed"));
+    PROPAGATE_ERROR_IF(r);
+    RETURN_ERROR_IF(!responseOk(r.value()), responseMessage(r.value(), "rotation failed"));
     ServiceCredentials creds;
     creds.message_ = responseMessage(r.value(), "rotated");
     creds.token_ = strField(r.value(), "token");
@@ -370,37 +359,32 @@ sgrn::Result<std::string, std::string> DatastoreClient::updatePassword(
     body.AddMember("old_password", rapidjson::Value(t_old_password.c_str(), alloc), alloc);
     body.AddMember("new_password", rapidjson::Value(t_new_password.c_str(), alloc), alloc);
     auto r = postJson(*this, "/api/v1/auth/user/password", std::move(body));
-    SGRN_IF_ERROR_PROPAGATE(r);
-    if (!responseOk(r.value()))
-        return sgrn::Result<std::string, std::string>::Error(responseMessage(r.value(), "password update failed"));
+    PROPAGATE_ERROR_IF(r);
+    RETURN_ERROR_IF(!responseOk(r.value()), responseMessage(r.value(), "password update failed"));
     return responseMessage(r.value(), "password updated");
 }
 
 sgrn::Result<std::string, std::string> DatastoreClient::userInfoJson() {
     auto doc = makeRequest("GET", "/api/v1/query/user/info");
-    if (doc.IsNull())
-        return sgrn::Result<std::string, std::string>::Error("user info failed: empty response");
+    RETURN_ERROR_IF(doc.IsNull(), "user info failed: empty response");
     return sgrn::utils::json::serializeCompact(doc);
 }
 
 sgrn::Result<std::string, std::string> DatastoreClient::storageStatsJson() {
     auto doc = makeRequest("GET", "/api/v1/storage/stats");
-    if (doc.IsNull())
-        return sgrn::Result<std::string, std::string>::Error("stats failed: empty response");
+    RETURN_ERROR_IF(doc.IsNull(), "stats failed: empty response");
     return sgrn::utils::json::serializeCompact(doc);
 }
 
 sgrn::Result<std::string, std::string> DatastoreClient::storageConstraintsJson() {
     auto doc = makeRequest("GET", "/api/v1/storage/info");
-    if (doc.IsNull())
-        return sgrn::Result<std::string, std::string>::Error("constraints failed: empty response");
+    RETURN_ERROR_IF(doc.IsNull(), "constraints failed: empty response");
     return sgrn::utils::json::serializeCompact(doc);
 }
 
 sgrn::Result<std::string, std::string> DatastoreClient::storageAdminOverviewJson(uint32_t t_max_pages) {
     auto doc = makeRequest("GET", "/api/v1/admin/storage/overview?max_pages=" + std::to_string(t_max_pages));
-    if (doc.IsNull())
-        return sgrn::Result<std::string, std::string>::Error("storage overview failed: empty response");
+    RETURN_ERROR_IF(doc.IsNull(), "storage overview failed: empty response");
     return sgrn::utils::json::serializeCompact(doc);
 }
 
@@ -412,8 +396,7 @@ sgrn::Result<std::string, std::string> DatastoreClient::storageAdminOrphansJson(
     if (!t_prefix.empty())
         url += "&prefix=" + urlEncodeQueryValue(t_prefix);
     auto doc = makeRequest("GET", url);
-    if (doc.IsNull())
-        return sgrn::Result<std::string, std::string>::Error("storage orphans failed: empty response");
+    RETURN_ERROR_IF(doc.IsNull(), "storage orphans failed: empty response");
     return sgrn::utils::json::serializeCompact(doc);
 }
 
@@ -435,8 +418,7 @@ sgrn::Result<std::string, std::string> DatastoreClient::storageAdminPurgeOrphans
     body.AddMember("dry_run", t_dry_run, alloc);
     body.AddMember("limit", t_limit, alloc);
     auto doc = makeRequest("POST", "/api/v1/admin/storage/orphans/purge", sgrn::utils::json::serializeCompact(body));
-    if (doc.IsNull())
-        return sgrn::Result<std::string, std::string>::Error("storage purge failed: empty response");
+    RETURN_ERROR_IF(doc.IsNull(), "storage purge failed: empty response");
     return sgrn::utils::json::serializeCompact(doc);
 }
 
@@ -450,8 +432,7 @@ sgrn::Result<std::string, std::string> DatastoreClient::storageAdminSearchJson(
     else if (!t_prefix.empty())
         url += "&prefix=" + urlEncodeQueryValue(t_prefix);
     auto doc = makeRequest("GET", url);
-    if (doc.IsNull())
-        return sgrn::Result<std::string, std::string>::Error("storage search failed: empty response");
+    RETURN_ERROR_IF(doc.IsNull(), "storage search failed: empty response");
     return sgrn::utils::json::serializeCompact(doc);
 }
 
@@ -460,10 +441,9 @@ namespace
 
 // Parse a raw admin-storage JSON body into a rapidjson Document.
 sgrn::Result<rapidjson::Document, std::string> parseAdminStorageJson(sgrn::Result<std::string, std::string> t_raw, const char* t_what) {
-    SGRN_IF_ERROR_PROPAGATE(t_raw);
+    PROPAGATE_ERROR_IF(t_raw);
     auto parsed = sgrn::utils::json::deserialize(t_raw.value());
-    if (parsed.hasError())
-        return sgrn::Result<rapidjson::Document, std::string>::Error(std::string(t_what) + ": invalid JSON response");
+    RETURN_ERROR_IF(parsed.hasError(), std::string(t_what) + ": invalid JSON response");
     return std::move(parsed.value());
 }
 
@@ -506,10 +486,10 @@ void fillStringList(const rapidjson::Value& t_doc, const char* t_key, std::vecto
 
 sgrn::Result<std::vector<StorageBucketCensus>, std::string> DatastoreClient::tryStorageAdminOverview(uint32_t t_max_pages) {
     auto doc_res = parseAdminStorageJson(storageAdminOverviewJson(t_max_pages), "storage overview");
-    SGRN_IF_ERROR_PROPAGATE(doc_res);
+    PROPAGATE_ERROR_IF(doc_res);
     rapidjson::Document doc = std::move(doc_res.value());
     if (!doc.IsObject() || !doc.HasMember("buckets") || !doc["buckets"].IsArray())
-        return sgrn::Result<std::vector<StorageBucketCensus>, std::string>::Error("storage overview: unexpected response shape");
+        return ::sgrn::Error("storage overview: unexpected response shape");
     std::vector<StorageBucketCensus> out;
     for (const auto& b : doc["buckets"].GetArray()) {
         if (!b.IsObject())
@@ -534,10 +514,9 @@ sgrn::Result<std::vector<StorageBucketCensus>, std::string> DatastoreClient::try
 sgrn::Result<StorageOrphansReport, std::string> DatastoreClient::tryStorageAdminOrphans(
     const std::string& t_bucket, const std::string& t_prefix, uint32_t t_limit, uint32_t t_max_pages) {
     auto doc_res = parseAdminStorageJson(storageAdminOrphansJson(t_bucket, t_prefix, t_limit, t_max_pages), "storage orphans");
-    SGRN_IF_ERROR_PROPAGATE(doc_res);
+    PROPAGATE_ERROR_IF(doc_res);
     rapidjson::Document doc = std::move(doc_res.value());
-    if (!doc.IsObject())
-        return sgrn::Result<StorageOrphansReport, std::string>::Error("storage orphans: unexpected response shape");
+    RETURN_ERROR_IF(!doc.IsObject(), "storage orphans: unexpected response shape");
     StorageOrphansReport r;
     r.bucket_ = strField(doc, "bucket");
     r.prefix_ = strField(doc, "prefix");
@@ -554,10 +533,9 @@ sgrn::Result<StorageOrphansReport, std::string> DatastoreClient::tryStorageAdmin
 sgrn::Result<StoragePurgeResult, std::string> DatastoreClient::tryStorageAdminPurge(
     const std::string& t_bucket, const std::vector<std::string>& t_keys, const std::string& t_prefix, bool t_dry_run, uint32_t t_limit) {
     auto doc_res = parseAdminStorageJson(storageAdminPurgeOrphansJson(t_bucket, t_keys, t_prefix, t_dry_run, t_limit), "storage purge");
-    SGRN_IF_ERROR_PROPAGATE(doc_res);
+    PROPAGATE_ERROR_IF(doc_res);
     rapidjson::Document doc = std::move(doc_res.value());
-    if (!doc.IsObject())
-        return sgrn::Result<StoragePurgeResult, std::string>::Error("storage purge: unexpected response shape");
+    RETURN_ERROR_IF(!doc.IsObject(), "storage purge: unexpected response shape");
     StoragePurgeResult r;
     r.dry_run_ = jsonBool(doc, "dry_run");
     if (r.dry_run_)
@@ -903,9 +881,7 @@ sgrn::Result<DriveListing, std::string> DatastoreClient::tryListDrive(const std:
     std::string endpoint = sgrn::datastore::client::detail::resolveDriveBase(config_) + "/list?path=" + t_path +
                            "&scope=" + sgrn::datastore::client::detail::storageScopeToString(actual_scope);
     auto t_json = makeRequest("GET", endpoint);
-    if (t_json.IsNull())
-        return sgrn::Result<DriveListing, std::string>::Error(
-            fmt::format("list '{}' failed: empty response (check URL, network and session)", t_path));
+    RETURN_ERROR_IF(t_json.IsNull(), fmt::format("list '{}' failed: empty response (check URL, network and session)", t_path));
     return sgrn::datastore::client::detail::parseDriveListing(t_json);
 }
 
@@ -963,11 +939,8 @@ sgrn::Result<DatastoreClient::ResumableUploadSession, std::string> DatastoreClie
     body.AddMember("chunk_size", t_chunk_size, alloc);
     body.AddMember("encrypt", t_encrypt, alloc);
     auto doc = makeRequest("POST", "/api/v1/storage/upload/init", sgrn::utils::json::serializeCompact(body));
-    if (doc.IsNull())
-        return sgrn::Result<ResumableUploadSession, std::string>::Error("init upload session failed: empty response");
-    if (doc.HasMember("error"))
-        return sgrn::Result<ResumableUploadSession, std::string>::Error(
-            doc["error"].IsString() ? doc["error"].GetString() : "server error");
+    RETURN_ERROR_IF(doc.IsNull(), "init upload session failed: empty response");
+    RETURN_ERROR_IF(doc.HasMember("error"), doc["error"].IsString() ? doc["error"].GetString() : "server error");
     ResumableUploadSession s;
     if (doc.HasMember("upload_id") && doc["upload_id"].IsString())
         s.upload_id = doc["upload_id"].GetString();
@@ -1004,19 +977,15 @@ sgrn::Result<bool, std::string> DatastoreClient::uploadChunk(
         }
     }
 
-    if (!res)
-        return sgrn::Result<bool, std::string>::Error("chunk upload failed: no response");
-    if (res->status < 200 || res->status >= 300)
-        return sgrn::Result<bool, std::string>::Error(httpErrorText(res->status, res->body));
+    RETURN_ERROR_IF(!res, "chunk upload failed: no response");
+    RETURN_ERROR_IF(res->status < 200 || res->status >= 300, httpErrorText(res->status, res->body));
     return true;
 }
 
 sgrn::Result<DatastoreClient::ResumableUploadStatus, std::string> DatastoreClient::getUploadStatus(const std::string& t_upload_id) {
     auto doc = makeRequest("GET", "/api/v1/storage/upload/status?upload_id=" + urlEncodeQueryValue(t_upload_id));
-    if (doc.IsNull())
-        return sgrn::Result<ResumableUploadStatus, std::string>::Error("get upload status failed: empty response");
-    if (doc.HasMember("error"))
-        return sgrn::Result<ResumableUploadStatus, std::string>::Error(doc["error"].IsString() ? doc["error"].GetString() : "server error");
+    RETURN_ERROR_IF(doc.IsNull(), "get upload status failed: empty response");
+    RETURN_ERROR_IF(doc.HasMember("error"), doc["error"].IsString() ? doc["error"].GetString() : "server error");
     ResumableUploadStatus s;
     if (doc.HasMember("upload_id") && doc["upload_id"].IsString())
         s.upload_id = doc["upload_id"].GetString();
@@ -1048,10 +1017,8 @@ sgrn::Result<std::string, std::string> DatastoreClient::completeUploadSession(co
     body.SetObject();
     body.AddMember("upload_id", rapidjson::Value(t_upload_id.c_str(), alloc), alloc);
     auto doc = makeRequest("POST", "/api/v1/storage/upload/complete", sgrn::utils::json::serializeCompact(body));
-    if (doc.IsNull())
-        return sgrn::Result<std::string, std::string>::Error("complete upload failed: empty response");
-    if (doc.HasMember("error"))
-        return sgrn::Result<std::string, std::string>::Error(doc["error"].IsString() ? doc["error"].GetString() : "server error");
+    RETURN_ERROR_IF(doc.IsNull(), "complete upload failed: empty response");
+    RETURN_ERROR_IF(doc.HasMember("error"), doc["error"].IsString() ? doc["error"].GetString() : "server error");
     if (doc.HasMember("message") && doc["message"].IsString())
         return std::string(doc["message"].GetString());
     return std::string("Upload completed");
@@ -1063,10 +1030,8 @@ sgrn::Result<std::string, std::string> DatastoreClient::abortUploadSession(const
     body.SetObject();
     body.AddMember("upload_id", rapidjson::Value(t_upload_id.c_str(), alloc), alloc);
     auto doc = makeRequest("DELETE", "/api/v1/storage/upload/abort?upload_id=" + urlEncodeQueryValue(t_upload_id));
-    if (doc.IsNull())
-        return sgrn::Result<std::string, std::string>::Error("abort upload failed: empty response");
-    if (doc.HasMember("error"))
-        return sgrn::Result<std::string, std::string>::Error(doc["error"].IsString() ? doc["error"].GetString() : "server error");
+    RETURN_ERROR_IF(doc.IsNull(), "abort upload failed: empty response");
+    RETURN_ERROR_IF(doc.HasMember("error"), doc["error"].IsString() ? doc["error"].GetString() : "server error");
     if (doc.HasMember("message") && doc["message"].IsString())
         return std::string(doc["message"].GetString());
     return std::string("Upload aborted");
@@ -1076,8 +1041,7 @@ sgrn::Result<std::string, std::string> DatastoreClient::abortUploadSession(const
 
 sgrn::Result<std::string, std::string> DatastoreClient::listActiveSessionsJson() {
     auto doc = makeRequest("GET", "/api/v1/admin/metaprobe/sessions");
-    if (doc.IsNull())
-        return sgrn::Result<std::string, std::string>::Error("list sessions failed: empty response");
+    RETURN_ERROR_IF(doc.IsNull(), "list sessions failed: empty response");
     return sgrn::utils::json::serializeCompact(doc);
 }
 
@@ -1085,8 +1049,7 @@ sgrn::Result<std::string, std::string> DatastoreClient::listActiveSessionsJson()
 
 sgrn::Result<std::string, std::string> DatastoreClient::listWebhooksJson() {
     auto doc = makeRequest("GET", "/api/v1/admin/webhooks");
-    if (doc.IsNull())
-        return sgrn::Result<std::string, std::string>::Error("list webhooks failed: empty response");
+    RETURN_ERROR_IF(doc.IsNull(), "list webhooks failed: empty response");
     return sgrn::utils::json::serializeCompact(doc);
 }
 
@@ -1098,10 +1061,8 @@ sgrn::Result<std::string, std::string> DatastoreClient::registerWebhookJson(cons
     if (!t_secret.empty())
         body.AddMember("secret", rapidjson::Value(t_secret.c_str(), alloc), alloc);
     auto doc = makeRequest("POST", "/api/v1/admin/webhooks", sgrn::utils::json::serializeCompact(body));
-    if (doc.IsNull())
-        return sgrn::Result<std::string, std::string>::Error("register webhook failed: empty response");
-    if (doc.HasMember("error"))
-        return sgrn::Result<std::string, std::string>::Error(doc["error"].IsString() ? doc["error"].GetString() : "server error");
+    RETURN_ERROR_IF(doc.IsNull(), "register webhook failed: empty response");
+    RETURN_ERROR_IF(doc.HasMember("error"), doc["error"].IsString() ? doc["error"].GetString() : "server error");
     return sgrn::utils::json::serializeCompact(doc);
 }
 
@@ -1120,10 +1081,8 @@ sgrn::Result<std::string, std::string> DatastoreClient::deleteWebhookJson(int32_
             res = http_client_->Delete(endpoint, headers);
         }
     }
-    if (!res)
-        return sgrn::Result<std::string, std::string>::Error("delete webhook failed: no response");
-    if (res->status < 200 || res->status >= 300)
-        return sgrn::Result<std::string, std::string>::Error(httpErrorText(res->status, res->body));
+    RETURN_ERROR_IF(!res, "delete webhook failed: no response");
+    RETURN_ERROR_IF(res->status < 200 || res->status >= 300, httpErrorText(res->status, res->body));
     auto root_opt = sgrn::utils::json::deserialize(res->body);
     if (!root_opt.hasError())
         return sgrn::utils::json::serializeCompact(root_opt.value());

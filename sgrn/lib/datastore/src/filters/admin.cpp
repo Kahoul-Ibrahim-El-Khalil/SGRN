@@ -66,7 +66,8 @@ drogon::Task<AdminLevel> AdminLevelCache::resolveAdminLevel(
     // Bootstrap admins are exact, case-insensitive matches. A DB failure is
     // deliberately not cached, so a transient outage cannot lock admins out.
     if (!db_queried) {
-        if (sgrn::datastore::auth::emailIsConfiguredPlatformAdmin(t_email)) resolved_level = AdminLevel::PLATFORM;
+        if (sgrn::datastore::auth::emailIsConfiguredPlatformAdmin(t_email))
+            resolved_level = AdminLevel::PLATFORM;
         co_return resolved_level;
     }
     if (resolved_level != AdminLevel::PLATFORM && sgrn::datastore::auth::emailIsConfiguredPlatformAdmin(t_email)) {

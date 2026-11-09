@@ -26,6 +26,11 @@ if(SGRN_DEPS_ONLY)
         set(FMT_MODULE  OFF CACHE BOOL "" FORCE)
         set(FMT_WERROR  OFF CACHE BOOL "" FORCE)
         sgrn_fetch_source(fmt)
+        if(NOT EXISTS "${fmt_SOURCE_DIR}/CMakeLists.txt")
+            message(FATAL_ERROR
+                "[SGRN/fmt] CPM returned an incomplete source cache entry: ${fmt_SOURCE_DIR}. "
+                "Remove that exact directory and rerun the preset.")
+        endif()
         add_subdirectory("${fmt_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/extern/fmt" EXCLUDE_FROM_ALL)
         if(TARGET fmt AND NOT TARGET extern::fmt)
             add_library(extern::fmt ALIAS fmt)
@@ -43,6 +48,11 @@ if(SGRN_DEPS_ONLY)
         set(FMT_MODULE  OFF CACHE BOOL "" FORCE)
         set(FMT_WERROR  OFF CACHE BOOL "" FORCE)
         sgrn_fetch_source(fmt)
+        if(NOT EXISTS "${fmt_SOURCE_DIR}/CMakeLists.txt")
+            message(FATAL_ERROR
+                "[SGRN/fmt] CPM returned an incomplete source cache entry: ${fmt_SOURCE_DIR}. "
+                "Remove that exact directory and rerun the preset.")
+        endif()
         add_subdirectory("${fmt_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/extern/fmt" EXCLUDE_FROM_ALL)
         if(TARGET fmt AND NOT TARGET extern::fmt)
             add_library(extern::fmt ALIAS fmt)

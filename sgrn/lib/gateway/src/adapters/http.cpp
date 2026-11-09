@@ -32,7 +32,7 @@ sgrn::Result<void> HttpAdapter::start(const std::string& t_ip, uint16_t t_port, 
     // NOTE: t_ws_port is accepted for source compatibility but ignored: since
     // the Crow migration the WebSocket endpoint (`/ws`) shares this same HTTP
     // listener instead of living on a separate port.
-    SGRN_RETURN_ERROR_IF(running_.load(std::memory_order_acquire), "HttpAdapter: already running");
+    RETURN_ERROR_IF(running_.load(std::memory_order_acquire), "HttpAdapter: already running");
 
     configure(t_registry, t_memory, std::move(tsp_db), std::move(tsp_security), tp_modbus_map);
 
@@ -348,7 +348,7 @@ void HttpAdapter::handlePostReplayResume(const http::HttpRequest& t_req, http::H
 
 // ── ACL helper — delegates to the shared SecurityHelper ─────────────────────
 bool HttpAdapter::isAuthorized(const http::HttpRequest& t_req, std::optional<uint16_t> t_db_number) const {
-    SGRN_RETURN_IF(!security_manager_, true);
+    RETURN_IF(!security_manager_, true);
 
     // SecurityHelper does not forward headers for connection-auth; call the
     // manager directly to preserve the header-names parameter.
@@ -362,10 +362,10 @@ bool HttpAdapter::isAuthorizedField(
     // through to the SecurityManager (fail-open, as before). Raw
     // /memory/* writes are byte-level S7 semantics and stay DB-ACL only.
     if (t_is_write && t_db_number.has_value() && refs_.registry) {
-        SGRN_RETURN_IF(auto loc = refs_.registry->findField(*t_db_number, t_field_path);
+        RETURN_IF(auto loc = refs_.registry->findField(*t_db_number, t_field_path);
             loc.has_value() && loc->field && loc->field->is_read_only, false);
     }
-    SGRN_RETURN_IF(!security_manager_, true);
+    RETURN_IF(!security_manager_, true);
 
     std::vector<std::string> header_names = t_req.headerNames();
     std::string client_ip = t_req.remote_ip;

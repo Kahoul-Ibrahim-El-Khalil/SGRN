@@ -26,7 +26,7 @@ public:
     drogon::Task<drogon::HttpResponsePtr> handleGetAutomatedServiceSession(drogon::HttpRequestPtr tsp_req);
 
 private:
-    inline static const std::array<typename sgrn::IHandler<AuthApiHandler>::route_config, 6> kRoutes{
+    inline static const std::array<typename sgrn::IHandler<AuthApiHandler>::RouteConfig, 6> kRoutes{
         {{"/api/v1/auth/user/signin", &AuthApiHandler::handleSignIn, {drogon::Post}, {}},
             {"/api/v1/auth/automated-service/signin", &AuthApiHandler::handleAutomatedServiceSignIn, {drogon::Post}, {}},
             {"/api/v1/auth/automated-service/signout", &AuthApiHandler::handleAutomatedServiceSignOut, {drogon::Post},

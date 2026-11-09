@@ -33,19 +33,15 @@ inline void hookOpcuaTags(::sgrn::gateway::adapters::OpcUaAdapter* tp_adapter, c
     backing->read_bytes = [t_rt](const std::string& t_name, size_t t_byte_offset, size_t t_size,
                               int t_bit) -> sgrn::Result<std::vector<uint8_t>, std::string> {
         auto d = t_rt->describeTag(t_name);
-        if (d.hasError())
-            return sgrn::Result<std::vector<uint8_t>, std::string>::Error("unknown tag '" + t_name + "'");
+        RETURN_ERROR_IF(d.hasError(), "unknown tag '" + t_name + "'");
         const auto& tag = d.value();
-        if (t_byte_offset + t_size > static_cast<size_t>(tag.span_bytes) || t_size == 0)
-            return sgrn::Result<std::vector<uint8_t>, std::string>::Error("span out of tag range");
+        RETURN_ERROR_IF(t_byte_offset + t_size > static_cast<size_t>(tag.span_bytes) || t_size == 0, "span out of tag range");
         std::vector<uint8_t> buf(t_size, 0);
         const size_t abs_off = static_cast<size_t>(tag.addr.byte_offset) + t_byte_offset;
         auto r = t_rt->readAreaMemory(tag.addr.area, abs_off, buf.size(), buf.data());
-        if (r.hasError())
-            return sgrn::Result<std::vector<uint8_t>, std::string>::Error(r.error());
+        RETURN_IF(r.hasError(), r.error());
         if (t_bit >= 0) {
-            if (buf.size() != 1)
-                return sgrn::Result<std::vector<uint8_t>, std::string>::Error("bit access needs one byte");
+            RETURN_ERROR_IF(buf.size() != 1, "bit access needs one byte");
             buf[0] = static_cast<uint8_t>((buf[0] >> t_bit) & 1u);
         }
         return buf;
@@ -53,15 +49,12 @@ inline void hookOpcuaTags(::sgrn::gateway::adapters::OpcUaAdapter* tp_adapter, c
     backing->write_bytes = [t_rt](const std::string& t_name, size_t t_byte_offset, const std::vector<uint8_t>& t_bytes,
                                int t_bit) -> sgrn::Result<void, std::string> {
         auto d = t_rt->describeTag(t_name);
-        if (d.hasError())
-            return sgrn::Result<void, std::string>::Error("unknown tag '" + t_name + "'");
+        RETURN_ERROR_IF(d.hasError(), "unknown tag '" + t_name + "'");
         const auto& tag = d.value();
-        if (t_byte_offset + t_bytes.size() > static_cast<size_t>(tag.span_bytes) || t_bytes.empty())
-            return sgrn::Result<void, std::string>::Error("span out of tag range");
+        RETURN_ERROR_IF(t_byte_offset + t_bytes.size() > static_cast<size_t>(tag.span_bytes) || t_bytes.empty(), "span out of tag range");
         const size_t abs_off = static_cast<size_t>(tag.addr.byte_offset) + t_byte_offset;
         if (t_bit >= 0) {
-            if (t_bytes.size() != 1)
-                return sgrn::Result<void, std::string>::Error("bit access needs one byte");
+            RETURN_ERROR_IF(t_bytes.size() != 1, "bit access needs one byte");
             auto r = t_rt->writeAreaBit(tag.addr.area, abs_off, t_bit, (t_bytes[0] & 1u) != 0);
             if (r.hasError())
                 return r;

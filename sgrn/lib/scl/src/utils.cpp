@@ -880,8 +880,7 @@ void serializeFieldToWriter(rapidjson::Writer<rapidjson::StringBuffer>& t_writer
 }
 sgrn::Result<std::vector<uint8_t>, SclError> parseHexBytes(const std::string& t_joined) {
     auto res = sgrn::utils::encoding::fromHex(t_joined);
-    if (!res)
-        return sgrn::Result<std::vector<uint8_t>, SclError>::Error(SclError::Generic);
+    RETURN_ERROR_IF(!res, SclError::Generic);
     return *res;
 }
 

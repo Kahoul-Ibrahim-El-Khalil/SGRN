@@ -50,7 +50,7 @@ Result<void, std::string> GatewayApplication::loadConfig(int t_argc, char** tp_a
 
     const fs::path config_path = expandUserPath(config_path_str);
 
-    SGRN_RETURN_IF(
+    RETURN_IF(
         !fs::exists(config_path) || !fs::is_regular_file(config_path), fmt::format("Config File does not exist: {}", config_path.string()));
 
     auto config_res = parseNodeConfig(config_path.string());

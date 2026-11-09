@@ -48,17 +48,13 @@ struct PredictionRecord {
     }
 
     static Result<PredictionRecord> deserialize(std::span<const uint8_t> data) {
-        if (data.size() < sizeof(PredictionRecordHeader)) {
-            return Result<PredictionRecord>::Error("Buffer too small for PredictionRecordHeader");
-        }
+        RETURN_ERROR_IF(data.size() < sizeof(PredictionRecordHeader), "Buffer too small for PredictionRecordHeader");
 
         PredictionRecord rec;
         std::memcpy(&rec.header, data.data(), sizeof(PredictionRecordHeader));
 
         const size_t expected_total = sizeof(PredictionRecordHeader) + rec.header.num_outputs * sizeof(float);
-        if (data.size() < expected_total) {
-            return Result<PredictionRecord>::Error("Buffer truncated for PredictionRecord payload");
-        }
+        RETURN_ERROR_IF(data.size() < expected_total, "Buffer truncated for PredictionRecord payload");
 
         rec.outputs.resize(rec.header.num_outputs);
         if (rec.header.num_outputs > 0) {

@@ -15,9 +15,7 @@ sgrn::Result<std::vector<TagDefinition>, SclError> XmlTagTableParser::parse(cons
     std::vector<TagDefinition> tags;
 
     XMLNode* p_root = xml_parse_string(t_xml_content.c_str());
-    if (!p_root) {
-        return sgrn::Result<std::vector<TagDefinition>, SclError>::Error(SclError::ParseError);
-    }
+    RETURN_ERROR_IF(!p_root, SclError::ParseError);
 
     // Traverse the document: Tagtable -> Tag
     for (size_t i = 0; i < p_root->children->len; i++) {

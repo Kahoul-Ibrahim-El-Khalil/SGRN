@@ -107,7 +107,7 @@ int main() {
     std::mutex image_mutex;
     auto read_db = [&](uint16_t t_db) -> sgrn::Result<std::vector<uint8_t>> {
         if (t_db != kDb)
-            return sgrn::Result<std::vector<uint8_t>>::Error("unknown DB");
+            RETURN_ERROR("unknown DB");
         std::lock_guard<std::mutex> lk(image_mutex);
         return image;
     };
@@ -275,7 +275,7 @@ int main() {
         std::mutex image2_mutex;
         auto read_db2 = [&](uint16_t t_db) -> sgrn::Result<std::vector<uint8_t>> {
             if (t_db != kDb)
-                return sgrn::Result<std::vector<uint8_t>>::Error("unknown DB");
+                RETURN_ERROR("unknown DB");
             std::lock_guard<std::mutex> lk(image2_mutex);
             return image2;
         };
@@ -361,7 +361,7 @@ int main() {
         image3[0] = 5;
         auto read_db3 = [&](uint16_t t_db) -> sgrn::Result<std::vector<uint8_t>> {
             if (t_db != kDb)
-                return sgrn::Result<std::vector<uint8_t>>::Error("unknown DB");
+                RETURN_ERROR("unknown DB");
             return image3;
         };
 

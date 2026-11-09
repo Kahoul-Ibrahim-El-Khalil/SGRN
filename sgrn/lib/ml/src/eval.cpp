@@ -7,12 +7,8 @@ namespace sgrn::ml
 {
 
 Result<RegressionMetrics> Evaluator::evaluateRegression(std::span<const float> t_predictions, std::span<const float> t_targets) {
-    if (t_predictions.size() != t_targets.size()) {
-        return Result<RegressionMetrics>::Error("Predictions and targets size mismatch");
-    }
-    if (t_predictions.empty()) {
-        return Result<RegressionMetrics>::Error("Cannot evaluate regression on empty spans");
-    }
+    RETURN_ERROR_IF(t_predictions.size() != t_targets.size(), "Predictions and targets size mismatch");
+    RETURN_ERROR_IF(t_predictions.empty(), "Cannot evaluate regression on empty spans");
 
     const size_t n = t_predictions.size();
     double sum_target = 0.0;
@@ -56,12 +52,8 @@ Result<RegressionMetrics> Evaluator::evaluateRegression(std::span<const float> t
 
 Result<ClassificationMetrics> Evaluator::evaluateBinary(
     std::span<const float> t_predictions, std::span<const float> t_targets, float t_threshold) {
-    if (t_predictions.size() != t_targets.size()) {
-        return Result<ClassificationMetrics>::Error("Predictions and targets size mismatch");
-    }
-    if (t_predictions.empty()) {
-        return Result<ClassificationMetrics>::Error("Cannot evaluate binary classification on empty spans");
-    }
+    RETURN_ERROR_IF(t_predictions.size() != t_targets.size(), "Predictions and targets size mismatch");
+    RETURN_ERROR_IF(t_predictions.empty(), "Cannot evaluate binary classification on empty spans");
 
     ClassificationMetrics m;
     m.sample_count = t_predictions.size();
@@ -98,12 +90,8 @@ Result<ClassificationMetrics> Evaluator::evaluateBinary(
 
 Result<TraceComparison> Evaluator::compareSignals(
     std::string_view t_signal_name, std::span<const double> t_sim_trace, std::span<const double> t_real_trace) {
-    if (t_sim_trace.size() != t_real_trace.size()) {
-        return Result<TraceComparison>::Error("Simulated and real trace lengths do not match");
-    }
-    if (t_sim_trace.empty()) {
-        return Result<TraceComparison>::Error("Cannot compare empty traces");
-    }
+    RETURN_ERROR_IF(t_sim_trace.size() != t_real_trace.size(), "Simulated and real trace lengths do not match");
+    RETURN_ERROR_IF(t_sim_trace.empty(), "Cannot compare empty traces");
 
     const size_t n = t_sim_trace.size();
     double sum_sim = 0.0;

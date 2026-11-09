@@ -346,21 +346,19 @@ std::optional<int64_t> parseIntegerLiteral(const std::string& t_in, bool t_big) 
 sgrn::Result<std::string> integerBind(std::string_view t_field, const Json::Value& t_value, bool t_big) {
     const FieldType type = t_big ? FieldType::BigInt : FieldType::Int;
     auto fail = [&]() {
-        return sgrn::Result<std::string>::Error(
-            fmt::format("Field '{}' expects {} but got {}", t_field, fieldTypeName(type), jsonTypeName(t_value)));
+        return ::sgrn::Error(fmt::format("Field '{}' expects {} but got {}", t_field, fieldTypeName(type), jsonTypeName(t_value)));
     };
     if (t_value.isInt64()) {
         const int64_t v = t_value.asInt64();
-        if (!t_big && (v < std::numeric_limits<int32_t>::min() || v > std::numeric_limits<int32_t>::max()))
-            return sgrn::Result<std::string>::Error(fmt::format("Field '{}' value out of range for {}", t_field, fieldTypeName(type)));
+        RETURN_ERROR_IF(!t_big && (v < std::numeric_limits<int32_t>::min() || v > std::numeric_limits<int32_t>::max()),
+            fmt::format("Field '{}' value out of range for {}", t_field, fieldTypeName(type)));
         return std::to_string(v);
     }
     if (t_value.isUInt64()) {
         const uint64_t u = t_value.asUInt64();
         const uint64_t limit =
             t_big ? static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) : static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
-        if (u > limit)
-            return sgrn::Result<std::string>::Error(fmt::format("Field '{}' value out of range for {}", t_field, fieldTypeName(type)));
+        RETURN_ERROR_IF(u > limit, fmt::format("Field '{}' value out of range for {}", t_field, fieldTypeName(type)));
         return std::to_string(u);
     }
     if (t_value.isString()) {
@@ -416,24 +414,16 @@ sgrn::Result<std::string> fieldValueToBind(std::string_view t_field_name, FieldT
         case FieldType::BigInt:
             return integerBind(t_field_name, t_value, /*big=*/true);
         case FieldType::Text:
-            if (!t_value.isString()) {
-                return sgrn::Result<std::string>::Error(
-                    fmt::format("Field '{}' expects text but got {}", t_field_name, jsonTypeName(t_value)));
-            }
+            RETURN_ERROR_IF(!t_value.isString(), fmt::format("Field '{}' expects text but got {}", t_field_name, jsonTypeName(t_value)));
             return t_value.asString();
         case FieldType::Bool:
-            if (!t_value.isBool()) {
-                return sgrn::Result<std::string>::Error(
-                    fmt::format("Field '{}' expects boolean but got {}", t_field_name, jsonTypeName(t_value)));
-            }
+            RETURN_ERROR_IF(!t_value.isBool(), fmt::format("Field '{}' expects boolean but got {}", t_field_name, jsonTypeName(t_value)));
             return t_value.asBool() ? "true" : "false";
         case FieldType::Timestamp:
             // ISO strings only; epoch numbers are rejected so a wrong unit
             // (seconds vs milliseconds) can never silently shift a timestamp.
-            if (!t_value.isString() || t_value.asString().empty()) {
-                return sgrn::Result<std::string>::Error(
-                    fmt::format("Field '{}' expects timestamp but got {}", t_field_name, jsonTypeName(t_value)));
-            }
+            RETURN_ERROR_IF(!t_value.isString() || t_value.asString().empty(),
+                fmt::format("Field '{}' expects timestamp but got {}", t_field_name, jsonTypeName(t_value)));
             return t_value.asString();
         case FieldType::Jsonb: {
             // Any JSON value is a valid jsonb document — re-serialize it
@@ -443,7 +433,7 @@ sgrn::Result<std::string> fieldValueToBind(std::string_view t_field_name, FieldT
             return Json::writeString(builder, t_value);
         }
     }
-    return sgrn::Result<std::string>::Error(fmt::format("Field '{}' has unknown type", t_field_name));
+    return ::sgrn::Error(fmt::format("Field '{}' has unknown type", t_field_name));
 }
 
 // --- LIST --------------------------------------------------------------

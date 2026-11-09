@@ -62,7 +62,7 @@ public:
 private:
     std::string endpoints_cache_;
 
-    inline static const std::array<::sgrn::IHandler<AdminApiHandler>::route_config, 21> kRoutes = {{
+    inline static const std::array<::sgrn::IHandler<AdminApiHandler>::RouteConfig, 21> kRoutes = {{
         {"/api/v1/admin/status", &AdminApiHandler::handleGetStatus, {drogon::Get},
             {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"}},
         {"/api/v1/admin/users", &AdminApiHandler::handleGetUsers, {drogon::Get},
@@ -114,7 +114,7 @@ private:
             {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"}},
     }};
 
-    inline static const std::array<::sgrn::IHandler<AdminApiHandler>::item_route_config, 6> kItemRoutes = {{
+    inline static const std::array<::sgrn::IHandler<AdminApiHandler>::ItemRouteConfig, 6> kItemRoutes = {{
         {"/api/v1/admin/automated-services/{id}/metadata", &AdminApiHandler::handleUpdateAutomatedServiceMetadata, {drogon::Patch},
             {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"}},
         {"/api/v1/admin/roles/{id}", &AdminApiHandler::handleUpdateRole, {drogon::Put},

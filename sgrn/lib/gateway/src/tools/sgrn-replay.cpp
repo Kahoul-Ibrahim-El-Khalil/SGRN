@@ -56,7 +56,7 @@ Result<void, std::string> GatewayReplayer::initialize() {
             argv.push_back(arg.data());
         }
 
-        SGRN_RETURN_IF(auto r = gateway_app_->loadConfig(static_cast<int>(argv.size()), argv.data());
+        RETURN_IF(auto r = gateway_app_->loadConfig(static_cast<int>(argv.size()), argv.data());
             r.hasError(), fmt::format(fg(fmt::color::red), "[sgrn_replay] Failed to load gateway config: {}\n", r.error()));
     }
 
@@ -66,13 +66,13 @@ Result<void, std::string> GatewayReplayer::initialize() {
     // below, once the twin is populated but before any adapter starts, so
     // persistence, cloud upload and southbound traffic stay off while the twin
     // is driven purely from the archive via writeDbMemory().
-    SGRN_RETURN_IF(auto r = gateway_app_->loadSchema();
+    RETURN_IF(auto r = gateway_app_->loadSchema();
         r.hasError(), fmt::format(fg(fmt::color::red), "[sgrn_replay] Failed to load schema: {}\n", r.error()));
 
-    SGRN_RETURN_IF(auto r = gateway_app_->initSecurity();
+    RETURN_IF(auto r = gateway_app_->initSecurity();
         r.hasError(), fmt::format(fg(fmt::color::red), "[sgrn_replay] Security init failed: {}\n", r.error()));
 
-    SGRN_RETURN_IF(auto r = gateway_app_->initTwin();
+    RETURN_IF(auto r = gateway_app_->initTwin();
         r.hasError(), fmt::format(fg(fmt::color::red), "[sgrn_replay] Twin memory init failed: {}\n", r.error()));
 
     gateway_app_->enablePassiveReplayMode();
@@ -80,15 +80,15 @@ Result<void, std::string> GatewayReplayer::initialize() {
     plc_memory_ = &gateway_app_->memory();
     schema_store_ = &gateway_app_->schema();
 
-    SGRN_RETURN_IF(auto r = gateway_app_->initThreading();
+    RETURN_IF(auto r = gateway_app_->initThreading();
         r.hasError(), fmt::format(fg(fmt::color::red), "[sgrn_replay] Threading init failed: {}\n", r.error()));
 
-    SGRN_RETURN_IF(auto r = gateway_app_->wireTelemetry();
+    RETURN_IF(auto r = gateway_app_->wireTelemetry();
         r.hasError(), fmt::format(fg(fmt::color::red), "[sgrn_replay] Telemetry wiring failed: {}\n", r.error()));
 
-    SGRN_RETURN_IF(auto r = gateway_app_->initInfrastructure();
+    RETURN_IF(auto r = gateway_app_->initInfrastructure();
         r.hasError(), fmt::format(fg(fmt::color::red), "[sgrn_replay] Infrastructure init failed: {}\n", r.error()));
-    SGRN_RETURN_IF(auto r = gateway_app_->startAdapters();
+    RETURN_IF(auto r = gateway_app_->startAdapters();
         r.hasError(), fmt::format(fg(fmt::color::red), "[sgrn_replay] Adapter start failed: {}\n", r.error()));
 
     return {};

@@ -88,22 +88,22 @@ sgrn::Result<modbus_t*> Client::createContext(const ClientConfig& t_cfg) {
 
 sgrn::Result<Client> Client::connect(ClientConfig t_cfg) {
     auto ctx_res = createContext(t_cfg);
-    SGRN_IF_ERROR_PROPAGATE(ctx_res);
+    PROPAGATE_ERROR_IF(ctx_res);
 
     Client client(ctx_res.value(), std::move(t_cfg));
-    SGRN_IF_ERROR_PROPAGATE(client.connectLocked());
+    PROPAGATE_ERROR_IF(client.connectLocked());
     return client;
 }
 
 sgrn::Result<std::shared_ptr<Client>> Client::createShared(ClientConfig t_cfg) {
     auto ctx_res = createContext(t_cfg);
-    SGRN_IF_ERROR_PROPAGATE(ctx_res);
+    PROPAGATE_ERROR_IF(ctx_res);
     return std::shared_ptr<Client>(new Client(ctx_res.value(), std::move(t_cfg)));
 }
 
 sgrn::Result<std::shared_ptr<Client>> Client::connectShared(ClientConfig t_cfg) {
     auto res = connect(std::move(t_cfg));
-    SGRN_IF_ERROR_PROPAGATE(res);
+    PROPAGATE_ERROR_IF(res);
     return std::shared_ptr<Client>(new Client(std::move(res.value())));
 }
 
@@ -115,7 +115,7 @@ void Client::disconnect() noexcept {
 }
 
 sgrn::Result<void> Client::connectLocked() {
-    SGRN_RETURN_IF_NULL(ctx_, fmt::format("modbus client context is null"));
+    RETURN_IF_NULL(ctx_, fmt::format("modbus client context is null"));
     if (connected_.load(std::memory_order_relaxed))
         return {};
 
@@ -132,7 +132,7 @@ sgrn::Result<void> Client::ensureConnected() {
         return {};
 
     if (!ctx_) {
-        SGRN_ASSIGN_OR_RETURN(ctx_, createContext(cfg_));
+        ASSIGN_OR_RETURN(ctx_, createContext(cfg_));
     }
     return connectLocked();
 }

@@ -86,7 +86,7 @@ Result<EncryptedChunk> encryptChunk(const EncryptChunkParams& t_params) {
     result.frame.flags = flags;
 
     auto enc_res = encryptChunkGcm(t_params.plaintext, t_params.dek, nonce, aad, result.ciphertext, result.frame.tag);
-    SGRN_RETURN_ERROR_IF(enc_res.hasError(), fmt::format("Encryption failure: {}", enc_res.error()));
+    RETURN_ERROR_IF(enc_res.hasError(), fmt::format("Encryption failure: {}", enc_res.error()));
 
     result.frame.payload_len = static_cast<uint32_t>(result.ciphertext.size());
     return result;
@@ -104,7 +104,7 @@ Result<void> decryptChunk(const DecryptChunkParams& t_params, std::vector<uint8_
     auto aad = buildChunkAad(t_params.header.key_id, t_params.frame.chunk_idx, t_params.frame.flags, t_params.header.total_plaintext_size);
 
     auto dec_res = decryptChunkGcm(t_params.ciphertext, t_params.dek, nonce, aad, t_params.frame.tag, t_out_plain);
-    SGRN_RETURN_ERROR_IF(dec_res.hasError(), fmt::format("AEAD tag verification failed for chunk {}", t_params.frame.chunk_idx));
+    RETURN_ERROR_IF(dec_res.hasError(), fmt::format("AEAD tag verification failed for chunk {}", t_params.frame.chunk_idx));
     return {};
 }
 
@@ -144,10 +144,10 @@ std::vector<uint8_t> StreamHeader::serialize() const {
 
 Result<StreamHeader> StreamHeader::deserialize(std::span<const uint8_t> t_bytes, std::size_t& t_out_header_bytes_read) {
     constexpr std::size_t kMinHeaderSize = 8 + 4 + 8 + 8 + 2; // 30 bytes
-    SGRN_RETURN_ERROR_IF(t_bytes.size() < kMinHeaderSize, "Truncated stream header: buffer too small");
+    RETURN_ERROR_IF(t_bytes.size() < kMinHeaderSize, "Truncated stream header: buffer too small");
 
     // 1. Verify Magic
-    SGRN_RETURN_ERROR_IF(
+    RETURN_ERROR_IF(
         std::memcmp(t_bytes.data(), kStreamMagic.data(), kStreamMagic.size()) != 0, "Corrupted stream header: magic bytes mismatch");
     std::size_t pos = 8;
 
@@ -155,7 +155,7 @@ Result<StreamHeader> StreamHeader::deserialize(std::span<const uint8_t> t_bytes,
     const uint32_t csz = (static_cast<uint32_t>(t_bytes[pos]) << 24) | (static_cast<uint32_t>(t_bytes[pos + 1]) << 16) |
                          (static_cast<uint32_t>(t_bytes[pos + 2]) << 8) | static_cast<uint32_t>(t_bytes[pos + 3]);
     pos += 4;
-    SGRN_RETURN_ERROR_IF(csz < 64 || csz > 64 * 1024 * 1024, "Corrupted stream header: invalid chunk size");
+    RETURN_ERROR_IF(csz < 64 || csz > 64 * 1024 * 1024, "Corrupted stream header: invalid chunk size");
 
     // 3. Nonce prefix
     std::array<uint8_t, kNoncePrefixSize> prefix{};
@@ -172,7 +172,7 @@ Result<StreamHeader> StreamHeader::deserialize(std::span<const uint8_t> t_bytes,
     // 5. Key ID
     const uint16_t kid_len = (static_cast<uint16_t>(t_bytes[pos]) << 8) | static_cast<uint16_t>(t_bytes[pos + 1]);
     pos += 2;
-    SGRN_RETURN_ERROR_IF(t_bytes.size() < pos + kid_len, "Truncated stream header: incomplete key_id");
+    RETURN_ERROR_IF(t_bytes.size() < pos + kid_len, "Truncated stream header: incomplete key_id");
 
     std::string kid(reinterpret_cast<const char*>(t_bytes.data() + pos), kid_len);
     pos += kid_len;
@@ -190,10 +190,10 @@ Result<StreamHeader> StreamHeader::deserialize(std::span<const uint8_t> t_bytes,
 
 Result<std::vector<uint8_t>> encryptBuffer(
     std::span<const uint8_t> t_plaintext, const Dek& t_dek, std::string_view t_key_id, std::size_t t_chunk_size) {
-    SGRN_RETURN_ERROR_IF(!t_dek.isValid(), "Cannot encrypt: DEK is invalid or uninitialized");
+    RETURN_ERROR_IF(!t_dek.isValid(), "Cannot encrypt: DEK is invalid or uninitialized");
 
     auto prefix_res = generateNoncePrefix();
-    SGRN_RETURN_ERROR_IF(prefix_res.hasError(), prefix_res.error());
+    RETURN_ERROR_IF(prefix_res.hasError(), prefix_res.error());
 
     StreamHeader header;
     header.chunk_size = t_chunk_size;
@@ -219,7 +219,7 @@ Result<std::vector<uint8_t>> encryptBuffer(
             .is_final = is_final,
             .plaintext = t_plaintext.subspan(offset, this_chunk_len),
         });
-        SGRN_RETURN_ERROR_IF(enc_res.hasError(), enc_res.error());
+        RETURN_ERROR_IF(enc_res.hasError(), enc_res.error());
 
         const auto& enc_chunk = enc_res.value();
         enc_chunk.frame.writeTo(out);
@@ -233,14 +233,14 @@ Result<std::vector<uint8_t>> encryptBuffer(
 }
 
 Result<std::vector<uint8_t>> decryptBuffer(std::span<const uint8_t> t_ciphertext, const Dek& t_dek, std::string_view t_expected_key_id) {
-    SGRN_RETURN_ERROR_IF(!t_dek.isValid(), "Cannot decrypt: DEK is invalid or uninitialized");
+    RETURN_ERROR_IF(!t_dek.isValid(), "Cannot decrypt: DEK is invalid or uninitialized");
 
     std::size_t header_len = 0;
     auto header_res = StreamHeader::deserialize(t_ciphertext, header_len);
-    SGRN_RETURN_ERROR_IF(header_res.hasError(), fmt::format("Corrupted header: {}", header_res.error()));
+    RETURN_ERROR_IF(header_res.hasError(), fmt::format("Corrupted header: {}", header_res.error()));
     const auto& header = header_res.value();
 
-    SGRN_RETURN_ERROR_IF(!t_expected_key_id.empty() && header.key_id != t_expected_key_id, "Key ID mismatch in stream header");
+    RETURN_ERROR_IF(!t_expected_key_id.empty() && header.key_id != t_expected_key_id, "Key ID mismatch in stream header");
 
     std::vector<uint8_t> plaintext;
     if (header.total_plaintext_size >= 0) {
@@ -252,17 +252,17 @@ Result<std::vector<uint8_t>> decryptBuffer(std::span<const uint8_t> t_ciphertext
     bool found_final = false;
 
     while (pos < t_ciphertext.size()) {
-        SGRN_RETURN_ERROR_IF(found_final, "Unexpected trailing data after final chunk");
-        SGRN_RETURN_ERROR_IF(t_ciphertext.size() - pos < kChunkHeaderSize, "Truncated stream: incomplete chunk header");
+        RETURN_ERROR_IF(found_final, "Unexpected trailing data after final chunk");
+        RETURN_ERROR_IF(t_ciphertext.size() - pos < kChunkHeaderSize, "Truncated stream: incomplete chunk header");
 
         auto frame_res =
             ChunkFrameHeader::deserialize(std::span<const uint8_t, kChunkHeaderSize>(t_ciphertext.data() + pos, kChunkHeaderSize));
-        SGRN_RETURN_ERROR_IF(frame_res.hasError(), frame_res.error());
+        RETURN_ERROR_IF(frame_res.hasError(), frame_res.error());
         const auto& frame = frame_res.value();
         pos += kChunkHeaderSize;
 
-        SGRN_RETURN_ERROR_IF(frame.chunk_idx != expected_chunk_idx, "Chunk out of order");
-        SGRN_RETURN_ERROR_IF(t_ciphertext.size() - pos < frame.payload_len, "Truncated stream: incomplete chunk payload");
+        RETURN_ERROR_IF(frame.chunk_idx != expected_chunk_idx, "Chunk out of order");
+        RETURN_ERROR_IF(t_ciphertext.size() - pos < frame.payload_len, "Truncated stream: incomplete chunk payload");
 
         auto chunk_cipher = t_ciphertext.subspan(pos, frame.payload_len);
         pos += frame.payload_len;
@@ -276,7 +276,7 @@ Result<std::vector<uint8_t>> decryptBuffer(std::span<const uint8_t> t_ciphertext
                 .ciphertext = chunk_cipher,
             },
             chunk_plain);
-        SGRN_RETURN_ERROR_IF(dec_res.hasError(), dec_res.error());
+        RETURN_ERROR_IF(dec_res.hasError(), dec_res.error());
 
         plaintext.insert(plaintext.end(), chunk_plain.begin(), chunk_plain.end());
         if (frame.isFinal()) {
@@ -285,7 +285,7 @@ Result<std::vector<uint8_t>> decryptBuffer(std::span<const uint8_t> t_ciphertext
         ++expected_chunk_idx;
     }
 
-    SGRN_RETURN_ERROR_IF(!found_final, "Truncated stream: missing final chunk");
+    RETURN_ERROR_IF(!found_final, "Truncated stream: missing final chunk");
 
     return plaintext;
 }
@@ -296,19 +296,19 @@ Result<std::vector<uint8_t>> decryptRange(
         return std::vector<uint8_t>{};
     }
 
-    SGRN_RETURN_ERROR_IF(!t_dek.isValid(), "Cannot decrypt: DEK is invalid or uninitialized");
+    RETURN_ERROR_IF(!t_dek.isValid(), "Cannot decrypt: DEK is invalid or uninitialized");
 
     std::size_t header_len = 0;
     auto header_res = StreamHeader::deserialize(t_ciphertext, header_len);
-    SGRN_RETURN_ERROR_IF(header_res.hasError(), fmt::format("Corrupted header: {}", header_res.error()));
+    RETURN_ERROR_IF(header_res.hasError(), fmt::format("Corrupted header: {}", header_res.error()));
     const auto& header = header_res.value();
 
-    SGRN_RETURN_ERROR_IF(!t_expected_key_id.empty() && header.key_id != t_expected_key_id, "Key ID mismatch in stream header");
+    RETURN_ERROR_IF(!t_expected_key_id.empty() && header.key_id != t_expected_key_id, "Key ID mismatch in stream header");
 
     uint64_t effective_length = t_length;
     if (header.total_plaintext_size >= 0) {
         const uint64_t total_sz = static_cast<uint64_t>(header.total_plaintext_size);
-        SGRN_RETURN_ERROR_IF(t_offset >= total_sz, "Range offset out of bounds");
+        RETURN_ERROR_IF(t_offset >= total_sz, "Range offset out of bounds");
         if (t_offset + effective_length > total_sz) {
             effective_length = total_sz - t_offset;
         }
@@ -325,18 +325,18 @@ Result<std::vector<uint8_t>> decryptRange(
 
     for (uint32_t chunk_idx = first_chunk; chunk_idx <= last_chunk; ++chunk_idx) {
         const std::size_t chunk_pos = header_len + static_cast<std::size_t>(chunk_idx) * normal_chunk_frame_size;
-        SGRN_RETURN_ERROR_IF(chunk_pos >= t_ciphertext.size() || t_ciphertext.size() - chunk_pos < kChunkHeaderSize,
+        RETURN_ERROR_IF(chunk_pos >= t_ciphertext.size() || t_ciphertext.size() - chunk_pos < kChunkHeaderSize,
             fmt::format("Truncated stream while seeking chunk {}", chunk_idx));
 
         auto frame_res =
             ChunkFrameHeader::deserialize(std::span<const uint8_t, kChunkHeaderSize>(t_ciphertext.data() + chunk_pos, kChunkHeaderSize));
-        SGRN_RETURN_ERROR_IF(frame_res.hasError(), frame_res.error());
+        RETURN_ERROR_IF(frame_res.hasError(), frame_res.error());
         const auto& frame = frame_res.value();
 
-        SGRN_RETURN_ERROR_IF(frame.chunk_idx != chunk_idx, "Chunk index mismatch during random seek");
+        RETURN_ERROR_IF(frame.chunk_idx != chunk_idx, "Chunk index mismatch during random seek");
 
         const std::size_t payload_pos = chunk_pos + kChunkHeaderSize;
-        SGRN_RETURN_ERROR_IF(t_ciphertext.size() - payload_pos < frame.payload_len, "Truncated chunk payload during random seek");
+        RETURN_ERROR_IF(t_ciphertext.size() - payload_pos < frame.payload_len, "Truncated chunk payload during random seek");
 
         auto chunk_cipher = t_ciphertext.subspan(payload_pos, frame.payload_len);
 
@@ -349,7 +349,7 @@ Result<std::vector<uint8_t>> decryptRange(
                 .ciphertext = chunk_cipher,
             },
             chunk_plain);
-        SGRN_RETURN_ERROR_IF(dec_res.hasError(), dec_res.error());
+        RETURN_ERROR_IF(dec_res.hasError(), dec_res.error());
 
         const uint64_t chunk_start_offset = static_cast<uint64_t>(chunk_idx) * chunk_size;
         const uint64_t chunk_end_offset = chunk_start_offset + chunk_plain.size();
@@ -368,10 +368,10 @@ Result<std::vector<uint8_t>> decryptRange(
 
 Result<uint64_t> encryptStream(
     std::istream& t_in_stream, std::ostream& t_out_stream, const Dek& t_dek, std::string_view t_key_id, std::size_t t_chunk_size) {
-    SGRN_RETURN_ERROR_IF(!t_dek.isValid(), "Cannot encrypt: DEK is invalid or uninitialized");
+    RETURN_ERROR_IF(!t_dek.isValid(), "Cannot encrypt: DEK is invalid or uninitialized");
 
     auto prefix_res = generateNoncePrefix();
-    SGRN_RETURN_ERROR_IF(prefix_res.hasError(), prefix_res.error());
+    RETURN_ERROR_IF(prefix_res.hasError(), prefix_res.error());
 
     // Streaming mode: total plaintext size may be unknown (-1)
     StreamHeader header;
@@ -382,7 +382,7 @@ Result<uint64_t> encryptStream(
 
     const auto header_bytes = header.serialize();
     t_out_stream.write(reinterpret_cast<const char*>(header_bytes.data()), static_cast<std::streamsize>(header_bytes.size()));
-    SGRN_RETURN_ERROR_IF(!t_out_stream, "Failed to write stream header to output");
+    RETURN_ERROR_IF(!t_out_stream, "Failed to write stream header to output");
 
     std::vector<uint8_t> buffer(t_chunk_size);
     uint32_t chunk_idx = 0;
@@ -405,7 +405,7 @@ Result<uint64_t> encryptStream(
             .is_final = is_final,
             .plaintext = std::span<const uint8_t>(buffer.data(), static_cast<std::size_t>(bytes_read)),
         });
-        SGRN_RETURN_ERROR_IF(enc_res.hasError(), fmt::format("Streaming encryption failure: {}", enc_res.error()));
+        RETURN_ERROR_IF(enc_res.hasError(), fmt::format("Streaming encryption failure: {}", enc_res.error()));
 
         const auto& enc_chunk = enc_res.value();
         uint8_t frame_hdr[kChunkHeaderSize];
@@ -429,28 +429,28 @@ Result<uint64_t> encryptStream(
 
 Result<uint64_t> decryptStream(
     std::istream& t_in_stream, std::ostream& t_out_stream, const Dek& t_dek, std::string_view t_expected_key_id) {
-    SGRN_RETURN_ERROR_IF(!t_dek.isValid(), "Cannot decrypt: DEK is invalid or uninitialized");
+    RETURN_ERROR_IF(!t_dek.isValid(), "Cannot decrypt: DEK is invalid or uninitialized");
 
     // Read fixed 30 bytes of header first
     constexpr std::size_t kFixedHeaderSize = 30;
     std::vector<uint8_t> header_buf(kFixedHeaderSize);
     t_in_stream.read(reinterpret_cast<char*>(header_buf.data()), kFixedHeaderSize);
-    SGRN_RETURN_ERROR_IF(t_in_stream.gcount() < static_cast<std::streamsize>(kFixedHeaderSize), "Truncated stream: incomplete header");
+    RETURN_ERROR_IF(t_in_stream.gcount() < static_cast<std::streamsize>(kFixedHeaderSize), "Truncated stream: incomplete header");
 
     const uint16_t kid_len = (static_cast<uint16_t>(header_buf[28]) << 8) | static_cast<uint16_t>(header_buf[29]);
     std::vector<uint8_t> kid_buf(kid_len);
     if (kid_len > 0) {
         t_in_stream.read(reinterpret_cast<char*>(kid_buf.data()), kid_len);
-        SGRN_RETURN_ERROR_IF(t_in_stream.gcount() < static_cast<std::streamsize>(kid_len), "Truncated stream: incomplete key ID in header");
+        RETURN_ERROR_IF(t_in_stream.gcount() < static_cast<std::streamsize>(kid_len), "Truncated stream: incomplete key ID in header");
         header_buf.insert(header_buf.end(), kid_buf.begin(), kid_buf.end());
     }
 
     std::size_t header_len = 0;
     auto header_res = StreamHeader::deserialize(header_buf, header_len);
-    SGRN_RETURN_ERROR_IF(header_res.hasError(), fmt::format("Corrupted header: {}", header_res.error()));
+    RETURN_ERROR_IF(header_res.hasError(), fmt::format("Corrupted header: {}", header_res.error()));
     const auto& header = header_res.value();
 
-    SGRN_RETURN_ERROR_IF(!t_expected_key_id.empty() && header.key_id != t_expected_key_id, "Key ID mismatch in stream header");
+    RETURN_ERROR_IF(!t_expected_key_id.empty() && header.key_id != t_expected_key_id, "Key ID mismatch in stream header");
 
     uint32_t expected_chunk_idx = 0;
     uint64_t total_decrypted = 0;
@@ -458,19 +458,19 @@ Result<uint64_t> decryptStream(
 
     uint8_t frame_buf[kChunkHeaderSize];
     while (t_in_stream.read(reinterpret_cast<char*>(frame_buf), kChunkHeaderSize)) {
-        SGRN_RETURN_ERROR_IF(found_final, "Unexpected trailing data after final chunk");
+        RETURN_ERROR_IF(found_final, "Unexpected trailing data after final chunk");
 
         auto frame_res = ChunkFrameHeader::deserialize(std::span<const uint8_t, kChunkHeaderSize>(frame_buf, kChunkHeaderSize));
-        SGRN_RETURN_ERROR_IF(frame_res.hasError(), frame_res.error());
+        RETURN_ERROR_IF(frame_res.hasError(), frame_res.error());
         const auto& frame = frame_res.value();
 
-        SGRN_RETURN_ERROR_IF(frame.chunk_idx != expected_chunk_idx,
+        RETURN_ERROR_IF(frame.chunk_idx != expected_chunk_idx,
             fmt::format("Chunk out of order: expected {} but got {}", expected_chunk_idx, frame.chunk_idx));
 
         std::vector<uint8_t> chunk_cipher(frame.payload_len);
         if (frame.payload_len > 0) {
             t_in_stream.read(reinterpret_cast<char*>(chunk_cipher.data()), frame.payload_len);
-            SGRN_RETURN_ERROR_IF(
+            RETURN_ERROR_IF(
                 t_in_stream.gcount() < static_cast<std::streamsize>(frame.payload_len), "Truncated stream: incomplete chunk payload");
         }
 
@@ -483,7 +483,7 @@ Result<uint64_t> decryptStream(
                 .ciphertext = chunk_cipher,
             },
             chunk_plain);
-        SGRN_RETURN_ERROR_IF(dec_res.hasError(), dec_res.error());
+        RETURN_ERROR_IF(dec_res.hasError(), dec_res.error());
 
         if (!chunk_plain.empty()) {
             t_out_stream.write(reinterpret_cast<const char*>(chunk_plain.data()), static_cast<std::streamsize>(chunk_plain.size()));
@@ -496,7 +496,7 @@ Result<uint64_t> decryptStream(
         ++expected_chunk_idx;
     }
 
-    SGRN_RETURN_ERROR_IF(!found_final, "Truncated stream: missing final chunk");
+    RETURN_ERROR_IF(!found_final, "Truncated stream: missing final chunk");
 
     return total_decrypted;
 }

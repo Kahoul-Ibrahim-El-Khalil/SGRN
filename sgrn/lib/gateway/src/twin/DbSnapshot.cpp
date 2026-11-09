@@ -359,7 +359,7 @@ sgrn::Result<std::string, ::sgrn::scl::SclError> DbSnapshot::getFieldValue(const
 
 void DbSnapshot::updateRawRegion(size_t t_offset, const uint8_t* tp_src, size_t t_bytes) {
 
-    SGRN_RETURN_IF(!tp_src || t_bytes == 0, ;);
+    RETURN_IF(!tp_src || t_bytes == 0, ;);
 
     std::lock_guard lock(state_mutex_);
 

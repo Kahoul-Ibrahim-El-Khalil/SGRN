@@ -5,6 +5,19 @@ sgrn_find_readline()
 
 add_library(sgrn_datastore_shell STATIC
     src/DatastoreShell.cpp
+    src/connection.cpp
+    src/path.cpp
+    src/pipeline.cpp
+    src/angelscript-bindings.cpp
+    src/dispatch.cpp
+    src/print.cpp
+    src/commands/cmd-admin-accounts.cpp
+    src/commands/cmd-admin-sessions.cpp
+    src/commands/cmd-auth.cpp
+    src/commands/cmd-filesystem.cpp
+    src/commands/cmd-session.cpp
+    src/commands/cmd-storage.cpp
+    src/commands/cmd-upload.cpp
     include/sgrn/datastore/shell/DatastoreShell.hpp
 )
 

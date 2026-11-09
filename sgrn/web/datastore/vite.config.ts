@@ -35,6 +35,8 @@ export default defineConfig(({ command }): UserConfig => {
                 // sgrn/typescript/types/src hot-reload during `bun run dev`
                 // (instead of the stale copy under node_modules/@sgrn/types).
                 "@sgrn/types": path.resolve(__dirname, "../../typescript/types/src/index.ts"),
+                "@sgrn/datastore/web": path.resolve(__dirname, "../../typescript/datastore/src/web.ts"),
+                "@sgrn/datastore": path.resolve(__dirname, "../../typescript/datastore/src/index.ts"),
             },
         },
         build: {

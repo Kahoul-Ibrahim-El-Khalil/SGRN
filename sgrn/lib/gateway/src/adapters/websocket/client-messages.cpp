@@ -76,18 +76,18 @@ namespace sgrn::gateway::adapters::websocket
 void WebSocketAdapter::handleClientMessage(crow::websocket::connection& t_conn, const std::string& t_message) {
     // MED-5: Reject oversized messages before parsing to prevent memory exhaustion.
     constexpr size_t kMaxMessageBytes = 4096;
-    SGRN_RETURN_IF(t_message.size() > kMaxMessageBytes, ;);
+    RETURN_IF(t_message.size() > kMaxMessageBytes, ;);
     rapidjson::Document doc;
     doc.Parse(t_message.c_str());
-    SGRN_RETURN_IF(doc.HasParseError() || !doc.IsObject(), ;);
+    RETURN_IF(doc.HasParseError() || !doc.IsObject(), ;);
 
     auto resolveDbRef = [&](const rapidjson::Value& t_db_value) -> std::optional<uint16_t> {
-        SGRN_RETURN_IF(t_db_value.IsUint(), static_cast<uint16_t>(t_db_value.GetUint()));
+        RETURN_IF(t_db_value.IsUint(), static_cast<uint16_t>(t_db_value.GetUint()));
 
-        SGRN_RETURN_IF(t_db_value.IsUint64() && t_db_value.GetUint64() <= std::numeric_limits<uint16_t>::max(),
+        RETURN_IF(t_db_value.IsUint64() && t_db_value.GetUint64() <= std::numeric_limits<uint16_t>::max(),
             static_cast<uint16_t>(t_db_value.GetUint64()));
 
-        SGRN_RETURN_IF(t_db_value.IsString() && registry_, registry_->resolveDbRef(t_db_value.GetString()));
+        RETURN_IF(t_db_value.IsString() && registry_, registry_->resolveDbRef(t_db_value.GetString()));
 
         return std::nullopt;
     };

@@ -95,7 +95,7 @@ static Result<std::string, std::string> extractLiteralOrConstArg(const std::stri
         if (std::regex_search(t_content, var_match, var_regex))
             return var_match[1].str();
     } catch (const std::exception& e) {
-        return Result<std::string, std::string>::Error(e.what());
+        return ::sgrn::Error(e.what());
     }
     return "";
 }
@@ -185,15 +185,13 @@ static Result<SchemaLoadResult, SclError> loadScannedSchema(const std::string& t
     if (fs::exists(resolved)) {
         if (t_method == "loadJsonSchema") {
             auto res = ::sgrn::scl::PlcSchemaStore::loadFromJsonFile(resolved);
-            if (res.hasError())
-                return res.error();
+            RETURN_IF(res.hasError(), res.error());
             return SchemaLoadResult{std::move(res.value()), schema_key};
         }
 
         ::sgrn::scl::PlcSchemaStore store;
         auto res = store.loadFile(resolved);
-        if (res.hasError())
-            return res.error();
+        RETURN_IF(res.hasError(), res.error());
         return SchemaLoadResult{std::move(store), schema_key};
     }
 
@@ -205,9 +203,7 @@ static Result<SchemaLoadResult, SclError> loadScannedSchema(const std::string& t
 
     ::sgrn::scl::PlcSchemaStore store;
     auto res = store.loadSchema(t_raw_arg); // raw arg, not `resolved`
-    if (res.hasError()) {
-        return res.error();
-    }
+    RETURN_IF(res.hasError(), res.error());
     // For inline schemas, use a hash of the content as key
     schema_key = "inline:" + std::to_string(std::hash<std::string>{}(t_raw_arg));
 

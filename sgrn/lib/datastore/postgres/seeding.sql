@@ -18,10 +18,10 @@ on conflict (name) do nothing;
 insert into
   core.domains (organisation, name)
 values
-  ('CIC-Moulins Guelma', 'Production'),
-  ('CIC-Moulins Guelma', 'Maintenance'),
-  ('CIC-Moulins Guelma', 'Logistics'),
-  ('CIC-Moulins Guelma', 'Management')
+  ('CIC-Moulins Guelma', 'production'),
+  ('CIC-Moulins Guelma', 'maintenance'),
+  ('CIC-Moulins Guelma', 'logistics'),
+  ('CIC-Moulins Guelma', 'management')
 on conflict (organisation, name) do nothing;
 
 -- note: core.roles table has been removed.

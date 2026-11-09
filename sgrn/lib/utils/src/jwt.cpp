@@ -62,9 +62,7 @@ static std::string computeSignature(std::string_view t_payload, std::string_view
 }
 
 Result<std::string> generateToken(const Json::Value& t_claims, const std::string& t_secret) {
-    if (t_secret.empty()) {
-        return Result<std::string>::Error("JWT signature missing secret");
-    }
+    RETURN_ERROR_IF(t_secret.empty(), "JWT signature missing secret");
 
     // 1. Header (HS256)
     Json::Value header;
@@ -91,20 +89,14 @@ Result<std::string> generateToken(const Json::Value& t_claims, const std::string
 }
 
 Result<Json::Value> verifyToken(const std::string& t_token, const std::string& t_secret) {
-    if (t_secret.empty()) {
-        return Result<Json::Value>::Error("JWT verification missing secret");
-    }
+    RETURN_ERROR_IF(t_secret.empty(), "JWT verification missing secret");
 
     // JWT parts: [header].[payload].[signature]
     std::string::size_type dot1 = t_token.find('.');
-    if (dot1 == std::string::npos) {
-        return Result<Json::Value>::Error("JWT format invalid");
-    }
+    RETURN_ERROR_IF(dot1 == std::string::npos, "JWT format invalid");
 
     std::string::size_type dot2 = t_token.find('.', dot1 + 1);
-    if (dot2 == std::string::npos) {
-        return Result<Json::Value>::Error("JWT format invalid");
-    }
+    RETURN_ERROR_IF(dot2 == std::string::npos, "JWT format invalid");
 
     std::string_view header_b64(&t_token[0], dot1);
     std::string_view payload_b64(&t_token[dot1 + 1], dot2 - (dot1 + 1));
@@ -115,24 +107,18 @@ Result<Json::Value> verifyToken(const std::string& t_token, const std::string& t
     std::string expected_signature = computeSignature(message, t_secret);
 
     // Constant-time compare
-    if (signature_b64.length() != expected_signature.length()) {
-        return Result<Json::Value>::Error("Invalid JWT signature");
-    }
+    RETURN_ERROR_IF(signature_b64.length() != expected_signature.length(), "Invalid JWT signature");
 
     int mismatch = 0;
     for (size_t i = 0; i < signature_b64.length(); ++i) {
         mismatch |= (signature_b64[i] ^ expected_signature[i]);
     }
 
-    if (mismatch != 0) {
-        return Result<Json::Value>::Error("Invalid JWT signature");
-    }
+    RETURN_ERROR_IF(mismatch != 0, "Invalid JWT signature");
 
     // Decode Payload
     std::string payload_json = base64UrlDecode(payload_b64);
-    if (payload_json.empty()) {
-        return Result<Json::Value>::Error("Failed to decode JWT payload");
-    }
+    RETURN_ERROR_IF(payload_json.empty(), "Failed to decode JWT payload");
 
     // Parse Claims
     Json::Value t_claims;
@@ -140,9 +126,8 @@ Result<Json::Value> verifyToken(const std::string& t_token, const std::string& t
     std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
     std::string errs;
 
-    if (!reader->parse(payload_json.data(), payload_json.data() + payload_json.length(), &t_claims, &errs)) {
-        return Result<Json::Value>::Error("Failed to parse JWT payload");
-    }
+    RETURN_ERROR_IF(
+        !reader->parse(payload_json.data(), payload_json.data() + payload_json.length(), &t_claims, &errs), "Failed to parse JWT payload");
 
     return t_claims;
 }

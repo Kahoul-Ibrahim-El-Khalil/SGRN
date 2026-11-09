@@ -87,23 +87,20 @@ FullDbReadFn PersistenceBridge::makeDbReader() const {
     std::weak_ptr<runtime::PlcRuntime> weak_rt = runtime_;
     return [weak_rt](uint16_t t_db) -> sgrn::Result<std::vector<uint8_t>> {
         auto rt = weak_rt.lock();
-        if (!rt)
-            return sgrn::Result<std::vector<uint8_t>>::Error("runtime expired");
+        RETURN_ERROR_IF(!rt, "runtime expired");
 
         // Look up the DB size from the schema.
         auto& schema = rt->getSchema();
         auto db_res = schema.getDb(t_db);
-        if (db_res.hasError() || !db_res.value() || db_res.value()->size_bytes <= 0)
-            return sgrn::Result<std::vector<uint8_t>>::Error(fmt::format("DB {} not found in schema", t_db));
+        RETURN_ERROR_IF(
+            db_res.hasError() || !db_res.value() || db_res.value()->size_bytes <= 0, fmt::format("DB {} not found in schema", t_db));
 
         const size_t db_size = static_cast<size_t>(db_res.value()->size_bytes);
         std::vector<uint8_t> buf(db_size, 0);
 
         auto& mem = rt->getMemory();
         auto read_res = mem.readDbMemory(t_db, 0, db_size, buf.data());
-        if (read_res.hasError())
-            return sgrn::Result<std::vector<uint8_t>>::Error(
-                fmt::format("readDbMemory DB{} failed: {}", t_db, static_cast<int>(read_res.error())));
+        RETURN_ERROR_IF(read_res.hasError(), fmt::format("readDbMemory DB{} failed: {}", t_db, static_cast<int>(read_res.error())));
 
         return sgrn::Result<std::vector<uint8_t>>(std::move(buf));
     };

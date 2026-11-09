@@ -11,6 +11,7 @@
 #include <sgrn/datastore/error/exception.hpp>
 #include <sgrn/types/HttpResponseCallback.hpp>
 #include <cctype>
+#include <charconv>
 #include <json/json.h>
 #include <stdexcept>
 #include <string>
@@ -29,32 +30,109 @@ constexpr const char plain_content_type[] = "text/plain";
 // Only escapes characters that would break a JSON string literal.
 // Literal error-message constants need no escaping at the call site.
 // =========================================================
-inline std::string jsonEscape(std::string_view s) {
-    std::string out;
-    out.reserve(s.size() + 4);
-    for (unsigned char c : s) {
+inline void appendJsonEscaped(std::string& t_out, std::string_view t_value) {
+    t_out.reserve(t_out.size() + t_value.size() + 4);
+    for (unsigned char c : t_value) {
         switch (c) {
             case '"':
-                out += "\\\"";
+                t_out += "\\\"";
                 break;
             case '\\':
-                out += "\\\\";
+                t_out += "\\\\";
                 break;
             case '\n':
-                out += "\\n";
+                t_out += "\\n";
                 break;
             case '\r':
-                out += "\\r";
+                t_out += "\\r";
                 break;
             case '\t':
-                out += "\\t";
+                t_out += "\\t";
                 break;
             default:
-                out += static_cast<char>(c);
+                t_out += static_cast<char>(c);
         }
     }
+}
+
+inline std::string jsonEscape(std::string_view t_value) {
+    std::string out;
+    out.reserve(t_value.size() + 4);
+    appendJsonEscaped(out, t_value);
     return out;
 }
+
+// Small allocation-conscious writer for fixed-shape response objects. It owns
+// its final body and is moved into Drogon; it never exposes a reusable buffer
+// that could be modified while a response is in flight.
+class JsonObjectBuilder {
+public:
+    explicit JsonObjectBuilder(std::size_t t_reserve = 128) {
+        body_.reserve(t_reserve);
+        body_ += '{';
+    }
+
+    JsonObjectBuilder& string(std::string_view t_key, std::string_view t_value) {
+        key(t_key);
+        body_ += '"';
+        appendJsonEscaped(body_, t_value);
+        body_ += '"';
+        return *this;
+    }
+
+    JsonObjectBuilder& int64(std::string_view t_key, std::int64_t t_value) {
+        key(t_key);
+        char buffer[32];
+        const auto result = std::to_chars(std::begin(buffer), std::end(buffer), t_value);
+        body_.append(buffer, result.ptr);
+        return *this;
+    }
+
+    JsonObjectBuilder& uint64(std::string_view t_key, std::uint64_t t_value) {
+        key(t_key);
+        char buffer[32];
+        const auto result = std::to_chars(std::begin(buffer), std::end(buffer), t_value);
+        body_.append(buffer, result.ptr);
+        return *this;
+    }
+
+    JsonObjectBuilder& boolean(std::string_view t_key, bool t_value) {
+        key(t_key);
+        body_ += t_value ? "true" : "false";
+        return *this;
+    }
+
+    JsonObjectBuilder& null(std::string_view t_key) {
+        key(t_key);
+        body_ += "null";
+        return *this;
+    }
+
+    JsonObjectBuilder& raw(std::string_view t_key, std::string_view t_json) {
+        key(t_key);
+        body_ += t_json;
+        return *this;
+    }
+
+    std::string finish() && {
+        body_ += '}';
+        return std::move(body_);
+    }
+
+private:
+    void key(std::string_view t_key) {
+        if (!first_) {
+            body_ += ',';
+        }
+        first_ = false;
+        body_ += '"';
+        appendJsonEscaped(body_, t_key);
+        body_ += R"(":)";
+    }
+
+    std::string body_;
+    bool first_{true};
+};
 
 // =========================================================
 // 1. Core Response Factory
@@ -209,11 +287,19 @@ inline drogon::HttpResponsePtr createErrorResponse(
         msg = "Referenced entity does not exist.";
     }
 
-    // Emit JSON directly — no intermediate Json::Value tree needed for two fields.
+    // Emit JSON directly — no intermediate Json::Value tree or temporary
+    // escaped strings needed for the common two-field error response.
     auto resp = drogon::HttpResponse::newHttpResponse();
     resp->setStatusCode(t_http_code);
     resp->setContentTypeString(::sgrn::json_content_type);
-    resp->setBody(fmt::format(R"({{"error":"{}","scope":"{}"}})", jsonEscape(msg), jsonEscape(t_scope)));
+    std::string body;
+    body.reserve(msg.size() + t_scope.size() + 24);
+    body += R"({"error":")";
+    appendJsonEscaped(body, msg);
+    body += R"(","scope":")";
+    appendJsonEscaped(body, t_scope);
+    body += R"("})";
+    resp->setBody(std::move(body));
     return resp;
 }
 

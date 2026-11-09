@@ -53,7 +53,7 @@ inline std::string normalizePath(std::string t_path) {
 inline bool readStringFromFile(const std::filesystem::path& t_path, std::string& t_content) {
     std::ifstream ifs(t_path);
 
-    SGRN_RETURN_IF(!ifs.is_open(), false);
+    RETURN_IF(!ifs.is_open(), false);
 
     t_content.assign((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
     return true;
@@ -62,7 +62,7 @@ inline bool readStringFromFile(const std::filesystem::path& t_path, std::string&
 inline bool writeStringToFile(const std::filesystem::path& t_path, const char* tp_content) {
     std::ofstream ofs(t_path);
 
-    SGRN_RETURN_IF(!ofs.is_open(), false);
+    RETURN_IF(!ofs.is_open(), false);
 
     ofs << tp_content;
     return true;
@@ -71,7 +71,7 @@ inline bool writeStringToFile(const std::filesystem::path& t_path, const char* t
 inline bool writeStringToFile(const std::filesystem::path& t_path, const std::string& t_content) {
     std::ofstream ofs(t_path);
 
-    SGRN_RETURN_IF(!ofs.is_open(), false);
+    RETURN_IF(!ofs.is_open(), false);
 
     ofs << t_content.c_str();
     return true;
@@ -79,14 +79,14 @@ inline bool writeStringToFile(const std::filesystem::path& t_path, const std::st
 
 inline bool readBinaryFile(const std::filesystem::path& t_path, std::vector<uint8_t>& t_data) {
     std::ifstream ifs(t_path, std::ios::binary);
-    SGRN_RETURN_IF(!ifs.is_open(), false);
+    RETURN_IF(!ifs.is_open(), false);
     t_data.assign((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
     return true;
 }
 
 inline bool writeBinaryFile(const std::filesystem::path& t_path, const uint8_t* tp_data, size_t t_size) {
     std::ofstream ofs(t_path, std::ios::binary);
-    SGRN_RETURN_IF(!ofs.is_open(), false);
+    RETURN_IF(!ofs.is_open(), false);
     if (t_size > 0 && tp_data != nullptr) {
         ofs.write(reinterpret_cast<const char*>(tp_data), static_cast<std::streamsize>(t_size));
     }
@@ -116,7 +116,7 @@ inline bool writeBinaryFile(const std::filesystem::path& t_path, const std::vect
 ///         copy operation failed.
 inline sgrn::Result<void, std::string> copyIfChanged(const std::filesystem::path& t_src, const std::filesystem::path& t_dst) {
     namespace fs = std::filesystem;
-    SGRN_RETURN_ERROR_IF(!fs::exists(t_src), fmt::format("Source file does not exist: {}", t_src.string()));
+    RETURN_ERROR_IF(!fs::exists(t_src), fmt::format("Source file does not exist: {}", t_src.string()));
     bool copy_needed = true;
     if (fs::exists(t_dst)) {
         copy_needed = (fs::file_size(t_src) != fs::file_size(t_dst));

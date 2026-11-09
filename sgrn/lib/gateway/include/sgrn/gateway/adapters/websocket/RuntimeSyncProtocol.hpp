@@ -7,7 +7,7 @@
 // it carries a sequence number and one or more byte ranges that can be
 // applied atomically by a runtime endpoint.
 
-#include <sgrn/Result.hpp> // SGRN_RETURN_IF validation macro
+#include <sgrn/Result.hpp> // RETURN_IF validation macro
 
 #include <concepts>
 #include <cstdint>
@@ -156,23 +156,23 @@ inline bool decode(const std::string& input, Frame& frame, std::string* error = 
     frame.timestamp_ms = timestamp_ms;
     frame.records.clear();
 
-    SGRN_RETURN_IF(count > (input.size() - pos) / kRecordHeaderSize, fail("runtime-sync record count exceeds frame"));
+    RETURN_IF(count > (input.size() - pos) / kRecordHeaderSize, fail("runtime-sync record count exceeds frame"));
 
     frame.records.reserve(count);
     for (uint32_t i = 0; i < count; ++i) {
         Record record;
         uint32_t length = 0;
 
-        SGRN_RETURN_IF(!detail::readAllLE(input, pos, record.db, record.offset, length), fail("truncated runtime-sync record"));
+        RETURN_IF(!detail::readAllLE(input, pos, record.db, record.offset, length), fail("truncated runtime-sync record"));
 
-        SGRN_RETURN_IF(length > input.size() - pos, fail("runtime-sync record exceeds frame"));
+        RETURN_IF(length > input.size() - pos, fail("runtime-sync record exceeds frame"));
         record.bytes.assign(
             reinterpret_cast<const uint8_t*>(input.data() + pos), reinterpret_cast<const uint8_t*>(input.data() + pos + length));
         pos += length;
 
         frame.records.push_back(std::move(record));
     }
-    SGRN_RETURN_IF(pos != input.size(), fail("trailing runtime-sync bytes"));
+    RETURN_IF(pos != input.size(), fail("trailing runtime-sync bytes"));
     return true;
 }
 

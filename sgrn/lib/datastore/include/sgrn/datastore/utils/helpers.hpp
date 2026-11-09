@@ -114,18 +114,15 @@ inline std::optional<T> extractHeaderNumericalValue(const drogon::HttpRequestPtr
 
     // FIXED: Changed from getParameter to getHeader
     const std::string value_str = tsp_req->getHeader(t_header);
-    if (value_str.empty()) {
-        return std::nullopt;
-    }
+
+    RETURN_IF(value_str.empty(), std::nullopt);
     T value{};
     const char* p_begin = value_str.data();
     const char* p_end = value_str.data() + value_str.size();
 
     auto [ptr, ec] = std::from_chars(p_begin, p_end, value);
 
-    if (ec != std::errc{} || ptr != p_end) {
-        return std::nullopt;
-    }
+    RETURN_IF(ec != std::errc{} || ptr != p_end, std::nullopt);
 
     return value;
 }
@@ -133,30 +130,29 @@ inline std::optional<T> extractHeaderNumericalValue(const drogon::HttpRequestPtr
 inline BackendResult<std::string> extractRequiredParam(const drogon::HttpRequestPtr& tsp_req, const std::string& t_name) {
     std::string value = tsp_req->getParameter(t_name);
     if (value.empty()) {
-        return BackendResult<std::string>::Error("Application", "Missing required parameter: " + t_name);
+        RETURN_ERROR(datastore::BackendError{"Application", "Missing required parameter: " + t_name});
     }
     return value;
 }
 
 inline std::optional<std::string> extractOptionalParam(const drogon::HttpRequestPtr& tsp_req, const std::string& t_name) {
     std::string value = tsp_req->getParameter(t_name);
-    if (value.empty()) {
-        return std::nullopt;
-    }
+
+    RETURN_IF(value.empty(), std::nullopt);
     return value;
 }
 
 // ADDED: Security utility to prevent path traversal attacks
 inline bool isValidStorageKey(std::string_view t_key) {
     // Reject path traversal attempts
-    if (t_key.find("..") != std::string_view::npos)
-        return false;
-    if (t_key.find("//") != std::string_view::npos)
-        return false;
-    if (t_key.starts_with("/"))
-        return false;
-    if (t_key.empty())
-        return false;
+    RETURN_IF(t_key.find("..") != std::string_view::npos, false);
+
+    RETURN_IF(t_key.find("//") != std::string_view::npos, false);
+
+    RETURN_IF(t_key.starts_with("/"), false);
+
+    RETURN_IF(t_key.empty(), false);
+
     return true;
 }
 
@@ -165,16 +161,19 @@ namespace datastore::auth
 
 inline bool emailIsConfiguredPlatformAdmin(const std::string& t_email_raw) {
     const std::string email = sgrn::utils::strings::toLower(sgrn::utils::strings::trim(t_email_raw));
-    if (email.empty()) return false;
+    RETURN_IF(email.empty(), false);
+
     if (const char* env = std::getenv("SGRN_SYSTEM_ADMIN_EMAILS")) {
         std::string values(env);
         size_t start = 0;
         while (start <= values.size()) {
             const size_t comma = values.find(',', start);
-            const std::string item = sgrn::utils::strings::toLower(sgrn::utils::strings::trim(
-                values.substr(start, comma == std::string::npos ? std::string::npos : comma - start)));
-            if (!item.empty() && item == email) return true;
-            if (comma == std::string::npos) break;
+            const std::string item = sgrn::utils::strings::toLower(
+                sgrn::utils::strings::trim(values.substr(start, comma == std::string::npos ? std::string::npos : comma - start)));
+
+            RETURN_IF(!item.empty() && item == email, true);
+            if (comma == std::string::npos)
+                break;
             start = comma + 1;
         }
     }
@@ -185,8 +184,12 @@ inline bool emailIsConfiguredPlatformAdmin(const std::string& t_email_raw) {
             auto matches = [&](const Json::Value& v) {
                 return v.isString() && sgrn::utils::strings::toLower(sgrn::utils::strings::trim(v.asString())) == email;
             };
-            if (value.isArray()) for (const auto& item : value) if (matches(item)) return true;
-            if (matches(value)) return true;
+            if (value.isArray())
+                for (const auto& item : value)
+                    if (matches(item))
+                        return true;
+            if (matches(value))
+                return true;
         }
     } catch (...) {
     }
@@ -194,16 +197,15 @@ inline bool emailIsConfiguredPlatformAdmin(const std::string& t_email_raw) {
 }
 
 inline bool isPlatformAdmin(const drogon::HttpRequestPtr& tsp_req) {
-    if (!tsp_req || !tsp_req->attributes()->find("session_json")) {
-        return false;
-    }
+
+    RETURN_IF(!tsp_req || !tsp_req->attributes()->find("session_json"), false);
+
     const auto& session = tsp_req->attributes()->get<Json::Value>("session_json");
-    if (!session.isMember("user") || !session["user"].isMember("email") || !session["user"]["email"].isString()) {
-        return false;
-    }
-    if (tsp_req->attributes()->find("is_platform_admin")) {
-        return tsp_req->attributes()->get<bool>("is_platform_admin");
-    }
+
+    RETURN_IF(!session.isMember("user") || !session["user"].isMember("email") || !session["user"]["email"].isString(), false);
+
+    RETURN_IF(tsp_req->attributes()->find("is_platform_admin"), tsp_req->attributes()->get<bool>("is_platform_admin"));
+
     return emailIsConfiguredPlatformAdmin(session["user"]["email"].asString());
 }
 

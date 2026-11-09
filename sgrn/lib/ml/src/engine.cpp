@@ -5,9 +5,7 @@ namespace sgrn::ml
 {
 
 Result<void> PredictionEngine::loadModel(ModelManifest t_manifest, std::unique_ptr<IModelBackend> t_backend) {
-    if (!t_backend) {
-        return Result<void>::Error("Cannot load null backend into PredictionEngine");
-    }
+    RETURN_ERROR_IF(!t_backend, "Cannot load null backend into PredictionEngine");
 
     manifest_ = std::move(t_manifest);
     backend_ = std::move(t_backend);
@@ -28,23 +26,17 @@ void PredictionEngine::reset() {
 }
 
 Result<Prediction> PredictionEngine::step(uint64_t t_ts_ns, std::span<const double> t_raw_inputs) {
-    if (!backend_) {
-        return Result<Prediction>::Error("PredictionEngine has no active model backend");
-    }
+    RETURN_ERROR_IF(!backend_, "PredictionEngine has no active model backend");
 
     const auto t_start = std::chrono::steady_clock::now();
 
     // 1. Extract features
     auto ext_res = extractor_.push(t_ts_ns, t_raw_inputs, feature_buffer_);
-    if (ext_res.hasError()) {
-        return Result<Prediction>::Error("Feature extraction error: " + ext_res.error());
-    }
+    RETURN_ERROR_IF(ext_res.hasError(), "Feature extraction error: " + ext_res.error());
 
     // 2. Perform inference via backend
     auto pred_res = backend_->predict(feature_buffer_);
-    if (pred_res.hasError()) {
-        return Result<Prediction>::Error("Inference error: " + pred_res.error());
-    }
+    RETURN_ERROR_IF(pred_res.hasError(), "Inference error: " + pred_res.error());
 
     const auto t_end = std::chrono::steady_clock::now();
     const auto latency_us = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count());

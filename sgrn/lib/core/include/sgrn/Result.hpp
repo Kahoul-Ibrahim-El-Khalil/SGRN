@@ -45,6 +45,21 @@ public:
         : base(std::unexpect, E(std::forward<Err>(t_e))) {
     }
 
+    // Direct-initialise E from a std::unexpected<G>. Needed because the
+    // inherited expected(unexpected<G>) constructor is explicit whenever
+    // E's conversion from G is explicit (e.g. std::string from string_view),
+    // which makes `return sgrn::Error(...)` ill-formed. Direct-initialising
+    // here keeps the Error()/macro sugar usable with such error types.
+    template <typename G, std::enable_if_t<std::is_constructible_v<E, G>, int> = 0>
+    Result(std::unexpected<G>&& t_e)
+        : base(std::unexpect, E(std::move(t_e).error())) {
+    }
+
+    template <typename G, std::enable_if_t<std::is_constructible_v<E, const G&>, int> = 0>
+    Result(const std::unexpected<G>& t_e)
+        : base(std::unexpect, E(t_e.error())) {
+    }
+
     // ── Syntactic sugar ───────────────────────────────────────────────────
     [[nodiscard]] bool hasError() const noexcept {
         return !base::has_value();
@@ -68,36 +83,73 @@ template <typename E>
     return std::unexpected<std::decay_t<E>>(std::forward<E>(e));
 }
 
-#define SGRN_IF_ERROR_PROPAGATE(expr)                                                                                                      \
+#define PROPAGATE_ERROR_IF(expr)                                                                                                           \
     do {                                                                                                                                   \
         auto&& _sgrn_result = (expr);                                                                                                      \
         if (!_sgrn_result.has_value())                                                                                                     \
-            return std::unexpected(_sgrn_result.error());                                                                                  \
+            return ::sgrn::Error(std::move(_sgrn_result).error());                                                                         \
     } while (false)
 
-#define SGRN_ASSIGN_OR_RETURN(lhs, expr)                                                                                                   \
+#define ASSIGN_OR_RETURN(lhs, expr)                                                                                                        \
     do {                                                                                                                                   \
         auto&& _sgrn_result = (expr);                                                                                                      \
         if (!_sgrn_result.has_value())                                                                                                     \
-            return std::unexpected(_sgrn_result.error());                                                                                  \
+            return ::sgrn::Error(_sgrn_result.error());                                                                                    \
         (lhs) = std::move(_sgrn_result.value());                                                                                           \
     } while (false)
 
-#define SGRN_RETURN_ERROR_IF(condition, error)                                                                                             \
+#define RETURN_ERROR_IF(condition, error)                                                                                                  \
     do {                                                                                                                                   \
         if (condition)                                                                                                                     \
-            return Error(error);                                                                                                           \
+            return ::sgrn::Error(error);                                                                                                   \
     } while (false)
 
-#define SGRN_RETURN_IF(condition, error)                                                                                                   \
+#define RETURN_IF(condition, error)                                                                                                        \
     do {                                                                                                                                   \
         if (condition)                                                                                                                     \
             return error;                                                                                                                  \
     } while (false)
 
-#define SGRN_RETURN_IF_NULL(ptr, error)                                                                                                    \
+#define RETURN_IF_NULL(ptr, error)                                                                                                         \
     do {                                                                                                                                   \
         if (!ptr)                                                                                                                          \
             return error;                                                                                                                  \
     } while (false)
+
+#define RETURN_ERROR(...) return ::sgrn::Error(__VA_ARGS__)
+#define CO_PROPAGATE_ERROR_IF(expr)                                                                                                        \
+    do {                                                                                                                                   \
+        auto&& _sgrn_result = (expr);                                                                                                      \
+        if (!_sgrn_result.has_value())                                                                                                     \
+            co_return ::sgrn::Error(std::move(_sgrn_result).error());                                                                      \
+    } while (false)
+
+#define CO_ASSIGN_OR_RETURN(lhs, expr)                                                                                                     \
+    do {                                                                                                                                   \
+        auto&& _sgrn_result = (expr);                                                                                                      \
+        if (!_sgrn_result.has_value())                                                                                                     \
+            co_return ::sgrn::Error(_sgrn_result.error());                                                                                 \
+        (lhs) = std::move(_sgrn_result.value());                                                                                           \
+    } while (false)
+
+#define CO_RETURN_ERROR_IF(condition, error)                                                                                               \
+    do {                                                                                                                                   \
+        if (condition)                                                                                                                     \
+            co_return ::sgrn::Error(error);                                                                                                \
+    } while (false)
+
+#define CO_RETURN_IF(condition, value)                                                                                                     \
+    do {                                                                                                                                   \
+        if (condition)                                                                                                                     \
+            co_return value;                                                                                                               \
+    } while (false)
+
+#define CO_RETURN_IF_NULL(ptr, value)                                                                                                      \
+    do {                                                                                                                                   \
+        if (!ptr)                                                                                                                          \
+            co_return value;                                                                                                               \
+    } while (false)
+
+#define CO_RETURN_ERROR(...) co_return ::sgrn::Error(__VA_ARGS__)
+
 } // namespace sgrn

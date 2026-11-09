@@ -161,7 +161,7 @@ private:
     drogon::Task<drogon::HttpResponsePtr> deleteFolder(
         const drogon::orm::DbClientPtr& tsp_db_client, int64_t t_entity_id, int32_t t_user_id, bool t_is_admin);
 
-    inline static const std::array<IHandler<StorageApiHandler>::route_config, 20> kRoutes = {
+    inline static const std::array<IHandler<StorageApiHandler>::RouteConfig, 20> kRoutes = {
         {{"/api/v1/storage/stats", &StorageApiHandler::handleGetStorageStats, {drogon::Get}, {"sgrn::datastore::filters::UserAuthFilter"}},
 
             {"/api/v1/storage/files/metadata", &StorageApiHandler::handleGetFilesMetadata, {drogon::Get},
@@ -221,8 +221,8 @@ private:
                 {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}}}};
 
     // Item routes: `{name}` is mapped by Drogon onto the handler's second
-    // argument (see IHandler::item_route_config).
-    inline static const std::array<IHandler<StorageApiHandler>::item_route_config, 2> kItemRoutes{
+    // argument (see IHandler::ItemRouteConfig).
+    inline static const std::array<IHandler<StorageApiHandler>::ItemRouteConfig, 2> kItemRoutes{
         {{"/api/v1/automated-service/objects/{name}", &StorageApiHandler::handleMoveObject, {drogon::Patch},
              {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}},
 
