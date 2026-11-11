@@ -21,6 +21,52 @@ Json::Value parseMetadataValue(const std::string& t_raw) {
     }
     return metadata;
 }
+
+struct UserTarget {
+    int32_t id{};
+    std::string organisation;
+    std::string email;
+    bool is_platform_admin{false};
+    std::string status;
+};
+
+// Resolves an active (non-soft-deleted) user. Returns nullopt for "missing"
+// AND "belongs to another organisation" so callers answer identically (no
+// tenant enumeration).
+drogon::Task<std::optional<UserTarget>> loadUserTarget(
+    const drogon::orm::DbClientPtr& t_db, int32_t t_id, const std::string& t_caller_org, bool t_is_platform) {
+    auto rows = co_await t_db->execSqlCoro(
+        "SELECT id, organisation, email, is_platform_admin, status FROM core.users WHERE id = $1 AND deleted_at IS NULL", t_id);
+    if (rows.empty()) {
+        co_return std::nullopt;
+    }
+    UserTarget target;
+    target.id = rows[0]["id"].as<int32_t>();
+    target.organisation = rows[0]["organisation"].as<std::string>();
+    target.email = rows[0]["email"].as<std::string>();
+    target.is_platform_admin = rows[0]["is_platform_admin"].as<bool>();
+    target.status = rows[0]["status"].as<std::string>();
+    if (!t_is_platform && target.organisation != t_caller_org) {
+        co_return std::nullopt;
+    }
+    co_return target;
+}
+
+// True when the user holds an organisation-scope admin assignment and nobody
+// else in that organisation can still administer it.
+drogon::Task<bool> isLastOrgAdmin(const drogon::orm::DbClientPtr& t_db, int32_t t_user_id) {
+    auto rows = co_await t_db->execSqlCoro(
+        "SELECT EXISTS (SELECT 1 FROM core.admin_assignments WHERE user_id = $1 AND scope = 'organisation') AS is_admin, "
+        "(SELECT count(*) FROM core.admin_assignments a JOIN core.users u ON u.id = a.user_id "
+        " WHERE a.scope = 'organisation' AND a.organisation = (SELECT organisation FROM core.users WHERE id = $1) "
+        "   AND u.status = 'active' AND u.deleted_at IS NULL AND u.id <> $1) AS other_admins",
+        t_user_id);
+    if (rows.empty()) {
+        co_return false;
+    }
+    co_return rows[0]["is_admin"].as<bool>() && rows[0]["other_admins"].as<int64_t>() == 0;
+}
+
 } // namespace
 
 Task<HttpResponsePtr> AdminApiHandler::handleGetUsers(HttpRequestPtr tsp_req) {
@@ -106,6 +152,16 @@ Task<HttpResponsePtr> AdminApiHandler::handleRegisterUser(HttpRequestPtr tsp_req
             co_return sgrn::createJsonResponse(db_res);
         }
         auto db = db_res.value();
+        payload_opt->domain = sgrn::utils::strings::toLower(sgrn::utils::strings::trim(payload_opt->domain));
+        if (!payload_opt->domain.empty()) {
+            auto dom = co_await db->execSqlCoro(
+                "SELECT 1 FROM core.domains WHERE organisation = $1 AND name = $2", payload_opt->organisation, payload_opt->domain);
+            if (dom.empty()) {
+                co_return createErrorResponse(
+                    "Unknown domain '" + payload_opt->domain + "' in organisation '" + payload_opt->organisation + "'", k400BadRequest,
+                    "AdminApi");
+            }
+        }
         // Assuming default role is 'user' if not specified
         std::string role = json->get("role", "user").asString();
         auto result = co_await registerUser(db, *payload_opt, role);
@@ -221,7 +277,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleRegisterAutomatedService(HttpReques
 Task<HttpResponsePtr> AdminApiHandler::handleUpdateAutomatedServiceMetadata(HttpRequestPtr tsp_req, std::string t_id) {
     const std::string id_str = std::move(t_id);
     auto json = tsp_req->getJsonObject();
-    if (id_str.empty() || !json || !json->isMember("metadata")) {
+    if (id_str.empty() || !json || !(json->isMember("metadata") || json->isMember("description"))) {
         co_return createErrorResponse(AdminApiError::InvalidPayload);
     }
 
@@ -240,16 +296,33 @@ Task<HttpResponsePtr> AdminApiHandler::handleUpdateAutomatedServiceMetadata(Http
     auto db = db_res.value();
 
     try {
+        // Description update rides the same PATCH: the service registry
+        // previously had no way to change the separate description column
+        // after registration. Empty string clears it.
+        const bool has_description = json->isMember("description") && (*json)["description"].isString();
+        const std::string description = has_description ? sgrn::utils::strings::trim((*json)["description"].asString()) : "";
+
         Json::StreamWriterBuilder wb;
         wb["indentation"] = "";
-        const std::string meta_str = Json::writeString(wb, (*json)["metadata"]);
+        Json::Value meta = json->isMember("metadata") ? (*json)["metadata"] : Json::Value(Json::objectValue);
+        const std::string meta_str = Json::writeString(wb, meta);
 
         // Update with ORG check to ensure an admin from Org A cannot edit automated services from Org B.
-        auto res = co_await db->execSqlCoro(
-            "UPDATE core.automated_services SET metadata = metadata || $1::jsonb WHERE id = $2 AND organisation = $3", meta_str,
-            automated_service_id, org);
+        size_t affected = 0;
+        if (has_description) {
+            std::optional<std::string> desc_param = description.empty() ? std::nullopt : std::optional<std::string>(description);
+            auto r = co_await db->execSqlCoro(
+                "UPDATE core.automated_services SET metadata = metadata || $1::jsonb, description = $3 WHERE id = $2 AND organisation = $4",
+                meta_str, automated_service_id, desc_param, org);
+            affected = r.affectedRows();
+        } else {
+            auto r = co_await db->execSqlCoro(
+                "UPDATE core.automated_services SET metadata = metadata || $1::jsonb WHERE id = $2 AND organisation = $3", meta_str,
+                automated_service_id, org);
+            affected = r.affectedRows();
+        }
 
-        if (res.affectedRows() == 0) {
+        if (affected == 0) {
             co_return createErrorResponse(AdminApiError::InvalidUserId);
         }
 
@@ -331,6 +404,299 @@ Task<HttpResponsePtr> AdminApiHandler::handleRotateAutomatedServiceToken(HttpReq
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to rotate credentials: {}", e.what());
         co_return createErrorResponse(std::string("Failed to rotate credentials: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handleSetUserStatus(HttpRequestPtr tsp_req, std::string t_id) {
+    try {
+        const auto ctx = detail::requestContext(tsp_req);
+        const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
+
+        int32_t target_id = 0;
+        try {
+            target_id = std::stoi(t_id);
+        } catch (const std::exception&) {
+            co_return createErrorResponse(AdminApiError::InvalidUserId);
+        }
+
+        auto json = tsp_req->getJsonObject();
+        if (!json || !json->isMember("status") || !(*json)["status"].isString()) {
+            co_return createErrorResponse(AdminApiError::InvalidPayload);
+        }
+        const std::string status = (*json)["status"].asString();
+        if (status != "active" && status != "suspended") {
+            co_return createErrorResponse("status must be 'active' or 'suspended'", k400BadRequest, "AdminApi");
+        }
+        if (target_id == ctx.actor_id) {
+            co_return createErrorResponse("Forbidden: you cannot change your own status", k403Forbidden, "AdminApi");
+        }
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError()) {
+            co_return sgrn::createJsonResponse(db_res);
+        }
+        auto db = db_res.value();
+
+        auto target = co_await loadUserTarget(db, target_id, ctx.organisation, is_platform);
+        if (!target.has_value()) {
+            co_return createErrorResponse(AdminApiError::InvalidUserId);
+        }
+        if (target->is_platform_admin && !is_platform) {
+            co_return createErrorResponse("Forbidden: only a platform admin may change a platform admin", k403Forbidden, "AdminApi");
+        }
+        if (status == "suspended" && co_await isLastOrgAdmin(db, target_id)) {
+            co_return createErrorResponse("Conflict: cannot suspend the last organisation admin", k409Conflict, "AdminApi");
+        }
+
+        // trg_revoke_user_sessions terminates live sessions when status leaves
+        // 'active' or is_active drops (WP2 migration).
+        co_await db->execSqlCoro(
+            "UPDATE core.users SET status = $2::text, is_active = ($2::text = 'active') WHERE id = $1", target_id, status);
+        sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(target_id);
+
+        Json::Value details(Json::objectValue);
+        details["status"] = status;
+        co_await sgrn::datastore::audit::AuditLogger::log(db, ctx.organisation, "user", ctx.actor_id, ctx.actor_name, "user.status_changed",
+            "user", std::to_string(target_id), tsp_req->getPeerAddr().toIp(), details, "success");
+
+        Json::Value resp;
+        resp["success"] = true;
+        resp["status"] = status;
+        co_return createJsonResponse(resp, k200OK);
+    } catch (const std::exception& e) {
+        ADMIN_ERROR_LOG("Failed to set user status: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to set user status: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handleDeleteUser(HttpRequestPtr tsp_req, std::string t_id) {
+    try {
+        const auto ctx = detail::requestContext(tsp_req);
+        const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
+
+        int32_t target_id = 0;
+        try {
+            target_id = std::stoi(t_id);
+        } catch (const std::exception&) {
+            co_return createErrorResponse(AdminApiError::InvalidUserId);
+        }
+        if (target_id == ctx.actor_id) {
+            co_return createErrorResponse("Forbidden: you cannot delete your own account", k403Forbidden, "AdminApi");
+        }
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError()) {
+            co_return sgrn::createJsonResponse(db_res);
+        }
+        auto db = db_res.value();
+
+        auto target = co_await loadUserTarget(db, target_id, ctx.organisation, is_platform);
+        if (!target.has_value()) {
+            co_return createErrorResponse(AdminApiError::InvalidUserId);
+        }
+        if (target->is_platform_admin && !is_platform) {
+            co_return createErrorResponse("Forbidden: only a platform admin may delete a platform admin", k403Forbidden, "AdminApi");
+        }
+        if (target->status == "active" && co_await isLastOrgAdmin(db, target_id)) {
+            co_return createErrorResponse("Conflict: cannot delete the last organisation admin", k409Conflict, "AdminApi");
+        }
+
+        // Soft delete: trg_revoke_user_sessions ends live sessions.
+        co_await db->execSqlCoro("UPDATE core.users SET deleted_at = now(), is_active = false WHERE id = $1", target_id);
+        sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(target_id);
+
+        Json::Value resp;
+        resp["success"] = true;
+        resp["deleted_user_id"] = target_id;
+        co_await sgrn::datastore::audit::AuditLogger::log(db, ctx.organisation, "user", ctx.actor_id, ctx.actor_name, "user.deleted",
+            "user", std::to_string(target_id), tsp_req->getPeerAddr().toIp(), Json::objectValue, "success");
+        co_return createJsonResponse(resp, k200OK);
+    } catch (const std::exception& e) {
+        ADMIN_ERROR_LOG("Failed to delete user: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to delete user: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handleResetUserPassword(HttpRequestPtr tsp_req, std::string t_id) {
+    try {
+        const auto ctx = detail::requestContext(tsp_req);
+        const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
+
+        int32_t target_id = 0;
+        try {
+            target_id = std::stoi(t_id);
+        } catch (const std::exception&) {
+            co_return createErrorResponse(AdminApiError::InvalidUserId);
+        }
+
+        auto json = tsp_req->getJsonObject();
+        if (!json || !json->isMember("new_password") || !(*json)["new_password"].isString()) {
+            co_return createErrorResponse(AdminApiError::InvalidPayload);
+        }
+        const std::string new_password = (*json)["new_password"].asString();
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError()) {
+            co_return sgrn::createJsonResponse(db_res);
+        }
+        auto db = db_res.value();
+
+        auto target = co_await loadUserTarget(db, target_id, ctx.organisation, is_platform);
+        if (!target.has_value()) {
+            co_return createErrorResponse(AdminApiError::InvalidUserId);
+        }
+        if (target->is_platform_admin && !is_platform) {
+            co_return createErrorResponse(
+                "Forbidden: only a platform admin may reset a platform admin's password", k403Forbidden, "AdminApi");
+        }
+        if (new_password.size() < 12) {
+            co_return createErrorResponse("new_password must be at least 12 characters", k400BadRequest, "AdminApi");
+        }
+        if (sgrn::utils::strings::toLower(new_password) == sgrn::utils::strings::toLower(target->email)) {
+            co_return createErrorResponse("new_password must differ from the user's email", k400BadRequest, "AdminApi");
+        }
+
+        // trg_hash_password only runs BEFORE INSERT — hash explicitly here.
+        co_await db->execSqlCoro("UPDATE core.users SET password = crypt($2, gen_salt('bf')) WHERE id = $1", target_id, new_password);
+        // Sessions do not survive a credential change; the enqueue trigger
+        // broadcasts the revoke to every instance.
+        co_await db->execSqlCoro("UPDATE core.sessions SET terminated_at = now(), termination_reason = 'password_changed' "
+                                 "WHERE user_id = $1 AND terminated_at IS NULL",
+            target_id);
+        sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(target_id);
+
+        Json::Value details(Json::objectValue); // never the password itself
+        details["sessions_revoked"] = true;
+        co_await sgrn::datastore::audit::AuditLogger::log(db, ctx.organisation, "user", ctx.actor_id, ctx.actor_name, "user.password_reset",
+            "user", std::to_string(target_id), tsp_req->getPeerAddr().toIp(), details, "success");
+
+        Json::Value resp;
+        resp["success"] = true;
+        co_return createJsonResponse(resp, k200OK);
+    } catch (const std::exception& e) {
+        ADMIN_ERROR_LOG("Failed to reset user password: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to reset user password: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handleSetAutomatedServiceStatus(HttpRequestPtr tsp_req, std::string t_id) {
+    try {
+        const auto ctx = detail::requestContext(tsp_req);
+        const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
+
+        int32_t service_id = 0;
+        try {
+            service_id = std::stoi(t_id);
+        } catch (const std::exception&) {
+            co_return createErrorResponse(AdminApiError::InvalidUserId);
+        }
+
+        auto json = tsp_req->getJsonObject();
+        if (!json || !json->isMember("status") || !(*json)["status"].isString()) {
+            co_return createErrorResponse(AdminApiError::InvalidPayload);
+        }
+        const std::string status = (*json)["status"].asString();
+        if (status != "active" && status != "degraded" && status != "offline" && status != "maintenance") {
+            co_return createErrorResponse(
+                "status must be one of 'active', 'degraded', 'offline' or 'maintenance'", k400BadRequest, "AdminApi");
+        }
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError()) {
+            co_return sgrn::createJsonResponse(db_res);
+        }
+        auto db = db_res.value();
+
+        // Org-scoped unless platform admin. Token registration (SessionStore)
+        // keys on status = 'active' AND deleted_at IS NULL, so a non-active
+        // service loses its credential lookup immediately — the same gate
+        // loadActiveTokens applies at boot.
+        std::string sql = "UPDATE core.automated_services SET status = $1::text "
+                          "WHERE id = $2 AND deleted_at IS NULL RETURNING token::text";
+        std::vector<std::string> binds = {status, std::to_string(service_id)};
+        if (!is_platform) {
+            sql += " AND organisation = $3";
+            binds.push_back(ctx.organisation);
+        }
+        auto res = co_await sgrn::datastore::core::execSqlCoroVec(db, sql, binds);
+        if (res.empty()) {
+            // missing OR other tenant — same answer
+            co_return createErrorResponse(AdminApiError::InvalidUserId);
+        }
+
+        const std::string token = res[0]["token"].isNull() ? "" : res[0]["token"].as<std::string>();
+        if (!token.empty()) {
+            if (status == "active") {
+                sgrn::datastore::session::SessionStore::instance().registerServiceToken(token);
+                co_await db->execSqlCoro("SELECT pg_notify('service_token_update', $1)", "register:" + token);
+            } else {
+                sgrn::datastore::session::SessionStore::instance().deregisterServiceToken(token);
+                co_await db->execSqlCoro("SELECT pg_notify('service_token_update', $1)", "deregister:" + token);
+            }
+        }
+
+        Json::Value details(Json::objectValue);
+        details["status"] = status;
+        co_await sgrn::datastore::audit::AuditLogger::log(db, ctx.organisation, "user", ctx.actor_id, ctx.actor_name,
+            "service.status_changed", "automated_service", std::to_string(service_id), tsp_req->getPeerAddr().toIp(), details, "success");
+
+        Json::Value resp;
+        resp["success"] = true;
+        resp["automated_service_id"] = service_id;
+        resp["status"] = status;
+        co_return createJsonResponse(resp, k200OK);
+    } catch (const std::exception& e) {
+        ADMIN_ERROR_LOG("Failed to set automated service status: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to set automated service status: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+Task<HttpResponsePtr> AdminApiHandler::handleDeleteAutomatedService(HttpRequestPtr tsp_req, std::string t_id) {
+    try {
+        const auto ctx = detail::requestContext(tsp_req);
+        const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
+
+        int32_t service_id = 0;
+        try {
+            service_id = std::stoi(t_id);
+        } catch (const std::exception&) {
+            co_return createErrorResponse(AdminApiError::InvalidUserId);
+        }
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError()) {
+            co_return sgrn::createJsonResponse(db_res);
+        }
+        auto db = db_res.value();
+
+        std::string sql =
+            "UPDATE core.automated_services SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL RETURNING token::text";
+        std::vector<std::string> binds = {std::to_string(service_id)};
+        if (!is_platform) {
+            binds.push_back(ctx.organisation);
+            sql += " AND organisation = $2";
+        }
+        auto res = co_await sgrn::datastore::core::execSqlCoroVec(db, sql, binds);
+        if (res.empty()) {
+            // missing OR other tenant — same answer
+            co_return createErrorResponse(AdminApiError::InvalidUserId);
+        }
+
+        const std::string token = res[0]["token"].isNull() ? "" : res[0]["token"].as<std::string>();
+        if (!token.empty()) {
+            sgrn::datastore::session::SessionStore::instance().deregisterServiceToken(token);
+            co_await db->execSqlCoro("SELECT pg_notify('service_token_update', $1)", "deregister:" + token);
+        }
+
+        Json::Value resp;
+        resp["success"] = true;
+        resp["deleted_service_id"] = service_id;
+        co_await sgrn::datastore::audit::AuditLogger::log(db, ctx.organisation, "user", ctx.actor_id, ctx.actor_name, "service.deleted",
+            "automated_service", std::to_string(service_id), tsp_req->getPeerAddr().toIp(), Json::objectValue, "success");
+        co_return createJsonResponse(resp, k200OK);
+    } catch (const std::exception& e) {
+        ADMIN_ERROR_LOG("Failed to delete automated service: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to delete automated service: ") + e.what(), k400BadRequest, "AdminApi");
     }
 }
 

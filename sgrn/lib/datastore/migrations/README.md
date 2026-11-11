@@ -28,6 +28,31 @@ labels and paths to lower-case, then prevents future mixed-case domain labels
 or user-domain assignments. Resolve any case-folding collision reported by
 the migration before retrying it.
 
+`008_admin_ui_support.sql` hardens tenant/lifecycle/quota behaviour for the
+admin console. It prints **NOTICES** that require operator follow-up:
+
+- admin assignments / user-domain permissions that name a user of a
+  **different organisation** (or a domain of another organisation) remain in
+  the table — the new `trg_assert_same_org` guard blocks _new_ violating
+  writes only. Clean up the reported rows manually.
+- storage rows with a domain label that cannot be resolved to the owner's
+  organisation keep `domain_id = NULL`; re-home those namespaces manually.
+  NEW domain writes get `domain_id` derived automatically.
+
+Behaviour changes after this migration:
+
+- Suspending / soft-deleting a user or service, or suspending an
+  organisation, terminates its live sessions immediately (reason `revoked`).
+- `status = 'invited'` users can no longer sign in (`authenticate_user` and
+  the inline sign-in query check `status = 'active'`, `deleted_at IS NULL`
+  and the organisation's status).
+- Byte-level storage quotas (actor, organisation and domain) are enforced at
+  the `storage.file_objects` stage. Legacy byte totals were never advanced by
+  uploads (+1 entry, +0 bytes); the migration recomputes owner and
+  organisation aggregates once from live mappings.
+- `core.domains` gained `storage_limit` / `entry_count_limit` namespace caps;
+  they are admin-route-only (never client-writable through generated CRUD).
+
 ## Conventions
 
 - Idempotent: safe to re-run (conditional DML, `IF NOT EXISTS` DDL,

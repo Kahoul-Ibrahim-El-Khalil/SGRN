@@ -1075,8 +1075,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleDeleteFormat(HttpRequestPtr tsp
 Task<HttpResponsePtr> StorageAdminHandler::handleListQuotas(HttpRequestPtr tsp_req) {
     try {
         const std::string kind = lowerAscii(queryParam(tsp_req, "kind", "user"));
-        if (kind != "user" && kind != "service" && kind != "organisation") {
-            co_return sgrn::createErrorResponse("kind must be user, service or organisation", k400BadRequest, "StorageAdmin");
+        if (kind != "user" && kind != "service" && kind != "organisation" && kind != "domain") {
+            co_return sgrn::createErrorResponse("kind must be user, service, organisation or domain", k400BadRequest, "StorageAdmin");
         }
         const std::string search = queryParam(tsp_req, "search", "");
         const std::size_t limit = clampParam(queryParam(tsp_req, "limit", ""), 100, 1000);
@@ -1092,7 +1092,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleListQuotas(HttpRequestPtr tsp_r
         std::string quota_sql;
         std::vector<std::string> quota_binds = {escapeLike(search)};
         if (kind == "user") {
-            quota_sql = "SELECT id, email, organisation, total_virtual_size, storage_limit, total_entry_count, entry_count_limit "
+            quota_sql = "SELECT id, email, organisation, total_virtual_size, storage_limit, total_entry_count, entry_count_limit, "
+                        "rate_limit_rpm, max_file_size_mb, preferred_chunk_size_mb, rate_limit_upload_rpm "
                         "FROM core.users WHERE deleted_at IS NULL AND (email ILIKE '%' || $1 || '%' ESCAPE '\\' "
                         "OR organisation ILIKE '%' || $1 || '%' ESCAPE '\\') ";
             if (!is_platform) {
@@ -1101,7 +1102,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleListQuotas(HttpRequestPtr tsp_r
             }
             quota_sql += "ORDER BY id LIMIT " + std::to_string(limit);
         } else if (kind == "service") {
-            quota_sql = "SELECT id, name, organisation, total_virtual_size, storage_limit, total_entry_count, entry_count_limit "
+            quota_sql = "SELECT id, name, organisation, total_virtual_size, storage_limit, total_entry_count, entry_count_limit, "
+                        "rate_limit_rpm, max_file_size_mb, preferred_chunk_size_mb, rate_limit_upload_rpm "
                         "FROM core.automated_services WHERE deleted_at IS NULL AND (name ILIKE '%' || $1 || '%' ESCAPE '\\' "
                         "OR organisation ILIKE '%' || $1 || '%' ESCAPE '\\') ";
             if (!is_platform) {
@@ -1109,8 +1111,21 @@ Task<HttpResponsePtr> StorageAdminHandler::handleListQuotas(HttpRequestPtr tsp_r
                 quota_binds.push_back(session_org);
             }
             quota_sql += "ORDER BY id LIMIT " + std::to_string(limit);
+        } else if (kind == "domain") {
+            // Namespace caps: usage is the whole subtree, computed by
+            // storage.domain_usage (files + directories, virtual bytes).
+            quota_sql = "SELECT d.id, d.name, d.path, d.organisation, d.storage_limit, d.entry_count_limit, "
+                        "coalesce(u.virtual_size, 0) AS total_virtual_size, coalesce(u.entry_count, 0) AS total_entry_count "
+                        "FROM core.domains d LEFT JOIN LATERAL storage.domain_usage(d.id) u ON true "
+                        "WHERE (d.name ILIKE '%' || $1 || '%' ESCAPE '\\' OR d.path ILIKE '%' || $1 || '%' ESCAPE '\\' "
+                        "OR d.organisation ILIKE '%' || $1 || '%' ESCAPE '\\') ";
+            if (!is_platform) {
+                quota_sql += "AND d.organisation = $2 ";
+                quota_binds.push_back(session_org);
+            }
+            quota_sql += "ORDER BY d.organisation, d.path LIMIT " + std::to_string(limit);
         } else {
-            quota_sql = "SELECT name, total_virtual_size, storage_limit, total_entry_count, entry_count_limit "
+            quota_sql = "SELECT name, total_virtual_size, storage_limit, total_entry_count, entry_count_limit, rate_limit_rpm "
                         "FROM core.organisations WHERE (name ILIKE '%' || $1 || '%' ESCAPE '\\') ";
             if (!is_platform) {
                 quota_sql += "AND name = $2 ";
@@ -1129,14 +1144,27 @@ Task<HttpResponsePtr> StorageAdminHandler::handleListQuotas(HttpRequestPtr tsp_r
             } else if (kind == "service") {
                 e["id"] = fieldInt(row["id"]);
                 e["name"] = row["name"].as<std::string>();
+            } else if (kind == "domain") {
+                e["id"] = fieldInt(row["id"]);
+                e["name"] = row["name"].as<std::string>();
+                e["path"] = row["path"].as<std::string>();
             } else {
                 e["name"] = row["name"].as<std::string>();
             }
+            e["kind"] = kind;
             e["organisation"] = row["organisation"].isNull() ? Json::Value::null : Json::Value(row["organisation"].as<std::string>());
             e["storage_used_bytes"] = fieldInt(row["total_virtual_size"]);
             setNullableInt64(e, "storage_limit_bytes", row["storage_limit"]);
             e["entries_used"] = fieldInt(row["total_entry_count"]);
             setNullableInt64(e, "entry_count_limit", row["entry_count_limit"]);
+            if (kind == "user" || kind == "service" || kind == "organisation") {
+                setNullableInt64(e, "rate_limit_rpm", row["rate_limit_rpm"]);
+            }
+            if (kind == "user" || kind == "service") {
+                setNullableInt64(e, "max_file_size_mb", row["max_file_size_mb"]);
+                setNullableInt64(e, "preferred_chunk_size_mb", row["preferred_chunk_size_mb"]);
+                setNullableInt64(e, "rate_limit_upload_rpm", row["rate_limit_upload_rpm"]);
+            }
             list.append(std::move(e));
         }
         Json::Value out;
@@ -1159,8 +1187,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpdateQuota(HttpRequestPtr tsp_
             co_return sgrn::createErrorResponse("kind (user|service|organisation) is required", k400BadRequest, "StorageAdmin");
         }
         const std::string kind = lowerAscii((*json)["kind"].asString());
-        if (kind != "user" && kind != "service" && kind != "organisation") {
-            co_return sgrn::createErrorResponse("kind must be user, service or organisation", k400BadRequest, "StorageAdmin");
+        if (kind != "user" && kind != "service" && kind != "organisation" && kind != "domain") {
+            co_return sgrn::createErrorResponse("kind must be user, service, organisation or domain", k400BadRequest, "StorageAdmin");
         }
         const bool has_storage = json->isMember("storage_limit_bytes");
         const bool has_entries = json->isMember("entry_count_limit");
@@ -1264,6 +1292,19 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpdateQuota(HttpRequestPtr tsp_
             }
             quota_sql += "RETURNING id, " + idcol +
                          " AS label, organisation, total_virtual_size, storage_limit, total_entry_count, entry_count_limit";
+        } else if (kind == "domain") {
+            if (!json->isMember("id") || !(*json)["id"].isInt() || (*json)["id"].asInt() <= 0) {
+                co_return sgrn::createErrorResponse("id (positive integer) is required for kind domain", k400BadRequest, "StorageAdmin");
+            }
+            binds.push_back(std::to_string((*json)["id"].asInt()));
+            quota_sql = "UPDATE core.domains SET " + sets + " WHERE id = $" + std::to_string(binds.size()) + " ";
+            if (!is_platform) {
+                binds.push_back(session_org);
+                quota_sql += "AND organisation = $" + std::to_string(binds.size()) + " ";
+            }
+            quota_sql += "RETURNING id, name AS label, organisation, "
+                         "(SELECT u.virtual_size FROM storage.domain_usage(id) u) AS total_virtual_size, storage_limit, "
+                         "(SELECT u.entry_count FROM storage.domain_usage(id) u) AS total_entry_count, entry_count_limit";
         } else {
             const std::string target_org = (*json)["name"].asString();
             binds.push_back(target_org);
@@ -1287,6 +1328,26 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpdateQuota(HttpRequestPtr tsp_
         setNullableInt64(out, "storage_limit_bytes", row["storage_limit"]);
         out["entries_used"] = fieldInt(row["total_entry_count"]);
         setNullableInt64(out, "entry_count_limit", row["entry_count_limit"]);
+
+        // WP4c: this handler previously wrote no audit row at all (F7).
+        // Details are the applied caps only — never request-echoed blobs.
+        Json::Value applied(Json::objectValue);
+        applied["storage_limit"] =
+            row["storage_limit"].isNull() ? Json::Value(Json::nullValue) : Json::Value(row["storage_limit"].as<int64_t>());
+        applied["entry_count_limit"] =
+            row["entry_count_limit"].isNull() ? Json::Value(Json::nullValue) : Json::Value(row["entry_count_limit"].as<int64_t>());
+        if (tsp_req->attributes()->find("session_json")) {
+            const auto& session = tsp_req->attributes()->get<Json::Value>("session_json");
+            if (session.isObject() && session.isMember("user") && session["user"].isObject()) {
+                const auto& user = session["user"];
+                std::string target_id = row["label"].as<std::string>();
+                if (kind != "organisation" && kind != "domain") {
+                    target_id = std::to_string(fieldInt(row["id"]));
+                }
+                co_await sgrn::datastore::audit::AuditLogger::log(db, user["organisation"].asString(), "user", user["id"].asInt(),
+                    user["email"].asString(), "quota.updated", kind, target_id, tsp_req->getPeerAddr().toIp(), applied, "success");
+            }
+        }
         co_return sgrn::createJsonResponse(out, k200OK);
     } catch (const drogon::orm::DrogonDbException& e) {
         co_return sgrn::createErrorResponse(std::string("Database error: ") + e.base().what(), k500InternalServerError, "StorageAdmin");

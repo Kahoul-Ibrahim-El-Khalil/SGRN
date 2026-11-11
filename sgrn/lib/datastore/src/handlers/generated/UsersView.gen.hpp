@@ -20,25 +20,25 @@ public:
         {"family_name", FieldType::Text, Op::Eq | Op::Like, true, true},
         {"email", FieldType::Text, Op::Eq | Op::Like, true, true},
         {"phone_number", FieldType::Text, 0, true, true},
-        {"is_platform_admin", FieldType::Bool, static_cast<uint8_t>(Op::Eq), true, true},
-        {"role", FieldType::Text, static_cast<uint8_t>(Op::Eq), true, true},
+        {"is_platform_admin", FieldType::Bool, static_cast<uint8_t>(Op::Eq), false, false},
+        {"role", FieldType::Text, static_cast<uint8_t>(Op::Eq), false, false},
         {"domain", FieldType::Text, static_cast<uint8_t>(Op::Eq), true, true},
-        {"deleted_at", FieldType::Timestamp, 0, true, true},
-        {"status", FieldType::Text, Op::Eq | Op::In, true, true},
-        {"is_active", FieldType::Bool, 0, true, true},
+        {"deleted_at", FieldType::Timestamp, 0, false, false},
+        {"status", FieldType::Text, Op::Eq | Op::In, false, false},
+        {"is_active", FieldType::Bool, 0, false, false},
         {"can_read_personal", FieldType::Bool, 0, true, true},
         {"can_write_personal", FieldType::Bool, 0, true, true},
         {"can_delete_personal", FieldType::Bool, 0, true, true},
-        {"total_virtual_size", FieldType::BigInt, 0, true, true},
-        {"total_real_size", FieldType::BigInt, 0, true, true},
-        {"storage_limit", FieldType::BigInt, 0, true, true},
-        {"total_entry_count", FieldType::BigInt, 0, true, true},
-        {"entry_count_limit", FieldType::BigInt, 0, true, true},
-        {"rate_limit_rpm", FieldType::Int, 0, true, true},
-        {"max_file_size_mb", FieldType::BigInt, 0, true, true},
-        {"preferred_chunk_size_mb", FieldType::Int, 0, true, true},
-        {"rate_limit_upload_rpm", FieldType::Int, 0, true, true},
-        {"created_at", FieldType::Timestamp, 0, true, true},
+        {"total_virtual_size", FieldType::BigInt, 0, false, false},
+        {"total_real_size", FieldType::BigInt, 0, false, false},
+        {"storage_limit", FieldType::BigInt, 0, false, false},
+        {"total_entry_count", FieldType::BigInt, 0, false, false},
+        {"entry_count_limit", FieldType::BigInt, 0, false, false},
+        {"rate_limit_rpm", FieldType::Int, 0, false, false},
+        {"max_file_size_mb", FieldType::BigInt, 0, false, false},
+        {"preferred_chunk_size_mb", FieldType::Int, 0, false, false},
+        {"rate_limit_upload_rpm", FieldType::Int, 0, false, false},
+        {"created_at", FieldType::Timestamp, 0, false, false},
     }};
 
     static constexpr CrudViewSpec kSpec{
@@ -55,15 +55,19 @@ public:
         : CrudViewHandler(this, kRoutes, kItemRoutes) {
     }
 
-private:
-    static inline const std::array<RouteConfig, 2> kRoutes = {{
-        {"/api/v1/users", &UsersView::handleList, {drogon::Get}, {"sgrn::datastore::filters::UserAuthFilter"}},
-        {"/api/v1/users", &UsersView::handleCreate, {drogon::Post}, {"sgrn::datastore::filters::UserAuthFilter"}},
+public:
+    // Route tables are public so tests can assert the generated filter
+    // policy (which routes exist, and which filters guard each) without
+    // having to boot the Drogon app.
+    static inline const std::array<RouteConfig, 1> kRoutes = {{
+        {"/api/v1/users", &UsersView::handleList, {drogon::Get},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"}},
     }};
-    static inline const std::array<ItemRouteConfig, 3> kItemRoutes = {{
-        {"/api/v1/users/{id}", &UsersView::handleGet, {drogon::Get}, {"sgrn::datastore::filters::UserAuthFilter"}},
-        {"/api/v1/users/{id}", &UsersView::handleUpdate, {drogon::Patch}, {"sgrn::datastore::filters::UserAuthFilter"}},
-        {"/api/v1/users/{id}", &UsersView::handleDelete, {drogon::Delete}, {"sgrn::datastore::filters::UserAuthFilter"}},
+    static inline const std::array<ItemRouteConfig, 2> kItemRoutes = {{
+        {"/api/v1/users/{id}", &UsersView::handleGet, {drogon::Get},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"}},
+        {"/api/v1/users/{id}", &UsersView::handleUpdate, {drogon::Patch},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"}},
     }};
 };
 

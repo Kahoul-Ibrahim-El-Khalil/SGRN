@@ -149,7 +149,8 @@ Task<Json::Value> registerUser(
             "RETURNING id, first_name, family_name, email, role, organisation, status, domain, phone_number",
             t_register_user_payload.first_name, t_register_user_payload.family_name, t_register_user_payload.email,
             t_register_user_payload.password, role_lower, t_register_user_payload.organisation, t_register_user_payload.status,
-            t_register_user_payload.domain,
+            t_register_user_payload.domain.empty() ? std::optional<std::string>{}
+                                                   : std::optional<std::string>(t_register_user_payload.domain),
             t_register_user_payload.phone_number.empty() ? std::optional<std::string>{} : t_register_user_payload.phone_number,
             t_register_user_payload.storage_limit);
 

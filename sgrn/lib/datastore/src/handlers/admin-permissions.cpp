@@ -244,6 +244,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleGrantPermission(HttpRequestPtr tsp_
         }
         co_await sgrn::datastore::audit::AuditLogger::log(db, organisation, "user", actor_id, actor_name, "permission.granted", "user",
             std::to_string(user_id), tsp_req->getPeerAddr().toIp(), *json, "success");
+        sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(user_id);
         co_return createJsonResponse(out, k200OK);
     } catch (const drogon::orm::DrogonDbException& e) {
         ADMIN_ERROR_LOG("Permission grant DB error: {}", e.base().what());
@@ -330,6 +331,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleRevokePermission(HttpRequestPtr tsp
         if (!remaining.empty() && remaining[0][0].as<std::string>() == "0") {
             out["warning"] = "User now holds no domain grants — zero-trust default-deny locks them out of storage entirely.";
         }
+        sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(affected_user);
         co_return createJsonResponse(out, k200OK);
     } catch (const drogon::orm::DrogonDbException& e) {
         ADMIN_ERROR_LOG("Permission revoke DB error: {}", e.base().what());

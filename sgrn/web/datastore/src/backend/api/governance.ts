@@ -18,7 +18,7 @@ export interface FormatsList {
     count: number;
 }
 
-export type QuotaKind = "user" | "service" | "organisation";
+export type QuotaKind = "user" | "service" | "organisation" | "domain";
 
 export interface QuotaRow {
     id?: number;
@@ -84,102 +84,77 @@ export function deleteFormat(t_extension: string): Promise<SgrnResult<{ success:
     );
 }
 
-interface BackendGetQuotasResp {
-    success: boolean;
-    organisation?: {
-        total_virtual_size: number;
-        total_real_size: number;
-        storage_limit: number | null;
-        total_entry_count: number;
-        entry_count_limit: number | null;
-        rate_limit_rpm: number | null;
-    };
-    users?: Array<{
-        id: number;
-        email: string;
-        total_virtual_size: number;
-        total_real_size: number;
-        storage_limit: number | null;
-        total_entry_count: number;
-        entry_count_limit: number | null;
-        rate_limit_rpm: number | null;
-        max_file_size_mb?: number | null;
-        preferred_chunk_size_mb?: number | null;
-        rate_limit_upload_rpm?: number | null;
-    }>;
-    automated_services?: Array<{
-        id: number;
-        name: string;
-        token: string;
-        total_virtual_size: number;
-        total_real_size: number;
-        storage_limit: number | null;
-        total_entry_count: number;
-        entry_count_limit: number | null;
-        rate_limit_rpm: number | null;
-        max_file_size_mb?: number | null;
-        preferred_chunk_size_mb?: number | null;
-        rate_limit_upload_rpm?: number | null;
-    }>;
+// Unified response of GET /api/v1/admin/quotas (StorageAdminHandler::handleListQuotas):
+// { kind, rows: [...], count }. Rows are kind-shaped but always carry the
+// usage/limit pair; extra columns appear per kind (path for domains,
+// rate limits for users/services/organisations).
+export interface BackendQuotaRow {
+    kind: QuotaKind;
+    id?: number;
+    email?: string;
+    name?: string;
+    path?: string;
+    organisation?: string | null;
+    storage_used_bytes: number;
+    storage_limit_bytes: number | null;
+    entries_used: number;
+    entry_count_limit: number | null;
+    rate_limit_rpm?: number | null;
+    max_file_size_mb?: number | null;
+    preferred_chunk_size_mb?: number | null;
+    rate_limit_upload_rpm?: number | null;
+}
+
+export interface QuotaRow {
+    id?: number;
+    email?: string;
+    name?: string;
+    label?: string;
+    path?: string;
+    organisation: string | null;
+    storage_used_bytes: number;
+    storage_limit_bytes: number | null;
+    entries_used: number;
+    entry_count_limit: number | null;
+    max_file_size_mb?: number | null;
+    preferred_chunk_size_mb?: number | null;
+    rate_limit_upload_rpm?: number | null;
+    rate_limit_rpm?: number | null;
 }
 
 export async function fetchQuotas(t_kind: QuotaKind, t_search = "", t_limit = 100): Promise<SgrnResult<QuotasList>> {
-    const quotaParams = new URLSearchParams({ limit: String(t_limit) });
-    const rawRes = await request<BackendGetQuotasResp>(`${AdminBackendApiEndpoints.QUOTAS}?${quotaParams.toString()}`);
+    const quotaParams = new URLSearchParams({
+        kind: t_kind,
+        limit: String(t_limit),
+    });
+    if (t_search.trim()) {
+        quotaParams.set("search", t_search.trim());
+    }
+    const rawRes = await request<{ kind: QuotaKind; rows: BackendQuotaRow[]; count: number }>(
+        `${AdminBackendApiEndpoints.QUOTAS}?${quotaParams.toString()}`,
+    );
     if (rawRes.error || !rawRes.data) {
         return { error: rawRes.error || "Failed to load quotas", scope: rawRes.scope };
     }
 
-    const data = rawRes.data;
-    const searchLower = t_search.trim().toLowerCase();
-    let rows: QuotaRow[] = [];
-
-    if (t_kind === "user" && data.users) {
-        rows = data.users
-            .filter((u) => !searchLower || u.email.toLowerCase().includes(searchLower))
-            .map((u) => ({
-                id: u.id,
-                email: u.email,
-                organisation: null,
-                storage_used_bytes: u.total_real_size ?? 0,
-                storage_limit_bytes: u.storage_limit ?? null,
-                entries_used: u.total_entry_count ?? 0,
-                entry_count_limit: u.entry_count_limit ?? null,
-                max_file_size_mb: u.max_file_size_mb ?? null,
-                preferred_chunk_size_mb: u.preferred_chunk_size_mb ?? null,
-                rate_limit_upload_rpm: u.rate_limit_upload_rpm ?? null,
-                rate_limit_rpm: u.rate_limit_rpm ?? null,
-            }));
-    } else if (t_kind === "service" && data.automated_services) {
-        rows = data.automated_services
-            .filter((s) => !searchLower || s.name.toLowerCase().includes(searchLower))
-            .map((s) => ({
-                id: s.id,
-                name: s.name,
-                organisation: null,
-                storage_used_bytes: s.total_real_size ?? 0,
-                storage_limit_bytes: s.storage_limit ?? null,
-                entries_used: s.total_entry_count ?? 0,
-                entry_count_limit: s.entry_count_limit ?? null,
-                max_file_size_mb: s.max_file_size_mb ?? null,
-                preferred_chunk_size_mb: s.preferred_chunk_size_mb ?? null,
-                rate_limit_upload_rpm: s.rate_limit_upload_rpm ?? null,
-                rate_limit_rpm: s.rate_limit_rpm ?? null,
-            }));
-    } else if (t_kind === "organisation" && data.organisation) {
-        const o = data.organisation;
-        rows = [
-            {
-                name: "Primary Organisation",
-                organisation: null,
-                storage_used_bytes: o.total_real_size ?? 0,
-                storage_limit_bytes: o.storage_limit ?? null,
-                entries_used: o.total_entry_count ?? 0,
-                entry_count_limit: o.entry_count_limit ?? null,
-                rate_limit_rpm: o.rate_limit_rpm ?? null,
-            },
-        ];
-    }
+    // The backend returns a unified row shape for every kind (usage,
+    // limits, and per-kind extras like `path` for domains). Pass the
+    // rows straight through — QuotaRow is structurally compatible.
+    const rows: QuotaRow[] = rawRes.data.rows.map((r) => ({
+        id: r.id,
+        email: r.email,
+        name: r.name,
+        path: r.path,
+        organisation: r.organisation ?? null,
+        storage_used_bytes: r.storage_used_bytes ?? 0,
+        storage_limit_bytes: r.storage_limit_bytes ?? null,
+        entries_used: r.entries_used ?? 0,
+        entry_count_limit: r.entry_count_limit ?? null,
+        max_file_size_mb: r.max_file_size_mb ?? null,
+        preferred_chunk_size_mb: r.preferred_chunk_size_mb ?? null,
+        rate_limit_upload_rpm: r.rate_limit_upload_rpm ?? null,
+        rate_limit_rpm: r.rate_limit_rpm ?? null,
+    }));
 
     return {
         data: {
@@ -208,6 +183,13 @@ export function updateQuota(t_body: {
         endpoint = AdminBackendApiEndpoints.QUOTAS_SERVICE(t_body.id);
     } else if (t_body.kind === "organisation") {
         endpoint = AdminBackendApiEndpoints.QUOTAS_ORG;
+        // Platform admins may target another organisation via ?name=;
+        // tenant sessions are scoped server-side to their own row.
+        if (t_body.name) {
+            endpoint += `?name=${encodeURIComponent(t_body.name)}`;
+        }
+    } else if (t_body.kind === "domain") {
+        endpoint = AdminBackendApiEndpoints.QUOTAS_DOMAIN(t_body.id!);
     }
 
     const payload = {

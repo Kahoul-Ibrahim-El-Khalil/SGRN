@@ -19,6 +19,8 @@ const std::string Domains::Cols::_name = "\"name\"";
 const std::string Domains::Cols::_parent_id = "\"parent_id\"";
 const std::string Domains::Cols::_path = "\"path\"";
 const std::string Domains::Cols::_encryption_policy = "\"encryption_policy\"";
+const std::string Domains::Cols::_storage_limit = "\"storage_limit\"";
+const std::string Domains::Cols::_entry_count_limit = "\"entry_count_limit\"";
 const std::string Domains::primaryKeyName = "id";
 const bool Domains::hasPrimaryKey = true;
 const std::string Domains::tableName = "core.\"domains\"";
@@ -26,7 +28,8 @@ const std::string Domains::tableName = "core.\"domains\"";
 const std::vector<typename Domains::MetaData> Domains::metaData_ = {{"id", "int32_t", "integer", 4, 1, 1, 1},
     {"organisation", "std::string", "text", 0, 0, 0, 1}, {"name", "std::string", "text", 0, 0, 0, 1},
     {"parent_id", "int32_t", "integer", 4, 0, 0, 0}, {"path", "std::string", "text", 0, 0, 0, 1},
-    {"encryption_policy", "std::string", "text", 0, 0, 0, 1}};
+    {"encryption_policy", "std::string", "text", 0, 0, 0, 1}, {"storage_limit", "int64_t", "bigint", 8, 0, 0, 0},
+    {"entry_count_limit", "int64_t", "bigint", 8, 0, 0, 0}};
 const std::string& Domains::getColumnName(size_t index) noexcept(false) {
     assert(index < metaData_.size());
     return metaData_[index].colName_;
@@ -51,9 +54,15 @@ Domains::Domains(const Row& r, const ssize_t indexOffset) noexcept {
         if (!r["encryption_policy"].isNull()) {
             encryptionPolicy_ = std::make_shared<std::string>(r["encryption_policy"].as<std::string>());
         }
+        if (!r["storage_limit"].isNull()) {
+            storageLimit_ = std::make_shared<int64_t>(r["storage_limit"].as<int64_t>());
+        }
+        if (!r["entry_count_limit"].isNull()) {
+            entryCountLimit_ = std::make_shared<int64_t>(r["entry_count_limit"].as<int64_t>());
+        }
     } else {
         size_t offset = (size_t)indexOffset;
-        if (offset + 6 > r.size()) {
+        if (offset + 8 > r.size()) {
             LOG_FATAL << "Invalid SQL result for this model";
             return;
         }
@@ -82,11 +91,19 @@ Domains::Domains(const Row& r, const ssize_t indexOffset) noexcept {
         if (!r[index].isNull()) {
             encryptionPolicy_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+        index = offset + 6;
+        if (!r[index].isNull()) {
+            storageLimit_ = std::make_shared<int64_t>(r[index].as<int64_t>());
+        }
+        index = offset + 7;
+        if (!r[index].isNull()) {
+            entryCountLimit_ = std::make_shared<int64_t>(r[index].as<int64_t>());
+        }
     }
 }
 
 Domains::Domains(const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector) noexcept(false) {
-    if (pMasqueradingVector.size() != 6) {
+    if (pMasqueradingVector.size() != 8) {
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
@@ -124,6 +141,18 @@ Domains::Domains(const Json::Value& pJson, const std::vector<std::string>& pMasq
         dirtyFlag_[5] = true;
         if (!pJson[pMasqueradingVector[5]].isNull()) {
             encryptionPolicy_ = std::make_shared<std::string>(pJson[pMasqueradingVector[5]].asString());
+        }
+    }
+    if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
+        dirtyFlag_[6] = true;
+        if (!pJson[pMasqueradingVector[6]].isNull()) {
+            storageLimit_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[6]].asInt64());
+        }
+    }
+    if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
+        dirtyFlag_[7] = true;
+        if (!pJson[pMasqueradingVector[7]].isNull()) {
+            entryCountLimit_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[7]].asInt64());
         }
     }
 }
@@ -165,10 +194,22 @@ Domains::Domains(const Json::Value& pJson) noexcept(false) {
             encryptionPolicy_ = std::make_shared<std::string>(pJson["encryption_policy"].asString());
         }
     }
+    if (pJson.isMember("storage_limit")) {
+        dirtyFlag_[6] = true;
+        if (!pJson["storage_limit"].isNull()) {
+            storageLimit_ = std::make_shared<int64_t>((int64_t)pJson["storage_limit"].asInt64());
+        }
+    }
+    if (pJson.isMember("entry_count_limit")) {
+        dirtyFlag_[7] = true;
+        if (!pJson["entry_count_limit"].isNull()) {
+            entryCountLimit_ = std::make_shared<int64_t>((int64_t)pJson["entry_count_limit"].asInt64());
+        }
+    }
 }
 
 void Domains::updateByMasqueradedJson(const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector) noexcept(false) {
-    if (pMasqueradingVector.size() != 6) {
+    if (pMasqueradingVector.size() != 8) {
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
@@ -207,6 +248,18 @@ void Domains::updateByMasqueradedJson(const Json::Value& pJson, const std::vecto
             encryptionPolicy_ = std::make_shared<std::string>(pJson[pMasqueradingVector[5]].asString());
         }
     }
+    if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
+        dirtyFlag_[6] = true;
+        if (!pJson[pMasqueradingVector[6]].isNull()) {
+            storageLimit_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[6]].asInt64());
+        }
+    }
+    if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
+        dirtyFlag_[7] = true;
+        if (!pJson[pMasqueradingVector[7]].isNull()) {
+            entryCountLimit_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[7]].asInt64());
+        }
+    }
 }
 
 void Domains::updateByJson(const Json::Value& pJson) noexcept(false) {
@@ -243,6 +296,18 @@ void Domains::updateByJson(const Json::Value& pJson) noexcept(false) {
         dirtyFlag_[5] = true;
         if (!pJson["encryption_policy"].isNull()) {
             encryptionPolicy_ = std::make_shared<std::string>(pJson["encryption_policy"].asString());
+        }
+    }
+    if (pJson.isMember("storage_limit")) {
+        dirtyFlag_[6] = true;
+        if (!pJson["storage_limit"].isNull()) {
+            storageLimit_ = std::make_shared<int64_t>((int64_t)pJson["storage_limit"].asInt64());
+        }
+    }
+    if (pJson.isMember("entry_count_limit")) {
+        dirtyFlag_[7] = true;
+        if (!pJson["entry_count_limit"].isNull()) {
+            entryCountLimit_ = std::make_shared<int64_t>((int64_t)pJson["entry_count_limit"].asInt64());
         }
     }
 }
@@ -355,11 +420,48 @@ void Domains::setEncryptionPolicy(std::string&& pEncryptionPolicy) noexcept {
     dirtyFlag_[5] = true;
 }
 
+const int64_t& Domains::getValueOfStorageLimit() const noexcept {
+    static const int64_t defaultValue = int64_t();
+    if (storageLimit_)
+        return *storageLimit_;
+    return defaultValue;
+}
+const std::shared_ptr<int64_t>& Domains::getStorageLimit() const noexcept {
+    return storageLimit_;
+}
+void Domains::setStorageLimit(const int64_t& pStorageLimit) noexcept {
+    storageLimit_ = std::make_shared<int64_t>(pStorageLimit);
+    dirtyFlag_[6] = true;
+}
+void Domains::setStorageLimitToNull() noexcept {
+    storageLimit_.reset();
+    dirtyFlag_[6] = true;
+}
+
+const int64_t& Domains::getValueOfEntryCountLimit() const noexcept {
+    static const int64_t defaultValue = int64_t();
+    if (entryCountLimit_)
+        return *entryCountLimit_;
+    return defaultValue;
+}
+const std::shared_ptr<int64_t>& Domains::getEntryCountLimit() const noexcept {
+    return entryCountLimit_;
+}
+void Domains::setEntryCountLimit(const int64_t& pEntryCountLimit) noexcept {
+    entryCountLimit_ = std::make_shared<int64_t>(pEntryCountLimit);
+    dirtyFlag_[7] = true;
+}
+void Domains::setEntryCountLimitToNull() noexcept {
+    entryCountLimit_.reset();
+    dirtyFlag_[7] = true;
+}
+
 void Domains::updateId(const uint64_t id) {
 }
 
 const std::vector<std::string>& Domains::insertColumns() noexcept {
-    static const std::vector<std::string> inCols = {"organisation", "name", "parent_id", "path", "encryption_policy"};
+    static const std::vector<std::string> inCols = {
+        "organisation", "name", "parent_id", "path", "encryption_policy", "storage_limit", "entry_count_limit"};
     return inCols;
 }
 
@@ -399,6 +501,20 @@ void Domains::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+    if (dirtyFlag_[6]) {
+        if (getStorageLimit()) {
+            binder << getValueOfStorageLimit();
+        } else {
+            binder << nullptr;
+        }
+    }
+    if (dirtyFlag_[7]) {
+        if (getEntryCountLimit()) {
+            binder << getValueOfEntryCountLimit();
+        } else {
+            binder << nullptr;
+        }
+    }
 }
 
 const std::vector<std::string> Domains::updateColumns() const {
@@ -417,6 +533,12 @@ const std::vector<std::string> Domains::updateColumns() const {
     }
     if (dirtyFlag_[5]) {
         ret.push_back(getColumnName(5));
+    }
+    if (dirtyFlag_[6]) {
+        ret.push_back(getColumnName(6));
+    }
+    if (dirtyFlag_[7]) {
+        ret.push_back(getColumnName(7));
     }
     return ret;
 }
@@ -457,6 +579,20 @@ void Domains::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+    if (dirtyFlag_[6]) {
+        if (getStorageLimit()) {
+            binder << getValueOfStorageLimit();
+        } else {
+            binder << nullptr;
+        }
+    }
+    if (dirtyFlag_[7]) {
+        if (getEntryCountLimit()) {
+            binder << getValueOfEntryCountLimit();
+        } else {
+            binder << nullptr;
+        }
+    }
 }
 Json::Value Domains::toJson() const {
     Json::Value ret;
@@ -490,6 +626,16 @@ Json::Value Domains::toJson() const {
     } else {
         ret["encryption_policy"] = Json::Value();
     }
+    if (getStorageLimit()) {
+        ret["storage_limit"] = (Json::Int64)getValueOfStorageLimit();
+    } else {
+        ret["storage_limit"] = Json::Value();
+    }
+    if (getEntryCountLimit()) {
+        ret["entry_count_limit"] = (Json::Int64)getValueOfEntryCountLimit();
+    } else {
+        ret["entry_count_limit"] = Json::Value();
+    }
     return ret;
 }
 
@@ -499,7 +645,7 @@ std::string Domains::toString() const {
 
 Json::Value Domains::toMasqueradedJson(const std::vector<std::string>& pMasqueradingVector) const {
     Json::Value ret;
-    if (pMasqueradingVector.size() == 6) {
+    if (pMasqueradingVector.size() == 8) {
         if (!pMasqueradingVector[0].empty()) {
             if (getId()) {
                 ret[pMasqueradingVector[0]] = getValueOfId();
@@ -542,6 +688,20 @@ Json::Value Domains::toMasqueradedJson(const std::vector<std::string>& pMasquera
                 ret[pMasqueradingVector[5]] = Json::Value();
             }
         }
+        if (!pMasqueradingVector[6].empty()) {
+            if (getStorageLimit()) {
+                ret[pMasqueradingVector[6]] = (Json::Int64)getValueOfStorageLimit();
+            } else {
+                ret[pMasqueradingVector[6]] = Json::Value();
+            }
+        }
+        if (!pMasqueradingVector[7].empty()) {
+            if (getEntryCountLimit()) {
+                ret[pMasqueradingVector[7]] = (Json::Int64)getValueOfEntryCountLimit();
+            } else {
+                ret[pMasqueradingVector[7]] = Json::Value();
+            }
+        }
         return ret;
     }
     LOG_ERROR << "Masquerade failed";
@@ -574,6 +734,16 @@ Json::Value Domains::toMasqueradedJson(const std::vector<std::string>& pMasquera
         ret["encryption_policy"] = getValueOfEncryptionPolicy();
     } else {
         ret["encryption_policy"] = Json::Value();
+    }
+    if (getStorageLimit()) {
+        ret["storage_limit"] = (Json::Int64)getValueOfStorageLimit();
+    } else {
+        ret["storage_limit"] = Json::Value();
+    }
+    if (getEntryCountLimit()) {
+        ret["entry_count_limit"] = (Json::Int64)getValueOfEntryCountLimit();
+    } else {
+        ret["entry_count_limit"] = Json::Value();
     }
     return ret;
 }
@@ -609,11 +779,19 @@ bool Domains::validateJsonForCreation(const Json::Value& pJson, std::string& err
         if (!validJsonOfField(5, "encryption_policy", pJson["encryption_policy"], err, true))
             return false;
     }
+    if (pJson.isMember("storage_limit")) {
+        if (!validJsonOfField(6, "storage_limit", pJson["storage_limit"], err, true))
+            return false;
+    }
+    if (pJson.isMember("entry_count_limit")) {
+        if (!validJsonOfField(7, "entry_count_limit", pJson["entry_count_limit"], err, true))
+            return false;
+    }
     return true;
 }
 bool Domains::validateMasqueradedJsonForCreation(
     const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector, std::string& err) {
-    if (pMasqueradingVector.size() != 6) {
+    if (pMasqueradingVector.size() != 8) {
         err = "Bad masquerading vector";
         return false;
     }
@@ -660,6 +838,18 @@ bool Domains::validateMasqueradedJsonForCreation(
                     return false;
             }
         }
+        if (!pMasqueradingVector[6].empty()) {
+            if (pJson.isMember(pMasqueradingVector[6])) {
+                if (!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, true))
+                    return false;
+            }
+        }
+        if (!pMasqueradingVector[7].empty()) {
+            if (pJson.isMember(pMasqueradingVector[7])) {
+                if (!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, true))
+                    return false;
+            }
+        }
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -694,11 +884,19 @@ bool Domains::validateJsonForUpdate(const Json::Value& pJson, std::string& err) 
         if (!validJsonOfField(5, "encryption_policy", pJson["encryption_policy"], err, false))
             return false;
     }
+    if (pJson.isMember("storage_limit")) {
+        if (!validJsonOfField(6, "storage_limit", pJson["storage_limit"], err, false))
+            return false;
+    }
+    if (pJson.isMember("entry_count_limit")) {
+        if (!validJsonOfField(7, "entry_count_limit", pJson["entry_count_limit"], err, false))
+            return false;
+    }
     return true;
 }
 bool Domains::validateMasqueradedJsonForUpdate(
     const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector, std::string& err) {
-    if (pMasqueradingVector.size() != 6) {
+    if (pMasqueradingVector.size() != 8) {
         err = "Bad masquerading vector";
         return false;
     }
@@ -728,6 +926,14 @@ bool Domains::validateMasqueradedJsonForUpdate(
         }
         if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
             if (!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
+            if (!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, false))
+                return false;
+        }
+        if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
+            if (!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, false))
                 return false;
         }
     } catch (const Json::LogicError& e) {
@@ -797,6 +1003,24 @@ bool Domains::validJsonOfField(size_t index, const std::string& fieldName, const
                 return false;
             }
             if (!pJson.isString()) {
+                err = "Type error in the " + fieldName + " field";
+                return false;
+            }
+            break;
+        case 6:
+            if (pJson.isNull()) {
+                return true;
+            }
+            if (!pJson.isInt64()) {
+                err = "Type error in the " + fieldName + " field";
+                return false;
+            }
+            break;
+        case 7:
+            if (pJson.isNull()) {
+                return true;
+            }
+            if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }

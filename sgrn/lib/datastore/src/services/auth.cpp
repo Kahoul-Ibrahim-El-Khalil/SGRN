@@ -3,6 +3,7 @@
 #include <sgrn/datastore/BackendError.hpp>
 #include <sgrn/datastore/DbError.hpp>
 #include <sgrn/datastore/audit/AuditLogger.hpp>
+#include <sgrn/datastore/filters/admin.hpp>
 #include <sgrn/datastore/session/SessionStore.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
@@ -53,10 +54,18 @@ Task<HttpResponsePtr> performSignInProcess(HttpRequestPtr tsp_http_req, std::str
 
     std::optional<drogon::orm::Result> result_opt;
     try {
+        // WP2 sign-in hardening: the SQL predicate excludes suspended /
+        // soft-deleted accounts and accounts whose organisation is suspended
+        // or archived, matching core.authenticate_user (postgres/functions).
+        // F10 (deprecated role-based admin level in the JWT claims) is fixed
+        // separately against core.admin_level.
         result_opt = co_await db_client->execSqlCoro("SELECT ud.* "
                                                      "FROM core.user_details ud "
                                                      "JOIN core.users u ON u.id = ud.id "
-                                                     "WHERE u.email = $1 AND u.is_active = true "
+                                                     "WHERE u.email = $1 AND u.is_active = true AND u.status = 'active' "
+                                                     "AND u.deleted_at IS NULL "
+                                                     "AND EXISTS (SELECT 1 FROM core.organisations o "
+                                                     "            WHERE o.name = u.organisation AND o.status = 'active') "
                                                      "AND u.password = crypt($2, u.password)",
             t_email, t_password);
     } catch (const drogon::orm::DrogonDbException& e) {
@@ -107,11 +116,31 @@ Task<HttpResponsePtr> performSignInProcess(HttpRequestPtr tsp_http_req, std::str
 
         bool is_platform_admin = row["is_platform_admin"].isNull() ? false : row["is_platform_admin"].as<bool>();
         user_data["is_platform_admin"] = is_platform_admin;
-        int32_t admin_lvl = is_platform_admin ? 3 : (role == "admin" ? 2 : 0);
-        user_data["admin_level"] = admin_lvl;
-        user_data["admin_level_name"] = admin_lvl == 3 ? "PLATFORM" : (admin_lvl == 2 ? "ORG" : "NONE");
 
         user_data["organisation"] = row["organisation"].isNull() ? "" : row["organisation"].as<std::string>();
+
+        // F10: the session's admin level is authoritative from core.admin_level
+        // (admin_assignments + is_platform_admin), not the legacy `role` column.
+        // Resolve any domain scope so a DOMAIN admin is not flattened to NONE.
+        std::optional<int32_t> admin_domain_id;
+        const std::string user_domain = row["domain"].isNull() ? "" : row["domain"].as<std::string>();
+        if (!user_domain.empty() && !user_data["organisation"].asString().empty()) {
+            auto dom = co_await db_client->execSqlCoro(
+                "SELECT id FROM core.domains WHERE organisation = $1 AND name = $2", user_data["organisation"].asString(), user_domain);
+            if (!dom.empty()) {
+                admin_domain_id = dom[0]["id"].as<int32_t>();
+            }
+        }
+        const sgrn::datastore::filters::AdminLevel resolved_level =
+            co_await sgrn::datastore::filters::AdminLevelCache::instance().resolveAdminLevel(
+                user_id, user_data["organisation"].asString(), admin_domain_id, user_data["email"].asString());
+        int32_t admin_lvl = static_cast<int32_t>(resolved_level);
+        if (is_platform_admin && admin_lvl < static_cast<int32_t>(sgrn::datastore::filters::AdminLevel::PLATFORM)) {
+            admin_lvl = static_cast<int32_t>(sgrn::datastore::filters::AdminLevel::PLATFORM);
+        }
+        user_data["admin_level"] = admin_lvl;
+        user_data["admin_level_name"] =
+            sgrn::datastore::filters::adminLevelToString(static_cast<sgrn::datastore::filters::AdminLevel>(admin_lvl));
         user_data["total_virtual_size"] = row["total_virtual_size"].as<int64_t>();
         user_data["total_real_size"] = row["total_real_size"].as<int64_t>();
         user_data["storage_limit"] = row["storage_limit"].isNull() ? Json::Value::null : Json::Value(row["storage_limit"].as<int64_t>());
@@ -265,6 +294,11 @@ Task<HttpResponsePtr> performAutomatedServiceSignInProcess(HttpRequestPtr tsp_ht
         automated_service_data["role"] = Json::Value(Json::objectValue);
         automated_service_data["role"]["name"] = "automated_service";
         automated_service_data["role"]["code"] = 1;
+        // Services are never browser admins; expose the same claim shape so the
+        // dashboard gate can rely on admin_level being present.
+        automated_service_data["is_platform_admin"] = false;
+        automated_service_data["admin_level"] = 0;
+        automated_service_data["admin_level_name"] = "NONE";
 
         Json::Value claims;
         claims["user"] = automated_service_data;

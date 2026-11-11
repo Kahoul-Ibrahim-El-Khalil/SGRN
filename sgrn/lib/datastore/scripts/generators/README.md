@@ -14,14 +14,15 @@ Two different philosophies coexist on purpose:
 
 ### Generator catalog
 
-| Script                            | Location   | Primary input                  | Primary output                           | Mapping                                                           |
-| --------------------------------- | ---------- | ------------------------------ | ---------------------------------------- | ----------------------------------------------------------------- |
-| `generate_views.py`               | here       | `crud/manifest.json` + live DB | `src/handlers/generated/*.gen.hpp`       | [Manifest → C++ views](#manifest-table-entry--c-output-reference) |
-| `generate_orm.py`                 | here       | live DB (`core`, `storage`)    | `src/orm/models/<schema>/*.{h,cc}`       | [Live table → ORM](#live-table--c-orm-output-reference)           |
-| `migrate_comments_to_manifest.py` | here       | legacy `sgrn:` SQL comments    | `crud/manifest.json`                     | one-off; see script header                                        |
-| `generate_embedded_assets.py`     | `scripts/` | any directory tree             | per-file `*.hpp` + master `*_assets.hpp` | [Source file → VFS entry](#source-file--c-vfs-output-reference)   |
-| `generate_web_headers.py`         | `scripts/` | (shim)                         | same as `--kind web`                     | [Web shim](#generate_web_headerspy--compatibility-shim)           |
-| `embded_web.py`                   | `scripts/` | explicit file list             | single `web.hpp`                         | [Legacy one-off embedder](#embded_webpy--legacy-manual-embedder)  |
+| Script                            | Location   | Primary input                  | Primary output                           | Mapping                                                                       |
+| --------------------------------- | ---------- | ------------------------------ | ---------------------------------------- | ----------------------------------------------------------------------------- |
+| `generate_views.py`               | here       | `crud/manifest.json` + live DB | `src/handlers/generated/*.gen.hpp`       | [Manifest → C++ views](#manifest-table-entry--c-output-reference)             |
+| `generate_orm.py`                 | here       | live DB (`core`, `storage`)    | `src/orm/models/<schema>/*.{h,cc}`       | [Live table → ORM](#live-table--c-orm-output-reference)                       |
+| `migrate_comments_to_manifest.py` | here       | legacy `sgrn:` SQL comments    | `crud/manifest.json`                     | one-off; see script header                                                    |
+| `check_manifest_policy.py`        | `scripts/` | `crud/manifest.json`           | exit 0 / `POLICY:` violations            | [Sensitive-column policy](#sensitive-column-policy-manifest--generated-views) |
+| `generate_embedded_assets.py`     | `scripts/` | any directory tree             | per-file `*.hpp` + master `*_assets.hpp` | [Source file → VFS entry](#source-file--c-vfs-output-reference)               |
+| `generate_web_headers.py`         | `scripts/` | (shim)                         | same as `--kind web`                     | [Web shim](#generate_web_headerspy--compatibility-shim)                       |
+| `embded_web.py`                   | `scripts/` | explicit file list             | single `web.hpp`                         | [Legacy one-off embedder](#embded_webpy--legacy-manual-embedder)              |
 
 ## Where am I? (repository orientation for newcomers)
 
@@ -569,6 +570,49 @@ neq gt gte lt lte like in`.
 - `SENSITIVE_COLUMNS` (`password`, `token_secret_hash`, …) stay a
   code-level constant, not manifest-overridable: listing one is a hard
   error, and unlisted ones are hard-omitted from the API surface.
+
+### Sensitive-column policy (manifest & generated views)
+
+Two complementary guards keep secrets and privilege state off the writable
+HTTP surface:
+
+1. **Generation-time (generator, cannot be bypassed):** `generate_views.py`
+   hard-errors if a manifest `columns` entry names a `SENSITIVE_COLUMNS`
+   member, and hard-omits any _live_ column that belongs to
+   `SENSITIVE_COLUMNS` even when the manifest never mentions it. Additionally,
+   for any table with a write operation, **every** live column in
+   `SENSITIVE_COLUMNS` must be _explicitly configured_ in the manifest —
+   this is what prevents a newly added privileged column (e.g. a future
+   `is_platform_admin`) from silently inheriting the writable
+   `insertable/updatable` default. The generated field whitelist
+   (`kFields`) therefore never contains a sensitive column, and
+   `insertable`/`updatable` flags in the manifest are the only way to
+   toggle writability for everything else.
+2. **Check-time (policy script, run in CI / tests):**
+   `scripts/check_manifest_policy.py` re-validates the committed
+   `crud/manifest.json` against the policy:
+
+   ```bash
+   # from the repo root (path defaults to crud/manifest.json)
+   python3 sgrn/lib/datastore/scripts/check_manifest_policy.py \
+           sgrn/lib/datastore/crud/manifest.json
+   ```
+
+   It fails (exit 1, one `POLICY:` line per violation) when:
+   - a write operation (`create` / `update` / `delete`) is not gated by an
+     admin filter (`OrgAdminFilter` / `PlatformAdminFilter`);
+   - `users` / `automated_services` expose a `list` operation to non-admins
+     (personal & service data);
+   - a manifest-configured sensitive column (`is_platform_admin`, `role`,
+     `is_active`, `token`, quota limits, usage counters, `metadata`, …) is
+     marked `insertable` or `updatable`.
+
+   Note the script inspects only columns _named_ in the manifest — the
+   generation-time rule above covers live columns the manifest omits. The
+   `crud_admin_lockdown_test` runs both halves: it checks the compiled
+   route-table policy against the repo manifest (with a negative fixture)
+   and probes the live engine, including the audit hook, so a regression in
+   either guard fails the suite.
 
 ### What it generates (checked in)
 

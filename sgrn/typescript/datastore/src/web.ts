@@ -87,6 +87,10 @@ export const AdminBackendApiEndpoints = {
   LIST_AUTOMATED_SERVICES: "/api/v1/automated-services",
   UPDATE_AUTOMATED_SERVICE_METADATA: (id: number) =>
     `/api/v1/admin/automated-services/${id}/metadata`,
+  AUTOMATED_SERVICE_ITEM: (id: number) =>
+    `/api/v1/admin/automated-services/${id}`,
+  AUTOMATED_SERVICE_STATUS: (id: number) =>
+    `/api/v1/admin/automated-services/${id}/status`,
   ROTATE_AUTOMATED_SERVICE_TOKEN:
     "/api/v1/admin/automated-services/rotate-token",
   STORAGE_OVERVIEW: "/api/v1/admin/storage/overview",
@@ -101,13 +105,28 @@ export const AdminBackendApiEndpoints = {
   ROLES_ASSIGN: "/api/v1/admin/roles/assign",
   ROLES_REVOKE: "/api/v1/admin/roles/revoke",
   AUDIT_LOGS: "/api/v1/admin/audit-logs",
+  AUDIT_VERIFY: "/api/v1/admin/audit-logs/verify",
+  ROLE_ASSIGNMENTS: "/api/v1/admin/roles/assignments",
+  QUOTAS_DOMAIN: (id: number) => `/api/v1/admin/quotas/domain/${id}`,
+  DOMAINS: "/api/v1/admin/domains",
+  DOMAIN_ITEM: (id: number) => `/api/v1/admin/domains/${id}`,
+  DOMAIN_RENAME: (id: number) => `/api/v1/admin/domains/${id}/rename`,
+  DOMAIN_MOVE: (id: number) => `/api/v1/admin/domains/${id}/move`,
+  ACCOUNT_ADMIN: "/api/v1/admin/users/register",
+  ACCOUNTS: "/api/v1/admin/users",
+  ACCOUNT_ITEM: (id: number) => `/api/v1/admin/users/${id}`,
+  ACCOUNT_STATUS: (id: number) => `/api/v1/admin/users/${id}/status`,
+  ACCOUNT_PASSWORD: (id: number) => `/api/v1/admin/users/${id}/password`,
   QUOTAS_ORG: "/api/v1/admin/quotas/organisation",
+  ORGANISATIONS: "/api/v1/admin/organisations",
   QUOTAS_USER: (id: number) => `/api/v1/admin/quotas/user/${id}`,
   QUOTAS_SERVICE: (id: number) => `/api/v1/admin/quotas/service/${id}`,
   PERMISSIONS: "/api/v1/admin/permissions",
   ANALYTICS_OVERVIEW: "/api/v1/admin/analytics/overview",
   ANALYTICS_BREAKDOWN: "/api/v1/admin/analytics/breakdown",
   METAPROBE_SESSIONS: "/api/v1/admin/metaprobe/sessions",
+  METAPROBE_SESSION_ITEM: (token: string) =>
+    `/api/v1/admin/metaprobe/sessions/${encodeURIComponent(token)}`,
   WEBHOOKS: "/api/v1/admin/webhooks",
   WEBHOOK_ITEM: (id: number) => `/api/v1/admin/webhooks/${id}`,
 } as const;

@@ -18,6 +18,7 @@
 
 #include <sgrn/datastore/core/db.hpp>
 #include <sgrn/datastore/error/ApiErrors.hpp>
+#include <sgrn/datastore/filters/admin.hpp>
 #include <sgrn/datastore/handlers/admin.hpp>
 #include <sgrn/datastore/services/WebhookService.hpp>
 #include <sgrn/datastore/services/admin-repository.hpp>

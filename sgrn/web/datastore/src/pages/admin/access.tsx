@@ -1,8 +1,26 @@
 import { useState, useCallback, useEffect } from "react";
-import { Loader2, Search, Plus, Trash2, Shield, RefreshCw } from "lucide-react";
+import { Loader2, Search, Plus, Trash2, Shield, RefreshCw, Save, UserPlus, UserMinus } from "lucide-react";
 import { useEvent } from "@/contexts/EventContext";
+import { authenticatedFetch } from "@/backend/api/fetcher";
 import { fetchPermissions, grantPermission, revokePermission, type DomainPermission } from "@/backend/api/permissions";
-import { fetchRoles, createRole, type RoleEntry } from "@/backend/api/roles";
+import {
+    fetchRoles,
+    fetchRoleAssignments,
+    createRole,
+    updateRole,
+    deleteRole,
+    assignRole,
+    revokeRole,
+    type RoleEntry,
+    type RoleAssignment,
+} from "@/backend/api/roles";
+
+// Directory entries for role assignment targets (org-scoped lists from the
+// generated CRUD views).
+interface AssignTarget {
+    id: number;
+    label: string;
+}
 
 export default function PermissionsPanel() {
     const { showEvent } = useEvent();
@@ -22,11 +40,65 @@ export default function PermissionsPanel() {
 
     // Roles State
     const [roles, setRoles] = useState<RoleEntry[]>([]);
+    const [assignments, setAssignments] = useState<RoleAssignment[]>([]);
     const [loadingRoles, setLoadingRoles] = useState(false);
     const [creatingRole, setCreatingRole] = useState(false);
     const [newRoleName, setNewRoleName] = useState("");
     const [newRoleDesc, setNewRoleDesc] = useState("");
     const [newRolePerms, setNewRolePerms] = useState("");
+
+    // Role editing / assignment state. Edits apply per role id; assignment
+    // targets are loaded from the org-scoped user/service lists.
+    const [roleEdits, setRoleEdits] = useState<Record<number, { description: string; perms: string }>>({});
+    const [busyRoleId, setBusyRoleId] = useState<number | null>(null);
+    const [assignTargetKind, setAssignTargetKind] = useState<"user" | "service">("user");
+    const [assignTargets, setAssignTargets] = useState<AssignTarget[]>([]);
+    const [assignTargetId, setAssignTargetId] = useState("");
+    const [assignRoleId, setAssignRoleId] = useState("");
+    const [assigning, setAssigning] = useState(false);
+
+    const roleEditFor = useCallback(
+        (t_role: RoleEntry): { description: string; perms: string } =>
+            roleEdits[t_role.id] ?? {
+                description: t_role.description || "",
+                perms: Array.isArray(t_role.permissions) ? t_role.permissions.join(", ") : "",
+            },
+        [roleEdits],
+    );
+
+    const setRoleEdit = useCallback((t_role: RoleEntry, t_patch: Partial<{ description: string; perms: string }>) => {
+        setRoleEdits((prev) => ({
+            ...prev,
+            [t_role.id]: {
+                ...(prev[t_role.id] ?? {
+                    description: t_role.description || "",
+                    perms: Array.isArray(t_role.permissions) ? t_role.permissions.join(", ") : "",
+                }),
+                ...t_patch,
+            },
+        }));
+    }, []);
+
+    const loadAssignTargets = useCallback(async (t_kind: "user" | "service") => {
+        setAssignTargets([]);
+        setAssignTargetId("");
+        try {
+            // Org admins get their own org's rows; platform admins may pass
+            // ?organisation= — the default list is scoped server-side.
+            const res = await authenticatedFetch(t_kind === "user" ? "/api/v1/users" : "/api/v1/automated-services");
+            if (!res.ok) return;
+            const data = await res.json();
+            if (!Array.isArray(data)) return;
+            const parsed: AssignTarget[] = data.map((entry: Record<string, unknown>) =>
+                t_kind === "user"
+                    ? { id: Number(entry.id) || 0, label: String(entry.email || `user #${entry.id}`) }
+                    : { id: Number(entry.id) || 0, label: String(entry.name || `service #${entry.id}`) },
+            );
+            setAssignTargets(parsed.filter((t) => t.id > 0));
+        } catch {
+            // directory is best-effort; assignment still works by typing an id
+        }
+    }, []);
 
     const loadRoles = useCallback(async () => {
         setLoadingRoles(true);
@@ -36,6 +108,10 @@ export default function PermissionsPanel() {
                 throw new Error(result.error || "Failed to load roles");
             }
             setRoles(result.data.roles);
+            const aresult = await fetchRoleAssignments();
+            if (!aresult.error && aresult.data) {
+                setAssignments(aresult.data.assignments);
+            }
         } catch (error) {
             console.error("Failed to fetch roles:", error);
             showEvent("error", "Unable to load dynamic roles");
@@ -43,6 +119,103 @@ export default function PermissionsPanel() {
             setLoadingRoles(false);
         }
     }, [showEvent]);
+
+    const handleUpdateRole = useCallback(
+        async (t_role: RoleEntry) => {
+            const edit = roleEdits[t_role.id];
+            if (!edit) return;
+            const permsArray = edit.perms
+                .split(",")
+                .map((p) => p.trim())
+                .filter(Boolean);
+            const descriptionChanged = edit.description !== (t_role.description || "");
+            const permsChanged = JSON.stringify(permsArray) !== JSON.stringify(Array.isArray(t_role.permissions) ? t_role.permissions : []);
+            if (!descriptionChanged && !permsChanged) {
+                showEvent("info", "No role changes to save");
+                return;
+            }
+            setBusyRoleId(t_role.id);
+            try {
+                const body: Record<string, unknown> = {};
+                if (descriptionChanged) body.description = edit.description;
+                if (permsChanged) body.permissions = permsArray;
+                const result = await updateRole(t_role.id, body);
+                if (result.error || !result.data) {
+                    throw new Error(result.error || "Failed to update role");
+                }
+                showEvent("success", `Role '${t_role.name}' updated`);
+                setRoleEdits((prev) => {
+                    const next = { ...prev };
+                    delete next[t_role.id];
+                    return next;
+                });
+                await loadRoles();
+            } catch (error) {
+                showEvent("error", error instanceof Error ? error.message : "Failed to update role");
+            } finally {
+                setBusyRoleId(null);
+            }
+        },
+        [roleEdits, loadRoles, showEvent],
+    );
+
+    const handleDeleteRole = useCallback(
+        async (t_role: RoleEntry) => {
+            if (t_role.is_system) {
+                showEvent("error", "System roles cannot be deleted");
+                return;
+            }
+            if (!window.confirm(`Delete role '${t_role.name}'? Assignments referencing it are removed.`)) return;
+            setBusyRoleId(t_role.id);
+            try {
+                const result = await deleteRole(t_role.id);
+                if (result.error || !result.data) {
+                    throw new Error(result.error || "Failed to delete role");
+                }
+                showEvent("success", `Role '${t_role.name}' deleted`);
+                await loadRoles();
+            } catch (error) {
+                showEvent("error", error instanceof Error ? error.message : "Failed to delete role");
+            } finally {
+                setBusyRoleId(null);
+            }
+        },
+        [loadRoles, showEvent],
+    );
+
+    const handleAssignRevokeRole = useCallback(
+        async (t_revoke: boolean) => {
+            const roleId = Number(assignRoleId);
+            const targetId = Number(assignTargetId);
+            if (!roleId || !targetId) {
+                showEvent("error", "Select both a target and a role");
+                return;
+            }
+            setAssigning(true);
+            try {
+                const payload =
+                    assignTargetKind === "user"
+                        ? { role_id: roleId, user_id: targetId }
+                        : { role_id: roleId, automated_service_id: targetId };
+                const result = t_revoke ? await revokeRole(payload) : await assignRole(payload);
+                if (result.error || !result.data) {
+                    throw new Error(result.error || (t_revoke ? "Failed to revoke role" : "Failed to assign role"));
+                }
+                showEvent(
+                    "success",
+                    `${t_revoke ? "Revoked" : "Assigned"} role #${roleId} ${t_revoke ? "from" : "to"} ${
+                        assignTargetKind === "user" ? "user" : "service"
+                    } #${targetId}`,
+                );
+                await loadRoles();
+            } catch (error) {
+                showEvent("error", error instanceof Error ? error.message : t_revoke ? "Failed to revoke role" : "Failed to assign role");
+            } finally {
+                setAssigning(false);
+            }
+        },
+        [assignRoleId, assignTargetId, assignTargetKind, loadRoles, showEvent],
+    );
 
     const handleCreateRole = useCallback(async () => {
         if (!newRoleName.trim()) {
@@ -165,7 +338,8 @@ export default function PermissionsPanel() {
     useEffect(() => {
         load();
         loadRoles();
-    }, [load, loadRoles]);
+        loadAssignTargets("user");
+    }, [load, loadRoles, loadAssignTargets]);
 
     return (
         <div className="query-builder">
@@ -379,7 +553,14 @@ export default function PermissionsPanel() {
                                     <tr key={r.id}>
                                         <td>#{r.id}</td>
                                         <td className="admin-cell-bold">{r.name}</td>
-                                        <td className="admin-cell-muted">{r.description || "-"}</td>
+                                        <td>
+                                            <input
+                                                className="input-desktop w-44"
+                                                value={roleEditFor(r).description}
+                                                placeholder="DESCRIPTION"
+                                                onChange={(e) => setRoleEdit(r, { description: e.target.value })}
+                                            />
+                                        </td>
                                         <td>
                                             <span
                                                 style={{
@@ -396,27 +577,34 @@ export default function PermissionsPanel() {
                                             </span>
                                         </td>
                                         <td>
-                                            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
-                                                {Array.isArray(r.permissions) && r.permissions.length > 0 ? (
-                                                    r.permissions.map((p) => (
-                                                        <span
-                                                            key={p}
-                                                            style={{
-                                                                padding: "1px 6px",
-                                                                borderRadius: "3px",
-                                                                fontSize: "0.7rem",
-                                                                fontFamily: "monospace",
-                                                                backgroundColor: "rgba(255, 255, 255, 0.06)",
-                                                                color: "#e2e8f0",
-                                                                border: "1px solid rgba(255, 255, 255, 0.1)",
-                                                            }}
-                                                        >
-                                                            {p}
-                                                        </span>
-                                                    ))
-                                                ) : (
-                                                    <span className="admin-cell-muted">None</span>
-                                                )}
+                                            <div style={{ display: "flex", alignItems: "flex-start", gap: "0.4rem" }}>
+                                                <input
+                                                    className="input-desktop font-mono"
+                                                    style={{ minWidth: 220 }}
+                                                    value={roleEditFor(r).perms}
+                                                    placeholder="storage:read, storage:write"
+                                                    onChange={(e) => setRoleEdit(r, { perms: e.target.value })}
+                                                />
+                                                <button
+                                                    className="btn-desktop h-7 px-3"
+                                                    onClick={() => handleUpdateRole(r)}
+                                                    disabled={busyRoleId === r.id || r.is_system}
+                                                    title={r.is_system ? "System roles are read-only" : "Save description / permissions"}
+                                                >
+                                                    {busyRoleId === r.id ? (
+                                                        <Loader2 className="animate-spin" size={14} />
+                                                    ) : (
+                                                        <Save size={14} />
+                                                    )}
+                                                </button>
+                                                <button
+                                                    className="btn-desktop h-7 px-3"
+                                                    onClick={() => handleDeleteRole(r)}
+                                                    disabled={busyRoleId === r.id || r.is_system}
+                                                    title={r.is_system ? "System roles cannot be deleted" : "Delete this custom role"}
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
                                             </div>
                                         </td>
                                     </tr>
@@ -425,6 +613,87 @@ export default function PermissionsPanel() {
                         </table>
                     </div>
                 )}
+
+                {assignments.length > 0 && (
+                    <div className="datagrid-wrapper" style={{ marginTop: "1rem" }}>
+                        <table className="datagrid-industrial">
+                            <thead>
+                                <tr>
+                                    <th colSpan={3} style={{ textAlign: "left" }}>
+                                        CURRENT ROLE ASSIGNMENTS — {assignments.length}
+                                    </th>
+                                </tr>
+                                <tr>
+                                    <th>ROLE</th>
+                                    <th>TARGET</th>
+                                    <th>TYPE</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {assignments.map((a, idx) => (
+                                    <tr key={`${a.role_id}-${a.target_type}-${a.target_id}-${idx}`}>
+                                        <td className="admin-cell-bold">
+                                            #{a.role_id} {a.role_name}
+                                        </td>
+                                        <td className="font-mono">{a.target_label}</td>
+                                        <td>
+                                            <span className="badge-status">{a.target_type === "user" ? "USER" : "SERVICE"}</span>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+
+                <div className="query-controls-row" style={{ marginTop: "1.5rem" }}>
+                    <select
+                        className="input-desktop w-32"
+                        value={assignTargetKind}
+                        onChange={(e) => {
+                            const kind = e.target.value as "user" | "service";
+                            setAssignTargetKind(kind);
+                            loadAssignTargets(kind);
+                        }}
+                    >
+                        <option value="user">USER</option>
+                        <option value="service">SERVICE</option>
+                    </select>
+                    <select className="input-desktop flex-1" value={assignTargetId} onChange={(e) => setAssignTargetId(e.target.value)}>
+                        <option value="">TARGET {assignTargetKind.toUpperCase()} *</option>
+                        {assignTargets.map((t) => (
+                            <option key={t.id} value={t.id}>
+                                {t.label}
+                            </option>
+                        ))}
+                    </select>
+                    <select className="input-desktop w-56" value={assignRoleId} onChange={(e) => setAssignRoleId(e.target.value)}>
+                        <option value="">ROLE *</option>
+                        {roles.map((r) => (
+                            <option key={r.id} value={r.id}>
+                                #{r.id} {r.name}
+                            </option>
+                        ))}
+                    </select>
+                    <button
+                        className="btn-desktop-primary"
+                        onClick={() => handleAssignRevokeRole(false)}
+                        disabled={assigning}
+                        title="Grant this role to the target (self-assignment is refused server-side)"
+                    >
+                        {assigning ? <Loader2 className="animate-spin" size={18} /> : <UserPlus size={18} />}
+                        <span>&nbsp;ASSIGN</span>
+                    </button>
+                    <button
+                        className="btn-desktop"
+                        onClick={() => handleAssignRevokeRole(true)}
+                        disabled={assigning}
+                        title="Revoke this role from the target"
+                    >
+                        <UserMinus size={18} />
+                        <span>&nbsp;REVOKE</span>
+                    </button>
+                </div>
 
                 <div className="query-controls-row" style={{ marginTop: "1.5rem" }}>
                     <input

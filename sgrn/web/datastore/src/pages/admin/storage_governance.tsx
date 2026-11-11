@@ -259,6 +259,23 @@ function draftKey(t_row: QuotaRow, t_kind: QuotaKind): string {
     return `${t_kind}:${t_row.id}`;
 }
 
+// Column applicability per quota kind — the backend silently ignores
+// fields outside the first N quota columns for a kind, so the UI hides
+// them instead of letting the user type values that never persist.
+const KIND_COLUMNS: Record<QuotaKind, { maxFile: boolean; chunk: boolean; uploadRpm: boolean; rateRpm: boolean }> = {
+    user: { maxFile: true, chunk: true, uploadRpm: true, rateRpm: true },
+    service: { maxFile: true, chunk: true, uploadRpm: true, rateRpm: true },
+    organisation: { maxFile: false, chunk: false, uploadRpm: false, rateRpm: true },
+    domain: { maxFile: false, chunk: false, uploadRpm: false, rateRpm: false },
+};
+
+const KIND_LABEL: Record<QuotaKind, string> = {
+    user: "EMAIL",
+    service: "SERVICE",
+    organisation: "ORGANISATION",
+    domain: "DOMAIN",
+};
+
 export function QuotasPanel() {
     const { showEvent } = useEvent();
     const [kind, setKind] = useState<QuotaKind>("user");
@@ -316,6 +333,7 @@ export function QuotasPanel() {
         async (t_row: QuotaRow) => {
             const key = draftKey(t_row, kind);
             const draft: QuotaDraft = drafts[key] ?? draftFor(t_row);
+            const cols = KIND_COLUMNS[kind];
             const storageMb = mbToBytes(draft.storageMb);
             if (!draft.storageUnlimited && storageMb === null) {
                 showEvent("error", "Storage cap must be a non-negative MB value or unlimited");
@@ -353,10 +371,10 @@ export function QuotasPanel() {
                     kind,
                     storage_limit_bytes: draft.storageUnlimited ? null : storageMb,
                     entry_count_limit: draft.entriesUnlimited ? null : entriesVal,
-                    max_file_size_mb: parseNullableNum(draft.maxFileMb),
-                    preferred_chunk_size_mb: parseNullableNum(draft.chunkMb),
-                    rate_limit_upload_rpm: parseNullableNum(draft.uploadRpm),
-                    rate_limit_rpm: parseNullableNum(draft.rateRpm),
+                    max_file_size_mb: cols.maxFile ? parseNullableNum(draft.maxFileMb) : undefined,
+                    preferred_chunk_size_mb: cols.chunk ? parseNullableNum(draft.chunkMb) : undefined,
+                    rate_limit_upload_rpm: cols.uploadRpm ? parseNullableNum(draft.uploadRpm) : undefined,
+                    rate_limit_rpm: cols.rateRpm ? parseNullableNum(draft.rateRpm) : undefined,
                 };
                 if (kind === "organisation") {
                     body.name = t_row.name;
@@ -393,10 +411,17 @@ export function QuotasPanel() {
                         <option value="user">USERS</option>
                         <option value="service">SERVICES</option>
                         <option value="organisation">ORGANISATIONS</option>
+                        <option value="domain">DOMAINS</option>
                     </select>
                     <input
                         className="input-desktop flex-1"
-                        placeholder={kind === "organisation" ? "SEARCH ORGANISATION" : "SEARCH EMAIL / NAME / ORGANISATION"}
+                        placeholder={
+                            kind === "organisation"
+                                ? "SEARCH ORGANISATION"
+                                : kind === "domain"
+                                  ? "SEARCH DOMAIN / PATH / ORGANISATION"
+                                  : "SEARCH EMAIL / NAME / ORGANISATION"
+                        }
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         onKeyDown={(e) => {
@@ -418,13 +443,13 @@ export function QuotasPanel() {
                         <table className="datagrid-industrial">
                             <thead>
                                 <tr>
-                                    <th>{kind === "organisation" ? "ORGANISATION" : kind === "user" ? "EMAIL" : "SERVICE"}</th>
+                                    <th>{KIND_LABEL[kind]}</th>
                                     <th>USED / STORAGE CAP (MB)</th>
                                     <th>ENTRIES / ENTRY CAP</th>
-                                    <th>MAX FILE (MB)</th>
-                                    <th>CHUNK (MB)</th>
-                                    <th>UPLOAD RPM</th>
-                                    <th>API RPM</th>
+                                    {KIND_COLUMNS[kind].maxFile && <th>MAX FILE (MB)</th>}
+                                    {KIND_COLUMNS[kind].chunk && <th>CHUNK (MB)</th>}
+                                    {KIND_COLUMNS[kind].uploadRpm && <th>UPLOAD RPM</th>}
+                                    {KIND_COLUMNS[kind].rateRpm && <th>API RPM</th>}
                                     <th className="text-right">OPERATIONS</th>
                                 </tr>
                             </thead>
@@ -432,11 +457,15 @@ export function QuotasPanel() {
                                 {rows.map((r) => {
                                     const key = draftKey(r, kind);
                                     const draft = draftFor(r);
+                                    const cols = KIND_COLUMNS[kind];
                                     return (
                                         <tr key={key}>
                                             <td>
                                                 <div className="admin-cell-bold">{labelOf(r)}</div>
-                                                {r.organisation && <div className="admin-cell-muted">{r.organisation}</div>}
+                                                {kind === "domain" && r.path && <div className="admin-cell-muted font-mono">{r.path}</div>}
+                                                {kind !== "domain" && r.organisation && (
+                                                    <div className="admin-cell-muted">{r.organisation}</div>
+                                                )}
                                             </td>
                                             <td>
                                                 <div className="query-controls-row">
@@ -487,44 +516,52 @@ export function QuotasPanel() {
                                                 </div>
                                             </td>
                                             <td>
-                                                <input
-                                                    className="input-desktop w-24"
-                                                    type="number"
-                                                    min={1}
-                                                    placeholder="SYS"
-                                                    value={draft.maxFileMb}
-                                                    onChange={(e) => setDraft(r, { maxFileMb: e.target.value })}
-                                                />
+                                                {cols.maxFile && (
+                                                    <input
+                                                        className="input-desktop w-24"
+                                                        type="number"
+                                                        min={1}
+                                                        placeholder="SYS"
+                                                        value={draft.maxFileMb}
+                                                        onChange={(e) => setDraft(r, { maxFileMb: e.target.value })}
+                                                    />
+                                                )}
                                             </td>
                                             <td>
-                                                <input
-                                                    className="input-desktop w-20"
-                                                    type="number"
-                                                    min={1}
-                                                    placeholder="5"
-                                                    value={draft.chunkMb}
-                                                    onChange={(e) => setDraft(r, { chunkMb: e.target.value })}
-                                                />
+                                                {cols.chunk && (
+                                                    <input
+                                                        className="input-desktop w-20"
+                                                        type="number"
+                                                        min={1}
+                                                        placeholder="5"
+                                                        value={draft.chunkMb}
+                                                        onChange={(e) => setDraft(r, { chunkMb: e.target.value })}
+                                                    />
+                                                )}
                                             </td>
                                             <td>
-                                                <input
-                                                    className="input-desktop w-24"
-                                                    type="number"
-                                                    min={1}
-                                                    placeholder="10000"
-                                                    value={draft.uploadRpm}
-                                                    onChange={(e) => setDraft(r, { uploadRpm: e.target.value })}
-                                                />
+                                                {cols.uploadRpm && (
+                                                    <input
+                                                        className="input-desktop w-24"
+                                                        type="number"
+                                                        min={1}
+                                                        placeholder="10000"
+                                                        value={draft.uploadRpm}
+                                                        onChange={(e) => setDraft(r, { uploadRpm: e.target.value })}
+                                                    />
+                                                )}
                                             </td>
                                             <td>
-                                                <input
-                                                    className="input-desktop w-24"
-                                                    type="number"
-                                                    min={1}
-                                                    placeholder="SYS"
-                                                    value={draft.rateRpm}
-                                                    onChange={(e) => setDraft(r, { rateRpm: e.target.value })}
-                                                />
+                                                {cols.rateRpm && (
+                                                    <input
+                                                        className="input-desktop w-24"
+                                                        type="number"
+                                                        min={1}
+                                                        placeholder="SYS"
+                                                        value={draft.rateRpm}
+                                                        onChange={(e) => setDraft(r, { rateRpm: e.target.value })}
+                                                    />
+                                                )}
                                             </td>
                                             <td>
                                                 <div className="admin-actions-right">
@@ -551,9 +588,10 @@ export function QuotasPanel() {
             )}
 
             <div className="query-help">
-                <strong>Granular Constraints</strong> allow setting custom Storage Quotas, Maximum File Size (MB), Upload Chunk Size (MB),
-                Upload Rate (RPM), and General API Rate (RPM) per User, Service, or Organisation. Empty fields seamlessly fall back to
-                system defaults.
+                <strong>Granular Constraints</strong> allow setting custom Storage Quotas and Entry Caps per User, Service, Organisation or{" "}
+                <strong>Domain</strong> (namespace caps cover the whole sub-tree). Users and Services additionally accept Maximum File Size
+                (MB), Upload Chunk Size (MB), Upload Rate (RPM), and General API Rate (RPM). Empty fields seamlessly fall back to system
+                defaults; the usage column reflects live consumption (domains count the full namespace sub-tree).
             </div>
         </div>
     );

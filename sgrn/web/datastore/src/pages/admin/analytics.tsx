@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { Loader2, Search, RefreshCw, Trash2, ShieldAlert, Activity } from "lucide-react";
+import { Loader2, Search, RefreshCw, Trash2, ShieldAlert, Activity, ShieldCheck } from "lucide-react";
 import { useEvent } from "@/contexts/EventContext";
 import {
     fetchAnalyticsOverview,
@@ -9,7 +9,7 @@ import {
     type BreakdownKind,
     type BreakdownRow,
 } from "@/backend/api/analytics";
-import { fetchAuditLogs, purgeAuditLogs, type AuditLogEntry } from "@/backend/api/audit";
+import { fetchAuditLogs, purgeAuditLogs, verifyAuditLogs, type AuditLogEntry, type VerifyAuditLogsResult } from "@/backend/api/audit";
 
 function StatCell({ t_label, t_value, t_sub }: { t_label: string; t_value: string; t_sub?: string }) {
     return (
@@ -36,6 +36,8 @@ export default function AnalyticsPanel() {
     const [auditActionFilter, setAuditActionFilter] = useState("");
     const [purgeDays, setPurgeDays] = useState(30);
     const [purging, setPurging] = useState(false);
+    const [verifying, setVerifying] = useState(false);
+    const [verifyResult, setVerifyResult] = useState<VerifyAuditLogsResult | null>(null);
 
     const loadOverview = useCallback(async () => {
         setLoading(true);
@@ -104,6 +106,36 @@ export default function AnalyticsPanel() {
             setPurging(false);
         }
     }, [purgeDays, loadAudit, showEvent]);
+
+    const handleVerifyAudit = useCallback(async () => {
+        setVerifying(true);
+        try {
+            const result = await verifyAuditLogs();
+            // The backend returns 409 when the chain is tampered — still a
+            // well-formed VerifyAuditLogsResult body, so both outcomes flow
+            // through result.data.
+            if (!result.data) {
+                throw new Error(result.error || "Verification failed");
+            }
+            setVerifyResult(result.data);
+            if (result.data.is_valid) {
+                showEvent(
+                    "success",
+                    `Audit chain verified: ${result.data.total_rows} rows, ${result.data.verified_checkpoints} checkpoints intact.`,
+                );
+            } else {
+                showEvent(
+                    "error",
+                    `AUDIT CHAIN TAMPERED — first break at seq ${result.data.first_broken_seq ?? "?"} (row ${result.data.first_broken_id ?? "?"}): ${result.data.message}`,
+                );
+            }
+        } catch (error) {
+            console.error("Audit verification failed:", error);
+            showEvent("error", error instanceof Error ? error.message : "Audit verification failed");
+        } finally {
+            setVerifying(false);
+        }
+    }, [showEvent]);
 
     useEffect(() => {
         loadOverview();
@@ -444,6 +476,15 @@ export default function AnalyticsPanel() {
                     />
                     <span className="admin-cell-muted">DAYS</span>
                     <button
+                        className="btn-desktop"
+                        onClick={handleVerifyAudit}
+                        disabled={verifying}
+                        title="Re-verify the tamper-evident hash chain over all audit rows"
+                    >
+                        {verifying ? <Loader2 className="animate-spin" size={18} /> : <ShieldCheck size={18} />}
+                        <span>&nbsp;VERIFY CHAIN</span>
+                    </button>
+                    <button
                         className="btn-desktop-primary"
                         style={{ backgroundColor: "#dc2626", borderColor: "#b91c1c" }}
                         onClick={handlePurgeAudit}
@@ -453,6 +494,23 @@ export default function AnalyticsPanel() {
                         <span>&nbsp;EXECUTE AUDIT CLEARANCE</span>
                     </button>
                 </div>
+                {verifyResult && (
+                    <div
+                        className="query-help"
+                        style={{
+                            marginTop: "1rem",
+                            border: `1px solid ${verifyResult.is_valid ? "rgba(34, 197, 94, 0.4)" : "rgba(239, 68, 68, 0.5)"}`,
+                            color: verifyResult.is_valid ? "#4ade80" : "#f87171",
+                        }}
+                    >
+                        {verifyResult.is_valid ? "✔ " : "✘ "}
+                        {verifyResult.is_valid
+                            ? `Chain VERIFIED — ${verifyResult.total_rows} rows, ${verifyResult.verified_checkpoints} checkpoints intact.`
+                            : `Chain TAMPERED — first break at seq ${verifyResult.first_broken_seq ?? "?"} (row ${
+                                  verifyResult.first_broken_id ?? "?"
+                              }). ${verifyResult.message}`}
+                    </div>
+                )}
             </div>
         </div>
     );

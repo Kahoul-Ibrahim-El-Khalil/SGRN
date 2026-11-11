@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Loader2, Save, RefreshCw, TriangleAlert, Activity, Webhook, Plus, Trash2 } from "lucide-react";
+import { Loader2, Save, RefreshCw, TriangleAlert, Activity, Webhook, Plus, Trash2, LogOut } from "lucide-react";
 import { useEvent } from "@/contexts/EventContext";
 import { authenticatedFetch } from "@/backend/api/fetcher";
 import { AdminBackendApiEndpoints } from "@/backend/endpoints";
@@ -16,6 +16,8 @@ import {
 function LiveSessionsSection() {
     const [sessions, setSessions] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
+    const [revoking, setRevoking] = useState<string | null>(null);
+    const { showEvent } = useEvent();
 
     const loadSessions = useCallback(async () => {
         setLoading(true);
@@ -31,6 +33,28 @@ function LiveSessionsSection() {
             setLoading(false);
         }
     }, []);
+
+    const revokeSession = useCallback(
+        async (t_token: string, t_actor: string) => {
+            if (!window.confirm(`Terminate the live session of ${t_actor}?`)) return;
+            setRevoking(t_token);
+            try {
+                const res = await authenticatedFetch(AdminBackendApiEndpoints.METAPROBE_SESSION_ITEM(t_token), { method: "DELETE" });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    throw new Error(data.error || `Failed to revoke session (HTTP ${res.status})`);
+                }
+                showEvent("success", `Session of ${t_actor} terminated`);
+                await loadSessions();
+            } catch (e: any) {
+                console.error(e);
+                showEvent("error", e?.message || "Failed to revoke session");
+            } finally {
+                setRevoking(null);
+            }
+        },
+        [loadSessions, showEvent],
+    );
 
     useEffect(() => {
         loadSessions();
@@ -58,12 +82,13 @@ function LiveSessionsSection() {
                             <th>IP Address</th>
                             <th>Created At</th>
                             <th>Expires At</th>
+                            <th className="text-right">Operations</th>
                         </tr>
                     </thead>
                     <tbody>
                         {sessions.length === 0 ? (
                             <tr>
-                                <td colSpan={5} className="text-center py-4 text-gray-500">
+                                <td colSpan={6} className="text-center py-4 text-gray-500">
                                     No active sessions found
                                 </td>
                             </tr>
@@ -81,6 +106,23 @@ function LiveSessionsSection() {
                                     <td className="font-mono">{s.ip}</td>
                                     <td className="text-xs text-gray-400">{s.created_at}</td>
                                     <td className="text-xs text-gray-400">{s.expires_at}</td>
+                                    <td>
+                                        <div className="admin-actions-right">
+                                            <button
+                                                className="btn-desktop h-7 px-3"
+                                                onClick={() => revokeSession(s.token, s.actor_name)}
+                                                disabled={revoking === s.token}
+                                                title="Terminate this session immediately (audited as session.revoked)"
+                                            >
+                                                {revoking === s.token ? (
+                                                    <Loader2 size={14} className="animate-spin" />
+                                                ) : (
+                                                    <LogOut size={14} />
+                                                )}
+                                                <span>&nbsp;REVOKE</span>
+                                            </button>
+                                        </div>
+                                    </td>
                                 </tr>
                             ))
                         )}

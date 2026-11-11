@@ -9,6 +9,8 @@ import { Loader2, Plus, Trash2, Save, Lock, ShieldCheck, RefreshCw, ChevronDown,
 import { UserStatus } from "@/types";
 import { useEvent } from "@/contexts/EventContext";
 import { authenticatedFetch } from "@/backend/api/fetcher";
+import { AdminBackendApiEndpoints } from "@/backend/endpoints";
+import { resetUserPassword, setUserStatus, deleteUser } from "@/backend/api/accountAdmin";
 
 // ============================================================================
 // SHARED
@@ -116,6 +118,20 @@ export function UserConfigPanel() {
         }
     }, [showEvent]);
 
+    const loadDomains = useCallback(async () => {
+        const res = await authenticatedFetch("/api/v1/domains");
+        if (res.ok) {
+            const data = await res.json();
+            if (Array.isArray(data)) {
+                setDomains(data as DomainRecord[]);
+            }
+        }
+    }, []);
+
+    useEffect(() => {
+        loadDomains();
+    }, [loadDomains]);
+
     useEffect(() => {
         load();
     }, [load]);
@@ -164,26 +180,42 @@ export function UserConfigPanel() {
                 if (family !== (t_user.family_name ?? "")) body.family_name = family;
                 if (phone !== (t_user.phone_number ?? "")) body.phone_number = phone;
                 if (draft.domain !== oldDomain) body.domain = draft.domain;
-                if (draft.status !== (t_user.status ?? "")) body.status = draft.status;
+                // Status is a locked column on the generated CRUD view — it
+                // MUST go through the hand-written admin route (which also
+                // revokes sessions and guards the last org admin), never the
+                // generic PATCH (where it would be a silent no-op).
+                const statusChanged = draft.status !== (t_user.status ?? "");
+                if (statusChanged && draft.status !== UserStatus.ACTIVE && draft.status !== UserStatus.SUSPENDED) {
+                    showEvent("error", "Users cannot be moved back to 'invited' — choose active or suspended");
+                    return;
+                }
                 if (draft.can_read_personal !== (t_user.can_read_personal ?? false)) body.can_read_personal = draft.can_read_personal;
                 if (draft.can_write_personal !== (t_user.can_write_personal ?? false)) body.can_write_personal = draft.can_write_personal;
                 if (draft.can_delete_personal !== (t_user.can_delete_personal ?? false))
                     body.can_delete_personal = draft.can_delete_personal;
-                if (Object.keys(body).length === 0) {
+                if (Object.keys(body).length === 0 && !statusChanged) {
                     showEvent("info", "No changes to save");
                     setSavingId(null);
                     return;
                 }
-                const res = await authenticatedFetch(`/api/v1/users/${t_user.id}`, {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(body),
-                });
-                if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    throw new Error(err.message || err.error || `Failed to update user (HTTP ${res.status})`);
+                if (Object.keys(body).length > 0) {
+                    const res = await authenticatedFetch(`/api/v1/users/${t_user.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(body),
+                    });
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        throw new Error(err.message || err.error || `Failed to update user (HTTP ${res.status})`);
+                    }
                 }
-                showEvent("success", `User ${first} ${family} updated`);
+                if (statusChanged) {
+                    const sres = await setUserStatus(t_user.id, draft.status as "active" | "suspended");
+                    if (sres.error) {
+                        throw new Error(sres.error);
+                    }
+                }
+                showEvent("success", `User ${first} ${family} updated${statusChanged ? " (sessions revoked if suspended)" : ""}`);
                 await load();
             } catch (err: any) {
                 showEvent("error", err?.message || "Failed to update user");
@@ -192,6 +224,46 @@ export function UserConfigPanel() {
             }
         },
         [drafts, load, showEvent],
+    );
+
+    const handleResetPassword = useCallback(
+        async (t_user: UserRecord) => {
+            const pw = window.prompt(`New password for ${t_user.email} (min 12 characters):`);
+            if (pw === null) return;
+            if (pw.length < 12) {
+                showEvent("error", "Password must be at least 12 characters");
+                return;
+            }
+            setSavingId(t_user.id);
+            try {
+                const res = await resetUserPassword(t_user.id, pw);
+                if (res.error) throw new Error(res.error);
+                showEvent("success", `Password reset for ${t_user.email} — all their sessions were revoked`);
+            } catch (err: any) {
+                showEvent("error", err?.message || "Failed to reset password");
+            } finally {
+                setSavingId(null);
+            }
+        },
+        [showEvent],
+    );
+
+    const handleDeleteUser = useCallback(
+        async (t_user: UserRecord) => {
+            if (!window.confirm(`Soft-delete user ${t_user.email}? Their sessions are revoked immediately.`)) return;
+            setSavingId(t_user.id);
+            try {
+                const res = await deleteUser(t_user.id);
+                if (res.error) throw new Error(res.error);
+                showEvent("success", `User ${t_user.email} deleted`);
+                await load();
+            } catch (err: any) {
+                showEvent("error", err?.message || "Failed to delete user");
+            } finally {
+                setSavingId(null);
+            }
+        },
+        [load, showEvent],
     );
 
     const filtered = users.filter((u) => {
@@ -252,6 +324,8 @@ export function UserConfigPanel() {
                                             savingId={savingId}
                                             onToggle={() => startEdit(u)}
                                             onSave={() => handleSave(u)}
+                                            onResetPassword={() => handleResetPassword(u)}
+                                            onDelete={() => handleDeleteUser(u)}
                                             onChange={(patch) => setDraft(u.id, patch)}
                                         />
                                     );
@@ -264,10 +338,12 @@ export function UserConfigPanel() {
 
             <div className="query-help">
                 <strong>Inline User Configuration</strong> edits identity (names, terminal number), assigned domain, account status and
-                personal namespace permissions (read / write / delete) directly against the user record. Storage quotas, max file size and
-                rate limits are configured in <em>Storage Admin → Quotas</em>. Drafts apply on <em>SAVE</em> — only changed fields are
-                written. Note: a terminal number (unique, <code>+&lt;7..15 digits&gt;</code>) and an assigned domain cannot be cleared, only
-                changed.
+                personal namespace permissions (read / write / delete) directly against the user record. Status changes go through the admin
+                lifecycle route (sessions are revoked when a user is suspended); <em>RESET PASSWORD</em> sets a new credential and revokes
+                every live session; <em>DELETE</em> soft-deletes the account. Storage quotas, max file size and rate limits are configured
+                in <em>Storage Admin → Quotas</em>. Drafts apply on <em>SAVE</em> — only changed fields are written. Note: a terminal number
+                (unique, <code>+&lt;7..15 digits&gt;</code>) and an assigned domain cannot be cleared, only changed, and accounts cannot be
+                moved back to <em>invited</em>.
             </div>
         </div>
     );
@@ -282,9 +358,11 @@ function UserRow(props: {
     savingId: number | null;
     onToggle: () => void;
     onSave: () => void;
+    onResetPassword: () => void;
+    onDelete: () => void;
     onChange: (t_patch: Partial<UserDraft>) => void;
 }) {
-    const { user, domains, isEditing, draft, savingId, onToggle, onSave, onChange } = props;
+    const { user, domains, isEditing, draft, savingId, onToggle, onSave, onResetPassword, onDelete, onChange } = props;
     const colSpan = 6;
     return (
         <>
@@ -369,7 +447,9 @@ function UserRow(props: {
                             >
                                 <option value={UserStatus.ACTIVE}>ACTIVE</option>
                                 <option value={UserStatus.SUSPENDED}>SUSPENDED</option>
-                                <option value={UserStatus.INVITED}>INVITED</option>
+                                <option value={UserStatus.INVITED} disabled={user.status !== UserStatus.INVITED}>
+                                    INVITED (REGISTRATION ONLY)
+                                </option>
                             </select>
                         </div>
                         <div className="query-controls-row flex-wrap gap-2 pb-1">
@@ -398,6 +478,24 @@ function UserRow(props: {
                                 <span>DELETE PERSONAL NS</span>
                             </label>
                             <button
+                                className="btn-desktop"
+                                onClick={onResetPassword}
+                                disabled={savingId === user.id}
+                                title="Reset this user's password (revokes all their sessions)"
+                            >
+                                <Lock size={14} />
+                                <span>&nbsp;RESET PASSWORD</span>
+                            </button>
+                            <button
+                                className="btn-desktop"
+                                onClick={onDelete}
+                                disabled={savingId === user.id}
+                                title="Soft-delete this user (revokes all their sessions)"
+                            >
+                                <Trash2 size={14} />
+                                <span>&nbsp;DELETE</span>
+                            </button>
+                            <button
                                 className="btn-desktop-primary"
                                 onClick={onSave}
                                 disabled={savingId === user.id}
@@ -417,6 +515,123 @@ function UserRow(props: {
 // ============================================================================
 // DOMAIN CONFIGURATION
 // ============================================================================
+
+// ============================================================================
+// REGISTER USER FORM
+// ============================================================================
+
+export function RegisterUserForm() {
+    const { showEvent } = useEvent();
+    const [loading, setLoading] = useState(false);
+    const [creating, setCreating] = useState(false);
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [organisation, setOrganisation] = useState("");
+    const [firstName, setFirstName] = useState("");
+    const [familyName, setFamilyName] = useState("");
+
+    const load = useCallback(async () => {
+        const res = await authenticatedFetch("/api/v1/query/organisations");
+        if (res.ok) {
+            const data = await res.json();
+            if (Array.isArray(data) && data.length > 0) {
+                setOrganisation(data[0].name);
+            }
+        }
+    }, []);
+
+    useEffect(() => {
+        load();
+    }, [load]);
+
+    // Initialize loading state
+    useEffect(() => {
+        setLoading(false);
+    }, []);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!email || !password || !organisation || !firstName || !familyName) {
+            showEvent("error", "All fields are required");
+            return;
+        }
+        setCreating(true);
+        try {
+            const res = await authenticatedFetch("/api/v1/admin/users/register", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email, password, organisation, first_name: firstName, family_name: familyName }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                showEvent("success", "User registered successfully");
+                setEmail("");
+                setPassword("");
+                setFirstName("");
+                setFamilyName("");
+                await load();
+            } else {
+                showEvent("error", data.error || "Failed to register user");
+            }
+        } catch (err: any) {
+            showEvent("error", err?.message || "Network error during registration");
+        } finally {
+            setCreating(false);
+        }
+    };
+
+    return (
+        <div className="reg-form-card">
+            <h3>Register New User</h3>
+            <form onSubmit={handleSubmit} className="reg-form">
+                <div className="reg-input-group">
+                    <input
+                        className="input-desktop"
+                        placeholder="EMAIL *"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                    />
+                    <input
+                        className="input-desktop"
+                        placeholder="PASSWORD (min 12 chars) *"
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                    />
+                </div>
+                <div className="reg-input-group">
+                    <input
+                        className="input-desktop"
+                        placeholder="ORGANISATION *"
+                        value={organisation}
+                        onChange={(e) => setOrganisation(e.target.value)}
+                        required
+                    />
+                    <input
+                        className="input-desktop"
+                        placeholder="FIRST NAME *"
+                        value={firstName}
+                        onChange={(e) => setFirstName(e.target.value)}
+                        required
+                    />
+                    <input
+                        className="input-desktop"
+                        placeholder="FAMILY NAME *"
+                        value={familyName}
+                        onChange={(e) => setFamilyName(e.target.value)}
+                        required
+                    />
+                </div>
+                <button className="btn-desktop-primary" type="submit" disabled={creating || loading}>
+                    {creating ? <Loader2 className="animate-spin" size={18} /> : <Plus size={18} />}
+                    <span>&nbsp;REGISTER</span>
+                </button>
+            </form>
+        </div>
+    );
+}
 
 export function DomainConfigPanel() {
     const { showEvent } = useEvent();
@@ -499,29 +714,56 @@ export function DomainConfigPanel() {
             if (!draft) return;
             setSavingId(t_domain.id);
             try {
-                const body: Record<string, unknown> = {};
-                if (draft.name.trim() !== (t_domain.name ?? "")) body.name = draft.name.trim();
-                if (draft.parent_id !== null && String(draft.parent_id) !== String(t_domain.parent_id ?? "")) {
-                    body.parent_id = draft.parent_id;
-                }
-                if (draft.encryption_policy !== (t_domain.encryption_policy || "optional")) {
-                    body.encryption_policy = draft.encryption_policy;
-                }
-                if (Object.keys(body).length === 0) {
+                // Name and parent changes go through the hand-written
+                // lifecycle routes (admin-domains.cpp): rename re-labels every
+                // authority in the sub-tree, move supports re-parenting to
+                // root (the generated CRUD view cannot clear a NULL column).
+                // Only the encryption policy rides the generic CRUD PATCH.
+                const nameChanged = draft.name.trim() !== (t_domain.name ?? "");
+                const parentChanged = String(draft.parent_id ?? "null") !== String(t_domain.parent_id ?? "null");
+                const policyChanged = draft.encryption_policy !== (t_domain.encryption_policy || "optional");
+                if (!nameChanged && !parentChanged && !policyChanged) {
                     showEvent("info", "No changes to save");
                     setSavingId(null);
                     return;
                 }
-                const res = await authenticatedFetch(`/api/v1/domains/${t_domain.id}`, {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(body),
-                });
-                if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    throw new Error(err.message || err.error || `Failed to update domain (HTTP ${res.status})`);
+                if (nameChanged) {
+                    if (!draft.name.trim()) {
+                        throw new Error("Domain name must not be empty");
+                    }
+                    const rres = await authenticatedFetch(AdminBackendApiEndpoints.DOMAIN_RENAME(t_domain.id), {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ name: draft.name.trim() }),
+                    });
+                    if (!rres.ok) {
+                        const err = await rres.json().catch(() => ({}));
+                        throw new Error(err.message || err.error || `Failed to rename domain (HTTP ${rres.status})`);
+                    }
                 }
-                showEvent("success", `Domain "${draft.name.trim()}" updated`);
+                if (parentChanged) {
+                    const mres = await authenticatedFetch(AdminBackendApiEndpoints.DOMAIN_MOVE(t_domain.id), {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ parent_id: draft.parent_id }),
+                    });
+                    if (!mres.ok) {
+                        const err = await mres.json().catch(() => ({}));
+                        throw new Error(err.message || err.error || `Failed to move domain (HTTP ${mres.status})`);
+                    }
+                }
+                if (policyChanged) {
+                    const res = await authenticatedFetch(`/api/v1/domains/${t_domain.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ encryption_policy: draft.encryption_policy }),
+                    });
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        throw new Error(err.message || err.error || `Failed to update domain (HTTP ${res.status})`);
+                    }
+                }
+                showEvent("success", `Domain "${draft.name.trim()}" updated${nameChanged ? " (authorities re-labelled)" : ""}`);
                 await load();
             } catch (err: any) {
                 showEvent("error", err?.message || "Failed to update domain");
@@ -654,10 +896,10 @@ export function DomainConfigPanel() {
                                                         setDraft(d, { parent_id: e.target.value ? Number(e.target.value) : null })
                                                     }
                                                 >
-                                                    {/* Nullable columns can't be cleared via the CRUD views,
-                                                        so re-parenting back to root stays disabled here. */}
-                                                    <option value="" disabled>
-                                                        {d.parent_id == null ? "(root — current value)" : "(root — unavailable)"}
+                                                    {/* Re-parenting runs through the lifecycle MOVE
+                                                        route, which supports returning to root. */}
+                                                    <option value="">
+                                                        {d.parent_id == null ? "(root — current value)" : "(root — top level)"}
                                                     </option>
                                                     {domains
                                                         .filter((other) => other.id !== d.id)
@@ -742,8 +984,8 @@ export function DomainConfigPanel() {
                     </li>
                 </ul>
                 <span className="mt-1 block">
-                    Delete is disabled while sub-domains reference the parent. Re-parenting between domains works; re-parenting back to root
-                    is not supported by the CRUD engine yet.
+                    Delete is disabled while sub-domains reference the parent. Renaming re-labels every authority under the sub-tree and
+                    re-parenting (including back to root) goes through the lifecycle <code>rename</code>/<code>move</code> routes.
                 </span>
             </div>
         </div>

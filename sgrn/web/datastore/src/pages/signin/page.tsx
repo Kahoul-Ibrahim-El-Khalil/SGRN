@@ -29,8 +29,10 @@ function useSignIn(
             const { user, token } = result.data;
             login(user, token);
             showEvent("success", "Sign in successful!");
-            const isAdmin = typeof user.role === "string" ? user.role === "admin" : user.role?.name === "admin";
-            navigate(isAdmin ? "/admin" : "/drive", { replace: true });
+            // Organisation/platform admins land in the dashboard; domain
+            // admins (level 1) only manage storage, so they go to /drive.
+            const admin_level = user.is_platform_admin === true ? 3 : (user.admin_level ?? 0);
+            navigate(admin_level >= 2 ? "/admin" : "/drive", { replace: true });
         } catch {
             showEvent("error", "Network error during sign in");
         } finally {

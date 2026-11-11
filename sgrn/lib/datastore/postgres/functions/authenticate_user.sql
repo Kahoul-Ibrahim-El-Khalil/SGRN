@@ -22,6 +22,13 @@ set
     join   core.users        u  on u.id = ud.id
     where  u.email     = t_email
       and  u.is_active = true
+      -- WP2: sign-in hardening — suspended / soft-deleted accounts and
+      -- accounts of suspended / archived organisations can no longer mint
+      -- sessions.  (Previously only is_active was checked.)
+      and  u.status    = 'active'
+      and  u.deleted_at is null
+      and  exists (select 1 from core.organisations o
+                   where o.name = u.organisation and o.status = 'active')
       and  u.password  = crypt(t_password, u.password);
 $$;
 

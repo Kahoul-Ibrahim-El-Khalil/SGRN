@@ -19,6 +19,14 @@ export interface User {
     status?: UserStatus | string;
     domain?: string;
     phone_number?: string | null;
+    organisation?: string;
+
+    // Session admin level resolved by the backend from core.admin_level
+    // (0 = none, 1 = domain, 2 = organisation, 3 = platform).
+    role?: string | { name: string; code?: number };
+    admin_level?: number;
+    admin_level_name?: string;
+    is_platform_admin?: boolean;
 
     total_virtual_size?: number;
     total_real_size?: number;

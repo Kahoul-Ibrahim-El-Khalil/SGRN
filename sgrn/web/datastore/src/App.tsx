@@ -46,8 +46,10 @@ const ProtectedRoute = ({ children: t_children, adminOnly: t_admin_only = false 
     }
 
     if (t_admin_only && user) {
-        const isAdmin = typeof user.role === "string" ? user.role === "admin" : user.role?.name === "admin";
-        if (!isAdmin) {
+        // Gate on core.admin_level (server-resolved), not the legacy role
+        // column: organisation (2) and platform (3) admins may enter.
+        const admin_level = user.is_platform_admin === true ? 3 : (user.admin_level ?? 0);
+        if (admin_level < 2) {
             return <Navigate to="/drive" replace />;
         }
     }

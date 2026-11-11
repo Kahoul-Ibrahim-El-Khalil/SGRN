@@ -16,6 +16,9 @@ import {
     KeyRound,
     BarChart3,
     Network,
+    Building2,
+    Save,
+    Trash2,
 } from "lucide-react";
 import { PageLayout } from "@/components/PageLayout";
 import { fetchOrganisations, fetchDomains, fetchStatuses } from "@/pages/signin/backend";
@@ -24,9 +27,11 @@ import PermissionsPanel from "@/pages/admin/access";
 import AnalyticsPanel from "@/pages/admin/analytics";
 import { FormatsPanel, QuotasPanel, EncryptionPoliciesPanel } from "@/pages/admin/storage_governance";
 import { UserConfigPanel, DomainConfigPanel } from "@/pages/admin/accounts";
+import { OrganisationsPanel } from "@/pages/admin/organisations";
 
 import type { IdNamePair } from "@/types/IdNamePair";
 import { AdminBackendApiEndpoints } from "@/backend/endpoints";
+import { mbToBytes, updateQuota } from "@/backend/api/governance";
 import { useEvent } from "@/contexts/EventContext";
 import { authenticatedFetch } from "@/backend/api/fetcher";
 import { useAuth } from "@/contexts/AuthContext";
@@ -55,14 +60,17 @@ function useOrgDependencies(t_selected_org: string | null) {
     return { domains, statuses };
 }
 
-type RegistrationMode = "user" | "domains" | "automated_service" | "query_builder" | "storage" | "system" | "permissions" | "analytics";
+type RegistrationMode =
+    "user" | "domains" | "organisations" | "automated_service" | "query_builder" | "storage" | "system" | "permissions" | "analytics";
 
 interface AutomatedServiceListEntry {
     id: number;
     name: string;
     token: string;
+    description: string | null;
     metadata: Record<string, unknown>;
     is_active: boolean;
+    status: string;
     domain: string;
     created_at: string;
 }
@@ -88,6 +96,17 @@ export default function AdminTab() {
     const [automatedServiceListError, setAutomatedServiceListError] = useState<string | null>(null);
     const [loadingAutomatedServices, setLoadingAutomatedServices] = useState(false);
     const [rotatingAutomatedServiceId, setRotatingAutomatedServiceId] = useState<number | null>(null);
+    // Service configuration drafts — metadata JSON text and per-row busy flags.
+    const [serviceMetaDrafts, setServiceMetaDrafts] = useState<Record<number, { meta: string; description: string }>>({});
+    const [savingServiceMetaId, setSavingServiceMetaId] = useState<number | null>(null);
+    const [savingServiceStatusId, setSavingServiceStatusId] = useState<number | null>(null);
+    const [deletingServiceId, setDeletingServiceId] = useState<number | null>(null);
+    // Inline quota drafts: empty field = leave that cap untouched (the quota
+    // PUT has partial semantics). The service list does not carry current
+    // caps (they are sensitive columns, hard-omitted from generated views),
+    // so drafts always start blank; live usage/caps live in the Quotas ledger.
+    const [serviceQuotaDrafts, setServiceQuotaDrafts] = useState<Record<number, { storageMb: string; entries: string }>>({});
+    const [savingServiceQuotaId, setSavingServiceQuotaId] = useState<number | null>(null);
 
     const [submitting, setSubmitting] = useState(false);
 
@@ -152,13 +171,17 @@ export default function AdminTab() {
                     id: Number(entry.id) || 0,
                     name: String(entry.name || "Unknown"),
                     token: String(entry.token || ""),
+                    description: entry.description == null ? null : String(entry.description),
                     metadata,
                     is_active: String(entry.status || "") === "active",
+                    status: String(entry.status || "active"),
                     domain: String(entry.domain || ""),
                     created_at: String(entry.created_at || ""),
                 };
             });
             setAutomatedServices(parsed);
+            setServiceMetaDrafts({});
+            setServiceQuotaDrafts({});
         } catch (error) {
             console.error("Failed to fetch automated services:", error);
             showEvent("error", "Unable to load automated service roster");
@@ -197,6 +220,188 @@ export default function AdminTab() {
                 showEvent("error", "Unable to rotate automated service token");
             } finally {
                 setRotatingAutomatedServiceId(null);
+            }
+        },
+        [fetchAutomatedServices, showEvent],
+    );
+
+    // ── Service configuration (metadata / status / delete) ──────────────────
+    // Backend contracts (admin-users-services.cpp):
+    //   PATCH /admin/automated-services/{id}/metadata {metadata: {...}} — merged into the row's jsonb
+    //   PATCH /admin/automated-services/{id}/status    {status: active|degraded|offline|maintenance}
+    //   DELETE /admin/automated-services/{id}          — soft-delete + credential revoke
+    const serviceMetaDraftFor = useCallback(
+        (t_svc: AutomatedServiceListEntry): { meta: string; description: string } =>
+            serviceMetaDrafts[t_svc.id] ?? { meta: JSON.stringify(t_svc.metadata, null, 2), description: t_svc.description ?? "" },
+        [serviceMetaDrafts],
+    );
+
+    const setServiceMetaDraft = useCallback((t_svc: AutomatedServiceListEntry, t_patch: Partial<{ meta: string; description: string }>) => {
+        setServiceMetaDrafts((prev) => ({
+            ...prev,
+            [t_svc.id]: {
+                ...(prev[t_svc.id] ?? {
+                    meta: JSON.stringify(t_svc.metadata, null, 2),
+                    description: t_svc.description ?? "",
+                }),
+                ...t_patch,
+            },
+        }));
+    }, []);
+
+    const saveServiceMetadata = useCallback(
+        async (t_svc: AutomatedServiceListEntry) => {
+            const draft = serviceMetaDrafts[t_svc.id] ?? {
+                meta: JSON.stringify(t_svc.metadata, null, 2),
+                description: t_svc.description ?? "",
+            };
+            let parsed: unknown;
+            try {
+                parsed = JSON.parse(draft.meta || "{}");
+            } catch {
+                showEvent("error", `Metadata for ${t_svc.name} must be valid JSON`);
+                return;
+            }
+            if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+                showEvent("error", "Metadata must be a JSON object");
+                return;
+            }
+            setSavingServiceMetaId(t_svc.id);
+            try {
+                const response = await authenticatedFetch(AdminBackendApiEndpoints.UPDATE_AUTOMATED_SERVICE_METADATA(t_svc.id), {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ metadata: parsed, description: draft.description }),
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(payload.error || `Failed to update metadata (HTTP ${response.status})`);
+                }
+                showEvent("success", `Configuration updated for ${t_svc.name}`);
+                await fetchAutomatedServices();
+            } catch (error: any) {
+                console.error("Metadata update failed:", error);
+                showEvent("error", error?.message || "Unable to update service metadata");
+            } finally {
+                setSavingServiceMetaId(null);
+            }
+        },
+        [serviceMetaDrafts, fetchAutomatedServices, showEvent],
+    );
+
+    const setServiceStatus = useCallback(
+        async (t_svc: AutomatedServiceListEntry, t_status: string) => {
+            setSavingServiceStatusId(t_svc.id);
+            try {
+                const response = await authenticatedFetch(AdminBackendApiEndpoints.AUTOMATED_SERVICE_STATUS(t_svc.id), {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ status: t_status }),
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(payload.error || `Failed to set status (HTTP ${response.status})`);
+                }
+                showEvent("success", `${t_svc.name} is now ${t_status.toUpperCase()}`);
+                await fetchAutomatedServices();
+            } catch (error: any) {
+                console.error("Status update failed:", error);
+                showEvent("error", error?.message || "Unable to set service status");
+            } finally {
+                setSavingServiceStatusId(null);
+            }
+        },
+        [fetchAutomatedServices, showEvent],
+    );
+
+    const serviceQuotaDraftFor = useCallback(
+        (t_svc: AutomatedServiceListEntry): { storageMb: string; entries: string } =>
+            serviceQuotaDrafts[t_svc.id] ?? { storageMb: "", entries: "" },
+        [serviceQuotaDrafts],
+    );
+
+    const setServiceQuotaDraft = useCallback(
+        (t_svc: AutomatedServiceListEntry, t_patch: Partial<{ storageMb: string; entries: string }>) => {
+            setServiceQuotaDrafts((prev) => ({
+                ...prev,
+                [t_svc.id]: { ...(prev[t_svc.id] ?? { storageMb: "", entries: "" }), ...t_patch },
+            }));
+        },
+        [],
+    );
+
+    const saveServiceQuota = useCallback(
+        async (t_svc: AutomatedServiceListEntry) => {
+            const draft = serviceQuotaDrafts[t_svc.id] ?? { storageMb: "", entries: "" };
+            if (draft.storageMb.trim() === "" && draft.entries.trim() === "") {
+                showEvent("warning", "Enter a storage cap (MB) and/or an entry cap to apply");
+                return;
+            }
+            // Partial quota semantics: only the filled fields are sent —
+            // absent keys leave the stored cap untouched. Lifting a cap
+            // (null) stays a Quotas-ledger operation.
+            let storageBytes: number | undefined;
+            if (draft.storageMb.trim() !== "") {
+                const bytes = mbToBytes(draft.storageMb);
+                if (bytes === null) {
+                    showEvent("error", "Storage cap must be a non-negative MB value");
+                    return;
+                }
+                storageBytes = bytes;
+            }
+            let entries: number | undefined;
+            if (draft.entries.trim() !== "") {
+                const n = Number(draft.entries);
+                if (!Number.isInteger(n) || n < 0) {
+                    showEvent("error", "Entry cap must be a non-negative integer");
+                    return;
+                }
+                entries = n;
+            }
+            setSavingServiceQuotaId(t_svc.id);
+            try {
+                const res = await updateQuota({
+                    kind: "service",
+                    id: t_svc.id,
+                    storage_limit_bytes: storageBytes,
+                    entry_count_limit: entries,
+                });
+                if (res.error) {
+                    throw new Error(res.error);
+                }
+                showEvent("success", `Quota updated for ${t_svc.name}`);
+                setServiceQuotaDrafts((prev) => ({ ...prev, [t_svc.id]: { storageMb: "", entries: "" } }));
+            } catch (error: any) {
+                console.error("Service quota update failed:", error);
+                showEvent("error", error?.message || "Unable to update service quota");
+            } finally {
+                setSavingServiceQuotaId(null);
+            }
+        },
+        [serviceQuotaDrafts, showEvent],
+    );
+
+    const deleteService = useCallback(
+        async (t_svc: AutomatedServiceListEntry) => {
+            if (!window.confirm(`Soft-delete service "${t_svc.name}"? Its credentials are revoked immediately.`)) {
+                return;
+            }
+            setDeletingServiceId(t_svc.id);
+            try {
+                const response = await authenticatedFetch(AdminBackendApiEndpoints.AUTOMATED_SERVICE_ITEM(t_svc.id), {
+                    method: "DELETE",
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(payload.error || `Failed to delete service (HTTP ${response.status})`);
+                }
+                showEvent("success", `Service ${t_svc.name} deleted`);
+                await fetchAutomatedServices();
+            } catch (error: any) {
+                console.error("Service delete failed:", error);
+                showEvent("error", error?.message || "Unable to delete service");
+            } finally {
+                setDeletingServiceId(null);
             }
         },
         [fetchAutomatedServices, showEvent],
@@ -264,7 +469,7 @@ export default function AdminTab() {
             const formEl = t_event.currentTarget;
 
             const serviceKind = form.get("service_kind")?.toString().trim() || "";
-            const payload = {
+            const payload: Record<string, unknown> = {
                 name: form.get("service_name")?.toString().trim() || "",
                 organisation: form.get("organisation")?.toString() || "",
                 metadata: serviceKind ? { kind: serviceKind } : {},
@@ -274,6 +479,18 @@ export default function AdminTab() {
             if (!payload.name) {
                 showEvent("warning", "Please fill in the service name");
                 return;
+            }
+
+            // Optional initial storage cap — the backend register handler
+            // accepts storage_limit (bytes) via create_automated_service.
+            const storageCapRaw = form.get("storage_cap_mb")?.toString().trim() || "";
+            if (storageCapRaw) {
+                const storageBytes = mbToBytes(storageCapRaw);
+                if (storageBytes === null) {
+                    showEvent("error", "Storage cap must be a non-negative MB value");
+                    return;
+                }
+                payload.storage_limit = storageBytes;
             }
 
             setSubmitting(true);
@@ -462,6 +679,14 @@ export default function AdminTab() {
                         >
                             <Network size={16} /> <span>Domain Registry</span>
                         </button>
+                        {isPlatformAdmin && (
+                            <button
+                                className={`admin-mode-btn ${mode === "organisations" ? "admin-mode-btn-active" : ""}`}
+                                onClick={() => setMode("organisations")}
+                            >
+                                <Building2 size={16} /> <span>Organisations</span>
+                            </button>
+                        )}
                         <button
                             className={`admin-mode-btn ${mode === "automated_service" ? "admin-mode-btn-active" : ""}`}
                             onClick={() => setMode("automated_service")}
@@ -499,6 +724,7 @@ export default function AdminTab() {
                     <div className="reg-header">
                         {mode === "user" && <UserPlus size={20} className="text-primary" />}
                         {mode === "domains" && <Network size={20} className="text-primary" />}
+                        {mode === "organisations" && <Building2 size={20} className="text-primary" />}
                         {mode === "automated_service" && <Shield size={20} className="text-primary" />}
                         {mode === "query_builder" && <Search size={20} className="text-primary" />}
                         {mode === "storage" && <Database size={20} className="text-primary" />}
@@ -508,6 +734,7 @@ export default function AdminTab() {
                         <h2 className="reg-title">
                             {mode === "user" && "Register User"}
                             {mode === "domains" && "Domain Configuration"}
+                            {mode === "organisations" && "Organisation Management"}
                             {mode === "automated_service" && "Register Service"}
                             {mode === "query_builder" && "Data Explorer"}
                             {mode === "storage" && "Garage Storage Admin"}
@@ -587,6 +814,8 @@ export default function AdminTab() {
 
                     {mode === "domains" && <DomainConfigPanel />}
 
+                    {mode === "organisations" && isPlatformAdmin && <OrganisationsPanel />}
+
                     {mode === "automated_service" && (
                         <>
                             <form onSubmit={handleRegisterAutomatedService} className="reg-form">
@@ -620,6 +849,14 @@ export default function AdminTab() {
                                         </option>
                                         {renderOptions(domains)}
                                     </select>
+                                    <input
+                                        name="storage_cap_mb"
+                                        className="input-desktop w-44"
+                                        type="number"
+                                        min={0}
+                                        step="any"
+                                        placeholder="STORAGE CAP (MB, OPT.)"
+                                    />
                                     <button type="submit" className="btn-desktop-primary" disabled={submitting}>
                                         {submitting ? "INITIALIZING..." : "PROVISION SERVICE"}
                                     </button>
@@ -669,6 +906,9 @@ export default function AdminTab() {
                                                 <th>IDENTIFIER</th>
                                                 <th>DOMAIN</th>
                                                 <th>TOKEN REFERENCE</th>
+                                                <th>STATUS</th>
+                                                <th>METADATA (JSON)</th>
+                                                <th>QUOTA CAPS</th>
                                                 <th className="text-right">OPERATIONS</th>
                                             </tr>
                                         </thead>
@@ -679,6 +919,97 @@ export default function AdminTab() {
                                                     <td className="admin-cell-primary">{svc.domain || "GLOBAL"}</td>
                                                     <td className="admin-cell-token">{svc.token}</td>
                                                     <td>
+                                                        <div className="flex items-center gap-2">
+                                                            <select
+                                                                className="input-desktop w-36"
+                                                                value={svc.status}
+                                                                disabled={savingServiceStatusId === svc.id}
+                                                                onChange={(e) => setServiceStatus(svc, e.target.value)}
+                                                                title="Operational status — non-active services lose credential access immediately"
+                                                            >
+                                                                <option value="active">ACTIVE</option>
+                                                                <option value="degraded">DEGRADED</option>
+                                                                <option value="maintenance">MAINTENANCE</option>
+                                                                <option value="offline">OFFLINE</option>
+                                                            </select>
+                                                            {savingServiceStatusId === svc.id && (
+                                                                <Loader2 size={14} className="drive-spin" />
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                    <td>
+                                                        <div className="flex items-start gap-2">
+                                                            <div className="flex flex-col gap-1">
+                                                                <input
+                                                                    className="input-desktop"
+                                                                    style={{ width: 220 }}
+                                                                    placeholder="DESCRIPTION"
+                                                                    maxLength={256}
+                                                                    value={serviceMetaDraftFor(svc).description}
+                                                                    onChange={(e) =>
+                                                                        setServiceMetaDraft(svc, { description: e.target.value })
+                                                                    }
+                                                                />
+                                                                <textarea
+                                                                    className="input-desktop font-mono"
+                                                                    rows={2}
+                                                                    style={{ minWidth: 220 }}
+                                                                    value={serviceMetaDraftFor(svc).meta}
+                                                                    onChange={(e) => setServiceMetaDraft(svc, { meta: e.target.value })}
+                                                                    spellCheck={false}
+                                                                />
+                                                            </div>
+                                                            <button
+                                                                className="btn-desktop h-7 px-3"
+                                                                onClick={() => saveServiceMetadata(svc)}
+                                                                disabled={savingServiceMetaId === svc.id}
+                                                                title="Save description + metadata (merged into the service record)"
+                                                            >
+                                                                {savingServiceMetaId === svc.id ? (
+                                                                    <Loader2 size={14} className="drive-spin" />
+                                                                ) : (
+                                                                    <Save size={14} />
+                                                                )}
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                    <td>
+                                                        <div className="flex items-start gap-2">
+                                                            <input
+                                                                className="input-desktop w-24"
+                                                                type="number"
+                                                                min={0}
+                                                                step="any"
+                                                                placeholder="MB"
+                                                                title="Storage cap in MB — empty = unchanged"
+                                                                value={serviceQuotaDraftFor(svc).storageMb}
+                                                                onChange={(e) => setServiceQuotaDraft(svc, { storageMb: e.target.value })}
+                                                            />
+                                                            <input
+                                                                className="input-desktop w-20"
+                                                                type="number"
+                                                                min={0}
+                                                                step={1}
+                                                                placeholder="ENT."
+                                                                title="Entry count cap — empty = unchanged"
+                                                                value={serviceQuotaDraftFor(svc).entries}
+                                                                onChange={(e) => setServiceQuotaDraft(svc, { entries: e.target.value })}
+                                                            />
+                                                            <button
+                                                                className="btn-desktop h-7 px-3"
+                                                                onClick={() => saveServiceQuota(svc)}
+                                                                disabled={savingServiceQuotaId === svc.id}
+                                                                title="Apply quota caps (empty fields are left unchanged)"
+                                                            >
+                                                                {savingServiceQuotaId === svc.id ? (
+                                                                    <Loader2 size={14} className="drive-spin" />
+                                                                ) : (
+                                                                    <Save size={14} />
+                                                                )}
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                    <td>
                                                         <div className="admin-actions-right">
                                                             <button
                                                                 className="btn-desktop h-7 px-3"
@@ -687,6 +1018,18 @@ export default function AdminTab() {
                                                             >
                                                                 {rotatingAutomatedServiceId === svc.id ? "ROTATING..." : "ROTATE KEY"}
                                                             </button>
+                                                            <button
+                                                                className="btn-desktop h-7 px-3"
+                                                                onClick={() => deleteService(svc)}
+                                                                disabled={deletingServiceId === svc.id}
+                                                                title="Soft-delete this service and revoke its credentials"
+                                                            >
+                                                                {deletingServiceId === svc.id ? (
+                                                                    <Loader2 size={14} className="drive-spin" />
+                                                                ) : (
+                                                                    <Trash2 size={14} />
+                                                                )}
+                                                            </button>
                                                         </div>
                                                     </td>
                                                 </tr>
@@ -694,6 +1037,13 @@ export default function AdminTab() {
                                         </tbody>
                                     </table>
                                 </div>
+                            </div>
+                            <div className="query-help">
+                                <strong>Service Configuration:</strong> status, metadata and quota caps are edited inline and apply
+                                immediately. Non-<em>active</em> statuses (degraded / maintenance / offline) revoke the service's
+                                credentials instantly; <em>active</em> restores access with the same key. Empty quota fields are left
+                                unchanged — to lift a cap entirely (unlimited), use <em>Storage Admin → Quotas → SERVICES</em>, which also
+                                shows live usage against each cap.
                             </div>
                         </>
                     )}

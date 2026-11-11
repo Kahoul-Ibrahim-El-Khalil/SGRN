@@ -1,5 +1,6 @@
 #include <sgrn/datastore/query/CrudViewEngine.hpp>
 
+#include <sgrn/datastore/audit/AuditLogger.hpp>
 #include <sgrn/datastore/core/db.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe-access.hpp>
@@ -405,6 +406,63 @@ std::string selectList(const CrudViewSpec& t_spec) {
     return out;
 }
 
+// --- audit hook ------------------------------------------------------------
+// Every generated write leaves one core.audit_logs row. The details object is
+// built from *spec fields only*: arbitrary client JSON keys are never echoed
+// into the audit trail, and secrets are absent from spec.fields by
+// construction (manifest policy + generator assertion).
+//
+// Audit failure must not turn a committed write into a 500: AuditLogger logs
+// internally, and anything thrown here is swallowed.
+drogon::Task<void> auditCrudMutation(const drogon::HttpRequestPtr& tsp_req, const CrudViewSpec& t_spec, std::string_view t_op,
+    const std::string& t_target_id, const Json::Value& t_body) {
+    try {
+        if (!tsp_req || !tsp_req->attributes()->find("session_json")) {
+            co_return;
+        }
+        const Json::Value session = tsp_req->attributes()->get<Json::Value>("session_json");
+        if (!session.isObject() || !session.isMember("user") || !session["user"].isObject()) {
+            co_return;
+        }
+        const Json::Value& user = session["user"];
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError()) {
+            co_return;
+        }
+
+        Json::Value details(Json::objectValue);
+        for (const auto& field : t_spec.fields) {
+            const std::string key(field.name);
+            if (t_body.isObject() && t_body.isMember(key)) {
+                details[key] = t_body[key];
+            }
+        }
+
+        co_await sgrn::datastore::audit::AuditLogger::log(db_res.value(), user["organisation"].asString(), "user", user["id"].asInt(),
+            user["email"].asString(), fmt::format("crud.{}.{}", t_spec.write_table, t_op), std::string(t_spec.write_table), t_target_id,
+            tsp_req->getPeerAddr().toIp(), details, "success");
+    } catch (const std::exception&) {
+        // Never fail a committed write because the audit sink hiccuped.
+    }
+}
+
+std::string jsonIdToString(const Json::Value& t_value) {
+    if (t_value.isString()) {
+        return t_value.asString();
+    }
+    if (t_value.isInt64()) {
+        return std::to_string(t_value.asInt64());
+    }
+    if (t_value.isUInt64()) {
+        return std::to_string(t_value.asUInt64());
+    }
+    if (t_value.isInt()) {
+        return std::to_string(t_value.asInt());
+    }
+    return {};
+}
+
 } // namespace
 
 sgrn::Result<std::string> fieldValueToBind(std::string_view t_field_name, FieldType t_type, const Json::Value& t_value) {
@@ -616,7 +674,9 @@ drogon::Task<HttpResponsePtr> executeViewInsert(const CrudViewSpec& t_spec, Http
         if (result.empty()) {
             co_return sgrn::createErrorResponse("Insert returned no row", k500InternalServerError, "Database");
         }
-        co_return sgrn::createJsonResponse(rowToJson(result[0], t_spec), k201Created);
+        const Json::Value created = rowToJson(result[0], t_spec);
+        co_await auditCrudMutation(tsp_req, t_spec, "create", jsonIdToString(created[std::string(t_spec.pk.name)]), *json);
+        co_return sgrn::createJsonResponse(created, k201Created);
     } catch (const std::exception& e) {
         co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "Database");
     }
@@ -670,7 +730,9 @@ drogon::Task<HttpResponsePtr> executeViewUpdate(
         if (result.empty()) {
             co_return sgrn::createErrorResponse("No matching row", k404NotFound, "NotFound");
         }
-        co_return sgrn::createJsonResponse(rowToJson(result[0], t_spec), k200OK);
+        const Json::Value updated = rowToJson(result[0], t_spec);
+        co_await auditCrudMutation(tsp_req, t_spec, "update", t_id, *json);
+        co_return sgrn::createJsonResponse(updated, k200OK);
     } catch (const std::exception& e) {
         co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "Database");
     }
@@ -678,7 +740,8 @@ drogon::Task<HttpResponsePtr> executeViewUpdate(
 
 // --- DELETE ------------------------------------------------------------
 
-drogon::Task<HttpResponsePtr> executeViewDelete(const CrudViewSpec& t_spec, HttpRequestPtr, std::string t_tenant, std::string t_id) {
+drogon::Task<HttpResponsePtr> executeViewDelete(
+    const CrudViewSpec& t_spec, HttpRequestPtr tsp_req, std::string t_tenant, std::string t_id) {
     std::string sql = fmt::format("DELETE FROM {} WHERE {} = $1 AND {} = $2", t_spec.write_table, t_spec.pk.name, t_spec.tenant_column);
 
     auto db_res = sgrn::datastore::core::getDbClient();
@@ -686,7 +749,10 @@ drogon::Task<HttpResponsePtr> executeViewDelete(const CrudViewSpec& t_spec, Http
         co_return sgrn::createJsonResponse(db_res);
     }
     try {
-        co_await db_res.value()->execSqlCoro(sql, t_id, t_tenant);
+        auto deleted_rows = co_await db_res.value()->execSqlCoro(sql, t_id, t_tenant);
+        if (deleted_rows.affectedRows() > 0) {
+            co_await auditCrudMutation(tsp_req, t_spec, "delete", t_id, Json::objectValue);
+        }
         co_return drogon::HttpResponse::newHttpResponse(k204NoContent, drogon::CT_NONE);
     } catch (const std::exception& e) {
         co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "Database");

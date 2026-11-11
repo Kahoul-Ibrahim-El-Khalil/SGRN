@@ -123,6 +123,42 @@ TENANT_COLUMN_CANDIDATES = {"organisation", "organisation_id"}
 # expose a password hash.
 SENSITIVE_COLUMNS = {"password", "token_secret_hash", "password_hash", "secret"}
 
+# Columns that EXIST on the API surface but must never be silently writable.
+# For any table with a write operation (create/update/delete), each of these
+# live columns must be explicitly named in the manifest with its insertable/
+# updatable flags spelled out; forgetting to list one is exactly how a
+# privilege-escalation column (e.g. core.users.is_platform_admin) used to
+# inherit the writable default. Keep in sync with scripts/check_manifest_policy.py
+# (SENSITIVE there; plus the table-specific cases noted below).
+WRITE_GUARD_COLUMNS = {
+    "is_platform_admin",
+    "role",
+    "is_active",
+    "token",
+    "deleted_at",
+    "granted_by",
+    "path",
+    "storage_limit",
+    "entry_count_limit",
+    "rate_limit_rpm",
+    "max_file_size_mb",
+    "preferred_chunk_size_mb",
+    "rate_limit_upload_rpm",
+    "total_virtual_size",
+    "total_real_size",
+    "total_entry_count",
+    "metadata",
+}
+
+
+def write_guard_key(table: str, column: str) -> str:
+    """Table disambiguation for the guard set: core.users.status is a
+    lifecycle column (never writable through generated CRUD), while other
+    tables' status columns are ordinary configuration."""
+    if table == "users" and column == "status":
+        return "status"
+    return column
+
 GEN_DIR = str(DATASTORE_ROOT / "src" / "handlers" / "generated")
 REGISTRATION_FILE = f"{GEN_DIR}/RegisteredViews.cpp"
 
@@ -495,6 +531,24 @@ def build_view_spec(conn, manifest_path, schema, table, table_cfg, default_filte
                 f"from the API surface — it cannot be listed in the manifest"
             )
 
+    # New columns must never quietly inherit the writable default. If this
+    # table serves a write operation, every live column in WRITE_GUARD_COLUMNS
+    # has to be explicitly configured (see the set's comment above) — this is
+    # the runtime complement of scripts/check_manifest_policy.py, which only
+    # sees columns the manifest already names.
+    if any(op in ("create", "update", "delete") for op in operations):
+        manifest_columns = table_cfg.get("columns", {})
+        for name, _udt, _comment in columns:
+            if name in (pk, tenant_column):
+                continue  # pk + tenant are engine-managed, never writable
+            if name in SENSITIVE_COLUMNS:
+                continue  # hard-omitted from the surface, cannot be writable
+            if write_guard_key(table, name) in WRITE_GUARD_COLUMNS and name not in manifest_columns:
+                fail(
+                    f"{t_path}: live column '{name}' is in WRITE_GUARD_COLUMNS but is not listed in "
+                    f"'columns' — add an explicit entry with the intended insertable/updatable flags"
+                )
+
     pk_type = PG_TYPE_MAP.get(col_by_name[pk][1], "Text")
     if col_by_name[pk][1] not in PG_TYPE_MAP:
         print(f"warn: unmapped pk type '{col_by_name[pk][1]}' on {schema}.{table}.{pk}, using Text")
@@ -617,7 +671,10 @@ public:
         : CrudViewHandler(this, kRoutes, kItemRoutes) {{
     }}
 
-private:
+public:
+    // Route tables are public so tests can assert the generated filter
+    // policy (which routes exist, and which filters guard each) without
+    // having to boot the Drogon app.
     static inline const std::array<RouteConfig, {num_collection_routes}> kRoutes = {{{{
 {collection_routes}
     }}}};

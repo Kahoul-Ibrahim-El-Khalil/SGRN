@@ -61,6 +61,13 @@ if(SGRN_BUILD_TESTS)
     add_executable(cross_org_auth_test tests/cross-org-auth-test.cpp)
     target_link_libraries(cross_org_auth_test PRIVATE sgrn_datastore_lib)
     add_test(NAME cross_org_auth_test COMMAND cross_org_auth_test)
+    # WP2 migration-008 schema support: tenant guard, session revocation,
+    # hardened auth functions, domain/actor/org quota gates, rename_domain
+    # and create_organisation (SQL-level, pg-fixture replay).
+    add_executable(admin_support_schema_test tests/admin-support-schema-test.cpp)
+    target_link_libraries(admin_support_schema_test PRIVATE sgrn_datastore_lib reproc::reproc++)
+    target_include_directories(admin_support_schema_test PRIVATE ${CMAKE_SOURCE_DIR}/sgrn/lib/tests/support)
+    add_test(NAME admin_support_schema_test COMMAND admin_support_schema_test)
     # Scoped admins and domain hierarchy tests (Prompt 4)
     add_executable(scoped_admins_test tests/scoped-admins-test.cpp)
     target_link_libraries(scoped_admins_test PRIVATE sgrn_datastore_lib reproc::reproc++)
@@ -85,6 +92,13 @@ if(SGRN_BUILD_TESTS)
     target_include_directories(encryption_test PRIVATE ${CMAKE_SOURCE_DIR}/sgrn/lib/tests/support)
     target_compile_definitions(encryption_test PRIVATE SGRN_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME encryption_test COMMAND encryption_test)
+    # WP1 CRUD lockdown: generated-route/field policy, OrgAdminFilter over
+    # the generated paths, engine-honors-updatable=false, and the
+    # check_manifest_policy.py CI gate.
+    add_executable(crud_admin_lockdown_test tests/crud-admin-lockdown-test.cpp)
+    target_link_libraries(crud_admin_lockdown_test PRIVATE sgrn_datastore_lib)
+    target_compile_definitions(crud_admin_lockdown_test PRIVATE SGRN_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    add_test(NAME crud_admin_lockdown_test COMMAND crud_admin_lockdown_test)
 endif()
 
 # ==================== Summary ====================

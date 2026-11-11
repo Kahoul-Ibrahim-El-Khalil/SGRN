@@ -40,20 +40,17 @@ public:
         : CrudViewHandler(this, kRoutes, kItemRoutes) {
     }
 
-private:
-    static inline const std::array<RouteConfig, 2> kRoutes = {{
+public:
+    // Route tables are public so tests can assert the generated filter
+    // policy (which routes exist, and which filters guard each) without
+    // having to boot the Drogon app.
+    static inline const std::array<RouteConfig, 1> kRoutes = {{
         {"/api/v1/user-domain-permissions", &UserDomainPermissionsView::handleList, {drogon::Get},
-            {"sgrn::datastore::filters::UserAuthFilter"}},
-        {"/api/v1/user-domain-permissions", &UserDomainPermissionsView::handleCreate, {drogon::Post},
-            {"sgrn::datastore::filters::UserAuthFilter"}},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"}},
     }};
-    static inline const std::array<ItemRouteConfig, 3> kItemRoutes = {{
+    static inline const std::array<ItemRouteConfig, 1> kItemRoutes = {{
         {"/api/v1/user-domain-permissions/{id}", &UserDomainPermissionsView::handleGet, {drogon::Get},
-            {"sgrn::datastore::filters::UserAuthFilter"}},
-        {"/api/v1/user-domain-permissions/{id}", &UserDomainPermissionsView::handleUpdate, {drogon::Patch},
-            {"sgrn::datastore::filters::UserAuthFilter"}},
-        {"/api/v1/user-domain-permissions/{id}", &UserDomainPermissionsView::handleDelete, {drogon::Delete},
-            {"sgrn::datastore::filters::UserAuthFilter"}},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"}},
     }};
 };
 

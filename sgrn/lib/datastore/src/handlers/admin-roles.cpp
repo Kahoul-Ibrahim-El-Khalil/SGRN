@@ -244,6 +244,10 @@ Task<HttpResponsePtr> AdminApiHandler::handleAssignRole(HttpRequestPtr tsp_req) 
             user_id.has_value() ? "user" : "automated_service",
             user_id.has_value() ? std::to_string(*user_id) : std::to_string(*service_id), tsp_req->getPeerAddr().toIp(), *json, "success");
 
+        if (user_id.has_value()) {
+            sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(*user_id);
+        }
+
         Json::Value resp;
         resp["success"] = true;
         resp["message"] = "Role assigned successfully";
@@ -329,6 +333,10 @@ Task<HttpResponsePtr> AdminApiHandler::handleRevokeRole(HttpRequestPtr tsp_req) 
             user_id.has_value() ? "user" : "automated_service",
             user_id.has_value() ? std::to_string(*user_id) : std::to_string(*service_id), tsp_req->getPeerAddr().toIp(), *json, "success");
 
+        if (user_id.has_value()) {
+            sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(*user_id);
+        }
+
         Json::Value resp;
         resp["success"] = true;
         resp["message"] = "Role revoked successfully";
@@ -336,6 +344,59 @@ Task<HttpResponsePtr> AdminApiHandler::handleRevokeRole(HttpRequestPtr tsp_req) 
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to revoke role: {}", e.what());
         co_return createErrorResponse(std::string("Failed to revoke role: ") + e.what(), k400BadRequest, "AdminApi");
+    }
+}
+
+// GET /api/v1/admin/roles/assignments — who currently holds which role.
+// Org-scoped: role org gates the row set, and targets of a foreign org are
+// filtered out (defense in depth; assignment writes already enforce this).
+Task<HttpResponsePtr> AdminApiHandler::handleListRoleAssignments(HttpRequestPtr tsp_req) {
+    try {
+        const auto context = detail::requestContext(tsp_req);
+
+        auto db_res = sgrn::datastore::core::getDbClient();
+        if (db_res.hasError())
+            co_return sgrn::createJsonResponse(db_res);
+        auto db = db_res.value();
+
+        auto res = co_await sgrn::datastore::core::execSqlCoroVec(db,
+            "SELECT ur.role_id, r.name AS role_name, ur.user_id, ur.automated_service_id, "
+            "       u.email AS user_email, a.name AS service_name "
+            "FROM core.user_roles ur "
+            "JOIN core.roles r ON r.id = ur.role_id "
+            "LEFT JOIN core.users u ON u.id = ur.user_id "
+            "LEFT JOIN core.automated_services a ON a.id = ur.automated_service_id "
+            "WHERE r.organisation = $1 "
+            "  AND (ur.user_id IS NULL OR u.organisation = $1) "
+            "  AND (ur.automated_service_id IS NULL OR a.organisation = $1) "
+            "ORDER BY ur.role_id, ur.user_id NULLS LAST, ur.automated_service_id NULLS LAST",
+            {context.organisation});
+
+        Json::Value arr = Json::arrayValue;
+        for (const auto& row : res) {
+            Json::Value item;
+            item["role_id"] = row["role_id"].as<int32_t>();
+            item["role_name"] = row["role_name"].as<std::string>();
+            if (row["user_id"].isNull()) {
+                item["target_type"] = "automated_service";
+                item["target_id"] = row["automated_service_id"].as<int32_t>();
+                item["target_label"] = row["service_name"].as<std::string>();
+            } else {
+                item["target_type"] = "user";
+                item["target_id"] = row["user_id"].as<int32_t>();
+                item["target_label"] = row["user_email"].as<std::string>();
+            }
+            arr.append(item);
+        }
+
+        Json::Value resp;
+        resp["success"] = true;
+        resp["assignments"] = arr;
+        resp["count"] = static_cast<Json::UInt64>(res.size());
+        co_return createJsonResponse(resp, k200OK);
+    } catch (const std::exception& e) {
+        ADMIN_ERROR_LOG("Failed to list role assignments: {}", e.what());
+        co_return createErrorResponse(std::string("Failed to list role assignments: ") + e.what(), k400BadRequest, "AdminApi");
     }
 }
 

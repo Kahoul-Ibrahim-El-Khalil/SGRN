@@ -1037,6 +1037,16 @@ execute function storage.cleanup_orphan_objects ();
 -- ============================================================
 -- trigger — maintain total storage usage on users/services
 -- ============================================================
+-- WP2 (F11): the INSERT branch is disabled.  At BEFORE INSERT on
+-- storage.files the file's storage.file_objects mappings do not exist yet,
+-- so `storage.get_file_sizes` returned 0 and the old INSERT branch added
+-- +1 entry and +0 bytes per file — byte accounting never advanced and
+-- byte-based quotas were never enforceable.  Mapping-level accounting,
+-- org refresh and byte quota gates now live in
+-- storage.apply_object_owner_usage (AFTER INSERT on storage.file_objects).
+-- The UPDATE (owner move) and DELETE branches stay: mappings are still
+-- readable at BEFORE time on those paths.
+-- ============================================================
 create or replace function storage.update_owner_storage_usage () returns trigger language plpgsql as $$
 declare
   v_old_virtual bigint := 0;
@@ -1045,21 +1055,6 @@ declare
   v_new_real    bigint := 0;
 begin
   if (tg_op = 'INSERT') then
-    select virtual_size, real_size into v_new_virtual, v_new_real from storage.get_file_sizes(new.id);
-
-    if new.user_id is not null then
-      update core.users
-      set total_virtual_size = coalesce(total_virtual_size, 0) + v_new_virtual,
-          total_real_size    = coalesce(total_real_size, 0)    + v_new_real,
-          total_entry_count   = coalesce(total_entry_count, 0) + 1
-      where id = new.user_id;
-    elsif new.automated_service_id is not null then
-      update core.automated_services
-      set total_virtual_size = coalesce(total_virtual_size, 0) + v_new_virtual,
-          total_real_size    = coalesce(total_real_size, 0)    + v_new_real,
-          total_entry_count   = coalesce(total_entry_count, 0) + 1
-      where id = new.automated_service_id;
-    end if;
     return new;
   elsif (tg_op = 'DELETE') then
     select virtual_size, real_size into v_old_virtual, v_old_real from storage.get_file_sizes(old.id);
@@ -1131,52 +1126,226 @@ or delete on storage.files for each row
 execute function storage.update_owner_storage_usage ();
 
 -- ============================================================
+-- WP2: actor usage recompute + byte-level quota gates
+-- ============================================================
+-- Recompute one actor's totals from live file_objects mappings and rows.
+-- Used as the single accounting point at mapping-change time so byte totals
+-- cannot drift (the old delta path computed +0 bytes per insert — F11).
+create or replace function storage.recompute_actor_usage (
+  p_user_id int,
+  p_service_id int
+) returns void language plpgsql as $$
+begin
+  if p_user_id is not null then
+    update core.users
+    set total_virtual_size = (
+          select coalesce(sum(o.original_size), 0)
+          from storage.files f
+          join storage.file_objects fo on fo.file_id = f.id
+          join storage.objects o on o.id = fo.object_id
+          where f.user_id = p_user_id
+        ),
+        total_real_size = (
+          select coalesce(sum(o.size), 0)
+          from storage.files f
+          join storage.file_objects fo on fo.file_id = f.id
+          join storage.objects o on o.id = fo.object_id
+          where f.user_id = p_user_id
+        ),
+        total_entry_count = (
+          select count(*)::bigint from storage.files f where f.user_id = p_user_id
+        ) + (
+          select count(*)::bigint from storage.directories d where d.user_id = p_user_id
+        )
+    where id = p_user_id;
+  elsif p_service_id is not null then
+    update core.automated_services
+    set total_virtual_size = (
+          select coalesce(sum(o.original_size), 0)
+          from storage.files f
+          join storage.file_objects fo on fo.file_id = f.id
+          join storage.objects o on o.id = fo.object_id
+          where f.automated_service_id = p_service_id
+        ),
+        total_real_size = (
+          select coalesce(sum(o.size), 0)
+          from storage.files f
+          join storage.file_objects fo on fo.file_id = f.id
+          join storage.objects o on o.id = fo.object_id
+          where f.automated_service_id = p_service_id
+        ),
+        total_entry_count = (
+          select count(*)::bigint from storage.files f where f.automated_service_id = p_service_id
+        ) + (
+          select count(*)::bigint from storage.directories d where d.automated_service_id = p_service_id
+        )
+    where id = p_service_id;
+  end if;
+end;
+$$;
+
+-- AFTER INSERT / UPDATE OF object_id / DELETE on storage.file_objects:
+--   1. Recompute the owning actor's totals from live mappings (actor-less
+--      domain rows carry no actor) and refresh the organisation aggregate.
+--   2. Enforce the byte caps (actor, organisation, domain) *after* the new
+--      mapping state is visible.  Raising here rolls the upload's whole
+--      transaction back, files row included.
+create or replace function storage.apply_object_owner_usage () returns trigger language plpgsql as $$
+declare
+  v_file_id     bigint;
+  v_user_id     int;
+  v_service_id  int;
+  v_domain_id   int;
+  v_org         text;
+  v_usage       bigint;
+  v_limit       bigint;
+  v_entry_count bigint;
+  v_entry_limit bigint;
+  v_org_usage   bigint;
+  v_org_limit   bigint;
+begin
+  if tg_op = 'INSERT' or tg_op = 'UPDATE' then
+    v_file_id := new.file_id;
+  else
+    v_file_id := old.file_id;
+  end if;
+
+  select f.user_id, f.automated_service_id, f.domain_id
+    into v_user_id, v_service_id, v_domain_id
+  from storage.files f
+  where f.id = v_file_id;
+
+  if not found then
+    if tg_op = 'DELETE' then
+      return old; -- file already gone: nothing to maintain
+    end if;
+    raise exception 'file_objects row references missing file %', v_file_id using errcode = '23503';
+  end if;
+
+  if v_user_id is not null then
+    select organisation into v_org from core.users where id = v_user_id;
+  elsif v_service_id is not null then
+    select organisation into v_org from core.automated_services where id = v_service_id;
+  elsif v_domain_id is not null then
+    select organisation into v_org from core.domains where id = v_domain_id;
+  end if;
+
+  -- 1. refresh accounting
+  if v_user_id is not null or v_service_id is not null then
+    perform storage.recompute_actor_usage(v_user_id, v_service_id);
+  end if;
+  if v_org is not null then
+    perform core.sync_org_totals_for(v_org);
+  end if;
+
+  -- 2. byte/entry gates (usage now includes the change just made)
+  if tg_op <> 'DELETE' then
+    -- actor byte + entry caps
+    if v_user_id is not null then
+      select total_virtual_size, storage_limit, total_entry_count, entry_count_limit
+      into v_usage, v_limit, v_entry_count, v_entry_limit
+      from core.users where id = v_user_id;
+
+      if v_limit is not null and coalesce(v_usage, 0) > v_limit then
+        raise exception 'Actor storage quota exceeded'
+          using errcode = '55P03',
+                detail  = format('Actor limit: %s, Current: %s', v_limit, coalesce(v_usage, 0));
+      end if;
+    elsif v_service_id is not null then
+      select total_virtual_size, storage_limit, total_entry_count, entry_count_limit
+      into v_usage, v_limit, v_entry_count, v_entry_limit
+      from core.automated_services where id = v_service_id;
+
+      if v_limit is not null and coalesce(v_usage, 0) > v_limit then
+        raise exception 'Actor storage quota exceeded'
+          using errcode = '55P03',
+                detail  = format('Actor limit: %s, Current: %s', v_limit, coalesce(v_usage, 0));
+      end if;
+    end if;
+
+    -- organisation byte cap (covers actor-owned and domain-namespace rows)
+    if v_org is not null then
+      select total_virtual_size, storage_limit
+      into v_org_usage, v_org_limit
+      from core.organisations where name = v_org;
+
+      if v_org_limit is not null and coalesce(v_org_usage, 0) > v_org_limit then
+        raise exception 'Organisation storage quota exceeded'
+          using errcode = '55P03',
+                detail  = format('Organisation: %s, Org limit: %s, Org current: %s',
+                                 v_org, v_org_limit, coalesce(v_org_usage, 0));
+      end if;
+    end if;
+
+    -- domain byte cap
+    if v_domain_id is not null then
+      select storage_limit into v_limit from core.domains where id = v_domain_id;
+
+      if v_limit is not null then
+        select virtual_size into v_usage from storage.domain_usage(v_domain_id);
+
+        if coalesce(v_usage, 0) > v_limit then
+          raise exception 'Domain storage quota exceeded'
+            using errcode = '55P03',
+                  detail  = format('Domain limit: %s, Current: %s', v_limit, coalesce(v_usage, 0));
+        end if;
+      end if;
+    end if;
+  end if;
+
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_apply_object_owner_usage on storage.file_objects;
+create trigger trg_apply_object_owner_usage
+after insert or update of object_id or delete on storage.file_objects
+for each row execute function storage.apply_object_owner_usage ();
+
+-- ============================================================
 -- trigger — enforce storage limits on users/services and org
 -- ============================================================
 -- FIX #9: org-level quota is now checked in addition to the per-actor limit.
 -- The check order is: actor limit first, then org limit — so the more
 -- specific constraint surfaces first in the error message.
+--
+-- WP2 (finding F11): the byte-level checks are no longer performed here.
+-- This trigger fires BEFORE INSERT on storage.files, but a file's
+-- storage.file_objects mappings are inserted *after* the files row, so
+-- `v_original_size` aggregated below was always 0 and neither actor nor org
+-- byte capacities were ever enforced.  A files-row trigger can never see the
+-- bytes of the upload it is vetting; the byte gates therefore moved to
+-- storage.apply_object_owner_usage (AFTER INSERT on storage.file_objects),
+-- where the mapped object sizes are final.  This function now enforces only
+-- the entry-count limits (actor + organisation); domain-namespace entry caps
+-- are enforced by storage.enforce_domain_quota.
 -- ============================================================
 create or replace function storage.enforce_storage_limit () returns trigger language plpgsql as $$
 declare
-  v_original_size bigint;
-  v_usage         bigint;
-  v_limit         bigint;
   v_entry_count    bigint;
   v_entry_limit    bigint;
-  v_org           text;
-  v_org_usage     bigint;
-  v_org_limit     bigint;
+  v_org            text;
   v_org_file_count bigint;
   v_org_file_limit bigint;
 begin
-  -- 1. size of the objects being referenced
-  if TG_TABLE_NAME = 'files' then
-    select coalesce(sum(o.original_size), 0)
-      into v_original_size
-      from storage.file_objects fo
-      join storage.objects o on o.id = fo.object_id
-     where fo.file_id = new.id;
-  else
-    v_original_size := 0;
-  end if;
-
-  -- 2. per-actor check (user or service)
+  -- 1. per-actor entry check (user or service).  Domain-namespace rows carry
+  --    no actor; their caps are enforced in storage.enforce_domain_quota /
+  --    storage.apply_object_owner_usage, so bail out when there is none.
   if new.user_id is not null then
-    select total_virtual_size, storage_limit, total_entry_count, entry_count_limit, organisation
-    into v_usage, v_limit, v_entry_count, v_entry_limit, v_org
+    select total_entry_count, entry_count_limit, organisation
+    into v_entry_count, v_entry_limit, v_org
     from core.users where id = new.user_id;
   elsif new.automated_service_id is not null then
-    select total_virtual_size, storage_limit, total_entry_count, entry_count_limit, organisation
-    into v_usage, v_limit, v_entry_count, v_entry_limit, v_org
+    select total_entry_count, entry_count_limit, organisation
+    into v_entry_count, v_entry_limit, v_org
     from core.automated_services where id = new.automated_service_id;
   end if;
 
-  if v_limit is not null and (coalesce(v_usage, 0) + v_original_size) > v_limit then
-    raise exception 'Storage quota exceeded'
-      using errcode = '55P03',
-            detail  = format('Actor limit: %s, Current: %s, Requested: %s',
-                             v_limit, coalesce(v_usage, 0), v_original_size);
+  if v_org is null then
+    return new;
   end if;
 
   if v_entry_limit is not null and (coalesce(v_entry_count, 0) + 1) > v_entry_limit then
@@ -1186,28 +1355,18 @@ begin
                              v_entry_limit, coalesce(v_entry_count, 0));
   end if;
 
-  -- FIX #9: org-level quota check
-  -- After the per-actor check passes, verify the organisation's aggregate
-  -- cap is not breached.  We read the live total from core.organisations
-  -- (already maintained by core.sync_org_storage_totals).
-  if v_org is not null then
-    select total_virtual_size, storage_limit, total_entry_count, entry_count_limit
-    into v_org_usage, v_org_limit, v_org_file_count, v_org_file_limit
-    from core.organisations where name = v_org;
+  -- 2. org-level entry limit.  core.organisations totals include
+  --    domain-namespace storage (see core.sync_org_totals_for), and the new
+  --    row is not yet counted at BEFORE INSERT, hence the +1.
+  select total_entry_count, entry_count_limit
+  into v_org_file_count, v_org_file_limit
+  from core.organisations where name = v_org;
 
-    if v_org_limit is not null and (coalesce(v_org_usage, 0) + v_original_size) > v_org_limit then
-      raise exception 'Organisation storage quota exceeded'
-        using errcode = '55P03',
-              detail  = format('Organisation: %s, Org limit: %s, Org current: %s, Requested: %s',
-                               v_org, v_org_limit, coalesce(v_org_usage, 0), v_original_size);
-    end if;
-
-    if v_org_file_limit is not null and (coalesce(v_org_file_count, 0) + 1) > v_org_file_limit then
-      raise exception 'Organisation entry count limit exceeded'
-        using errcode = '55P03',
-              detail  = format('Organisation: %s, Org entry limit: %s, Org current count: %s',
-                               v_org, v_org_file_limit, coalesce(v_org_file_count, 0));
-    end if;
+  if v_org_file_limit is not null and (coalesce(v_org_file_count, 0) + 1) > v_org_file_limit then
+    raise exception 'Organisation entry count limit exceeded'
+      using errcode = '55P03',
+            detail  = format('Organisation: %s, Org entry limit: %s, Org current count: %s',
+                             v_org, v_org_file_limit, coalesce(v_org_file_count, 0));
   end if;
 
   return new;
@@ -1219,6 +1378,158 @@ execute function storage.enforce_storage_limit ();
 
 create trigger trg_enforce_storage_limit_dir before insert on storage.directories for each row
 execute function storage.enforce_storage_limit ();
+
+-- ============================================================
+-- WP2: domain-namespace quota support
+-- ============================================================
+
+-- Live usage of a domain namespace: byte sums over this domain's
+-- file_objects mappings and the entry counts over its rows.  Computed live
+-- (not from stored counters) so it cannot drift from the actual mappings.
+create or replace function storage.domain_usage (p_domain_id int)
+returns table (virtual_size bigint, real_size bigint, entry_count bigint)
+language sql stable as $$
+  select
+    coalesce((
+      select sum(o.original_size)
+      from storage.files f
+      join storage.file_objects fo on fo.file_id = f.id
+      join storage.objects o on o.id = fo.object_id
+      where f.domain_id = p_domain_id
+    ), 0)::bigint,
+    coalesce((
+      select sum(o.size)
+      from storage.files f
+      join storage.file_objects fo on fo.file_id = f.id
+      join storage.objects o on o.id = fo.object_id
+      where f.domain_id = p_domain_id
+    ), 0)::bigint,
+    (select count(*)::bigint from storage.files f where f.domain_id = p_domain_id)
+      + (select count(*)::bigint from storage.directories d where d.domain_id = p_domain_id)
+$$;
+
+-- BEFORE INSERT/UPDATE on storage.files and storage.directories:
+--   1. Derive `domain_id` for domain-namespace rows from the domain label.
+--      The application writes only the label; without this derivation the id
+--      column stayed NULL forever and every domain_id-based consumer (quota,
+--      rename, admin filters) saw nothing.  The owner's organisation is
+--      resolved through the actor row or, for domain-namespace rows
+--      (actorless), through the owning core.sessions row.
+--   2. Cross-check a pre-set (domain label, domain_id) pair.
+--   3. Enforce the domain's entry_count_limit on file rows (live count,
+--      directories included), plus the organisation's entry cap for
+--      domain-namespace uploads (no actor row exists to carry that check in
+--      storage.enforce_storage_limit).
+-- Byte caps for the domain are enforced at the mapping stage (see
+-- storage.apply_object_owner_usage); at this point a file has no mappings.
+create or replace function storage.enforce_domain_quota () returns trigger language plpgsql as $$
+declare
+  v_org          text;
+  v_domain_id    int;
+  v_domain_name  text;
+  v_entry_limit  bigint;
+  v_entry_count  bigint;
+  v_org_entry_limit   bigint;
+  v_org_entry_count   bigint;
+begin
+  if new.domain_id is not null then
+    select organisation, name into v_org, v_domain_name from core.domains where id = new.domain_id;
+
+    if v_org is null then
+      raise exception 'Domain % does not exist', new.domain_id using errcode = '23503';
+    end if;
+
+    -- normalise the label from the id; reject mismatched (label, id) pairs
+    if new.domain is not null and new.domain is distinct from v_domain_name then
+      raise exception 'Domain label % does not match domain id %', new.domain, new.domain_id
+        using errcode = '23514';
+    end if;
+    new.domain := v_domain_name;
+  elsif new.domain is not null then
+    if new.user_id is not null then
+      select organisation into v_org from core.users where id = new.user_id;
+    elsif new.automated_service_id is not null then
+      select organisation into v_org from core.automated_services where id = new.automated_service_id;
+    else
+      select coalesce(u.organisation, a.organisation) into v_org
+      from core.sessions s
+      left join core.users u on u.id = s.user_id
+      left join core.automated_services a on a.id = s.automated_service_id
+      where s.id = new.session_id;
+    end if;
+
+    if v_org is null then
+      raise exception 'Domain-scoped row requires a resolvable owner (session %)', new.session_id
+        using errcode = '23503';
+    end if;
+
+    select d.id into v_domain_id
+    from core.domains d
+    where d.organisation = v_org and d.name = new.domain;
+
+    if v_domain_id is null then
+      raise exception 'Unknown domain % for organisation %', new.domain, v_org
+        using errcode = '23503';
+    end if;
+    new.domain_id := v_domain_id;
+  end if;
+
+  if TG_TABLE_NAME = 'files' and new.domain_id is not null then
+    -- domain entry cap: live count of rows in this namespace (directories
+    -- count as entries too, mirroring the actor-level counting)
+    select entry_count_limit into v_entry_limit from core.domains where id = new.domain_id;
+
+    if v_entry_limit is not null then
+      v_entry_count := (select count(*) from storage.files f where f.domain_id = new.domain_id)
+                     + (select count(*) from storage.directories d where d.domain_id = new.domain_id);
+
+      if v_entry_count + 1 > v_entry_limit then
+        raise exception 'Domain entry count limit exceeded'
+          using errcode = '55P03',
+                detail  = format('Domain %s entry limit: %s, Current entries: %s',
+                                 new.domain, v_entry_limit, v_entry_count);
+      end if;
+    end if;
+
+    -- organisation entry cap for domain-namespace uploads: these rows carry
+    -- no actor, so storage.enforce_storage_limit skips them; the org total
+    -- (synced by core.sync_org_totals_for, counting domain rows live) does
+    -- not include the row being inserted yet, hence the +1 here as well.
+    select entry_count_limit into v_org_entry_limit from core.organisations where name = v_org;
+
+    if v_org_entry_limit is not null then
+      v_org_entry_count := (
+        select total_entry_count from core.organisations where name = v_org
+      );
+
+      -- only enforce through the live org view when the org total actually
+      -- counts domain rows: actor-owned rows were already gated by
+      -- storage.enforce_storage_limit against the same counter.
+      if new.user_id is null and new.automated_service_id is null
+         and v_org_entry_count + 1 > v_org_entry_limit then
+        raise exception 'Organisation entry count limit exceeded'
+          using errcode = '55P03',
+                detail  = format('Organisation: %s, Org entry limit: %s, Org current count: %s',
+                                 v_org, v_org_entry_limit, v_org_entry_count);
+      end if;
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_enforce_domain_quota on storage.files;
+create trigger trg_enforce_domain_quota
+before insert or update of user_id, automated_service_id, session_id, domain, domain_id
+on storage.files
+for each row execute function storage.enforce_domain_quota ();
+
+drop trigger if exists trg_enforce_domain_quota_dir on storage.directories;
+create trigger trg_enforce_domain_quota_dir
+before insert or update of user_id, automated_service_id, session_id, domain, domain_id
+on storage.directories
+for each row execute function storage.enforce_domain_quota ();
 
 -- ============================================================
 -- trigger — maintain total_entry_count on directories

@@ -36,6 +36,32 @@ export async function fetchRoles(): Promise<SgrnResult<RolesListResult>> {
     }
 }
 
+export interface RoleAssignment {
+    role_id: number;
+    role_name: string;
+    target_type: "user" | "automated_service";
+    target_id: number;
+    target_label: string;
+}
+
+export interface RoleAssignmentsResult {
+    success: boolean;
+    assignments: RoleAssignment[];
+    count: number;
+}
+
+export async function fetchRoleAssignments(): Promise<SgrnResult<RoleAssignmentsResult>> {
+    try {
+        const res = await authenticatedFetch(AdminBackendApiEndpoints.ROLE_ASSIGNMENTS);
+        return await processResponse<RoleAssignmentsResult>(res);
+    } catch (e) {
+        return {
+            error: `Fetch role assignments failed: ${e instanceof Error ? e.message : String(e)}`,
+            scope: ErrorScope.Network,
+        };
+    }
+}
+
 export async function createRole(role: {
     name: string;
     description?: string;

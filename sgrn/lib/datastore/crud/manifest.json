@@ -16,49 +16,7 @@
           "write_table": "core.automated_services",
           "default_order": "id",
           "max_limit": 500,
-          "operations": ["list", "get", "create", "update", "delete"],
-          "columns": {
-            "name": {
-              "filter_ops": ["eq", "like"]
-            },
-            "token": {
-              "insertable": false,
-              "updatable": false
-            },
-            "domain": {
-              "filter_ops": ["eq"]
-            },
-            "status": {
-              "filter_ops": ["eq", "in"]
-            }
-          }
-        },
-        "domains": {
-          "tenant_column": "organisation",
-          "read_relation": "core.domains",
-          "write_table": "core.domains",
-          "default_order": "id",
-          "max_limit": 500,
-          "operations": ["list", "get", "create", "update", "delete"],
-          "columns": {
-            "name": {
-              "filter_ops": ["eq", "like"]
-            },
-            "parent_id": {
-              "filter_ops": ["eq"]
-            },
-            "path": {
-              "filter_ops": ["eq", "like"]
-            }
-          }
-        },
-        "admin_assignments": {
-          "tenant_column": "organisation",
-          "read_relation": "core.admin_assignments",
-          "write_table": "core.admin_assignments",
-          "default_order": "id",
-          "max_limit": 500,
-          "operations": ["list", "get", "create", "update", "delete"],
+          "operations": ["list", "get", "update"],
           "operation_filters": {
             "list": [
               "sgrn::datastore::filters::UserAuthFilter",
@@ -68,6 +26,42 @@
               "sgrn::datastore::filters::UserAuthFilter",
               "sgrn::datastore::filters::OrgAdminFilter"
             ],
+            "update": [
+              "sgrn::datastore::filters::UserAuthFilter",
+              "sgrn::datastore::filters::OrgAdminFilter"
+            ]
+          },
+          "columns": {
+            "name": { "filter_ops": ["eq", "like"] },
+            "domain": { "filter_ops": ["eq"] },
+            "status": { "filter_ops": ["eq", "in"] },
+            "token": { "insertable": false, "updatable": false },
+            "metadata": { "insertable": false, "updatable": false },
+            "deleted_at": { "insertable": false, "updatable": false },
+            "created_at": { "insertable": false, "updatable": false },
+            "updated_at": { "insertable": false, "updatable": false },
+            "total_virtual_size": { "insertable": false, "updatable": false },
+            "total_real_size": { "insertable": false, "updatable": false },
+            "total_entry_count": { "insertable": false, "updatable": false },
+            "storage_limit": { "insertable": false, "updatable": false },
+            "entry_count_limit": { "insertable": false, "updatable": false },
+            "rate_limit_rpm": { "insertable": false, "updatable": false },
+            "max_file_size_mb": { "insertable": false, "updatable": false },
+            "preferred_chunk_size_mb": {
+              "insertable": false,
+              "updatable": false
+            },
+            "rate_limit_upload_rpm": { "insertable": false, "updatable": false }
+          }
+        },
+        "domains": {
+          "tenant_column": "organisation",
+          "read_relation": "core.domains",
+          "write_table": "core.domains",
+          "default_order": "id",
+          "max_limit": 500,
+          "operations": ["list", "get", "create", "update", "delete"],
+          "operation_filters": {
             "create": [
               "sgrn::datastore::filters::UserAuthFilter",
               "sgrn::datastore::filters::OrgAdminFilter"
@@ -82,15 +76,39 @@
             ]
           },
           "columns": {
-            "user_id": {
-              "filter_ops": ["eq", "in"]
+            "encryption_policy": { "filter_ops": ["eq"] },
+            "name": { "filter_ops": ["eq", "like"], "updatable": false },
+            "parent_id": { "filter_ops": ["eq"], "updatable": false },
+            "path": {
+              "filter_ops": ["eq", "like"],
+              "insertable": false,
+              "updatable": false
             },
-            "scope": {
-              "filter_ops": ["eq"]
-            },
-            "domain_id": {
-              "filter_ops": ["eq"]
-            }
+            "storage_limit": { "insertable": false, "updatable": false },
+            "entry_count_limit": { "insertable": false, "updatable": false }
+          }
+        },
+        "admin_assignments": {
+          "tenant_column": "organisation",
+          "read_relation": "core.admin_assignments",
+          "write_table": "core.admin_assignments",
+          "default_order": "id",
+          "max_limit": 500,
+          "operations": ["list", "get"],
+          "operation_filters": {
+            "list": [
+              "sgrn::datastore::filters::UserAuthFilter",
+              "sgrn::datastore::filters::OrgAdminFilter"
+            ],
+            "get": [
+              "sgrn::datastore::filters::UserAuthFilter",
+              "sgrn::datastore::filters::OrgAdminFilter"
+            ]
+          },
+          "columns": {
+            "user_id": { "filter_ops": ["eq", "in"] },
+            "scope": { "filter_ops": ["eq"] },
+            "domain_id": { "filter_ops": ["eq"] }
           }
         },
         "sessions": {
@@ -102,14 +120,20 @@
           "write_table": "core.user_domain_permissions",
           "default_order": "id",
           "max_limit": 500,
-          "operations": ["list", "get", "create", "update", "delete"],
+          "operations": ["list", "get"],
+          "operation_filters": {
+            "list": [
+              "sgrn::datastore::filters::UserAuthFilter",
+              "sgrn::datastore::filters::OrgAdminFilter"
+            ],
+            "get": [
+              "sgrn::datastore::filters::UserAuthFilter",
+              "sgrn::datastore::filters::OrgAdminFilter"
+            ]
+          },
           "columns": {
-            "user_id": {
-              "filter_ops": ["eq", "in"]
-            },
-            "domain": {
-              "filter_ops": ["eq"]
-            }
+            "user_id": { "filter_ops": ["eq", "in"] },
+            "domain": { "filter_ops": ["eq"] }
           }
         },
         "users": {
@@ -118,29 +142,56 @@
           "write_table": "core.users",
           "default_order": "id",
           "max_limit": 500,
-          "operations": ["list", "get", "create", "update", "delete"],
+          "operations": ["list", "get", "update"],
+          "operation_filters": {
+            "list": [
+              "sgrn::datastore::filters::UserAuthFilter",
+              "sgrn::datastore::filters::OrgAdminFilter"
+            ],
+            "get": [
+              "sgrn::datastore::filters::UserAuthFilter",
+              "sgrn::datastore::filters::OrgAdminFilter"
+            ],
+            "update": [
+              "sgrn::datastore::filters::UserAuthFilter",
+              "sgrn::datastore::filters::OrgAdminFilter"
+            ]
+          },
           "columns": {
-            "first_name": {
-              "filter_ops": ["eq", "like"]
-            },
-            "family_name": {
-              "filter_ops": ["eq", "like"]
-            },
-            "email": {
-              "filter_ops": ["eq", "like"]
-            },
-            "is_platform_admin": {
-              "filter_ops": ["eq"]
+            "first_name": { "filter_ops": ["eq", "like"] },
+            "family_name": { "filter_ops": ["eq", "like"] },
+            "email": { "filter_ops": ["eq", "like"] },
+            "domain": { "filter_ops": ["eq"] },
+            "status": {
+              "filter_ops": ["eq", "in"],
+              "insertable": false,
+              "updatable": false
             },
             "role": {
-              "filter_ops": ["eq"]
+              "filter_ops": ["eq"],
+              "insertable": false,
+              "updatable": false
             },
-            "domain": {
-              "filter_ops": ["eq"]
+            "is_platform_admin": {
+              "filter_ops": ["eq"],
+              "insertable": false,
+              "updatable": false
             },
-            "status": {
-              "filter_ops": ["eq", "in"]
-            }
+            "is_active": { "insertable": false, "updatable": false },
+            "deleted_at": { "insertable": false, "updatable": false },
+            "created_at": { "insertable": false, "updatable": false },
+            "total_virtual_size": { "insertable": false, "updatable": false },
+            "total_real_size": { "insertable": false, "updatable": false },
+            "total_entry_count": { "insertable": false, "updatable": false },
+            "storage_limit": { "insertable": false, "updatable": false },
+            "entry_count_limit": { "insertable": false, "updatable": false },
+            "rate_limit_rpm": { "insertable": false, "updatable": false },
+            "max_file_size_mb": { "insertable": false, "updatable": false },
+            "preferred_chunk_size_mb": {
+              "insertable": false,
+              "updatable": false
+            },
+            "rate_limit_upload_rpm": { "insertable": false, "updatable": false }
           }
         }
       }

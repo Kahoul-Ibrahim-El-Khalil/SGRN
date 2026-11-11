@@ -15,11 +15,13 @@ using sgrn::datastore::query::PrimaryKey;
 
 class DomainsView : public CrudViewHandler<DomainsView> {
 public:
-    static constexpr std::array<Field, 4> kFields = {{
-        {"name", FieldType::Text, Op::Eq | Op::Like, true, true},
-        {"parent_id", FieldType::Int, static_cast<uint8_t>(Op::Eq), true, true},
-        {"path", FieldType::Text, Op::Eq | Op::Like, true, true},
-        {"encryption_policy", FieldType::Text, 0, true, true},
+    static constexpr std::array<Field, 6> kFields = {{
+        {"name", FieldType::Text, Op::Eq | Op::Like, true, false},
+        {"parent_id", FieldType::Int, static_cast<uint8_t>(Op::Eq), true, false},
+        {"path", FieldType::Text, Op::Eq | Op::Like, false, false},
+        {"encryption_policy", FieldType::Text, static_cast<uint8_t>(Op::Eq), true, true},
+        {"storage_limit", FieldType::BigInt, 0, false, false},
+        {"entry_count_limit", FieldType::BigInt, 0, false, false},
     }};
 
     static constexpr CrudViewSpec kSpec{
@@ -36,15 +38,21 @@ public:
         : CrudViewHandler(this, kRoutes, kItemRoutes) {
     }
 
-private:
+public:
+    // Route tables are public so tests can assert the generated filter
+    // policy (which routes exist, and which filters guard each) without
+    // having to boot the Drogon app.
     static inline const std::array<RouteConfig, 2> kRoutes = {{
         {"/api/v1/domains", &DomainsView::handleList, {drogon::Get}, {"sgrn::datastore::filters::UserAuthFilter"}},
-        {"/api/v1/domains", &DomainsView::handleCreate, {drogon::Post}, {"sgrn::datastore::filters::UserAuthFilter"}},
+        {"/api/v1/domains", &DomainsView::handleCreate, {drogon::Post},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"}},
     }};
     static inline const std::array<ItemRouteConfig, 3> kItemRoutes = {{
         {"/api/v1/domains/{id}", &DomainsView::handleGet, {drogon::Get}, {"sgrn::datastore::filters::UserAuthFilter"}},
-        {"/api/v1/domains/{id}", &DomainsView::handleUpdate, {drogon::Patch}, {"sgrn::datastore::filters::UserAuthFilter"}},
-        {"/api/v1/domains/{id}", &DomainsView::handleDelete, {drogon::Delete}, {"sgrn::datastore::filters::UserAuthFilter"}},
+        {"/api/v1/domains/{id}", &DomainsView::handleUpdate, {drogon::Patch},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"}},
+        {"/api/v1/domains/{id}", &DomainsView::handleDelete, {drogon::Delete},
+            {"sgrn::datastore::filters::UserAuthFilter", "sgrn::datastore::filters::OrgAdminFilter"}},
     }};
 };
 

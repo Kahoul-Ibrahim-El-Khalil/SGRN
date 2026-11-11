@@ -90,7 +90,6 @@ HttpRequestPtr makeAuthRequest(HttpMethod t_method, const std::string& t_path, c
     }
     req->setMethod(t_method);
     req->setPath(t_path);
-
     if (t_caller.user_id > 0) {
         Json::Value session;
         session["user"]["id"] = t_caller.user_id;
@@ -110,6 +109,20 @@ HttpRequestPtr makeAuthRequest(HttpMethod t_method, const std::string& t_path, c
     }
 
     return req;
+}
+
+// Textual HTTP method → drogon enum (all verbs, so the matrix can run
+// PUT/PATCH routes through the same harness as GET/POST/DELETE).
+HttpMethod methodFromName(const std::string& t_method) {
+    if (t_method == "GET")
+        return Get;
+    if (t_method == "POST")
+        return Post;
+    if (t_method == "PUT")
+        return Put;
+    if (t_method == "PATCH")
+        return Patch;
+    return Delete;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -170,6 +183,24 @@ void runAuthorizationMatrixTests() {
         {"DELETE", "/api/v1/admin/storage/formats", AdminLevel::ORG},
         {"GET", "/api/v1/admin/analytics/overview", AdminLevel::ORG},
         {"GET", "/api/v1/admin/analytics/breakdown", AdminLevel::ORG},
+
+        // WP5/WP7 additions — account & domain lifecycle, organisation
+        // lifecycle, domain quotas. Levels mirror admin.hpp's route table:
+        // org-scoped mutations sit behind OrgAdminFilter; organisation
+        // create/update is platform-only (fleet-wide namespace).
+        {"GET", "/api/v1/admin/organisations", AdminLevel::ORG},
+        {"POST", "/api/v1/admin/organisations", AdminLevel::PLATFORM},
+        {"PATCH", "/api/v1/admin/organisations/1", AdminLevel::PLATFORM},
+        {"PUT", "/api/v1/admin/quotas/domain/1", AdminLevel::ORG},
+        {"POST", "/api/v1/admin/domains/1/rename", AdminLevel::ORG},
+        {"POST", "/api/v1/admin/domains/1/move", AdminLevel::ORG},
+        {"PATCH", "/api/v1/admin/users/1/status", AdminLevel::ORG},
+        {"POST", "/api/v1/admin/users/1/password", AdminLevel::ORG},
+        {"DELETE", "/api/v1/admin/users/1", AdminLevel::ORG},
+        {"DELETE", "/api/v1/admin/automated-services/1", AdminLevel::ORG},
+        {"PATCH", "/api/v1/admin/automated-services/1/status", AdminLevel::ORG},
+        {"GET", "/api/v1/admin/roles/assignments", AdminLevel::ORG},
+        {"DELETE", "/api/v1/admin/metaprobe/sessions/00000000-0000-0000-0000-000000000001", AdminLevel::ORG},
     };
 
     // Pre-cache admin levels in AdminLevelCache to simulate resolved DB levels
@@ -194,8 +225,7 @@ void runAuthorizationMatrixTests() {
             ++g_total_cases;
 
             // Scenario A: Caller targets their own organisation
-            auto req = makeAuthRequest(
-                (r.method == std::string("GET")) ? Get : ((r.method == std::string("POST")) ? Post : Delete), r.path, c, c.org);
+            auto req = makeAuthRequest(methodFromName(r.method), r.path, c, c.org);
 
             bool filter_passed = false;
             HttpResponsePtr err_resp;
@@ -236,7 +266,7 @@ void runAuthorizationMatrixTests() {
             // Non-platform callers attempting to pass a foreign organisation parameter must be rejected with 403
             if (c.user_id > 0 && !c.is_platform) {
                 ++g_total_cases;
-                auto cross_req = makeAuthRequest((r.method == std::string("GET")) ? Get : Post, r.path, c, "ForeignTenantOrg");
+                auto cross_req = makeAuthRequest(methodFromName(r.method), r.path, c, "ForeignTenantOrg");
 
                 bool cross_passed = false;
                 HttpResponsePtr cross_err;

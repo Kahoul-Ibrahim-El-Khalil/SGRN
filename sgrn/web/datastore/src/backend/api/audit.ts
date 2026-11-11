@@ -72,3 +72,25 @@ export async function purgeAuditLogs(t_older_than_days: number = 30): Promise<Sg
         };
     }
 }
+
+export interface VerifyAuditLogsResult {
+    is_valid: boolean;
+    total_rows: number;
+    verified_checkpoints: number;
+    status: "verified" | "tampered";
+    message: string;
+    first_broken_seq?: number;
+    first_broken_id?: number;
+}
+
+export async function verifyAuditLogs(): Promise<SgrnResult<VerifyAuditLogsResult>> {
+    try {
+        const res = await authenticatedFetch(AdminBackendApiEndpoints.AUDIT_VERIFY);
+        return await processResponse<VerifyAuditLogsResult>(res);
+    } catch (e) {
+        return {
+            error: `Audit verification failed: ${e instanceof Error ? e.message : String(e)}`,
+            scope: ErrorScope.Network,
+        };
+    }
+}

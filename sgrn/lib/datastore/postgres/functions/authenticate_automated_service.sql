@@ -40,7 +40,14 @@ set
         a.domain
     from core.automated_services a
     where a.token = t_token
-      and a.token_secret_hash = crypt(t_secret, a.token_secret_hash);
+      and a.token_secret_hash = crypt(t_secret, a.token_secret_hash)
+      -- WP2: sign-in hardening — soft-deleted services and services of
+      -- suspended / archived organisations can no longer mint sessions.
+      and a.deleted_at is null
+      and exists (
+        select 1 from core.organisations o
+        where o.name = a.organisation and o.status = 'active'
+      );
 $$;
 
 -- permissions
