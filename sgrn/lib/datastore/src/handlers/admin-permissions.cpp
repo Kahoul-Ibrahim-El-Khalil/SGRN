@@ -7,20 +7,39 @@ using namespace drogon;
 
 namespace
 {
-Json::Value permissionRowJson(int64_t t_id, int32_t t_user_id, const std::string& t_email, const std::string& t_organisation,
-    const std::string& t_domain, const std::string& t_subpath, bool t_read, bool t_write, bool t_delete) {
-    Json::Value e;
-    e["id"] = Json::Int64(t_id);
-    e["user_id"] = t_user_id;
-    e["email"] = t_email;
-    e["organisation"] = t_organisation;
-    e["domain"] = t_domain;
-    e["allowed_subpath"] = t_subpath;
-    e["can_read"] = t_read;
-    e["can_write"] = t_write;
-    e["can_delete"] = t_delete;
-    return e;
-}
+struct PermissionRow {
+    int64_t id{0};
+    int32_t user_id{0};
+    std::string email;
+    std::string organisation;
+    std::string domain;
+    std::string allowed_subpath;
+    bool can_read{false};
+    bool can_write{false};
+    bool can_delete{false};
+};
+
+struct PermissionListResponse {
+    std::vector<PermissionRow> permissions;
+    int64_t count{0};
+};
+struct PermissionGrantResponse {
+    int64_t id{0};
+    int32_t user_id{0};
+    std::string email;
+    std::string organisation;
+    std::string domain;
+    std::string allowed_subpath;
+    bool can_read{false};
+    bool can_write{false};
+    bool can_delete{false};
+    std::optional<std::string> note;
+};
+struct PermissionRevokeResponse {
+    bool success{true};
+    std::string revoked;
+    std::optional<std::string> warning;
+};
 
 bool rowBool(const drogon::orm::Row& t_row, const char* t_col) {
     if (t_row[t_col].isNull()) {
@@ -90,16 +109,15 @@ Task<HttpResponsePtr> AdminApiHandler::handleListPermissions(HttpRequestPtr tsp_
             "ORDER BY u.email, p.domain LIMIT $5",
             user_id, email, domain, organisation, static_cast<int64_t>(limit));
 
-        Json::Value list = Json::arrayValue;
+        PermissionListResponse out;
+        out.permissions.reserve(rows.size());
         for (const auto& row : rows) {
-            list.append(permissionRowJson(row["id"].as<int64_t>(), row["user_id"].as<int32_t>(), row["email"].as<std::string>(),
+            out.permissions.push_back({row["id"].as<int64_t>(), row["user_id"].as<int32_t>(), row["email"].as<std::string>(),
                 row["organisation"].as<std::string>(), row["domain"].as<std::string>(), row["allowed_subpath"].as<std::string>(),
-                rowBool(row, "can_read"), rowBool(row, "can_write"), rowBool(row, "can_delete")));
+                rowBool(row, "can_read"), rowBool(row, "can_write"), rowBool(row, "can_delete")});
         }
-        Json::Value out;
-        out["permissions"] = std::move(list);
-        out["count"] = static_cast<Json::Int64>(rows.size());
-        co_return createJsonResponse(out, k200OK);
+        out.count = static_cast<int64_t>(rows.size());
+        co_return createTypedJsonResponse(out, k200OK);
     } catch (const drogon::orm::DrogonDbException& e) {
         ADMIN_ERROR_LOG("Permission list DB error: {}", e.base().what());
         co_return createErrorResponse(AdminApiError::DbError);
@@ -237,15 +255,15 @@ Task<HttpResponsePtr> AdminApiHandler::handleGrantPermission(HttpRequestPtr tsp_
             "RETURNING id, allowed_subpath, can_read, can_write, can_delete",
             user_id, organisation, domain, subpath, can_read, can_write, can_delete);
         const auto& row = upserted[0];
-        Json::Value out = permissionRowJson(row["id"].as<int64_t>(), user_id, email, organisation, domain,
-            row["allowed_subpath"].as<std::string>(), rowBool(row, "can_read"), rowBool(row, "can_write"), rowBool(row, "can_delete"));
+        PermissionGrantResponse out{row["id"].as<int64_t>(), user_id, email, organisation, domain, row["allowed_subpath"].as<std::string>(),
+            rowBool(row, "can_read"), rowBool(row, "can_write"), rowBool(row, "can_delete"), std::nullopt};
         if (first_grant) {
-            out["note"] = "First domain grant for this user — storage access unlocked (zero-trust default was deny-all).";
+            out.note = "First domain grant for this user — storage access unlocked (zero-trust default was deny-all).";
         }
         co_await sgrn::datastore::audit::AuditLogger::log(db, organisation, "user", actor_id, actor_name, "permission.granted", "user",
             std::to_string(user_id), tsp_req->getPeerAddr().toIp(), *json, "success");
         sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(user_id);
-        co_return createJsonResponse(out, k200OK);
+        co_return createTypedJsonResponse(out, k200OK);
     } catch (const drogon::orm::DrogonDbException& e) {
         ADMIN_ERROR_LOG("Permission grant DB error: {}", e.base().what());
         co_return createErrorResponse(AdminApiError::DbError);
@@ -325,14 +343,13 @@ Task<HttpResponsePtr> AdminApiHandler::handleRevokePermission(HttpRequestPtr tsp
         const int32_t affected_user = deleted[0]["user_id"].as<int32_t>();
         auto remaining = co_await db->execSqlCoro("SELECT COUNT(*) FROM core.user_domain_permissions WHERE user_id = $1", affected_user);
 
-        Json::Value out;
-        out["success"] = true;
-        out["revoked"] = id_desc;
+        PermissionRevokeResponse out;
+        out.revoked = id_desc;
         if (!remaining.empty() && remaining[0][0].as<std::string>() == "0") {
-            out["warning"] = "User now holds no domain grants — zero-trust default-deny locks them out of storage entirely.";
+            out.warning = "User now holds no domain grants — zero-trust default-deny locks them out of storage entirely.";
         }
         sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(affected_user);
-        co_return createJsonResponse(out, k200OK);
+        co_return createTypedJsonResponse(out, k200OK);
     } catch (const drogon::orm::DrogonDbException& e) {
         ADMIN_ERROR_LOG("Permission revoke DB error: {}", e.base().what());
         co_return createErrorResponse(AdminApiError::DbError);

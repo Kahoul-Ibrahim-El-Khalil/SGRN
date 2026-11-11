@@ -7,6 +7,60 @@ using namespace drogon;
 
 namespace
 {
+struct UserListEntry {
+    int32_t id{0};
+    std::string email;
+    std::string first_name;
+    std::string family_name;
+    std::string organisation;
+};
+
+struct ServiceRegistrationResponse {
+    bool success{true};
+    std::string message;
+    int32_t automated_service_id{0};
+    std::string name;
+    std::string token;
+    std::string token_secret;
+    std::string organisation;
+    std::string kind;
+};
+
+struct ServiceRotationResponse {
+    bool success{true};
+    int32_t automated_service_id{0};
+    std::string name;
+    std::string token;
+    std::string token_secret;
+    bool is_active{false};
+    std::string status;
+    std::string organisation;
+    std::string created_at;
+    sgrn::json::RawJson metadata{"{}"};
+    std::optional<sgrn::json::RawJson> kind;
+};
+
+struct UserStatusResponse {
+    bool success{true};
+    std::string status;
+};
+struct DeletedUserResponse {
+    bool success{true};
+    int32_t deleted_user_id{0};
+};
+struct SuccessResponse {
+    bool success{true};
+};
+struct ServiceStatusResponse {
+    bool success{true};
+    int32_t automated_service_id{0};
+    std::string status;
+};
+struct DeletedServiceResponse {
+    bool success{true};
+    int32_t deleted_service_id{0};
+};
+
 Json::Value parseMetadataValue(const std::string& t_raw) {
     if (t_raw.empty()) {
         return Json::Value(Json::objectValue);
@@ -99,18 +153,19 @@ Task<HttpResponsePtr> AdminApiHandler::handleGetUsers(HttpRequestPtr tsp_req) {
                 : co_await db->execSqlCoro(
                       "SELECT id, email, first_name, family_name, organisation FROM core.users WHERE deleted_at IS NULL ORDER BY id");
 
-        Json::Value users_json = Json::arrayValue;
+        std::vector<UserListEntry> users;
+        users.reserve(rows.size());
         for (const auto& user : rows) {
-            Json::Value u;
-            u["id"] = user["id"].as<int32_t>();
-            u["email"] = user["email"].as<std::string>();
-            u["first_name"] = user["first_name"].as<std::string>();
-            u["family_name"] = user["family_name"].as<std::string>();
-            u["organisation"] = user["organisation"].as<std::string>();
-            users_json.append(u);
+            users.push_back({user["id"].as<int32_t>(), user["email"].as<std::string>(), user["first_name"].as<std::string>(),
+                user["family_name"].as<std::string>(), user["organisation"].as<std::string>()});
         }
 
-        co_return createJsonResponse(users_json, k200OK);
+        auto json_result = sgrn::json::write(users);
+        if (json_result.hasError()) {
+            co_return createErrorResponse("Failed to serialize users response", k500InternalServerError, "AdminApi");
+        }
+        std::string response_json = std::move(json_result).value();
+        co_return createJsonResponse(std::move(response_json), k200OK);
     } catch (const std::exception& e) {
         co_return createErrorResponse(AdminApiError::DbError);
     }
@@ -243,15 +298,9 @@ Task<HttpResponsePtr> AdminApiHandler::handleRegisterAutomatedService(HttpReques
         if (res.empty())
             co_return createErrorResponse(AdminApiError::DbError);
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["message"] = "Automated service registered successfully";
-        resp["automated_service_id"] = res[0]["id"].as<int32_t>();
-        resp["name"] = res[0]["name"].as<std::string>();
-        resp["token"] = res[0]["token"].as<std::string>();
-        resp["token_secret"] = res[0]["token_secret"].as<std::string>();
-        resp["organisation"] = res[0]["organisation"].as<std::string>();
-        resp["kind"] = kind;
+        ServiceRegistrationResponse resp{true, "Automated service registered successfully", res[0]["id"].as<int32_t>(),
+            res[0]["name"].as<std::string>(), res[0]["token"].as<std::string>(), res[0]["token_secret"].as<std::string>(),
+            res[0]["organisation"].as<std::string>(), kind};
 
         // Sync: insert the new public service token into local RAM sorted vector
         // and broadcast PG NOTIFY so all cluster nodes update their lookup vectors.
@@ -264,7 +313,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleRegisterAutomatedService(HttpReques
         co_await sgrn::datastore::audit::AuditLogger::log(db, org, "user", actor_id, actor_name, "service.created", "automated_service",
             std::to_string(res[0]["id"].as<int32_t>()), tsp_req->getPeerAddr().toIp(), *json, "success");
 
-        co_return createJsonResponse(resp, k201Created);
+        co_return createTypedJsonResponse(resp, k201Created);
     } catch (const drogon::orm::DrogonDbException& e) {
         ADMIN_ERROR_LOG("Automated service registration DB error: {}", e.base().what());
         co_return createErrorResponse(std::string("Automated service registration failed: ") + e.base().what(), k400BadRequest, "AdminApi");
@@ -374,21 +423,18 @@ Task<HttpResponsePtr> AdminApiHandler::handleRotateAutomatedServiceToken(HttpReq
         }
 
         const auto& updated = rotation[0];
-        Json::Value resp = Json::objectValue;
-        resp["success"] = true;
-        resp["automated_service_id"] = updated["id"].as<int32_t>();
-        resp["name"] = updated["name"].as<std::string>();
-        resp["token"] = updated["token"].as<std::string>();
-        resp["token_secret"] = updated["token_secret"].as<std::string>();
-        resp["is_active"] = (updated["status"].as<std::string>() == "active");
-        resp["status"] = updated["status"].as<std::string>();
-        resp["organisation"] = updated["organisation"].as<std::string>();
-        resp["created_at"] = updated["created_at"].as<std::string>();
         const Json::Value metadata = parseMetadataValue(updated["metadata"].as<std::string>());
-        resp["metadata"] = metadata;
+        Json::StreamWriterBuilder metadata_writer;
+        metadata_writer["indentation"] = "";
+        const sgrn::json::RawJson metadata_raw(Json::writeString(metadata_writer, metadata));
+        std::optional<sgrn::json::RawJson> kind_raw;
         if (metadata.isObject() && metadata.isMember("kind") && !metadata["kind"].isNull()) {
-            resp["kind"] = metadata["kind"];
+            kind_raw = sgrn::json::RawJson(Json::writeString(metadata_writer, metadata["kind"]));
         }
+        ServiceRotationResponse resp{true, updated["id"].as<int32_t>(), updated["name"].as<std::string>(),
+            updated["token"].as<std::string>(), updated["token_secret"].as<std::string>(), updated["status"].as<std::string>() == "active",
+            updated["status"].as<std::string>(), updated["organisation"].as<std::string>(), updated["created_at"].as<std::string>(),
+            metadata_raw, std::move(kind_raw)};
 
         // Sync: old public token is replaced — deregister old UUID from sorted vector
         // and register new UUID, broadcasting PG NOTIFY to all cluster nodes.
@@ -400,7 +446,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleRotateAutomatedServiceToken(HttpReq
         sgrn::datastore::session::SessionStore::instance().registerServiceToken(new_tok);
         co_await db->execSqlCoro("SELECT pg_notify('service_token_update', $1)", "register:" + new_tok);
 
-        co_return createJsonResponse(resp, k200OK);
+        co_return createTypedJsonResponse(resp, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to rotate credentials: {}", e.what());
         co_return createErrorResponse(std::string("Failed to rotate credentials: ") + e.what(), k400BadRequest, "AdminApi");
@@ -459,10 +505,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleSetUserStatus(HttpRequestPtr tsp_re
         co_await sgrn::datastore::audit::AuditLogger::log(db, ctx.organisation, "user", ctx.actor_id, ctx.actor_name, "user.status_changed",
             "user", std::to_string(target_id), tsp_req->getPeerAddr().toIp(), details, "success");
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["status"] = status;
-        co_return createJsonResponse(resp, k200OK);
+        co_return createTypedJsonResponse(UserStatusResponse{true, status}, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to set user status: {}", e.what());
         co_return createErrorResponse(std::string("Failed to set user status: ") + e.what(), k400BadRequest, "AdminApi");
@@ -505,12 +548,9 @@ Task<HttpResponsePtr> AdminApiHandler::handleDeleteUser(HttpRequestPtr tsp_req, 
         co_await db->execSqlCoro("UPDATE core.users SET deleted_at = now(), is_active = false WHERE id = $1", target_id);
         sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(target_id);
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["deleted_user_id"] = target_id;
         co_await sgrn::datastore::audit::AuditLogger::log(db, ctx.organisation, "user", ctx.actor_id, ctx.actor_name, "user.deleted",
             "user", std::to_string(target_id), tsp_req->getPeerAddr().toIp(), Json::objectValue, "success");
-        co_return createJsonResponse(resp, k200OK);
+        co_return createTypedJsonResponse(DeletedUserResponse{true, target_id}, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to delete user: {}", e.what());
         co_return createErrorResponse(std::string("Failed to delete user: ") + e.what(), k400BadRequest, "AdminApi");
@@ -570,9 +610,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleResetUserPassword(HttpRequestPtr ts
         co_await sgrn::datastore::audit::AuditLogger::log(db, ctx.organisation, "user", ctx.actor_id, ctx.actor_name, "user.password_reset",
             "user", std::to_string(target_id), tsp_req->getPeerAddr().toIp(), details, "success");
 
-        Json::Value resp;
-        resp["success"] = true;
-        co_return createJsonResponse(resp, k200OK);
+        co_return createTypedJsonResponse(SuccessResponse{}, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to reset user password: {}", e.what());
         co_return createErrorResponse(std::string("Failed to reset user password: ") + e.what(), k400BadRequest, "AdminApi");
@@ -640,11 +678,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleSetAutomatedServiceStatus(HttpReque
         co_await sgrn::datastore::audit::AuditLogger::log(db, ctx.organisation, "user", ctx.actor_id, ctx.actor_name,
             "service.status_changed", "automated_service", std::to_string(service_id), tsp_req->getPeerAddr().toIp(), details, "success");
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["automated_service_id"] = service_id;
-        resp["status"] = status;
-        co_return createJsonResponse(resp, k200OK);
+        co_return createTypedJsonResponse(ServiceStatusResponse{true, service_id, status}, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to set automated service status: {}", e.what());
         co_return createErrorResponse(std::string("Failed to set automated service status: ") + e.what(), k400BadRequest, "AdminApi");
@@ -688,12 +722,9 @@ Task<HttpResponsePtr> AdminApiHandler::handleDeleteAutomatedService(HttpRequestP
             co_await db->execSqlCoro("SELECT pg_notify('service_token_update', $1)", "deregister:" + token);
         }
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["deleted_service_id"] = service_id;
         co_await sgrn::datastore::audit::AuditLogger::log(db, ctx.organisation, "user", ctx.actor_id, ctx.actor_name, "service.deleted",
             "automated_service", std::to_string(service_id), tsp_req->getPeerAddr().toIp(), Json::objectValue, "success");
-        co_return createJsonResponse(resp, k200OK);
+        co_return createTypedJsonResponse(DeletedServiceResponse{true, service_id}, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to delete automated service: {}", e.what());
         co_return createErrorResponse(std::string("Failed to delete automated service: ") + e.what(), k400BadRequest, "AdminApi");

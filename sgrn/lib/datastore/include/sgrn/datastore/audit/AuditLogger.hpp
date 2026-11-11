@@ -2,6 +2,7 @@
 
 #include <drogon/orm/DbClient.h>
 #include <drogon/utils/coroutine.h>
+#include <sgrn/utils/json-serialization.hpp>
 #include <json/json.h>
 
 #include <cstdint>
@@ -33,15 +34,34 @@ struct AuditCheckpointResult {
 
 class AuditLogger {
 public:
-    // Asynchronously log an event to core.audit_logs table via core.append_audit_log()
+    // Serialize a typed details object with Glaze, then append the event to
+    // core.audit_logs via core.append_audit_log().
+    template <typename T>
     static drogon::Task<bool> log(drogon::orm::DbClientPtr tsp_db_client, std::string t_organisation,
         std::string t_actor_type, // "user", "automated_service", "system"
         std::optional<int32_t> t_actor_id, std::string t_actor_name,
         std::string t_action,      // e.g. "auth.login", "user.created", "quota.updated", "audit.purged"
         std::string t_target_type, // "user", "automated_service", "role", "file", "organisation"
-        std::string t_target_id, std::string t_ip, Json::Value t_details = Json::objectValue,
-        std::string t_status = "success" // "success", "failure"
-    );
+        std::string t_target_id, std::string t_ip, const T& t_details, std::string t_status = "success") { // "success", "failure"
+        auto details_result = sgrn::json::write(t_details);
+        if (details_result.hasError()) {
+            co_return false;
+        }
+        co_return co_await logSerialized(std::move(tsp_db_client), std::move(t_organisation), std::move(t_actor_type), t_actor_id,
+            std::move(t_actor_name), std::move(t_action), std::move(t_target_type), std::move(t_target_id), std::move(t_ip),
+            std::move(details_result).value(), std::move(t_status));
+    }
+
+    // Compatibility boundary for legacy dynamic JsonCpp payloads. New call
+    // sites should use the typed overload above.
+    static drogon::Task<bool> log(drogon::orm::DbClientPtr tsp_db_client, std::string t_organisation, std::string t_actor_type,
+        std::optional<int32_t> t_actor_id, std::string t_actor_name, std::string t_action, std::string t_target_type,
+        std::string t_target_id, std::string t_ip, Json::Value t_details = Json::objectValue, std::string t_status = "success");
+
+    // Append already serialized JSON. The input must be a valid JSON object.
+    static drogon::Task<bool> logSerialized(drogon::orm::DbClientPtr tsp_db_client, std::string t_organisation, std::string t_actor_type,
+        std::optional<int32_t> t_actor_id, std::string t_actor_name, std::string t_action, std::string t_target_type,
+        std::string t_target_id, std::string t_ip, std::string t_details_json, std::string t_status = "success");
 
     // Verify hash chain and checkpoints for an organisation (or across all organisations if empty)
     static drogon::Task<AuditVerificationResult> verifyChain(drogon::orm::DbClientPtr tsp_db_client, const std::string& t_organisation);

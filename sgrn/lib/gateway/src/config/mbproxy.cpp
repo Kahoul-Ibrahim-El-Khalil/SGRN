@@ -1,86 +1,102 @@
 #include <sgrn/gateway/config/mbproxy.hpp>
-#include <sgrn/utils/filesystem.hpp>
+#include <sgrn/utils/json-serialization.hpp>
 #include <fstream>
-#include <rapidjson/document.h>
-#include <rapidjson/error/en.h>
-#include <sstream>
+#include <iterator>
 
 namespace sgrn::gateway::config
 {
 using sgrn::Result;
+
+namespace detail
+{
+
+struct MbMappingJson {
+    std::string type{"holding"};
+    uint16_t src_address{0};
+    uint16_t dst_address{0};
+    uint16_t count{1};
+    int interval_ms{100};
+};
+
+struct MbDeviceJson {
+    std::string name;
+    std::string ip;
+    uint16_t port{502};
+    std::vector<MbMappingJson> mappings;
+};
+
+struct MbProxyConfigJson {
+    struct Hub {
+        std::string ip{"127.0.0.1"};
+        uint16_t port{502};
+    } hub;
+    std::vector<MbDeviceJson> devices;
+    bool verbose{false};
+};
+
+} // namespace detail
+
+} // namespace sgrn::gateway::config
+
+namespace glz
+{
+
+template <>
+struct meta<sgrn::gateway::config::detail::MbMappingJson> {
+    using T = sgrn::gateway::config::detail::MbMappingJson;
+    static constexpr auto value = object("type", &T::type, "src_address", &T::src_address, "dst_address", &T::dst_address, "count",
+        &T::count, "interval_ms", &T::interval_ms);
+};
+
+template <>
+struct meta<sgrn::gateway::config::detail::MbDeviceJson> {
+    using T = sgrn::gateway::config::detail::MbDeviceJson;
+    static constexpr auto value = object("name", &T::name, "ip", &T::ip, "port", &T::port, "mappings", &T::mappings);
+};
+
+template <>
+struct meta<sgrn::gateway::config::detail::MbProxyConfigJson::Hub> {
+    using T = sgrn::gateway::config::detail::MbProxyConfigJson::Hub;
+    static constexpr auto value = object("ip", &T::ip, "port", &T::port);
+};
+
+template <>
+struct meta<sgrn::gateway::config::detail::MbProxyConfigJson> {
+    using T = sgrn::gateway::config::detail::MbProxyConfigJson;
+    static constexpr auto value = object("hub", &T::hub, "devices", &T::devices, "verbose", &T::verbose);
+};
+
+} // namespace glz
+
+namespace sgrn::gateway::config
+{
 
 Result<MbProxyConfig, std::string> parseMbProxyConfig(const std::string& t_path) {
     std::ifstream ifs(t_path);
     if (!ifs.is_open())
         return Error(fmt::format("Cannot open config file: {}", t_path));
 
-    std::stringstream buffer;
-    buffer << ifs.rdbuf();
-    std::string content = buffer.str();
+    const std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    auto wire_res = sgrn::json::read<detail::MbProxyConfigJson>(content);
+    if (wire_res.hasError())
+        return Error(fmt::format("Failed to deserialize Modbus proxy config: {}", wire_res.error().what()));
 
-    rapidjson::Document doc;
-    if (doc.Parse(content.c_str()).HasParseError()) {
-        return Error(
-            fmt::format("JSON Parse SchemaError: {} at offset {}", rapidjson::GetParseError_En(doc.GetParseError()), doc.GetErrorOffset()));
-    }
-
-    if (!doc.IsObject()) {
-        return Error(std::string("Config root must be an object"));
-    }
-
+    const auto& wire = wire_res.value();
     MbProxyConfig cfg;
-
-    if (doc.HasMember("hub") && doc["hub"].IsObject()) {
-        const auto& hub = doc["hub"];
-        if (hub.HasMember("ip") && hub["ip"].IsString())
-            cfg.hub_ip = hub["ip"].GetString();
-        if (hub.HasMember("port") && hub["port"].IsUint())
-            cfg.hub_port = static_cast<uint16_t>(hub["port"].GetUint());
-    }
-
-    if (doc.HasMember("verbose") && doc["verbose"].IsBool()) {
-        cfg.verbose = doc["verbose"].GetBool();
-    }
-
-    if (doc.HasMember("devices") && doc["devices"].IsArray()) {
-        const auto& devices = doc["devices"];
-        for (rapidjson::SizeType i = 0; i < devices.Size(); ++i) {
-            if (!devices[i].IsObject())
-                continue;
-            const auto& d = devices[i];
-
-            MbDevice device;
-            if (d.HasMember("name") && d["name"].IsString())
-                device.name = d["name"].GetString();
-            if (d.HasMember("ip") && d["ip"].IsString())
-                device.ip = d["ip"].GetString();
-            if (d.HasMember("port") && d["port"].IsUint())
-                device.port = static_cast<uint16_t>(d["port"].GetUint());
-
-            if (d.HasMember("mappings") && d["mappings"].IsArray()) {
-                const auto& maps = d["mappings"];
-                for (rapidjson::SizeType j = 0; j < maps.Size(); ++j) {
-                    if (!maps[j].IsObject())
-                        continue;
-                    const auto& m = maps[j];
-
-                    MbMapping mapping;
-                    if (m.HasMember("type") && m["type"].IsString())
-                        mapping.type = m["type"].GetString();
-                    if (m.HasMember("src_address") && m["src_address"].IsUint())
-                        mapping.src_address = static_cast<uint16_t>(m["src_address"].GetUint());
-                    if (m.HasMember("dst_address") && m["dst_address"].IsUint())
-                        mapping.dst_address = static_cast<uint16_t>(m["dst_address"].GetUint());
-                    if (m.HasMember("count") && m["count"].IsUint())
-                        mapping.count = static_cast<uint16_t>(m["count"].GetUint());
-                    if (m.HasMember("interval_ms") && m["interval_ms"].IsInt())
-                        mapping.interval_ms = m["interval_ms"].GetInt();
-
-                    device.mappings.push_back(mapping);
-                }
-            }
-            cfg.devices.push_back(device);
-        }
+    cfg.hub_ip = wire.hub.ip;
+    cfg.hub_port = wire.hub.port;
+    cfg.verbose = wire.verbose;
+    cfg.devices.reserve(wire.devices.size());
+    for (const auto& device_wire : wire.devices) {
+        MbDevice device;
+        device.name = device_wire.name;
+        device.ip = device_wire.ip;
+        device.port = device_wire.port;
+        device.mappings.reserve(device_wire.mappings.size());
+        for (const auto& mapping_wire : device_wire.mappings)
+            device.mappings.push_back(
+                {mapping_wire.type, mapping_wire.src_address, mapping_wire.dst_address, mapping_wire.count, mapping_wire.interval_ms});
+        cfg.devices.push_back(std::move(device));
     }
 
     return cfg;

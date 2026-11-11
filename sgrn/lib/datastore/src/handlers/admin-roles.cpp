@@ -1,9 +1,54 @@
 // admin-roles.cpp — Role administration.
 #include "admin-common.hpp"
 
+#include <sgrn/utils/json-serialization.hpp>
+
 namespace sgrn::datastore::handlers::admin
 {
 using namespace drogon;
+
+namespace
+{
+struct SuccessMessageResponse {
+    bool success{true};
+    std::string message;
+};
+
+struct RoleCreatedResponse {
+    bool success{true};
+    int32_t role_id{0};
+    std::string message;
+};
+
+struct RoleAssignmentEntry {
+    int32_t role_id{0};
+    std::string role_name;
+    std::string target_type;
+    int32_t target_id{0};
+    std::string target_label;
+};
+
+struct RoleAssignmentsResponse {
+    bool success{true};
+    std::vector<RoleAssignmentEntry> assignments;
+    std::size_t count{0};
+};
+
+struct RoleListEntry {
+    int32_t id{0};
+    std::string name;
+    std::string description;
+    bool is_system{false};
+    std::string created_at;
+    std::string updated_at;
+    sgrn::json::RawJson permissions{"[]"};
+};
+
+struct RoleListResponse {
+    bool success{true};
+    std::vector<RoleListEntry> roles;
+};
+} // namespace
 
 Task<HttpResponsePtr> AdminApiHandler::handleGetRoles(HttpRequestPtr tsp_req) {
     try {
@@ -19,33 +64,19 @@ Task<HttpResponsePtr> AdminApiHandler::handleGetRoles(HttpRequestPtr tsp_req) {
         if (res.hasError())
             co_return createErrorResponse(AdminApiError::DbError);
 
-        Json::Value roles_arr = Json::arrayValue;
+        RoleListResponse resp;
+        resp.roles.reserve(res.value().size());
         for (const auto& row : res.value()) {
-            Json::Value r;
-            r["id"] = row.id;
-            r["name"] = row.name;
-            r["description"] = row.description;
-            r["is_system"] = row.system;
-            r["created_at"] = row.created_at;
-            r["updated_at"] = row.updated_at;
-
             const std::string& raw_perms = row.permissions;
             Json::CharReaderBuilder builder;
             Json::Value perms_json;
             std::string errs;
             const std::unique_ptr<Json::CharReader> up_reader(builder.newCharReader());
-            if (up_reader->parse(raw_perms.data(), raw_perms.data() + raw_perms.size(), &perms_json, &errs)) {
-                r["permissions"] = perms_json;
-            } else {
-                r["permissions"] = Json::arrayValue;
-            }
-            roles_arr.append(r);
+            const bool valid = up_reader->parse(raw_perms.data(), raw_perms.data() + raw_perms.size(), &perms_json, &errs);
+            resp.roles.push_back({row.id, row.name, row.description, row.system, row.created_at, row.updated_at,
+                valid ? sgrn::json::RawJson(raw_perms) : sgrn::json::RawJson("[]")});
         }
-
-        Json::Value resp;
-        resp["success"] = true;
-        resp["roles"] = roles_arr;
-        co_return createJsonResponse(resp, k200OK);
+        co_return createTypedJsonResponse(resp, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to get roles: {}", e.what());
         co_return createErrorResponse(std::string("Failed to get roles: ") + e.what(), k400BadRequest, "AdminApi");
@@ -86,11 +117,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleCreateRole(HttpRequestPtr tsp_req) 
         co_await sgrn::datastore::audit::AuditLogger::log(db, context.organisation, "user", context.actor_id, context.actor_name,
             "role.created", "role", std::to_string(role_id), tsp_req->getPeerAddr().toIp(), *json, "success");
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["role_id"] = role_id;
-        resp["message"] = "Custom role created successfully";
-        co_return createJsonResponse(resp, k201Created);
+        co_return createTypedJsonResponse(RoleCreatedResponse{true, role_id, "Custom role created successfully"}, k201Created);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to create role: {}", e.what());
         co_return createErrorResponse(std::string("Failed to create role: ") + e.what(), k400BadRequest, "AdminApi");
@@ -131,10 +158,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleUpdateRole(HttpRequestPtr tsp_req, 
         co_await sgrn::datastore::audit::AuditLogger::log(db, context.organisation, "user", context.actor_id, context.actor_name,
             "role.updated", "role", std::to_string(role_id), tsp_req->getPeerAddr().toIp(), *json, "success");
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["message"] = "Role updated successfully";
-        co_return createJsonResponse(resp, k200OK);
+        co_return createTypedJsonResponse(SuccessMessageResponse{true, "Role updated successfully"}, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to update role: {}", e.what());
         co_return createErrorResponse(std::string("Failed to update role: ") + e.what(), k400BadRequest, "AdminApi");
@@ -160,10 +184,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleDeleteRole(HttpRequestPtr tsp_req, 
         co_await sgrn::datastore::audit::AuditLogger::log(db, context.organisation, "user", context.actor_id, context.actor_name,
             "role.deleted", "role", std::to_string(role_id), tsp_req->getPeerAddr().toIp(), Json::objectValue, "success");
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["message"] = "Role deleted successfully";
-        co_return createJsonResponse(resp, k200OK);
+        co_return createTypedJsonResponse(SuccessMessageResponse{true, "Role deleted successfully"}, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to delete role: {}", e.what());
         co_return createErrorResponse(std::string("Failed to delete role: ") + e.what(), k400BadRequest, "AdminApi");
@@ -248,10 +269,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleAssignRole(HttpRequestPtr tsp_req) 
             sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(*user_id);
         }
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["message"] = "Role assigned successfully";
-        co_return createJsonResponse(resp, k200OK);
+        co_return createTypedJsonResponse(SuccessMessageResponse{true, "Role assigned successfully"}, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to assign role: {}", e.what());
         co_return createErrorResponse(std::string("Failed to assign role: ") + e.what(), k400BadRequest, "AdminApi");
@@ -337,10 +355,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleRevokeRole(HttpRequestPtr tsp_req) 
             sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(*user_id);
         }
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["message"] = "Role revoked successfully";
-        co_return createJsonResponse(resp, k200OK);
+        co_return createTypedJsonResponse(SuccessMessageResponse{true, "Role revoked successfully"}, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to revoke role: {}", e.what());
         co_return createErrorResponse(std::string("Failed to revoke role: ") + e.what(), k400BadRequest, "AdminApi");
@@ -372,28 +387,25 @@ Task<HttpResponsePtr> AdminApiHandler::handleListRoleAssignments(HttpRequestPtr 
             "ORDER BY ur.role_id, ur.user_id NULLS LAST, ur.automated_service_id NULLS LAST",
             {context.organisation});
 
-        Json::Value arr = Json::arrayValue;
+        std::vector<RoleAssignmentEntry> assignments;
+        assignments.reserve(res.size());
         for (const auto& row : res) {
-            Json::Value item;
-            item["role_id"] = row["role_id"].as<int32_t>();
-            item["role_name"] = row["role_name"].as<std::string>();
+            RoleAssignmentEntry item;
+            item.role_id = row["role_id"].as<int32_t>();
+            item.role_name = row["role_name"].as<std::string>();
             if (row["user_id"].isNull()) {
-                item["target_type"] = "automated_service";
-                item["target_id"] = row["automated_service_id"].as<int32_t>();
-                item["target_label"] = row["service_name"].as<std::string>();
+                item.target_type = "automated_service";
+                item.target_id = row["automated_service_id"].as<int32_t>();
+                item.target_label = row["service_name"].as<std::string>();
             } else {
-                item["target_type"] = "user";
-                item["target_id"] = row["user_id"].as<int32_t>();
-                item["target_label"] = row["user_email"].as<std::string>();
+                item.target_type = "user";
+                item.target_id = row["user_id"].as<int32_t>();
+                item.target_label = row["user_email"].as<std::string>();
             }
-            arr.append(item);
+            assignments.push_back(std::move(item));
         }
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["assignments"] = arr;
-        resp["count"] = static_cast<Json::UInt64>(res.size());
-        co_return createJsonResponse(resp, k200OK);
+        co_return createTypedJsonResponse(RoleAssignmentsResponse{true, std::move(assignments), res.size()}, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to list role assignments: {}", e.what());
         co_return createErrorResponse(std::string("Failed to list role assignments: ") + e.what(), k400BadRequest, "AdminApi");

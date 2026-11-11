@@ -11,6 +11,7 @@
 #include <sgrn/gateway/twin/PlcMemory.hpp>
 #include <sgrn/gateway/twin/TypeDictionary.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
+#include <sgrn/utils/json-serialization.hpp>
 #include <chrono>
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -19,6 +20,43 @@
 using sgrn::gateway::common::SecurityHelper;
 namespace sgrn::gateway::adapters
 {
+
+namespace
+{
+
+struct ReplayStatusResponse {
+    double speed;
+    bool paused;
+    bool unpaced;
+    uint64_t frames;
+    int64_t ts;
+
+    static constexpr auto glaze = glz::object("speed", &ReplayStatusResponse::speed, "paused", &ReplayStatusResponse::paused, "unpaced",
+        &ReplayStatusResponse::unpaced, "frames", &ReplayStatusResponse::frames, "ts", &ReplayStatusResponse::ts);
+};
+
+struct ApiErrorResponse {
+    std::string error;
+
+    static constexpr auto glaze = glz::object("error", &ApiErrorResponse::error);
+};
+
+} // namespace
+
+namespace
+{
+
+void setJsonError(auto& t_response, std::string t_message) {
+    auto json = sgrn::json::write(ApiErrorResponse{std::move(t_message)});
+    if (json.hasError()) {
+        t_response.status = 500;
+        t_response.set_content(R"JSON({"error":"failed to serialize error response"})JSON", "application/json");
+        return;
+    }
+    t_response.set_content(json.value(), "application/json");
+}
+
+} // namespace
 
 HttpAdapter::HttpAdapter() = default;
 
@@ -281,7 +319,7 @@ void HttpAdapter::handleGetPolicy(const http::HttpRequest&, http::HttpResponse& 
 void HttpAdapter::handleGetReplayStatus(const http::HttpRequest&, http::HttpResponse& t_res) {
     if (!replay_control_) {
         t_res.status = 404;
-        t_res.set_content(R"JSON({"error":"replay control unavailable"})JSON", "application/json");
+        setJsonError(t_res, "replay control unavailable");
         return;
     }
     const double speed = replay_control_->speed.load(std::memory_order_relaxed);
@@ -289,21 +327,25 @@ void HttpAdapter::handleGetReplayStatus(const http::HttpRequest&, http::HttpResp
     const bool unpaced = replay_control_->unpaced.load(std::memory_order_relaxed);
     const int64_t ts = replay_control_->cur_ts.load(std::memory_order_relaxed);
     const uint64_t frames = replay_control_->frames.load(std::memory_order_relaxed);
-    t_res.set_content(fmt::format(R"({{"speed":{},"paused":{},"unpaced":{},"frames":{},"ts":{}}})", speed, paused ? "true" : "false",
-                          unpaced ? "true" : "false", frames, ts),
-        "application/json");
+    const auto response = sgrn::json::write(ReplayStatusResponse{speed, paused, unpaced, frames, ts});
+    if (response.hasError()) {
+        t_res.status = 500;
+        t_res.set_content(R"JSON({"error":"failed to serialize replay status"})JSON", "application/json");
+        return;
+    }
+    t_res.set_content(response.value(), "application/json");
 }
 
 void HttpAdapter::handlePostReplaySpeed(const http::HttpRequest& t_req, http::HttpResponse& t_res) {
     if (!replay_control_) {
         t_res.status = 404;
-        t_res.set_content(R"JSON({"error":"replay control unavailable"})JSON", "application/json");
+        setJsonError(t_res, "replay control unavailable");
         return;
     }
     rapidjson::Document doc;
     if (doc.Parse(t_req.body.c_str()).HasParseError() || !doc.IsObject() || !doc.HasMember("speed")) {
         t_res.status = 400;
-        t_res.set_content(R"JSON({"error":"expected JSON body with speed field"})JSON", "application/json");
+        setJsonError(t_res, "expected JSON body with speed field");
         return;
     }
     const auto& v = doc["speed"];
@@ -313,14 +355,14 @@ void HttpAdapter::handlePostReplaySpeed(const http::HttpRequest& t_req, http::Ht
         const double speed = v.GetDouble();
         if (!(speed > 0) || speed > 1e9) {
             t_res.status = 400;
-            t_res.set_content(R"JSON({"error":"speed must be a positive number"})JSON", "application/json");
+            setJsonError(t_res, "speed must be a positive number");
             return;
         }
         replay_control_->unpaced.store(false, std::memory_order_relaxed);
         replay_control_->speed.store(speed, std::memory_order_relaxed);
     } else {
         t_res.status = 400;
-        t_res.set_content(R"JSON({"error":"speed must be a number or unpaced"})JSON", "application/json");
+        setJsonError(t_res, "speed must be a number or unpaced");
         return;
     }
     handleGetReplayStatus(t_req, t_res);
@@ -329,7 +371,7 @@ void HttpAdapter::handlePostReplaySpeed(const http::HttpRequest& t_req, http::Ht
 void HttpAdapter::handlePostReplayPause(const http::HttpRequest& t_req, http::HttpResponse& t_res) {
     if (!replay_control_) {
         t_res.status = 404;
-        t_res.set_content(R"JSON({"error":"replay control unavailable"})JSON", "application/json");
+        setJsonError(t_res, "replay control unavailable");
         return;
     }
     replay_control_->paused.store(true, std::memory_order_relaxed);
@@ -339,7 +381,7 @@ void HttpAdapter::handlePostReplayPause(const http::HttpRequest& t_req, http::Ht
 void HttpAdapter::handlePostReplayResume(const http::HttpRequest& t_req, http::HttpResponse& t_res) {
     if (!replay_control_) {
         t_res.status = 404;
-        t_res.set_content(R"JSON({"error":"replay control unavailable"})JSON", "application/json");
+        setJsonError(t_res, "replay control unavailable");
         return;
     }
     replay_control_->paused.store(false, std::memory_order_relaxed);

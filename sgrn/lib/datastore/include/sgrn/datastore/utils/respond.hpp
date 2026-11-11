@@ -10,6 +10,7 @@
 #include <sgrn/datastore/error/SgrnError.hpp>
 #include <sgrn/datastore/error/exception.hpp>
 #include <sgrn/types/HttpResponseCallback.hpp>
+#include <sgrn/utils/json-serialization.hpp>
 #include <cctype>
 #include <charconv>
 #include <json/json.h>
@@ -344,6 +345,18 @@ inline drogon::HttpResponsePtr createErrorResponse(EnumT t_api_error, std::optio
     auto resp = drogon::HttpResponse::newHttpJsonResponse(std::move(error_json));
     resp->setStatusCode(code);
     return resp;
+}
+
+// Serialize a fixed-shape response DTO directly with Glaze. Handlers should
+// use this for typed responses instead of constructing a Json::Value tree.
+template <typename T>
+inline drogon::HttpResponsePtr createTypedJsonResponse(const T& t_value, drogon::HttpStatusCode t_http_code = drogon::k200OK) {
+    auto json_result = ::sgrn::json::write(t_value);
+    if (json_result.hasError()) {
+        return createErrorResponse("Failed to serialize JSON response", drogon::k500InternalServerError, "Serialization");
+    }
+    std::string response_json = std::move(json_result).value();
+    return createJsonResponse(std::move(response_json), t_http_code);
 }
 
 // Overload for SgrnException

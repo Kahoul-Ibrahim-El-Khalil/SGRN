@@ -1,7 +1,9 @@
 #include <sgrn/datastore/services/storage.hpp>
 
 #include <drogon/HttpAppFramework.h>
+#include <sgrn/datastore/config/config.hpp>
 #include <sgrn/debug.hpp>
+#include <fstream>
 #include <mutex>
 
 #ifdef DEBUG_STORAGE_SERVICE
@@ -14,40 +16,21 @@
 
 namespace sgrn::datastore::services::storage
 {
-StorageConfig StorageConfig::fromS3Json(const Json::Value& t_s3) {
-    StorageConfig cfg;
-    if (!t_s3.isObject())
-        return cfg;
+namespace config_detail
+{
+struct CustomConfigWire {
+    StorageConfig::StorageConfigJson s3;
+};
 
-    if (t_s3.isMember("default_bucket") && t_s3["default_bucket"].isString())
-        cfg.default_bucket = t_s3["default_bucket"].asString();
-    if (t_s3.isMember("threshold_compress_ram_mb"))
-        cfg.threshold_compress_ram_mb = t_s3["threshold_compress_ram_mb"].asUInt64();
-    if (t_s3.isMember("max_file_size_mb"))
-        cfg.max_file_size_mb = t_s3["max_file_size_mb"].asUInt64();
-    if (t_s3.isMember("compression_level"))
-        cfg.compression_level = static_cast<uint8_t>(t_s3["compression_level"].asUInt());
-    if (t_s3.isMember("compression_size_threshold_kb"))
-        cfg.compression_size_threshold_kb = t_s3["compression_size_threshold_kb"].asUInt64();
-    if (t_s3.isMember("chunking_threshold_mb"))
-        cfg.chunking_threshold_mb = t_s3["chunking_threshold_mb"].asUInt64();
-    if (t_s3.isMember("chunk_part_size_mb"))
-        cfg.chunk_part_size_mb = t_s3["chunk_part_size_mb"].asUInt64();
+struct ConfigFileWire {
+    CustomConfigWire custom_config;
+};
 
+StorageConfig normalize(StorageConfig cfg) {
     if (cfg.chunk_part_size_mb < defaults::kMinPartSizeMb) {
         WARN_LOG(
             "s3.chunk_part_size_mb ({} MB) is below the {} MB S3 minimum — clamping.", cfg.chunk_part_size_mb, defaults::kMinPartSizeMb);
         cfg.chunk_part_size_mb = defaults::kMinPartSizeMb;
-    }
-    if (t_s3.isMember("allowed_extensions") && t_s3["allowed_extensions"].isArray()) {
-        cfg.allowed_extensions.clear();
-        for (const auto& ext : t_s3["allowed_extensions"])
-            cfg.allowed_extensions.insert(ext.asString());
-    }
-    if (t_s3.isMember("prohibited_extensions") && t_s3["prohibited_extensions"].isArray()) {
-        cfg.prohibited_extensions.clear();
-        for (const auto& ext : t_s3["prohibited_extensions"])
-            cfg.prohibited_extensions.insert(ext.asString());
     }
     if (cfg.chunking_threshold_mb >= cfg.max_file_size_mb) {
         WARN_LOG("s3.chunking_threshold_mb ({} MB) is at/above max_file_size_mb ({} MB) — multipart is unreachable.",
@@ -59,9 +42,36 @@ StorageConfig StorageConfig::fromS3Json(const Json::Value& t_s3) {
         cfg.allowed_extensions.size(), cfg.chunking_threshold_mb, cfg.chunk_part_size_mb);
     return cfg;
 }
+} // namespace config_detail
+
+StorageConfig StorageConfig::fromS3Json(const Json::Value& t_s3) {
+    StorageConfig cfg;
+    if (!t_s3.isObject())
+        return cfg;
+
+    const auto parsed = sgrn::json::read<StorageConfig::StorageConfigJson>(t_s3.toStyledString());
+    if (parsed.hasError()) {
+        WARN_LOG("Invalid storage config shape; using defaults: {}", parsed.error().message);
+        return cfg;
+    }
+    return config_detail::normalize(StorageConfig::fromJsonConfig(parsed.value()));
+}
 
 StorageConfig StorageConfig::loadFromConfig() {
     try {
+        const std::string config_path = sgrn::datastore::config::currentConfigPath();
+        std::ifstream config_file(config_path, std::ios::binary);
+        if (config_file) {
+            const std::string config_text((std::istreambuf_iterator<char>(config_file)), std::istreambuf_iterator<char>());
+            const auto parsed = sgrn::json::read<config_detail::ConfigFileWire>(config_text);
+            if (!parsed.hasError()) {
+                return config_detail::normalize(StorageConfig::fromJsonConfig(parsed.value().custom_config.s3));
+            }
+            WARN_LOG("Failed to parse typed storage configuration from {}: {}", config_path, parsed.error().message);
+        }
+
+        // Fallback for embedders that configure Drogon programmatically or
+        // whose config path is unavailable; this remains the dynamic boundary.
         const Json::Value& custom_config = drogon::app().getCustomConfig();
         if (custom_config.isMember("s3"))
             return fromS3Json(custom_config["s3"]);

@@ -16,6 +16,18 @@
 namespace sgrn::datastore::session
 {
 
+struct ActiveSession {
+    std::string token;
+    std::optional<int32_t> user_id;
+    std::optional<int32_t> automated_service_id;
+    std::string ip;
+    std::string created_at;
+    std::string expires_at;
+    std::string actor_type;
+    std::string actor_name;
+    std::string organisation;
+};
+
 class SessionStore {
 public:
     static SessionStore& instance();
@@ -66,7 +78,7 @@ public:
     void startPgListener();
 
     // Retrieves full details of active live sessions from database / RAM cache
-    drogon::Task<Json::Value> getActiveSessions();
+    drogon::Task<std::vector<ActiveSession>> getActiveSessions();
 
 private:
     SessionStore() = default;

@@ -9,6 +9,7 @@
 #include <sgrn/datastore/BackendError.hpp>
 #include <sgrn/datastore/services/helpers/storage.hpp>
 #include <sgrn/debug.hpp>
+#include <sgrn/utils/json-serialization.hpp>
 #include <algorithm>
 #include <filesystem>
 #include <optional>
@@ -52,35 +53,55 @@ struct StorageConfig {
         return std::max(chunk_part_size_mb, defaults::kMinPartSizeMb) * defaults::kBytesPerMb;
     }
 
-    // Serialize the live-effective `s3` block (used by the admin
-    // system-config GET so the dashboard can show what is actually in force,
-    // not just what the file says).
-    [[nodiscard]] Json::Value toJson() const {
-        Json::Value s3(Json::objectValue);
-        s3["default_bucket"] = default_bucket;
-        s3["threshold_compress_ram_mb"] = Json::UInt64(threshold_compress_ram_mb);
-        s3["max_file_size_mb"] = Json::UInt64(max_file_size_mb);
-        s3["compression_level"] = static_cast<Json::UInt>(compression_level);
-        s3["compression_size_threshold_kb"] = Json::UInt64(compression_size_threshold_kb);
-        s3["chunking_threshold_mb"] = Json::UInt64(chunking_threshold_mb);
-        s3["chunk_part_size_mb"] = Json::UInt64(chunk_part_size_mb);
-        Json::Value allowed(Json::arrayValue);
-        for (const auto& ext : allowed_extensions) {
-            allowed.append(ext);
-        }
-        s3["allowed_extensions"] = std::move(allowed);
-        Json::Value prohibited(Json::arrayValue);
-        for (const auto& ext : prohibited_extensions) {
-            prohibited.append(ext);
-        }
-        s3["prohibited_extensions"] = std::move(prohibited);
-        return s3;
+    struct StorageConfigJson {
+        std::string default_bucket = "sgrn-uploads";
+        uint64_t threshold_compress_ram_mb = defaults::kThresholdCompressRamMb;
+        uint64_t max_file_size_mb = defaults::kMaxFileSizeMb;
+        uint32_t compression_level = defaults::kCompressionLevel;
+        uint64_t compression_size_threshold_kb = defaults::kMinCompressSize;
+        uint64_t chunking_threshold_mb = defaults::kChunkingThresholdMb;
+        uint64_t chunk_part_size_mb = defaults::kChunkPartSizeMb;
+        std::vector<std::string> allowed_extensions{"*"};
+        std::vector<std::string> prohibited_extensions;
+    };
+
+    [[nodiscard]] StorageConfigJson toJsonConfig() const {
+        return {default_bucket, threshold_compress_ram_mb, max_file_size_mb, compression_level, compression_size_threshold_kb,
+            chunking_threshold_mb, chunk_part_size_mb, {allowed_extensions.begin(), allowed_extensions.end()},
+            {prohibited_extensions.begin(), prohibited_extensions.end()}};
+    }
+
+    [[nodiscard]] static StorageConfig fromJsonConfig(const StorageConfigJson& t_wire) {
+        StorageConfig cfg;
+        cfg.default_bucket = t_wire.default_bucket;
+        cfg.threshold_compress_ram_mb = t_wire.threshold_compress_ram_mb;
+        cfg.max_file_size_mb = t_wire.max_file_size_mb;
+        cfg.compression_level = static_cast<uint8_t>(t_wire.compression_level);
+        cfg.compression_size_threshold_kb = t_wire.compression_size_threshold_kb;
+        cfg.chunking_threshold_mb = t_wire.chunking_threshold_mb;
+        cfg.chunk_part_size_mb = t_wire.chunk_part_size_mb;
+        cfg.allowed_extensions = {t_wire.allowed_extensions.begin(), t_wire.allowed_extensions.end()};
+        cfg.prohibited_extensions = {t_wire.prohibited_extensions.begin(), t_wire.prohibited_extensions.end()};
+        return cfg;
     }
 
     static StorageConfig loadFromConfig();
     // Pure parse of an `s3` block (no Drogon singleton): shared by
     // loadFromConfig() and the admin config hot-apply path. Unit-testable.
     static StorageConfig fromS3Json(const Json::Value& t_s3);
+};
+
+struct UploadResponse {
+    bool success{true};
+    std::optional<int64_t> file_id;
+    std::optional<int64_t> object_id;
+    std::string name;
+    std::string key;
+    std::string upload_mode;
+    std::optional<int64_t> part_count;
+    std::optional<int64_t> part_size_bytes;
+    uint64_t original_size_bytes{0};
+    uint64_t final_size_bytes{0};
 };
 
 // Process-wide live storage config. StorageService publishes at construction;
@@ -120,7 +141,7 @@ public:
         const Json::Value& t_session, StorageScope t_scope, const std::string& t_path);
 
 private:
-    drogon::Task<::sgrn::datastore::BackendResult<Json::Value>> uploadFile(UploadContext t_context, drogon::HttpFile t_file);
+    drogon::Task<::sgrn::datastore::BackendResult<UploadResponse>> uploadFile(UploadContext t_context, drogon::HttpFile t_file);
     drogon::Task<::sgrn::datastore::BackendResult<std::string>> downloadFile(std::string t_bucket, std::string t_key);
     drogon::Task<bool> objectExists(std::string t_bucket, std::string t_key);
     ::sgrn::datastore::BackendResult<bool> validateFileSize(size_t t_size);

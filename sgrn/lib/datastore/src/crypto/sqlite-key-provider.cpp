@@ -193,6 +193,12 @@ SqliteKeyProvider::~SqliteKeyProvider() {
 
     RETURN_ERROR_IF(sqlite3_exec(m_db, ddl, nullptr, nullptr, nullptr) != SQLITE_OK,
         fmt::format("Key store schema init failed: {}", sqlite3_errmsg(m_db)));
+
+    // Shredded keys retain their audit row, but no longer own a file.  Clearing
+    // this association is required because file IDs can be reused after a
+    // database restore/reset while file_keys.file_id is UNIQUE.
+    RETURN_ERROR_IF(sqlite3_exec(m_db, "UPDATE file_keys SET file_id=NULL WHERE state='shredded'", nullptr, nullptr, nullptr) != SQLITE_OK,
+        fmt::format("Key store shredded-key migration failed: {}", sqlite3_errmsg(m_db)));
     return {};
 }
 
@@ -317,7 +323,56 @@ SqliteKeyProvider::~SqliteKeyProvider() {
     sqlite3_bind_int64(sg.stmt, 1, file_id_int);
     sqlite3_bind_text(sg.stmt, 2, t_key_id.c_str(), -1, SQLITE_STATIC);
 
-    const int rc = sqlite3_step(sg.stmt);
+    int rc = sqlite3_step(sg.stmt);
+    if ((rc & 0xFF) == SQLITE_CONSTRAINT) {
+        // A file ID can be reused after the PostgreSQL database is restored or
+        // its sequence is reset.  In that case an older active key may still
+        // own the numeric ID in this durable key store.  The caller has just
+        // associated this file with t_key_id, so the old association is stale:
+        // cryptographically shred it, release the UNIQUE value, and retry.
+        StmtGuard owner_lookup;
+        const char* owner_sql = "SELECT key_id, state FROM file_keys WHERE file_id=?";
+        RETURN_ERROR_IF(sqlite3_prepare_v2(m_db, owner_sql, -1, &owner_lookup.stmt, nullptr) != SQLITE_OK,
+            sqliteDiag(m_db, "Key store activate owner lookup prepare"));
+        sqlite3_bind_int64(owner_lookup.stmt, 1, file_id_int);
+        const int owner_rc = sqlite3_step(owner_lookup.stmt);
+        RETURN_ERROR_IF(owner_rc != SQLITE_ROW, sqliteDiag(m_db, "Key store activate owner lookup"));
+        const char* owner_key_text = reinterpret_cast<const char*>(sqlite3_column_text(owner_lookup.stmt, 0));
+        const char* owner_state_text = reinterpret_cast<const char*>(sqlite3_column_text(owner_lookup.stmt, 1));
+        const std::string owner_key = owner_key_text ? owner_key_text : "";
+        const std::string owner_state = owner_state_text ? owner_state_text : "";
+        RETURN_ERROR_IF(owner_key.empty() || owner_key == t_key_id, "Key store activate found an invalid existing file-key association");
+        RETURN_ERROR_IF(owner_state != "active" && owner_state != "shredded",
+            fmt::format("Key store activate found file_id {} owned by a {} key", file_id_int, owner_state));
+
+        if (owner_state == "active") {
+            std::array<uint8_t, 32> zeros{};
+            OPENSSL_cleanse(zeros.data(), zeros.size());
+            StmtGuard shred_old;
+            const char* shred_sql = "UPDATE file_keys SET dek=?, state='shredded', file_id=NULL WHERE key_id=? AND state='active'";
+            RETURN_ERROR_IF(sqlite3_prepare_v2(m_db, shred_sql, -1, &shred_old.stmt, nullptr) != SQLITE_OK,
+                sqliteDiag(m_db, "Key store activate stale-key shred prepare"));
+            sqlite3_bind_blob(shred_old.stmt, 1, zeros.data(), static_cast<int>(zeros.size()), SQLITE_STATIC);
+            sqlite3_bind_text(shred_old.stmt, 2, owner_key.c_str(), -1, SQLITE_STATIC);
+            RETURN_ERROR_IF(sqlite3_step(shred_old.stmt) != SQLITE_DONE || sqlite3_changes(m_db) != 1,
+                sqliteDiag(m_db, "Key store activate stale-key shred"));
+        } else {
+            StmtGuard clear_shredded;
+            const char* clear_sql = "UPDATE file_keys SET file_id=NULL WHERE key_id=? AND state='shredded'";
+            RETURN_ERROR_IF(sqlite3_prepare_v2(m_db, clear_sql, -1, &clear_shredded.stmt, nullptr) != SQLITE_OK,
+                sqliteDiag(m_db, "Key store activate shredded-key clear prepare"));
+            sqlite3_bind_text(clear_shredded.stmt, 1, owner_key.c_str(), -1, SQLITE_STATIC);
+            RETURN_ERROR_IF(sqlite3_step(clear_shredded.stmt) != SQLITE_DONE || sqlite3_changes(m_db) != 1,
+                sqliteDiag(m_db, "Key store activate shredded-key clear"));
+        }
+
+        StmtGuard retry;
+        RETURN_ERROR_IF(
+            sqlite3_prepare_v2(m_db, sql, -1, &retry.stmt, nullptr) != SQLITE_OK, sqliteDiag(m_db, "Key store activate retry prepare"));
+        sqlite3_bind_int64(retry.stmt, 1, file_id_int);
+        sqlite3_bind_text(retry.stmt, 2, t_key_id.c_str(), -1, SQLITE_STATIC);
+        rc = sqlite3_step(retry.stmt);
+    }
     RETURN_ERROR_IF(rc != SQLITE_DONE, sqliteDiag(m_db, "Key store activate step"));
     RETURN_ERROR_IF(sqlite3_changes(m_db) == 0, "Key not found or already activated/shredded");
 
@@ -389,7 +444,7 @@ SqliteKeyProvider::~SqliteKeyProvider() {
     OPENSSL_cleanse(zeros.data(), zeros.size());
 
     StmtGuard sg;
-    const char* sql = "UPDATE file_keys SET dek=?, state='shredded' WHERE key_id=? AND state!='shredded'";
+    const char* sql = "UPDATE file_keys SET dek=?, state='shredded', file_id=NULL WHERE key_id=? AND state!='shredded'";
     RETURN_ERROR_IF(sqlite3_prepare_v2(m_db, sql, -1, &sg.stmt, nullptr) != SQLITE_OK, "Key store shred prepare failed");
 
     sqlite3_bind_blob(sg.stmt, 1, zeros.data(), static_cast<int>(zeros.size()), SQLITE_STATIC);

@@ -120,7 +120,10 @@ if(SGRN_BUILD_DROGON)
             set(LIBPQ_BATCH_MODE       OFF CACHE BOOL "" FORCE)
             set(LIBPQ_SUPPORTS_BATCH_MODE OFF CACHE BOOL "" FORCE)
         else()
-            set(BUILD_CTL OFF CACHE BOOL "" FORCE)
+            # ORM code generation invokes drogon_ctl during the main build.
+            # Build it for native configurations so fresh CI runners have the
+            # executable; cross builds cannot run the target binary.
+            set(BUILD_CTL ON CACHE BOOL "" FORCE)
         endif()
 
         if(NOT TARGET Jsoncpp_lib AND TARGET sgrn::jsoncpp)

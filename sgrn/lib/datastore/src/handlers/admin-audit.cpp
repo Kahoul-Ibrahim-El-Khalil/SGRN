@@ -1,9 +1,79 @@
 // admin-audit.cpp — Audit-log administration.
 #include "admin-common.hpp"
 
+#include <sgrn/utils/json-serialization.hpp>
+
+#include <optional>
+
 namespace sgrn::datastore::handlers::admin
 {
 using namespace drogon;
+
+namespace detail
+{
+
+// The response is deliberately separate from AuditVerificationResult: this is
+// the HTTP contract, while AuditVerificationResult is the datastore result.
+struct AuditVerificationResponse {
+    bool is_valid{false};
+    int64_t total_rows{0};
+    int64_t verified_checkpoints{0};
+    std::string status;
+    std::string message;
+    std::optional<int64_t> first_broken_seq;
+    std::optional<int64_t> first_broken_id;
+};
+
+struct AuditLogEntry {
+    int64_t id{0};
+    std::string organisation;
+    std::string actor_type;
+    std::optional<int32_t> actor_id;
+    std::string actor_name;
+    std::string action;
+    std::string target_type;
+    std::string target_id;
+    std::string ip;
+    std::string status;
+    std::string created_at;
+    sgrn::json::RawJson details{"{}"};
+};
+
+struct AuditLogsResponse {
+    bool success{true};
+    std::vector<AuditLogEntry> audit_logs;
+    int32_t limit{0};
+    int32_t offset{0};
+};
+
+struct AuditPurgeResponse {
+    bool success{true};
+    int64_t records_purged{0};
+    int32_t older_than_days{0};
+    std::string message;
+};
+
+struct AuditPurgeDetails {
+    int32_t older_than_days{0};
+    int64_t records_purged{0};
+    std::string cleared_by;
+    std::string target_organisation;
+    std::string status_message;
+};
+
+struct AuditVerificationDetails {
+    std::string target_organisation;
+    bool is_valid{false};
+    int64_t total_rows{0};
+    int64_t verified_checkpoints{0};
+};
+
+} // namespace detail
+
+} // namespace sgrn::datastore::handlers::admin
+
+namespace sgrn::datastore::handlers::admin
+{
 
 Task<HttpResponsePtr> AdminApiHandler::handleGetAuditLogs(HttpRequestPtr tsp_req) {
     try {
@@ -20,8 +90,8 @@ Task<HttpResponsePtr> AdminApiHandler::handleGetAuditLogs(HttpRequestPtr tsp_req
         int32_t offset = offset_raw.empty() ? 0 : std::stoi(offset_raw);
 
         auto db_res = sgrn::datastore::core::getDbClient();
-        if (db_res.hasError())
-            co_return sgrn::createJsonResponse(db_res);
+        CO_RETURN_IF(db_res.hasError(), createJsonResponse(db_res));
+
         auto db = db_res.value();
 
         std::string query = "SELECT id, organisation, actor_type, actor_id, actor_name, action, target_type, target_id, ip::text, details, "
@@ -51,40 +121,41 @@ Task<HttpResponsePtr> AdminApiHandler::handleGetAuditLogs(HttpRequestPtr tsp_req
 
         auto res = co_await sgrn::datastore::core::execSqlCoroVec(db, query, params);
 
-        Json::Value logs_arr = Json::arrayValue;
+        std::vector<detail::AuditLogEntry> audit_logs;
+        audit_logs.reserve(res.size());
         for (const auto& row : res) {
-            Json::Value entry;
-            entry["id"] = row["id"].as<int64_t>();
-            entry["organisation"] = row["organisation"].as<std::string>();
-            entry["actor_type"] = row["actor_type"].as<std::string>();
-            entry["actor_id"] = row["actor_id"].isNull() ? Json::Value(Json::nullValue) : Json::Value(row["actor_id"].as<int32_t>());
-            entry["actor_name"] = row["actor_name"].as<std::string>();
-            entry["action"] = row["action"].as<std::string>();
-            entry["target_type"] = row["target_type"].isNull() ? "" : row["target_type"].as<std::string>();
-            entry["target_id"] = row["target_id"].isNull() ? "" : row["target_id"].as<std::string>();
-            entry["ip"] = row["ip"].as<std::string>();
-            entry["status"] = row["status"].as<std::string>();
-            entry["created_at"] = row["created_at"].as<std::string>();
-
-            const std::string raw_det = row["details"].isNull() ? "{}" : row["details"].as<std::string>();
-            Json::CharReaderBuilder builder;
-            Json::Value det_json;
-            std::string errs;
-            const std::unique_ptr<Json::CharReader> up_reader(builder.newCharReader());
-            if (up_reader->parse(raw_det.data(), raw_det.data() + raw_det.size(), &det_json, &errs)) {
-                entry["details"] = det_json;
-            } else {
-                entry["details"] = Json::objectValue;
+            detail::AuditLogEntry entry;
+            entry.id = row["id"].as<int64_t>();
+            entry.organisation = row["organisation"].as<std::string>();
+            entry.actor_type = row["actor_type"].as<std::string>();
+            if (!row["actor_id"].isNull()) {
+                entry.actor_id = row["actor_id"].as<int32_t>();
             }
-            logs_arr.append(entry);
+            entry.actor_name = row["actor_name"].as<std::string>();
+            entry.action = row["action"].as<std::string>();
+            entry.target_type = row["target_type"].isNull() ? "" : row["target_type"].as<std::string>();
+            entry.target_id = row["target_id"].isNull() ? "" : row["target_id"].as<std::string>();
+            entry.ip = row["ip"].as<std::string>();
+            entry.status = row["status"].as<std::string>();
+            entry.created_at = row["created_at"].as<std::string>();
+            if (!row["details"].isNull()) {
+                entry.details = sgrn::json::RawJson{row["details"].as<std::string>()};
+            }
+            audit_logs.push_back(std::move(entry));
         }
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["audit_logs"] = logs_arr;
-        resp["limit"] = limit;
-        resp["offset"] = offset;
-        co_return createJsonResponse(resp, k200OK);
+        detail::AuditLogsResponse resp;
+        resp.audit_logs = std::move(audit_logs);
+        resp.limit = limit;
+        resp.offset = offset;
+
+        auto response_result = sgrn::json::write(resp);
+        if (response_result.hasError()) {
+            ADMIN_ERROR_LOG("Failed to serialize audit logs response: {}", response_result.error().what());
+            co_return createErrorResponse("Failed to serialize audit logs response", k500InternalServerError, "AdminApi");
+        }
+        std::string response_json = std::move(response_result).value();
+        co_return createJsonResponse(std::move(response_json), k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to fetch audit logs: {}", e.what());
         co_return createErrorResponse(std::string("Failed to fetch audit logs: ") + e.what(), k400BadRequest, "AdminApi");
@@ -111,8 +182,9 @@ Task<HttpResponsePtr> AdminApiHandler::handlePurgeAuditLogs(HttpRequestPtr tsp_r
         const std::string org_filter = tsp_req->getParameter("organisation");
 
         auto db_res = sgrn::datastore::core::getDbClient();
-        if (db_res.hasError())
-            co_return sgrn::createJsonResponse(db_res);
+
+        CO_RETURN_IF(db_res.hasError(), createJsonResponse(db_res));
+
         auto db = db_res.value();
 
         int64_t purged_count = 0;
@@ -140,23 +212,30 @@ Task<HttpResponsePtr> AdminApiHandler::handlePurgeAuditLogs(HttpRequestPtr tsp_r
         }
 
         // Auditable Clearance: Log an immutable audit entry documenting the purge operation!
-        Json::Value details;
-        details["older_than_days"] = days;
-        details["records_purged"] = purged_count;
-        details["cleared_by"] = actor_name;
-        details["target_organisation"] = org_filter.empty() ? "all" : org_filter;
-        details["status_message"] = purge_status_msg;
+        detail::AuditPurgeDetails details{
+            .older_than_days = days,
+            .records_purged = purged_count,
+            .cleared_by = actor_name,
+            .target_organisation = org_filter.empty() ? "all" : org_filter,
+            .status_message = purge_status_msg,
+        };
 
         const std::string log_org = org_filter.empty() ? "platform" : org_filter;
         co_await sgrn::datastore::audit::AuditLogger::log(db, log_org, "user", actor_id, actor_name, "audit.purged", "audit_logs", log_org,
             tsp_req->getPeerAddr().toIp(), details, "success");
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["records_purged"] = purged_count;
-        resp["older_than_days"] = days;
-        resp["message"] = purge_status_msg.empty() ? "Audit logs purged successfully" : purge_status_msg;
-        co_return createJsonResponse(resp, k200OK);
+        detail::AuditPurgeResponse resp;
+        resp.records_purged = purged_count;
+        resp.older_than_days = days;
+        resp.message = purge_status_msg.empty() ? "Audit logs purged successfully" : purge_status_msg;
+
+        auto response_result = sgrn::json::write(resp);
+        if (response_result.hasError()) {
+            ADMIN_ERROR_LOG("Failed to serialize audit purge response: {}", response_result.error().what());
+            co_return createErrorResponse("Failed to serialize audit purge response", k500InternalServerError, "AdminApi");
+        }
+        std::string response_json = std::move(response_result).value();
+        co_return createJsonResponse(std::move(response_json), k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to purge audit logs: {}", e.what());
         co_return createErrorResponse(std::string("Failed to purge audit logs: ") + e.what(), k400BadRequest, "AdminApi");
@@ -191,31 +270,34 @@ Task<HttpResponsePtr> AdminApiHandler::handleVerifyAuditLogs(HttpRequestPtr tsp_
         const int32_t actor_id = session["user"]["id"].asInt();
         const std::string actor_name = session["user"]["email"].asString();
 
-        Json::Value log_details;
-        log_details["target_organisation"] = target_org.empty() ? "all" : target_org;
-        log_details["is_valid"] = verify_res.is_valid;
-        log_details["total_rows"] = static_cast<Json::Int64>(verify_res.total_rows);
-        log_details["verified_checkpoints"] = static_cast<Json::Int64>(verify_res.verified_checkpoints);
-
         co_await sgrn::datastore::audit::AuditLogger::log(db, session_org, "user", actor_id, actor_name, "audit.verified", "audit_logs",
-            target_org, tsp_req->getPeerAddr().toIp(), log_details, verify_res.is_valid ? "success" : "failure");
+            target_org, tsp_req->getPeerAddr().toIp(),
+            detail::AuditVerificationDetails{
+                .target_organisation = target_org.empty() ? "all" : target_org,
+                .is_valid = verify_res.is_valid,
+                .total_rows = verify_res.total_rows,
+                .verified_checkpoints = verify_res.verified_checkpoints,
+            },
+            verify_res.is_valid ? "success" : "failure");
 
-        Json::Value resp;
-        resp["is_valid"] = verify_res.is_valid;
-        resp["total_rows"] = static_cast<Json::Int64>(verify_res.total_rows);
-        resp["verified_checkpoints"] = static_cast<Json::Int64>(verify_res.verified_checkpoints);
-        resp["status"] = verify_res.is_valid ? "verified" : "tampered";
-        resp["message"] = verify_res.failure_reason;
+        detail::AuditVerificationResponse resp;
+        resp.is_valid = verify_res.is_valid;
+        resp.total_rows = verify_res.total_rows;
+        resp.verified_checkpoints = verify_res.verified_checkpoints;
+        resp.status = verify_res.is_valid ? "verified" : "tampered";
+        resp.message = verify_res.failure_reason;
         if (!verify_res.is_valid) {
-            if (verify_res.first_broken_seq.has_value()) {
-                resp["first_broken_seq"] = static_cast<Json::Int64>(*verify_res.first_broken_seq);
-            }
-            if (verify_res.first_broken_id.has_value()) {
-                resp["first_broken_id"] = static_cast<Json::Int64>(*verify_res.first_broken_id);
-            }
+            resp.first_broken_seq = verify_res.first_broken_seq;
+            resp.first_broken_id = verify_res.first_broken_id;
         }
 
-        co_return createJsonResponse(resp, verify_res.is_valid ? k200OK : k409Conflict);
+        auto response_result = sgrn::json::write(resp);
+        if (response_result.hasError()) {
+            ADMIN_ERROR_LOG("Failed to serialize audit verification response: {}", response_result.error().what());
+            co_return createErrorResponse("Failed to serialize audit verification response", k500InternalServerError, "AdminApi");
+        }
+        std::string response_json = std::move(response_result).value();
+        co_return createJsonResponse(std::move(response_json), verify_res.is_valid ? k200OK : k409Conflict);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to verify audit logs: {}", e.what());
         co_return createErrorResponse(std::string("Failed to verify audit logs: ") + e.what(), k400BadRequest, "AdminApi");

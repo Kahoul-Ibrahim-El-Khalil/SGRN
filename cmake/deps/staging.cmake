@@ -347,6 +347,12 @@ if(EXISTS "${unordered_dense_SOURCE_DIR}/include")
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
     )
 endif()
+if(EXISTS "${glaze_SOURCE_DIR}/include")
+    install(DIRECTORY "${glaze_SOURCE_DIR}/include/"
+        DESTINATION "${_INC}"
+        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+    )
+endif()
 # s7codec is SGRN-internal: install from sgrn/lib/codecs/s7codec/include/
 install(DIRECTORY "${_s7codec_src}/"
     DESTINATION "${_INC}"
@@ -633,6 +639,15 @@ if(NOT TARGET unordered_dense)
 endif()
 if(NOT TARGET extern::unordered_dense)
     add_library(extern::unordered_dense ALIAS unordered_dense)
+endif()
+
+# ── Header-only: glaze ────────────────────────────────────────────────────────
+if(NOT TARGET glaze)
+    add_library(glaze INTERFACE IMPORTED GLOBAL)
+    target_include_directories(glaze SYSTEM INTERFACE "${_inc}")
+endif()
+if(NOT TARGET extern::glaze)
+    add_library(extern::glaze ALIAS glaze)
 endif()
 
 # ── Header-only: s7codec ─────────────────────────────────────────────────────

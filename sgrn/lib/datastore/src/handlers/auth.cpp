@@ -5,6 +5,7 @@
 #include <sgrn/datastore/services/auth.hpp>
 #include <sgrn/datastore/session/SessionStore.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
+#include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe-access.hpp>
 #include <sgrn/utils/jsoncpp.hpp>
 
@@ -23,6 +24,21 @@
 namespace sgrn::datastore::handlers::auth
 {
 using namespace drogon;
+
+namespace
+{
+struct AutomatedServiceSessionResponse {
+    int32_t automated_service_id{0};
+    std::optional<sgrn::json::RawJson> automated_service;
+    std::optional<int64_t> session_id;
+};
+
+std::string compactJson(const Json::Value& t_value) {
+    Json::StreamWriterBuilder writer;
+    writer["indentation"] = "";
+    return Json::writeString(writer, t_value);
+}
+} // namespace
 
 Task<HttpResponsePtr> AuthApiHandler::handleSignIn(HttpRequestPtr tsp_req) {
     const auto p_json = tsp_req->getJsonObject();
@@ -140,18 +156,16 @@ Task<HttpResponsePtr> AuthApiHandler::handleGetAutomatedServiceSession(HttpReque
     const auto session = tsp_req->getAttributes()->get<Json::Value>("session_json");
     const int32_t automated_service_id = tsp_req->getAttributes()->get<int32_t>("automated_service_id");
 
-    Json::Value response;
-    response["automated_service_id"] = automated_service_id;
-
-    // Forward the full automated service node back to the caller.
+    std::optional<sgrn::json::RawJson> automated_service;
     if (session.isMember("user")) {
-        response["automated_service"] = session["user"];
+        automated_service = sgrn::json::RawJson(compactJson(session["user"]));
     }
-    if (session.isMember("session_id")) {
-        response["session_id"] = session["session_id"];
+    std::optional<int64_t> session_id;
+    if (session.isMember("session_id") && session["session_id"].isIntegral()) {
+        session_id = session["session_id"].asInt64();
     }
-
-    co_return HttpResponse::newHttpJsonResponse(std::move(response));
+    co_return createTypedJsonResponse(
+        AutomatedServiceSessionResponse{automated_service_id, std::move(automated_service), session_id}, k200OK);
 }
 } // namespace sgrn::datastore::handlers::auth
 

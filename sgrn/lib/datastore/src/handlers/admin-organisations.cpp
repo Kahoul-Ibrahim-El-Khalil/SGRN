@@ -11,6 +11,36 @@ using namespace drogon;
 
 namespace
 {
+struct OrganisationRow {
+    std::string name;
+    std::optional<std::string> description;
+    std::optional<std::string> domain;
+    std::string status;
+    int64_t total_virtual_size{0};
+    std::optional<int64_t> storage_limit;
+    int64_t total_entry_count{0};
+    std::optional<int64_t> entry_count_limit;
+    std::optional<int32_t> rate_limit_rpm;
+};
+
+struct OrganisationListResponse {
+    bool success{true};
+    std::vector<OrganisationRow> organisations;
+};
+struct OrganisationCreatedResponse {
+    bool success{true};
+    std::string organisation;
+};
+struct OrganisationCreatedWithAdminResponse {
+    bool success{true};
+    std::string organisation;
+    int32_t admin_user_id{0};
+};
+struct OrganisationUpdatedResponse {
+    bool success{true};
+    std::string organisation;
+};
+
 std::optional<int64_t> optionalCap(const Json::Value& t_json, const char* t_key, std::string& o_err) {
     if (!t_json.isMember(t_key) || t_json[t_key].isNull()) {
         return std::nullopt;
@@ -22,20 +52,15 @@ std::optional<int64_t> optionalCap(const Json::Value& t_json, const char* t_key,
     return t_json[t_key].asInt64();
 }
 
-Json::Value organisationRowJson(const drogon::orm::Row& t_row) {
-    Json::Value o;
-    o["name"] = t_row["name"].as<std::string>();
-    o["description"] = t_row["description"].isNull() ? Json::Value(Json::nullValue) : Json::Value(t_row["description"].as<std::string>());
-    o["domain"] = t_row["domain"].isNull() ? Json::Value(Json::nullValue) : Json::Value(t_row["domain"].as<std::string>());
-    o["status"] = t_row["status"].as<std::string>();
-    o["total_virtual_size"] = Json::Int64(t_row["total_virtual_size"].as<int64_t>());
-    o["storage_limit"] =
-        t_row["storage_limit"].isNull() ? Json::Value(Json::nullValue) : Json::Value(Json::Int64(t_row["storage_limit"].as<int64_t>()));
-    o["total_entry_count"] = Json::Int64(t_row["total_entry_count"].as<int64_t>());
-    o["entry_count_limit"] = t_row["entry_count_limit"].isNull() ? Json::Value(Json::nullValue)
-                                                                 : Json::Value(Json::Int64(t_row["entry_count_limit"].as<int64_t>()));
-    o["rate_limit_rpm"] = t_row["rate_limit_rpm"].isNull() ? Json::Value(Json::nullValue) : Json::Value(t_row["rate_limit_rpm"].as<int>());
-    return o;
+OrganisationRow organisationRow(const drogon::orm::Row& t_row) {
+    return {t_row["name"].as<std::string>(),
+        t_row["description"].isNull() ? std::nullopt : std::optional<std::string>(t_row["description"].as<std::string>()),
+        t_row["domain"].isNull() ? std::nullopt : std::optional<std::string>(t_row["domain"].as<std::string>()),
+        t_row["status"].as<std::string>(), t_row["total_virtual_size"].as<int64_t>(),
+        t_row["storage_limit"].isNull() ? std::nullopt : std::optional<int64_t>(t_row["storage_limit"].as<int64_t>()),
+        t_row["total_entry_count"].as<int64_t>(),
+        t_row["entry_count_limit"].isNull() ? std::nullopt : std::optional<int64_t>(t_row["entry_count_limit"].as<int64_t>()),
+        t_row["rate_limit_rpm"].isNull() ? std::nullopt : std::optional<int32_t>(t_row["rate_limit_rpm"].as<int>())};
 }
 } // namespace
 
@@ -56,15 +81,12 @@ Task<HttpResponsePtr> AdminApiHandler::handleListOrganisations(HttpRequestPtr ts
         auto rows = is_platform ? co_await db->execSqlCoro(std::string(kSelect) + "ORDER BY name")
                                 : co_await db->execSqlCoro(std::string(kSelect) + "WHERE name = $1", ctx.organisation);
 
-        Json::Value list = Json::arrayValue;
+        OrganisationListResponse resp;
+        resp.organisations.reserve(rows.size());
         for (const auto& row : rows) {
-            list.append(organisationRowJson(row));
+            resp.organisations.push_back(organisationRow(row));
         }
-
-        Json::Value resp;
-        resp["success"] = true;
-        resp["organisations"] = std::move(list);
-        co_return createJsonResponse(resp, k200OK);
+        co_return createTypedJsonResponse(resp, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to list organisations: {}", e.what());
         co_return createErrorResponse(std::string("Failed to list organisations: ") + e.what(), k400BadRequest, "AdminApi");
@@ -148,13 +170,11 @@ Task<HttpResponsePtr> AdminApiHandler::handleCreateOrganisation(HttpRequestPtr t
         co_await sgrn::datastore::audit::AuditLogger::log(db, name, "user", ctx.actor_id, ctx.actor_name, "organisation.created",
             "organisation", name, tsp_req->getPeerAddr().toIp(), details, "success");
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["organisation"] = name;
         if (!res.empty() && !res[0]["out_admin_user_id"].isNull()) {
-            resp["admin_user_id"] = res[0]["out_admin_user_id"].as<int32_t>();
+            co_return createTypedJsonResponse(
+                OrganisationCreatedWithAdminResponse{true, name, res[0]["out_admin_user_id"].as<int32_t>()}, k201Created);
         }
-        co_return createJsonResponse(resp, k201Created);
+        co_return createTypedJsonResponse(OrganisationCreatedResponse{true, name}, k201Created);
     } catch (const drogon::orm::DrogonDbException& e) {
         const std::string msg = e.base().what();
         if (msg.find("duplicate key") != std::string::npos) {
@@ -242,10 +262,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleUpdateOrganisation(HttpRequestPtr t
         co_await sgrn::datastore::audit::AuditLogger::log(db, name, "user", ctx.actor_id, ctx.actor_name, "organisation.updated",
             "organisation", name, tsp_req->getPeerAddr().toIp(), details, "success");
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["organisation"] = name;
-        co_return createJsonResponse(resp, k200OK);
+        co_return createTypedJsonResponse(OrganisationUpdatedResponse{true, name}, k200OK);
     } catch (const drogon::orm::DrogonDbException& e) {
         co_return createErrorResponse(std::string("Organisation update failed: ") + e.base().what(), k400BadRequest, "AdminApi");
     } catch (const std::exception& e) {

@@ -61,3 +61,18 @@ if(NOT TARGET unordered_dense)
     target_include_directories(unordered_dense SYSTEM INTERFACE "${unordered_dense_SOURCE_DIR}/include")
     add_library(extern::unordered_dense ALIAS unordered_dense)
 endif()
+
+# glaze — header-only, C++23 JSON library
+if(NOT TARGET extern::glaze)
+    sgrn_fetch_source(glaze)
+    if(TARGET glaze::glaze)
+        add_library(extern::glaze ALIAS glaze::glaze)
+    else()
+        # Keep a useful diagnostic if an older glaze checkout does not expose
+        # the upstream target expected by this integration.
+        message(FATAL_ERROR
+            "[SGRN] glaze was fetched, but its CMake package did not define "
+            "the required glaze::glaze target."
+        )
+    endif()
+endif()

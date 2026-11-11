@@ -31,6 +31,7 @@ set(HEADERS
     include/sgrn/utils/env.hpp
     include/sgrn/utils/event-broker.hpp
     include/sgrn/utils/filesystem.hpp
+    include/sgrn/utils/glaze.hpp
     include/sgrn/utils/hashing.hpp
     include/sgrn/utils/jsoncpp.hpp
     include/sgrn/utils/json.hpp
@@ -75,6 +76,10 @@ target_link_libraries(sgrn_utils PUBLIC extern::httplib)
 target_link_libraries(sgrn_utils PUBLIC fmt::fmt)
 target_include_directories(sgrn_utils INTERFACE $<TARGET_PROPERTY:fmt::fmt,INTERFACE_INCLUDE_DIRECTORIES>)
 
+# Glaze (header-only, C++23 JSON) — propagated to all sgrn_utils consumers so
+# that sgrn/utils/glaze.hpp and sgrn::json::* are available without extra links.
+target_link_libraries(sgrn_utils PUBLIC extern::glaze)
+
 
 target_link_libraries(sgrn_utils PRIVATE extern::xml_h)
 
@@ -96,6 +101,18 @@ sgrn_package_runtime_dependencies(
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 if(SGRN_BUILD_TESTS)
+    sgrn_add_component_executable(
+        TARGET glaze_json_test
+        SOURCES tests/glaze-json-test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn_utils
+            fmt::fmt
+            extern::glaze
+    )
+    add_test(NAME glaze_json_test COMMAND glaze_json_test)
+    target_compile_features(glaze_json_test PRIVATE cxx_std_23)
+
     sgrn_add_component_executable(
         TARGET compression_test
         SOURCES tests/compression-test.cpp

@@ -46,6 +46,34 @@ using namespace drogon;
 
 using sgrn::datastore::services::storage::StorageScope;
 
+namespace detail
+{
+struct DeleteResponse {
+    bool success{true};
+    int64_t id{0};
+    std::string type;
+};
+struct BulkResult {
+    int64_t id{0};
+    std::string type;
+    bool success{false};
+    std::optional<std::string> error;
+};
+struct BulkResponse {
+    bool success{true};
+    std::string action;
+    int32_t total{0};
+    int32_t success_count{0};
+    std::vector<BulkResult> results;
+};
+struct StorageStatsResponse {
+    int64_t file_count{0};
+    int64_t total_original_bytes{0};
+    int64_t total_compressed_bytes{0};
+    std::optional<int64_t> storage_limit;
+};
+} // namespace detail
+
 // ============================================================================
 // Drive Directory Listing
 //
@@ -1088,11 +1116,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleDelete(HttpRequestPtr tsp_req) {
             co_return co_await deleteFolder(db_client, entity_id, user_id, is_admin);
         }
 
-        Json::Value response;
-        response["success"] = true;
-        response["id"] = Json::Int64(entity_id);
-        response["type"] = type;
-        co_return createJsonResponse(std::move(response), k200OK);
+        co_return createTypedJsonResponse(detail::DeleteResponse{true, entity_id, type}, k200OK);
 
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Delete handler DB exception: {}", e.base().what());
@@ -1263,7 +1287,8 @@ Task<HttpResponsePtr> StorageApiHandler::handleBulkAction(HttpRequestPtr tsp_req
             co_return sgrn::createJsonResponse(db_res);
         auto db_client = db_res.value();
 
-        Json::Value results(Json::arrayValue);
+        std::vector<detail::BulkResult> results;
+        results.reserve(items.size());
         int success_count = 0;
 
         if (action == "delete") {
@@ -1279,15 +1304,10 @@ Task<HttpResponsePtr> StorageApiHandler::handleBulkAction(HttpRequestPtr tsp_req
                 else
                     res = co_await deleteFolder(db_client, id, user_id, is_admin);
 
-                Json::Value res_item;
-                res_item["id"] = Json::Int64(id);
-                res_item["type"] = type;
-                res_item["success"] = (res->statusCode() == k200OK);
-                if (res->statusCode() != k200OK)
-                    res_item["error"] = std::string(res->getBody());
-                else
+                const bool succeeded = res->statusCode() == k200OK;
+                results.push_back({id, type, succeeded, succeeded ? std::nullopt : std::optional<std::string>(res->getBody())});
+                if (succeeded)
                     success_count++;
-                results.append(res_item);
             }
         } else if (action == "move") {
             if (!json->isMember("target_parent_id")) {
@@ -1309,27 +1329,17 @@ Task<HttpResponsePtr> StorageApiHandler::handleBulkAction(HttpRequestPtr tsp_req
                 else
                     res = co_await moveFolder(transaction, id, user_id, is_admin, target_parent_id, std::nullopt);
 
-                Json::Value res_item;
-                res_item["id"] = Json::Int64(id);
-                res_item["type"] = type;
-                res_item["success"] = (res->statusCode() == k200OK);
-                if (res->statusCode() != k200OK)
-                    res_item["error"] = std::string(res->getBody());
-                else
+                const bool succeeded = res->statusCode() == k200OK;
+                results.push_back({id, type, succeeded, succeeded ? std::nullopt : std::optional<std::string>(res->getBody())});
+                if (succeeded)
                     success_count++;
-                results.append(res_item);
             }
         } else {
             co_return createJsonErrorResponse("Unsupported action", k400BadRequest);
         }
 
-        Json::Value final_res;
-        final_res["success"] = true;
-        final_res["action"] = action;
-        final_res["total"] = (int)items.size();
-        final_res["success_count"] = success_count;
-        final_res["results"] = results;
-        co_return createJsonResponse(std::move(final_res), k200OK);
+        co_return createTypedJsonResponse(
+            detail::BulkResponse{true, action, static_cast<int32_t>(items.size()), success_count, std::move(results)}, k200OK);
 
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Bulk action handler DB exception: {}", e.base().what());
@@ -1477,31 +1487,19 @@ Task<HttpResponsePtr> StorageApiHandler::handleGetStorageStats(HttpRequestPtr ts
 
             if (result.empty()) {
                 SGRN_WARN_LOG("handleGetStorageStats: User {} not found in core.users", user_id);
-                Json::Value empty_stats;
-                empty_stats["file_count"] = 0;
-                empty_stats["total_original_bytes"] = 0;
-                empty_stats["total_compressed_bytes"] = 0;
-                empty_stats["storage_limit"] = Json::nullValue;
-                co_return HttpResponse::newHttpJsonResponse(std::move(empty_stats));
+                co_return createTypedJsonResponse(detail::StorageStatsResponse{}, k200OK);
             }
 
             const auto& row = result[0];
-            Json::Value stats;
-            stats["file_count"] = row["file_count"].as<int64_t>();
-            stats["total_original_bytes"] = row["total_virtual_size"].as<int64_t>();
-            stats["total_compressed_bytes"] = row["total_real_size"].as<int64_t>();
+            detail::StorageStatsResponse stats{row["file_count"].as<int64_t>(), row["total_virtual_size"].as<int64_t>(),
+                row["total_real_size"].as<int64_t>(),
+                row["storage_limit"].isNull() ? std::nullopt : std::optional<int64_t>(row["storage_limit"].as<int64_t>())};
 
-            if (row["storage_limit"].isNull()) {
-                stats["storage_limit"] = Json::nullValue;
-            } else {
-                stats["storage_limit"] = row["storage_limit"].as<int64_t>();
-            }
+            DEBUG_LOG("Storage stats for user {}: files={}, raw={}, compressed={}, limit={}", user_id, stats.file_count,
+                stats.total_original_bytes, stats.total_compressed_bytes,
+                stats.storage_limit ? std::to_string(*stats.storage_limit) : "unlimited");
 
-            DEBUG_LOG("Storage stats for user {}: files={}, raw={}, compressed={}, limit={}", user_id, stats["file_count"].asInt64(),
-                stats["total_original_bytes"].asInt64(), stats["total_compressed_bytes"].asInt64(),
-                stats["storage_limit"].isNull() ? "unlimited" : std::to_string(stats["storage_limit"].asInt64()));
-
-            co_return HttpResponse::newHttpJsonResponse(std::move(stats));
+            co_return createTypedJsonResponse(stats, k200OK);
         } catch (const drogon::orm::DrogonDbException& e) {
             SGRN_ERROR_LOG("handleGetStorageStats: SQL Execution Error: {}", e.base().what());
             co_return createErrorResponse(GenericApiError::InternalServerError);

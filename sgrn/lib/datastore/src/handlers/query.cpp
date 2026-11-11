@@ -27,6 +27,28 @@ using namespace drogon_model::sgrn;
 namespace sgrn::datastore::handlers::query
 {
 
+namespace
+{
+struct IdNameResponse {
+    int32_t id{0};
+    std::string name;
+};
+
+struct UserInfoResponse {
+    int32_t id{0};
+    std::string first_name;
+    std::string family_name;
+    std::string email;
+    std::string organisation;
+    std::string domain;
+    std::string status;
+};
+
+struct MessageResponse {
+    std::string message;
+};
+} // namespace
+
 static std::optional<int32_t> getIntParam(HttpRequestPtr tsp_http_req, const std::string& t_param_name) {
     const std::string& val = tsp_http_req->getParameter(t_param_name);
     if (val.empty()) {
@@ -44,13 +66,11 @@ static std::optional<int32_t> getIntParam(HttpRequestPtr tsp_http_req, const std
 }
 
 template <typename T>
-Json::Value modelsToJson(const std::vector<T>& t_models) {
-    Json::Value arr(Json::arrayValue);
+std::vector<IdNameResponse> modelsToResponse(const std::vector<T>& t_models) {
+    std::vector<IdNameResponse> arr;
+    arr.reserve(t_models.size());
     for (const auto& item : t_models) {
-        Json::Value obj;
-        obj["id"] = item.getValueOfId();
-        obj["name"] = item.getValueOfName();
-        arr.append(std::move(obj));
+        arr.push_back({item.getValueOfId(), item.getValueOfName()});
     }
     return arr;
 }
@@ -58,20 +78,8 @@ Json::Value modelsToJson(const std::vector<T>& t_models) {
 Task<HttpResponsePtr> QueryApiHandler::handleQueryListOfUserStatus(HttpRequestPtr tsp_http_req) {
     // Since core.status table is removed, we return the hardcoded list
     // allowed by the CHECK constraint on core.users.status
-    Json::Value arr(Json::arrayValue);
-
-    auto add_status = [&](int t_id, const std::string& t_name) {
-        Json::Value obj;
-        obj["id"] = t_id;
-        obj["name"] = t_name;
-        arr.append(std::move(obj));
-    };
-
-    add_status(1, "active");
-    add_status(2, "suspended");
-    add_status(3, "invited");
-
-    co_return HttpResponse::newHttpJsonResponse(arr);
+    std::vector<IdNameResponse> statuses{{1, "active"}, {2, "suspended"}, {3, "invited"}};
+    co_return createTypedJsonResponse(statuses, k200OK);
 }
 
 Task<HttpResponsePtr> QueryApiHandler::handleQueryListOfOrganisations(HttpRequestPtr tsp_http_req) {
@@ -84,7 +92,7 @@ Task<HttpResponsePtr> QueryApiHandler::handleQueryListOfOrganisations(HttpReques
         CoroMapper<drogon_model::sgrn::core::Organisations> mapper(client);
 
         auto results = co_await mapper.orderBy(drogon_model::sgrn::core::Organisations::Cols::_name, SortOrder::ASC).findAll();
-        co_return HttpResponse::newHttpJsonResponse(modelsToJson(results));
+        co_return createTypedJsonResponse(modelsToResponse(results), k200OK);
 
     } catch (const DrogonDbException& e) {
         ERROR_LOG("DB Error: {}", e.base().what());
@@ -112,17 +120,18 @@ Task<HttpResponsePtr> QueryApiHandler::handleQueryUserInfo(HttpRequestPtr tsp_ht
             co_return sgrn::createErrorResponse(QueryApiError::UserNotFound);
         }
 
-        Json::Value row_json;
         auto row = result.front();
-        row_json["id"] = row["id"].as<int32_t>();
-        row_json["first_name"] = row["first_name"].as<std::string>();
-        row_json["family_name"] = row["family_name"].as<std::string>();
-        row_json["email"] = row["email"].as<std::string>();
-        row_json["organisation"] = row["organisation"].as<std::string>();
-        row_json["domain"] = row["domain"].isNull() ? "" : row["domain"].as<std::string>();
-        row_json["status"] = row["status"].as<std::string>();
+        UserInfoResponse response{
+            row["id"].as<int32_t>(),
+            row["first_name"].as<std::string>(),
+            row["family_name"].as<std::string>(),
+            row["email"].as<std::string>(),
+            row["organisation"].as<std::string>(),
+            row["domain"].isNull() ? "" : row["domain"].as<std::string>(),
+            row["status"].as<std::string>(),
+        };
 
-        co_return HttpResponse::newHttpJsonResponse(std::move(row_json));
+        co_return createTypedJsonResponse(response, k200OK);
 
     } catch (const std::exception& e) {
         ERROR_LOG("DB Error: {}", e.what());
@@ -157,9 +166,7 @@ drogon::Task<drogon::HttpResponsePtr> QueryApiHandler::handleUpdateUserInfo(drog
         co_await client->execSqlCoro("UPDATE core.users SET first_name = $1, family_name = $2, phone_number = $3 WHERE id = $4", first_name,
             family_name, phone_number, user_id);
 
-        Json::Value response;
-        response["message"] = "Profile updated successfully";
-        co_return HttpResponse::newHttpJsonResponse(std::move(response));
+        co_return createTypedJsonResponse(MessageResponse{"Profile updated successfully"}, k200OK);
 
     } catch (const std::exception& e) {
         ERROR_LOG("Update User Info Error: {}", e.what());

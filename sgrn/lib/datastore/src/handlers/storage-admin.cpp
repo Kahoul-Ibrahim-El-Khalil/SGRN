@@ -33,6 +33,259 @@
 #include <utility>
 #include <vector>
 
+namespace sgrn::datastore::handlers::storage_admin::detail
+{
+struct StorageObjectInfo {
+    int64_t id{0};
+    std::string bucket;
+    std::string object_key;
+    int64_t size{0};
+    int64_t original_size{0};
+    bool is_compressed{false};
+    std::optional<std::string> compression_algorithm;
+    std::optional<int64_t> compression_level;
+    std::string provider;
+    std::string created_at;
+};
+
+struct StorageFileReference {
+    int64_t file_id{0};
+    std::string full_path;
+    std::optional<int64_t> user_id;
+    std::optional<int64_t> automated_service_id;
+    std::string created_at;
+};
+
+struct KeySearchResponse {
+    std::string bucket;
+    std::string key;
+    std::optional<StorageObjectInfo> db;
+    std::optional<std::vector<StorageFileReference>> files;
+    sgrn::json::RawJson garage{"null"};
+    std::optional<std::string> garage_error;
+};
+
+struct PrefixMatch {
+    std::string key;
+    int64_t size{0};
+    std::string etag;
+    bool in_db{false};
+};
+
+struct PrefixSearchResponse {
+    std::string bucket;
+    std::string prefix;
+    std::vector<PrefixMatch> matches;
+    bool truncated{false};
+};
+
+struct PurgeSkipped {
+    std::string key;
+    std::string reason;
+};
+
+struct PurgeKey {
+    std::string key;
+};
+
+struct PurgeDryRunResponse {
+    std::string bucket;
+    bool dry_run{true};
+    std::vector<PurgeKey> would_delete;
+    int64_t would_delete_count{0};
+    std::vector<PurgeSkipped> skipped;
+};
+
+struct PurgeResponse {
+    std::string bucket;
+    bool dry_run{false};
+    std::vector<std::string> deleted;
+    sgrn::json::RawJson errors{"[]"};
+    std::vector<PurgeSkipped> skipped;
+};
+
+struct QuotaUpdateWithIdResponse {
+    std::string kind;
+    int64_t id{0};
+    std::string label;
+    std::optional<std::string> organisation;
+    int64_t storage_used_bytes{0};
+    std::optional<int64_t> storage_limit_bytes;
+    int64_t entries_used{0};
+    std::optional<int64_t> entry_count_limit;
+};
+
+struct QuotaUpdateOrganisationResponse {
+    std::string kind;
+    std::string label;
+    std::optional<std::string> organisation;
+    int64_t storage_used_bytes{0};
+    std::optional<int64_t> storage_limit_bytes;
+    int64_t entries_used{0};
+    std::optional<int64_t> entry_count_limit;
+};
+
+struct UserQuotaRow {
+    int64_t id{0};
+    std::string email;
+    std::string kind;
+    std::optional<std::string> organisation;
+    int64_t storage_used_bytes{0};
+    std::optional<int64_t> storage_limit_bytes;
+    int64_t entries_used{0};
+    std::optional<int64_t> entry_count_limit;
+    std::optional<int64_t> rate_limit_rpm;
+    std::optional<int64_t> max_file_size_mb;
+    std::optional<int64_t> preferred_chunk_size_mb;
+    std::optional<int64_t> rate_limit_upload_rpm;
+};
+
+struct ServiceQuotaRow {
+    int64_t id{0};
+    std::string name;
+    std::string kind;
+    std::optional<std::string> organisation;
+    int64_t storage_used_bytes{0};
+    std::optional<int64_t> storage_limit_bytes;
+    int64_t entries_used{0};
+    std::optional<int64_t> entry_count_limit;
+    std::optional<int64_t> rate_limit_rpm;
+    std::optional<int64_t> max_file_size_mb;
+    std::optional<int64_t> preferred_chunk_size_mb;
+    std::optional<int64_t> rate_limit_upload_rpm;
+};
+
+struct DomainQuotaRow {
+    int64_t id{0};
+    std::string name;
+    std::string path;
+    std::string kind;
+    std::optional<std::string> organisation;
+    int64_t storage_used_bytes{0};
+    std::optional<int64_t> storage_limit_bytes;
+    int64_t entries_used{0};
+    std::optional<int64_t> entry_count_limit;
+};
+
+struct OrganisationQuotaRow {
+    std::string name;
+    std::string kind;
+    std::optional<std::string> organisation;
+    int64_t storage_used_bytes{0};
+    std::optional<int64_t> storage_limit_bytes;
+    int64_t entries_used{0};
+    std::optional<int64_t> entry_count_limit;
+    std::optional<int64_t> rate_limit_rpm;
+};
+
+struct UserQuotasResponse {
+    std::string kind;
+    std::vector<UserQuotaRow> rows;
+    int64_t count{0};
+};
+struct ServiceQuotasResponse {
+    std::string kind;
+    std::vector<ServiceQuotaRow> rows;
+    int64_t count{0};
+};
+struct DomainQuotasResponse {
+    std::string kind;
+    std::vector<DomainQuotaRow> rows;
+    int64_t count{0};
+};
+struct OrganisationQuotasResponse {
+    std::string kind;
+    std::vector<OrganisationQuotaRow> rows;
+    int64_t count{0};
+};
+
+struct AnalyticsCounts {
+    int64_t users{0};
+    int64_t automated_services{0};
+    int64_t organisations{0};
+    int64_t domains{0};
+    int64_t files{0};
+    int64_t objects{0};
+    int64_t formats{0};
+    int64_t permission_grants{0};
+};
+
+struct AnalyticsBytes {
+    int64_t virtual_bytes{0};
+    int64_t stored{0};
+    int64_t saved_by_compression{0};
+};
+
+struct AnalyticsTimeseriesEntry {
+    std::string day;
+    int64_t files{0};
+    int64_t bytes_virtual{0};
+};
+
+struct AnalyticsExtensionEntry {
+    std::string extension;
+    int64_t files{0};
+    int64_t bytes_virtual{0};
+};
+
+struct AnalyticsUploaderEntry {
+    std::string actor;
+    int64_t files{0};
+    int64_t bytes_virtual{0};
+};
+
+struct AnalyticsRecentFile {
+    std::string name;
+    std::string extension;
+    int64_t bytes_virtual{0};
+    std::string actor;
+    std::string at;
+};
+
+struct AnalyticsOverviewResponse {
+    AnalyticsCounts counts;
+    AnalyticsBytes bytes;
+    std::vector<AnalyticsTimeseriesEntry> timeseries_30d;
+    std::vector<AnalyticsExtensionEntry> top_extensions;
+    std::vector<AnalyticsUploaderEntry> top_uploaders;
+    std::vector<AnalyticsRecentFile> recent_files;
+};
+
+struct AnalyticsBreakdownActorRow {
+    std::string slice;
+    int64_t files{0};
+    int64_t bytes_virtual{0};
+    int64_t actors{0};
+};
+
+struct AnalyticsBreakdownQuotaRow {
+    std::string slice;
+    int64_t files{0};
+    int64_t bytes_virtual{0};
+    std::optional<int64_t> storage_limit_bytes;
+    std::optional<int64_t> entry_count_limit;
+};
+
+struct AnalyticsBreakdownActorResponse {
+    std::string kind;
+    std::vector<AnalyticsBreakdownActorRow> rows;
+    int64_t count{0};
+};
+
+struct AnalyticsBreakdownQuotaResponse {
+    std::string kind;
+    std::vector<AnalyticsBreakdownQuotaRow> rows;
+    int64_t count{0};
+};
+} // namespace sgrn::datastore::handlers::storage_admin::detail
+
+template <>
+struct glz::meta<sgrn::datastore::handlers::storage_admin::detail::AnalyticsBytes> {
+    using T = sgrn::datastore::handlers::storage_admin::detail::AnalyticsBytes;
+    static constexpr auto value =
+        glz::object("virtual", &T::virtual_bytes, "stored", &T::stored, "saved_by_compression", &T::saved_by_compression);
+};
+
 namespace
 {
 
@@ -124,7 +377,7 @@ Json::Int64 fieldInt(const drogon::orm::Field& t_field) {
 
 struct GarageKey {
     std::string key;
-    Json::Int64 size = 0;
+    int64_t size = 0;
     std::string etag;
 };
 
@@ -133,6 +386,91 @@ struct GarageScan {
     bool truncated = false;
     uint32_t pages = 0;
 };
+
+struct StorageStats {
+    int64_t objects{0};
+    int64_t bytes{0};
+    int64_t files{0};
+};
+
+struct OverviewBucket {
+    std::string name;
+    struct {
+        int64_t objects{0};
+        int64_t bytes{0};
+        bool truncated{false};
+        uint32_t pages{0};
+    } garage;
+    StorageStats db;
+};
+
+struct OverviewResponse {
+    std::vector<OverviewBucket> buckets;
+};
+
+struct OrphanObject {
+    std::string key;
+    int64_t size{0};
+    std::string etag;
+};
+
+struct OrphanSize {
+    std::string key;
+    int64_t size{0};
+};
+
+struct OrphansResponse {
+    std::string bucket;
+    std::string prefix;
+    int64_t garage_scanned{0};
+    bool garage_truncated{false};
+    std::vector<OrphanObject> garage_only;
+    int64_t garage_only_count{0};
+    int64_t garage_only_bytes{0};
+    std::vector<OrphanSize> db_missing;
+    int64_t db_missing_unchecked{0};
+};
+
+struct FormatRecord {
+    std::string extension;
+    std::string mime_type;
+    bool is_compressed{false};
+    bool is_allowed{false};
+    std::optional<std::string> description;
+    std::string created_at;
+};
+
+struct FormatsResponse {
+    std::vector<FormatRecord> formats;
+    int64_t count{0};
+};
+
+struct FormatUpsertResponse {
+    std::string extension;
+    std::string mime_type;
+    bool is_compressed{false};
+    bool is_allowed{false};
+    std::optional<std::string> description;
+    std::string created_at;
+    bool created{false};
+};
+
+struct FormatDeleteResponse {
+    bool success{true};
+    std::string extension;
+};
+
+struct FormatConflictResponse {
+    std::string extension;
+    int64_t referencing_files{0};
+    std::string hint;
+};
+
+std::string jsonText(const Json::Value& t_value) {
+    Json::StreamWriterBuilder writer;
+    writer["indentation"] = "";
+    return Json::writeString(writer, t_value);
+}
 
 // Page through ListObjectsV2 (server-side prefix filter) up to max_pages.
 Task<GarageScan> scanBucketKeys(
@@ -167,6 +505,7 @@ Task<GarageScan> scanBucketKeys(
 namespace sgrn::datastore::handlers::storage_admin
 {
 using namespace drogon;
+using namespace detail;
 
 Task<HttpResponsePtr> StorageAdminHandler::handleOverview(HttpRequestPtr tsp_req) {
     try {
@@ -182,21 +521,22 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOverview(HttpRequestPtr tsp_req
         auto db = db_res.value();
 
         const Json::Value buckets_res = co_await s3unwrap(s3->listBuckets());
-        Json::Value buckets = Json::arrayValue;
+        std::vector<OverviewBucket> buckets;
+        buckets.reserve(buckets_res["buckets"].size());
         for (const auto& b : buckets_res["buckets"]) {
             const std::string name = b["name"].asString();
-            Json::Value entry;
-            entry["name"] = name;
+            OverviewBucket entry;
+            entry.name = name;
 
             const GarageScan scan = co_await scanBucketKeys(s3, name, "", max_pages);
             Json::Int64 bytes = 0;
             for (const auto& k : scan.keys) {
                 bytes += k.size;
             }
-            entry["garage"]["objects"] = static_cast<Json::Int64>(scan.keys.size());
-            entry["garage"]["bytes"] = static_cast<Json::Int64>(bytes);
-            entry["garage"]["truncated"] = scan.truncated;
-            entry["garage"]["pages"] = scan.pages;
+            entry.garage.objects = static_cast<int64_t>(scan.keys.size());
+            entry.garage.bytes = bytes;
+            entry.garage.truncated = scan.truncated;
+            entry.garage.pages = scan.pages;
 
             auto objs = is_platform ? co_await sgrn::datastore::core::execSqlCoroVec(
                                           db, "SELECT COUNT(*), COALESCE(SUM(size),0) FROM storage.objects WHERE bucket = $1", {name})
@@ -222,14 +562,12 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOverview(HttpRequestPtr tsp_req
                                            "LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
                                            "WHERE o.bucket = $1 AND COALESCE(u.organisation, s.organisation) = $2",
                                            {name, session_org});
-            entry["db"]["objects"] = static_cast<Json::Int64>(fieldInt(objs[0][0]));
-            entry["db"]["bytes"] = static_cast<Json::Int64>(fieldInt(objs[0][1]));
-            entry["db"]["files"] = static_cast<Json::Int64>(fieldInt(files[0][0]));
-            buckets.append(std::move(entry));
+            entry.db.objects = fieldInt(objs[0][0]);
+            entry.db.bytes = fieldInt(objs[0][1]);
+            entry.db.files = fieldInt(files[0][0]);
+            buckets.push_back(std::move(entry));
         }
-        Json::Value out;
-        out["buckets"] = std::move(buckets);
-        co_return sgrn::createJsonResponse(out, k200OK);
+        co_return sgrn::createTypedJsonResponse(OverviewResponse{std::move(buckets)}, k200OK);
     } catch (const S3UpstreamError& e) {
         co_return sgrn::createErrorResponse(e.what(), k502BadGateway, "StorageAdmin");
     } catch (const std::exception& e) {
@@ -261,7 +599,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOrphans(HttpRequestPtr tsp_req)
             db_sizes[row["key"].as<std::string>()] = fieldInt(row["size"]);
         }
 
-        Json::Value garage_only = Json::arrayValue;
+        std::vector<OrphanObject> garage_only;
+        garage_only.reserve(limit);
         int64_t garage_only_bytes = 0;
         std::size_t garage_only_count = 0;
         std::unordered_set<std::string> seen;
@@ -272,18 +611,15 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOrphans(HttpRequestPtr tsp_req)
                 ++garage_only_count;
                 garage_only_bytes += k.size;
                 if (garage_only.size() < limit) {
-                    Json::Value e;
-                    e["key"] = k.key;
-                    e["size"] = static_cast<Json::Int64>(k.size);
-                    e["etag"] = k.etag;
-                    garage_only.append(std::move(e));
+                    garage_only.push_back({k.key, k.size, k.etag});
                 }
             }
         }
 
         // DB rows with no Garage object: HEAD-verify each (bounded by limit)
         // so the report is exact even when the Garage scan truncated.
-        Json::Value db_missing = Json::arrayValue;
+        std::vector<OrphanSize> db_missing;
+        db_missing.reserve(limit);
         std::size_t db_missing_unchecked = 0;
         for (const auto& [key, size] : db_sizes) {
             if (seen.find(key) != seen.end()) {
@@ -295,24 +631,23 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOrphans(HttpRequestPtr tsp_req)
             }
             const bool present = co_await s3unwrap(s3->exists(bucket, key));
             if (!present) {
-                Json::Value e;
-                e["key"] = key;
-                e["size"] = static_cast<Json::Int64>(size);
-                db_missing.append(std::move(e));
+                db_missing.push_back({key, size});
             }
         }
 
-        Json::Value out;
-        out["bucket"] = bucket;
-        out["prefix"] = prefix;
-        out["garage_scanned"] = static_cast<Json::Int64>(scan.keys.size());
-        out["garage_truncated"] = scan.truncated;
-        out["garage_only"] = std::move(garage_only);
-        out["garage_only_count"] = static_cast<Json::Int64>(garage_only_count);
-        out["garage_only_bytes"] = static_cast<Json::Int64>(garage_only_bytes);
-        out["db_missing"] = std::move(db_missing);
-        out["db_missing_unchecked"] = static_cast<Json::Int64>(db_missing_unchecked);
-        co_return sgrn::createJsonResponse(out, k200OK);
+        co_return sgrn::createTypedJsonResponse(
+            OrphansResponse{
+                bucket,
+                prefix,
+                static_cast<int64_t>(scan.keys.size()),
+                scan.truncated,
+                std::move(garage_only),
+                static_cast<int64_t>(garage_only_count),
+                garage_only_bytes,
+                std::move(db_missing),
+                static_cast<int64_t>(db_missing_unchecked),
+            },
+            k200OK);
     } catch (const S3UpstreamError& e) {
         co_return sgrn::createErrorResponse(e.what(), k502BadGateway, "StorageAdmin");
     } catch (const std::exception& e) {
@@ -393,57 +728,64 @@ Task<HttpResponsePtr> StorageAdminHandler::handlePurgeOrphans(HttpRequestPtr tsp
 
         // Re-verify every candidate against the DB immediately before acting:
         // a concurrent upload must never lose its bytes to an admin purge.
-        Json::Value skipped = Json::arrayValue;
+        std::vector<PurgeSkipped> skipped;
+        skipped.reserve(candidates.size());
         std::vector<std::string> doomed;
         doomed.reserve(candidates.size());
         for (const auto& key : candidates) {
             auto hit = co_await sgrn::datastore::core::execSqlCoroVec(
                 db, "SELECT 1 FROM storage.objects WHERE bucket = $1 AND key = $2 LIMIT 1", {bucket, key});
             if (!hit.empty()) {
-                Json::Value e;
-                e["key"] = key;
-                e["reason"] = "referenced by storage.objects";
-                skipped.append(std::move(e));
+                skipped.push_back({key, "referenced by storage.objects"});
             } else {
                 doomed.push_back(key);
             }
         }
 
-        Json::Value out;
-        out["bucket"] = bucket;
-        out["dry_run"] = dry_run;
         if (dry_run) {
-            Json::Value would = Json::arrayValue;
+            const int64_t would_delete_count = static_cast<int64_t>(doomed.size());
+            std::vector<PurgeKey> would_delete;
+            would_delete.reserve(doomed.size());
             for (const auto& key : doomed) {
-                Json::Value e;
-                e["key"] = key;
-                would.append(std::move(e));
+                would_delete.push_back({key});
             }
-            out["would_delete"] = std::move(would);
-            out["would_delete_count"] = static_cast<Json::Int64>(doomed.size());
-            out["skipped"] = std::move(skipped);
-            co_return sgrn::createJsonResponse(out, k200OK);
+            co_return sgrn::createTypedJsonResponse(
+                PurgeDryRunResponse{
+                    bucket,
+                    true,
+                    std::move(would_delete),
+                    would_delete_count,
+                    std::move(skipped),
+                },
+                k200OK);
         }
 
-        Json::Value deleted = Json::arrayValue;
-        Json::Value errors = Json::arrayValue;
+        std::vector<std::string> deleted;
+        sgrn::json::RawJson errors{"[]"};
         if (!doomed.empty()) {
             const Json::Value res = co_await s3unwrap(s3->deleteFiles(bucket, doomed));
-            if (res.isMember("deleted")) {
-                deleted = res["deleted"];
-            } else {
-                for (const auto& key : doomed) {
-                    deleted.append(key);
+            if (res.isMember("deleted") && res["deleted"].isArray()) {
+                for (const auto& key : res["deleted"]) {
+                    if (key.isString()) {
+                        deleted.push_back(key.asString());
+                    }
                 }
+            } else {
+                deleted = doomed;
             }
             if (res.isMember("errors")) {
-                errors = res["errors"];
+                errors = sgrn::json::RawJson{jsonText(res["errors"])};
             }
         }
-        out["deleted"] = std::move(deleted);
-        out["errors"] = std::move(errors);
-        out["skipped"] = std::move(skipped);
-        co_return sgrn::createJsonResponse(out, k200OK);
+        co_return sgrn::createTypedJsonResponse(
+            PurgeResponse{
+                bucket,
+                false,
+                std::move(deleted),
+                std::move(errors),
+                std::move(skipped),
+            },
+            k200OK);
     } catch (const S3UpstreamError& e) {
         co_return sgrn::createErrorResponse(e.what(), k502BadGateway, "StorageAdmin");
     } catch (const std::exception& e) {
@@ -466,37 +808,30 @@ Task<HttpResponsePtr> StorageAdminHandler::handleSearch(HttpRequestPtr tsp_req) 
         auto db = db_res.value();
 
         if (!key.empty()) {
-            Json::Value out;
-            out["bucket"] = bucket;
-            out["key"] = key;
+            KeySearchResponse out;
+            out.bucket = bucket;
+            out.key = key;
             auto objs = co_await sgrn::datastore::core::execSqlCoroVec(db,
                 "SELECT id, bucket, key, size, original_size, is_compressed, compression_algorithm, compression_level,"
                 " provider, created_at FROM storage.objects WHERE bucket = $1 AND key = $2",
                 {bucket, key});
             if (objs.empty()) {
-                out["db"] = Json::Value::null;
+                out.db = std::nullopt;
             } else {
                 const auto& row = objs[0];
-                Json::Value obj;
-                obj["id"] = fieldInt(row["id"]);
-                obj["bucket"] = row["bucket"].as<std::string>();
-                obj["object_key"] = row["key"].as<std::string>();
-                obj["size"] = fieldInt(row["size"]);
-                obj["original_size"] = fieldInt(row["original_size"]);
-                obj["is_compressed"] = row["is_compressed"].as<std::string>() == "t";
-                if (row["compression_algorithm"].isNull()) {
-                    obj["compression_algorithm"] = Json::Value::null;
-                } else {
-                    obj["compression_algorithm"] = row["compression_algorithm"].as<std::string>();
-                }
-                if (row["compression_level"].isNull()) {
-                    obj["compression_level"] = Json::Value::null;
-                } else {
-                    obj["compression_level"] = fieldInt(row["compression_level"]);
-                }
-                obj["provider"] = row["provider"].as<std::string>();
-                obj["created_at"] = row["created_at"].as<std::string>();
-                out["db"] = std::move(obj);
+                out.db = StorageObjectInfo{
+                    fieldInt(row["id"]),
+                    row["bucket"].as<std::string>(),
+                    row["key"].as<std::string>(),
+                    fieldInt(row["size"]),
+                    fieldInt(row["original_size"]),
+                    row["is_compressed"].as<std::string>() == "t",
+                    row["compression_algorithm"].isNull() ? std::nullopt
+                                                          : std::optional<std::string>(row["compression_algorithm"].as<std::string>()),
+                    row["compression_level"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["compression_level"])),
+                    row["provider"].as<std::string>(),
+                    row["created_at"].as<std::string>(),
+                };
 
                 const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
                 const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
@@ -520,26 +855,25 @@ Task<HttpResponsePtr> StorageAdminHandler::handleSearch(HttpRequestPtr tsp_req) 
                 }
 
                 auto files = co_await sgrn::datastore::core::execSqlCoroVec(db, file_sql, file_binds);
-                Json::Value refs = Json::arrayValue;
+                std::vector<StorageFileReference> refs;
+                refs.reserve(files.size());
                 for (const auto& f : files) {
-                    Json::Value e;
-                    e["file_id"] = fieldInt(f["id"]);
-                    e["full_path"] = f["full_path"].as<std::string>();
-                    e["user_id"] = f["user_id"].isNull() ? Json::Value::null : Json::Value(fieldInt(f["user_id"]));
-                    e["automated_service_id"] =
-                        f["automated_service_id"].isNull() ? Json::Value::null : Json::Value(fieldInt(f["automated_service_id"]));
-                    e["created_at"] = f["created_at"].as<std::string>();
-                    refs.append(std::move(e));
+                    refs.push_back({
+                        fieldInt(f["id"]),
+                        f["full_path"].as<std::string>(),
+                        f["user_id"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(f["user_id"])),
+                        f["automated_service_id"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(f["automated_service_id"])),
+                        f["created_at"].as<std::string>(),
+                    });
                 }
-                out["files"] = std::move(refs);
+                out.files = std::move(refs);
             }
             try {
-                out["garage"] = co_await s3unwrap(s3->statObject(bucket, key));
+                out.garage = sgrn::json::RawJson{jsonText(co_await s3unwrap(s3->statObject(bucket, key)))};
             } catch (const S3UpstreamError& e) {
-                out["garage"] = Json::Value::null;
-                out["garage_error"] = e.what();
+                out.garage_error = e.what();
             }
-            co_return sgrn::createJsonResponse(out, k200OK);
+            co_return sgrn::createTypedJsonResponse(out, k200OK);
         }
 
         if (!prefix.empty()) {
@@ -552,21 +886,14 @@ Task<HttpResponsePtr> StorageAdminHandler::handleSearch(HttpRequestPtr tsp_req) 
             for (const auto& row : match_rows) {
                 db_keys.insert(row["key"].as<std::string>());
             }
-            Json::Value matches = Json::arrayValue;
+            std::vector<PrefixMatch> matches;
+            matches.reserve(res["objects"].size());
             for (const auto& obj : res["objects"]) {
-                Json::Value e;
-                e["key"] = obj["key"].asString();
-                e["size"] = obj["size"].asInt64();
-                e["etag"] = obj["etag"].asString();
-                e["in_db"] = db_keys.find(obj["key"].asString()) != db_keys.end();
-                matches.append(std::move(e));
+                const std::string object_key = obj["key"].asString();
+                matches.push_back({object_key, obj["size"].asInt64(), obj["etag"].asString(), db_keys.find(object_key) != db_keys.end()});
             }
-            Json::Value out;
-            out["bucket"] = bucket;
-            out["prefix"] = prefix;
-            out["matches"] = std::move(matches);
-            out["truncated"] = res["is_truncated"].asBool();
-            co_return sgrn::createJsonResponse(out, k200OK);
+            co_return sgrn::createTypedJsonResponse(
+                PrefixSearchResponse{bucket, prefix, std::move(matches), res["is_truncated"].asBool()}, k200OK);
         }
 
         co_return sgrn::createErrorResponse(
@@ -728,16 +1055,38 @@ Json::Value systemConfigValuesJson(const Json::Value& t_sanitized_root) {
     return values;
 }
 
-Json::Value stringArrayJson(const std::set<std::string>& t_set) {
-    Json::Value arr = Json::arrayValue;
-    for (const auto& s : t_set) {
-        arr.append(s);
-    }
-    return arr;
-}
-
 bool startsWithPath(const std::string& t_path, const std::string& t_prefix) {
     return t_path.size() > t_prefix.size() && t_path.compare(0, t_prefix.size(), t_prefix) == 0 && t_path[t_prefix.size()] == '.';
+}
+
+struct SystemConfigResponse {
+    std::string config_path;
+    sgrn::json::RawJson values{"{}"};
+    sgrn::json::RawJson schema{"[]"};
+    sgrn::json::RawJson live{"{}"};
+    std::vector<std::string> pending_restart;
+};
+
+struct SystemConfigUpdateResponse {
+    bool success{true};
+    std::string config_path;
+    std::string backup_path;
+    std::vector<std::string> applied_hot;
+    std::vector<std::string> restart_required;
+    std::vector<std::string> pending_restart;
+    std::vector<std::string> warnings;
+};
+
+struct SystemConfigAuditDetails {
+    std::vector<std::string> applied_hot;
+    std::vector<std::string> restart_required;
+    std::string config_path;
+};
+
+std::string compactJson(const Json::Value& t_value) {
+    Json::StreamWriterBuilder writer;
+    writer["indentation"] = "";
+    return Json::writeString(writer, t_value);
 }
 
 } // namespace
@@ -752,26 +1101,26 @@ Task<HttpResponsePtr> StorageAdminHandler::handleGetSystemConfig(HttpRequestPtr 
         if (const std::string err = readConfigFile(path, root); !err.empty()) {
             co_return sgrn::createErrorResponse(err, k500InternalServerError, "SystemConfig");
         }
-        Json::Value out;
-        out["config_path"] = path;
-        out["values"] = systemConfigValuesJson(sgrn::datastore::sysconfig::sanitizeForAdmin(root));
-        out["schema"] = systemConfigSchemaJson();
+        const auto live_s3 = sgrn::json::write(sgrn::datastore::services::storage::currentStorageConfig().toJsonConfig());
+        if (live_s3.hasError()) {
+            co_return sgrn::createErrorResponse("Failed to serialize live storage configuration", k500InternalServerError, "SystemConfig");
+        }
+        const std::string live_json = "{\"custom_config\":{\"s3\":" + live_s3.value() + "}}";
         // Effective-now values (live in-memory). Identical to `values` for
         // every hot key — PUT applies synchronously — and the source of truth
         // the upload path actually reads. Differs only if the file was
         // hand-edited without restarting for restart-required keys.
-        {
-            Json::Value live(Json::objectValue);
-            Json::Value live_cc(Json::objectValue);
-            live_cc["s3"] = sgrn::datastore::services::storage::currentStorageConfig().toJson();
-            live["custom_config"] = std::move(live_cc);
-            out["live"] = std::move(live);
-        }
+        std::vector<std::string> pending_restart;
         {
             std::lock_guard lock(g_pending_restart_mutex);
-            out["pending_restart"] = stringArrayJson(g_pending_restart);
+            pending_restart.assign(g_pending_restart.begin(), g_pending_restart.end());
         }
-        co_return sgrn::createJsonResponse(out, k200OK);
+        const Json::Value values = systemConfigValuesJson(sgrn::datastore::sysconfig::sanitizeForAdmin(root));
+        const Json::Value schema = systemConfigSchemaJson();
+        co_return sgrn::createTypedJsonResponse(
+            SystemConfigResponse{path, sgrn::json::RawJson(compactJson(values)), sgrn::json::RawJson(compactJson(schema)),
+                sgrn::json::RawJson(live_json), std::move(pending_restart)},
+            k200OK);
     } catch (const std::exception& e) {
         co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "SystemConfig");
     }
@@ -813,14 +1162,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpdateSystemConfig(HttpRequestP
             touched_s3 = touched_s3 || startsWithPath(p, "custom_config.s3");
             touched_rl = touched_rl || startsWithPath(p, "custom_config.rate_limiting");
         }
-        Json::Value applied_hot = Json::arrayValue;
-        Json::Value restart_required = Json::arrayValue;
-        for (const auto& p : report.hot) {
-            applied_hot.append(p);
-        }
-        for (const auto& p : report.restart) {
-            restart_required.append(p);
-        }
+        std::vector<std::string> applied_hot(report.hot.begin(), report.hot.end());
+        std::vector<std::string> restart_required(report.restart.begin(), report.restart.end());
         if (touched_s3 && root.isMember("custom_config") && root["custom_config"].isMember("s3")) {
             sgrn::datastore::services::storage::publishStorageConfig(
                 sgrn::datastore::services::storage::StorageConfig::fromS3Json(root["custom_config"]["s3"]));
@@ -832,12 +1175,12 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpdateSystemConfig(HttpRequestP
                 sgrn::datastore::ratelimit::publishRateLimitConfig(
                     sgrn::datastore::ratelimit::RateLimitConfig::fromJson(root["custom_config"]));
             } else {
-                Json::Value still_hot = Json::arrayValue;
+                std::vector<std::string> still_hot;
                 for (const auto& p : applied_hot) {
-                    if (startsWithPath(p.asString(), "custom_config.rate_limiting")) {
-                        restart_required.append(p.asString());
+                    if (startsWithPath(p, "custom_config.rate_limiting")) {
+                        restart_required.push_back(p);
                     } else {
-                        still_hot.append(p.asString());
+                        still_hot.push_back(p);
                     }
                 }
                 applied_hot.swap(still_hot);
@@ -847,25 +1190,15 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpdateSystemConfig(HttpRequestP
         {
             std::lock_guard lock(g_pending_restart_mutex);
             for (const auto& p : restart_required) {
-                g_pending_restart.insert(p.asString());
+                g_pending_restart.insert(p);
             }
         }
-
-        Json::Value out;
-        out["success"] = true;
-        out["config_path"] = path;
-        out["backup_path"] = path + ".bak";
-        out["applied_hot"] = std::move(applied_hot);
-        out["restart_required"] = std::move(restart_required);
+        std::vector<std::string> pending_restart;
         {
             std::lock_guard lock(g_pending_restart_mutex);
-            out["pending_restart"] = stringArrayJson(g_pending_restart);
+            pending_restart.assign(g_pending_restart.begin(), g_pending_restart.end());
         }
-        Json::Value warnings = Json::arrayValue;
-        for (const auto& w : report.warnings) {
-            warnings.append(w);
-        }
-        out["warnings"] = std::move(warnings);
+        std::vector<std::string> warnings(report.warnings.begin(), report.warnings.end());
 
         // --- Audit: system.config_updated ------------------------------------
         {
@@ -876,16 +1209,15 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpdateSystemConfig(HttpRequestP
                 const std::string actor_name = session["user"]["email"].asString();
                 // Platform-level config is owned by the platform organisation ("platform").
                 const std::string config_org = session["user"]["organisation"].asString();
-                Json::Value detail;
-                detail["applied_hot"] = out["applied_hot"];
-                detail["restart_required"] = out["restart_required"];
-                detail["config_path"] = path;
                 co_await sgrn::datastore::audit::AuditLogger::log(db_res.value(), config_org, "user", actor_id, actor_name,
-                    "system.config_updated", "system_config", path, tsp_req->getPeerAddr().toIp(), detail, "success");
+                    "system.config_updated", "system_config", path, tsp_req->getPeerAddr().toIp(),
+                    SystemConfigAuditDetails{applied_hot, restart_required, path}, "success");
             }
         }
 
-        co_return sgrn::createJsonResponse(out, k200OK);
+        co_return sgrn::createTypedJsonResponse(SystemConfigUpdateResponse{true, path, path + ".bak", std::move(applied_hot),
+                                                    std::move(restart_required), std::move(pending_restart), std::move(warnings)},
+            k200OK);
     } catch (const std::exception& e) {
         co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "SystemConfig");
     }
@@ -906,27 +1238,15 @@ bool jsonBool(const Json::Value& t_v, bool t_dflt) {
     return t_v.isBool() ? t_v.asBool() : t_dflt;
 }
 
-Json::Value formatRowJson(const drogon::orm::Row& t_row) {
-    Json::Value e;
-    e["extension"] = t_row["extension"].as<std::string>();
-    e["mime_type"] = t_row["mime_type"].as<std::string>();
-    e["is_compressed"] = t_row["is_compressed"].as<std::string>() == "t";
-    e["is_allowed"] = t_row["is_allowed"].as<std::string>() == "t";
-    if (t_row["description"].isNull()) {
-        e["description"] = Json::Value::null;
-    } else {
-        e["description"] = t_row["description"].as<std::string>();
-    }
-    e["created_at"] = t_row["created_at"].as<std::string>();
-    return e;
-}
-
-void setNullableInt64(Json::Value& t_out, const char* t_key, const drogon::orm::Field& t_field) {
-    if (t_field.isNull()) {
-        t_out[t_key] = Json::Value::null;
-    } else {
-        t_out[t_key] = fieldInt(t_field);
-    }
+FormatRecord formatRow(const drogon::orm::Row& t_row) {
+    return {
+        t_row["extension"].as<std::string>(),
+        t_row["mime_type"].as<std::string>(),
+        t_row["is_compressed"].as<std::string>() == "t",
+        t_row["is_allowed"].as<std::string>() == "t",
+        t_row["description"].isNull() ? std::nullopt : std::optional<std::string>(t_row["description"].as<std::string>()),
+        t_row["created_at"].as<std::string>(),
+    };
 }
 
 } // namespace
@@ -955,14 +1275,12 @@ Task<HttpResponsePtr> StorageAdminHandler::handleListFormats(HttpRequestPtr tsp_
                 std::to_string(limit),
             {escapeLike(search), allowed});
 
-        Json::Value formats = Json::arrayValue;
+        std::vector<FormatRecord> formats;
+        formats.reserve(rows.size());
         for (const auto& row : rows) {
-            formats.append(formatRowJson(row));
+            formats.push_back(formatRow(row));
         }
-        Json::Value out;
-        out["formats"] = std::move(formats);
-        out["count"] = static_cast<Json::Int64>(rows.size());
-        co_return sgrn::createJsonResponse(out, k200OK);
+        co_return sgrn::createTypedJsonResponse(FormatsResponse{std::move(formats), static_cast<int64_t>(rows.size())}, k200OK);
     } catch (const std::exception& e) {
         co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "StorageAdmin");
     }
@@ -1003,15 +1321,16 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpsertFormat(HttpRequestPtr tsp
         // text instead of blanking it — unlike a blind ON CONFLICT overwrite.
         auto existing =
             co_await sgrn::datastore::core::execSqlCoroVec(db, "SELECT extension FROM storage.formats WHERE extension = $1", {ext});
-        Json::Value row;
+        FormatRecord row;
+        bool created = false;
         if (existing.empty()) {
             auto inserted = co_await sgrn::datastore::core::execSqlCoroVec(db,
                 "INSERT INTO storage.formats (extension, mime_type, is_compressed, is_allowed, description) "
                 "VALUES ($1, $2, ($3 = 'true'), ($4 = 'true'), NULLIF($5, '')) "
                 "RETURNING extension, mime_type, is_compressed, is_allowed, description, created_at",
                 {ext, mime, is_compressed ? "true" : "false", is_allowed ? "true" : "false", description});
-            row = formatRowJson(inserted[0]);
-            row["created"] = true;
+            row = formatRow(inserted[0]);
+            created = true;
         } else {
             // Only touch description when the caller sent one.
             auto updated = co_await sgrn::datastore::core::execSqlCoroVec(db,
@@ -1021,10 +1340,19 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpsertFormat(HttpRequestPtr tsp
                 "RETURNING extension, mime_type, is_compressed, is_allowed, description, created_at",
                 {ext, mime, is_compressed ? "true" : "false", is_allowed ? "true" : "false", description,
                     has_description ? "true" : "false"});
-            row = formatRowJson(updated[0]);
-            row["created"] = false;
+            row = formatRow(updated[0]);
         }
-        co_return sgrn::createJsonResponse(row, k200OK);
+        co_return sgrn::createTypedJsonResponse(
+            FormatUpsertResponse{
+                row.extension,
+                row.mime_type,
+                row.is_compressed,
+                row.is_allowed,
+                std::move(row.description),
+                row.created_at,
+                created,
+            },
+            k200OK);
     } catch (const drogon::orm::DrogonDbException& e) {
         co_return sgrn::createErrorResponse(std::string("Database error: ") + e.base().what(), k500InternalServerError, "StorageAdmin");
     } catch (const std::exception& e) {
@@ -1052,21 +1380,20 @@ Task<HttpResponsePtr> StorageAdminHandler::handleDeleteFormat(HttpRequestPtr tsp
         auto refs = co_await sgrn::datastore::core::execSqlCoroVec(db, "SELECT COUNT(*) FROM storage.files WHERE extension = $1", {ext});
         const long long referencing = refs.empty() ? 0 : fieldInt(refs[0][0]);
         if (referencing > 0) {
-            Json::Value detail;
-            detail["extension"] = ext;
-            detail["referencing_files"] = static_cast<Json::Int64>(referencing);
-            detail["hint"] = "set is_allowed=false instead — history stays intact, new uploads are blocked";
-            co_return sgrn::createJsonResponse(detail, k409Conflict);
+            co_return sgrn::createTypedJsonResponse(
+                FormatConflictResponse{
+                    ext,
+                    referencing,
+                    "set is_allowed=false instead — history stays intact, new uploads are blocked",
+                },
+                k409Conflict);
         }
 
         auto deleted = co_await sgrn::datastore::core::execSqlCoroVec(db, "DELETE FROM storage.formats WHERE extension = $1", {ext});
         if (deleted.affectedRows() == 0) {
             co_return sgrn::createErrorResponse("Unknown format: " + ext, k404NotFound, "StorageAdmin");
         }
-        Json::Value out;
-        out["success"] = true;
-        out["extension"] = ext;
-        co_return sgrn::createJsonResponse(out, k200OK);
+        co_return sgrn::createTypedJsonResponse(FormatDeleteResponse{true, ext}, k200OK);
     } catch (const std::exception& e) {
         co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "StorageAdmin");
     }
@@ -1135,43 +1462,59 @@ Task<HttpResponsePtr> StorageAdminHandler::handleListQuotas(HttpRequestPtr tsp_r
         }
         auto rows = co_await sgrn::datastore::core::execSqlCoroVec(db, quota_sql, quota_binds);
 
-        Json::Value list = Json::arrayValue;
+        std::vector<UserQuotaRow> users;
+        std::vector<ServiceQuotaRow> services;
+        std::vector<DomainQuotaRow> domains;
+        std::vector<OrganisationQuotaRow> organisations;
+        users.reserve(rows.size());
+        services.reserve(rows.size());
+        domains.reserve(rows.size());
+        organisations.reserve(rows.size());
         for (const auto& row : rows) {
-            Json::Value e;
+            const std::optional<std::string> organisation =
+                row["organisation"].isNull() ? std::nullopt : std::optional<std::string>(row["organisation"].as<std::string>());
+            const std::optional<int64_t> storage_limit =
+                row["storage_limit"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["storage_limit"]));
+            const std::optional<int64_t> entry_limit =
+                row["entry_count_limit"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["entry_count_limit"]));
             if (kind == "user") {
-                e["id"] = fieldInt(row["id"]);
-                e["email"] = row["email"].as<std::string>();
+                users.push_back({fieldInt(row["id"]), row["email"].as<std::string>(), kind, organisation,
+                    fieldInt(row["total_virtual_size"]), storage_limit, fieldInt(row["total_entry_count"]), entry_limit,
+                    row["rate_limit_rpm"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["rate_limit_rpm"])),
+                    row["max_file_size_mb"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["max_file_size_mb"])),
+                    row["preferred_chunk_size_mb"].isNull() ? std::nullopt
+                                                            : std::optional<int64_t>(fieldInt(row["preferred_chunk_size_mb"])),
+                    row["rate_limit_upload_rpm"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["rate_limit_upload_rpm"]))});
             } else if (kind == "service") {
-                e["id"] = fieldInt(row["id"]);
-                e["name"] = row["name"].as<std::string>();
+                services.push_back({fieldInt(row["id"]), row["name"].as<std::string>(), kind, organisation,
+                    fieldInt(row["total_virtual_size"]), storage_limit, fieldInt(row["total_entry_count"]), entry_limit,
+                    row["rate_limit_rpm"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["rate_limit_rpm"])),
+                    row["max_file_size_mb"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["max_file_size_mb"])),
+                    row["preferred_chunk_size_mb"].isNull() ? std::nullopt
+                                                            : std::optional<int64_t>(fieldInt(row["preferred_chunk_size_mb"])),
+                    row["rate_limit_upload_rpm"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["rate_limit_upload_rpm"]))});
             } else if (kind == "domain") {
-                e["id"] = fieldInt(row["id"]);
-                e["name"] = row["name"].as<std::string>();
-                e["path"] = row["path"].as<std::string>();
+                domains.push_back({fieldInt(row["id"]), row["name"].as<std::string>(), row["path"].as<std::string>(), kind, organisation,
+                    fieldInt(row["total_virtual_size"]), storage_limit, fieldInt(row["total_entry_count"]), entry_limit});
             } else {
-                e["name"] = row["name"].as<std::string>();
+                organisations.push_back({row["name"].as<std::string>(), kind, organisation, fieldInt(row["total_virtual_size"]),
+                    storage_limit, fieldInt(row["total_entry_count"]), entry_limit,
+                    row["rate_limit_rpm"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["rate_limit_rpm"]))});
             }
-            e["kind"] = kind;
-            e["organisation"] = row["organisation"].isNull() ? Json::Value::null : Json::Value(row["organisation"].as<std::string>());
-            e["storage_used_bytes"] = fieldInt(row["total_virtual_size"]);
-            setNullableInt64(e, "storage_limit_bytes", row["storage_limit"]);
-            e["entries_used"] = fieldInt(row["total_entry_count"]);
-            setNullableInt64(e, "entry_count_limit", row["entry_count_limit"]);
-            if (kind == "user" || kind == "service" || kind == "organisation") {
-                setNullableInt64(e, "rate_limit_rpm", row["rate_limit_rpm"]);
-            }
-            if (kind == "user" || kind == "service") {
-                setNullableInt64(e, "max_file_size_mb", row["max_file_size_mb"]);
-                setNullableInt64(e, "preferred_chunk_size_mb", row["preferred_chunk_size_mb"]);
-                setNullableInt64(e, "rate_limit_upload_rpm", row["rate_limit_upload_rpm"]);
-            }
-            list.append(std::move(e));
         }
-        Json::Value out;
-        out["kind"] = kind;
-        out["rows"] = std::move(list);
-        out["count"] = static_cast<Json::Int64>(rows.size());
-        co_return sgrn::createJsonResponse(out, k200OK);
+        if (kind == "user") {
+            co_return sgrn::createTypedJsonResponse(UserQuotasResponse{kind, std::move(users), static_cast<int64_t>(rows.size())}, k200OK);
+        }
+        if (kind == "service") {
+            co_return sgrn::createTypedJsonResponse(
+                ServiceQuotasResponse{kind, std::move(services), static_cast<int64_t>(rows.size())}, k200OK);
+        }
+        if (kind == "domain") {
+            co_return sgrn::createTypedJsonResponse(
+                DomainQuotasResponse{kind, std::move(domains), static_cast<int64_t>(rows.size())}, k200OK);
+        }
+        co_return sgrn::createTypedJsonResponse(
+            OrganisationQuotasResponse{kind, std::move(organisations), static_cast<int64_t>(rows.size())}, k200OK);
     } catch (const std::exception& e) {
         co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "StorageAdmin");
     }
@@ -1317,17 +1660,12 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpdateQuota(HttpRequestPtr tsp_
             co_return sgrn::createErrorResponse("No such " + kind + " (or it is soft-deleted)", k404NotFound, "StorageAdmin");
         }
         const auto& row = rows[0];
-        Json::Value out;
-        out["kind"] = kind;
-        if (kind != "organisation") {
-            out["id"] = fieldInt(row["id"]);
-        }
-        out["label"] = row["label"].as<std::string>();
-        out["organisation"] = row["organisation"].isNull() ? Json::Value::null : Json::Value(row["organisation"].as<std::string>());
-        out["storage_used_bytes"] = fieldInt(row["total_virtual_size"]);
-        setNullableInt64(out, "storage_limit_bytes", row["storage_limit"]);
-        out["entries_used"] = fieldInt(row["total_entry_count"]);
-        setNullableInt64(out, "entry_count_limit", row["entry_count_limit"]);
+        const std::optional<std::string> organisation =
+            row["organisation"].isNull() ? std::nullopt : std::optional<std::string>(row["organisation"].as<std::string>());
+        const std::optional<int64_t> storage_limit =
+            row["storage_limit"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["storage_limit"]));
+        const std::optional<int64_t> entry_limit =
+            row["entry_count_limit"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["entry_count_limit"]));
 
         // WP4c: this handler previously wrote no audit row at all (F7).
         // Details are the applied caps only — never request-echoed blobs.
@@ -1348,7 +1686,31 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpdateQuota(HttpRequestPtr tsp_
                     user["email"].asString(), "quota.updated", kind, target_id, tsp_req->getPeerAddr().toIp(), applied, "success");
             }
         }
-        co_return sgrn::createJsonResponse(out, k200OK);
+        if (kind == "organisation") {
+            co_return sgrn::createTypedJsonResponse(
+                QuotaUpdateOrganisationResponse{
+                    kind,
+                    row["label"].as<std::string>(),
+                    organisation,
+                    fieldInt(row["total_virtual_size"]),
+                    storage_limit,
+                    fieldInt(row["total_entry_count"]),
+                    entry_limit,
+                },
+                k200OK);
+        }
+        co_return sgrn::createTypedJsonResponse(
+            QuotaUpdateWithIdResponse{
+                kind,
+                fieldInt(row["id"]),
+                row["label"].as<std::string>(),
+                organisation,
+                fieldInt(row["total_virtual_size"]),
+                storage_limit,
+                fieldInt(row["total_entry_count"]),
+                entry_limit,
+            },
+            k200OK);
     } catch (const drogon::orm::DrogonDbException& e) {
         co_return sgrn::createErrorResponse(std::string("Database error: ") + e.base().what(), k500InternalServerError, "StorageAdmin");
     } catch (const std::exception& e) {
@@ -1436,23 +1798,18 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPt
         const int64_t bytes_stored = objects.empty() ? 0 : fieldInt(objects[0][1]);
         const int64_t bytes_virtual = objects.empty() ? 0 : fieldInt(objects[0][2]);
 
-        Json::Value out;
-        Json::Value counts;
-        counts["users"] = users.empty() ? 0 : fieldInt(users[0][0]);
-        counts["automated_services"] = services.empty() ? 0 : fieldInt(services[0][0]);
-        counts["organisations"] = orgs.empty() ? 0 : fieldInt(orgs[0][0]);
-        counts["domains"] = domains.empty() ? 0 : fieldInt(domains[0][0]);
-        counts["files"] = files.empty() ? 0 : fieldInt(files[0][0]);
-        counts["objects"] = objects.empty() ? 0 : fieldInt(objects[0][0]);
-        counts["formats"] = formats.empty() ? 0 : fieldInt(formats[0][0]);
-        counts["permission_grants"] = grants.empty() ? 0 : fieldInt(grants[0][0]);
-        out["counts"] = std::move(counts);
-
-        Json::Value bytes;
-        bytes["virtual"] = bytes_virtual;
-        bytes["stored"] = bytes_stored;
-        bytes["saved_by_compression"] = bytes_virtual - bytes_stored;
-        out["bytes"] = std::move(bytes);
+        detail::AnalyticsOverviewResponse out;
+        out.counts.users = users.empty() ? 0 : fieldInt(users[0][0]);
+        out.counts.automated_services = services.empty() ? 0 : fieldInt(services[0][0]);
+        out.counts.organisations = orgs.empty() ? 0 : fieldInt(orgs[0][0]);
+        out.counts.domains = domains.empty() ? 0 : fieldInt(domains[0][0]);
+        out.counts.files = files.empty() ? 0 : fieldInt(files[0][0]);
+        out.counts.objects = objects.empty() ? 0 : fieldInt(objects[0][0]);
+        out.counts.formats = formats.empty() ? 0 : fieldInt(formats[0][0]);
+        out.counts.permission_grants = grants.empty() ? 0 : fieldInt(grants[0][0]);
+        out.bytes.virtual_bytes = bytes_virtual;
+        out.bytes.stored = bytes_stored;
+        out.bytes.saved_by_compression = bytes_virtual - bytes_stored;
 
         // --- 30-day upload timeseries (day, files, virtual bytes) ---
         auto series =
@@ -1474,15 +1831,9 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPt
                       "WHERE f.created_at >= now() - interval '30 days' AND COALESCE(u.organisation, s.organisation) = $1 "
                       "GROUP BY 1 ORDER BY 1",
                       {session_org});
-        Json::Value timeseries = Json::arrayValue;
         for (const auto& row : series) {
-            Json::Value e;
-            e["day"] = row["day"].as<std::string>();
-            e["files"] = fieldInt(row["files"]);
-            e["bytes_virtual"] = fieldInt(row["bytes_virtual"]);
-            timeseries.append(std::move(e));
+            out.timeseries_30d.push_back({row["day"].as<std::string>(), fieldInt(row["files"]), fieldInt(row["bytes_virtual"])});
         }
-        out["timeseries_30d"] = std::move(timeseries);
 
         // --- top extensions by file count ---
         auto exts =
@@ -1503,15 +1854,9 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPt
                       "WHERE COALESCE(u.organisation, s.organisation) = $1 "
                       "GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
                       {session_org});
-        Json::Value top_ext = Json::arrayValue;
         for (const auto& row : exts) {
-            Json::Value e;
-            e["extension"] = row["ext"].as<std::string>();
-            e["files"] = fieldInt(row["files"]);
-            e["bytes_virtual"] = fieldInt(row["bytes_virtual"]);
-            top_ext.append(std::move(e));
+            out.top_extensions.push_back({row["ext"].as<std::string>(), fieldInt(row["files"]), fieldInt(row["bytes_virtual"])});
         }
-        out["top_extensions"] = std::move(top_ext);
 
         // --- top uploaders (users + services in one list) ---
         auto uploaders =
@@ -1545,15 +1890,9 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPt
                               "WHERE s.organisation = $1 "
                               "GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
                               {session_org});
-        Json::Value top_actors = Json::arrayValue;
         for (const auto& row : uploaders) {
-            Json::Value e;
-            e["actor"] = row["actor"].as<std::string>();
-            e["files"] = fieldInt(row["files"]);
-            e["bytes_virtual"] = fieldInt(row["bytes_virtual"]);
-            top_actors.append(std::move(e));
+            out.top_uploaders.push_back({row["actor"].as<std::string>(), fieldInt(row["files"]), fieldInt(row["bytes_virtual"])});
         }
-        out["top_uploaders"] = std::move(top_actors);
 
         // --- most recent files ---
         auto recent =
@@ -1583,19 +1922,12 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPt
                       "WHERE COALESCE(u.organisation, s.organisation) = $1 "
                       "ORDER BY f.id DESC LIMIT 10",
                       {session_org});
-        Json::Value recent_json = Json::arrayValue;
         for (const auto& row : recent) {
-            Json::Value e;
-            e["name"] = row["name"].as<std::string>();
-            e["extension"] = row["ext"].as<std::string>();
-            e["bytes_virtual"] = fieldInt(row["original_size"]);
-            e["actor"] = row["actor"].as<std::string>();
-            e["at"] = row["at"].as<std::string>();
-            recent_json.append(std::move(e));
+            out.recent_files.push_back({row["name"].as<std::string>(), row["ext"].as<std::string>(), fieldInt(row["original_size"]),
+                row["actor"].as<std::string>(), row["at"].as<std::string>()});
         }
-        out["recent_files"] = std::move(recent_json);
 
-        co_return sgrn::createJsonResponse(out, k200OK);
+        co_return sgrn::createTypedJsonResponse(out, k200OK);
     } catch (const std::exception& e) {
         co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "StorageAdmin");
     }
@@ -1674,27 +2006,30 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsBreakdown(HttpRequestP
         }
         auto rows = co_await sgrn::datastore::core::execSqlCoroVec(db, sql, binds);
 
-        Json::Value list = Json::arrayValue;
-        for (const auto& row : rows) {
-            Json::Value e;
-            e["slice"] = row["slice"].as<std::string>();
-            e["files"] = fieldInt(row["files"]);
-            e["bytes_virtual"] = fieldInt(row["bytes_virtual"]);
-            if (kind == "domain" || kind == "organisation") {
-                e["actors"] = fieldInt(row["actors"]);
-            } else {
-                const int64_t storage_cap = fieldInt(row["storage_cap"]);
-                const int64_t entry_cap = fieldInt(row["entry_cap"]);
-                e["storage_limit_bytes"] = storage_cap < 0 ? Json::Value::null : Json::Value(storage_cap);
-                e["entry_count_limit"] = entry_cap < 0 ? Json::Value::null : Json::Value(entry_cap);
+        if (kind == "domain" || kind == "organisation") {
+            detail::AnalyticsBreakdownActorResponse out;
+            out.kind = kind;
+            out.count = static_cast<int64_t>(rows.size());
+            out.rows.reserve(rows.size());
+            for (const auto& row : rows) {
+                out.rows.push_back(
+                    {row["slice"].as<std::string>(), fieldInt(row["files"]), fieldInt(row["bytes_virtual"]), fieldInt(row["actors"])});
             }
-            list.append(std::move(e));
+            co_return sgrn::createTypedJsonResponse(out, k200OK);
         }
-        Json::Value out;
-        out["kind"] = kind;
-        out["rows"] = std::move(list);
-        out["count"] = static_cast<Json::Int64>(rows.size());
-        co_return sgrn::createJsonResponse(out, k200OK);
+
+        detail::AnalyticsBreakdownQuotaResponse out;
+        out.kind = kind;
+        out.count = static_cast<int64_t>(rows.size());
+        out.rows.reserve(rows.size());
+        for (const auto& row : rows) {
+            const int64_t storage_cap = fieldInt(row["storage_cap"]);
+            const int64_t entry_cap = fieldInt(row["entry_cap"]);
+            out.rows.push_back({row["slice"].as<std::string>(), fieldInt(row["files"]), fieldInt(row["bytes_virtual"]),
+                storage_cap < 0 ? std::nullopt : std::optional<int64_t>(storage_cap),
+                entry_cap < 0 ? std::nullopt : std::optional<int64_t>(entry_cap)});
+        }
+        co_return sgrn::createTypedJsonResponse(out, k200OK);
     } catch (const std::exception& e) {
         co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "StorageAdmin");
     }

@@ -95,49 +95,25 @@ std::string_view opSql(Op t_op) {
     }
 }
 
-Json::Value fieldToJson(const drogon::orm::Field& t_field, FieldType t_type) {
-    if (t_field.isNull()) {
-        return Json::Value::null;
-    }
-    try {
-        switch (t_type) {
-            case FieldType::Int:
-                return Json::Value(t_field.as<int32_t>());
-            case FieldType::Bool:
-                return Json::Value(t_field.as<bool>());
-            case FieldType::BigInt:
-                // Deliberate, not a bug: JS Number loses precision past
-                // 2^53-1, so int8 stays a decimal string on the wire.
-                return Json::Value(t_field.as<std::string>());
-            case FieldType::Jsonb: {
-                const std::string raw = t_field.as<std::string>();
-                Json::Value parsed;
-                Json::CharReaderBuilder builder;
-                std::string errors;
-                const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
-                if (reader->parse(raw.data(), raw.data() + raw.size(), &parsed, &errors)) {
-                    return parsed;
-                }
-                // Corrupt payload must not throw out of the coroutine —
-                // degrade to the raw text as a string.
-                return Json::Value(raw);
-            }
-            case FieldType::Text:
-            case FieldType::Timestamp:
-            default:
-                return Json::Value(t_field.as<std::string>());
-        }
-    } catch (const std::exception&) {
-        return Json::Value::null;
-    }
-}
+void appendJsonEscapedString(std::string& out, std::string_view raw);
+void appendFieldValueRaw(std::string& out, const drogon::orm::Field& t_field, FieldType t_type);
 
-Json::Value rowToJson(const drogon::orm::Row& t_row, const CrudViewSpec& t_spec) {
-    Json::Value r(Json::objectValue);
+std::string rowToJsonString(const drogon::orm::Row& t_row, const CrudViewSpec& t_spec) {
+    std::string r;
+    r.reserve(t_row.size() * 48);
+    r += '{';
+    bool first = true;
     for (std::size_t i = 0; i < t_row.size(); ++i) {
         drogon::orm::Field f = t_row[i];
-        r[f.name()] = fieldToJson(f, resolveColumnType(t_spec, f.name()));
+        if (!first) {
+            r += ',';
+        }
+        first = false;
+        appendJsonEscapedString(r, f.name());
+        r += ':';
+        appendFieldValueRaw(r, f, resolveColumnType(t_spec, f.name()));
     }
+    r += '}';
     return r;
 }
 
@@ -447,22 +423,6 @@ drogon::Task<void> auditCrudMutation(const drogon::HttpRequestPtr& tsp_req, cons
     }
 }
 
-std::string jsonIdToString(const Json::Value& t_value) {
-    if (t_value.isString()) {
-        return t_value.asString();
-    }
-    if (t_value.isInt64()) {
-        return std::to_string(t_value.asInt64());
-    }
-    if (t_value.isUInt64()) {
-        return std::to_string(t_value.asUInt64());
-    }
-    if (t_value.isInt()) {
-        return std::to_string(t_value.asInt());
-    }
-    return {};
-}
-
 } // namespace
 
 sgrn::Result<std::string> fieldValueToBind(std::string_view t_field_name, FieldType t_type, const Json::Value& t_value) {
@@ -622,7 +582,8 @@ drogon::Task<HttpResponsePtr> executeViewGet(const CrudViewSpec& t_spec, HttpReq
         if (result.empty()) {
             co_return sgrn::createErrorResponse("No matching row", k404NotFound, "NotFound");
         }
-        co_return sgrn::createJsonResponse(rowToJson(result[0], t_spec), k200OK);
+        std::string response_json = rowToJsonString(result[0], t_spec);
+        co_return sgrn::createJsonResponse(std::move(response_json), k200OK);
     } catch (const std::exception& e) {
         co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "Database");
     }
@@ -674,9 +635,10 @@ drogon::Task<HttpResponsePtr> executeViewInsert(const CrudViewSpec& t_spec, Http
         if (result.empty()) {
             co_return sgrn::createErrorResponse("Insert returned no row", k500InternalServerError, "Database");
         }
-        const Json::Value created = rowToJson(result[0], t_spec);
-        co_await auditCrudMutation(tsp_req, t_spec, "create", jsonIdToString(created[std::string(t_spec.pk.name)]), *json);
-        co_return sgrn::createJsonResponse(created, k201Created);
+        const std::string created_id = result[0][std::string(t_spec.pk.name)].as<std::string>();
+        co_await auditCrudMutation(tsp_req, t_spec, "create", created_id, *json);
+        std::string response_json = rowToJsonString(result[0], t_spec);
+        co_return sgrn::createJsonResponse(std::move(response_json), k201Created);
     } catch (const std::exception& e) {
         co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "Database");
     }
@@ -730,9 +692,9 @@ drogon::Task<HttpResponsePtr> executeViewUpdate(
         if (result.empty()) {
             co_return sgrn::createErrorResponse("No matching row", k404NotFound, "NotFound");
         }
-        const Json::Value updated = rowToJson(result[0], t_spec);
         co_await auditCrudMutation(tsp_req, t_spec, "update", t_id, *json);
-        co_return sgrn::createJsonResponse(updated, k200OK);
+        std::string response_json = rowToJsonString(result[0], t_spec);
+        co_return sgrn::createJsonResponse(std::move(response_json), k200OK);
     } catch (const std::exception& e) {
         co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "Database");
     }

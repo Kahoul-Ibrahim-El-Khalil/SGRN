@@ -140,6 +140,7 @@ sgrn_fetch_source(crow)
 sgrn_fetch_source(xml_h)
 sgrn_fetch_source(sqlite_modern_cpp)
 sgrn_fetch_source(unordered_dense)
+sgrn_fetch_source(glaze)
 
 # End of third-party section: our own staging follows.
 

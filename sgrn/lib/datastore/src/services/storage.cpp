@@ -34,6 +34,27 @@
 
 namespace sgrn::datastore::services::storage
 {
+
+namespace
+{
+struct StorageConstraintsResponse {
+    std::uint64_t max_file_size_mb{0};
+    std::uint64_t max_file_size_bytes{0};
+    bool encryption_supported{false};
+};
+
+struct ServiceObjectResponse {
+    int64_t id{0};
+    std::string name;
+    std::string full_path;
+    std::string extension;
+    std::string created_at;
+    int64_t size{0};
+    int64_t original_size{0};
+    bool is_compressed{false};
+    std::optional<std::string> compression_algorithm;
+};
+} // namespace
 namespace fs = std::filesystem;
 using namespace drogon;
 using namespace sgrn::datastore::plugins;
@@ -317,20 +338,22 @@ Task<HttpResponsePtr> StorageService::handleUploadFileRequest(
         .organisation = t_session["user"].isMember("organisation") ? t_session["user"]["organisation"].asString() : "",
         .bucket = currentStorageConfig().default_bucket};
 
-    BackendResult<Json::Value> r = co_await uploadFile(std::move(t_context), t_http_file);
+    BackendResult<UploadResponse> r = co_await uploadFile(std::move(t_context), t_http_file);
     if (r.hasError()) {
         co_return sgrn::createJsonResponse(r);
     }
-    co_return HttpResponse::newHttpJsonResponse(std::move(r.value()));
+    co_return sgrn::createTypedJsonResponse(r.value(), k200OK);
 }
 
 Task<HttpResponsePtr> StorageService::handleGetConstraints() {
     const StorageConfig cfg = currentStorageConfig();
-    Json::Value constraints;
-    constraints["max_file_size_mb"] = Json::Value::UInt64(cfg.max_file_size_mb);
-    constraints["max_file_size_bytes"] = Json::Value::UInt64(cfg.maxFileSizeBytes());
-    constraints["encryption_supported"] = sgrn::datastore::crypto::isKeyStoreInitialized();
-    co_return HttpResponse::newHttpJsonResponse(std::move(constraints));
+    co_return sgrn::createTypedJsonResponse(
+        StorageConstraintsResponse{
+            cfg.max_file_size_mb,
+            cfg.maxFileSizeBytes(),
+            sgrn::datastore::crypto::isKeyStoreInitialized(),
+        },
+        k200OK);
 }
 
 Task<HttpResponsePtr> StorageService::handleCreateDirectoryRequest(Json::Value t_session, std::string t_scope, std::string t_path) {
@@ -401,22 +424,21 @@ Task<HttpResponsePtr> StorageService::handleListObjects(int32_t t_automated_serv
                                                          "ORDER BY f.created_at DESC",
             t_automated_service_id);
 
-        Json::Value arr(Json::arrayValue);
+        std::vector<ServiceObjectResponse> objects;
+        objects.reserve(result.size());
         for (const auto& row : result) {
-            Json::Value item;
-            item["id"] = Json::Int64(row["id"].as<int64_t>());
-            item["name"] = row["name"].as<std::string>();
-            item["full_path"] = row["full_path"].as<std::string>();
-            item["extension"] = row["extension"].isNull() ? "" : row["extension"].as<std::string>();
-            item["created_at"] = row["created_at"].as<std::string>();
-            item["size"] = Json::Int64(row["compressed_size"].as<int64_t>());
-            item["original_size"] = Json::Int64(row["original_size"].as<int64_t>());
-            item["is_compressed"] = row["is_compressed"].as<bool>();
-            item["compression_algorithm"] =
-                row["compression_algorithm"].isNull() ? Json::Value::null : Json::Value(row["compression_algorithm"].as<std::string>());
-            arr.append(std::move(item));
+            objects.push_back({row["id"].as<int64_t>(), row["name"].as<std::string>(), row["full_path"].as<std::string>(),
+                row["extension"].isNull() ? "" : row["extension"].as<std::string>(), row["created_at"].as<std::string>(),
+                row["compressed_size"].as<int64_t>(), row["original_size"].as<int64_t>(), row["is_compressed"].as<bool>(),
+                row["compression_algorithm"].isNull() ? std::nullopt
+                                                      : std::optional<std::string>(row["compression_algorithm"].as<std::string>())});
         }
-        co_return HttpResponse::newHttpJsonResponse(std::move(arr));
+        auto json_result = sgrn::json::write(objects);
+        if (json_result.hasError()) {
+            co_return createErrorResponse("Failed to serialize object list", k500InternalServerError, "StorageService");
+        }
+        std::string response_json = std::move(json_result).value();
+        co_return createJsonResponse(std::move(response_json), k200OK);
     } catch (const std::exception& ex) {
         co_return createJsonErrorResponse(std::format("Database error: {}", ex.what()), k500InternalServerError);
     }

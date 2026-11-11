@@ -164,6 +164,19 @@ void testSqliteKeyProviderLifecycle(const fs::path& t_test_dir) {
     auto get_after_shred = provider->get(key_id);
     CHECK_MSG(get_after_shred.hasError(), "getting shredded key must fail");
 
+    // Shredding must release the file association so a later upload can reuse
+    // a database file ID without violating file_keys.file_id UNIQUE.
+    auto replacement_pending = provider->createPending("uploads/replacement/0");
+    CHECK(replacement_pending.hasValue());
+    CHECK(provider->activate(replacement_pending.value().key_id, "101").hasValue());
+
+    // Rebinding the same file ID must shred the previous active association
+    // rather than surfacing SQLite's UNIQUE constraint to the upload API.
+    auto rotated_pending = provider->createPending("uploads/rotated/0");
+    CHECK(rotated_pending.hasValue());
+    CHECK(provider->activate(rotated_pending.value().key_id, "101").hasValue());
+    CHECK(provider->get(replacement_pending.value().key_id).hasError());
+
     std::printf("    done (permissions 0700/0600, isolation, pending->active->shred lifecycle verified)\n");
 }
 

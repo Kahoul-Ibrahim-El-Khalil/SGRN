@@ -6,6 +6,8 @@
 // These routes go through the subtree-safe SQL functions instead.
 #include "admin-common.hpp"
 
+#include <sgrn/utils/json-serialization.hpp>
+
 #include <string>
 
 namespace sgrn::datastore::handlers::admin
@@ -14,6 +16,36 @@ using namespace drogon;
 
 namespace
 {
+struct RenameDomainResponse {
+    bool success{true};
+    int32_t domain_id{0};
+    std::string name;
+};
+
+struct MoveDomainResponse {
+    bool success{true};
+    int32_t domain_id{0};
+    std::optional<int32_t> parent_id;
+};
+
+struct RenameDomainAuditDetails {
+    std::string name;
+};
+
+struct MoveDomainAuditDetails {
+    std::optional<int32_t> parent_id;
+};
+
+template <typename T>
+Task<HttpResponsePtr> jsonResponse(T t_value) {
+    auto response_result = sgrn::json::write(t_value);
+    if (response_result.hasError()) {
+        co_return createErrorResponse("Failed to serialize domain response", k500InternalServerError, "AdminApi");
+    }
+    std::string response_json = std::move(response_result).value();
+    co_return createJsonResponse(std::move(response_json), k200OK);
+}
+
 // "missing" and "other tenant" must be indistinguishable.
 Task<std::optional<std::string>> domainOrganisation(
     const drogon::orm::DbClientPtr& t_db, int32_t t_domain_id, const std::string& t_caller_org, bool t_is_platform) {
@@ -82,16 +114,10 @@ Task<HttpResponsePtr> AdminApiHandler::handleRenameDomain(HttpRequestPtr tsp_req
         // Domain paths moved: any cached domain-scope level may now be stale.
         sgrn::datastore::filters::AdminLevelCache::instance().invalidateAll();
 
-        Json::Value details(Json::objectValue);
-        details["name"] = new_name;
         co_await sgrn::datastore::audit::AuditLogger::log(db, *org, "user", ctx.actor_id, ctx.actor_name, "domain.renamed", "domain",
-            std::to_string(domain_id), tsp_req->getPeerAddr().toIp(), details, "success");
+            std::to_string(domain_id), tsp_req->getPeerAddr().toIp(), RenameDomainAuditDetails{new_name}, "success");
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["domain_id"] = domain_id;
-        resp["name"] = new_name;
-        co_return createJsonResponse(resp, k200OK);
+        co_return co_await jsonResponse(RenameDomainResponse{true, domain_id, new_name});
     } catch (const drogon::orm::DrogonDbException& e) {
         co_return sqlErrorToResponse(e, "Domain rename failed");
     } catch (const std::exception& e) {
@@ -146,16 +172,10 @@ Task<HttpResponsePtr> AdminApiHandler::handleMoveDomain(HttpRequestPtr tsp_req, 
         co_await db->execSqlCoro("SELECT core.move_domain_subtree($1, $2)", domain_id, parent_id);
         sgrn::datastore::filters::AdminLevelCache::instance().invalidateAll();
 
-        Json::Value details(Json::objectValue);
-        details["parent_id"] = parent_id ? Json::Value(*parent_id) : Json::Value(Json::nullValue);
         co_await sgrn::datastore::audit::AuditLogger::log(db, *org, "user", ctx.actor_id, ctx.actor_name, "domain.moved", "domain",
-            std::to_string(domain_id), tsp_req->getPeerAddr().toIp(), details, "success");
+            std::to_string(domain_id), tsp_req->getPeerAddr().toIp(), MoveDomainAuditDetails{parent_id}, "success");
 
-        Json::Value resp;
-        resp["success"] = true;
-        resp["domain_id"] = domain_id;
-        resp["parent_id"] = parent_id ? Json::Value(*parent_id) : Json::Value(Json::nullValue);
-        co_return createJsonResponse(resp, k200OK);
+        co_return co_await jsonResponse(MoveDomainResponse{true, domain_id, parent_id});
     } catch (const drogon::orm::DrogonDbException& e) {
         co_return sqlErrorToResponse(e, "Domain move failed");
     } catch (const std::exception& e) {

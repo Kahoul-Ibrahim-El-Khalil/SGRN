@@ -27,6 +27,11 @@ struct QuotaColumn {
     int64_t max_value;
 };
 
+struct QuotaUpdateResponse {
+    bool success{true};
+    sgrn::json::RawJson applied{"{}"};
+};
+
 // Order matters: the first 3 are valid for organisations/domains, all 6 for
 // users and services (applyQuotaUpdate's t_column_count slices the prefix).
 constexpr std::array<QuotaColumn, 6> kQuotaColumns = {{
@@ -121,10 +126,10 @@ Task<HttpResponsePtr> applyQuotaUpdate(HttpRequestPtr tsp_req, const char* t_tab
     co_await sgrn::datastore::audit::AuditLogger::log(db, ctx.organisation, "user", ctx.actor_id, ctx.actor_name, "quota.updated",
         t_target_type, t_key_value, tsp_req->getPeerAddr().toIp(), patch.applied, "success");
 
-    Json::Value resp;
-    resp["success"] = true;
-    resp["applied"] = patch.applied;
-    co_return createJsonResponse(resp, k200OK);
+    Json::StreamWriterBuilder writer;
+    writer["indentation"] = "";
+    const std::string applied_json = Json::writeString(writer, patch.applied);
+    co_return createTypedJsonResponse(QuotaUpdateResponse{true, sgrn::json::RawJson(applied_json)}, k200OK);
 }
 
 } // namespace

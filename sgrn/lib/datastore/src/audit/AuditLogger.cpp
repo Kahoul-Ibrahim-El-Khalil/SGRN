@@ -11,9 +11,9 @@
 namespace sgrn::datastore::audit
 {
 
-drogon::Task<bool> AuditLogger::log(drogon::orm::DbClientPtr tsp_db_client, std::string t_organisation, std::string t_actor_type,
+drogon::Task<bool> AuditLogger::logSerialized(drogon::orm::DbClientPtr tsp_db_client, std::string t_organisation, std::string t_actor_type,
     std::optional<int32_t> t_actor_id, std::string t_actor_name, std::string t_action, std::string t_target_type, std::string t_target_id,
-    std::string t_ip, Json::Value t_details, std::string t_status) {
+    std::string t_ip, std::string t_details_json, std::string t_status) {
     try {
         if (!tsp_db_client) {
             tsp_db_client = drogon::app().getDbClient();
@@ -22,23 +22,30 @@ drogon::Task<bool> AuditLogger::log(drogon::orm::DbClientPtr tsp_db_client, std:
             co_return false;
         }
 
-        Json::StreamWriterBuilder wb;
-        wb["indentation"] = "";
-        const std::string details_str = Json::writeString(wb, t_details);
-
         // Insert atomically via core.append_audit_log() under advisory lock
         co_await tsp_db_client->execSqlCoro(
             "SELECT out_id, out_seq, out_prev_hash, out_row_hash FROM core.append_audit_log("
             "$1::text, $2::text, $3::int, $4::text, $5::text, $6::text, $7::text, $8::inet, $9::jsonb, $10::text)",
             t_organisation, t_actor_type, t_actor_id, t_actor_name, t_action,
             t_target_type.empty() ? std::optional<std::string>{} : t_target_type,
-            t_target_id.empty() ? std::optional<std::string>{} : t_target_id, t_ip.empty() ? "127.0.0.1" : t_ip, details_str, t_status);
+            t_target_id.empty() ? std::optional<std::string>{} : t_target_id, t_ip.empty() ? "127.0.0.1" : t_ip, t_details_json, t_status);
 
         co_return true;
     } catch (const std::exception& e) {
         LOG_ERROR << "AuditLogger failed to append audit record '" << t_action << "': " << e.what();
         co_return false;
     }
+}
+
+drogon::Task<bool> AuditLogger::log(drogon::orm::DbClientPtr tsp_db_client, std::string t_organisation, std::string t_actor_type,
+    std::optional<int32_t> t_actor_id, std::string t_actor_name, std::string t_action, std::string t_target_type, std::string t_target_id,
+    std::string t_ip, Json::Value t_details, std::string t_status) {
+    Json::StreamWriterBuilder writer;
+    writer["indentation"] = "";
+    std::string details_json = Json::writeString(writer, t_details);
+    co_return co_await logSerialized(std::move(tsp_db_client), std::move(t_organisation), std::move(t_actor_type), t_actor_id,
+        std::move(t_actor_name), std::move(t_action), std::move(t_target_type), std::move(t_target_id), std::move(t_ip),
+        std::move(details_json), std::move(t_status));
 }
 
 drogon::Task<AuditVerificationResult> AuditLogger::verifyChain(drogon::orm::DbClientPtr tsp_db_client, const std::string& t_organisation) {

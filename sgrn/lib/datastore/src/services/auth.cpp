@@ -37,6 +37,26 @@ using ::sgrn::datastore::session::SessionStore;
 namespace sgrn::datastore::handlers::auth
 {
 
+namespace
+{
+struct UserSignInResponse {
+    std::string token;
+    sgrn::json::RawJson user{"{}"};
+};
+
+struct ServiceSignInResponse {
+    std::string token;
+    int64_t session_id{0};
+    sgrn::json::RawJson automated_service{"{}"};
+};
+
+std::string compactJson(const Json::Value& t_value) {
+    Json::StreamWriterBuilder writer;
+    writer["indentation"] = "";
+    return Json::writeString(writer, t_value);
+}
+} // namespace
+
 Task<HttpResponsePtr> performSignInProcess(HttpRequestPtr tsp_http_req, std::string t_email, std::string t_password) {
     t_email = sgrn::utils::strings::trim(std::move(t_email));
     auto db_res = sgrn::datastore::core::getDbClient();
@@ -205,16 +225,19 @@ Task<HttpResponsePtr> performSignInProcess(HttpRequestPtr tsp_http_req, std::str
     }
 
     // 6. Construct response
-    Json::Value response;
-    response["token"] = t_token;
-    response["user"] = user_data;
+    const UserSignInResponse response{t_token, sgrn::json::RawJson(compactJson(user_data))};
 
     // Log Audit Event
     const std::string org = user_data.isMember("organisation") ? user_data["organisation"].asString() : "";
     co_await sgrn::datastore::audit::AuditLogger::log(db_client, org, "user", user_data["id"].asInt(), user_data["email"].asString(),
         "auth.login", "user", std::to_string(user_data["id"].asInt()), peer_ip, Json::objectValue, "success");
 
-    auto resp = HttpResponse::newHttpJsonResponse(std::move(response));
+    auto json_result = sgrn::json::write(response);
+    if (json_result.hasError()) {
+        co_return createErrorResponse("Failed to serialize sign-in response", k500InternalServerError, "Auth");
+    }
+    std::string response_json = std::move(json_result).value();
+    auto resp = createJsonResponse(std::move(response_json), k200OK);
     resp->addHeader("Authorization", "Bearer " + t_token);
     co_return resp;
 }
@@ -343,12 +366,14 @@ Task<HttpResponsePtr> performAutomatedServiceSignInProcess(HttpRequestPtr tsp_ht
             }
         }
 
-        Json::Value response;
-        response["token"] = session_token;
-        response["session_id"] = Json::Value(session_id);
-        response["automated_service"] = automated_service_data;
+        const ServiceSignInResponse response{session_token, session_id, sgrn::json::RawJson(compactJson(automated_service_data))};
 
-        auto resp = HttpResponse::newHttpJsonResponse(std::move(response));
+        auto json_result = sgrn::json::write(response);
+        if (json_result.hasError()) {
+            co_return createErrorResponse("Failed to serialize automated service sign-in response", k500InternalServerError, "Auth");
+        }
+        std::string response_json = std::move(json_result).value();
+        auto resp = createJsonResponse(std::move(response_json), k200OK);
         resp->addHeader("Authorization", "Bearer " + session_token);
         co_return resp;
 

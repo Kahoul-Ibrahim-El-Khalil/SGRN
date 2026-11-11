@@ -445,13 +445,14 @@ void SessionStore::startPgListener() {
     });
 }
 
-Task<Json::Value> SessionStore::getActiveSessions() {
-    Json::Value list = Json::arrayValue;
+Task<std::vector<ActiveSession>> SessionStore::getActiveSessions() {
+    std::vector<ActiveSession> sessions;
     try {
         auto db = drogon::app().getDbClient();
         auto res = co_await db->execSqlCoro(
             "SELECT s.token::text, s.user_id, s.automated_service_id, s.ip::text, s.created_at::text, s.expires_at::text, "
-            "u.email as user_email, u.first_name, u.family_name, a.name as service_name, s.session_data "
+            "u.email as user_email, u.first_name, u.family_name, u.organisation as user_organisation, "
+            "a.name as service_name, a.organisation as service_organisation, s.session_data "
             "FROM core.sessions s "
             "LEFT JOIN core.users u ON u.id = s.user_id "
             "LEFT JOIN core.automated_services a ON a.id = s.automated_service_id "
@@ -459,24 +460,22 @@ Task<Json::Value> SessionStore::getActiveSessions() {
             "ORDER BY s.created_at DESC");
 
         for (const auto& row : res) {
-            Json::Value item;
-            item["token"] = row["token"].as<std::string>();
-            item["user_id"] = row["user_id"].isNull() ? Json::Value(Json::nullValue) : Json::Value(row["user_id"].as<int32_t>());
-            item["automated_service_id"] = row["automated_service_id"].isNull() ? Json::Value(Json::nullValue)
-                                                                                : Json::Value(row["automated_service_id"].as<int32_t>());
-            item["ip"] = row["ip"].isNull() ? "127.0.0.1" : row["ip"].as<std::string>();
-            item["created_at"] = row["created_at"].isNull() ? "" : row["created_at"].as<std::string>();
-            item["expires_at"] = row["expires_at"].isNull() ? "" : row["expires_at"].as<std::string>();
-            item["actor_type"] = row["user_id"].isNull() ? "automated_service" : "user";
-            item["actor_name"] = row["user_id"].isNull()
-                                     ? (row["service_name"].isNull() ? "Automated Service" : row["service_name"].as<std::string>())
-                                     : (row["user_email"].isNull() ? "User" : row["user_email"].as<std::string>());
-            list.append(item);
+            const bool is_service = row["user_id"].isNull();
+            sessions.push_back({row["token"].as<std::string>(),
+                row["user_id"].isNull() ? std::nullopt : std::optional<int32_t>(row["user_id"].as<int32_t>()),
+                row["automated_service_id"].isNull() ? std::nullopt : std::optional<int32_t>(row["automated_service_id"].as<int32_t>()),
+                row["ip"].isNull() ? "127.0.0.1" : row["ip"].as<std::string>(),
+                row["created_at"].isNull() ? "" : row["created_at"].as<std::string>(),
+                row["expires_at"].isNull() ? "" : row["expires_at"].as<std::string>(), is_service ? "automated_service" : "user",
+                is_service ? (row["service_name"].isNull() ? "Automated Service" : row["service_name"].as<std::string>())
+                           : (row["user_email"].isNull() ? "User" : row["user_email"].as<std::string>()),
+                is_service ? (row["service_organisation"].isNull() ? "" : row["service_organisation"].as<std::string>())
+                           : (row["user_organisation"].isNull() ? "" : row["user_organisation"].as<std::string>())});
         }
     } catch (const std::exception& e) {
         LOG_ERROR << "Failed fetching active sessions: " << e.what();
     }
-    co_return list;
+    co_return sessions;
 }
 
 } // namespace sgrn::datastore::session

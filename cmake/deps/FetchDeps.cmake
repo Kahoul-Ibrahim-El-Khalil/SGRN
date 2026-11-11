@@ -207,6 +207,17 @@ set(SGRN_DEP_unordered_dense_URL
     "https://github.com/martinus/unordered_dense/archive/refs/tags/v4.9.2.tar.gz"
 )
 
+# Glaze — use the upstream FetchContent integration.  In particular, do not
+# use a GitHub archive URL here: some archive downloads have been left as
+# empty CPM tarballs in the shared cache, and glaze already publishes the
+# `glaze::glaze` target that consumers should link.
+set(SGRN_DEP_glaze_REPO
+    "https://github.com/stephenberry/glaze.git"
+)
+set(SGRN_DEP_glaze_TAG
+    "main"
+)
+
 # ── Snap7 inline hardening ────────────────────────────────────────────────────
 #
 # Applies the client-side PDU-length hardening directly in the fetched source.
@@ -308,55 +319,94 @@ macro(sgrn_fetch_source DEP_NAME)
 
     if(NOT ${DEP_NAME}_SOURCE_DIR)
 
-        set(_sfs_url
-            "${SGRN_DEP_${DEP_NAME}_URL}"
-        )
-
-        set(_sfs_repo
-            "${SGRN_DEP_${DEP_NAME}_REPO}"
-        )
-
-        set(_sfs_tag
-            "${SGRN_DEP_${DEP_NAME}_TAG}"
-        )
-
-        if(_sfs_url)
-
-            set(_cpm_hash_args)
-            if(DEFINED SGRN_DEP_${DEP_NAME}_HASH AND NOT SGRN_DEP_${DEP_NAME}_HASH STREQUAL "")
-                list(APPEND _cpm_hash_args URL_HASH "${SGRN_DEP_${DEP_NAME}_HASH}")
-            endif()
-
-            CPMAddPackage(
-                NAME           ${DEP_NAME}
-                URL            "${_sfs_url}"
-                ${_cpm_hash_args}
-                DOWNLOAD_ONLY  YES
+        # Glaze's supported integration is FetchContent_MakeAvailable(), not
+        # a DOWNLOAD_ONLY archive followed by a locally-created interface
+        # target.  Keep this exception here so all callers share one
+        # declaration and the upstream glaze::glaze target is available.
+        if(DEP_NAME STREQUAL "glaze")
+            include(FetchContent)
+            FetchContent_Declare(
+                glaze
+                GIT_REPOSITORY "${SGRN_DEP_glaze_REPO}"
+                GIT_TAG        "${SGRN_DEP_glaze_TAG}"
+                GIT_SHALLOW    TRUE
+                # Avoid a network fetch on every configure. Re-fetch explicitly
+                # by clearing the glaze FetchContent source cache when desired.
+                UPDATE_DISCONNECTED TRUE
             )
-
-        elseif(_sfs_repo)
-
-            set(_shallow TRUE)
-            if(_sfs_tag MATCHES "^[0-9a-fA-F]{40}$")
-                set(_shallow FALSE)
-            endif()
-
-            CPMAddPackage(
-                NAME           ${DEP_NAME}
-                GIT_REPOSITORY "${_sfs_repo}"
-                GIT_TAG        "${_sfs_tag}"
-                GIT_SHALLOW    ${_shallow}
-                DOWNLOAD_ONLY  YES
-            )
-
+            FetchContent_MakeAvailable(glaze)
         else()
 
-            message(FATAL_ERROR
-                "[SGRN] sgrn_fetch_source(${DEP_NAME}): no metadata found. "
-                "Add SGRN_DEP_${DEP_NAME}_URL or _REPO/TAG to "
-                "cmake/deps/FetchDeps.cmake"
+            set(_sfs_url
+                "${SGRN_DEP_${DEP_NAME}_URL}"
             )
 
+            set(_sfs_repo
+                "${SGRN_DEP_${DEP_NAME}_REPO}"
+            )
+
+            set(_sfs_tag
+                "${SGRN_DEP_${DEP_NAME}_TAG}"
+            )
+
+            if(_sfs_url)
+
+                set(_cpm_hash_args)
+                if(DEFINED SGRN_DEP_${DEP_NAME}_HASH AND NOT SGRN_DEP_${DEP_NAME}_HASH STREQUAL "")
+                    list(APPEND _cpm_hash_args URL_HASH "${SGRN_DEP_${DEP_NAME}_HASH}")
+                endif()
+
+                CPMAddPackage(
+                    NAME           ${DEP_NAME}
+                    URL            "${_sfs_url}"
+                    ${_cpm_hash_args}
+                    DOWNLOAD_ONLY  YES
+                )
+
+            elseif(_sfs_repo)
+
+                set(_shallow TRUE)
+                if(_sfs_tag MATCHES "^[0-9a-fA-F]{40}$")
+                    set(_shallow FALSE)
+                endif()
+
+                CPMAddPackage(
+                    NAME           ${DEP_NAME}
+                    GIT_REPOSITORY "${_sfs_repo}"
+                    GIT_TAG        "${_sfs_tag}"
+                    GIT_SHALLOW    ${_shallow}
+                    DOWNLOAD_ONLY  YES
+                )
+
+            else()
+
+                message(FATAL_ERROR
+                    "[SGRN] sgrn_fetch_source(${DEP_NAME}): no metadata found. "
+                    "Add SGRN_DEP_${DEP_NAME}_URL or _REPO/TAG to "
+                    "cmake/deps/FetchDeps.cmake"
+                )
+
+            endif()
+        endif()
+
+        # CPM treats any existing cache directory as populated, including one
+        # left empty by an interrupted download. That skips the fetch and the
+        # later staging step silently omits the headers.
+        if(NOT ${DEP_NAME}_SOURCE_DIR OR NOT EXISTS "${${DEP_NAME}_SOURCE_DIR}")
+            message(FATAL_ERROR
+                "[SGRN] sgrn_fetch_source(${DEP_NAME}): CPM did not provide a source directory."
+            )
+        endif()
+        file(GLOB _sfs_entries "${${DEP_NAME}_SOURCE_DIR}/*")
+        if(NOT _sfs_entries)
+            set(_sfs_bad "${${DEP_NAME}_SOURCE_DIR}")
+            file(REMOVE_RECURSE "${_sfs_bad}")
+            message(FATAL_ERROR
+                "[SGRN] sgrn_fetch_source(${DEP_NAME}): CPM cache at\n"
+                "  ${_sfs_bad}\n"
+                "was empty (interrupted download). It has been removed; "
+                "re-run CMake to download it again."
+            )
         endif()
 
         # Snap7 is the only dependency requiring local source hardening.

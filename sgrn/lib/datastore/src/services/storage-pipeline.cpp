@@ -19,6 +19,15 @@
 
 namespace sgrn::datastore::services::storage
 {
+namespace
+{
+struct BatchUploadResponse {
+    int32_t success_count{0};
+    int32_t fail_count{0};
+    std::vector<sgrn::json::RawJson> results;
+};
+} // namespace
+
 namespace fs = std::filesystem;
 using namespace drogon;
 using namespace sgrn::datastore::plugins;
@@ -43,7 +52,8 @@ Task<BackendResult<void>> StorageService::deleteFile(drogon::orm::DbClientPtr ts
 
 Task<HttpResponsePtr> StorageService::handleUploadFilesBatchRequest(
     Json::Value t_session, std::string t_scope, std::string t_base_path, const std::vector<drogon::HttpFile>& t_files) {
-    Json::Value results(Json::arrayValue);
+    std::vector<sgrn::json::RawJson> results;
+    results.reserve(t_files.size());
     int success_count = 0;
     int fail_count = 0;
 
@@ -52,10 +62,7 @@ Task<HttpResponsePtr> StorageService::handleUploadFilesBatchRequest(
         auto sanitized_opt = sgrn::utils::strings::sanitizeRelativeFilename(decoded_name);
         if (!sanitized_opt.has_value()) {
             fail_count++;
-            Json::Value err_res;
-            err_res["success"] = false;
-            err_res["error"] = "Invalid filename: path traversal detected";
-            results.append(std::move(err_res));
+            results.emplace_back(R"({"success":false,"error":"Invalid filename: path traversal detected"})");
             continue;
         }
         decoded_name = sanitized_opt.value();
@@ -71,22 +78,17 @@ Task<HttpResponsePtr> StorageService::handleUploadFilesBatchRequest(
         } else {
             fail_count++;
         }
-        results.append(r->getJsonObject() ? *r->getJsonObject() : Json::Value(Json::objectValue));
+        results.emplace_back(r->getJsonObject() ? r->getBody() : "{}");
     }
 
-    Json::Value response(Json::objectValue);
-    response["success_count"] = success_count;
-    response["fail_count"] = fail_count;
-    response["results"] = std::move(results);
-
-    co_return HttpResponse::newHttpJsonResponse(std::move(response));
+    co_return sgrn::createTypedJsonResponse(BatchUploadResponse{success_count, fail_count, std::move(results)}, k200OK);
 }
 
 // ============================================================================
 // Internal Private Methods (Orchestration)
 // ============================================================================
 
-Task<BackendResult<Json::Value>> StorageService::uploadFile(UploadContext t_context, drogon::HttpFile t_file) {
+Task<BackendResult<UploadResponse>> StorageService::uploadFile(UploadContext t_context, drogon::HttpFile t_file) {
     try {
         BackendResult<drogon::orm::DbClientPtr> db_res = getDbClient();
         CO_RETURN_ERROR_IF(db_res.hasError(), db_res.error());
@@ -135,24 +137,9 @@ Task<BackendResult<Json::Value>> StorageService::uploadFile(UploadContext t_cont
         CO_RETURN_ERROR_IF(upload_res.hasError(), upload_res.error()); // transaction destructs here → rollback
         BackendResult<void> finalize_res = co_await finalizeUpload(sp_transaction, t_context);
         CO_RETURN_ERROR_IF(finalize_res.hasError(), finalize_res.error());
-        Json::Value response;
-        response["success"] = true;
-        if (t_context.file_id.has_value())
-            response["file_id"] = Json::Int64(*t_context.file_id);
-        if (t_context.object_id.has_value())
-            response["object_id"] = Json::Int64(*t_context.object_id);
-        response["name"] = t_context.original_filename;
-        response["key"] = t_context.identity.hash.key;
-        // Debuggability: which S3 path the bytes took, and both sizes — the
-        // threshold decision uses the original size, the wire used final.
-        response["upload_mode"] = t_context.upload_mode;
-        response["part_count"] =
-            t_context.part_count.has_value() ? Json::Value(Json::Int64(*t_context.part_count)) : Json::Value(Json::nullValue);
-        response["part_size_bytes"] =
-            t_context.part_size_bytes.has_value() ? Json::Value(Json::Int64(*t_context.part_size_bytes)) : Json::Value(Json::nullValue);
-        response["original_size_bytes"] = Json::UInt64(t_context.identity.original_size);
-        response["final_size_bytes"] = Json::UInt64(t_context.identity.final_size);
-        co_return BackendResult<Json::Value>(std::move(response));
+        co_return BackendResult<UploadResponse>(UploadResponse{true, t_context.file_id, t_context.object_id, t_context.original_filename,
+            t_context.identity.hash.key, t_context.upload_mode, t_context.part_count, t_context.part_size_bytes,
+            t_context.identity.original_size, t_context.identity.final_size});
     } catch (const std::exception& ex) {
         co_return BackendError{"Runtime", std::format("Upload failed: {}", ex.what())};
     }
