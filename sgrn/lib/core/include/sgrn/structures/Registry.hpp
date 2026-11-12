@@ -4,13 +4,12 @@
 #include <sgrn/structures/ReflectedPoint.hpp>
 #include <sgrn/types/UniversalType.hpp>
 #include <sgrn/utils/endianess.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <sgrn/utils/time.hpp>
 #include <cstdint>
 #include <json/json.h>
 #include <memory>
 #include <optional>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
@@ -141,14 +140,14 @@ struct Symbol {
     }
 
     /**
-     * @brief Recursive serialization using RapidJSON Writer.
+     * @brief Recursive serialization using the Glaze-backed sgrn::json::dom::Writer.
      */
     template <typename Writer>
     void serialize(
         Writer& t_writer, const ArenaTree& t_tree, const std::vector<std::pair<size_t, size_t>>& t_ranges = {}, int t_depth = 0) const {
         if (children_.empty()) {
             if (!cached_node_) {
-                t_writer.Null();
+                t_writer.nullValue();
                 return;
             }
 
@@ -157,48 +156,48 @@ struct Symbol {
 
             switch (type_) {
                 case UniversalType::Bool:
-                    t_writer.Bool(p_ptr[0] != 0);
+                    t_writer.boolean(p_ptr[0] != 0);
                     break;
                 case UniversalType::Int:
                     if (val_size == 1)
-                        t_writer.Int(static_cast<int8_t>(p_ptr[0]));
+                        t_writer.int32(static_cast<int8_t>(p_ptr[0]));
                     else if (val_size == 2)
-                        t_writer.Int(sgrn::utils::fromBigEndian<int16_t>(p_ptr));
+                        t_writer.int32(sgrn::utils::fromBigEndian<int16_t>(p_ptr));
                     else if (val_size == 4)
-                        t_writer.Int(sgrn::utils::fromBigEndian<int32_t>(p_ptr));
+                        t_writer.int32(sgrn::utils::fromBigEndian<int32_t>(p_ptr));
                     else
-                        t_writer.Int64(sgrn::utils::fromBigEndian<int64_t>(p_ptr));
+                        t_writer.int64(sgrn::utils::fromBigEndian<int64_t>(p_ptr));
                     break;
                 case UniversalType::UInt:
                     if (val_size == 1)
-                        t_writer.Uint(p_ptr[0]);
+                        t_writer.uint32(p_ptr[0]);
                     else if (val_size == 2)
-                        t_writer.Uint(sgrn::utils::fromBigEndian<uint16_t>(p_ptr));
+                        t_writer.uint32(sgrn::utils::fromBigEndian<uint16_t>(p_ptr));
                     else if (val_size == 4)
-                        t_writer.Uint(sgrn::utils::fromBigEndian<uint32_t>(p_ptr));
+                        t_writer.uint32(sgrn::utils::fromBigEndian<uint32_t>(p_ptr));
                     else
-                        t_writer.Uint64(sgrn::utils::fromBigEndian<uint64_t>(p_ptr));
+                        t_writer.uint64(sgrn::utils::fromBigEndian<uint64_t>(p_ptr));
                     break;
                 case UniversalType::Float:
                     if (val_size == 4)
-                        t_writer.Double(static_cast<double>(sgrn::utils::fromBigEndian<float>(p_ptr)));
+                        t_writer.float64(static_cast<double>(sgrn::utils::fromBigEndian<float>(p_ptr)));
                     else
-                        t_writer.Double(sgrn::utils::fromBigEndian<double>(p_ptr));
+                        t_writer.float64(sgrn::utils::fromBigEndian<double>(p_ptr));
                     break;
                 case UniversalType::String:
-                    t_writer.String(reinterpret_cast<const char*>(p_ptr), static_cast<rapidjson::SizeType>(val_size));
+                    t_writer.string(reinterpret_cast<const char*>(p_ptr), static_cast<sgrn::json::dom::SizeType>(val_size));
                     break;
                 case UniversalType::DateTime: {
                     int64_t ms = sgrn::utils::fromBigEndian<int64_t>(p_ptr);
                     std::string ts = sgrn::utils::time::iso8601Timestamp(ms);
-                    t_writer.String(ts.c_str(), static_cast<rapidjson::SizeType>(ts.length()));
+                    t_writer.string(ts.c_str(), static_cast<sgrn::json::dom::SizeType>(ts.length()));
                 } break;
                 default:
-                    t_writer.Null();
+                    t_writer.nullValue();
                     break;
             }
         } else {
-            t_writer.StartObject();
+            t_writer.startObject();
             for (const auto& child : children_) {
                 if (!t_ranges.empty()) {
                     bool overlaps = false;
@@ -220,10 +219,10 @@ struct Symbol {
                         continue;
                 }
 
-                t_writer.Key(child.name_.c_str(), static_cast<rapidjson::SizeType>(child.name_.length()));
+                t_writer.key(child.name_.c_str(), static_cast<sgrn::json::dom::SizeType>(child.name_.length()));
                 child.serialize(t_writer, t_tree, t_ranges, t_depth + 1);
             }
-            t_writer.EndObject();
+            t_writer.endObject();
         }
     }
 };
@@ -352,27 +351,27 @@ public:
     std::string getFullSnapshot() const {
         auto lk = const_cast<ArenaTree&>(tree_).lockShared(top_level_names_); // FIX-1
 
-        rapidjson::StringBuffer sb;
-        rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
-        t_writer.StartObject();
+        sgrn::json::dom::StringBuffer sb;
+        sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> t_writer(sb);
+        t_writer.startObject();
         for (const auto& name_ : top_level_names_) {
             const auto& p_sym = symbols_.at(name_);
-            t_writer.Key(p_sym.name_.c_str(), static_cast<rapidjson::SizeType>(p_sym.name_.length()));
+            t_writer.key(p_sym.name_.c_str(), static_cast<sgrn::json::dom::SizeType>(p_sym.name_.length()));
             p_sym.serialize(t_writer, tree_);
         }
-        t_writer.EndObject();
-        return sb.GetString();
+        t_writer.endObject();
+        return sb.extractString();
     }
 
     std::string getDeltaSnapshot(const std::vector<std::string>& t_filter = {}) {
-        rapidjson::StringBuffer sb;
-        rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
-        t_writer.StartObject();
+        sgrn::json::dom::StringBuffer sb;
+        sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> t_writer(sb);
+        t_writer.startObject();
 
         auto dirty_nodes = tree_.getDirtyNodes();
         if (dirty_nodes.empty()) {
-            t_writer.EndObject();
-            return sb.GetString();
+            t_writer.endObject();
+            return sb.extractString();
         }
 
         std::vector<std::string> target_paths;
@@ -391,8 +390,8 @@ public:
         }
 
         if (target_paths.empty()) {
-            t_writer.EndObject();
-            return sb.GetString();
+            t_writer.endObject();
+            return sb.extractString();
         }
 
         auto lk = tree_.lockShared(target_paths);
@@ -405,12 +404,12 @@ public:
             const auto& p_sym = it->second;
             auto t_ranges = tree_.getNode(t_path)->getAndClearDirty();
 
-            t_writer.Key(p_sym.name_.c_str(), static_cast<rapidjson::SizeType>(p_sym.name_.length()));
+            t_writer.key(p_sym.name_.c_str(), static_cast<sgrn::json::dom::SizeType>(p_sym.name_.length()));
             p_sym.serialize(t_writer, tree_, t_ranges);
         }
 
-        t_writer.EndObject();
-        return sb.GetString();
+        t_writer.endObject();
+        return sb.extractString();
     }
 
 protected:

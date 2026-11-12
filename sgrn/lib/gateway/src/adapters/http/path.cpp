@@ -1,8 +1,8 @@
 #include <sgrn/gateway/adapters/http/path.hpp>
+#include <sgrn/gateway/common/JsonLeafVisitor.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <algorithm>
 #include <cctype>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 
 namespace sgrn::gateway::adapters
 {
@@ -108,18 +108,16 @@ Resolution resolveSemanticPath(const std::vector<std::string>& t_segs, const ::s
     return {};
 }
 
-void collectLeaves(const rapidjson::Value& t_node, const std::string& t_prefix, std::vector<std::pair<std::string, std::string>>& t_out) {
-    if (!t_node.IsObject()) {
-        rapidjson::StringBuffer sb;
-        rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-        t_node.Accept(w);
-        t_out.push_back({t_prefix, sb.GetString()});
-        return;
-    }
-    for (auto it = t_node.MemberBegin(); it != t_node.MemberEnd(); ++it) {
-        std::string child = t_prefix.empty() ? it->name.GetString() : (t_prefix + "/" + it->name.GetString());
-        collectLeaves(it->value, child, t_out);
-    }
+void collectLeaves(
+    const sgrn::json::dom::Value& t_node, const std::string& t_prefix, std::vector<std::pair<std::string, std::string>>& t_out) {
+    std::string path = t_prefix;
+    common::visitJsonLeaves(t_node, path, '/', common::JsonArrayPolicy::TreatAsLeaf,
+        [&t_out](const std::string& t_leaf_path, const sgrn::json::dom::Value& t_leaf) {
+            sgrn::json::dom::StringBuffer buffer;
+            sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(buffer);
+            t_leaf.accept(writer);
+            t_out.emplace_back(t_leaf_path, buffer.getString());
+        });
 }
 
 } // namespace sgrn::gateway::adapters

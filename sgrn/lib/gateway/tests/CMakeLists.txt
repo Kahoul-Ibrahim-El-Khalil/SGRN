@@ -15,6 +15,8 @@ if(SGRN_BUILD_TESTS)
         TARGET runtime_sync_protocol_test
         SOURCES runtime-sync-protocol-test.cpp
         ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn::utils
     )
     target_include_directories(runtime_sync_protocol_test PRIVATE
         ${CMAKE_SOURCE_DIR}/sgrn/lib/gateway/include

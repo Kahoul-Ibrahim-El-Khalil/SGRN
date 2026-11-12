@@ -7,12 +7,15 @@
 // it carries a sequence number and one or more byte ranges that can be
 // applied atomically by a runtime endpoint.
 
-#include <sgrn/Result.hpp> // RETURN_IF validation macro
+#include <sgrn/Result.hpp>                   // RETURN_IF validation macro
+#include <sgrn/utils/json-serialization.hpp> // shared RuntimeSync JSON DTO reflection
 
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -99,6 +102,76 @@ inline constexpr size_t kHeaderSize = sizeof(kMagic) + kFixedFieldBytes;
 
 // Record header: db u16, offset u32, payload length u32 — little-endian.
 inline constexpr size_t kRecordHeaderSize = detail::sumFieldBytes<uint16_t, uint32_t, uint32_t>();
+
+// JSON representation of the same RuntimeSync write/ack contract. Keeping
+// these reflected types next to the binary frame definition prevents the
+// gateway and s7shell client from independently declaring the same wire
+// fields. Optional record members let the receiver distinguish a missing
+// field from a valid zero offset / DB / area.
+namespace json
+{
+
+struct DbWriteRecord {
+    std::optional<uint32_t> db;
+    std::optional<uint64_t> offset;
+    std::optional<uint64_t> size;
+    std::optional<std::string> data;
+    static constexpr auto glaze =
+        glz::object("db", &DbWriteRecord::db, "offset", &DbWriteRecord::offset, "size", &DbWriteRecord::size, "data", &DbWriteRecord::data);
+};
+
+struct DbWriteEnvelope {
+    std::string command;
+    uint64_t sequence{0};
+    std::vector<DbWriteRecord> updates;
+    static constexpr auto glaze =
+        glz::object("command", &DbWriteEnvelope::command, "sequence", &DbWriteEnvelope::sequence, "updates", &DbWriteEnvelope::updates);
+};
+
+struct AreaWriteRecord {
+    std::optional<uint32_t> area;
+    std::optional<uint64_t> offset;
+    std::optional<uint64_t> size;
+    std::optional<std::string> data;
+    static constexpr auto glaze = glz::object(
+        "area", &AreaWriteRecord::area, "offset", &AreaWriteRecord::offset, "size", &AreaWriteRecord::size, "data", &AreaWriteRecord::data);
+};
+
+struct AreaWriteEnvelope {
+    std::string command;
+    uint64_t sequence{0};
+    std::vector<AreaWriteRecord> updates;
+    static constexpr auto glaze = glz::object(
+        "command", &AreaWriteEnvelope::command, "sequence", &AreaWriteEnvelope::sequence, "updates", &AreaWriteEnvelope::updates);
+};
+
+struct DictionaryLeaf {
+    uint32_t id{0};
+    std::string path;
+    static constexpr auto glaze = glz::object("id", &DictionaryLeaf::id, "path", &DictionaryLeaf::path);
+};
+
+struct DictionaryFrame {
+    std::string type;
+    std::vector<DictionaryLeaf> leaves;
+    static constexpr auto glaze = glz::object("type", &DictionaryFrame::type, "leaves", &DictionaryFrame::leaves);
+};
+
+struct WriteAck {
+    std::string type;
+    std::optional<uint64_t> sequence;
+    std::optional<bool> ok;
+    std::optional<std::string> error;
+    static constexpr auto glaze =
+        glz::object("type", &WriteAck::type, "sequence", &WriteAck::sequence, "ok", &WriteAck::ok, "error", &WriteAck::error);
+};
+
+struct TypeProbe {
+    std::string type;
+    static constexpr auto glaze = glz::object("type", &TypeProbe::type);
+};
+
+} // namespace json
 
 // The wire layout is pinned here and by runtime_sync_protocol_test. These
 // asserts make any accidental layout change a compile-time failure; a real

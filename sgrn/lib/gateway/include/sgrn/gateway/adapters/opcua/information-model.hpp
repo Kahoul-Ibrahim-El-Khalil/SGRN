@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sgrn/utils/json-dom.hpp>
+
 #include <sgrn/gateway/adapters/opcua/NodeContext.hpp>
 #include <sgrn/gateway/adapters/opcua/delta-push.hpp>
 #include <sgrn/scl/types.hpp>
@@ -11,7 +13,6 @@
 #include <map>
 #include <memory>
 #include <optional>
-#include <rapidjson/document.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -141,6 +142,6 @@ void buildAddressSpace(const OpcUaAddressSpaceContext& t_context, const ::sgrn::
 // ── Alarm events ────────────────────────────────────────────────────────────
 
 void triggerAlarmEvent(wrappers::opcua::Server& t_server, const wrappers::opcua::NodeId& t_alarm_event_type_id, uint16_t t_db_number,
-    const std::string& t_path, const rapidjson::Value& t_alarm_obj, uint64_t t_timestamp_ms);
+    const std::string& t_path, const sgrn::json::dom::Value& t_alarm_obj, uint64_t t_timestamp_ms);
 
 } // namespace sgrn::gateway::adapters

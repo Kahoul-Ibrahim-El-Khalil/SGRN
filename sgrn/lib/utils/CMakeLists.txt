@@ -32,6 +32,9 @@ set(HEADERS
     include/sgrn/utils/event-broker.hpp
     include/sgrn/utils/filesystem.hpp
     include/sgrn/utils/glaze.hpp
+    include/sgrn/utils/json-dom.hpp
+    include/sgrn/utils/json-ops.hpp
+    include/sgrn/utils/json-serialization.hpp
     include/sgrn/utils/hashing.hpp
     include/sgrn/utils/jsoncpp.hpp
     include/sgrn/utils/json.hpp
@@ -41,7 +44,6 @@ set(HEADERS
     include/sgrn/utils/network.hpp
     include/sgrn/utils/process.hpp
     include/sgrn/utils/progress.hpp
-    include/sgrn/utils/rapidjson.hpp
     include/sgrn/utils/strings.hpp
     include/sgrn/utils/tar.hpp
     include/sgrn/utils/threading.hpp

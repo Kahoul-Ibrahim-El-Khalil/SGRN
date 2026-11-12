@@ -14,7 +14,7 @@ target_link_libraries(sgrn_core INTERFACE
     sgrn::angelscript
     sgrn::angelscript_addons
     sgrn::s7codec
-    extern::rapidjson
+    extern::glaze
 )
 
 target_compile_definitions(sgrn_core INTERFACE SGRN_NO_DROGON)

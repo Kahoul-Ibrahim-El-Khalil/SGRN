@@ -1,9 +1,7 @@
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <sgrn/s7shell/utils/json-helpers.hpp>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
+#include <sgrn/utils/json-dom.hpp>
 #include <stdexcept>
 #include <string>
 
@@ -50,32 +48,32 @@ bool ok(sgrn::Result<void, ::sgrn::wrappers::s7::S7Error>&& t_res, std::string_v
 }
 
 double jsonScalarDouble(const std::string& t_json, double t_fallback) {
-    rapidjson::Document doc;
-    if (doc.Parse(t_json.c_str()).HasParseError())
+    sgrn::json::dom::Document doc;
+    if (doc.parse(t_json.c_str()).hasParseError())
         return t_fallback;
-    if (doc.IsDouble() || doc.IsNumber())
-        return doc.GetDouble();
-    if (doc.IsInt())
-        return static_cast<double>(doc.GetInt());
-    if (doc.IsUint())
-        return static_cast<double>(doc.GetUint());
-    if (doc.IsBool())
-        return doc.GetBool() ? 1.0 : 0.0;
+    if (doc.isDouble() || doc.is_number())
+        return doc.getDouble();
+    if (doc.isInt())
+        return static_cast<double>(doc.getInt());
+    if (doc.isUint())
+        return static_cast<double>(doc.getUint());
+    if (doc.is_boolean())
+        return doc.getBool() ? 1.0 : 0.0;
     return t_fallback;
 }
 
 int32_t jsonScalarInt(const std::string& t_json, int32_t t_fallback) {
-    rapidjson::Document doc;
-    if (doc.Parse(t_json.c_str()).HasParseError())
+    sgrn::json::dom::Document doc;
+    if (doc.parse(t_json.c_str()).hasParseError())
         return t_fallback;
-    if (doc.IsInt())
-        return doc.GetInt();
-    if (doc.IsUint())
-        return static_cast<int32_t>(doc.GetUint());
-    if (doc.IsDouble() || doc.IsNumber())
-        return static_cast<int32_t>(doc.GetDouble());
-    if (doc.IsBool())
-        return doc.GetBool() ? 1 : 0;
+    if (doc.isInt())
+        return doc.getInt();
+    if (doc.isUint())
+        return static_cast<int32_t>(doc.getUint());
+    if (doc.isDouble() || doc.is_number())
+        return static_cast<int32_t>(doc.getDouble());
+    if (doc.is_boolean())
+        return doc.getBool() ? 1 : 0;
     return t_fallback;
 }
 

@@ -8,9 +8,7 @@
  */
 
 #include <sgrn/scl/functions/modbus.hpp>
-
-#include <rapidjson/prettywriter.h>
-#include <rapidjson/stringbuffer.h>
+#include <sgrn/utils/json-dom.hpp>
 
 #include <s7codec/types.hpp>
 
@@ -193,80 +191,80 @@ ModbusVirtualMap buildModbusVirtualMap(const PlcSchemaStore& t_store) {
 // JSON serializer — /registry/modbus  (Listing G.2 format)
 // ---------------------------------------------------------------------------
 
-static void writeRegEntry(rapidjson::PrettyWriter<rapidjson::StringBuffer>& t_w, const ModbusVirtualEntry& t_e) {
-    t_w.StartObject();
-    t_w.Key("start");
-    t_w.Int(t_e.reg_start);
-    t_w.Key("count");
-    t_w.Int(t_e.reg_count);
-    t_w.Key("type");
-    t_w.String(s7codec::s7TypeToString(t_e.type));
-    t_w.Key("access");
-    t_w.String(t_e.read_only ? "ro" : "rw");
-    t_w.Key("padded");
-    t_w.Bool(t_e.padded);
-    t_w.Key("source");
-    t_w.String(fmt::format("DB{}.{}", t_e.db_number, t_e.field_path).c_str());
-    t_w.EndObject();
+static void writeRegEntry(sgrn::json::dom::PrettyWriter<sgrn::json::dom::StringBuffer>& t_w, const ModbusVirtualEntry& t_e) {
+    t_w.startObject();
+    t_w.key("start");
+    t_w.int32(t_e.reg_start);
+    t_w.key("count");
+    t_w.int32(t_e.reg_count);
+    t_w.key("type");
+    t_w.string(s7codec::s7TypeToString(t_e.type));
+    t_w.key("access");
+    t_w.string(t_e.read_only ? "ro" : "rw");
+    t_w.key("padded");
+    t_w.boolean(t_e.padded);
+    t_w.key("source");
+    t_w.string(fmt::format("DB{}.{}", t_e.db_number, t_e.field_path).c_str());
+    t_w.endObject();
 }
 
-static void writeBitEntry(rapidjson::PrettyWriter<rapidjson::StringBuffer>& t_w, const ModbusVirtualEntry& t_e) {
-    t_w.StartObject();
-    t_w.Key("address");
-    t_w.Int(t_e.reg_start);
-    t_w.Key("bit");
-    t_w.Int(t_e.bit_index);
-    t_w.Key("type");
-    t_w.String("BOOL");
-    t_w.Key("access");
-    t_w.String(t_e.read_only ? "ro" : "rw");
-    t_w.Key("padded");
-    t_w.Bool(false);
-    t_w.Key("source");
-    t_w.String(fmt::format("DB{}.{}", t_e.db_number, t_e.field_path).c_str());
-    t_w.EndObject();
+static void writeBitEntry(sgrn::json::dom::PrettyWriter<sgrn::json::dom::StringBuffer>& t_w, const ModbusVirtualEntry& t_e) {
+    t_w.startObject();
+    t_w.key("address");
+    t_w.int32(t_e.reg_start);
+    t_w.key("bit");
+    t_w.int32(t_e.bit_index);
+    t_w.key("type");
+    t_w.string("BOOL");
+    t_w.key("access");
+    t_w.string(t_e.read_only ? "ro" : "rw");
+    t_w.key("padded");
+    t_w.boolean(false);
+    t_w.key("source");
+    t_w.string(fmt::format("DB{}.{}", t_e.db_number, t_e.field_path).c_str());
+    t_w.endObject();
 }
 
 std::string serializeModbusMapToJson(const ModbusVirtualMap& t_map) {
-    rapidjson::StringBuffer sb;
-    rapidjson::PrettyWriter<rapidjson::StringBuffer> t_w(sb);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::PrettyWriter<sgrn::json::dom::StringBuffer> t_w(sb);
 
-    t_w.StartObject();
+    t_w.startObject();
 
-    t_w.Key("holding_registers");
-    t_w.StartArray();
+    t_w.key("holding_registers");
+    t_w.startArray();
     for (const auto& t_e : t_map.holding)
         writeRegEntry(t_w, t_e);
-    t_w.EndArray();
+    t_w.endArray();
 
-    t_w.Key("input_registers");
-    t_w.StartArray();
+    t_w.key("input_registers");
+    t_w.startArray();
     for (const auto& t_e : t_map.input)
         writeRegEntry(t_w, t_e);
-    t_w.EndArray();
+    t_w.endArray();
 
-    t_w.Key("coils");
-    t_w.StartArray();
+    t_w.key("coils");
+    t_w.startArray();
     for (const auto& t_e : t_map.coil)
         writeBitEntry(t_w, t_e);
-    t_w.EndArray();
+    t_w.endArray();
 
-    t_w.Key("discrete_inputs");
-    t_w.StartArray();
+    t_w.key("discrete_inputs");
+    t_w.startArray();
     for (const auto& t_e : t_map.discrete)
         writeBitEntry(t_w, t_e);
-    t_w.EndArray();
+    t_w.endArray();
 
     if (!t_map.warnings.empty()) {
-        t_w.Key("warnings");
-        t_w.StartArray();
+        t_w.key("warnings");
+        t_w.startArray();
         for (const auto& warn : t_map.warnings)
-            t_w.String(warn.c_str());
-        t_w.EndArray();
+            t_w.string(warn.c_str());
+        t_w.endArray();
     }
 
-    t_w.EndObject();
-    return sb.GetString();
+    t_w.endObject();
+    return sb.getString();
 }
 
 } // namespace sgrn::scl

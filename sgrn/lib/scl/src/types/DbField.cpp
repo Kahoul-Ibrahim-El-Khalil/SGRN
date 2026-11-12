@@ -1,10 +1,8 @@
 #include <fmt/format.h>
+#include <sgrn/utils/json-dom.hpp>
 
 #include <sgrn/scl/types/DbField.hpp>
 
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <s7codec/codec.hpp>
 #include <string>
 
@@ -13,15 +11,15 @@
 // -----------------------------------------------------------------------------
 
 std::string toJsonString(const sgrn::scl::DbField& t_field) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> t_writer(sb);
     sgrn::scl::field::serializeToWriter(t_writer, t_field);
-    return sb.GetString();
+    return sb.getString();
 }
 
-rapidjson::Document toJson(const sgrn::scl::DbField& t_field) {
-    rapidjson::Document doc;
-    doc.Parse(toJsonString(t_field).c_str());
+sgrn::json::dom::Document toJson(const sgrn::scl::DbField& t_field) {
+    sgrn::json::dom::Document doc;
+    doc.parse(toJsonString(t_field).c_str());
     return doc;
 }
 
@@ -32,71 +30,71 @@ rapidjson::Document toJson(const sgrn::scl::DbField& t_field) {
 namespace sgrn::scl::field
 {
 
-sgrn::scl::DbField fromJson(const rapidjson::Value& t_node) {
+sgrn::scl::DbField fromJson(const sgrn::json::dom::Value& t_node) {
     sgrn::scl::DbField t_field;
-    if (!t_node.IsObject())
+    if (!t_node.is_object())
         return t_field;
 
-    if (t_node.HasMember("name") && t_node["name"].IsString())
-        t_field.name = t_node["name"].GetString();
-    if (t_node.HasMember("offset"))
-        t_field.offset = t_node["offset"].GetInt();
-    if (t_node.HasMember("bit_index"))
-        t_field.bit_index = t_node["bit_index"].GetInt();
-    if (t_node.HasMember("count"))
-        t_field.count = t_node["count"].GetInt();
-    if (t_node.HasMember("udt_name") && t_node["udt_name"].IsString())
-        t_field.udt_name = t_node["udt_name"].GetString();
-    if (t_node.HasMember("struct_size"))
-        t_field.struct_size = t_node["struct_size"].GetInt();
-    if (t_node.HasMember("unit") && t_node["unit"].IsString())
-        t_field.unit = t_node["unit"].GetString();
-    if (t_node.HasMember("dimension") && t_node["dimension"].IsString())
-        t_field.dimension = t_node["dimension"].GetString();
-    if (t_node.HasMember("description") && t_node["description"].IsString())
-        t_field.description = t_node["description"].GetString();
-    if (t_node.HasMember("precision") && t_node["precision"].IsInt())
-        t_field.precision = t_node["precision"].GetInt();
-    if (t_node.HasMember("nominal") && t_node["nominal"].IsNumber())
-        t_field.nominal = t_node["nominal"].GetDouble();
-    if (t_node.HasMember("alarm_lo") && t_node["alarm_lo"].IsNumber())
-        t_field.alarm_lo = t_node["alarm_lo"].GetDouble();
-    if (t_node.HasMember("alarm_hi") && t_node["alarm_hi"].IsNumber())
-        t_field.alarm_hi = t_node["alarm_hi"].GetDouble();
-    if (t_node.HasMember("is_label") && t_node["is_label"].IsBool())
-        t_field.is_label = t_node["is_label"].GetBool();
-    if (t_node.HasMember("is_transient") && t_node["is_transient"].IsBool())
-        t_field.is_transient = t_node["is_transient"].GetBool();
-    if (t_node.HasMember("is_read_only") && t_node["is_read_only"].IsBool())
-        t_field.is_read_only = t_node["is_read_only"].GetBool();
-    if (t_node.HasMember("min") && t_node["min"].IsNumber())
-        t_field.min_val = t_node["min"].GetDouble();
-    if (t_node.HasMember("max") && t_node["max"].IsNumber())
-        t_field.max_val = t_node["max"].GetDouble();
+    if (t_node.hasMember("name") && t_node["name"].is_string())
+        t_field.name = t_node["name"].getString();
+    if (t_node.hasMember("offset"))
+        t_field.offset = t_node["offset"].getInt();
+    if (t_node.hasMember("bit_index"))
+        t_field.bit_index = t_node["bit_index"].getInt();
+    if (t_node.hasMember("count"))
+        t_field.count = t_node["count"].getInt();
+    if (t_node.hasMember("udt_name") && t_node["udt_name"].is_string())
+        t_field.udt_name = t_node["udt_name"].getString();
+    if (t_node.hasMember("struct_size"))
+        t_field.struct_size = t_node["struct_size"].getInt();
+    if (t_node.hasMember("unit") && t_node["unit"].is_string())
+        t_field.unit = t_node["unit"].getString();
+    if (t_node.hasMember("dimension") && t_node["dimension"].is_string())
+        t_field.dimension = t_node["dimension"].getString();
+    if (t_node.hasMember("description") && t_node["description"].is_string())
+        t_field.description = t_node["description"].getString();
+    if (t_node.hasMember("precision") && t_node["precision"].isInt())
+        t_field.precision = t_node["precision"].getInt();
+    if (t_node.hasMember("nominal") && t_node["nominal"].is_number())
+        t_field.nominal = t_node["nominal"].getDouble();
+    if (t_node.hasMember("alarm_lo") && t_node["alarm_lo"].is_number())
+        t_field.alarm_lo = t_node["alarm_lo"].getDouble();
+    if (t_node.hasMember("alarm_hi") && t_node["alarm_hi"].is_number())
+        t_field.alarm_hi = t_node["alarm_hi"].getDouble();
+    if (t_node.hasMember("is_label") && t_node["is_label"].is_boolean())
+        t_field.is_label = t_node["is_label"].getBool();
+    if (t_node.hasMember("is_transient") && t_node["is_transient"].is_boolean())
+        t_field.is_transient = t_node["is_transient"].getBool();
+    if (t_node.hasMember("is_read_only") && t_node["is_read_only"].is_boolean())
+        t_field.is_read_only = t_node["is_read_only"].getBool();
+    if (t_node.hasMember("min") && t_node["min"].is_number())
+        t_field.min_val = t_node["min"].getDouble();
+    if (t_node.hasMember("max") && t_node["max"].is_number())
+        t_field.max_val = t_node["max"].getDouble();
 
-    if (t_node.HasMember("enum") && t_node["enum"].IsObject()) {
-        for (auto it = t_node["enum"].MemberBegin(); it != t_node["enum"].MemberEnd(); ++it) {
+    if (t_node.hasMember("enum") && t_node["enum"].is_object()) {
+        for (auto it = t_node["enum"].memberBegin(); it != t_node["enum"].memberEnd(); ++it) {
             try {
-                const int key = std::stoi(it->name.GetString());
-                if (it->value.IsString())
-                    t_field.enum_map[key] = it->value.GetString();
+                const int key = std::stoi(it->name.getString());
+                if (it->value.is_string())
+                    t_field.enum_map[key] = it->value.getString();
             } catch (...) {
             }
         }
     }
-    if (t_node.HasMember("init") && t_node["init"].IsString())
-        t_field.init_value = t_node["init"].GetString();
-    if (t_node.HasMember("endianness") && t_node["endianness"].IsString()) {
-        const std::string e = t_node["endianness"].GetString();
+    if (t_node.hasMember("init") && t_node["init"].is_string())
+        t_field.init_value = t_node["init"].getString();
+    if (t_node.hasMember("endianness") && t_node["endianness"].is_string()) {
+        const std::string e = t_node["endianness"].getString();
         t_field.endianness = (e == "little" || e == "LITTLE") ? s7codec::Endian::Little : s7codec::Endian::Big;
     }
-    if (t_node.HasMember("trigger_events") && t_node["trigger_events"].IsBool())
-        t_field.trigger_events = t_node["trigger_events"].GetBool();
-    if (t_node.HasMember("is_dynamic") && t_node["is_dynamic"].IsBool())
-        t_field.is_dynamic = t_node["is_dynamic"].GetBool();
+    if (t_node.hasMember("trigger_events") && t_node["trigger_events"].is_boolean())
+        t_field.trigger_events = t_node["trigger_events"].getBool();
+    if (t_node.hasMember("is_dynamic") && t_node["is_dynamic"].is_boolean())
+        t_field.is_dynamic = t_node["is_dynamic"].getBool();
 
-    if (t_node.HasMember("agg") && t_node["agg"].IsString()) {
-        const std::string a = t_node["agg"].GetString();
+    if (t_node.hasMember("agg") && t_node["agg"].is_string()) {
+        const std::string a = t_node["agg"].getString();
         if (a == "MEAN" || a == "AVG")
             t_field.agg_type = AggregationType::Mean;
         else if (a == "MAX")
@@ -108,28 +106,28 @@ sgrn::scl::DbField fromJson(const rapidjson::Value& t_node) {
         else if (a == "LAST")
             t_field.agg_type = AggregationType::Last;
     }
-    if (t_node.HasMember("is_timestamp") && t_node["is_timestamp"].IsBool())
-        t_field.is_timestamp = t_node["is_timestamp"].GetBool();
-    if (t_node.HasMember("timestamp_for") && t_node["timestamp_for"].IsArray()) {
-        for (const auto& item : t_node["timestamp_for"].GetArray()) {
-            if (item.IsString())
-                t_field.timestamp_for.emplace_back(item.GetString());
+    if (t_node.hasMember("is_timestamp") && t_node["is_timestamp"].is_boolean())
+        t_field.is_timestamp = t_node["is_timestamp"].getBool();
+    if (t_node.hasMember("timestamp_for") && t_node["timestamp_for"].is_array()) {
+        for (const auto& item : t_node["timestamp_for"].elements()) {
+            if (item.is_string())
+                t_field.timestamp_for.emplace_back(item.getString());
         }
     }
-    if (t_node.HasMember("dataset_step_ns") && t_node["dataset_step_ns"].IsUint64())
-        t_field.dataset_step_ns = t_node["dataset_step_ns"].GetUint64();
+    if (t_node.hasMember("dataset_step_ns") && t_node["dataset_step_ns"].isUint64())
+        t_field.dataset_step_ns = t_node["dataset_step_ns"].getUint64();
 
-    if (t_node.HasMember("type") && t_node["type"].IsString()) {
-        if (auto opt = s7codec::toType(t_node["type"].GetString())) {
+    if (t_node.hasMember("type") && t_node["type"].is_string()) {
+        if (auto opt = s7codec::toType(t_node["type"].getString())) {
             t_field.type = *opt;
         } else {
             // Unknown type token → a UDT reference (resolved later against the registry).
             t_field.type = sgrn::scl::DataType::Struct;
-            t_field.udt_name = t_node["type"].GetString();
+            t_field.udt_name = t_node["type"].getString();
         }
     }
-    if (t_node.HasMember("children") && t_node["children"].IsArray()) {
-        for (const auto& child : t_node["children"].GetArray()) {
+    if (t_node.hasMember("children") && t_node["children"].is_array()) {
+        for (const auto& child : t_node["children"].elements()) {
             t_field.children.push_back(fromJson(child));
         }
     }
@@ -138,8 +136,8 @@ sgrn::scl::DbField fromJson(const rapidjson::Value& t_node) {
 }
 
 sgrn::scl::DbField fromJsonString(const std::string& t_value) {
-    rapidjson::Document doc;
-    doc.Parse(t_value.c_str());
+    sgrn::json::dom::Document doc;
+    doc.parse(t_value.c_str());
     return fromJson(doc);
 }
 

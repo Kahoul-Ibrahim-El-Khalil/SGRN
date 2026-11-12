@@ -4,12 +4,12 @@
 #include <sgrn/gateway/twin/utils.hpp>
 #include <sgrn/plcsim/PlcTagTable.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <sgrn/wrappers/s7/S7Client.hpp>
 #include <sgrn/wrappers/s7/error.hpp>
 #include <algorithm>
 #include <cstring>
 #include <fstream>
-#include <rapidjson/document.h>
 #include <stdexcept>
 #include <string>
 
@@ -44,27 +44,27 @@ sgrn::Result<void, SclError> PlcTagTable::loadRegistry_(const std::string& t_pat
     if (!f.is_open())
         return SclError::Generic;
     std::string json_str((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-    rapidjson::Document root;
-    root.Parse(json_str.c_str());
-    if (root.HasParseError())
+    sgrn::json::dom::Document root;
+    root.parse(json_str.data(), static_cast<sgrn::json::dom::SizeType>(json_str.size()));
+    if (root.hasParseError())
         return SclError::InvalidType;
 
     // Iterate through members of the root JSON object (one member per tag)
-    for (auto it = root.MemberBegin(); it != root.MemberEnd(); ++it) {
-        const std::string t_name = it->name.GetString();
+    for (auto it = root.memberBegin(); it != root.memberEnd(); ++it) {
+        const std::string t_name = it->name.getString();
         const auto& cfg = it->value;
-        if (!cfg.IsObject())
+        if (!cfg.is_object())
             continue;
 
         auto blk = std::make_unique<Block>();
         blk->name = t_name;
-        blk->type_name = cfg.HasMember("type") ? cfg["type"].GetString() : "Real";
+        blk->type_name = cfg.hasMember("type") && cfg["type"].is_string() ? cfg["type"].getString() : "Real";
         if (auto t = sgrn::scl::parseS7Type(blk->type_name)) {
             blk->type = *t;
         }
 
         // Map textual S7 areas (e.g., "DB", "MK", "PA", "PE") to protocol codes
-        std::string area_str = cfg.HasMember("area") ? cfg["area"].GetString() : "DB";
+        std::string area_str = cfg.hasMember("area") && cfg["area"].is_string() ? cfg["area"].getString() : "DB";
         if (area_str == "DB")
             blk->addr.area = S7AreaDB;
         else if (area_str == "MK")
@@ -79,9 +79,9 @@ sgrn::Result<void, SclError> PlcTagTable::loadRegistry_(const std::string& t_pat
         }
 
         // Retrieve offsets and sizes within the mapped area
-        blk->addr.db_number = cfg.HasMember("db") ? cfg["db"].GetInt() : 0;
-        blk->addr.start_byte = cfg.HasMember("start") ? cfg["start"].GetInt() : 0;
-        blk->addr.bit_offset = cfg.HasMember("bit") ? cfg["bit"].GetInt() : 0;
+        blk->addr.db_number = cfg.hasMember("db") && cfg["db"].is_number() ? cfg["db"].getInt() : 0;
+        blk->addr.start_byte = cfg.hasMember("start") && cfg["start"].is_number() ? cfg["start"].getInt() : 0;
+        blk->addr.bit_offset = cfg.hasMember("bit") && cfg["bit"].is_number() ? cfg["bit"].getInt() : 0;
 
         // Establish protocol word lengths and byte lengths based on the tag type
         if (blk->type_name == "Bool") {

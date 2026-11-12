@@ -7,7 +7,7 @@
 //   1. The WebSocket JSON seed frame ({"<DbName>": {...}} pushed on open,
 //      produced by server_.getDigitalTwinJsonString() → PlcState::serialize)
 //      is structurally identical to HTTP GET /data/<DbName> (same render
-//      family): rapidjson-independent deep equality via jsoncpp.
+//      family): JSON-backend-independent deep equality via jsoncpp.
 //   2. A full-DB binary subscription ({"command":"subscribe_binary","db":N})
 //      receives an immediate binary frame whose payload — after the 12-byte
 //      header ([u32 db ~LE][f64 timestamp ~LE]) — is byte-identical to HTTP

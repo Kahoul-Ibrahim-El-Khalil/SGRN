@@ -1,3 +1,4 @@
+#include <sgrn/utils/json-dom.hpp>
 // Binary-archive -> JSONL transcode helpers for sgrn-dataset.
 // Split from sgrn-dataset.cpp; shared by the pipeline and merge units.
 #include <fmt/color.h>
@@ -13,10 +14,6 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
-#include <rapidjson/document.h>
-#include <rapidjson/prettywriter.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <s7codec/endian.hpp>
 #include <stdexcept>
 #include <string>
@@ -103,17 +100,17 @@ struct TranscodeLeaf {
 };
 
 /// Recursively collects leaves from a schema-JSON "fields" array.
-void collectTranscodeLeaves(const rapidjson::Value& t_fields, const std::string& t_db_prefix, size_t t_base_offset,
+void collectTranscodeLeaves(const sgrn::json::dom::Value& t_fields, const std::string& t_db_prefix, size_t t_base_offset,
     s7codec::Endian t_db_endian, std::vector<TranscodeLeaf>& t_out) {
-    if (!t_fields.IsArray())
+    if (!t_fields.is_array())
         return;
-    for (const auto& field : t_fields.GetArray()) {
-        if (!field.IsObject() || !field.HasMember("name") || !field["name"].IsString())
+    for (const auto& field : t_fields.elements()) {
+        if (!field.is_object() || !field.hasMember("name") || !field["name"].is_string())
             continue;
-        const std::string name = field["name"].GetString();
-        if (!field.HasMember("offset") || (!field["offset"].IsUint() && !field["offset"].IsInt()))
+        const std::string name = field["name"].getString();
+        if (!field.hasMember("offset") || (!field["offset"].isUint() && !field["offset"].isInt()))
             continue;
-        const int rel = field["offset"].IsUint() ? static_cast<int>(field["offset"].GetUint()) : field["offset"].GetInt();
+        const int rel = field["offset"].isUint() ? static_cast<int>(field["offset"].getUint()) : field["offset"].getInt();
         if (rel < 0)
             continue;
         const std::string path = t_db_prefix.empty() ? name : t_db_prefix + "." + name;
@@ -121,14 +118,14 @@ void collectTranscodeLeaves(const rapidjson::Value& t_fields, const std::string&
 
         uint32_t arr_count = 1;
         uint32_t arr_stride = 0; // 0 = Bit-packed Bool semantics (decoded specially)
-        if (field.HasMember("count") && field["count"].IsUint())
-            arr_count = field["count"].GetUint();
+        if (field.hasMember("count") && field["count"].isUint())
+            arr_count = field["count"].getUint();
         if (arr_count > 1) {
-            if (field.HasMember("struct_size") && field["struct_size"].IsUint())
-                arr_stride = field["struct_size"].GetUint();
+            if (field.hasMember("struct_size") && field["struct_size"].isUint())
+                arr_stride = field["struct_size"].getUint();
         }
 
-        const bool has_children = field.HasMember("children") && field["children"].IsArray() && !field["children"].Empty();
+        const bool has_children = field.hasMember("children") && field["children"].is_array() && !field["children"].empty();
         if (has_children) {
             // Struct (array): child offsets are relative to element 0. Leaves
             // keep the collapsed path but carry the array span so the decoder
@@ -152,15 +149,15 @@ void collectTranscodeLeaves(const rapidjson::Value& t_fields, const std::string&
             }
             continue;
         }
-        if (!field.HasMember("type") || !field["type"].IsString())
+        if (!field.hasMember("type") || !field["type"].is_string())
             continue;
-        auto type = sgrn::scl::parseDataType(field["type"].GetString());
+        auto type = sgrn::scl::parseDataType(field["type"].getString());
         if (!type.has_value())
             continue;
-        const int bit = (field.HasMember("bit") && field["bit"].IsUint()) ? static_cast<int>(field["bit"].GetUint()) : 0;
+        const int bit = (field.hasMember("bit") && field["bit"].isUint()) ? static_cast<int>(field["bit"].getUint()) : 0;
         s7codec::Endian endian = t_db_endian;
-        if (field.HasMember("endianness") && field["endianness"].IsString() &&
-            std::string_view(field["endianness"].GetString()) == "little") {
+        if (field.hasMember("endianness") && field["endianness"].is_string() &&
+            std::string_view(field["endianness"].getString()) == "little") {
             endian = s7codec::Endian::Little;
         }
         TranscodeLeaf leaf{path, abs_offset, *type, bit, endian};
@@ -174,37 +171,38 @@ void collectTranscodeLeaves(const rapidjson::Value& t_fields, const std::string&
 
 /// Builds db_number -> leaves from an embedded schema document. Accepts the
 /// "dbs" member as either a list (with "number"/"name") or a keyed object.
-bool buildTranscodeLayout(const rapidjson::Document& t_schema, std::unordered_map<uint16_t, std::vector<TranscodeLeaf>>& t_out) {
-    if (!t_schema.IsObject() || !t_schema.HasMember("dbs"))
+bool buildTranscodeLayout(const sgrn::json::dom::Document& t_schema, std::unordered_map<uint16_t, std::vector<TranscodeLeaf>>& t_out) {
+    if (!t_schema.is_object() || !t_schema.hasMember("dbs"))
         return false;
     const auto& dbs = t_schema["dbs"];
-    auto handle_db = [&](const rapidjson::Value& t_db) {
+    auto handle_db = [&](const sgrn::json::dom::Value& t_db) {
         uint16_t db_num = 0;
-        if (t_db.HasMember("number") && t_db["number"].IsUint())
-            db_num = static_cast<uint16_t>(t_db["number"].GetUint());
+        if (t_db.hasMember("number") && t_db["number"].isUint())
+            db_num = static_cast<uint16_t>(t_db["number"].getUint());
         else
             return;
-        std::string db_name = (t_db.HasMember("name") && t_db["name"].IsString()) ? t_db["name"].GetString() : "";
+        std::string db_name = (t_db.hasMember("name") && t_db["name"].is_string()) ? t_db["name"].getString() : "";
         const std::string prefix = db_name.empty() ? fmt::format("DB{}", db_num) : db_name;
         s7codec::Endian db_endian = s7codec::Endian::Little;
-        if (t_db.HasMember("endianness") && t_db["endianness"].IsString() && std::string_view(t_db["endianness"].GetString()) == "little") {
+        if (t_db.hasMember("endianness") && t_db["endianness"].is_string() &&
+            std::string_view(t_db["endianness"].getString()) == "little") {
             db_endian = s7codec::Endian::Little;
         }
-        if (!t_db.HasMember("fields"))
+        if (!t_db.hasMember("fields"))
             return;
         std::vector<TranscodeLeaf> leaves;
         collectTranscodeLeaves(t_db["fields"], prefix, 0, db_endian, leaves);
         if (!leaves.empty())
             t_out[db_num] = std::move(leaves);
     };
-    if (dbs.IsArray()) {
-        for (const auto& db : dbs.GetArray()) {
-            if (db.IsObject())
+    if (dbs.is_array()) {
+        for (const auto& db : dbs.elements()) {
+            if (db.is_object())
                 handle_db(db);
         }
-    } else if (dbs.IsObject()) {
-        for (auto it = dbs.MemberBegin(); it != dbs.MemberEnd(); ++it) {
-            if (it->value.IsObject())
+    } else if (dbs.is_object()) {
+        for (auto it = dbs.memberBegin(); it != dbs.memberEnd(); ++it) {
+            if (it->value.is_object())
                 handle_db(it->value);
         }
     }
@@ -214,8 +212,8 @@ bool buildTranscodeLayout(const rapidjson::Document& t_schema, std::unordered_ma
 /// Decodes one leaf to a typed JSON value (mirrors endian_helper::loadValue
 /// reads, but type-preserving). Returns false when undecodable (out of
 /// range, unsupported type, non-finite float) — caller skips the leaf.
-bool decodeTranscodeLeaf(const uint8_t* t_image, size_t t_image_len, const TranscodeLeaf& t_leaf, rapidjson::Value& t_out,
-    rapidjson::Document::AllocatorType& t_alloc) {
+bool decodeTranscodeLeaf(const uint8_t* t_image, size_t t_image_len, const TranscodeLeaf& t_leaf, sgrn::json::dom::Value& t_out,
+    sgrn::json::dom::Document::AllocatorType& t_alloc) {
     using DT = sgrn::scl::DataType;
     using sgrn::common::endian_helper::loadFromBuffer;
     const size_t width = s7TypeByteSize(t_leaf.type);
@@ -224,52 +222,52 @@ bool decodeTranscodeLeaf(const uint8_t* t_image, size_t t_image_len, const Trans
     const uint8_t* p = t_image + t_leaf.offset;
     switch (t_leaf.type) {
         case DT::Bool:
-            t_out.SetBool(((p[0] >> t_leaf.bit) & 1) != 0);
+            t_out.setBool(((p[0] >> t_leaf.bit) & 1) != 0);
             return true;
         case DT::Byte:
         case DT::USInt:
         case DT::Char:
-            t_out.SetUint(p[0]);
+            t_out.setUint(p[0]);
             return true;
         case DT::SInt:
-            t_out.SetInt(static_cast<int8_t>(p[0]));
+            t_out.setInt(static_cast<int8_t>(p[0]));
             return true;
         case DT::Word:
         case DT::UInt:
-            t_out.SetUint(loadFromBuffer<uint16_t>(p, t_leaf.endian));
+            t_out.setUint(loadFromBuffer<uint16_t>(p, t_leaf.endian));
             return true;
         case DT::Int:
-            t_out.SetInt(loadFromBuffer<int16_t>(p, t_leaf.endian));
+            t_out.setInt(loadFromBuffer<int16_t>(p, t_leaf.endian));
             return true;
         case DT::DWord:
         case DT::UDInt:
         case DT::Time:
         case DT::TimeOfDay:
-            t_out.SetUint64(loadFromBuffer<uint32_t>(p, t_leaf.endian));
+            t_out.setUint64(loadFromBuffer<uint32_t>(p, t_leaf.endian));
             return true;
         case DT::DInt:
-            t_out.SetInt(loadFromBuffer<int32_t>(p, t_leaf.endian));
+            t_out.setInt(loadFromBuffer<int32_t>(p, t_leaf.endian));
             return true;
         case DT::Real: {
             const float v = loadFromBuffer<float>(p, t_leaf.endian);
             if (std::isinf(v) || std::isnan(v))
                 return false;
-            t_out.SetDouble(static_cast<double>(v));
+            t_out.setDouble(static_cast<double>(v));
             return true;
         }
         case DT::LWord:
         case DT::ULInt:
         case DT::LTime:
-            t_out.SetUint64(loadFromBuffer<uint64_t>(p, t_leaf.endian));
+            t_out.setUint64(loadFromBuffer<uint64_t>(p, t_leaf.endian));
             return true;
         case DT::LInt:
-            t_out.SetInt64(loadFromBuffer<int64_t>(p, t_leaf.endian));
+            t_out.setInt64(loadFromBuffer<int64_t>(p, t_leaf.endian));
             return true;
         case DT::LReal: {
             const double v = loadFromBuffer<double>(p, t_leaf.endian);
             if (std::isinf(v) || std::isnan(v))
                 return false;
-            t_out.SetDouble(v);
+            t_out.setDouble(v);
             return true;
         }
         case DT::DTL: {
@@ -288,7 +286,7 @@ bool decodeTranscodeLeaf(const uint8_t* t_image, size_t t_image_len, const Trans
                 static_cast<unsigned>(p[3]), static_cast<unsigned>(p[5]), static_cast<unsigned>(p[6]), static_cast<unsigned>(p[7]), nanos);
             // Copy into allocator-owned storage: SetString(buf, len) without
             // an allocator stores the (stack) pointer — dangling on return.
-            t_out.SetString(buf, static_cast<rapidjson::SizeType>(std::strlen(buf)), t_alloc);
+            t_out.setString(buf, static_cast<sgrn::json::dom::SizeType>(std::strlen(buf)), t_alloc);
             return true;
         }
         default:
@@ -332,15 +330,15 @@ bool transcodeBinaryToJsonl(const std::string& t_decompressed, const std::string
         }
     }
     if (!schema_json.empty()) {
-        rapidjson::StringBuffer sb;
-        rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-        w.StartObject();
-        w.Key("type");
-        w.String("schema");
-        w.Key("schema");
-        w.RawValue(schema_json.c_str(), schema_json.size(), rapidjson::kObjectType);
-        w.EndObject();
-        t_emit(sb.GetString());
+        sgrn::json::dom::StringBuffer sb;
+        sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> w(sb);
+        w.startObject();
+        w.key("type");
+        w.string("schema");
+        w.key("schema");
+        w.rawJson(schema_json.c_str(), schema_json.size(), sgrn::json::dom::Type::Object);
+        w.endObject();
+        t_emit(sb.getString());
     }
 
     // Value-preserving state: schema layout for decoding, dictionary maps
@@ -351,9 +349,9 @@ bool transcodeBinaryToJsonl(const std::string& t_decompressed, const std::string
     bool have_layout = false;
     // Function scope: decode_image borrows schema_doc's allocator for
     // allocator-owned (copied) leaf strings (e.g. DTL timestamps).
-    rapidjson::Document schema_doc;
+    sgrn::json::dom::Document schema_doc;
     if (!schema_json.empty()) {
-        if (!schema_doc.Parse(schema_json.c_str()).HasParseError() && schema_doc.IsObject()) {
+        if (!schema_doc.parse(schema_json.c_str()).hasParseError() && schema_doc.is_object()) {
             have_layout = buildTranscodeLayout(schema_doc, layout);
         }
         if (!have_layout) {
@@ -367,23 +365,23 @@ bool transcodeBinaryToJsonl(const std::string& t_decompressed, const std::string
 
     // Streams one valued record: {"type":..,"ts":..,"data"|"changes":{"id":value}}.
     auto emit_valued = [&](const char* t_type, int64_t t_ts, const char* t_payload_key,
-                           std::vector<std::pair<std::string, rapidjson::Value>> t_entries) {
-        rapidjson::StringBuffer sb;
-        rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-        w.StartObject();
-        w.Key("type");
-        w.String(t_type);
-        w.Key("ts");
-        w.Int64(t_ts);
-        w.Key(t_payload_key);
-        w.StartObject();
+                           std::vector<std::pair<std::string, sgrn::json::dom::Value>> t_entries) {
+        sgrn::json::dom::StringBuffer sb;
+        sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> w(sb);
+        w.startObject();
+        w.key("type");
+        w.string(t_type);
+        w.key("ts");
+        w.int64(t_ts);
+        w.key(t_payload_key);
+        w.startObject();
         for (auto& [id_str, val] : t_entries) {
-            w.Key(id_str.c_str(), static_cast<rapidjson::SizeType>(id_str.size()));
-            val.Accept(w);
+            w.key(id_str.c_str(), static_cast<sgrn::json::dom::SizeType>(id_str.size()));
+            val.accept(w);
         }
-        w.EndObject();
-        w.EndObject();
-        t_emit(sb.GetString());
+        w.endObject();
+        w.endObject();
+        t_emit(sb.getString());
     };
 
     size_t pos = header.frames_start;
@@ -427,8 +425,8 @@ bool transcodeBinaryToJsonl(const std::string& t_decompressed, const std::string
         // dictionary line additionally (re)builds ID resolution.
         if (db_num == sgrn::gateway::database::kControlFrameDbNum) {
             std::string control_json(reinterpret_cast<const char*>(payload), payload_len);
-            rapidjson::Document control_doc;
-            if (!control_doc.Parse(control_json.c_str()).HasParseError() && control_doc.IsObject()) {
+            sgrn::json::dom::Document control_doc;
+            if (!control_doc.parse(control_json.c_str()).hasParseError() && control_doc.is_object()) {
                 if (isDictionaryRecord(control_doc)) {
                     dict_paths.clear();
                     path_to_id.clear();
@@ -449,7 +447,7 @@ bool transcodeBinaryToJsonl(const std::string& t_decompressed, const std::string
         // are skipped, never fabricated.
         auto decode_image = [&](uint16_t t_db, const uint8_t* t_image, size_t t_image_len,
                                 const std::vector<sgrn::gateway::database::BinaryDeltaRun>* t_changed_runs) {
-            std::vector<std::pair<std::string, rapidjson::Value>> entries;
+            std::vector<std::pair<std::string, sgrn::json::dom::Value>> entries;
             if (!have_layout || path_to_id.empty())
                 return entries;
             auto layout_it = layout.find(t_db);
@@ -481,12 +479,12 @@ bool transcodeBinaryToJsonl(const std::string& t_decompressed, const std::string
                     if (!touched)
                         continue;
                 }
-                rapidjson::Value val;
-                auto& alloc = schema_doc.GetAllocator();
+                sgrn::json::dom::Value val;
+                auto& alloc = schema_doc.allocator();
                 if (leaf.count > 1) {
                     // Emit the full array under the collapsed dictionary id:
                     // readers fan each element into its "a.b[i].c" column.
-                    val.SetArray();
+                    val.setArray();
                     for (uint32_t i = 0; i < leaf.count; ++i) {
                         TranscodeLeaf el = leaf;
                         if (leaf.type == sgrn::scl::DataType::Bool && leaf.stride == 0) {
@@ -496,11 +494,11 @@ bool transcodeBinaryToJsonl(const std::string& t_decompressed, const std::string
                         } else {
                             el.offset += static_cast<size_t>(i) * leaf.stride;
                         }
-                        rapidjson::Value ev;
+                        sgrn::json::dom::Value ev;
                         if (decodeTranscodeLeaf(t_image, t_image_len, el, ev, alloc))
-                            val.PushBack(std::move(ev), alloc);
+                            val.pushBack(std::move(ev), alloc);
                         else
-                            val.PushBack(rapidjson::Value().SetNull(), alloc);
+                            val.pushBack(sgrn::json::dom::Value().setNull(), alloc);
                     }
                 } else if (decodeTranscodeLeaf(t_image, t_image_len, leaf, val, alloc)) {
                     entries.emplace_back(std::to_string(id_it->second), std::move(val));
@@ -516,23 +514,23 @@ bool transcodeBinaryToJsonl(const std::string& t_decompressed, const std::string
         // Legacy synthetic record for frames decoded without schema or
         // dictionary (historic behavior): metadata only, no values.
         auto emit_synthetic = [&](const char* t_marker, int64_t t_ts, uint16_t t_db) {
-            rapidjson::StringBuffer sb;
-            rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-            w.StartObject();
-            w.Key("type");
-            w.String("anchor");
-            w.Key("ts");
-            w.Int64(t_ts);
-            w.Key("db");
-            w.Uint(t_db);
+            sgrn::json::dom::StringBuffer sb;
+            sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> w(sb);
+            w.startObject();
+            w.key("type");
+            w.string("anchor");
+            w.key("ts");
+            w.int64(t_ts);
+            w.key("db");
+            w.uint32(t_db);
             if (t_marker != nullptr) {
-                w.Key(t_marker);
-                w.Bool(true);
+                w.key(t_marker);
+                w.boolean(true);
             }
-            w.Key("bytes_len");
-            w.Uint(payload_len);
-            w.EndObject();
-            t_emit(sb.GetString());
+            w.key("bytes_len");
+            w.uint32(payload_len);
+            w.endObject();
+            t_emit(sb.getString());
         };
 
         // Delta frames (v2+): patch the cached image, then emit the changed

@@ -9,11 +9,11 @@
 #   sgrn_pch_std        Standard library only (STL, C headers).
 #                       Linked by: all SGRN targets.
 #
-#   sgrn_pch_third      std + {fmt}, jsoncpp, OpenSSL, RapidJSON, httplib,
+#   sgrn_pch_third      std + {fmt}, jsoncpp, OpenSSL, Glaze, httplib,
 #                       AngelScript, IXWebSocket, sqlite_modern_cpp, s7codec.
 #                       Linked by: utils, sdk, scl, gateway sub-targets.
 #
-#   sgrn_pch_s7_third   std + snap7, open62541, rapidjson, xml_h.
+#   sgrn_pch_s7_third   std + snap7, open62541, Glaze, xml_h.
 #                       Linked by: s7shell, gateway S7/OPC-UA targets.
 #
 #   sgrn_pch_net        third + Trantor + Drogon.
@@ -146,7 +146,6 @@ function(sgrn_create_pch_third)
         sgrn::fmt 
         sgrn::jsoncpp 
         sgrn::openssl 
-        sgrn::rapidjson 
         sgrn::httplib
         sgrn::crow
         sgrn::angelscript
@@ -154,6 +153,7 @@ function(sgrn_create_pch_third)
         sgrn::sqlite_modern_cpp
         sgrn::cxxopts
         sgrn::s7codec
+        extern::glaze
     )
     # Include paths flow in transitively through sgrn::* target_link_libraries above.
     # No manual extern/ source paths needed (works for both build-from-source
@@ -162,7 +162,7 @@ function(sgrn_create_pch_third)
         <fmt/core.h> <fmt/format.h> <fmt/chrono.h> <fmt/color.h> <fmt/ostream.h> <fmt/ranges.h>
         <json/json.h> <json/value.h> <openssl/ssl.h> <openssl/crypto.h> <zstd.h> 
         <cxxopts.hpp> <sqlite_modern_cpp.h>
-        <rapidjson/document.h> <rapidjson/writer.h> <rapidjson/stringbuffer.h> <rapidjson/prettywriter.h> <rapidjson/error/en.h>
+        <glaze/glaze.hpp>
         <httplib.h>
         <crow.h>
         <angelscript.h>
@@ -246,7 +246,7 @@ function(sgrn_create_pch_s7)
 endfunction()
 
 # ------------------------------------------------------------------------------
-# 5. S7 Third Party PCH: Base + RapidJSON + Open62541 + Snap7
+# 5. S7 Third Party PCH: Base + Open62541 + Snap7
 # ------------------------------------------------------------------------------
 function(sgrn_create_pch_s7_third_party)
     set(pch_file "${PROJECT_SOURCE_DIR}/cmake/pch_s7_third.cpp")
@@ -272,18 +272,16 @@ function(sgrn_create_pch_s7_third_party)
         sgrn_pch_std 
         sgrn::snap7 
         sgrn::open62541 
-        sgrn::rapidjson 
         sgrn::xml_h
+        extern::glaze
     )
 
     target_precompile_headers(sgrn_pch_s7_third PUBLIC
         <snap7.h>
         <open62541/server.h>
         <open62541/client.h>
-        <rapidjson/document.h>
-        <rapidjson/writer.h>
-        <rapidjson/stringbuffer.h>
         <xml.h>
+        <glaze/glaze.hpp>
     )
 endfunction()
 

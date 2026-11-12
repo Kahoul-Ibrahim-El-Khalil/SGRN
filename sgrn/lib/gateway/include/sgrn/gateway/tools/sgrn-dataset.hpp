@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sgrn/utils/json-dom.hpp>
+
 #include <sgrn/Result.hpp>
 #include <sgrn/ml/columnar-dataset.hpp>
 #include <sgrn/ml/time-grid-resampler.hpp>
@@ -8,7 +10,6 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
-#include <rapidjson/document.h>
 #include <s7codec/codec.hpp>
 #include <string>
 #include <unordered_map>
@@ -117,14 +118,14 @@ private:
     /// Ingests one parsed JSONL-shape document (anchor / delta / legacy flat
     /// / control anchor). Returns false for timestamp-less lines (schema /
     /// dictionary / manifest / footer), which carry no data.
-    bool ingestJsonRecord(const rapidjson::Document& t_doc, const std::vector<std::string>& t_dict);
+    bool ingestJsonRecord(const sgrn::json::dom::Document& t_doc, const std::vector<std::string>& t_dict);
     /// Merge one binary DB image's decodable leaves into the current state
     /// (same semantics as the JSONL ingest; undecodable leaves stay absent).
     void ingestBinaryImage(uint16_t t_db, const uint8_t* t_image, size_t t_len);
-    void ingestKeyedValues(const rapidjson::Value& t_obj, const std::vector<std::string>& t_dict);
-    void storeStateValue(const std::string& t_key, const rapidjson::Value& t_v);
-    void storeStateLeaf(const std::string& t_key, const rapidjson::Value& t_v);
-    void walkStateObject(const std::string& t_prefix, const rapidjson::Value& t_v);
+    void ingestKeyedValues(const sgrn::json::dom::Value& t_obj, const std::vector<std::string>& t_dict);
+    void storeStateValue(const std::string& t_key, const sgrn::json::dom::Value& t_v);
+    void storeStateLeaf(const std::string& t_key, const sgrn::json::dom::Value& t_v);
+    void walkStateObject(const std::string& t_prefix, const sgrn::json::dom::Value& t_v);
 
     // --- row emission (CSV + streaming cache stay row-identical) ---
     /// Batch every co-timestamp frame into one complete row: defer until

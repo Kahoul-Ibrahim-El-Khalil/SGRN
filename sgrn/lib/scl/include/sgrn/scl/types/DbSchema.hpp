@@ -3,7 +3,7 @@
 #include <sgrn/scl/types/DbField.hpp>
 #include <sgrn/scl/types/UdtDefinition.hpp>
 #include <sgrn/scl/types/modbus/ModbusArea.hpp>
-#include <rapidjson/document.h>
+#include <sgrn/utils/json-dom.hpp>
 #include <s7codec/codec.hpp>
 #include <stdexcept>
 #include <string>
@@ -35,67 +35,67 @@ namespace sgrn::scl::db
 /// the DB header is emitted (fields are omitted).
 template <typename Writer>
 inline void serializeToWriter(Writer& t_writer, const sgrn::scl::DbSchema& t_db, bool t_headers_only = false) {
-    t_writer.StartObject();
-    t_writer.Key("number");
-    t_writer.Int(t_db.db_number);
-    t_writer.Key("name");
-    t_writer.String(t_db.db_name.c_str());
-    t_writer.Key("size_bytes");
-    t_writer.Int(t_db.size_bytes);
+    t_writer.startObject();
+    t_writer.key("number");
+    t_writer.int32(t_db.db_number);
+    t_writer.key("name");
+    t_writer.string(t_db.db_name.c_str());
+    t_writer.key("size_bytes");
+    t_writer.int32(t_db.size_bytes);
     if (!t_db.source_file.empty()) {
-        t_writer.Key("source_file");
-        t_writer.String(t_db.source_file.c_str());
+        t_writer.key("source_file");
+        t_writer.string(t_db.source_file.c_str());
     }
     if (t_db.endianness != s7codec::Endian::Little) {
-        t_writer.Key("endianness");
-        t_writer.String(t_db.endianness == s7codec::Endian::Little ? "little" : "big");
+        t_writer.key("endianness");
+        t_writer.string(t_db.endianness == s7codec::Endian::Little ? "little" : "big");
     }
     if (t_db.trigger_events) {
-        t_writer.Key("trigger_events");
-        t_writer.Bool(true);
+        t_writer.key("trigger_events");
+        t_writer.boolean(true);
     }
     if (t_db.modbus_area != ModbusArea::None) {
-        t_writer.Key("modbus_area");
+        t_writer.key("modbus_area");
         switch (t_db.modbus_area) {
             case ModbusArea::Holding:
-                t_writer.String("holding");
+                t_writer.string("holding");
                 break;
             case ModbusArea::Input:
-                t_writer.String("input");
+                t_writer.string("input");
                 break;
             case ModbusArea::Coil:
-                t_writer.String("coil");
+                t_writer.string("coil");
                 break;
             case ModbusArea::Discrete:
-                t_writer.String("discrete");
+                t_writer.string("discrete");
                 break;
             default:
                 break;
         }
     }
     if (t_db.dataset_step_ns > 0) {
-        t_writer.Key("dataset_step_ns");
-        t_writer.Uint64(t_db.dataset_step_ns);
+        t_writer.key("dataset_step_ns");
+        t_writer.uint64(t_db.dataset_step_ns);
     }
     if (!t_headers_only) {
-        t_writer.Key("fields");
-        t_writer.StartArray();
+        t_writer.key("fields");
+        t_writer.startArray();
         for (const auto& t_field : t_db.fields) {
             sgrn::scl::field::serializeToWriter(t_writer, t_field);
         }
-        t_writer.EndArray();
+        t_writer.endArray();
     }
-    t_writer.EndObject();
+    t_writer.endObject();
 }
 
 /// from-side lives in its own namespace (C++ cannot overload on return type globally).
-sgrn::scl::DbSchema fromJson(const rapidjson::Value& t_value);
+sgrn::scl::DbSchema fromJson(const sgrn::json::dom::Value& t_value);
 sgrn::scl::DbSchema fromJsonString(const std::string& t_value);
 } // namespace sgrn::scl::db
 
 // global namespace — functional JSON form
 std::string toJsonString(const sgrn::scl::DbSchema& t_db);
-rapidjson::Document toJson(const sgrn::scl::DbSchema& t_db);
+sgrn::json::dom::Document toJson(const sgrn::scl::DbSchema& t_db);
 
 template <>
 struct fmt::formatter<sgrn::scl::DbSchema> : formatter<std::string_view> {

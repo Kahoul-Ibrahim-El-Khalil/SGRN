@@ -20,7 +20,6 @@ target_link_libraries(sgrn_datastore_client
         sgrn_utils
         fmt::fmt
         sgrn::httplib
-        sgrn::rapidjson
 )
 
 add_library(sgrn::datastore_client ALIAS sgrn_datastore_client)

@@ -40,7 +40,7 @@ struct S7ProxyConfig {
 };
 
 /**
- * @brief Parse the S7Proxy configuration from a JSON file using RapidJSON.
+ * @brief Parse the S7Proxy configuration from a JSON file using Glaze JSON DOM.
  */
 sgrn::Result<S7ProxyConfig, std::string> parseProxyConfig(const std::string& t_path);
 

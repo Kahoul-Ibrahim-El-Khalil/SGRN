@@ -6,6 +6,7 @@
 #include <sgrn/gateway/twin/utils.hpp>
 #include <sgrn/ml/columnar-dataset.hpp>
 #include <sgrn/utils/compression.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <sgrn/utils/time.hpp>
 #include <cctype>
 #include <chrono>
@@ -13,9 +14,6 @@
 #include <deque>
 #include <fstream>
 #include <optional>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -152,8 +150,8 @@ bool GatewayReplayer::sleepPaced(int64_t& t_last_ts, int64_t t_ts) {
     return true;
 }
 
-bool GatewayReplayer::encodeLeaf(const std::string& t_full_path, const rapidjson::Value& t_val, std::deque<std::vector<uint8_t>>& t_storage,
-    std::vector<twin::DbMemorySpan>& t_spans) {
+bool GatewayReplayer::encodeLeaf(const std::string& t_full_path, const sgrn::json::dom::Value& t_val,
+    std::deque<std::vector<uint8_t>>& t_storage, std::vector<twin::DbMemorySpan>& t_spans) {
     if (plc_memory_ == nullptr || plc_memory_->state() == nullptr || schema_store_ == nullptr)
         return false;
 
@@ -192,16 +190,16 @@ bool GatewayReplayer::encodeLeaf(const std::string& t_full_path, const rapidjson
     // same split DbIOProvider::commitOneField uses for live writes.
     if (field.type == ::sgrn::scl::DataType::Bool && field.count <= 1) {
         bool bit = false;
-        if (t_val.IsBool())
-            bit = t_val.GetBool();
-        else if (t_val.IsInt())
-            bit = t_val.GetInt() != 0;
-        else if (t_val.IsUint())
-            bit = t_val.GetUint() != 0;
-        else if (t_val.IsString()) {
-            const std::string s = t_val.GetString();
+        if (t_val.is_boolean())
+            bit = t_val.getBool();
+        else if (t_val.isInt())
+            bit = t_val.getInt() != 0;
+        else if (t_val.isUint())
+            bit = t_val.getUint() != 0;
+        else if (t_val.is_string()) {
+            const std::string s = t_val.getString();
             bit = (s == "true" || s == "1" || s == "TRUE");
-        } else if (t_val.IsNull()) {
+        } else if (t_val.is_null()) {
             bit = false;
         } else {
             fmt::print(fg(fmt::color::yellow), "[sgrn_replay] Unencodable bool '{}', skipping leaf.\n", t_full_path);
@@ -218,14 +216,14 @@ bool GatewayReplayer::encodeLeaf(const std::string& t_full_path, const rapidjson
     }
     const size_t size = static_cast<size_t>(field_size);
 
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-    t_val.Accept(writer);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
+    t_val.accept(writer);
 
     // deque keeps existing element addresses stable across pushes, so spans
     // built earlier stay valid while later leaves append their buffers.
     t_storage.emplace_back(size, 0);
-    auto res = twin::encodeFieldAt(field, sb.GetString(), t_storage.back().data(), size, /*bit_offset=*/0, field.endianness);
+    auto res = twin::encodeFieldAt(field, sb.getString(), t_storage.back().data(), size, /*bit_offset=*/0, field.endianness);
     if (res.hasError()) {
         t_storage.pop_back();
         fmt::print(fg(fmt::color::yellow), "[sgrn_replay] Encode failed for '{}': {}\n", t_full_path, ::sgrn::scl::toString(res.error()));
@@ -304,14 +302,14 @@ bool GatewayReplayer::processColumnarDataset(const std::string& path) {
         for (size_t f = 0; f < n_features; ++f) {
             const auto& feat = manifest.spec.features[f];
             const float val = reader.featureColumn(f)[r];
-            rapidjson::Value jval(val);
+            sgrn::json::dom::Value jval(val);
             const std::string& tag = !feat.source_tag.empty() ? feat.source_tag : feat.name;
             encodeLeaf(tag, jval, storage, spans);
         }
         for (size_t l = 0; l < n_labels; ++l) {
             const auto& lbl = manifest.spec.labels[l];
             const float val = reader.labelColumn(l)[r];
-            rapidjson::Value jval(val);
+            sgrn::json::dom::Value jval(val);
             const std::string& tag = !lbl.target_tag.empty() ? lbl.target_tag : lbl.name;
             encodeLeaf(tag, jval, storage, spans);
         }
@@ -504,41 +502,45 @@ bool GatewayReplayer::processBinaryArchive(const std::string& path) {
         while (std::getline(stream, line) && running_.load()) {
             if (line.empty())
                 continue;
-            rapidjson::Document doc;
-            if (doc.Parse(line.c_str()).HasParseError())
+            sgrn::json::dom::Document doc;
+            if (doc.parse(line.c_str()).hasParseError())
                 continue;
 
-            if (doc.HasMember("type") && doc["type"].IsString() && std::string_view(doc["type"].GetString()) == "dictionary") {
-                if (doc.HasMember("leaves") && doc["leaves"].IsArray()) {
-                    for (const auto& item : doc["leaves"].GetArray()) {
-                        if (item.IsObject() && item.HasMember("id") && item["id"].IsUint() && item.HasMember("path") &&
-                            item["path"].IsString()) {
-                            const auto id = item["id"].GetUint();
+            if (doc.hasMember("type") && doc["type"].is_string() && std::string_view(doc["type"].getString()) == "dictionary") {
+                if (doc.hasMember("leaves") && doc["leaves"].is_array()) {
+                    for (const auto& item : doc["leaves"].elements()) {
+                        if (item.is_object() && item.hasMember("id") && item["id"].isUint() && item.hasMember("path") &&
+                            item["path"].is_string()) {
+                            const auto id = item["id"].getUint();
                             if (id >= path_by_id.size())
                                 path_by_id.resize(static_cast<size_t>(id) + 1);
-                            path_by_id[id] = item["path"].GetString();
+                            path_by_id[id] = item["path"].getString();
                         }
                     }
                 }
                 continue;
             }
 
-            if (!doc.HasMember("type") || !doc["type"].IsString())
+            if (!doc.hasMember("type") || !doc["type"].is_string())
                 continue;
-            const std::string_view line_type = doc["type"].GetString();
+            const std::string_view line_type = doc["type"].getString();
             if (line_type != "anchor" && line_type != "delta")
                 continue;
 
-            const int64_t ts = (doc.HasMember("ts") && doc["ts"].IsInt64()) ? doc["ts"].GetInt64() : sgrn::utils::time::nowMilliseconds();
+            const int64_t ts = (doc.hasMember("ts") && doc["ts"].isInt64()) ? doc["ts"].getInt64() : sgrn::utils::time::nowMilliseconds();
 
             if (!sleepPaced(last_ts, ts))
                 break;
 
-            const rapidjson::Value* payload = nullptr;
-            if (doc.HasMember("changes") && doc["changes"].IsObject())
-                payload = &doc["changes"];
-            else if (doc.HasMember("data") && doc["data"].IsObject())
-                payload = &doc["data"];
+            sgrn::json::dom::Value payload_value;
+            const sgrn::json::dom::Value* payload = nullptr;
+            if (doc.hasMember("changes") && doc["changes"].is_object()) {
+                payload_value = doc["changes"];
+                payload = &payload_value;
+            } else if (doc.hasMember("data") && doc["data"].is_object()) {
+                payload_value = doc["data"];
+                payload = &payload_value;
+            }
             if (payload == nullptr)
                 continue;
 
@@ -546,15 +548,15 @@ bool GatewayReplayer::processBinaryArchive(const std::string& path) {
             // append theirs (see encodeLeaf).
             std::deque<std::vector<uint8_t>> storage;
             std::vector<twin::DbMemorySpan> spans;
-            for (auto it = payload->MemberBegin(); it != payload->MemberEnd(); ++it) {
-                std::string key = it->name.GetString();
+            for (auto it = payload->memberBegin(); it != payload->memberEnd(); ++it) {
+                std::string key = it->name.getString();
                 if (!path_by_id.empty() && std::all_of(key.begin(), key.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
                     const size_t id = std::stoul(key);
                     if (id >= path_by_id.size() || path_by_id[id].empty())
                         continue;
                     key = path_by_id[id];
                 }
-                if (it->value.IsObject()) {
+                if (it->value.is_object()) {
                     fmt::print(fg(fmt::color::cyan), "[sgrn_replay] Skipping nested member '{}' (legacy anchor shape).\n", key);
                     continue;
                 }

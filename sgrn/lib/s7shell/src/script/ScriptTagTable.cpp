@@ -10,9 +10,7 @@
 
 #include <fmt/color.h>
 #include <fmt/format.h>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
+#include <sgrn/utils/json-dom.hpp>
 #include <stdexcept>
 #include <string>
 
@@ -152,11 +150,11 @@ void ScriptTagTable::put(const std::string& t_path, const std::string& t_raw_val
 void ScriptTagTable::put(const std::string& t_path, double t_val) {
     stampRequest();
     RespStampTags resp_stamp(this);
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-    writer.Double(t_val);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
+    writer.float64(t_val);
     if (conn_->hasRuntimeTag(t_path)) {
-        auto res = conn_->runtimeTagPut(t_path, sb.GetString());
+        auto res = conn_->runtimeTagPut(t_path, sb.getString());
         setOpResult(res);
         if (!res.hasError())
             markStaleIfDropped();
@@ -167,7 +165,7 @@ void ScriptTagTable::put(const std::string& t_path, double t_val) {
         last_op_err_ = S7Error::ReadError;
         return;
     }
-    auto res = conn_->tag_table_->put(conn_->client_, t_path, sb.GetString());
+    auto res = conn_->tag_table_->put(conn_->client_, t_path, sb.getString());
     setOpResult(res);
 }
 
@@ -175,11 +173,11 @@ void ScriptTagTable::put(const std::string& t_path, double t_val) {
 void ScriptTagTable::put(const std::string& t_path, int32_t t_val) {
     stampRequest();
     RespStampTags resp_stamp(this);
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-    writer.Int(t_val);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
+    writer.int32(t_val);
     if (conn_->hasRuntimeTag(t_path)) {
-        auto res = conn_->runtimeTagPut(t_path, sb.GetString());
+        auto res = conn_->runtimeTagPut(t_path, sb.getString());
         setOpResult(res);
         if (!res.hasError())
             markStaleIfDropped();
@@ -190,7 +188,7 @@ void ScriptTagTable::put(const std::string& t_path, int32_t t_val) {
         last_op_err_ = S7Error::ReadError;
         return;
     }
-    auto res = conn_->tag_table_->put(conn_->client_, t_path, sb.GetString());
+    auto res = conn_->tag_table_->put(conn_->client_, t_path, sb.getString());
     setOpResult(res);
 }
 
@@ -338,20 +336,20 @@ bool ScriptTagTable::putRetry(const std::string& t_path, const std::string& t_ra
 }
 
 bool ScriptTagTable::putRetryDouble(const std::string& t_path, double t_val, int t_max_retries) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-    w.Double(t_val);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> w(sb);
+    w.float64(t_val);
     // Explicit std::string: bare const char* would bind the
     // putRetry(string, bool, int) overload and retry writing "true".
-    return putRetry(t_path, std::string(sb.GetString()), t_max_retries);
+    return putRetry(t_path, std::string(sb.getString()), t_max_retries);
 }
 
 bool ScriptTagTable::putRetryInt(const std::string& t_path, int32_t t_val, int t_max_retries) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-    w.Int(t_val);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> w(sb);
+    w.int32(t_val);
     // See putRetryDouble: explicit std::string defeats the bool overload.
-    return putRetry(t_path, std::string(sb.GetString()), t_max_retries);
+    return putRetry(t_path, std::string(sb.getString()), t_max_retries);
 }
 
 bool ScriptTagTable::putRetryBool(const std::string& t_path, bool t_val, int t_max_retries) {

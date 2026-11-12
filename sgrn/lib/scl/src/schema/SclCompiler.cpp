@@ -335,31 +335,20 @@ Result<void, ::sgrn::scl::SclError> SclCompiler::loadFromContent(PlcSchemaStore&
     }(t_content);
 
     if (first_char == '{' || first_char == '[') {
-        rapidjson::Document root;
-        root.Parse(t_content.c_str());
-        if (root.HasParseError())
-            return SclError::ParseError;
-
-        auto nested = PlcSchemaStore::loadFromJson(root);
+        auto nested = SchemaSerializer::parseContent(t_content);
         if (nested.hasError())
             return Error(nested.error());
 
         ParseResult pr;
-        for (auto& [_, t_db] : nested.value().dbs_)
-            pr.dbs.push_back(std::move(t_db));
-        for (auto& t_udt : nested.value().udts_)
-            pr.udts.push_back(std::move(t_udt));
+        pr.dbs = std::move(nested.value().dbs);
+        pr.udts = std::move(nested.value().udts);
 
         auto res = mergeIntoRegistry(t_registry, std::move(pr), t_source_name, t_force);
         if (res.hasError())
             return res;
 
-        if (root.HasMember("tags") && root["tags"].IsArray()) {
-            for (const auto& tag_node : root["tags"].GetArray()) {
-                if (auto tag = SchemaSerializer::tagFromJson(tag_node)) {
-                    t_registry.addTag(std::move(*tag), t_force);
-                }
-            }
+        for (auto& tag : nested.value().tags) {
+            t_registry.addTag(std::move(tag), t_force);
         }
         t_registry.rebuildIndices();
         return {};

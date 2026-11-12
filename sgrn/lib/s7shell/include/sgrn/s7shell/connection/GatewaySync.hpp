@@ -40,11 +40,11 @@
 //   sync.connect("ws://192.168.1.1:8080/ws");
 //   // GatewaySync runs in background until sync.disconnect()
 // =============================================================================
-
 #include <sgrn/gateway/twin/LeafDictionary.hpp>
 #include <sgrn/plcsim/runtime/PlcRuntime.hpp>
 #include <atomic>
 #include <condition_variable>
+#include <glaze/json/generic_fwd.hpp>
 #include <ixwebsocket/IXWebSocket.h>
 #include <memory>
 #include <mutex>
@@ -164,7 +164,21 @@ private:
     bool has_remote_dict_{false};
     ::sgrn::gateway::twin::LeafDictionary local_dict_;
     bool local_dict_built_{false};
-
+    /// Reused scratch buffer for outbound RuntimeSync JSON envelopes. Both
+    /// publishDirtyBatch() and publishPendingTags() run on the single
+    /// publish_worker_ thread and hand the string to ws_.sendText(), which
+    /// copies into IXWebSocket's outbound frame before returning — so the
+    /// buffer can be reused across frames without locking. Declared here
+    /// solely to avoid one std::string allocation per publish.
+    std::string json_scratch_;
+    /// Reused serialization buffer for inbound delta leaves. It is separate
+    /// from json_scratch_: the receive callback and publish worker run on
+    /// different threads.
+    std::string leaf_scratch_;
+    /// DeltaSnapshot keys and nesting are dynamic, so a reflected wire struct
+    /// is not appropriate here. Keep one Glaze DOM and reuse its allocations
+    /// between callback-thread parses.
+    glz::generic_i64 delta_value_;
     mutable std::mutex err_mutex_;
     std::string last_error_;
 };

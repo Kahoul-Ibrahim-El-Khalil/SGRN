@@ -1,7 +1,8 @@
 #pragma once
+
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <optional>
-#include <rapidjson/document.h>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,5 +19,6 @@ struct Resolution {
 bool isAllDigits(const std::string& t_s);
 std::vector<std::string_view> splitSlashes(std::string_view path);
 Resolution resolveSemanticPath(const std::vector<std::string>& t_segs, const ::sgrn::scl::PlcSchemaStore& t_registry);
-void collectLeaves(const rapidjson::Value& t_node, const std::string& t_prefix, std::vector<std::pair<std::string, std::string>>& t_out);
+void collectLeaves(
+    const sgrn::json::dom::Value& t_node, const std::string& t_prefix, std::vector<std::pair<std::string, std::string>>& t_out);
 } // namespace sgrn::gateway::adapters

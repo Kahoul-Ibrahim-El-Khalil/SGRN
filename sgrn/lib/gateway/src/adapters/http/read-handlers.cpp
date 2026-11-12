@@ -1,5 +1,4 @@
 #include <fmt/core.h>
-#include <sgrn/common/json-helper.hpp>
 #include <sgrn/gateway/adapters/http.hpp>
 #include <sgrn/gateway/adapters/http/errors.hpp>
 #include <sgrn/gateway/adapters/http/path.hpp>
@@ -8,16 +7,59 @@
 #include <sgrn/gateway/twin/PlcMemory.hpp>
 #include <sgrn/gateway/twin/TypeDictionary.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
+#include <sgrn/utils/json-dom.hpp>
+#include <sgrn/utils/json-ops.hpp>
+#include <sgrn/utils/json-serialization.hpp>
 #include <sgrn/utils/json.hpp>
-#include <sgrn/utils/rapidjson.hpp>
 #include <sgrn/utils/strings.hpp>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <sgrn/scl/functions/modbus.hpp>
-using sgrn::common::json_helper::buildArrayResponse;
 namespace sgrn::gateway::adapters
 {
+
+namespace
+{
+
+struct ConnectionJson {
+    std::string type;
+    std::string ip;
+    std::string endpoint;
+    int64_t first_seen;
+    int64_t last_seen;
+    int event_count;
+};
+
+struct SessionJson {
+    int id;
+    std::string ip;
+    int64_t connect_time;
+    uint64_t bytes_sent;
+    uint64_t bytes_received;
+};
+
+struct LogJson {
+    int64_t ts;
+    std::string level;
+    std::string msg;
+};
+
+template <class Response, class Rows>
+void setJsonArrayResponse(Response& t_res, const Rows& t_rows) {
+    auto serialized = sgrn::json::write(t_rows);
+    if (serialized.hasError()) {
+        t_res.status = 500;
+        t_res.set_content(R"JSON({"error":"failed to serialize JSON response"})JSON", "application/json");
+        return;
+    }
+    t_res.set_content(std::move(serialized.value()), "application/json");
+}
+
+} // namespace
 
 void HttpAdapter::handleGetModbusRegistry(const http::HttpRequest&, http::HttpResponse& t_res) {
     if (!modbus_map_) {
@@ -106,18 +148,19 @@ void HttpAdapter::handleGetData(const http::HttpRequest& t_req, http::HttpRespon
                 return;
             }
             if (!arr_res.hasError()) {
-                rapidjson::Document arr_doc;
-                if (!arr_doc.Parse(arr_res.value().c_str()).HasParseError() && arr_doc.IsArray()) {
+                sgrn::json::dom::Document arr_doc;
+                if (!arr_doc.parse(arr_res.value().c_str()).hasParseError() && arr_doc.is_array()) {
                     const size_t idx = *array_index;
-                    if (idx < arr_doc.GetArray().Size()) {
-                        rapidjson::Value& element = arr_doc[static_cast<rapidjson::SizeType>(idx)];
+                    if (idx < arr_doc.elements().size()) {
+                        sgrn::json::dom::Value element = sgrn::json::dom::Value::view(arr_doc.rawValue().get_array().at(idx));
 
                         // If there's a rest path, extract the nested field
                         if (!array_rest_path.empty()) {
                             const auto segments = sgrn::gateway::adapters::splitSlashes(array_rest_path);
-                            rapidjson::Value* current = &element;
+                            sgrn::json::dom::Value* current = &element;
+                            sgrn::json::dom::Value found_value;
                             for (size_t i = 0; i < segments.size(); ++i) {
-                                if (!current->IsObject()) {
+                                if (!current->is_object()) {
                                     t_res.status = 422;
                                     t_res.set_content(
                                         fmt::format(
@@ -126,10 +169,11 @@ void HttpAdapter::handleGetData(const http::HttpRequest& t_req, http::HttpRespon
                                     return;
                                 }
                                 // Case-insensitive field lookup
-                                rapidjson::Value* found = nullptr;
-                                for (auto it = current->MemberBegin(); it != current->MemberEnd(); ++it) {
-                                    if (strcasecmp(it->name.GetString(), segments[i].data()) == 0) {
-                                        found = &it->value;
+                                bool found = false;
+                                for (auto it = current->memberBegin(); it != current->memberEnd(); ++it) {
+                                    if (strcasecmp(it->name.getString(), segments[i].data()) == 0) {
+                                        found_value.rebindTo(it->value);
+                                        found = true;
                                         break;
                                     }
                                 }
@@ -141,25 +185,25 @@ void HttpAdapter::handleGetData(const http::HttpRequest& t_req, http::HttpRespon
                                     return;
                                 }
                                 if (i == segments.size() - 1) {
-                                    rapidjson::StringBuffer sb;
-                                    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-                                    found->Accept(w);
-                                    t_res.set_content(sb.GetString(), "application/json");
+                                    sgrn::json::dom::StringBuffer sb;
+                                    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> w(sb);
+                                    found_value.accept(w);
+                                    t_res.set_content(sb.getString(), "application/json");
                                 } else {
-                                    current = found;
+                                    current = &found_value;
                                 }
                             }
                         } else {
-                            rapidjson::StringBuffer sb;
-                            rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-                            element.Accept(w);
-                            t_res.set_content(sb.GetString(), "application/json");
+                            sgrn::json::dom::StringBuffer sb;
+                            sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> w(sb);
+                            element.accept(w);
+                            t_res.set_content(sb.getString(), "application/json");
                         }
                         return;
                     }
                     t_res.status = 416;
                     t_res.set_content(
-                        fmt::format(R"X({{"error":"Array index {} out of range (size={})"}})X", idx, arr_doc.GetArray().Size()),
+                        fmt::format(R"X({{"error":"Array index {} out of range (size={})"}})X", idx, arr_doc.elements().size()),
                         "application/json");
                     return;
                 }
@@ -175,7 +219,7 @@ void HttpAdapter::handleGetData(const http::HttpRequest& t_req, http::HttpRespon
                 t_res.set_content(db_json, "application/json");
                 return;
             }
-            if (auto sub = sgrn::utils::rapidjson::extractSubtree(db_json, field_path)) {
+            if (auto sub = sgrn::utils::json::extractSubtree(db_json, field_path)) {
                 t_res.set_content(*sub, "application/json");
                 return;
             }
@@ -199,17 +243,12 @@ void HttpAdapter::handleGetConnections(const http::HttpRequest&, http::HttpRespo
         return;
     }
     auto conns = std::move(conns_res.value());
-    t_res.set_content(buildArrayResponse(conns.size(),
-                          [&](rapidjson::Value& item, auto& alloc, size_t i) {
-                              const auto& c = conns[i];
-                              item.AddMember("type", rapidjson::Value(c.type.c_str(), alloc), alloc);
-                              item.AddMember("ip", rapidjson::Value(c.remote_ip.c_str(), alloc), alloc);
-                              item.AddMember("endpoint", rapidjson::Value(c.endpoint.c_str(), alloc), alloc);
-                              item.AddMember("first_seen", c.first_seen, alloc);
-                              item.AddMember("last_seen", c.last_seen, alloc);
-                              item.AddMember("event_count", c.event_count, alloc);
-                          }),
-        "application/json");
+    std::vector<ConnectionJson> rows;
+    rows.reserve(conns.size());
+    for (auto& c : conns) {
+        rows.push_back({std::move(c.type), std::move(c.remote_ip), std::move(c.endpoint), c.first_seen, c.last_seen, c.event_count});
+    }
+    setJsonArrayResponse(t_res, rows);
 }
 
 void HttpAdapter::handleGetDbHistory(const http::HttpRequest&, http::HttpResponse& t_res) {
@@ -240,16 +279,12 @@ void HttpAdapter::handleGetDbSessions(const http::HttpRequest&, http::HttpRespon
         return;
     }
     auto sessions = std::move(sessions_res.value());
-    t_res.set_content(buildArrayResponse(sessions.size(),
-                          [&](rapidjson::Value& item, auto& alloc, size_t i) {
-                              const auto& s = sessions[i];
-                              item.AddMember("id", s.id, alloc);
-                              item.AddMember("ip", rapidjson::Value(s.ip.c_str(), alloc), alloc);
-                              item.AddMember("connect_time", s.connect_time, alloc);
-                              item.AddMember("bytes_sent", s.bytes_sent, alloc);
-                              item.AddMember("bytes_received", s.bytes_received, alloc);
-                          }),
-        "application/json");
+    std::vector<SessionJson> rows;
+    rows.reserve(sessions.size());
+    for (auto& session : sessions) {
+        rows.push_back({session.id, std::move(session.ip), session.connect_time, session.bytes_sent, session.bytes_received});
+    }
+    setJsonArrayResponse(t_res, rows);
 }
 
 void HttpAdapter::handleGetDbLogs(const http::HttpRequest& t_req, http::HttpResponse& t_res) {
@@ -279,14 +314,12 @@ void HttpAdapter::handleGetDbLogs(const http::HttpRequest& t_req, http::HttpResp
         return;
     }
     auto logs = std::move(logs_res.value());
-    t_res.set_content(buildArrayResponse(logs.size(),
-                          [&](rapidjson::Value& item, auto& alloc, size_t i) {
-                              const auto& l = logs[i];
-                              item.AddMember("ts", l.timestamp, alloc);
-                              item.AddMember("level", rapidjson::Value(l.level.c_str(), alloc), alloc);
-                              item.AddMember("msg", rapidjson::Value(l.message.c_str(), alloc), alloc);
-                          }),
-        "application/json");
+    std::vector<LogJson> rows;
+    rows.reserve(logs.size());
+    for (auto& log : logs) {
+        rows.push_back({log.timestamp, std::move(log.level), std::move(log.message)});
+    }
+    setJsonArrayResponse(t_res, rows);
 }
 
 } // namespace sgrn::gateway::adapters

@@ -166,16 +166,6 @@ set(SGRN_DEP_drogon_TAG
     "v1.9.14"
 )
 
-# RapidJSON master snapshot — pinned to an immutable commit so CI is reproducible.
-# This includes the C++20/23 compatibility work and the UTF-8 validation fix
-# that are not present in the v1.1.0 release.
-set(SGRN_DEP_rapidjson_REPO
-    "https://github.com/Tencent/rapidjson.git"
-)
-set(SGRN_DEP_rapidjson_TAG
-    "24b5e7a8b27f42fa16b96fc70aade9106cf7102f"
-)
-
 # cpp-httplib v0.58.0
 set(SGRN_DEP_cpp_httplib_URL
     "https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.58.0.tar.gz"

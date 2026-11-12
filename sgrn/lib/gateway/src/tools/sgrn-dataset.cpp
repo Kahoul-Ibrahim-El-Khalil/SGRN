@@ -7,12 +7,9 @@
 #include <sgrn/ml/columnar-dataset.hpp>
 #include <sgrn/ml/time-grid-resampler.hpp>
 #include <sgrn/utils/compression.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <sgrn/utils/time.hpp>
 #include <fstream>
-#include <rapidjson/document.h>
-#include <rapidjson/prettywriter.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <s7codec/endian.hpp>
 #include <stdexcept>
 #include <string>
@@ -559,44 +556,44 @@ void DatasetProcessor::emitRow(int64_t t_ts) {
     }
     csv_out_ << "\n";
 }
-void DatasetProcessor::storeStateValue(const std::string& t_key, const rapidjson::Value& t_v) {
+void DatasetProcessor::storeStateValue(const std::string& t_key, const sgrn::json::dom::Value& t_v) {
     std::string val_str;
-    if (t_v.IsString())
-        val_str = t_v.GetString();
-    else if (t_v.IsNumber())
-        val_str = std::to_string(t_v.GetDouble());
-    else if (t_v.IsBool())
-        val_str = t_v.GetBool() ? "true" : "false";
-    else if (t_v.IsNull())
+    if (t_v.is_string())
+        val_str = t_v.getString();
+    else if (t_v.is_number())
+        val_str = std::to_string(t_v.getDouble());
+    else if (t_v.is_boolean())
+        val_str = t_v.getBool() ? "true" : "false";
+    else if (t_v.is_null())
         val_str = "null";
     else {
-        rapidjson::StringBuffer sb;
-        rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-        t_v.Accept(w);
-        val_str = sb.GetString();
+        sgrn::json::dom::StringBuffer sb;
+        sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> w(sb);
+        t_v.accept(w);
+        val_str = sb.getString();
     }
     current_state_[t_key] = val_str;
 }
 
-void DatasetProcessor::walkStateObject(const std::string& t_prefix, const rapidjson::Value& t_v) {
-    if (!t_v.IsObject()) {
+void DatasetProcessor::walkStateObject(const std::string& t_prefix, const sgrn::json::dom::Value& t_v) {
+    if (!t_v.is_object()) {
         storeStateLeaf(t_prefix, t_v);
         return;
     }
-    for (auto m = t_v.MemberBegin(); m != t_v.MemberEnd(); ++m)
-        walkStateObject(t_prefix.empty() ? m->name.GetString() : t_prefix + "." + m->name.GetString(), m->value);
+    for (auto m = t_v.memberBegin(); m != t_v.memberEnd(); ++m)
+        walkStateObject(t_prefix.empty() ? m->name.getString() : t_prefix + "." + m->name.getString(), m->value);
 }
 
 /// Store one leaf; array values fan out to the indexed schema features
 /// ("a.b[i].c"), resolved against feature_index_map_ so the keys match
 /// the CSV columns exactly. Unknown shapes are skipped, as before.
-void DatasetProcessor::storeStateLeaf(const std::string& t_key, const rapidjson::Value& t_v) {
-    if (t_v.IsObject()) {
+void DatasetProcessor::storeStateLeaf(const std::string& t_key, const sgrn::json::dom::Value& t_v) {
+    if (t_v.is_object()) {
         walkStateObject(t_key, t_v);
         return;
     }
-    if (!t_v.IsArray()) {
-        if (t_v.IsString() || t_v.IsNumber() || t_v.IsBool())
+    if (!t_v.is_array()) {
+        if (t_v.is_string() || t_v.is_number() || t_v.is_boolean())
             storeStateValue(t_key, t_v);
         return;
     }
@@ -612,7 +609,7 @@ void DatasetProcessor::storeStateLeaf(const std::string& t_key, const rapidjson:
             cand += "." + segs[k];
         if (feature_index_map_.find(cand) == feature_index_map_.end())
             continue;
-        for (rapidjson::SizeType i = 0; i < t_v.Size(); ++i) {
+        for (sgrn::json::dom::SizeType i = 0; i < t_v.size(); ++i) {
             std::string ikey;
             for (size_t k = 0; k <= p; ++k)
                 ikey += (k ? "." : "") + segs[k];
@@ -622,18 +619,18 @@ void DatasetProcessor::storeStateLeaf(const std::string& t_key, const rapidjson:
             if (feature_index_map_.find(ikey) == feature_index_map_.end())
                 continue;
             const auto& el = t_v[i];
-            if (el.IsString() || el.IsNumber() || el.IsBool() || el.IsNull())
+            if (el.is_string() || el.is_number() || el.is_boolean() || el.is_null())
                 storeStateValue(ikey, el);
-            else if (el.IsObject())
+            else if (el.is_object())
                 walkStateObject(ikey, el);
         }
         return;
     }
 }
 
-void DatasetProcessor::ingestKeyedValues(const rapidjson::Value& t_obj, const std::vector<std::string>& t_dict) {
-    for (auto it = t_obj.MemberBegin(); it != t_obj.MemberEnd(); ++it) {
-        std::string key = it->name.GetString();
+void DatasetProcessor::ingestKeyedValues(const sgrn::json::dom::Value& t_obj, const std::vector<std::string>& t_dict) {
+    for (auto it = t_obj.memberBegin(); it != t_obj.memberEnd(); ++it) {
+        std::string key = it->name.getString();
 
         if (!t_dict.empty() && std::all_of(key.begin(), key.end(), ::isdigit)) {
             size_t id = std::stoul(key);
@@ -652,12 +649,12 @@ void DatasetProcessor::ingestKeyedValues(const rapidjson::Value& t_obj, const st
 /// carry no data. Used by the JSONL branch and, for JSON anchor controls,
 /// by the binary branch — so transcoded output and direct reads agree row
 /// for row.
-bool DatasetProcessor::ingestJsonRecord(const rapidjson::Document& t_doc, const std::vector<std::string>& t_dict) {
+bool DatasetProcessor::ingestJsonRecord(const sgrn::json::dom::Document& t_doc, const std::vector<std::string>& t_dict) {
     int64_t ts = 0;
-    if (t_doc.HasMember("ts") && t_doc["ts"].IsInt64()) {
-        ts = t_doc["ts"].GetInt64();
-    } else if (t_doc.HasMember("timestamp") && t_doc["timestamp"].IsInt64()) {
-        ts = t_doc["timestamp"].GetInt64();
+    if (t_doc.hasMember("ts") && t_doc["ts"].isInt64()) {
+        ts = t_doc["ts"].getInt64();
+    } else if (t_doc.hasMember("timestamp") && t_doc["timestamp"].isInt64()) {
+        ts = t_doc["timestamp"].getInt64();
     }
     if (ts == 0)
         return false;
@@ -670,42 +667,42 @@ bool DatasetProcessor::ingestJsonRecord(const rapidjson::Document& t_doc, const 
     }
 
     // 1. Delta record: {"type":"delta","ts":123,"changes":{"<id>":val,...}}
-    if (t_doc.HasMember("changes") && t_doc["changes"].IsObject()) {
+    if (t_doc.hasMember("changes") && t_doc["changes"].is_object()) {
         ingestKeyedValues(t_doc["changes"], t_dict);
     }
     // 2. Anchor record — current format: {"type":"anchor","ts":123,"data":{"<id>":val,...}}
     //    Legacy format (pre-dictionary): {"data":{"DbName":{"field":val}}}
-    else if (t_doc.HasMember("data") && t_doc["data"].IsObject()) {
+    else if (t_doc.hasMember("data") && t_doc["data"].is_object()) {
         const auto& data = t_doc["data"];
         bool looks_nested = false;
-        for (auto it = data.MemberBegin(); it != data.MemberEnd(); ++it) {
-            if (it->value.IsObject()) {
+        for (auto it = data.memberBegin(); it != data.memberEnd(); ++it) {
+            if (it->value.is_object()) {
                 looks_nested = true;
                 break;
             }
         }
         if (looks_nested) {
-            for (auto db_it = data.MemberBegin(); db_it != data.MemberEnd(); ++db_it) {
-                if (!db_it->value.IsObject())
+            for (auto db_it = data.memberBegin(); db_it != data.memberEnd(); ++db_it) {
+                if (!db_it->value.is_object())
                     continue;
-                walkStateObject(db_it->name.GetString(), db_it->value);
+                walkStateObject(db_it->name.getString(), db_it->value);
             }
         } else {
             ingestKeyedValues(data, t_dict);
         }
     }
     // 3. Legacy flat record: {"timestamp":123,"db":"TankSkid","path":"tank_level","val":"30.5"}
-    else if (t_doc.HasMember("db") && t_doc.HasMember("path") && t_doc.HasMember("val")) {
-        std::string db = t_doc["db"].GetString();
-        std::string path = t_doc["path"].GetString();
+    else if (t_doc.hasMember("db") && t_doc.hasMember("path") && t_doc.hasMember("val")) {
+        std::string db = t_doc["db"].getString();
+        std::string path = t_doc["path"].getString();
         std::string full_key = fmt::format("{}.{}", db, path);
         std::string val_str;
-        if (t_doc["val"].IsString())
-            val_str = t_doc["val"].GetString();
-        else if (t_doc["val"].IsNumber())
-            val_str = std::to_string(t_doc["val"].GetDouble());
-        else if (t_doc["val"].IsBool())
-            val_str = t_doc["val"].GetBool() ? "true" : "false";
+        if (t_doc["val"].is_string())
+            val_str = t_doc["val"].getString();
+        else if (t_doc["val"].is_number())
+            val_str = std::to_string(t_doc["val"].getDouble());
+        else if (t_doc["val"].is_boolean())
+            val_str = t_doc["val"].getBool() ? "true" : "false";
         current_state_[full_key] = val_str;
     }
 
@@ -790,8 +787,8 @@ void DatasetProcessor::processBinaryArchive(const std::filesystem::path& t_path,
         // exactly like JSONL lines so direct reads agree with transcoded
         // output row for row. Everything else skips.
         if (db_num == sgrn::gateway::database::kControlFrameDbNum) {
-            rapidjson::Document control_doc;
-            if (!control_doc.Parse(reinterpret_cast<const char*>(payload), payload_len).HasParseError() && control_doc.IsObject()) {
+            sgrn::json::dom::Document control_doc;
+            if (!control_doc.parse(reinterpret_cast<const char*>(payload), payload_len).hasParseError() && control_doc.is_object()) {
                 if (isDictionaryRecord(control_doc)) {
                     parseDictionaryLine(control_doc, bin_paths);
                 } else {
@@ -885,8 +882,8 @@ void DatasetProcessor::processJsonlArchive(const std::filesystem::path& t_path, 
         if (line.empty())
             continue;
 
-        rapidjson::Document doc;
-        if (doc.Parse(line.c_str()).HasParseError())
+        sgrn::json::dom::Document doc;
+        if (doc.parse(line.c_str()).hasParseError())
             continue;
 
         // Learn the id->path mapping before we ever see anchor/delta lines.
@@ -899,108 +896,108 @@ void DatasetProcessor::processJsonlArchive(const std::filesystem::path& t_path, 
     }
 }
 sgrn::Result<void> DatasetProcessor::generateManifest(const std::string& t_manifest_path, const DatasetSummary& t_summary) {
-    rapidjson::StringBuffer sb;
-    rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(sb);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::PrettyWriter<sgrn::json::dom::StringBuffer> writer(sb);
 
-    writer.StartObject();
-    writer.Key("generator");
-    writer.String("sgrn_dataset");
+    writer.startObject();
+    writer.key("generator");
+    writer.string("sgrn_dataset");
 
-    writer.Key("created_at_ms");
-    writer.Int64(sgrn::utils::time::nowMilliseconds());
+    writer.key("created_at_ms");
+    writer.int64(sgrn::utils::time::nowMilliseconds());
 
-    writer.Key("start_timestamp_ms");
-    writer.Int64(t_summary.start_timestamp_ms);
+    writer.key("start_timestamp_ms");
+    writer.int64(t_summary.start_timestamp_ms);
 
-    writer.Key("end_timestamp_ms");
-    writer.Int64(t_summary.end_timestamp_ms);
+    writer.key("end_timestamp_ms");
+    writer.int64(t_summary.end_timestamp_ms);
 
-    writer.Key("total_files_processed");
-    writer.Uint64(t_summary.total_files_processed);
+    writer.key("total_files_processed");
+    writer.uint64(t_summary.total_files_processed);
 
-    writer.Key("total_records");
-    writer.Uint64(t_summary.total_records_processed);
+    writer.key("total_records");
+    writer.uint64(t_summary.total_records_processed);
 
-    writer.Key("features");
-    writer.StartArray();
+    writer.key("features");
+    writer.startArray();
 
     for (const auto& feat : t_summary.features) {
-        writer.StartObject();
-        writer.Key("name");
-        writer.String(feat.full_name.c_str());
+        writer.startObject();
+        writer.key("name");
+        writer.string(feat.full_name.c_str());
 
-        writer.Key("db");
-        writer.String(feat.db_name.c_str());
+        writer.key("db");
+        writer.string(feat.db_name.c_str());
 
-        writer.Key("path");
-        writer.String(feat.field_path.c_str());
+        writer.key("path");
+        writer.string(feat.field_path.c_str());
 
-        writer.Key("type");
-        writer.String(feat.data_type.c_str());
+        writer.key("type");
+        writer.string(feat.data_type.c_str());
 
-        writer.Key("unit");
-        writer.String(feat.unit.c_str());
+        writer.key("unit");
+        writer.string(feat.unit.c_str());
 
-        writer.Key("dimension");
-        writer.String(feat.dimension.c_str());
+        writer.key("dimension");
+        writer.string(feat.dimension.c_str());
 
-        writer.Key("is_label");
-        writer.Bool(feat.is_label);
+        writer.key("is_label");
+        writer.boolean(feat.is_label);
 
         if (!feat.description.empty()) {
-            writer.Key("description");
-            writer.String(feat.description.c_str());
+            writer.key("description");
+            writer.string(feat.description.c_str());
         }
         if (feat.precision >= 0) {
-            writer.Key("precision");
-            writer.Int(feat.precision);
+            writer.key("precision");
+            writer.int32(feat.precision);
         }
         if (feat.has_nominal) {
-            writer.Key("nominal");
-            writer.Double(feat.nominal);
+            writer.key("nominal");
+            writer.float64(feat.nominal);
         }
         if (feat.has_alarm) {
-            writer.Key("alarm_lo");
-            writer.Double(feat.alarm_lo);
-            writer.Key("alarm_hi");
-            writer.Double(feat.alarm_hi);
+            writer.key("alarm_lo");
+            writer.float64(feat.alarm_lo);
+            writer.key("alarm_hi");
+            writer.float64(feat.alarm_hi);
         }
 
-        writer.Key("is_categorical");
-        writer.Bool(feat.is_categorical);
+        writer.key("is_categorical");
+        writer.boolean(feat.is_categorical);
 
         if (!feat.enum_map.empty()) {
-            writer.Key("enum_values");
-            writer.StartObject();
+            writer.key("enum_values");
+            writer.startObject();
             for (const auto& kv : feat.enum_map) {
-                writer.Key(std::to_string(kv.first).c_str());
-                writer.String(kv.second.c_str());
+                writer.key(std::to_string(kv.first).c_str());
+                writer.string(kv.second.c_str());
             }
-            writer.EndObject();
+            writer.endObject();
         }
 
-        writer.Key("min_val");
-        writer.Double(feat.min_val);
+        writer.key("min_val");
+        writer.float64(feat.min_val);
 
-        writer.Key("max_val");
-        writer.Double(feat.max_val);
+        writer.key("max_val");
+        writer.float64(feat.max_val);
 
-        writer.Key("null_count");
-        writer.Uint64(feat.null_count);
+        writer.key("null_count");
+        writer.uint64(feat.null_count);
 
-        writer.Key("total_samples");
-        writer.Uint64(feat.total_samples);
-        writer.EndObject();
+        writer.key("total_samples");
+        writer.uint64(feat.total_samples);
+        writer.endObject();
     }
 
-    writer.EndArray();
-    writer.EndObject();
+    writer.endArray();
+    writer.endObject();
 
     std::ofstream out(t_manifest_path);
     if (!out.is_open()) {
         return fmt::format("Failed to write manifest: {}", t_manifest_path);
     }
-    out << sb.GetString();
+    out << sb.getString();
     out.close();
 
     return {};

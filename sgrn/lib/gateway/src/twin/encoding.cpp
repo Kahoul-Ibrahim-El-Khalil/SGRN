@@ -3,12 +3,11 @@
 #include <sgrn/gateway/twin/path.hpp>
 #include <sgrn/gateway/twin/time-utils.hpp>
 #include <sgrn/utils/encoding.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <sgrn/utils/time.hpp>
 #include <algorithm>
 #include <cstdint>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -31,24 +30,16 @@ using ::sgrn::scl::SclError;
 // resolved in encodeScalarValue, string arrays encoded per-tile, DTL string
 // parsing covers ISO/"T", space±ms and date-only forms.
 
-sgrn::Result<void, ::sgrn::scl::SclError> encodeDtlValue(
-    const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e) {
-    return ::sgrn::scl::encodeDtlValue(t_value, tp_ptr, t_buffer_size, t_e);
-}
-
-sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
-    const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e) {
-    return ::sgrn::scl::encodeScalarValue(t_field, t_value, tp_ptr, t_buffer_size, t_e);
-}
-
-sgrn::Result<void, ::sgrn::scl::SclError> encodeArrayValue(
-    const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, int t_depth, s7codec::Endian t_e) {
-    return ::sgrn::scl::encodeArrayValue(t_field, t_value, tp_ptr, t_buffer_size, t_depth, t_e);
-}
-
-sgrn::Result<void, ::sgrn::scl::SclError> encodeFieldRapidJson(
-    const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, int t_depth, s7codec::Endian t_e) {
-    return ::sgrn::scl::encodeFieldRapidJson(t_field, t_value, tp_ptr, t_buffer_size, t_depth, t_e);
+sgrn::Result<void, ::sgrn::scl::SclError> encodeFieldJson(const DbField& t_field, const sgrn::json::dom::Value& t_value, uint8_t* tp_ptr,
+    size_t t_buffer_size, int t_depth, s7codec::Endian t_e) {
+    // SCL still exposes a legacy DOM overload in a separate component.
+    // Keep this gateway boundary Glaze-only by serializing the DOM and using
+    // SCL's existing string-based entry point. The string path is also the
+    // stable public contract for callers that do not own a DOM backend.
+    auto encoded = ::sgrn::json::write(t_value.rawValue());
+    if (encoded.hasError())
+        return ::sgrn::scl::SclError::Generic;
+    return ::sgrn::scl::encodeFieldAt(t_field, encoded.value(), tp_ptr, t_buffer_size, t_depth, t_e);
 }
 
 sgrn::Result<void, ::sgrn::scl::SclError> encodeFieldAt(

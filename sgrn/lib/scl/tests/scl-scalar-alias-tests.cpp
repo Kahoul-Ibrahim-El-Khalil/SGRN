@@ -1,7 +1,6 @@
 #include <sgrn/scl/schema/DbSymbolsParser.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 
-#include <rapidjson/document.h>
 #include <s7codec/s7.hpp>
 
 #include <cassert>
@@ -13,7 +12,7 @@ using sgrn::Result;
 using namespace sgrn::scl;
 
 // ── Small test helpers ───────────────────────────────────────────────────────
-static Result<ParseResult, SchemaError> parseIt(const std::string& src) {
+static Result<ParseResult, SclError> parseIt(const std::string& src) {
     return DbSymbolsParser::parseString(src);
 }
 
@@ -261,12 +260,8 @@ END_DATA_BLOCK
     assert(loaded.has_value());
     const auto json_out = store.toJson();
 
-    rapidjson::Document doc;
-    doc.Parse(json_out.c_str());
-    assert(!doc.HasParseError());
-
     PlcSchemaStore store2;
-    auto loaded2 = PlcSchemaStore::loadFromJson(doc);
+    auto loaded2 = PlcSchemaStore::loadFromJson(json_out);
     assert(loaded2.has_value());
     store2 = loaded2.value();
 

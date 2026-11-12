@@ -50,5 +50,5 @@ archive prints usage.
 
 Links `sgrn_ml` (`sgrn::ml::ColumnarDatasetReader`), `sgrn_gateway` (adapters +
 embedded dashboard), `sgrn_gateway_twin`, `sgrn::scl`, `sgrn_utils`, zstd,
-cxxopts, RapidJSON and fmt. Compiles `sgrn/lib/gateway/src/gateway.cpp` directly
+cxxopts and fmt. Compiles `sgrn/lib/gateway/src/gateway.cpp` directly
 (passive-replay wiring).

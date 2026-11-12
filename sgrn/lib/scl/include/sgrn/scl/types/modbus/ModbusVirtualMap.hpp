@@ -1,7 +1,7 @@
 #pragma once
 
 #include <sgrn/scl/types/modbus/ModbusVirtualEntry.hpp>
-#include <rapidjson/document.h>
+#include <sgrn/utils/json-dom.hpp>
 #include <string>
 #include <vector>
 
@@ -39,57 +39,57 @@ namespace sgrn::scl::modbus::map
 /// Writer-agnostic JSON "form" for the full virtual Modbus map.
 template <typename Writer>
 inline void serializeToWriter(Writer& t_writer, const sgrn::scl::ModbusVirtualMap& t_map) {
-    t_writer.StartObject();
+    t_writer.startObject();
 
-    t_writer.Key("holding");
-    t_writer.StartArray();
+    t_writer.key("holding");
+    t_writer.startArray();
     for (const auto& t_e : t_map.holding)
         sgrn::scl::modbus::entry::serializeToWriter(t_writer, t_e);
-    t_writer.EndArray();
+    t_writer.endArray();
 
-    t_writer.Key("input");
-    t_writer.StartArray();
+    t_writer.key("input");
+    t_writer.startArray();
     for (const auto& t_e : t_map.input)
         sgrn::scl::modbus::entry::serializeToWriter(t_writer, t_e);
-    t_writer.EndArray();
+    t_writer.endArray();
 
-    t_writer.Key("coil");
-    t_writer.StartArray();
+    t_writer.key("coil");
+    t_writer.startArray();
     for (const auto& t_e : t_map.coil)
         sgrn::scl::modbus::entry::serializeToWriter(t_writer, t_e);
-    t_writer.EndArray();
+    t_writer.endArray();
 
-    t_writer.Key("discrete");
-    t_writer.StartArray();
+    t_writer.key("discrete");
+    t_writer.startArray();
     for (const auto& t_e : t_map.discrete)
         sgrn::scl::modbus::entry::serializeToWriter(t_writer, t_e);
-    t_writer.EndArray();
+    t_writer.endArray();
 
-    t_writer.Key("total_holding");
-    t_writer.Int(t_map.total_holding);
-    t_writer.Key("total_input");
-    t_writer.Int(t_map.total_input);
-    t_writer.Key("total_coils");
-    t_writer.Int(t_map.total_coils);
-    t_writer.Key("total_discrete");
-    t_writer.Int(t_map.total_discrete);
+    t_writer.key("total_holding");
+    t_writer.int32(t_map.total_holding);
+    t_writer.key("total_input");
+    t_writer.int32(t_map.total_input);
+    t_writer.key("total_coils");
+    t_writer.int32(t_map.total_coils);
+    t_writer.key("total_discrete");
+    t_writer.int32(t_map.total_discrete);
 
     if (!t_map.warnings.empty()) {
-        t_writer.Key("warnings");
-        t_writer.StartArray();
+        t_writer.key("warnings");
+        t_writer.startArray();
         for (const auto& warn : t_map.warnings)
-            t_writer.String(warn.c_str());
-        t_writer.EndArray();
+            t_writer.string(warn.c_str());
+        t_writer.endArray();
     }
 
-    t_writer.EndObject();
+    t_writer.endObject();
 }
 
 /// from-side lives in its own namespace (C++ cannot overload on return type globally).
-sgrn::scl::ModbusVirtualMap fromJson(const rapidjson::Value& t_value);
+sgrn::scl::ModbusVirtualMap fromJson(const sgrn::json::dom::Value& t_value);
 sgrn::scl::ModbusVirtualMap fromJsonString(const std::string& t_value);
 } // namespace sgrn::scl::modbus::map
 
 // global namespace — functional JSON form
 std::string toJsonString(const sgrn::scl::ModbusVirtualMap& t_modbus_virtual_map);
-rapidjson::Document toJson(const sgrn::scl::ModbusVirtualMap& t_modbus_virtual_map);
+sgrn::json::dom::Document toJson(const sgrn::scl::ModbusVirtualMap& t_modbus_virtual_map);

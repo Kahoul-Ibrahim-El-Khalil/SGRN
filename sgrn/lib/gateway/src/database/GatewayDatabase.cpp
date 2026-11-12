@@ -2,11 +2,9 @@
 #include <fmt/core.h>
 #include <sgrn/Result.hpp>
 #include <sgrn/gateway/database/GatewayDatabase.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <sgrn/utils/time.hpp>
 #include <filesystem>
-#include <rapidjson/prettywriter.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <sqlite_modern_cpp.h>
 #include <stdexcept>
 #include <string>
@@ -412,56 +410,56 @@ sgrn::Result<std::string> GatewayDatabase::exportHistoricalDataToJson() {
                 [&](int64_t ts, std::string t_name, double val) { metrics.emplace_back(ts, std::move(t_name), val); };
         }
 
-        rapidjson::StringBuffer sb;
-        rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(sb);
-        writer.StartObject();
+        sgrn::json::dom::StringBuffer sb;
+        sgrn::json::dom::PrettyWriter<sgrn::json::dom::StringBuffer> writer(sb);
+        writer.startObject();
 
-        writer.Key("logs");
-        writer.StartArray();
+        writer.key("logs");
+        writer.startArray();
         for (auto& [ts, lvl, msg] : logs) {
-            writer.StartObject();
-            writer.Key("ts");
-            writer.Int64(ts);
-            writer.Key("level");
-            writer.String(lvl.c_str(), static_cast<rapidjson::SizeType>(lvl.length()));
-            writer.Key("msg");
-            writer.String(msg.c_str(), static_cast<rapidjson::SizeType>(msg.length()));
-            writer.EndObject();
+            writer.startObject();
+            writer.key("ts");
+            writer.int64(ts);
+            writer.key("level");
+            writer.string(lvl.c_str(), static_cast<sgrn::json::dom::SizeType>(lvl.length()));
+            writer.key("msg");
+            writer.string(msg.c_str(), static_cast<sgrn::json::dom::SizeType>(msg.length()));
+            writer.endObject();
         }
-        writer.EndArray();
+        writer.endArray();
 
-        writer.Key("events");
-        writer.StartArray();
+        writer.key("events");
+        writer.startArray();
         for (auto& [ts, type, t_ip, det] : events) {
-            writer.StartObject();
-            writer.Key("ts");
-            writer.Int64(ts);
-            writer.Key("type");
-            writer.String(type.c_str(), static_cast<rapidjson::SizeType>(type.length()));
-            writer.Key("ip");
-            writer.String(t_ip.c_str(), static_cast<rapidjson::SizeType>(t_ip.length()));
-            writer.Key("details");
-            writer.String(det.c_str(), static_cast<rapidjson::SizeType>(det.length()));
-            writer.EndObject();
+            writer.startObject();
+            writer.key("ts");
+            writer.int64(ts);
+            writer.key("type");
+            writer.string(type.c_str(), static_cast<sgrn::json::dom::SizeType>(type.length()));
+            writer.key("ip");
+            writer.string(t_ip.c_str(), static_cast<sgrn::json::dom::SizeType>(t_ip.length()));
+            writer.key("details");
+            writer.string(det.c_str(), static_cast<sgrn::json::dom::SizeType>(det.length()));
+            writer.endObject();
         }
-        writer.EndArray();
+        writer.endArray();
 
-        writer.Key("metrics");
-        writer.StartArray();
+        writer.key("metrics");
+        writer.startArray();
         for (auto& [ts, t_name, val] : metrics) {
-            writer.StartObject();
-            writer.Key("ts");
-            writer.Int64(ts);
-            writer.Key("name");
-            writer.String(t_name.c_str(), static_cast<rapidjson::SizeType>(t_name.length()));
-            writer.Key("val");
-            writer.Double(val);
-            writer.EndObject();
+            writer.startObject();
+            writer.key("ts");
+            writer.int64(ts);
+            writer.key("name");
+            writer.string(t_name.c_str(), static_cast<sgrn::json::dom::SizeType>(t_name.length()));
+            writer.key("val");
+            writer.float64(val);
+            writer.endObject();
         }
-        writer.EndArray();
+        writer.endArray();
 
-        writer.EndObject();
-        return sb.GetString();
+        writer.endObject();
+        return sb.getString();
     } catch (const std::exception& e) {
         return fmt::format("exportHistoricalDataToJson failed: {}", e.what());
     }

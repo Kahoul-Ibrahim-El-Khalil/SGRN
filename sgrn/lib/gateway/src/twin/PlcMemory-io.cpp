@@ -10,8 +10,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <optional>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <shared_mutex>
 #include <stdexcept>
 #include <string>

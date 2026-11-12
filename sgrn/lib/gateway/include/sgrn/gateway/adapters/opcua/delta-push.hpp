@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sgrn/utils/json-dom.hpp>
+
 #include <sgrn/gateway/adapters/opcua/NodeContext.hpp>
 #include <sgrn/gateway/core/TelemetryBroker.hpp>
 #include <sgrn/wrappers/opcua/DataValue.hpp>
@@ -38,8 +40,8 @@ public:
 
     void flushDirtyAggregates(uint64_t t_timestamp_ms);
 
-    using AlarmCallback =
-        std::function<void(uint16_t t_db_number, const std::string& t_path, const rapidjson::Value& t_alarm_obj, uint64_t t_timestamp_ms)>;
+    using AlarmCallback = std::function<void(
+        uint16_t t_db_number, const std::string& t_path, const sgrn::json::dom::Value& t_alarm_obj, uint64_t t_timestamp_ms)>;
     void setAlarmCallback(AlarmCallback t_cb) {
         alarm_callback_ = std::move(t_cb);
     }
@@ -60,7 +62,8 @@ private:
 
     bool buildDataValueFromEvent(const core::TelemetryEvent& t_event, const NodeContext* tp_ctx, UA_DataValue& t_raw_dv);
     void enqueueDataValue(const wrappers::opcua::NodeId& t_node_id, UA_DataValue&& t_raw_dv, uint64_t t_timestamp_ms);
-    void flattenAndPush(uint16_t t_db_number, const rapidjson::Value& t_obj, const std::string& t_path_prefix, uint64_t t_timestamp_ms);
+    void flattenAndPush(
+        uint16_t t_db_number, const sgrn::json::dom::Value& t_obj, const std::string& t_path_prefix, uint64_t t_timestamp_ms);
     void pushSubtreeSnapshot(uint16_t t_db_number, const std::string& t_path_prefix, uint64_t t_timestamp_ms);
     void notifyAggregateAncestors(uint16_t t_db_number, const std::string& t_leaf_path, uint64_t /*timestamp_ms*/);
 

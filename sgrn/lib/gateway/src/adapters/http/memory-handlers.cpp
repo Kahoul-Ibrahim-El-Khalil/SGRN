@@ -1,3 +1,4 @@
+#include <sgrn/utils/json-dom.hpp>
 /* sgrn/gateway/src/adapters/http/memory-handlers.cpp */
 /**
  * @file memory-handlers.cpp
@@ -165,9 +166,6 @@
 #include <sgrn/utils/encoding.hpp>
 #include <sgrn/utils/json.hpp>
 #include <sgrn/utils/strings.hpp>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -327,10 +325,10 @@ void HttpAdapter::handlePutMemoryBinary(const http::HttpRequest& t_req, http::Ht
 void HttpAdapter::handlePutMemoryBatch(const http::HttpRequest& t_req, http::HttpResponse& t_res) {
     PlcMemory& t_memory = *refs_.memory;
     // Parse JSON request body
-    rapidjson::Document doc;
-    doc.Parse(t_req.body.c_str());
+    sgrn::json::dom::Document doc;
+    doc.parse(t_req.body.c_str());
 
-    if (doc.HasParseError() || !doc.IsArray()) {
+    if (doc.hasParseError() || !doc.is_array()) {
         t_res.status = 400;
         t_res.set_content(R"({"error":"PUT /t_memory/batch requires JSON array body"})", "application/json");
         return;
@@ -340,11 +338,11 @@ void HttpAdapter::handlePutMemoryBatch(const http::HttpRequest& t_req, http::Htt
     std::vector<twin::DbMemorySpan> write_spans;
     std::vector<std::vector<uint8_t>> payloads;
 
-    for (rapidjson::SizeType i = 0; i < doc.Size(); ++i) {
+    for (sgrn::json::dom::SizeType i = 0; i < doc.size(); ++i) {
         const auto& item = doc[i];
 
-        if (!item.IsObject() || !item.HasMember("db") || !item["db"].IsUint() || !item.HasMember("offset") || !item["offset"].IsUint64() ||
-            !item.HasMember("size") || !item["size"].IsUint64() || !item.HasMember("data") || !item["data"].IsString()) {
+        if (!item.is_object() || !item.hasMember("db") || !item["db"].isUint() || !item.hasMember("offset") || !item["offset"].isUint64() ||
+            !item.hasMember("size") || !item["size"].isUint64() || !item.hasMember("data") || !item["data"].is_string()) {
             t_res.status = 400;
             t_res.set_content(
                 R"JSON({"error":"Each item must have db (uint), offset (uint64), size (uint64), and data (string/base64url)"})JSON",
@@ -352,10 +350,10 @@ void HttpAdapter::handlePutMemoryBatch(const http::HttpRequest& t_req, http::Htt
             return;
         }
 
-        uint16_t db_num = static_cast<uint16_t>(item["db"].GetUint());
-        size_t item_offset = item["offset"].GetUint64();
-        size_t item_size = item["size"].GetUint64();
-        std::string data_b64 = item["data"].GetString();
+        uint16_t db_num = static_cast<uint16_t>(item["db"].getUint());
+        size_t item_offset = item["offset"].getUint64();
+        size_t item_size = item["size"].getUint64();
+        std::string data_b64 = item["data"].getString();
 
         if (item_size == 0) {
             t_res.status = 400;
@@ -391,26 +389,26 @@ void HttpAdapter::handlePutMemoryBatch(const http::HttpRequest& t_req, http::Htt
     if (auto r = t_memory.writeDbMemory(std::span(write_spans)); !r) {
         t_res.status = 413;
         t_res.set_content(
-            fmt::format(R"json({{"error":"{}","items":{},"reason":"atomic write failed, no items written"}})json", r.error(), doc.Size()),
+            fmt::format(R"json({{"error":"{}","items":{},"reason":"atomic write failed, no items written"}})json", r.error(), doc.size()),
             "application/json");
         return;
     }
 
     // Third pass: build success response
-    rapidjson::Document response;
-    response.SetArray();
-    auto& alloc = response.GetAllocator();
+    sgrn::json::dom::Document response;
+    response.setArray();
+    auto& alloc = response.allocator();
 
     for (size_t i = 0; i < write_spans.size(); ++i) {
-        rapidjson::Value res_item(rapidjson::kObjectType);
-        res_item.AddMember("db", write_spans[i].db, alloc);
-        res_item.AddMember("offset", static_cast<uint64_t>(write_spans[i].offset), alloc);
-        res_item.AddMember("size", static_cast<uint64_t>(write_spans[i].size), alloc);
+        sgrn::json::dom::Value res_item(sgrn::json::dom::Type::Object);
+        res_item.addMember("db", write_spans[i].db, alloc);
+        res_item.addMember("offset", static_cast<uint64_t>(write_spans[i].offset), alloc);
+        res_item.addMember("size", static_cast<uint64_t>(write_spans[i].size), alloc);
 
         std::string written_b64 = sgrn::utils::encoding::toBase64Url(payloads[i].data(), payloads[i].size());
-        res_item.AddMember("written", rapidjson::Value(written_b64.c_str(), alloc), alloc);
+        res_item.addMember("written", sgrn::json::dom::Value(written_b64.c_str(), alloc), alloc);
 
-        response.PushBack(res_item, alloc);
+        response.pushBack(res_item, alloc);
     }
 
     t_res.status = 200;

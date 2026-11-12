@@ -4,6 +4,7 @@
 #include <sgrn/gateway/twin/encoding.hpp>
 #include <sgrn/gateway/twin/utils.hpp>
 #include <sgrn/utils/endianess.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <algorithm>
 #include <cstdio>
@@ -181,11 +182,11 @@ sgrn::Result<void, ::sgrn::scl::SclError> DbSnapshot::write(S7Client& t_client) 
     return {};
 }
 
-// ── RapidJSON Serialization Helpers ──────────────────────────────────────
+// ── Glaze JSON DOM Serialization Helpers ──────────────────────────────────────
 
 namespace
 {
-using namespace rapidjson;
+using namespace sgrn::json::dom;
 } // namespace
 
 sgrn::Result<std::string, ::sgrn::scl::SclError> DbSnapshot::decode() const {
@@ -202,15 +203,15 @@ sgrn::Result<std::string, ::sgrn::scl::SclError> DbSnapshot::decode() const {
     StringBuffer sb;
     Writer<StringBuffer> writer(sb);
 
-    writer.StartObject();
+    writer.startObject();
     const uint8_t* p_data = raw_buffer_.front_data();
     for (const DbField& field : registry_.fields) {
-        writer.Key(field.name.c_str());
+        writer.key(field.name.c_str());
         serializeFieldToWriter(writer, field, p_data + field.offset, registry_.size_bytes - field.offset, 0);
     }
-    writer.EndObject();
+    writer.endObject();
 
-    return std::string(sb.GetString());
+    return std::string(sb.getString());
 }
 
 sgrn::Result<void, ::sgrn::scl::SclError> DbSnapshot::updateField(const std::string& t_field_path, const std::string& t_value) {
@@ -235,26 +236,26 @@ sgrn::Result<void, ::sgrn::scl::SclError> DbSnapshot::updateField(const std::str
 namespace
 {
 
-sgrn::Result<void, ::sgrn::scl::SclError> applyRapidJsonPatch(
-    const std::vector<DbField>& t_fields, const rapidjson::Value& t_patch, uint8_t* tp_ptr, size_t t_buffer_size) {
-    if (!t_patch.IsObject())
+sgrn::Result<void, ::sgrn::scl::SclError> applyJsonPatch(
+    const std::vector<DbField>& t_fields, const sgrn::json::dom::Value& t_patch, uint8_t* tp_ptr, size_t t_buffer_size) {
+    if (!t_patch.is_object())
         return SclError::Generic;
 
     for (const auto& field : t_fields) {
-        if (!t_patch.HasMember(field.name.c_str()))
+        if (!t_patch.hasMember(field.name.c_str()))
             continue;
 
         const auto& val = t_patch[field.name.c_str()];
         uint8_t* field_ptr = tp_ptr + field.offset;
         size_t field_buffer_remaining = t_buffer_size - field.offset;
 
-        // Structs recurse directly; all other types bridge through rapidjson
-        if (field.type == DataType::Struct && field.count <= 1 && val.IsObject()) {
-            auto status = applyRapidJsonPatch(field.children, val, field_ptr, field_buffer_remaining);
+        // Structs recurse directly; all other types bridge through the Glaze-backed DOM
+        if (field.type == DataType::Struct && field.count <= 1 && val.is_object()) {
+            auto status = applyJsonPatch(field.children, val, field_ptr, field_buffer_remaining);
             if (status.hasError())
                 return status;
         } else {
-            auto status = ::sgrn::gateway::twin::encodeFieldRapidJson(field, val, field_ptr, field_buffer_remaining);
+            auto status = ::sgrn::gateway::twin::encodeFieldJson(field, val, field_ptr, field_buffer_remaining);
             if (status.hasError())
                 return status;
         }
@@ -264,13 +265,13 @@ sgrn::Result<void, ::sgrn::scl::SclError> applyRapidJsonPatch(
 } // namespace
 
 sgrn::Result<void, ::sgrn::scl::SclError> DbSnapshot::updateFromJson(const std::string& t_json_patch) {
-    rapidjson::Document doc;
-    if (doc.Parse(t_json_patch.c_str()).HasParseError()) {
+    sgrn::json::dom::Document doc;
+    if (doc.parse(t_json_patch.c_str()).hasParseError()) {
         return SclError::ParseError;
     }
 
     std::lock_guard lock(state_mutex_);
-    auto res = applyRapidJsonPatch(registry_.fields, doc, raw_buffer_.front_data_rw(), registry_.size_bytes);
+    auto res = applyJsonPatch(registry_.fields, doc, raw_buffer_.front_data_rw(), registry_.size_bytes);
     if (!res.hasError()) {
         // Sync back buffer
         std::memcpy(raw_buffer_.back_data(), raw_buffer_.front_data(), registry_.size_bytes);

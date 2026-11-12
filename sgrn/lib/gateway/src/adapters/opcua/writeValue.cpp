@@ -1,3 +1,4 @@
+#include <sgrn/utils/json-dom.hpp>
 /**
  * @file write_handler.cpp
  * @brief Handles inbound OPC UA writes and translates them into S7 PLC memory payloads.
@@ -31,9 +32,6 @@
 #include <open62541/types_generated.h>
 #include <open62541/types_generated_handling.h>
 #include <optional>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <s7codec/codec.hpp>
 #include <stdexcept>
 #include <string>

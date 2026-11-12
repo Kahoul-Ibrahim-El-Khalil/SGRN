@@ -6,8 +6,7 @@
 #include <vector>
 
 #include <fmt/format.h>
-#include <sgrn/utils/json.hpp>
-#include <rapidjson/document.h>
+#include <sgrn/utils/glaze.hpp>
 #include <stdexcept>
 
 namespace sgrn::datastore::client
@@ -151,7 +150,7 @@ struct ObjectInfo {
     int32_t id_{};
     std::string name_{};
     std::string status_{};
-    rapidjson::Document metadata_{};
+    sgrn::json::Value metadata_{};
 };
 
 namespace detail
@@ -233,115 +232,6 @@ inline std::string buildQueryString(const std::vector<std::pair<std::string, std
     return out;
 }
 
-inline DrivePathNode parseDrivePathNode(const rapidjson::Value& t_value) {
-    DrivePathNode node;
-    if (t_value.HasMember("id") && !t_value["id"].IsNull()) {
-        node.id_ = t_value["id"].IsInt64() ? t_value["id"].GetInt64() : static_cast<int64_t>(t_value["id"].GetInt());
-    }
-    if (t_value.HasMember("name") && t_value["name"].IsString()) {
-        node.name_ = t_value["name"].GetString();
-    }
-    if (t_value.HasMember("path") && t_value["path"].IsString()) {
-        node.path = t_value["path"].GetString();
-    }
-    if (t_value.HasMember("display_name") && t_value["display_name"].IsString()) {
-        node.display_name = t_value["display_name"].GetString();
-    }
-    return node;
-}
-
-inline DriveFolderInfo parseDriveFolderInfo(const rapidjson::Value& t_value) {
-    DriveFolderInfo folder;
-    if (t_value.HasMember("id") && !t_value["id"].IsNull()) {
-        folder.id_ = t_value["id"].IsInt64() ? t_value["id"].GetInt64() : static_cast<int64_t>(t_value["id"].GetInt());
-    }
-    if (t_value.HasMember("name") && t_value["name"].IsString()) {
-        folder.name_ = t_value["name"].GetString();
-    }
-    if (t_value.HasMember("path") && t_value["path"].IsString()) {
-        folder.path = t_value["path"].GetString();
-    }
-    if (t_value.HasMember("display_name") && t_value["display_name"].IsString()) {
-        folder.display_name = t_value["display_name"].GetString();
-    }
-    if (t_value.HasMember("token") && t_value["token"].IsString()) {
-        folder.token = t_value["token"].GetString();
-    }
-    if (t_value.HasMember("kind") && t_value["kind"].IsString()) {
-        folder.kind = t_value["kind"].GetString();
-    }
-    if (t_value.HasMember("created_at") && t_value["created_at"].IsString()) {
-        folder.created_at = t_value["created_at"].GetString();
-    }
-    return folder;
-}
-
-inline DriveFileInfo parseDriveFileInfo(const rapidjson::Value& t_value) {
-    DriveFileInfo file;
-    if (t_value.HasMember("id") && !t_value["id"].IsNull()) {
-        file.id_ = t_value["id"].IsInt64() ? t_value["id"].GetInt64() : static_cast<int64_t>(t_value["id"].GetInt());
-    }
-    if (t_value.HasMember("name") && t_value["name"].IsString()) {
-        file.name_ = t_value["name"].GetString();
-    }
-    if (t_value.HasMember("path") && t_value["path"].IsString()) {
-        file.path = t_value["path"].GetString();
-    }
-    if (t_value.HasMember("extension") && t_value["extension"].IsString()) {
-        file.extension = t_value["extension"].GetString();
-    }
-    if (t_value.HasMember("size") && !t_value["size"].IsNull()) {
-        file.size = t_value["size"].IsInt64() ? t_value["size"].GetInt64() : static_cast<int64_t>(t_value["size"].GetInt());
-    }
-    if (t_value.HasMember("original_size") && !t_value["original_size"].IsNull()) {
-        file.original_size = t_value["original_size"].IsInt64() ? t_value["original_size"].GetInt64()
-                                                                : static_cast<int64_t>(t_value["original_size"].GetInt());
-    }
-    if (t_value.HasMember("created_at") && t_value["created_at"].IsString()) {
-        file.created_at = t_value["created_at"].GetString();
-    }
-    if (t_value.HasMember("sha256") && t_value["sha256"].IsString()) {
-        file.sha256 = t_value["sha256"].GetString();
-    }
-    if (t_value.HasMember("etag") && t_value["etag"].IsString()) {
-        file.etag = t_value["etag"].GetString();
-    }
-    if (t_value.HasMember("is_encrypted") && t_value["is_encrypted"].IsBool()) {
-        file.is_encrypted = t_value["is_encrypted"].GetBool();
-    }
-    if (t_value.HasMember("key_id") && t_value["key_id"].IsString()) {
-        file.key_id = t_value["key_id"].GetString();
-    }
-    return file;
-}
-
-inline DriveListing parseDriveListing(const rapidjson::Value& t_value) {
-    DriveListing listing;
-    if (t_value.HasMember("path") && t_value["path"].IsString()) {
-        listing.path = t_value["path"].GetString();
-    }
-    if (t_value.HasMember("trail") && t_value["trail"].IsArray()) {
-        for (const auto& entry : t_value["trail"].GetArray()) {
-            listing.trail.push_back(parseDrivePathNode(entry));
-        }
-    }
-    if (t_value.HasMember("folders") && t_value["folders"].IsArray()) {
-        for (const auto& entry : t_value["folders"].GetArray()) {
-            listing.folders.push_back(parseDriveFolderInfo(entry));
-        }
-    }
-    if (t_value.HasMember("files") && t_value["files"].IsArray()) {
-        for (const auto& entry : t_value["files"].GetArray()) {
-            listing.files.push_back(parseDriveFileInfo(entry));
-        }
-    }
-    return listing;
-}
-
-inline std::string jsonCompact(const rapidjson::Value& t_value) {
-    return sgrn::utils::json::serializeCompact(t_value);
-}
-
 } // namespace detail
 
 } // namespace sgrn::datastore::client
@@ -354,9 +244,9 @@ using namespace sgrn::datastore::client;
 template <>
 struct fmt::formatter<sgrn::datastore::client::ObjectInfo> : formatter<std::string_view> {
     auto format(const sgrn::datastore::client::ObjectInfo& t_info, format_context& t_ctx) const {
-        return formatter<std::string_view>::format(
-            fmt::format("ObjectInfo{{id={}, name=\"{}\", status=\"{}\", metadata={}}}", t_info.id_, t_info.name_, t_info.status_,
-                sgrn::datastore::client::detail::jsonCompact(t_info.metadata_)),
+        auto metadata = sgrn::json::write(t_info.metadata_);
+        return formatter<std::string_view>::format(fmt::format("ObjectInfo{{id={}, name=\"{}\", status=\"{}\", metadata={}}}", t_info.id_,
+                                                       t_info.name_, t_info.status_, metadata.hasError() ? "{}" : metadata.value()),
             t_ctx);
     }
 };

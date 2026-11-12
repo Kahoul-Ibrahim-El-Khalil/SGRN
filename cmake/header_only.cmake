@@ -20,14 +20,6 @@ macro(_sgrn_header_target dep_name target_name)
     endif()
 endmacro()
 
-# rapidjson
-if(NOT TARGET rapidjson)
-    sgrn_fetch_source(rapidjson)
-    add_library(rapidjson INTERFACE)
-    target_include_directories(rapidjson SYSTEM INTERFACE "${rapidjson_SOURCE_DIR}/include")
-    add_library(extern::rapidjson ALIAS rapidjson)
-endif()
-
 # cpp-httplib
 if(NOT TARGET httplib)
     sgrn_fetch_source(cpp_httplib)

@@ -1,10 +1,8 @@
 #include <fmt/format.h>
+#include <sgrn/utils/json-dom.hpp>
 
 #include <sgrn/scl/types/UdtDefinition.hpp>
 
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <s7codec/codec.hpp>
 #include <string>
 
@@ -13,15 +11,15 @@
 // -----------------------------------------------------------------------------
 
 std::string toJsonString(const sgrn::scl::UdtDefinition& udt_definition) {
-    rapidjson::StringBuffer string_buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(string_buffer);
+    sgrn::json::dom::StringBuffer string_buffer;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(string_buffer);
     sgrn::scl::udt::serializeToWriter(writer, udt_definition);
-    return string_buffer.GetString();
+    return string_buffer.getString();
 }
 
-rapidjson::Document toJson(const sgrn::scl::UdtDefinition& udt_definition) {
-    rapidjson::Document doc;
-    doc.Parse(toJsonString(udt_definition).c_str());
+sgrn::json::dom::Document toJson(const sgrn::scl::UdtDefinition& udt_definition) {
+    sgrn::json::dom::Document doc;
+    doc.parse(toJsonString(udt_definition).c_str());
     return doc;
 }
 
@@ -32,61 +30,61 @@ rapidjson::Document toJson(const sgrn::scl::UdtDefinition& udt_definition) {
 namespace sgrn::scl::udt
 {
 
-sgrn::scl::UdtDefinition fromJson(const rapidjson::Value& t_node) {
+sgrn::scl::UdtDefinition fromJson(const sgrn::json::dom::Value& t_node) {
     sgrn::scl::UdtDefinition udt_def;
-    if (!t_node.IsObject())
+    if (!t_node.is_object())
         return udt_def;
 
-    if (t_node.HasMember("udt_number"))
-        udt_def.udt_number = t_node["udt_number"].GetUint();
-    if (t_node.HasMember("name") && t_node["name"].IsString())
-        udt_def.name = t_node["name"].GetString();
-    if (t_node.HasMember("size_bytes"))
-        udt_def.size_bytes = t_node["size_bytes"].GetInt();
+    if (t_node.hasMember("udt_number"))
+        udt_def.udt_number = t_node["udt_number"].getUint();
+    if (t_node.hasMember("name") && t_node["name"].is_string())
+        udt_def.name = t_node["name"].getString();
+    if (t_node.hasMember("size_bytes"))
+        udt_def.size_bytes = t_node["size_bytes"].getInt();
 
-    if (t_node.HasMember("fields") && t_node["fields"].IsArray()) {
-        for (const auto& field_node : t_node["fields"].GetArray()) {
+    if (t_node.hasMember("fields") && t_node["fields"].is_array()) {
+        for (const auto& field_node : t_node["fields"].elements()) {
             udt_def.fields.push_back(sgrn::scl::field::fromJson(field_node));
         }
     }
 
-    if (t_node.HasMember("endianness") && t_node["endianness"].IsString()) {
-        const std::string e = t_node["endianness"].GetString();
+    if (t_node.hasMember("endianness") && t_node["endianness"].is_string()) {
+        const std::string e = t_node["endianness"].getString();
         udt_def.endianness = (e == "little" || e == "LITTLE") ? s7codec::Endian::Little : s7codec::Endian::Big;
     }
-    if (t_node.HasMember("trigger_events") && t_node["trigger_events"].IsBool())
-        udt_def.trigger_events = t_node["trigger_events"].GetBool();
-    if (t_node.HasMember("is_scalar_alias") && t_node["is_scalar_alias"].IsBool())
-        udt_def.is_scalar_alias = t_node["is_scalar_alias"].GetBool();
-    if (t_node.HasMember("scalar_type") && t_node["scalar_type"].IsString()) {
-        if (auto opt = s7codec::toType(t_node["scalar_type"].GetString()))
+    if (t_node.hasMember("trigger_events") && t_node["trigger_events"].is_boolean())
+        udt_def.trigger_events = t_node["trigger_events"].getBool();
+    if (t_node.hasMember("is_scalar_alias") && t_node["is_scalar_alias"].is_boolean())
+        udt_def.is_scalar_alias = t_node["is_scalar_alias"].getBool();
+    if (t_node.hasMember("scalar_type") && t_node["scalar_type"].is_string()) {
+        if (auto opt = s7codec::toType(t_node["scalar_type"].getString()))
             udt_def.scalar_type = *opt;
     }
-    if (t_node.HasMember("unit") && t_node["unit"].IsString())
-        udt_def.unit = t_node["unit"].GetString();
-    if (t_node.HasMember("dimension") && t_node["dimension"].IsString())
-        udt_def.dimension = t_node["dimension"].GetString();
-    if (t_node.HasMember("description") && t_node["description"].IsString())
-        udt_def.description = t_node["description"].GetString();
-    if (t_node.HasMember("precision") && t_node["precision"].IsInt())
-        udt_def.precision = t_node["precision"].GetInt();
-    if (t_node.HasMember("nominal") && t_node["nominal"].IsNumber())
-        udt_def.nominal = t_node["nominal"].GetDouble();
-    if (t_node.HasMember("alarm_lo") && t_node["alarm_lo"].IsNumber())
-        udt_def.alarm_lo = t_node["alarm_lo"].GetDouble();
-    if (t_node.HasMember("alarm_hi") && t_node["alarm_hi"].IsNumber())
-        udt_def.alarm_hi = t_node["alarm_hi"].GetDouble();
-    if (t_node.HasMember("min") && t_node["min"].IsNumber())
-        udt_def.min_val = t_node["min"].GetDouble();
-    if (t_node.HasMember("max") && t_node["max"].IsNumber())
-        udt_def.max_val = t_node["max"].GetDouble();
+    if (t_node.hasMember("unit") && t_node["unit"].is_string())
+        udt_def.unit = t_node["unit"].getString();
+    if (t_node.hasMember("dimension") && t_node["dimension"].is_string())
+        udt_def.dimension = t_node["dimension"].getString();
+    if (t_node.hasMember("description") && t_node["description"].is_string())
+        udt_def.description = t_node["description"].getString();
+    if (t_node.hasMember("precision") && t_node["precision"].isInt())
+        udt_def.precision = t_node["precision"].getInt();
+    if (t_node.hasMember("nominal") && t_node["nominal"].is_number())
+        udt_def.nominal = t_node["nominal"].getDouble();
+    if (t_node.hasMember("alarm_lo") && t_node["alarm_lo"].is_number())
+        udt_def.alarm_lo = t_node["alarm_lo"].getDouble();
+    if (t_node.hasMember("alarm_hi") && t_node["alarm_hi"].is_number())
+        udt_def.alarm_hi = t_node["alarm_hi"].getDouble();
+    if (t_node.hasMember("min") && t_node["min"].is_number())
+        udt_def.min_val = t_node["min"].getDouble();
+    if (t_node.hasMember("max") && t_node["max"].is_number())
+        udt_def.max_val = t_node["max"].getDouble();
 
-    if (t_node.HasMember("enum") && t_node["enum"].IsObject()) {
-        for (auto it = t_node["enum"].MemberBegin(); it != t_node["enum"].MemberEnd(); ++it) {
+    if (t_node.hasMember("enum") && t_node["enum"].is_object()) {
+        for (auto it = t_node["enum"].memberBegin(); it != t_node["enum"].memberEnd(); ++it) {
             try {
-                const int key = std::stoi(it->name.GetString());
-                if (it->value.IsString())
-                    udt_def.enum_map[key] = it->value.GetString();
+                const int key = std::stoi(it->name.getString());
+                if (it->value.is_string())
+                    udt_def.enum_map[key] = it->value.getString();
             } catch (...) {
             }
         }
@@ -96,8 +94,8 @@ sgrn::scl::UdtDefinition fromJson(const rapidjson::Value& t_node) {
 }
 
 sgrn::scl::UdtDefinition fromJsonString(const std::string& t_value) {
-    rapidjson::Document doc;
-    doc.Parse(t_value.c_str());
+    sgrn::json::dom::Document doc;
+    doc.parse(t_value.c_str());
     return fromJson(doc);
 }
 

@@ -213,8 +213,8 @@ Result<void, std::string> GatewayApplication::initTwin() {
 }
 
 Result<void, std::string> GatewayApplication::initThreading() {
-    const int light = std::clamp(config_.light_threads, kMinThreads, kMaxThreads);
-    const int heavy = std::clamp(config_.heavy_threads, kMinThreads, kMaxThreads);
+    const uint16_t light = std::clamp(config_.light_threads, kMinThreads, kMaxThreads);
+    const uint16_t heavy = std::clamp(config_.heavy_threads, kMinThreads, kMaxThreads);
     if (light != config_.light_threads || heavy != config_.heavy_threads)
         SGRN_WARN_LOG("Threading config out of range, clamped to light={} heavy={}", light, heavy);
 
@@ -436,13 +436,9 @@ sgrn::Result<PlcSchemaStore, std::string> GatewayApplication::extractSchemaFromA
             return Error("unparseable embedded schema");
         schema_store = std::move(store_res).value();
     } else {
-        rapidjson::Document schema_doc;
-        schema_doc.Parse(raw.substr(10, header.schema_len).c_str());
-        if (schema_doc.HasParseError() || !schema_doc.IsObject())
-            return Error("unparseable embedded schema");
-        auto deserialize_res = sgrn::scl::SchemaSerializer::deserialize(schema_store, schema_doc);
+        auto deserialize_res = sgrn::scl::SchemaSerializer::deserialize(schema_store, payload);
         if (deserialize_res.hasError())
-            return Error(fmt::format("schema deserialize failed: {}", deserialize_res.error()));
+            return Error(fmt::format("schema deserialize failed: {}", toString(deserialize_res.error())));
     }
 
     return schema_store;

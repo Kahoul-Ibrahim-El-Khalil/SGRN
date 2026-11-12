@@ -143,8 +143,8 @@ add_library(sgrn_gateway_twin STATIC ${GATEWAY_TWIN_SOURCES})
 add_library(sgrn::gateway::twin ALIAS sgrn_gateway_twin)
 target_include_directories(sgrn_gateway_twin PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(sgrn_gateway_twin PUBLIC sgrn::wrappers::s7 sgrn_scl fmt::fmt)
+target_link_libraries(sgrn_gateway_twin PUBLIC sgrn_utils) # public twin headers expose the Glaze-backed JSON DOM
 target_link_libraries(sgrn_gateway_twin PUBLIC sgrn::common) # public: PlcState.hpp (public header) includes <sgrn/common/TreePath.hpp>
-target_link_libraries(sgrn_gateway_twin PUBLIC extern::rapidjson)
 target_link_libraries(sgrn_gateway_twin PRIVATE sgrn::open62541)
 target_link_libraries(sgrn_gateway_twin PUBLIC sgrn::unordered_dense)
 
@@ -258,7 +258,6 @@ target_include_directories(sgrn_gateway_opcua
     PRIVATE
         ${CMAKE_SOURCE_DIR}/sgrn/lib/scl/include
 )
-target_link_libraries(sgrn_gateway_opcua PRIVATE extern::rapidjson)
 
 target_link_libraries(sgrn_gateway_opcua
     PUBLIC  sgrn::wrappers::opcua  # RAII types used in adapter public headers
@@ -356,7 +355,6 @@ target_include_directories(sgrn_gateway PRIVATE
 )
 target_link_libraries(sgrn_gateway PRIVATE
     extern::sqlite_modern_cpp
-    extern::rapidjson
     sgrn::unordered_dense
 )
 

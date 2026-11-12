@@ -63,7 +63,7 @@ TransferOutcome StorageClient::download(const std::string& t_remote_path, const 
     return {true, res.http_status, t_local_path};
 }
 
-rapidjson::Document StorageClient::listFiles(const std::string& t_query_params) {
+sgrn::json::Value StorageClient::listFiles(const std::string& t_query_params) {
     return client_.query("files", t_query_params);
 }
 

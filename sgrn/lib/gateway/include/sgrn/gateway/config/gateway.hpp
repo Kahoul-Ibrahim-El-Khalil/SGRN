@@ -90,10 +90,10 @@ struct GatewayConfig {
     bool cache_json_north{true};
     /// Telemetry-dispatch threads (GlobalContext io_context: TelemetryBroker
     /// fan-out to WebSocket/OPC-UA/persistence). Default 2.
-    int light_threads{2};
+    uint16_t light_threads{2};
     /// Compression/disk-I/O worker pool (PersistenceService, DatastoreBridge).
     /// Default 2.
-    int heavy_threads{2};
+    uint16_t heavy_threads{2};
     bool verbose{false};
     bool debug_incoming{false};
     bool debug_tree{false};
@@ -111,8 +111,7 @@ constexpr const char example[] = R"({
       "ip": "0.0.0.0",
       "port": 102,
       "max_clients": 12,
-      "pdu_size": 960,
-      "little_endian": true
+      "pdu_size": 960
     },
     "opcua": {
       "ip": "127.0.0.1",

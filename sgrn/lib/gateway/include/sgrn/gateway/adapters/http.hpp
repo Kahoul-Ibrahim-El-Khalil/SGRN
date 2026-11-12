@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sgrn/utils/json-dom.hpp>
+
 #include <sgrn/Result.hpp>
 #include <sgrn/gateway/adapters/http/types.hpp>
 #include <sgrn/gateway/adapters/northbound/NorthboundServer.hpp>
@@ -12,7 +14,6 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <rapidjson/document.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -141,13 +142,13 @@ private:
     /// POST /data/<DB>/<field>/<N>[/<rest>] — indexed array-of-struct element replacement (object body).
     void handlePostStructArrayElement(const http::HttpRequest& t_req, http::HttpResponse& t_res, uint16_t t_db_num,
         const std::string& t_field_path, const std::string& t_rest_path, size_t t_index, const std::string& t_url_path,
-        rapidjson::Document& t_document);
+        sgrn::json::dom::Document& t_document);
     /// POST /data/<DB>/<field>/<N> — scalar/primitive array element replacement (non-object body).
     void handlePostScalarArrayElement(const http::HttpRequest& t_req, http::HttpResponse& t_res, uint16_t t_db_num,
-        const std::string& t_field_path, size_t t_index, const std::string& t_url_path, const rapidjson::Document& t_document);
+        const std::string& t_field_path, size_t t_index, const std::string& t_url_path, const sgrn::json::dom::Document& t_document);
     /// POST /data/<DB>[/<field>] — leaf collection, authorization, atomic batch write and readback.
     void handlePostLeafField(const http::HttpRequest& t_req, http::HttpResponse& t_res, uint16_t t_db_num, const std::string& t_field_path,
-        const std::string& t_url_path, const rapidjson::Document& t_document);
+        const std::string& t_url_path, const sgrn::json::dom::Document& t_document);
     void handlePut(const http::HttpRequest& t_req, http::HttpResponse& t_res);
 
     // Discrete tag endpoints: /tags and /tags/<name> (see tags-handlers.cpp)

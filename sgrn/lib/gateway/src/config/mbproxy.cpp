@@ -38,48 +38,16 @@ struct MbProxyConfigJson {
 
 } // namespace sgrn::gateway::config
 
-namespace glz
-{
-
-template <>
-struct meta<sgrn::gateway::config::detail::MbMappingJson> {
-    using T = sgrn::gateway::config::detail::MbMappingJson;
-    static constexpr auto value = object("type", &T::type, "src_address", &T::src_address, "dst_address", &T::dst_address, "count",
-        &T::count, "interval_ms", &T::interval_ms);
-};
-
-template <>
-struct meta<sgrn::gateway::config::detail::MbDeviceJson> {
-    using T = sgrn::gateway::config::detail::MbDeviceJson;
-    static constexpr auto value = object("name", &T::name, "ip", &T::ip, "port", &T::port, "mappings", &T::mappings);
-};
-
-template <>
-struct meta<sgrn::gateway::config::detail::MbProxyConfigJson::Hub> {
-    using T = sgrn::gateway::config::detail::MbProxyConfigJson::Hub;
-    static constexpr auto value = object("ip", &T::ip, "port", &T::port);
-};
-
-template <>
-struct meta<sgrn::gateway::config::detail::MbProxyConfigJson> {
-    using T = sgrn::gateway::config::detail::MbProxyConfigJson;
-    static constexpr auto value = object("hub", &T::hub, "devices", &T::devices, "verbose", &T::verbose);
-};
-
-} // namespace glz
-
 namespace sgrn::gateway::config
 {
 
 Result<MbProxyConfig, std::string> parseMbProxyConfig(const std::string& t_path) {
     std::ifstream ifs(t_path);
-    if (!ifs.is_open())
-        return Error(fmt::format("Cannot open config file: {}", t_path));
+    RETURN_ERROR_IF(!ifs.is_open(), fmt::format("Cannot open config file: {}", t_path));
 
     const std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
     auto wire_res = sgrn::json::read<detail::MbProxyConfigJson>(content);
-    if (wire_res.hasError())
-        return Error(fmt::format("Failed to deserialize Modbus proxy config: {}", wire_res.error().what()));
+    RETURN_ERROR_IF(wire_res.hasError(), fmt::format("Failed to deserialize Modbus proxy config: {}", wire_res.error().what()));
 
     const auto& wire = wire_res.value();
     MbProxyConfig cfg;

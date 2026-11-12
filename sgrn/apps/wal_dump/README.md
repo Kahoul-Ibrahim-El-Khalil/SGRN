@@ -31,4 +31,4 @@ a missing directory is an error.
 ## Dependencies
 
 Links `sgrn_gateway_twin` (leaf-dictionary expansion) and `sgrn_utils`
-(Zstd line reader), plus RapidJSON/fmt transitively. No server, no network.
+(Zstd line reader), plus fmt transitively. No server, no network.

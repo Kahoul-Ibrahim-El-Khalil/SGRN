@@ -176,7 +176,6 @@ After Phase 1, `.prefix/` looks like:
 │   ├── drogon/  trantor/
 │   ├── modbus/
 │   ├── opener/
-│   ├── rapidjson/
 │   ├── httplib/
 │   ├── s7codec/
 │   └── sqlite_modern_cpp.h
@@ -234,7 +233,7 @@ CPM caches sources in `~/.cache/CPM/` (set by `CPM_SOURCE_CACHE` in
 | angelscript       | SHA pinned | Shallow clone |
 | opener            | master     | Shallow clone |
 | drogon            | v1.9.13    | Shallow clone |
-| rapidjson         | master     | Shallow clone |
+| glaze             | 9.1.0      | Shallow clone |
 | xml_h             | SHA pinned | Shallow clone |
 
 ---
@@ -374,7 +373,7 @@ If the library is consumed in normal (non-deps-only) builds, add it to
 | `arm64.cmake`           | ARM64 cross-compile dep resolver (Phase 2)                              |
 | `win64.cmake`           | Win64 cross-compile dep resolver (Phase 2)                              |
 | `fmt.cmake`             | `sgrn::fmt` resolver (deps-only produce + normal consume)               |
-| `header_only.cmake`     | INTERFACE targets: rapidjson, httplib, xml_h, sqlite_modern_cpp         |
+| `header_only.cmake`     | INTERFACE targets: glaze, httplib, xml_h, sqlite_modern_cpp             |
 | `s7codec.cmake`         | s7codec header-only target                                              |
 
 ### `cmake/` — Main build logic

@@ -2,9 +2,7 @@
 
 #include <fmt/core.h>
 #include <sgrn/scl/types.hpp>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
+#include <sgrn/utils/json-dom.hpp>
 #include <s7codec/s7.hpp>
 #include <stdexcept>
 #include <string>
@@ -30,9 +28,10 @@ inline bool overlapsAnyRange(int t_offset, int t_size, const std::vector<std::pa
 }
 
 /**
- * @brief Directly serializes an S7 field value from a memory buffer to a RapidJSON Writer.
+ * @brief Directly serializes an S7 field value from a memory buffer to a Glaze JSON DOM writer.
  *
- * This avoids intermediate Json::Value (JsonCpp) objects and heap allocations.
+ * This avoids intermediate DOM objects and heap allocations: values are decoded
+ * from raw S7 memory and streamed through the Glaze-backed sgrn::json::dom::Writer.
  */
 template <typename Writer>
 void serializeFieldTo(Writer& t_writer, const DbField& t_field, const uint8_t* p_ptr, size_t t_buffer_size) {
@@ -45,26 +44,26 @@ void serializeFieldTo(Writer& t_writer, const DbField& t_field, const uint8_t* p
             .string_capacity = s7codec::StringCapacity{t_field.count}});
 
     if (!dv.valid()) {
-        t_writer.Null();
+        t_writer.nullValue();
         return;
     }
     switch (dv.kind()) {
         case s7codec::ValueKind::Bool:
-            t_writer.Bool(dv.b());
+            t_writer.boolean(dv.b());
             break;
         case s7codec::ValueKind::SignedInt:
             if (t_field.type == DataType::Time) {
                 std::string s = s7codec::formatTimeString(static_cast<int32_t>(dv.i()));
-                t_writer.String(s.c_str(), static_cast<rapidjson::SizeType>(s.length()));
+                t_writer.string(s.c_str(), static_cast<sgrn::json::dom::SizeType>(s.length()));
             } else {
-                t_writer.Int64(dv.i());
+                t_writer.int64(dv.i());
             }
             break;
         case s7codec::ValueKind::UnsignedInt:
             if (t_field.type == DataType::Char) {
                 char c = static_cast<char>(dv.u());
                 std::string s(1, c);
-                t_writer.String(s.c_str(), 1);
+                t_writer.string(s.c_str(), 1);
             } else if (t_field.type == DataType::WChar) {
                 uint16_t wc = static_cast<uint16_t>(dv.u());
                 std::string s;
@@ -78,50 +77,50 @@ void serializeFieldTo(Writer& t_writer, const DbField& t_field, const uint8_t* p
                     s += static_cast<char>(0x80 | ((wc >> 6) & 0x3F));
                     s += static_cast<char>(0x80 | (wc & 0x3F));
                 }
-                t_writer.String(s.c_str(), static_cast<rapidjson::SizeType>(s.length()));
+                t_writer.string(s.c_str(), static_cast<sgrn::json::dom::SizeType>(s.length()));
             } else if (t_field.type == DataType::Byte) {
                 std::string s = fmt::format("0x{:02X}", static_cast<uint8_t>(dv.u()));
-                t_writer.String(s.c_str(), static_cast<rapidjson::SizeType>(s.length()));
+                t_writer.string(s.c_str(), static_cast<sgrn::json::dom::SizeType>(s.length()));
             } else if (t_field.type == DataType::Word) {
                 std::string s = fmt::format("0x{:04X}", static_cast<uint16_t>(dv.u()));
-                t_writer.String(s.c_str(), static_cast<rapidjson::SizeType>(s.length()));
+                t_writer.string(s.c_str(), static_cast<sgrn::json::dom::SizeType>(s.length()));
             } else if (t_field.type == DataType::DWord) {
                 std::string s = fmt::format("0x{:08X}", static_cast<uint32_t>(dv.u()));
-                t_writer.String(s.c_str(), static_cast<rapidjson::SizeType>(s.length()));
+                t_writer.string(s.c_str(), static_cast<sgrn::json::dom::SizeType>(s.length()));
             } else {
-                t_writer.Uint64(dv.u());
+                t_writer.uint64(dv.u());
             }
             break;
         case s7codec::ValueKind::Float:
-            t_writer.Double(static_cast<double>(dv.f()));
+            t_writer.float64(static_cast<double>(dv.f()));
             break;
         case s7codec::ValueKind::Double:
-            t_writer.Double(dv.d());
+            t_writer.float64(dv.d());
             break;
         case s7codec::ValueKind::String:
-            t_writer.String(dv.s().c_str(), static_cast<rapidjson::SizeType>(dv.s().length()));
+            t_writer.string(dv.s().c_str(), static_cast<sgrn::json::dom::SizeType>(dv.s().length()));
             break;
         default:
-            t_writer.Null();
+            t_writer.nullValue();
             break;
     }
 }
 
 /**
- * @brief Recursive serialization for structs and arrays using RapidJSON Writer.
+ * @brief Recursive serialization for structs and arrays using sgrn::json::dom::Writer.
  * Includes safety bounds and recursion depth limits.
  */
 template <typename Writer>
 void serializeComplexFieldTo(Writer& t_writer, const DbField& t_field, const uint8_t* tp_base_ptr, size_t t_buffer_size,
     const std::vector<std::pair<int32_t, int32_t>>& t_ranges = {}, int t_depth = 0) {
     if (t_depth > kMaxJsonRecursion) {
-        t_writer.String("!!! MAX_DEPTH_EXCEEDED !!!");
+        t_writer.string("!!! MAX_DEPTH_EXCEEDED !!!");
         return;
     }
 
     // Safety: ensure field offset is within buffer
     if (t_field.offset < 0 || static_cast<size_t>(t_field.offset) >= t_buffer_size) {
-        t_writer.Null();
+        t_writer.nullValue();
         return;
     }
 
@@ -129,7 +128,7 @@ void serializeComplexFieldTo(Writer& t_writer, const DbField& t_field, const uin
 
     if (t_field.type == DataType::Struct) {
         if (t_field.count > 1) {
-            t_writer.StartArray();
+            t_writer.startArray();
             uint32_t struct_size = std::max(static_cast<uint32_t>(1), t_field.struct_size);
             for (uint32_t i = 0; i < t_field.count; ++i) {
                 int elem_offset = t_field.offset + (i * struct_size);
@@ -140,32 +139,32 @@ void serializeComplexFieldTo(Writer& t_writer, const DbField& t_field, const uin
                 if (!overlapsAnyRange(elem_offset, struct_size, t_ranges))
                     continue;
 
-                t_writer.StartObject();
+                t_writer.startObject();
                 for (const auto& child : t_field.children) {
                     if (overlapsAnyRange(
                             elem_offset + child.offset, s7codec::typeSpanBytes(child.type, child.count).value_or(0), t_ranges)) {
-                        t_writer.Key(child.name.c_str(), static_cast<rapidjson::SizeType>(child.name.length()));
+                        t_writer.key(child.name.c_str(), static_cast<sgrn::json::dom::SizeType>(child.name.length()));
                         serializeComplexFieldTo(
                             t_writer, child, tp_base_ptr + elem_offset, t_buffer_size - elem_offset, t_ranges, t_depth + 1);
                     }
                 }
-                t_writer.EndObject();
+                t_writer.endObject();
             }
-            t_writer.EndArray();
+            t_writer.endArray();
         } else {
-            t_writer.StartObject();
+            t_writer.startObject();
             for (const auto& child : t_field.children) {
                 // Nested check: only serialize dirty children
                 if (overlapsAnyRange(
                         t_field.offset + child.offset, s7codec::typeSpanBytes(child.type, child.count).value_or(0), t_ranges)) {
-                    t_writer.Key(child.name.c_str(), static_cast<rapidjson::SizeType>(child.name.length()));
+                    t_writer.key(child.name.c_str(), static_cast<sgrn::json::dom::SizeType>(child.name.length()));
                     serializeComplexFieldTo(t_writer, child, p_ptr, t_buffer_size - t_field.offset, t_ranges, t_depth + 1);
                 }
             }
-            t_writer.EndObject();
+            t_writer.endObject();
         }
     } else if (t_field.count > 1 && t_field.type != DataType::String && t_field.type != DataType::WString) {
-        t_writer.StartArray();
+        t_writer.startArray();
         uint32_t elem_size = s7codec::primitiveSize(t_field.type).value_or(0);
         for (uint32_t i = 0; i < t_field.count; ++i) {
             int elem_offset = t_field.offset + (i * elem_size);
@@ -176,7 +175,7 @@ void serializeComplexFieldTo(Writer& t_writer, const DbField& t_field, const uin
                 serializeFieldTo(t_writer, t_field, tp_base_ptr + elem_offset, t_buffer_size - elem_offset);
             }
         }
-        t_writer.EndArray();
+        t_writer.endArray();
     } else {
         serializeFieldTo(t_writer, t_field, p_ptr, t_buffer_size - static_cast<size_t>(t_field.offset));
     }

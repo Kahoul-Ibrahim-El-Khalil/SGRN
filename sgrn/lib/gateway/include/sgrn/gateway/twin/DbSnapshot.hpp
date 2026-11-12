@@ -79,7 +79,7 @@ public:
     sgrn::Result<void, ::sgrn::scl::SclError> updateField(const std::string& t_field_name, const std::string& t_value);
 
     /**
-     * @brief Apply a JSON patch string to the raw buffer using RapidJSON.
+     * @brief Apply a JSON patch string to the raw buffer using Glaze JSON DOM.
      *
      * High-performance alternative to the Jsoncpp version.
      */

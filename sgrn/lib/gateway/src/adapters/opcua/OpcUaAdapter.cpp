@@ -16,6 +16,7 @@
 
 #include <sgrn/utils/time.hpp>
 
+#include <sgrn/utils/json-dom.hpp>
 #include <atomic>
 #include <future>
 #include <memory>
@@ -87,7 +88,7 @@ sgrn::Result<void> OpcUaAdapter::start(const std::string& /*ip*/, uint16_t t_por
         impl_->pending_writes.push(PendingWrite{std::move(node_id), std::move(value)});
     });
     impl_->delta_push.setActiveClientsCheck([this]() { return impl_->session_registry.clientsCount() > 0; });
-    impl_->delta_push.setAlarmCallback([this](uint16_t db, const std::string& path, const rapidjson::Value& alarm, uint64_t ts) {
+    impl_->delta_push.setAlarmCallback([this](uint16_t db, const std::string& path, const sgrn::json::dom::Value& alarm, uint64_t ts) {
         triggerAlarmEvent(*impl_->server, impl_->alarm_event_type_id, db, path, alarm, ts);
     });
 

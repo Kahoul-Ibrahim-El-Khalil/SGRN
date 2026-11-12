@@ -1,9 +1,9 @@
+#include <sgrn/utils/json-dom.hpp>
 // WebSocketAdapter inbound client-message handling (clients -> adapter).
 // Split from WebSocketAdapter.cpp; handles subscribe/unsubscribe/command dispatch.
 #include <fmt/core.h>
 #include <sgrn/common/endian-helper.hpp>
 #include <sgrn/common/event-helper.hpp>
-#include <sgrn/common/json-helper.hpp>
 #include <sgrn/common/path-utils.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/gateway/adapters/websocket/RuntimeSyncProtocol.hpp>
@@ -13,15 +13,14 @@
 #include <sgrn/gateway/core/TelemetryBroker.hpp>
 #include <sgrn/gateway/twin/LeafDictionary.hpp>
 #include <sgrn/utils/encoding.hpp>
+#include <sgrn/utils/json-serialization.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <sgrn/utils/time.hpp>
 #include <optional>
-#include <rapidjson/document.h>
-#include <rapidjson/error/en.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include <algorithm>
 #include <limits>
@@ -37,6 +36,68 @@ using sgrn::gateway::core::TelemetryEvent;
 using sgrn::scl::PlcSchemaStore;
 namespace sgrn::gateway::adapters::websocket
 {
+
+namespace
+{
+
+namespace runtime_sync_json = ::sgrn::gateway::adapters::websocket::runtime_sync::json;
+
+// Shared validation/decode/write mechanics for DB and discrete-area records.
+// Authorization and the final memory write remain caller-provided because DB
+// writes authorize a concrete DB number while area writes authorize no DB.
+template <class UpdateRange, class RecordParser, class AddressGetter, class Authorize, class Write>
+std::optional<std::string> applyRuntimeSyncWrites(const UpdateRange& t_updates, RecordParser&& t_parse_record,
+    std::string_view t_invalid_record, std::string_view t_invalid_range, std::string_view t_short_payload, AddressGetter&& t_get_address,
+    Authorize&& t_authorize, Write&& t_write) {
+    for (const auto& raw_update : t_updates) {
+        // Convert one record at a time so validation and writes retain the
+        // original sequential/partial-application behavior without a second
+        // JSON parse or an intermediate batch allocation.
+        auto parsed_update = t_parse_record(raw_update);
+        if (!parsed_update)
+            return std::string(t_invalid_record);
+        const auto& update = *parsed_update;
+        const auto address = t_get_address(update);
+        if (!address || !update.offset || !update.size || !update.data || *address > std::numeric_limits<uint16_t>::max())
+            return std::string(t_invalid_record);
+
+        const uint64_t offset = *update.offset;
+        const uint64_t size = *update.size;
+        if (offset > std::numeric_limits<size_t>::max() || size == 0 || size > std::numeric_limits<size_t>::max())
+            return std::string(t_invalid_range);
+
+        const uint16_t target = static_cast<uint16_t>(*address);
+        if (auto error = t_authorize(target); error.has_value())
+            return *error;
+
+        auto payload = sgrn::utils::encoding::fromBase64(*update.data);
+        if (payload.size() < size)
+            return std::string(t_short_payload);
+        payload.resize(static_cast<size_t>(size));
+
+        if (auto result = t_write(target, static_cast<size_t>(offset), payload.size(), payload.data()); result.hasError())
+            return result.error();
+    }
+    return std::nullopt;
+}
+
+std::string serializeWriteAck(const std::optional<uint64_t>& t_sequence, bool t_ok, const std::string& t_error) {
+    runtime_sync_json::WriteAck ack;
+    ack.type = "write_ack";
+    ack.sequence = t_sequence;
+    ack.ok = t_ok;
+    if (!t_ok && !t_error.empty())
+        ack.error = t_error;
+
+    auto serialized = sgrn::json::writeOmitNull(ack);
+    if (!serialized.hasError())
+        return serialized.value();
+
+    SGRN_WARN_LOG("Could not serialize RuntimeSync write acknowledgement: {}", serialized.error().message);
+    return R"({"type":"write_ack","ok":false,"error":"ack serialization failed"})";
+}
+
+} // namespace
 
 /**
  * @brief Handles incoming WebSocket messages from clients.
@@ -77,28 +138,27 @@ void WebSocketAdapter::handleClientMessage(crow::websocket::connection& t_conn, 
     // MED-5: Reject oversized messages before parsing to prevent memory exhaustion.
     constexpr size_t kMaxMessageBytes = 4096;
     RETURN_IF(t_message.size() > kMaxMessageBytes, ;);
-    rapidjson::Document doc;
-    doc.Parse(t_message.c_str());
-    RETURN_IF(doc.HasParseError() || !doc.IsObject(), ;);
+    sgrn::json::dom::Document doc;
+    doc.parse(t_message.c_str());
+    RETURN_IF(doc.hasParseError() || !doc.is_object(), ;);
 
-    auto resolveDbRef = [&](const rapidjson::Value& t_db_value) -> std::optional<uint16_t> {
-        RETURN_IF(t_db_value.IsUint(), static_cast<uint16_t>(t_db_value.GetUint()));
+    auto resolveDbRef = [&](const sgrn::json::dom::Value& t_db_value) -> std::optional<uint16_t> {
+        RETURN_IF(t_db_value.isUint(), static_cast<uint16_t>(t_db_value.getUint()));
 
-        RETURN_IF(t_db_value.IsUint64() && t_db_value.GetUint64() <= std::numeric_limits<uint16_t>::max(),
-            static_cast<uint16_t>(t_db_value.GetUint64()));
+        RETURN_IF(t_db_value.isUint64() && t_db_value.getUint64() <= std::numeric_limits<uint16_t>::max(),
+            static_cast<uint16_t>(t_db_value.getUint64()));
 
-        RETURN_IF(t_db_value.IsString() && registry_, registry_->resolveDbRef(t_db_value.GetString()));
+        RETURN_IF(t_db_value.is_string() && registry_, registry_->resolveDbRef(t_db_value.getString()));
 
         return std::nullopt;
     };
 
-    if (doc.HasMember("command") && doc["command"].IsString()) {
-        std::string cmd = doc["command"].GetString();
-        if (cmd == "write" && doc.HasMember("updates") && doc["updates"].IsArray()) {
-            // JSON is the inspectable equivalent of the binary RuntimeSync
-            // frame. It is intentionally raw-byte based so typed clients can
-            // use the schema they already negotiated instead of losing PLC
-            // endianness or padding information in JSON conversion.
+    if (doc.hasMember("command") && doc["command"].is_string()) {
+        std::string cmd = doc["command"].getString();
+        if (cmd == "write" && doc.hasMember("updates") && doc["updates"].is_array()) {
+            // JSON writes share their reflected DTO with GatewaySync. Reuse the
+            // already-parsed Glaze JSON DOM records and adapt them one at a time, so
+            // there is no second parse or intermediate batch allocation.
             bool ok = binary_write_fn_ != nullptr;
             std::string error;
             std::string ip;
@@ -117,71 +177,50 @@ void WebSocketAdapter::handleClientMessage(crow::websocket::connection& t_conn, 
                 }
             }
 
+            std::optional<uint64_t> sequence;
+            if (doc.hasMember("sequence") && doc["sequence"].isUint64())
+                sequence = doc["sequence"].getUint64();
+
             if (ok) {
-                for (const auto& item : doc["updates"].GetArray()) {
-                    if (!item.IsObject() || !item.HasMember("db") || !item["db"].IsUint() || item["db"].GetUint() > 65535 ||
-                        !item.HasMember("offset") || !item["offset"].IsUint64() || !item.HasMember("size") || !item["size"].IsUint64() ||
-                        !item.HasMember("data") || !item["data"].IsString()) {
-                        ok = false;
-                        error = "invalid RuntimeSync write record";
-                        break;
-                    }
-                    const uint16_t db = static_cast<uint16_t>(item["db"].GetUint());
-                    const uint64_t offset = item["offset"].GetUint64();
-                    const uint64_t size = item["size"].GetUint64();
-                    if (offset > std::numeric_limits<size_t>::max() || size == 0 || size > std::numeric_limits<size_t>::max()) {
-                        ok = false;
-                        error = "RuntimeSync write range is invalid";
-                        break;
-                    }
-                    if (security_manager_) {
-                        auto auth =
-                            SecurityHelper::authorizeWrite(*security_manager_, security::Protocol::WebSocket, ip, db, "", origin, headers);
-                        if (auth.hasError()) {
-                            ok = false;
-                            error = auth.error();
-                            break;
-                        }
-                    }
-                    auto payload = sgrn::utils::encoding::fromBase64(item["data"].GetString());
-                    if (payload.size() < size) {
-                        ok = false;
-                        error = "RuntimeSync write payload is shorter than size";
-                        break;
-                    }
-                    payload.resize(static_cast<size_t>(size));
-                    if (auto result = binary_write_fn_(db, static_cast<size_t>(offset), payload.size(), payload.data());
-                        result.hasError()) {
-                        ok = false;
-                        error = result.error();
-                        break;
-                    }
+                if (auto write_error = applyRuntimeSyncWrites(
+                        doc["updates"].elements(),
+                        [](const sgrn::json::dom::Value& item) -> std::optional<runtime_sync_json::DbWriteRecord> {
+                            if (!item.is_object() || !item.hasMember("db") || !item["db"].isUint() || item["db"].getUint() > 65535 ||
+                                !item.hasMember("offset") || !item["offset"].isUint64() || !item.hasMember("size") ||
+                                !item["size"].isUint64() || !item.hasMember("data") || !item["data"].is_string())
+                                return std::nullopt;
+                            runtime_sync_json::DbWriteRecord record;
+                            record.db = item["db"].getUint();
+                            record.offset = item["offset"].getUint64();
+                            record.size = item["size"].getUint64();
+                            record.data = item["data"].getString();
+                            return record;
+                        },
+                        "invalid RuntimeSync write record", "RuntimeSync write range is invalid",
+                        "RuntimeSync write payload is shorter than size",
+                        [](const runtime_sync_json::DbWriteRecord& item) { return item.db; },
+                        [&](uint16_t db) -> std::optional<std::string> {
+                            if (!security_manager_)
+                                return std::nullopt;
+                            auto auth = SecurityHelper::authorizeWrite(
+                                *security_manager_, security::Protocol::WebSocket, ip, db, "", origin, headers);
+                            if (auth.hasError())
+                                return auth.error();
+                            return std::nullopt;
+                        },
+                        [&](uint16_t db, size_t offset, size_t size, const uint8_t* data) {
+                            return binary_write_fn_(db, offset, size, data);
+                        });
+                    write_error.has_value()) {
+                    ok = false;
+                    error = std::move(*write_error);
                 }
             }
 
-            rapidjson::StringBuffer ack_buffer;
-            rapidjson::Writer<rapidjson::StringBuffer> ack_writer(ack_buffer);
-            ack_writer.StartObject();
-            ack_writer.Key("type");
-            ack_writer.String("write_ack");
-            if (doc.HasMember("sequence") && doc["sequence"].IsUint64()) {
-                ack_writer.Key("sequence");
-                ack_writer.Uint64(doc["sequence"].GetUint64());
-            }
-            ack_writer.Key("ok");
-            ack_writer.Bool(ok);
-            if (!ok && !error.empty()) {
-                ack_writer.Key("error");
-                ack_writer.String(error.c_str());
-            }
-            ack_writer.EndObject();
-            sendText(t_conn, ack_buffer.GetString());
-        } else if (cmd == "write_area" && doc.HasMember("updates") && doc["updates"].IsArray()) {
-            // Discrete-area twin writes (TIA-style tags: PE/PA/MK arenas).
-            // Same shape as "write" but addressed by S7 area code instead of
-            // DB number: {"area":129,"offset":0,"size":1,"data":"base64url"}.
-            // Unknown to older servers (silently ignored, no ack); servers
-            // without an area hook NACK with a clear error.
+            sendText(t_conn, serializeWriteAck(sequence, ok, error));
+        } else if (cmd == "write_area" && doc.hasMember("updates") && doc["updates"].is_array()) {
+            // Area writes share record validation and base64 handling with DB
+            // writes, but intentionally keep the no-DB authorization context.
             AreaWriteFn area_write_fn;
             {
                 std::lock_guard<std::mutex> lk(area_write_mutex_);
@@ -205,66 +244,49 @@ void WebSocketAdapter::handleClientMessage(crow::websocket::connection& t_conn, 
                 }
             }
 
+            std::optional<uint64_t> sequence;
+            if (doc.hasMember("sequence") && doc["sequence"].isUint64())
+                sequence = doc["sequence"].getUint64();
+
             if (area_ok) {
-                for (const auto& item : doc["updates"].GetArray()) {
-                    if (!item.IsObject() || !item.HasMember("area") || !item["area"].IsUint() || item["area"].GetUint() > 65535 ||
-                        !item.HasMember("offset") || !item["offset"].IsUint64() || !item.HasMember("size") || !item["size"].IsUint64() ||
-                        !item.HasMember("data") || !item["data"].IsString()) {
-                        area_ok = false;
-                        area_error = "invalid RuntimeSync area write record";
-                        break;
-                    }
-                    const uint16_t area = static_cast<uint16_t>(item["area"].GetUint());
-                    const uint64_t offset = item["offset"].GetUint64();
-                    const uint64_t size = item["size"].GetUint64();
-                    if (offset > std::numeric_limits<size_t>::max() || size == 0 || size > std::numeric_limits<size_t>::max()) {
-                        area_ok = false;
-                        area_error = "RuntimeSync area write range is invalid";
-                        break;
-                    }
-                    if (security_manager_) {
-                        auto auth = SecurityHelper::authorizeWrite(
-                            *security_manager_, security::Protocol::WebSocket, ip, std::nullopt, "", origin, headers);
-                        if (auth.hasError()) {
-                            area_ok = false;
-                            area_error = auth.error();
-                            break;
-                        }
-                    }
-                    auto payload = sgrn::utils::encoding::fromBase64(item["data"].GetString());
-                    if (payload.size() < size) {
-                        area_ok = false;
-                        area_error = "RuntimeSync area write payload is shorter than size";
-                        break;
-                    }
-                    payload.resize(static_cast<size_t>(size));
-                    if (auto result = area_write_fn(area, static_cast<size_t>(offset), payload.size(), payload.data()); result.hasError()) {
-                        area_ok = false;
-                        area_error = result.error();
-                        break;
-                    }
+                if (auto write_error = applyRuntimeSyncWrites(
+                        doc["updates"].elements(),
+                        [](const sgrn::json::dom::Value& item) -> std::optional<runtime_sync_json::AreaWriteRecord> {
+                            if (!item.is_object() || !item.hasMember("area") || !item["area"].isUint() || item["area"].getUint() > 65535 ||
+                                !item.hasMember("offset") || !item["offset"].isUint64() || !item.hasMember("size") ||
+                                !item["size"].isUint64() || !item.hasMember("data") || !item["data"].is_string())
+                                return std::nullopt;
+                            runtime_sync_json::AreaWriteRecord record;
+                            record.area = item["area"].getUint();
+                            record.offset = item["offset"].getUint64();
+                            record.size = item["size"].getUint64();
+                            record.data = item["data"].getString();
+                            return record;
+                        },
+                        "invalid RuntimeSync area write record", "RuntimeSync area write range is invalid",
+                        "RuntimeSync area write payload is shorter than size",
+                        [](const runtime_sync_json::AreaWriteRecord& item) { return item.area; },
+                        [&](uint16_t) -> std::optional<std::string> {
+                            if (!security_manager_)
+                                return std::nullopt;
+                            auto auth = SecurityHelper::authorizeWrite(
+                                *security_manager_, security::Protocol::WebSocket, ip, std::nullopt, "", origin, headers);
+                            if (auth.hasError())
+                                return auth.error();
+                            return std::nullopt;
+                        },
+                        [&](uint16_t area, size_t offset, size_t size, const uint8_t* data) {
+                            return area_write_fn(area, offset, size, data);
+                        });
+                    write_error.has_value()) {
+                    area_ok = false;
+                    area_error = std::move(*write_error);
                 }
             }
 
-            rapidjson::StringBuffer area_ack_buffer;
-            rapidjson::Writer<rapidjson::StringBuffer> area_ack_writer(area_ack_buffer);
-            area_ack_writer.StartObject();
-            area_ack_writer.Key("type");
-            area_ack_writer.String("write_ack");
-            if (doc.HasMember("sequence") && doc["sequence"].IsUint64()) {
-                area_ack_writer.Key("sequence");
-                area_ack_writer.Uint64(doc["sequence"].GetUint64());
-            }
-            area_ack_writer.Key("ok");
-            area_ack_writer.Bool(area_ok);
-            if (!area_ok && !area_error.empty()) {
-                area_ack_writer.Key("error");
-                area_ack_writer.String(area_error.c_str());
-            }
-            area_ack_writer.EndObject();
-            sendText(t_conn, area_ack_buffer.GetString());
-        } else if (cmd == "subscribe" && doc.HasMember("path") && doc["path"].IsString()) {
-            std::string path = doc["path"].GetString();
+            sendText(t_conn, serializeWriteAck(sequence, area_ok, area_error));
+        } else if (cmd == "subscribe" && doc.hasMember("path") && doc["path"].is_string()) {
+            std::string path = doc["path"].getString();
             // Catch-up target: subscriptions resolved below; the current
             // values are pushed after the lock is released.
             crow::websocket::connection* catchup_conn = nullptr;
@@ -305,7 +327,7 @@ void WebSocketAdapter::handleClientMessage(crow::websocket::connection& t_conn, 
             }
             if (catchup_conn)
                 sendCatchUp(*catchup_conn, catchup_ranges);
-        } else if (cmd == "subscribe_binary" && doc.HasMember("db")) {
+        } else if (cmd == "subscribe_binary" && doc.hasMember("db")) {
             if (!registry_) {
                 SGRN_WARN_LOG("WebSocket binary subscribe rejected: registry not available");
                 return;
@@ -318,12 +340,12 @@ void WebSocketAdapter::handleClientMessage(crow::websocket::connection& t_conn, 
             }
 
             size_t offset = 0;
-            if (doc.HasMember("offset")) {
-                if (!doc["offset"].IsUint64()) {
+            if (doc.hasMember("offset")) {
+                if (!doc["offset"].isUint64()) {
                     SGRN_WARN_LOG("WebSocket binary subscribe from DB{} rejected: invalid offset", *db_num);
                     return;
                 }
-                auto offset_raw = doc["offset"].GetUint64();
+                auto offset_raw = doc["offset"].getUint64();
                 if (offset_raw > std::numeric_limits<size_t>::max()) {
                     SGRN_WARN_LOG("WebSocket binary subscribe from DB{} rejected: offset out of range", *db_num);
                     return;
@@ -332,12 +354,12 @@ void WebSocketAdapter::handleClientMessage(crow::websocket::connection& t_conn, 
             }
 
             std::optional<size_t> size_opt;
-            if (doc.HasMember("size")) {
-                if (!doc["size"].IsUint64()) {
+            if (doc.hasMember("size")) {
+                if (!doc["size"].isUint64()) {
                     SGRN_WARN_LOG("WebSocket binary subscribe from DB{} rejected: invalid size", *db_num);
                     return;
                 }
-                auto size_raw = doc["size"].GetUint64();
+                auto size_raw = doc["size"].getUint64();
                 if (size_raw > std::numeric_limits<size_t>::max()) {
                     SGRN_WARN_LOG("WebSocket binary subscribe from DB{} rejected: size out of range", *db_num);
                     return;
@@ -398,15 +420,15 @@ void WebSocketAdapter::handleClientMessage(crow::websocket::connection& t_conn, 
             if (!sendBinaryFrame(&t_conn, *db_num, offset, size, timestamp_seconds)) {
                 SGRN_WARN_LOG("WebSocket binary seed for DB{} offset {} size {} failed", *db_num, offset, size);
             }
-        } else if (cmd == "unsubscribe" && doc.HasMember("path") && doc["path"].IsString()) {
-            std::string path = doc["path"].GetString();
+        } else if (cmd == "unsubscribe" && doc.hasMember("path") && doc["path"].is_string()) {
+            std::string path = doc["path"].getString();
             std::lock_guard<std::mutex> lk(clients_mutex_);
             auto it = clients_.find(&t_conn);
             if (it != clients_.end()) {
                 it->second.subscriptions.erase(path);
                 resolveLeafRanges(it->second);
             }
-        } else if (cmd == "unsubscribe_binary" && doc.HasMember("db")) {
+        } else if (cmd == "unsubscribe_binary" && doc.hasMember("db")) {
             if (!registry_) {
                 SGRN_WARN_LOG("WebSocket binary unsubscribe rejected: registry not available");
                 return;
@@ -423,16 +445,16 @@ void WebSocketAdapter::handleClientMessage(crow::websocket::connection& t_conn, 
             if (it == clients_.end())
                 return;
 
-            const bool has_offset = doc.HasMember("offset");
-            const bool has_size = doc.HasMember("size");
+            const bool has_offset = doc.hasMember("offset");
+            const bool has_size = doc.hasMember("size");
             if (!has_offset && !has_size) {
                 auto& subs = it->second.binary_subscriptions;
                 subs.erase(std::remove_if(
                                subs.begin(), subs.end(), [&](const ClientContext::BinarySubscription& sub) { return sub.db == *db_num; }),
                     subs.end());
-            } else if (has_offset && has_size && doc["offset"].IsUint64() && doc["size"].IsUint64()) {
-                auto offset_raw = doc["offset"].GetUint64();
-                auto size_raw = doc["size"].GetUint64();
+            } else if (has_offset && has_size && doc["offset"].isUint64() && doc["size"].isUint64()) {
+                auto offset_raw = doc["offset"].getUint64();
+                auto size_raw = doc["size"].getUint64();
                 if (offset_raw > std::numeric_limits<size_t>::max() || size_raw > std::numeric_limits<size_t>::max()) {
                     SGRN_WARN_LOG("WebSocket binary unsubscribe from DB{} rejected: range out of range", *db_num);
                     return;
@@ -457,7 +479,7 @@ void WebSocketAdapter::handleClientMessage(crow::websocket::connection& t_conn, 
                 it->second.binary_subscriptions.clear();
             }
         } else if (cmd == "setDictionaryMode") {
-            const bool enabled = doc.HasMember("enabled") && doc["enabled"].IsBool() && doc["enabled"].GetBool();
+            const bool enabled = doc.hasMember("enabled") && doc["enabled"].is_boolean() && doc["enabled"].getBool();
             crow::websocket::connection* catchup_conn = nullptr;
             std::vector<ClientContext::LeafRange> catchup_ranges;
             {

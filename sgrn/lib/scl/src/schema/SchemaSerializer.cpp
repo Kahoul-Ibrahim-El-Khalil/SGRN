@@ -2,18 +2,15 @@
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/scl/schema/SchemaSerializer.hpp>
 #include <sgrn/scl/utils.hpp>
+#include <sgrn/utils/glaze.hpp>
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <regex>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include <rapidjson/prettywriter.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 
 namespace sgrn::scl
 {
@@ -54,487 +51,6 @@ static void resolveUdtInField(DbField& t_field, const PlcSchemaStore& t_registry
     }
 }
 
-// --- RapidJSON Serialization Templates ---
-
-template <typename Writer>
-static void serializeDbField(Writer& t_writer, const DbField& t_field) {
-    t_writer.StartObject();
-    t_writer.Key("name");
-    t_writer.String(t_field.name.c_str());
-    t_writer.Key("offset");
-    t_writer.Int(t_field.offset);
-    t_writer.Key("bit");
-    t_writer.Int(t_field.bit_index);
-    t_writer.Key("type");
-    t_writer.String(s7codec::s7TypeToString(t_field.type));
-
-    if (t_field.type == DataType::String || t_field.type == DataType::WString || t_field.type == DataType::XString ||
-        t_field.type == DataType::XWString) {
-        // After the offset-tracker fix:
-        //   scalar string:  count=1,  string_capacity=chars, struct_size=byte_span
-        //   string array:   count=N,  string_capacity=chars, struct_size=per-elem-byte_span
-        // Use count>1 as the array discriminator; always emit string_capacity as 'capacity'.
-        const bool t_is_str_array = (t_field.count > 1);
-        t_writer.Key("count");
-        t_writer.Int(t_field.count);
-        t_writer.Key("capacity");
-        // Prefer string_capacity; fall back to deriving from struct_size if absent.
-        if (t_field.string_capacity > 0) {
-            t_writer.Int(t_field.string_capacity);
-        } else if (t_field.struct_size > 0) {
-            // Reverse-engineer char capacity from byte span.
-            int hdr = (t_field.type == DataType::String) ? 2 : (t_field.type == DataType::WString) ? 4 : 8; // XString / XWString
-            int wscale = (t_field.type == DataType::WString || t_field.type == DataType::XWString) ? 2 : 1;
-            t_writer.Int((t_field.struct_size - hdr) / wscale);
-        } else {
-            t_writer.Int(t_field.count); // legacy fallback
-        }
-        (void)t_is_str_array; // used for documentation only
-    } else {
-        t_writer.Key("count");
-        t_writer.Int(t_field.count);
-    }
-    if (!t_field.udt_name.empty()) {
-        t_writer.Key("udt_name");
-        t_writer.String(t_field.udt_name.c_str());
-    }
-    if (!t_field.children.empty()) {
-        t_writer.Key("children");
-        t_writer.StartArray();
-        for (const auto& child : t_field.children)
-            serializeDbField(t_writer, child);
-        t_writer.EndArray();
-    }
-    if (t_field.struct_size > 0) {
-        t_writer.Key("struct_size");
-        t_writer.Int(t_field.struct_size);
-    }
-    if (t_field.unit.has_value()) {
-        t_writer.Key("unit");
-        t_writer.String(t_field.unit.value().c_str());
-    }
-    if (t_field.dimension.has_value()) {
-        t_writer.Key("dimension");
-        t_writer.String(t_field.dimension.value().c_str());
-    }
-    if (t_field.description.has_value()) {
-        t_writer.Key("description");
-        t_writer.String(t_field.description.value().c_str());
-    }
-    if (t_field.precision.has_value()) {
-        t_writer.Key("precision");
-        t_writer.Int(t_field.precision.value());
-    }
-    if (t_field.nominal.has_value()) {
-        t_writer.Key("nominal");
-        t_writer.Double(t_field.nominal.value());
-    }
-    if (t_field.alarm_lo.has_value() && t_field.alarm_hi.has_value()) {
-        t_writer.Key("alarm_lo");
-        t_writer.Double(t_field.alarm_lo.value());
-        t_writer.Key("alarm_hi");
-        t_writer.Double(t_field.alarm_hi.value());
-    }
-    if (t_field.is_label) {
-        t_writer.Key("is_label");
-        t_writer.Bool(true);
-    }
-    if (t_field.is_transient) {
-        t_writer.Key("is_transient");
-        t_writer.Bool(true);
-    }
-    if (t_field.is_read_only) {
-        t_writer.Key("is_read_only");
-        t_writer.Bool(true);
-    }
-    if (t_field.min_val.has_value()) {
-        t_writer.Key("min");
-        t_writer.Double(t_field.min_val.value());
-    }
-    if (t_field.max_val.has_value()) {
-        t_writer.Key("max");
-        t_writer.Double(t_field.max_val.value());
-    }
-    if (!t_field.enum_map.empty()) {
-        t_writer.Key("enum");
-        t_writer.StartObject();
-        for (const auto& [k, v] : t_field.enum_map) {
-            t_writer.Key(std::to_string(k).c_str());
-            t_writer.String(v.c_str());
-        }
-        t_writer.EndObject();
-    }
-    if (t_field.endianness != s7codec::Endian::Little) {
-        t_writer.Key("endianness");
-        t_writer.String(t_field.endianness == s7codec::Endian::Little ? "little" : "big");
-    }
-    if (t_field.trigger_events) {
-        t_writer.Key("trigger_events");
-        t_writer.Bool(true);
-    }
-    if (t_field.is_dynamic) {
-        t_writer.Key("is_dynamic");
-        t_writer.Bool(true);
-    }
-    t_writer.EndObject();
-}
-
-template <typename Writer>
-static void serializeUdtDefinition(Writer& t_writer, const UdtDefinition& t_udt) {
-    t_writer.StartObject();
-    t_writer.Key("udt_number");
-    t_writer.Int(t_udt.udt_number);
-    t_writer.Key("name");
-    t_writer.String(t_udt.name.c_str());
-    t_writer.Key("size_bytes");
-    t_writer.Int(t_udt.size_bytes);
-    t_writer.Key("fields");
-    t_writer.StartArray();
-    for (const auto& t_field : t_udt.fields)
-        serializeDbField(t_writer, t_field);
-    t_writer.EndArray();
-    if (t_udt.endianness != s7codec::Endian::Little) {
-        t_writer.Key("endianness");
-        t_writer.String(t_udt.endianness == s7codec::Endian::Little ? "little" : "big");
-    }
-    if (t_udt.trigger_events) {
-        t_writer.Key("trigger_events");
-        t_writer.Bool(true);
-    }
-    if (t_udt.is_scalar_alias) {
-        t_writer.Key("is_scalar_alias");
-        t_writer.Bool(true);
-        t_writer.Key("scalar_type");
-        t_writer.String(s7codec::s7TypeToString(t_udt.scalar_type));
-    }
-    if (!t_udt.enum_map.empty()) {
-        t_writer.Key("enum");
-        t_writer.StartObject();
-        for (const auto& [key, value] : t_udt.enum_map) {
-            t_writer.Key(std::to_string(key).c_str());
-            t_writer.String(value.c_str());
-        }
-        t_writer.EndObject();
-    }
-    if (t_udt.unit.has_value()) {
-        t_writer.Key("unit");
-        t_writer.String(t_udt.unit.value().c_str());
-    }
-    if (t_udt.dimension.has_value()) {
-        t_writer.Key("dimension");
-        t_writer.String(t_udt.dimension.value().c_str());
-    }
-    if (t_udt.description.has_value()) {
-        t_writer.Key("description");
-        t_writer.String(t_udt.description.value().c_str());
-    }
-    if (t_udt.precision.has_value()) {
-        t_writer.Key("precision");
-        t_writer.Int(t_udt.precision.value());
-    }
-    if (t_udt.nominal.has_value()) {
-        t_writer.Key("nominal");
-        t_writer.Double(t_udt.nominal.value());
-    }
-    if (t_udt.alarm_lo.has_value() && t_udt.alarm_hi.has_value()) {
-        t_writer.Key("alarm_lo");
-        t_writer.Double(t_udt.alarm_lo.value());
-        t_writer.Key("alarm_hi");
-        t_writer.Double(t_udt.alarm_hi.value());
-    }
-    if (t_udt.min_val.has_value()) {
-        t_writer.Key("min");
-        t_writer.Double(t_udt.min_val.value());
-    }
-    if (t_udt.max_val.has_value()) {
-        t_writer.Key("max");
-        t_writer.Double(t_udt.max_val.value());
-    }
-    t_writer.EndObject();
-}
-
-template <typename Writer>
-static void serializeDbSchema(Writer& t_writer, const DbSchema& t_db, bool t_headers_only) {
-    t_writer.StartObject();
-    t_writer.Key("number");
-    t_writer.Int(t_db.db_number);
-    t_writer.Key("name");
-    t_writer.String(t_db.db_name.c_str());
-    t_writer.Key("size_bytes");
-    t_writer.Int(t_db.size_bytes);
-    if (!t_db.source_file.empty()) {
-        t_writer.Key("source_file");
-        t_writer.String(t_db.source_file.c_str());
-    }
-    if (t_db.endianness != s7codec::Endian::Little) {
-        t_writer.Key("endianness");
-        t_writer.String(t_db.endianness == s7codec::Endian::Little ? "little" : "big");
-    }
-    if (t_db.trigger_events) {
-        t_writer.Key("trigger_events");
-        t_writer.Bool(true);
-    }
-    if (t_db.modbus_area != ModbusArea::None) {
-        t_writer.Key("modbus_area");
-        switch (t_db.modbus_area) {
-            case sgrn::scl::ModbusArea::Holding:
-                t_writer.String("holding");
-                break;
-            case sgrn::scl::ModbusArea::Input:
-                t_writer.String("input");
-                break;
-            case sgrn::scl::ModbusArea::Coil:
-                t_writer.String("coil");
-                break;
-            case sgrn::scl::ModbusArea::Discrete:
-                t_writer.String("discrete");
-                break;
-            default:
-                break;
-        }
-    }
-    if (!t_headers_only) {
-        t_writer.Key("fields");
-        t_writer.StartArray();
-        for (const auto& t_field : t_db.fields)
-            serializeDbField(t_writer, t_field);
-        t_writer.EndArray();
-    }
-    t_writer.EndObject();
-}
-
-template <typename Writer>
-static void serializePlcTag(Writer& t_writer, const PlcTag& t_tag) {
-    t_writer.StartObject();
-    t_writer.Key("name");
-    t_writer.String(t_tag.name.c_str());
-    t_writer.Key("table");
-    t_writer.String(t_tag.table_name.c_str());
-    t_writer.Key("type");
-    t_writer.String(t_tag.type_str.c_str());
-    if (!t_tag.remark.empty()) {
-        t_writer.Key("remark");
-        t_writer.String(t_tag.remark.c_str());
-    }
-    t_writer.Key("address");
-    t_writer.String(t_tag.addr.label.c_str());
-    t_writer.EndObject();
-}
-
-template <typename Writer>
-static void doSerialize(Writer& t_writer, const PlcSchemaStore& t_registry, std::optional<uint16_t> t_db_number, bool t_headers_only) {
-    t_writer.StartObject();
-
-    // DBs
-    t_writer.Key("dbs");
-    t_writer.StartArray();
-    int accessible_dbs = 0;
-
-    for (const auto& [num, t_db] : t_registry.dbs()) {
-        if (t_db_number.has_value() && num != *t_db_number)
-            continue;
-
-        serializeDbSchema(t_writer, t_db, t_headers_only);
-
-        accessible_dbs++;
-    }
-    t_writer.EndArray();
-
-    // UDTs and Tags (only if not filtering)
-    if (!t_db_number.has_value()) {
-        t_writer.Key("udts");
-        t_writer.StartArray();
-        for (const UdtDefinition& p_udt : t_registry.udts())
-            serializeUdtDefinition(t_writer, p_udt);
-        t_writer.EndArray();
-
-        t_writer.Key("tags");
-        t_writer.StartArray();
-        for (const auto& [name, t_tag] : t_registry.tags())
-            serializePlcTag(t_writer, t_tag);
-        t_writer.EndArray();
-    }
-
-    // Declared dimension vocabulary (union across compiled files).
-    if (!t_db_number.has_value() && !t_registry.dimensions().empty()) {
-        t_writer.Key("dimensions");
-        t_writer.StartArray();
-        for (const auto& dim : t_registry.dimensions())
-            t_writer.String(dim.c_str());
-        t_writer.EndArray();
-    }
-
-    // Summary
-    t_writer.Key("summary");
-    t_writer.StartObject();
-    t_writer.Key("total_dbs");
-    t_writer.Int(static_cast<int>(t_registry.dbs().size()));
-    t_writer.Key("total_tags");
-    t_writer.Int(static_cast<int>(t_registry.tags().size()));
-    t_writer.Key("accessible_dbs");
-    t_writer.Int(accessible_dbs);
-    t_writer.Key("total_udts");
-    t_writer.Int(static_cast<int>(t_registry.udts().size()));
-    t_writer.Key("warnings");
-    t_writer.Int(static_cast<int>(t_registry.warnings().size()));
-    if (t_db_number.has_value()) {
-        t_writer.Key("filtered_db");
-        t_writer.Int(*t_db_number);
-    }
-    t_writer.EndObject();
-
-    t_writer.EndObject();
-}
-
-} // namespace detail
-
-// --- SchemaSerializer Implementation ---
-
-std::string SchemaSerializer::udtToJson(const UdtDefinition& t_udt) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
-    detail::serializeUdtDefinition(t_writer, t_udt);
-    return sb.GetString();
-}
-
-std::string SchemaSerializer::dbToJson(const DbSchema& t_db) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
-    detail::serializeDbSchema(t_writer, t_db, false);
-    return sb.GetString();
-}
-
-std::string SchemaSerializer::tagToJson(const PlcTag& t_tag) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
-    detail::serializePlcTag(t_writer, t_tag);
-    return sb.GetString();
-}
-
-std::string SchemaSerializer::serialize(
-    const PlcSchemaStore& t_registry, std::optional<uint16_t> t_db_number, bool t_headers_only, bool t_pretty) {
-    rapidjson::StringBuffer sb;
-    if (t_pretty) {
-        rapidjson::PrettyWriter<rapidjson::StringBuffer> t_writer(sb);
-        detail::doSerialize(t_writer, t_registry, t_db_number, t_headers_only);
-    } else {
-        rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
-        detail::doSerialize(t_writer, t_registry, t_db_number, t_headers_only);
-    }
-    return sb.GetString();
-}
-
-// --- Deserialization (rapidjson) ---
-
-static sgrn::Result<DbField, scl::SclError> fieldFromJson(const rapidjson::Value& t_node) {
-    if (!t_node.IsObject())
-        return scl::SclError::Generic;
-
-    DbField t_field;
-    if (!t_node.HasMember("name") || !t_node["name"].IsString())
-        return scl::SclError::Generic;
-    t_field.name = t_node["name"].GetString();
-
-    if (t_node.HasMember("offset"))
-        t_field.offset = t_node["offset"].GetInt();
-    if (t_node.HasMember("bit"))
-        t_field.bit_index = t_node["bit"].GetInt();
-    else if (t_node.HasMember("bit_index"))
-        t_field.bit_index = t_node["bit_index"].GetInt();
-    if (t_node.HasMember("count"))
-        t_field.count = t_node["count"].GetInt();
-    if (t_node.HasMember("udt_name") && t_node["udt_name"].IsString())
-        t_field.udt_name = t_node["udt_name"].GetString();
-    if (t_node.HasMember("struct_size"))
-        t_field.struct_size = t_node["struct_size"].GetInt();
-    if (t_node.HasMember("unit") && t_node["unit"].IsString())
-        t_field.unit = t_node["unit"].GetString();
-    if (t_node.HasMember("dimension") && t_node["dimension"].IsString())
-        t_field.dimension = t_node["dimension"].GetString();
-    if (t_node.HasMember("description") && t_node["description"].IsString())
-        t_field.description = t_node["description"].GetString();
-    if (t_node.HasMember("precision") && t_node["precision"].IsInt())
-        t_field.precision = t_node["precision"].GetInt();
-    if (t_node.HasMember("nominal") && t_node["nominal"].IsNumber())
-        t_field.nominal = t_node["nominal"].GetDouble();
-    if (t_node.HasMember("alarm_lo") && t_node["alarm_lo"].IsNumber())
-        t_field.alarm_lo = t_node["alarm_lo"].GetDouble();
-    if (t_node.HasMember("alarm_hi") && t_node["alarm_hi"].IsNumber())
-        t_field.alarm_hi = t_node["alarm_hi"].GetDouble();
-    if (t_node.HasMember("is_label") && t_node["is_label"].IsBool())
-        t_field.is_label = t_node["is_label"].GetBool();
-    if (t_node.HasMember("is_transient") && t_node["is_transient"].IsBool())
-        t_field.is_transient = t_node["is_transient"].GetBool();
-    if (t_node.HasMember("is_read_only") && t_node["is_read_only"].IsBool())
-        t_field.is_read_only = t_node["is_read_only"].GetBool();
-    if (t_node.HasMember("min") && t_node["min"].IsNumber())
-        t_field.min_val = t_node["min"].GetDouble();
-    if (t_node.HasMember("max") && t_node["max"].IsNumber())
-        t_field.max_val = t_node["max"].GetDouble();
-    if (t_node.HasMember("enum") && t_node["enum"].IsObject()) {
-        for (auto it = t_node["enum"].MemberBegin(); it != t_node["enum"].MemberEnd(); ++it) {
-            try {
-                int key = std::stoi(it->name.GetString());
-                if (it->value.IsString()) {
-                    t_field.enum_map[key] = it->value.GetString();
-                }
-            } catch (...) {
-            }
-        }
-    }
-    if (t_node.HasMember("endianness") && t_node["endianness"].IsString()) {
-        std::string e = t_node["endianness"].GetString();
-        t_field.endianness = (e == "little" || e == "LITTLE") ? s7codec::Endian::Little : s7codec::Endian::Little;
-    }
-    if (t_node.HasMember("trigger_events") && t_node["trigger_events"].IsBool()) {
-        t_field.trigger_events = t_node["trigger_events"].GetBool();
-    }
-    if (t_node.HasMember("is_dynamic") && t_node["is_dynamic"].IsBool()) {
-        t_field.is_dynamic = t_node["is_dynamic"].GetBool();
-    }
-
-    if (!t_node.HasMember("type") || !t_node["type"].IsString())
-        return scl::SclError::Generic;
-
-    std::optional<DataType> type = parseDataType(t_node["type"].GetString());
-    if (!type.has_value()) {
-        t_field.type = DataType::Struct;
-        t_field.udt_name = t_node["type"].GetString();
-    } else {
-        t_field.type = type.value();
-    }
-
-    // For string types: 'capacity' in JSON is the char capacity (as emitted by serializeDbField).
-    // Restore string_capacity and recompute struct_size (per-element byte span) so that
-    // the deserialized DbField matches what the SCL parser would produce.
-    const bool t_is_json_string = (t_field.type == DataType::String || t_field.type == DataType::WString ||
-                                   t_field.type == DataType::XString || t_field.type == DataType::XWString);
-    if (t_is_json_string && t_node.HasMember("capacity") && t_node["capacity"].IsInt()) {
-        const int char_cap = t_node["capacity"].GetInt();
-        t_field.string_capacity = char_cap;
-        // Ensure count >= 1 (scalar strings serialized with count=1)
-        if (t_field.count < 1)
-            t_field.count = 1;
-        // Recompute the per-element byte span
-        auto span_opt = s7codec::typeSpanBytes(t_field.type, char_cap);
-        t_field.struct_size = span_opt ? *span_opt : 0;
-    }
-
-    if (t_node.HasMember("children")) {
-        if (!t_node["children"].IsArray())
-            return scl::SclError::Generic;
-        for (const auto& child_node : t_node["children"].GetArray()) {
-            sgrn::Result<DbField, scl::SclError> child = fieldFromJson(child_node);
-            if (child.hasError()) {
-                return Error(child.error());
-            }
-            t_field.children.push_back(std::move(child.value()));
-        }
-    }
-
-    return t_field;
-}
-
 static int extractTrailingNumber(const std::string& t_value) {
     std::smatch m;
     static const std::regex kSuffixRe(R"((\d+)\s*$)");
@@ -543,237 +59,657 @@ static int extractTrailingNumber(const std::string& t_value) {
     return 0;
 }
 
-sgrn::Result<UdtDefinition, scl::SclError> SchemaSerializer::udtFromJson(const rapidjson::Value& t_node) {
-    if (!t_node.IsObject())
-        return scl::SclError::Generic;
+} // namespace detail
 
-    UdtDefinition p_udt;
-    if (t_node.HasMember("udt_number"))
-        p_udt.udt_number = t_node["udt_number"].GetInt();
-    if (t_node.HasMember("name") && t_node["name"].IsString())
-        p_udt.name = t_node["name"].GetString();
-    if (t_node.HasMember("size_bytes"))
-        p_udt.size_bytes = t_node["size_bytes"].GetInt();
+// ─────────────────────────────────────────────────────────────────────────────
+// JSON mirror structs
+//
+// The schema JSON layout is a compatibility contract (files on disk, JSONL
+// WALs). Rather than hand-writing JSON key gymnastics, each on-disk shape
+// is mirrored by a Json-suffixed struct (see MbProxyConfigJson) whose member
+// names match the JSON keys, so plain Glaze reflection reads and writes it.
+// sgrn::json::writeOmitNull skips
+// unset optionals, which reproduces the historical rule "only emit non-
+// defaults, never emit nulls"; on read, unset optionals leave the domain
+// struct's defaults in place.
+//
+// Members that exist only as read aliases of a canonical key
+// ("bit_index", "db_number", "db_name") are never set on write.
+//
+// glz::meta is needed only for FieldJson/UdtJson because the "enum" key is not
+// a valid C++ identifier.
+// ─────────────────────────────────────────────────────────────────────────────
 
-    if (t_node.HasMember("fields")) {
-        if (!t_node["fields"].IsArray())
-            return scl::SclError::Generic;
-        for (const auto& field_node : t_node["fields"].GetArray()) {
-            sgrn::Result<DbField, scl::SclError> t_field = fieldFromJson(field_node);
-            if (t_field.hasError()) {
-                return Error(t_field.error());
-            }
-            p_udt.fields.push_back(std::move(t_field.value()));
+namespace detail
+{
+
+struct FieldJson {
+    std::optional<std::string> name;
+    int offset{0};
+    int bit{0};
+    std::optional<int> bit_index; ///< legacy alias of "bit"
+    std::optional<std::string> type;
+    uint32_t count{0};
+    std::optional<uint32_t> capacity; ///< string char capacity (string types only)
+    std::optional<std::string> udt_name;
+    std::optional<std::vector<FieldJson>> children;
+    std::optional<uint32_t> struct_size;
+    std::optional<std::string> unit;
+    std::optional<std::string> dimension;
+    std::optional<std::string> description;
+    std::optional<int> precision;
+    std::optional<double> nominal;
+    std::optional<double> alarm_lo;
+    std::optional<double> alarm_hi;
+    std::optional<bool> is_label;
+    std::optional<bool> is_transient;
+    std::optional<bool> is_read_only;
+    std::optional<double> min;
+    std::optional<double> max;
+    std::optional<std::map<std::string, std::string>> enum_entries; ///< "enum": stringified int keys
+    std::optional<std::string> endianness;
+    std::optional<bool> trigger_events;
+    std::optional<bool> is_dynamic;
+};
+
+struct UdtJson {
+    int udt_number{0};
+    std::string name;
+    int size_bytes{0};
+    std::vector<FieldJson> fields;
+    std::optional<std::string> endianness;
+    std::optional<bool> trigger_events;
+    std::optional<bool> is_scalar_alias;
+    std::optional<std::string> scalar_type;
+    std::optional<std::map<std::string, std::string>> enum_entries;
+    std::optional<std::string> unit;
+    std::optional<std::string> dimension;
+    std::optional<std::string> description;
+    std::optional<int> precision;
+    std::optional<double> nominal;
+    std::optional<double> alarm_lo;
+    std::optional<double> alarm_hi;
+    std::optional<double> min;
+    std::optional<double> max;
+};
+
+struct DbJson {
+    std::optional<int> number;
+    std::optional<int> db_number; ///< legacy alias of "number"
+    std::optional<std::string> name;
+    std::optional<std::string> db_name; ///< legacy alias of "name"
+    int size_bytes{0};
+    std::optional<std::string> source_file;
+    std::optional<std::string> endianness;
+    std::optional<bool> trigger_events;
+    std::optional<std::string> modbus_area;
+    std::optional<std::vector<FieldJson>> fields; ///< unset = headers-only form
+};
+
+struct TagJson {
+    std::optional<std::string> name;
+    std::string table;
+    std::string type;
+    std::optional<std::string> remark;
+    std::optional<std::string> address;
+};
+
+struct SummaryJson {
+    int total_dbs{0};
+    int total_tags{0};
+    int accessible_dbs{0};
+    int total_udts{0};
+    int warnings{0};
+    std::optional<int> filtered_db;
+};
+
+struct RootJson {
+    std::vector<DbJson> dbs;
+    std::optional<std::vector<UdtJson>> udts; ///< only present when not DB-filtered
+    std::optional<std::vector<TagJson>> tags;
+    std::optional<std::vector<std::string>> dimensions;
+    std::optional<std::vector<std::string>> warnings; ///< read side only (parseContent)
+    SummaryJson summary;
+};
+
+} // namespace detail
+
+} // namespace sgrn::scl
+
+// Full meta tables are required only for FieldJson/UdtJson: the "enum" JSON
+// key is not a valid C++ identifier, so plain member-name reflection cannot
+// cover those two wire structs. Everything else is pure reflection.
+namespace glz
+{
+template <>
+struct meta<sgrn::scl::detail::FieldJson> {
+    using T = sgrn::scl::detail::FieldJson;
+    static constexpr auto value = object("name", &T::name, "offset", &T::offset, "bit", &T::bit, "bit_index", &T::bit_index, "type",
+        &T::type, "count", &T::count, "capacity", &T::capacity, "udt_name", &T::udt_name, "children", &T::children, "struct_size",
+        &T::struct_size, "unit", &T::unit, "dimension", &T::dimension, "description", &T::description, "precision", &T::precision,
+        "nominal", &T::nominal, "alarm_lo", &T::alarm_lo, "alarm_hi", &T::alarm_hi, "is_label", &T::is_label, "is_transient",
+        &T::is_transient, "is_read_only", &T::is_read_only, "min", &T::min, "max", &T::max, "enum", &T::enum_entries, "endianness",
+        &T::endianness, "trigger_events", &T::trigger_events, "is_dynamic", &T::is_dynamic);
+};
+
+template <>
+struct meta<sgrn::scl::detail::UdtJson> {
+    using T = sgrn::scl::detail::UdtJson;
+    static constexpr auto value =
+        object("udt_number", &T::udt_number, "name", &T::name, "size_bytes", &T::size_bytes, "fields", &T::fields, "endianness",
+            &T::endianness, "trigger_events", &T::trigger_events, "is_scalar_alias", &T::is_scalar_alias, "scalar_type", &T::scalar_type,
+            "enum", &T::enum_entries, "unit", &T::unit, "dimension", &T::dimension, "description", &T::description, "precision",
+            &T::precision, "nominal", &T::nominal, "alarm_lo", &T::alarm_lo, "alarm_hi", &T::alarm_hi, "min", &T::min, "max", &T::max);
+};
+} // namespace glz
+
+namespace sgrn::scl
+{
+
+namespace detail
+{
+
+static bool isStringType(DataType t_type) {
+    return t_type == DataType::String || t_type == DataType::WString || t_type == DataType::XString || t_type == DataType::XWString;
+}
+
+static std::map<std::string, std::string> enumToJson(const std::map<int, std::string>& t_enum_map) {
+    std::map<std::string, std::string> out;
+    for (const auto& [key, value] : t_enum_map)
+        out.emplace(std::to_string(key), value);
+    return out;
+}
+
+// ── domain → wire ─────────────────────────────────────────────────────────────
+
+static FieldJson fieldToJson(const DbField& t_f) {
+    FieldJson w;
+    w.name = t_f.name;
+    w.offset = t_f.offset;
+    w.bit = t_f.bit_index;
+    w.type = s7codec::s7TypeToString(t_f.type);
+    w.count = t_f.count;
+    if (isStringType(t_f.type)) {
+        // After the offset-tracker fix:
+        //   scalar string:  count=1,  string_capacity=chars, struct_size=byte_span
+        //   string array:   count=N,  string_capacity=chars, struct_size=per-elem-byte_span
+        // Prefer string_capacity; fall back to deriving chars from the byte span,
+        // then to the legacy count fallback.
+        if (t_f.string_capacity > 0) {
+            w.capacity = t_f.string_capacity;
+        } else if (t_f.struct_size > 0) {
+            const int hdr = (t_f.type == DataType::String) ? 2 : (t_f.type == DataType::WString) ? 4 : 8; // XString / XWString
+            const int wscale = (t_f.type == DataType::WString || t_f.type == DataType::XWString) ? 2 : 1;
+            w.capacity = static_cast<uint32_t>((t_f.struct_size - hdr) / wscale);
+        } else {
+            w.capacity = t_f.count;
         }
     }
+    if (!t_f.udt_name.empty())
+        w.udt_name = t_f.udt_name;
+    if (!t_f.children.empty()) {
+        std::vector<FieldJson> children;
+        children.reserve(t_f.children.size());
+        for (const auto& child : t_f.children)
+            children.push_back(fieldToJson(child));
+        w.children = std::move(children);
+    }
+    if (t_f.struct_size > 0)
+        w.struct_size = t_f.struct_size;
+    w.unit = t_f.unit;
+    w.dimension = t_f.dimension;
+    w.description = t_f.description;
+    w.precision = t_f.precision;
+    w.nominal = t_f.nominal;
+    if (t_f.alarm_lo.has_value() && t_f.alarm_hi.has_value()) {
+        w.alarm_lo = t_f.alarm_lo;
+        w.alarm_hi = t_f.alarm_hi;
+    }
+    if (t_f.is_label)
+        w.is_label = true;
+    if (t_f.is_transient)
+        w.is_transient = true;
+    if (t_f.is_read_only)
+        w.is_read_only = true;
+    w.min = t_f.min_val;
+    w.max = t_f.max_val;
+    if (!t_f.enum_map.empty())
+        w.enum_entries = enumToJson(t_f.enum_map);
+    if (t_f.endianness != s7codec::Endian::Little)
+        w.endianness = "big"; // defensive: memory is Little-only, but round-trip old values
+    if (t_f.trigger_events)
+        w.trigger_events = true;
+    if (t_f.is_dynamic)
+        w.is_dynamic = true;
+    return w;
+}
 
-    if (t_node.HasMember("endianness") && t_node["endianness"].IsString()) {
-        std::string e = t_node["endianness"].GetString();
-        p_udt.endianness = (e == "little" || e == "LITTLE") ? s7codec::Endian::Little : s7codec::Endian::Little;
+static UdtJson udtToJson(const UdtDefinition& t_u) {
+    UdtJson w;
+    w.udt_number = t_u.udt_number;
+    w.name = t_u.name;
+    w.size_bytes = t_u.size_bytes;
+    w.fields.reserve(t_u.fields.size());
+    for (const auto& f : t_u.fields)
+        w.fields.push_back(fieldToJson(f));
+    if (t_u.endianness != s7codec::Endian::Little)
+        w.endianness = "big";
+    if (t_u.trigger_events)
+        w.trigger_events = true;
+    if (t_u.is_scalar_alias) {
+        w.is_scalar_alias = true;
+        w.scalar_type = s7codec::s7TypeToString(t_u.scalar_type);
     }
-    if (t_node.HasMember("trigger_events") && t_node["trigger_events"].IsBool()) {
-        p_udt.trigger_events = t_node["trigger_events"].GetBool();
+    if (!t_u.enum_map.empty())
+        w.enum_entries = enumToJson(t_u.enum_map);
+    w.unit = t_u.unit;
+    w.dimension = t_u.dimension;
+    w.description = t_u.description;
+    w.precision = t_u.precision;
+    w.nominal = t_u.nominal;
+    if (t_u.alarm_lo.has_value() && t_u.alarm_hi.has_value()) {
+        w.alarm_lo = t_u.alarm_lo;
+        w.alarm_hi = t_u.alarm_hi;
     }
-    if (t_node.HasMember("is_scalar_alias") && t_node["is_scalar_alias"].IsBool()) {
-        p_udt.is_scalar_alias = t_node["is_scalar_alias"].GetBool();
+    w.min = t_u.min_val;
+    w.max = t_u.max_val;
+    return w;
+}
+
+static DbJson dbToJson(const DbSchema& t_db, bool t_headers_only) {
+    DbJson w;
+    w.number = t_db.db_number;
+    w.name = t_db.db_name;
+    w.size_bytes = t_db.size_bytes;
+    if (!t_db.source_file.empty())
+        w.source_file = t_db.source_file;
+    if (t_db.endianness != s7codec::Endian::Little)
+        w.endianness = "big";
+    if (t_db.trigger_events)
+        w.trigger_events = true;
+    if (t_db.modbus_area != ModbusArea::None) {
+        switch (t_db.modbus_area) {
+            case ModbusArea::Holding:
+                w.modbus_area = "holding";
+                break;
+            case ModbusArea::Input:
+                w.modbus_area = "input";
+                break;
+            case ModbusArea::Coil:
+                w.modbus_area = "coil";
+                break;
+            case ModbusArea::Discrete:
+                w.modbus_area = "discrete";
+                break;
+            default:
+                break;
+        }
     }
-    if (t_node.HasMember("scalar_type") && t_node["scalar_type"].IsString()) {
-        if (auto opt = s7codec::toType(t_node["scalar_type"].GetString()))
-            p_udt.scalar_type = *opt;
+    if (!t_headers_only) {
+        std::vector<FieldJson> fields;
+        fields.reserve(t_db.fields.size());
+        for (const auto& f : t_db.fields)
+            fields.push_back(fieldToJson(f));
+        w.fields = std::move(fields);
     }
-    if (t_node.HasMember("enum") && t_node["enum"].IsObject()) {
-        for (auto it = t_node["enum"].MemberBegin(); it != t_node["enum"].MemberEnd(); ++it) {
+    return w;
+}
+
+static TagJson tagToJson(const PlcTag& t_tag) {
+    TagJson w;
+    w.name = t_tag.name;
+    w.table = t_tag.table_name;
+    w.type = t_tag.type_str;
+    if (!t_tag.remark.empty())
+        w.remark = t_tag.remark;
+    w.address = t_tag.addr.label;
+    return w;
+}
+
+static RootJson rootToJson(const PlcSchemaStore& t_registry, std::optional<uint16_t> t_db_number, bool t_headers_only) {
+    RootJson root;
+    int accessible_dbs = 0;
+    for (const auto& [num, db] : t_registry.dbs()) {
+        if (t_db_number.has_value() && num != *t_db_number)
+            continue;
+        root.dbs.push_back(dbToJson(db, t_headers_only));
+        ++accessible_dbs;
+    }
+    if (!t_db_number.has_value()) {
+        std::vector<UdtJson> udts;
+        udts.reserve(t_registry.udts().size());
+        for (const UdtDefinition& udt : t_registry.udts())
+            udts.push_back(udtToJson(udt));
+        root.udts = std::move(udts);
+
+        std::vector<TagJson> tags;
+        tags.reserve(t_registry.tags().size());
+        for (const auto& [name, tag] : t_registry.tags())
+            tags.push_back(tagToJson(tag));
+        root.tags = std::move(tags);
+
+        if (!t_registry.dimensions().empty())
+            root.dimensions = {t_registry.dimensions().begin(), t_registry.dimensions().end()};
+    }
+    root.summary.total_dbs = static_cast<int>(t_registry.dbs().size());
+    root.summary.total_tags = static_cast<int>(t_registry.tags().size());
+    root.summary.accessible_dbs = accessible_dbs;
+    root.summary.total_udts = static_cast<int>(t_registry.udts().size());
+    root.summary.warnings = static_cast<int>(t_registry.warnings().size());
+    if (t_db_number.has_value())
+        root.summary.filtered_db = static_cast<int>(*t_db_number);
+    return root;
+}
+
+// ── wire → domain ─────────────────────────────────────────────────────────────
+
+static sgrn::Result<DbField, SclError> fieldFromJson(const FieldJson& t_w) {
+    if (!t_w.name.has_value() || !t_w.type.has_value())
+        return SclError::Generic;
+
+    DbField f;
+    f.name = *t_w.name;
+    f.offset = t_w.offset;
+    f.bit_index = static_cast<uint8_t>(t_w.bit != 0 ? t_w.bit : t_w.bit_index.value_or(0));
+    f.count = t_w.count;
+    if (t_w.udt_name)
+        f.udt_name = *t_w.udt_name;
+    if (t_w.struct_size)
+        f.struct_size = *t_w.struct_size;
+    f.unit = t_w.unit;
+    f.dimension = t_w.dimension;
+    f.description = t_w.description;
+    f.precision = t_w.precision;
+    f.nominal = t_w.nominal;
+    f.alarm_lo = t_w.alarm_lo;
+    f.alarm_hi = t_w.alarm_hi;
+    if (t_w.is_label)
+        f.is_label = *t_w.is_label;
+    if (t_w.is_transient)
+        f.is_transient = *t_w.is_transient;
+    if (t_w.is_read_only)
+        f.is_read_only = *t_w.is_read_only;
+    if (t_w.min)
+        f.min_val = *t_w.min;
+    if (t_w.max)
+        f.max_val = *t_w.max;
+    if (t_w.enum_entries) {
+        for (const auto& [key, value] : *t_w.enum_entries) {
             try {
-                const int key = std::stoi(it->name.GetString());
-                if (it->value.IsString())
-                    p_udt.enum_map[key] = it->value.GetString();
+                f.enum_map[std::stoi(key)] = value;
+            } catch (...) {
+                // Non-numeric enum keys are ignored, as before.
+            }
+        }
+    }
+    // Memory endianness is Little-only now (see DbField.hpp); the "endianness"
+    // key is accepted and ignored so old files keep loading.
+    if (t_w.trigger_events)
+        f.trigger_events = *t_w.trigger_events;
+    if (t_w.is_dynamic)
+        f.is_dynamic = *t_w.is_dynamic;
+
+    // "type": a known S7 type name, or an implicit UDT reference.
+    if (auto type = parseDataType(*t_w.type)) {
+        f.type = *type;
+    } else {
+        f.type = DataType::Struct;
+        f.udt_name = *t_w.type;
+    }
+
+    // String fields carry 'capacity' (chars); restore string_capacity and
+    // recompute the per-element byte span so the field matches what the SCL
+    // parser would produce.
+    if (isStringType(f.type) && t_w.capacity.has_value()) {
+        const uint32_t char_cap = *t_w.capacity;
+        f.string_capacity = char_cap;
+        if (f.count < 1)
+            f.count = 1;
+        const auto span = s7codec::typeSpanBytes(f.type, char_cap);
+        f.struct_size = span ? static_cast<uint32_t>(*span) : 0;
+    }
+
+    if (t_w.children) {
+        for (const auto& child : *t_w.children) {
+            auto child_field = fieldFromJson(child);
+            if (child_field.hasError())
+                return Error(child_field.error());
+            f.children.push_back(std::move(child_field.value()));
+        }
+    }
+    return f;
+}
+
+static sgrn::Result<UdtDefinition, SclError> udtFromJson(const UdtJson& t_w) {
+    UdtDefinition u;
+    u.udt_number = static_cast<uint16_t>(t_w.udt_number);
+    u.name = t_w.name;
+    u.size_bytes = t_w.size_bytes;
+    for (const auto& fw : t_w.fields) {
+        auto f = fieldFromJson(fw);
+        if (f.hasError())
+            return Error(f.error());
+        u.fields.push_back(std::move(f.value()));
+    }
+    // Memory endianness is Little-only now; the "endianness" key is ignored.
+    if (t_w.trigger_events)
+        u.trigger_events = *t_w.trigger_events;
+    if (t_w.is_scalar_alias)
+        u.is_scalar_alias = *t_w.is_scalar_alias;
+    if (t_w.scalar_type) {
+        if (auto t = s7codec::toType(t_w.scalar_type->c_str()))
+            u.scalar_type = *t;
+    }
+    if (t_w.enum_entries) {
+        for (const auto& [key, value] : *t_w.enum_entries) {
+            try {
+                u.enum_map[std::stoi(key)] = value;
             } catch (...) {
             }
         }
     }
-    if (t_node.HasMember("unit") && t_node["unit"].IsString())
-        p_udt.unit = t_node["unit"].GetString();
-    if (t_node.HasMember("dimension") && t_node["dimension"].IsString())
-        p_udt.dimension = t_node["dimension"].GetString();
-    if (t_node.HasMember("description") && t_node["description"].IsString())
-        p_udt.description = t_node["description"].GetString();
-    if (t_node.HasMember("precision") && t_node["precision"].IsInt())
-        p_udt.precision = t_node["precision"].GetInt();
-    if (t_node.HasMember("nominal") && t_node["nominal"].IsNumber())
-        p_udt.nominal = t_node["nominal"].GetDouble();
-    if (t_node.HasMember("alarm_lo") && t_node["alarm_lo"].IsNumber())
-        p_udt.alarm_lo = t_node["alarm_lo"].GetDouble();
-    if (t_node.HasMember("alarm_hi") && t_node["alarm_hi"].IsNumber())
-        p_udt.alarm_hi = t_node["alarm_hi"].GetDouble();
-    if (t_node.HasMember("min") && t_node["min"].IsNumber())
-        p_udt.min_val = t_node["min"].GetDouble();
-    if (t_node.HasMember("max") && t_node["max"].IsNumber())
-        p_udt.max_val = t_node["max"].GetDouble();
-
-    return p_udt;
+    u.unit = t_w.unit;
+    u.dimension = t_w.dimension;
+    u.description = t_w.description;
+    u.precision = t_w.precision;
+    u.nominal = t_w.nominal;
+    u.alarm_lo = t_w.alarm_lo;
+    u.alarm_hi = t_w.alarm_hi;
+    if (t_w.min)
+        u.min_val = *t_w.min;
+    if (t_w.max)
+        u.max_val = *t_w.max;
+    return u;
 }
 
-sgrn::Result<DbSchema, scl::SclError> SchemaSerializer::dbFromJson(const rapidjson::Value& t_node) {
-    if (!t_node.IsObject())
-        return scl::SclError::Generic;
-
-    DbSchema t_db;
-    if (t_node.HasMember("number"))
-        t_db.db_number = t_node["number"].GetInt();
-    else if (t_node.HasMember("db_number"))
-        t_db.db_number = t_node["db_number"].GetInt();
-    if (t_node.HasMember("name") && t_node["name"].IsString())
-        t_db.db_name = t_node["name"].GetString();
-    else if (t_node.HasMember("db_name") && t_node["db_name"].IsString())
-        t_db.db_name = t_node["db_name"].GetString();
-    if (t_node.HasMember("size_bytes"))
-        t_db.size_bytes = t_node["size_bytes"].GetInt();
-    if (t_node.HasMember("source_file") && t_node["source_file"].IsString())
-        t_db.source_file = t_node["source_file"].GetString();
-    if (t_node.HasMember("endianness") && t_node["endianness"].IsString()) {
-        std::string e = t_node["endianness"].GetString();
-        t_db.endianness = (e == "little" || e == "LITTLE") ? s7codec::Endian::Little : s7codec::Endian::Little;
+static sgrn::Result<DbSchema, SclError> dbFromJson(const DbJson& t_w) {
+    DbSchema db;
+    if (t_w.number)
+        db.db_number = static_cast<uint16_t>(*t_w.number);
+    else if (t_w.db_number)
+        db.db_number = static_cast<uint16_t>(*t_w.db_number);
+    if (t_w.name)
+        db.db_name = *t_w.name;
+    else if (t_w.db_name)
+        db.db_name = *t_w.db_name;
+    db.size_bytes = t_w.size_bytes;
+    if (t_w.source_file)
+        db.source_file = *t_w.source_file;
+    // Memory endianness is Little-only now; the "endianness" key is ignored.
+    if (t_w.trigger_events)
+        db.trigger_events = *t_w.trigger_events;
+    if (t_w.modbus_area) {
+        const std::string& area = *t_w.modbus_area;
+        if (area == "holding")
+            db.modbus_area = ModbusArea::Holding;
+        else if (area == "input")
+            db.modbus_area = ModbusArea::Input;
+        else if (area == "coil")
+            db.modbus_area = ModbusArea::Coil;
+        else if (area == "discrete")
+            db.modbus_area = ModbusArea::Discrete;
     }
-    if (t_node.HasMember("trigger_events") && t_node["trigger_events"].IsBool()) {
-        t_db.trigger_events = t_node["trigger_events"].GetBool();
+    for (const auto& fw : t_w.fields.value_or({})) {
+        auto f = fieldFromJson(fw);
+        if (f.hasError())
+            return Error(f.error());
+        db.fields.push_back(std::move(f.value()));
     }
-    if (t_node.HasMember("modbus_area") && t_node["modbus_area"].IsString()) {
-        std::string a = t_node["modbus_area"].GetString();
-        if (a == "holding")
-            t_db.modbus_area = sgrn::scl::ModbusArea::Holding;
-        else if (a == "input")
-            t_db.modbus_area = sgrn::scl::ModbusArea::Input;
-        else if (a == "coil")
-            t_db.modbus_area = sgrn::scl::ModbusArea::Coil;
-        else if (a == "discrete")
-            t_db.modbus_area = sgrn::scl::ModbusArea::Discrete;
-    }
-
-    if (t_node.HasMember("fields")) {
-        if (!t_node["fields"].IsArray())
-            return scl::SclError::Generic;
-        for (const auto& field_node : t_node["fields"].GetArray()) {
-            sgrn::Result<DbField, scl::SclError> t_field = fieldFromJson(field_node);
-            if (t_field.hasError()) {
-                return Error(t_field.error());
-            }
-            t_db.fields.push_back(std::move(t_field.value()));
-        }
-    }
-
-    if (t_db.size_bytes == 0) {
+    if (db.size_bytes == 0) {
         int max_end = 0;
-        for (const DbField& t_field : t_db.fields)
-            max_end = std::max(max_end, t_field.offset + detail::fieldSpanBytes(t_field));
-        t_db.size_bytes = max_end;
+        for (const DbField& f : db.fields)
+            max_end = std::max(max_end, f.offset + fieldSpanBytes(f));
+        db.size_bytes = max_end;
     }
-    return t_db;
+    return db;
 }
 
-sgrn::Result<PlcTag, scl::SclError> SchemaSerializer::tagFromJson(const rapidjson::Value& t_node) {
-    if (!t_node.IsObject())
-        return scl::SclError::Generic;
-    PlcTag t_tag;
-    if (!t_node.HasMember("name") || !t_node["name"].IsString())
-        return scl::SclError::Generic;
-    t_tag.name = t_node["name"].GetString();
-    if (t_node.HasMember("table") && t_node["table"].IsString())
-        t_tag.table_name = t_node["table"].GetString();
-    if (t_node.HasMember("type") && t_node["type"].IsString()) {
-        t_tag.type_str = t_node["type"].GetString();
-        // Resolve scalar types now; UDT references (quoted or bare names)
-        // resolve against the schema at load time (see PlcRuntime tags).
-        if (auto t = sgrn::scl::parseS7Type(t_tag.type_str))
-            t_tag.type = *t;
-        else if (!t_tag.type_str.empty())
-            t_tag.udt_name = t_tag.type_str;
-    }
-    if (t_node.HasMember("remark") && t_node["remark"].IsString())
-        t_tag.remark = t_node["remark"].GetString();
-    if (t_node.HasMember("address") && t_node["address"].IsString()) {
-        if (auto addr = parsePlcAddress(t_node["address"].GetString()))
-            t_tag.addr = *addr;
+static sgrn::Result<PlcTag, SclError> tagFromJson(const TagJson& t_w) {
+    if (!t_w.name.has_value())
+        return SclError::Generic;
+    PlcTag tag;
+    tag.name = *t_w.name;
+    tag.table_name = t_w.table;
+    tag.type_str = t_w.type;
+    // Resolve scalar types now; UDT references (quoted or bare names) resolve
+    // against the schema at load time (see PlcRuntime tags).
+    if (auto t = parseS7Type(tag.type_str))
+        tag.type = *t;
+    else if (!tag.type_str.empty())
+        tag.udt_name = tag.type_str;
+    if (t_w.remark)
+        tag.remark = *t_w.remark;
+    if (t_w.address) {
+        if (auto addr = parsePlcAddress(*t_w.address))
+            tag.addr = *addr;
         else
-            return scl::SclError::Generic;
+            return SclError::Generic;
     }
-    return t_tag;
+    return tag;
 }
 
-sgrn::Result<void, scl::SclError> SchemaSerializer::deserialize(PlcSchemaStore& t_registry, const rapidjson::Value& t_root) {
-    if (!t_root.IsObject() && !t_root.IsArray())
-        return scl::SclError::Generic;
-
-    auto load_udts = [&](const rapidjson::Value* tp_value) -> sgrn::Result<void, scl::SclError> {
-        if (!tp_value)
-            return {};
-        if (!tp_value->IsArray())
-            return scl::SclError::Generic;
-        for (const auto& t_node : tp_value->GetArray()) {
-            sgrn::Result<UdtDefinition, scl::SclError> p_udt = SchemaSerializer::udtFromJson(t_node);
-            if (p_udt.hasError()) {
-                return Error(p_udt.error());
-            }
-            sgrn::Result<void, scl::SclError> r = t_registry.addUdt(std::move(p_udt.value()));
-            if (r.hasError()) {
-                return Error(r.error());
-            }
+static sgrn::Result<RegistryContent, SclError> contentFromJson(const RootJson& t_w, bool t_lenient_tags) {
+    RegistryContent out;
+    for (const auto& uw : t_w.udts.value_or({})) {
+        auto udt = udtFromJson(uw);
+        if (udt.hasError())
+            return Error(udt.error());
+        out.udts.push_back(std::move(udt.value()));
+    }
+    for (const auto& dw : t_w.dbs) {
+        auto db = dbFromJson(dw);
+        if (db.hasError())
+            return Error(db.error());
+        if (db.value().db_number <= 0 && !db.value().db_name.empty())
+            db.value().db_number = static_cast<uint16_t>(extractTrailingNumber(db.value().db_name));
+        if (db.value().db_number <= 0)
+            return SclError::Generic;
+        out.dbs.push_back(std::move(db.value()));
+    }
+    for (const auto& tw : t_w.tags.value_or({})) {
+        auto tag = tagFromJson(tw);
+        if (tag.hasError()) {
+            if (t_lenient_tags)
+                continue;
+            return Error(tag.error());
         }
-        return {};
-    };
+        out.tags.push_back(std::move(tag.value()));
+    }
+    if (t_w.dimensions)
+        out.dimensions = *t_w.dimensions;
+    if (t_w.warnings)
+        out.warnings = *t_w.warnings;
+    return out;
+}
 
-    auto load_dbs = [&](const rapidjson::Value* tp_value) -> sgrn::Result<void, scl::SclError> {
-        if (!tp_value)
-            return {};
-        if (!tp_value->IsArray())
-            return scl::SclError::Generic;
-        for (const auto& t_node : tp_value->GetArray()) {
-            sgrn::Result<DbSchema, scl::SclError> t_db = SchemaSerializer::dbFromJson(t_node);
-            if (t_db.hasError()) {
-                return Error(t_db.error());
-            }
-            if (t_db.value().db_number <= 0 && !t_db.value().db_name.empty())
-                t_db.value().db_number = extractTrailingNumber(t_db.value().db_name);
-            if (t_db.value().db_number <= 0)
-                return scl::SclError::Generic;
-            t_registry.dbs_[t_db.value().db_number] = std::move(t_db.value());
-        }
-        return {};
-    };
-
-    auto load_tags = [&](const rapidjson::Value* tp_value) -> sgrn::Result<void, scl::SclError> {
-        if (!tp_value)
-            return {};
-        if (!tp_value->IsArray())
-            return scl::SclError::Generic;
-        for (const auto& t_node : tp_value->GetArray()) {
-            auto t_tag = SchemaSerializer::tagFromJson(t_node);
-            if (t_tag.hasError())
-                return Error(t_tag.error());
-            t_registry.addTag(std::move(t_tag.value()));
-        }
-        return {};
-    };
-
-    if (t_root.IsObject()) {
-        sgrn::Result<void, scl::SclError> udt_status = load_udts(t_root.HasMember("udts") ? &t_root["udts"] : nullptr);
-        if (udt_status.hasError())
-            return udt_status;
-        sgrn::Result<void, scl::SclError> db_status = load_dbs(t_root.HasMember("dbs") ? &t_root["dbs"] : nullptr);
-        if (db_status.hasError())
-            return db_status;
-        sgrn::Result<void, scl::SclError> tag_status = load_tags(t_root.HasMember("tags") ? &t_root["tags"] : nullptr);
-        if (tag_status.hasError())
-            return tag_status;
-    } else {
-        sgrn::Result<void, scl::SclError> db_status = load_dbs(&t_root);
-        if (db_status.hasError())
-            return db_status;
+static sgrn::Result<RegistryContent, SclError> parseContent(std::string_view t_text, bool t_lenient_tags) {
+    // Legacy form: a bare array of DB objects.
+    const size_t first = t_text.find_first_not_of(" \t\r\n");
+    if (first != std::string_view::npos && t_text[first] == '[') {
+        auto dbs = sgrn::json::read<std::vector<DbJson>>(t_text);
+        if (dbs.hasError())
+            return SclError::ParseError;
+        RootJson root;
+        root.dbs = std::move(dbs.value());
+        return contentFromJson(root, t_lenient_tags);
     }
 
-    t_registry.rebuildIndices();
-    SchemaSerializer::resolveUdtsInRegistry(t_registry);
-    t_registry.rebuildIndices();
+    auto root = sgrn::json::read<RootJson>(t_text);
+    if (root.hasError())
+        return SclError::ParseError;
+    return contentFromJson(root.value(), t_lenient_tags);
+}
 
+} // namespace detail
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SchemaSerializer — JSON
+// ─────────────────────────────────────────────────────────────────────────────
+
+std::string SchemaSerializer::udtToJson(const UdtDefinition& t_udt) {
+    return sgrn::json::writeOmitNull(detail::udtToJson(t_udt)).value_or("");
+}
+
+std::string SchemaSerializer::dbToJson(const DbSchema& t_db) {
+    return sgrn::json::writeOmitNull(detail::dbToJson(t_db, false)).value_or("");
+}
+
+std::string SchemaSerializer::tagToJson(const PlcTag& t_tag) {
+    return sgrn::json::writeOmitNull(detail::tagToJson(t_tag)).value_or("");
+}
+
+std::string SchemaSerializer::serialize(
+    const PlcSchemaStore& t_registry, std::optional<uint16_t> t_db_number, bool t_headers_only, bool t_pretty) {
+    const auto wire = detail::rootToJson(t_registry, t_db_number, t_headers_only);
+    const auto out = t_pretty ? sgrn::json::writeOmitNullPretty(wire) : sgrn::json::writeOmitNull(wire);
+    // Plain mirror structs cannot fail to write; degrade to an empty payload
+    // rather than changing the std::string public API.
+    return out.value_or("");
+}
+
+sgrn::Result<UdtDefinition, scl::SclError> SchemaSerializer::udtFromJson(std::string_view t_text) {
+    auto wire = sgrn::json::read<detail::UdtJson>(t_text);
+    if (wire.hasError())
+        return SclError::ParseError;
+    return detail::udtFromJson(wire.value());
+}
+
+sgrn::Result<DbSchema, scl::SclError> SchemaSerializer::dbFromJson(std::string_view t_text) {
+    auto wire = sgrn::json::read<detail::DbJson>(t_text);
+    if (wire.hasError())
+        return SclError::ParseError;
+    return detail::dbFromJson(wire.value());
+}
+
+sgrn::Result<PlcTag, scl::SclError> SchemaSerializer::tagFromJson(std::string_view t_text) {
+    auto wire = sgrn::json::read<detail::TagJson>(t_text);
+    if (wire.hasError())
+        return SclError::ParseError;
+    return detail::tagFromJson(wire.value());
+}
+
+sgrn::Result<RegistryContent, scl::SclError> SchemaSerializer::parseContent(std::string_view t_text, bool t_lenient_tags) {
+    return detail::parseContent(t_text, t_lenient_tags);
+}
+
+sgrn::Result<void, scl::SclError> SchemaSerializer::deserialize(PlcSchemaStore& t_registry, std::string_view t_text) {
+    auto content = parseContent(t_text);
+    if (content.hasError())
+        return Error(content.error());
+
+    for (auto& udt : content.value().udts) {
+        if (auto res = t_registry.addUdt(std::move(udt)); res.hasError())
+            return Error(res.error());
+    }
+    for (auto& db : content.value().dbs)
+        t_registry.dbs_[db.db_number] = std::move(db);
+    // Duplicate tags (Conflict) are skipped silently, as before.
+    for (auto& tag : content.value().tags)
+        (void)t_registry.addTag(std::move(tag));
+
+    t_registry.rebuildIndices();
+    resolveUdtsInRegistry(t_registry);
+    t_registry.rebuildIndices();
     return {};
 }
 
@@ -1316,13 +1252,17 @@ bool readUdt(Reader& t_r, UdtDefinition& t_udt) {
     uint8_t trigger = 0;
     uint8_t alias = 0;
     uint8_t flags = 0;
+    int32_t size_bytes = 0;
+    int32_t max_depth = 0;
     std::string scalar_name;
-    if (!t_r.u16(number) || !t_r.str(t_udt.name) || !t_r.i32(t_udt.size_bytes) || !t_r.i32(t_udt.max_depth) || !t_r.u8(endian) ||
-        !t_r.u8(trigger) || !t_r.u8(alias) || !t_r.str(scalar_name) || !t_r.u8(flags))
+    if (!t_r.u16(number) || !t_r.str(t_udt.name) || !t_r.i32(size_bytes) || !t_r.i32(max_depth) || !t_r.u8(endian) || !t_r.u8(trigger) ||
+        !t_r.u8(alias) || !t_r.str(scalar_name) || !t_r.u8(flags))
         return false;
     if (!u8ToEndian(endian, t_udt.endianness))
         return false;
     t_udt.udt_number = number;
+    t_udt.size_bytes = static_cast<uint32_t>(size_bytes);
+    t_udt.max_depth = static_cast<uint8_t>(max_depth);
     t_udt.trigger_events = trigger != 0;
     t_udt.is_scalar_alias = alias != 0;
     if (!s7codec::stringToType(scalar_name.c_str(), t_udt.scalar_type))

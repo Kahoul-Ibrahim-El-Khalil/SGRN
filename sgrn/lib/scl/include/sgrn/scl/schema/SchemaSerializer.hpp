@@ -1,12 +1,13 @@
 #pragma once
 
-#include <sgrn/scl/types.hpp>
-#include <rapidjson/document.h>
-
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
+#include <sgrn/scl/types.hpp>
 #include <sgrn/scl/utils.hpp>
 
+#include <optional>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace sgrn::scl
 {
@@ -31,31 +32,64 @@ inline bool isBinarySchemaPayload(std::string_view t_bytes) {
 }
 
 /**
+ * @brief Domain content of a parsed schema JSON document.
+ *
+ * Filled by SchemaSerializer::parseContent from either the object form
+ * ({dbs, udts, tags, dimensions, warnings}) or the legacy bare array of DBs.
+ */
+struct RegistryContent {
+    std::vector<DbSchema> dbs;
+    std::vector<UdtDefinition> udts;
+    std::vector<PlcTag> tags;
+    std::vector<std::string> dimensions;
+    std::vector<std::string> warnings;
+};
+
+/**
  * @brief Serialization engine for S7 Semantic Registries.
  *
- * Handles conversion between internal structures and JSON.
+ * JSON goes through the Glaze-based sgrn::json surface: wire structs (private
+ * to the .cpp) carry the historical on-disk layout, and reflection does the
+ * rest. The binary encoding below is the lossless form used by WAL archives.
  */
 class SchemaSerializer {
 public:
+    // ── JSON write ─────────────────────────────────────────────────────────────
     static std::string udtToJson(const UdtDefinition& t_udt);
     static std::string dbToJson(const DbSchema& t_db);
     static std::string tagToJson(const PlcTag& t_tag);
 
-    static sgrn::Result<UdtDefinition, scl::SclError> udtFromJson(const rapidjson::Value& t_node);
-    static sgrn::Result<DbSchema, scl::SclError> dbFromJson(const rapidjson::Value& t_node);
-    static sgrn::Result<PlcTag, scl::SclError> tagFromJson(const rapidjson::Value& t_node);
-
     /**
-     * @brief Serializes the registry to JSON string, with optional filtering.
-     * Uses rapidjson for efficient serialization.
+     * @brief Serializes the registry to a JSON string, with optional filtering.
+     *
+     * @param t_db_number  Only emit this DB's header+fields when set.
+     * @param t_headers_only  Omit the "fields" arrays (DB headers only).
+     * @param t_pretty  Pretty-print (human-facing output).
      */
     static std::string serialize(const PlcSchemaStore& t_registry, std::optional<uint16_t> t_db_number = std::nullopt,
         bool t_headers_only = false, bool t_pretty = false);
 
+    // ── JSON read (text in, domain out) ────────────────────────────────────────
+    static sgrn::Result<UdtDefinition, scl::SclError> udtFromJson(std::string_view t_text);
+    static sgrn::Result<DbSchema, scl::SclError> dbFromJson(std::string_view t_text);
+    static sgrn::Result<PlcTag, scl::SclError> tagFromJson(std::string_view t_text);
+
     /**
-     * @brief Deserializes a JSON object into a registry.
+     * @brief Parses schema text into RegistryContent.
+     *
+     * Accepts the object form and the legacy bare array of DBs. With
+     * t_lenient_tags, malformed tag rows are skipped instead of failing the
+     * whole parse (per-entity JSON consumers).
      */
-    static sgrn::Result<void, scl::SclError> deserialize(PlcSchemaStore& t_registry, const rapidjson::Value& t_root);
+    static sgrn::Result<RegistryContent, scl::SclError> parseContent(std::string_view t_text, bool t_lenient_tags = false);
+
+    /**
+     * @brief Deserializes schema JSON text into a registry.
+     *
+     * Loads dbs/udts/tags, then rebuilds indices and resolves UDT references
+     * so a JSON-loaded store compares equal to a binary-loaded one.
+     */
+    static sgrn::Result<void, scl::SclError> deserialize(PlcSchemaStore& t_registry, std::string_view t_text);
 
     /**
      * @brief Serializes the registry to the binary schema encoding.

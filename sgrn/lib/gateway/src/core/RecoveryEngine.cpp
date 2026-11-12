@@ -12,9 +12,7 @@
 #include <sgrn/utils/time.hpp>
 
 #include <fmt/core.h>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
+#include <sgrn/utils/json-dom.hpp>
 #include <stdexcept>
 #include <string>
 
@@ -106,11 +104,11 @@ std::vector<ArchiveCandidate> collectCandidates(const std::string& t_state_dir) 
 
 // ── JSON helpers ─────────────────────────────────────────────────────────────
 
-std::string serializeCompact(const rapidjson::Value& t_value) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-    t_value.Accept(w);
-    return sb.GetString();
+std::string serializeCompact(const sgrn::json::dom::Value& t_value) {
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> w(sb);
+    t_value.accept(w);
+    return sb.getString();
 }
 
 // ── State application (mirrors TreePersistenceStore::load, recursively) ─────
@@ -128,7 +126,7 @@ DbField makeDbField(const PlcNode& t_node) {
 
 // Encodes one JSON value into one leaf slot under the segment lock. Returns how
 // many leaves were restored (1) or skipped (0).
-int applyLeaf(PlcState& t_state, const std::string& t_path, const PlcNode* t_node, const rapidjson::Value& t_value, int& t_skipped) {
+int applyLeaf(PlcState& t_state, const std::string& t_path, const PlcNode* t_node, const sgrn::json::dom::Value& t_value, int& t_skipped) {
     if (!t_node || !t_node->cached_slot_ || !t_node->children_.empty()) {
         ++t_skipped;
         return 0;
@@ -140,7 +138,7 @@ int applyLeaf(PlcState& t_state, const std::string& t_path, const PlcNode* t_nod
     const DbField field = makeDbField(*t_node);
     {
         std::unique_lock<std::shared_mutex> lk(p_entry->mutex_);
-        auto res = twin::encodeFieldRapidJson(field, t_value, p_ptr, buf_remaining, 0, t_node->endian_);
+        auto res = twin::encodeFieldJson(field, t_value, p_ptr, buf_remaining, 0, t_node->endian_);
         if (res.hasError()) {
             ++t_skipped;
             return 0;
@@ -153,9 +151,10 @@ int applyLeaf(PlcState& t_state, const std::string& t_path, const PlcNode* t_nod
 }
 
 // Walks a PlcNode subtree and applies the matching JSON subtree (struct members
-// are matched by child name). Arrays are handled inside encodeFieldRapidJson via
+// are matched by child name). Arrays are handled inside encodeFieldJson via
 // the field's count.
-int applyValueToNode(PlcState& t_state, const std::string& t_path, const PlcNode* t_node, const rapidjson::Value& t_value, int& t_skipped) {
+int applyValueToNode(
+    PlcState& t_state, const std::string& t_path, const PlcNode* t_node, const sgrn::json::dom::Value& t_value, int& t_skipped) {
     if (!t_node || !t_node->cached_slot_) {
         ++t_skipped;
         return 0;
@@ -164,14 +163,14 @@ int applyValueToNode(PlcState& t_state, const std::string& t_path, const PlcNode
         return applyLeaf(t_state, t_path, t_node, t_value, t_skipped);
     }
     // Struct/DB node: value must be an object keyed by field name.
-    if (!t_value.IsObject()) {
+    if (!t_value.is_object()) {
         ++t_skipped;
         return 0;
     }
     int restored = 0;
     for (const auto& child : t_node->children_) {
-        auto it = t_value.FindMember(child.name_.c_str());
-        if (it == t_value.MemberEnd()) {
+        auto it = t_value.findMember(child.name_.c_str());
+        if (it == t_value.memberEnd()) {
             ++t_skipped; // schema drift: stored value lacks this field
             continue;
         }
@@ -191,13 +190,17 @@ int applyValueToNode(PlcState& t_state, const std::string& t_path, const PlcNode
 // Old anchors remain genuinely nested. This function decides nested-vs-flat
 // by inspecting the payload's own keys rather than trusting the line type,
 // so both formats replay correctly without an archive version flag.
-int applyPayload(PlcState& t_state, const rapidjson::Value& t_root, const std::vector<std::string>& t_path_by_id) {
+int applyPayload(PlcState& t_state, const sgrn::json::dom::Value& t_root, const std::vector<std::string>& t_path_by_id) {
     int skipped = 0;
-    const rapidjson::Value* payload = nullptr;
-    if (t_root.HasMember("data") && t_root["data"].IsObject())
-        payload = &t_root["data"];
-    else if (t_root.HasMember("changes") && t_root["changes"].IsObject())
-        payload = &t_root["changes"];
+    sgrn::json::dom::Value payload_value;
+    const sgrn::json::dom::Value* payload = nullptr;
+    if (t_root.hasMember("data") && t_root["data"].is_object()) {
+        payload_value = t_root["data"];
+        payload = &payload_value;
+    } else if (t_root.hasMember("changes") && t_root["changes"].is_object()) {
+        payload_value = t_root["changes"];
+        payload = &payload_value;
+    }
 
     if (!payload) {
         SGRN_WARN_LOG("Recovery: unsupported line type, skipping");
@@ -206,16 +209,16 @@ int applyPayload(PlcState& t_state, const rapidjson::Value& t_root, const std::v
 
     int restored = 0;
 
-    if (payload->MemberBegin() == payload->MemberEnd())
+    if (payload->memberBegin() == payload->memberEnd())
         return 0;
 
-    const std::string first_key = payload->MemberBegin()->name.GetString();
+    const std::string first_key = payload->memberBegin()->name.getString();
     bool is_numeric = std::all_of(first_key.begin(), first_key.end(), ::isdigit);
 
     if (is_numeric) {
         // Flat form (dictionary encoded): dotted-path map { "123": <value>, … }
-        for (auto it = payload->MemberBegin(); it != payload->MemberEnd(); ++it) {
-            twin::LeafId id = static_cast<twin::LeafId>(std::stoul(it->name.GetString()));
+        for (auto it = payload->memberBegin(); it != payload->memberEnd(); ++it) {
+            twin::LeafId id = static_cast<twin::LeafId>(std::stoul(it->name.getString()));
             if (id < t_path_by_id.size()) {
                 const PlcNode* p_node = t_state.find(t_path_by_id[id]);
                 restored += applyValueToNode(t_state, t_path_by_id[id], p_node, it->value, skipped);
@@ -231,16 +234,16 @@ int applyPayload(PlcState& t_state, const rapidjson::Value& t_root, const std::v
 
     if (is_flat) {
         // Flat form: dotted-path map { "DB10.field": <value>, … }
-        for (auto it = payload->MemberBegin(); it != payload->MemberEnd(); ++it) {
-            const std::string path = it->name.GetString();
+        for (auto it = payload->memberBegin(); it != payload->memberEnd(); ++it) {
+            const std::string path = it->name.getString();
             const PlcNode* p_node = t_state.find(path);
             restored += applyValueToNode(t_state, path, p_node, it->value, skipped);
         }
         return restored;
     }
     // Nested form: DB-object map { "DB10": { … }, … }
-    for (auto it = payload->MemberBegin(); it != payload->MemberEnd(); ++it) {
-        const std::string name = it->name.GetString();
+    for (auto it = payload->memberBegin(); it != payload->memberEnd(); ++it) {
+        const std::string name = it->name.getString();
         const PlcNode* p_node = t_state.find(name);
         restored += applyValueToNode(t_state, name, p_node, it->value, skipped);
     }
@@ -269,31 +272,31 @@ ReplayOutcome scanArchive(
 
     while (t_reader.readLine(line)) {
         ++line_no;
-        rapidjson::Document doc;
-        doc.Parse(line.c_str());
-        if (doc.HasParseError() || !doc.IsObject())
+        sgrn::json::dom::Document doc;
+        doc.parse(line.c_str());
+        if (doc.hasParseError() || !doc.is_object())
             continue; // tolerate a malformed record, keep scanning for the footer
 
-        const char* type = doc.HasMember("type") && doc["type"].IsString() ? doc["type"].GetString() : "";
+        const char* type = doc.hasMember("type") && doc["type"].is_string() ? doc["type"].getString() : "";
         if (line_no == 1 && std::string_view(type) == "schema") {
-            if (!doc.HasMember("schema") || doc["schema"].IsNull()) {
+            if (!doc.hasMember("schema") || doc["schema"].is_null()) {
                 out.schema_ok = true; // no stored schema => nothing to validate against
-            } else if (doc["schema"].IsObject() && !live_schema_json.empty()) {
+            } else if (doc["schema"].is_object() && !live_schema_json.empty()) {
                 out.schema_ok = (serializeCompact(doc["schema"]) == live_schema_json);
             } else {
                 out.schema_ok = false;
             }
         } else if (std::string_view(type) == "dictionary") {
-            if (doc.HasMember("leaves") && doc["leaves"].IsArray()) {
+            if (doc.hasMember("leaves") && doc["leaves"].is_array()) {
                 const auto& leaves = doc["leaves"];
-                for (rapidjson::SizeType i = 0; i < leaves.Size(); ++i) {
+                for (sgrn::json::dom::SizeType i = 0; i < leaves.size(); ++i) {
                     const auto& item = leaves[i];
-                    if (item.IsObject() && item.HasMember("id") && item["id"].IsUint() && item.HasMember("path") &&
-                        item["path"].IsString()) {
-                        auto id = item["id"].GetUint();
+                    if (item.is_object() && item.hasMember("id") && item["id"].isUint() && item.hasMember("path") &&
+                        item["path"].is_string()) {
+                        auto id = item["id"].getUint();
                         if (id >= out.path_by_id.size())
                             out.path_by_id.resize(id + 1);
-                        out.path_by_id[id] = item["path"].GetString();
+                        out.path_by_id[id] = item["path"].getString();
                     }
                 }
             }
@@ -301,8 +304,8 @@ ReplayOutcome scanArchive(
             out.last_anchor_line = static_cast<int64_t>(line_no);
         } else if (std::string_view(type) == "footer") {
             out.found_footer = true;
-            if (doc.HasMember("last_anchor_line") && doc["last_anchor_line"].IsInt64())
-                out.last_anchor_line = doc["last_anchor_line"].GetInt64();
+            if (doc.hasMember("last_anchor_line") && doc["last_anchor_line"].isInt64())
+                out.last_anchor_line = doc["last_anchor_line"].getInt64();
         }
     }
     return out;
@@ -322,17 +325,17 @@ ReplayOutcome replayArchive(
         if (reader.lineIndex() <= static_cast<size_t>(t_last_anchor_line)) {
             // Base-state region: only the anchor line applies; the schema and
             // manifest lines carry no twin data.
-            rapidjson::Document doc;
-            doc.Parse(line.c_str());
-            if (doc.IsObject() && doc.HasMember("type") && doc["type"].IsString() &&
-                std::string_view(doc["type"].GetString()) == "anchor") {
+            sgrn::json::dom::Document doc;
+            doc.parse(line.c_str());
+            if (doc.is_object() && doc.hasMember("type") && doc["type"].is_string() &&
+                std::string_view(doc["type"].getString()) == "anchor") {
                 out.restored += applyPayload(t_state, doc, t_path_by_id);
             }
             continue;
         }
-        rapidjson::Document doc;
-        doc.Parse(line.c_str());
-        if (doc.HasParseError() || !doc.IsObject())
+        sgrn::json::dom::Document doc;
+        doc.parse(line.c_str());
+        if (doc.hasParseError() || !doc.is_object())
             continue;
 
         out.restored += applyPayload(t_state, doc, t_path_by_id);
@@ -418,9 +421,9 @@ sgrn::Result<ReplayOutcome, std::string> replayBinaryArchive(
             if (std::move(store_res).value().toJson() != t_schema_store.toJson())
                 return Error("schema mismatch");
         } else {
-            rapidjson::Document schema_doc;
-            schema_doc.Parse(raw.substr(10, schema_len).c_str());
-            if (schema_doc.HasParseError() || !schema_doc.IsObject())
+            sgrn::json::dom::Document schema_doc;
+            schema_doc.parse(raw.substr(10, schema_len).c_str());
+            if (schema_doc.hasParseError() || !schema_doc.is_object())
                 return Error("unparseable embedded schema");
             if (serializeCompact(schema_doc) != t_schema_store.toJson())
                 return Error("schema mismatch");

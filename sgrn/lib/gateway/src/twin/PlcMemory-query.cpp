@@ -1,3 +1,4 @@
+#include <sgrn/utils/json-dom.hpp>
 // PlcMemory field/JSON query, snapshot and dirty/delta surface.
 // Split from PlcMemory.cpp; read-side accessors over PlcState.
 #include <fmt/core.h>
@@ -11,8 +12,6 @@
 #include "PlcState-serialize.hpp" // internal: PlcNode::serialize() definition
 #include <asio.hpp>
 #include <optional>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <shared_mutex>
 #include <stdexcept>
 #include <string>
@@ -173,15 +172,15 @@ std::string PlcMemory::getDbJsonString(uint16_t t_db_number) const {
 
     RETURN_IF_NULL(node, "{}");
 
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
 
     {
         std::shared_lock<std::shared_mutex> lk(p_entry->mutex_);
 
         node->serialize(writer, p_plc_state_->getArenaTree());
 
-        return sb.GetString();
+        return sb.getString();
     }
 }
 

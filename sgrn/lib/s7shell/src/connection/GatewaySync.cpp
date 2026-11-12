@@ -1,44 +1,50 @@
 #include <sgrn/s7shell/connection/GatewaySync.hpp>
 
 #include <sgrn/gateway/adapters/websocket/RuntimeSyncProtocol.hpp>
+#include <sgrn/gateway/common/JsonLeafVisitor.hpp>
 #include <sgrn/gateway/twin/twin.hpp>
 #include <sgrn/utils/encoding.hpp>
-#include <sgrn/utils/json.hpp>
+#include <sgrn/utils/json-serialization.hpp>
 
 #include <fmt/color.h>
 #include <fmt/core.h>
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <httplib.h>
-#include <rapidjson/document.h>
-#include <rapidjson/error/en.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace sgrn::s7shell::connection
 {
 thread_local bool GatewaySync::suppress_publish_ = false;
 
-static std::string rapidjsonValueToString(const rapidjson::Value& t_v) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-    t_v.Accept(writer);
-    return sb.GetString();
+// The shared RuntimeSync protocol header owns the reflected JSON DTOs used
+// by both this client and the gateway's WebSocket write handler.
+namespace
+{
+namespace runtime_sync_json = ::sgrn::gateway::adapters::websocket::runtime_sync::json;
+using SyncBatchItemJson = runtime_sync_json::DbWriteRecord;
+using SyncBatchEnvelopeJson = runtime_sync_json::DbWriteEnvelope;
+using SyncAreaItemJson = runtime_sync_json::AreaWriteRecord;
+using SyncAreaEnvelopeJson = runtime_sync_json::AreaWriteEnvelope;
+using DictionaryLeafJson = runtime_sync_json::DictionaryLeaf;
+using DictionaryFrameJson = runtime_sync_json::DictionaryFrame;
+using WriteAckJson = runtime_sync_json::WriteAck;
+using TypeProbeJson = runtime_sync_json::TypeProbe;
+
+std::string jsonString(const std::string& t_value) {
+    // sgrn::json::write of a bare string yields the quoted, escaped JSON form.
+    auto res = sgrn::json::write(t_value);
+    return res.value_or(std::string{});
 }
 
-static std::string jsonString(const std::string& t_value) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-    writer.String(t_value.c_str(), static_cast<rapidjson::SizeType>(t_value.size()));
-    return sb.GetString();
-}
-
-static std::string websocketUrlToHttpBase(std::string t_url) {
+std::string websocketUrlToHttpBase(std::string t_url) {
     if (t_url.starts_with("ws://"))
         t_url.replace(0, 5, "http://");
     else if (t_url.starts_with("wss://"))
@@ -51,18 +57,7 @@ static std::string websocketUrlToHttpBase(std::string t_url) {
     return t_url;
 }
 
-static void flattenJson(
-    const rapidjson::Value& t_node, const std::string& t_prefix, std::vector<std::pair<std::string, std::string>>& t_out) {
-    if (t_node.IsObject()) {
-        for (auto it = t_node.MemberBegin(); it != t_node.MemberEnd(); ++it) {
-            std::string child_key = t_prefix.empty() ? it->name.GetString() : t_prefix + "." + it->name.GetString();
-            flattenJson(it->value, child_key, t_out);
-        }
-        return;
-    }
-    if (!t_node.IsArray())
-        t_out.emplace_back(t_prefix, rapidjsonValueToString(t_node));
-}
+} // namespace
 
 GatewaySync::GatewaySync(PlcRuntimeSPtr tsp_runtime)
     : runtime_(std::move(tsp_runtime)) {
@@ -240,23 +235,29 @@ void GatewaySync::onMessage(const ix::WebSocketMessagePtr& t_msg) {
                 }
                 return;
             }
-            {
-                rapidjson::Document ack_doc;
-                ack_doc.Parse(t_msg->str.c_str());
-                if (!ack_doc.HasParseError() && ack_doc.IsObject() && ack_doc.HasMember("type") && ack_doc["type"].IsString()) {
-                    const std::string msg_type = ack_doc["type"].GetString();
-                    // Leaf-dictionary decode table for flat deltas. The
-                    // server pushes this once right after the full-snapshot
-                    // seed on every connect (see WebSocketAdapter onopen).
+            // ── Text frame dispatch ────────────────────────────────────
+            // DeltaSnapshot payloads have NO "type" key: {"<leaf-id>": value}
+            // or {"DB": {...}}. Guard on the literal substring so those
+            // frames skip the typed probe entirely (no TypeProbeJson
+            // allocation, no glz::format_error on a parse we know will fail).
+            // Only frames that advertise "type" pay the probe, and only
+            // ack/dictionary pay the full typed read — and both use
+            // read<T>(string_view) on the raw wire bytes, not the old
+            // Value + readFromValue() double walk.
+            if (t_msg->str.find("\"type\"") != std::string::npos) {
+                auto probe = sgrn::json::read<TypeProbeJson>(t_msg->str);
+                if (!probe.hasError() && !probe.value().type.empty()) {
+                    const std::string& msg_type = probe.value().type;
                     if (msg_type == "dictionary") {
                         onDictionaryFrame(t_msg->str);
                         return;
                     }
                     if (msg_type == "write_ack") {
-                        if (ack_doc.HasMember("sequence") && ack_doc["sequence"].IsUint64()) {
+                        auto w_res = sgrn::json::read<WriteAckJson>(t_msg->str);
+                        if (!w_res.hasError() && w_res.value().sequence.has_value()) {
                             std::lock_guard<std::mutex> lk(ack_mutex_);
-                            last_ack_sequence_ = ack_doc["sequence"].GetUint64();
-                            last_ack_ok_ = ack_doc.HasMember("ok") && ack_doc["ok"].IsBool() && ack_doc["ok"].GetBool();
+                            last_ack_sequence_ = w_res.value().sequence.value();
+                            last_ack_ok_ = w_res.value().ok.value_or(false);
                             ack_cv_.notify_all();
                         }
                         return;
@@ -321,25 +322,25 @@ bool GatewaySync::writeFieldThroughRuntime(const std::string& t_target, const st
 }
 
 void GatewaySync::onDictionaryFrame(const std::string& t_json_payload) {
-    rapidjson::Document doc;
-    doc.Parse(t_json_payload.c_str());
-    if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("leaves") || !doc["leaves"].IsArray())
+    // Direct typed read on the raw wire bytes: no glz::generic_i64
+    // intermediate, one reflection walk instead of parse + re-serialize +
+    // re-parse. Same wire shape, meaningfully less work per connect.
+    auto frame_res = sgrn::json::read<DictionaryFrameJson>(t_json_payload);
+    if (frame_res.hasError())
         return;
+    const auto& frame = frame_res.value();
     std::vector<std::string> paths;
-    for (const auto& item : doc["leaves"].GetArray()) {
-        if (!item.IsObject() || !item.HasMember("id") || !item["id"].IsUint() || !item.HasMember("path") || !item["path"].IsString())
-            continue;
-        const uint32_t id = item["id"].GetUint();
-        if (id >= paths.size())
-            paths.resize(static_cast<size_t>(id) + 1);
-        paths[id] = item["path"].GetString();
+    for (const auto& item : frame.leaves) {
+        if (item.id >= paths.size())
+            paths.resize(static_cast<size_t>(item.id) + 1);
+        paths[item.id] = item.path;
     }
     {
         std::lock_guard<std::mutex> lk(dict_mutex_);
         remote_paths_ = std::move(paths);
         has_remote_dict_ = true;
     }
-    fmt::print(fg(fmt::color::cyan), "[GatewayBinding] Leaf dictionary: {} paths.\n", doc["leaves"].Size());
+    fmt::print(fg(fmt::color::cyan), "[GatewayBinding] Leaf dictionary: {} paths.\n", frame.leaves.size());
 }
 
 bool GatewaySync::resolveLeafPath(uint32_t t_id, std::string& t_path) {
@@ -359,46 +360,67 @@ bool GatewaySync::resolveLeafPath(uint32_t t_id, std::string& t_path) {
 }
 
 void GatewaySync::handleDeltaSnapshot(const std::string& t_json_payload, uint16_t /*db_hint*/) {
-    rapidjson::Document doc;
-    doc.Parse(t_json_payload.c_str());
-    if (doc.HasParseError() || !doc.IsObject()) {
+    // Delta payloads have arbitrary keys ({"<leaf-id>": value} or
+    // {"DB": {...}}), so they must stay dynamic. Clear the existing object
+    // rather than replacing it, allowing Glaze's parser to reuse its storage.
+    //
+    // Single-thread ownership: handleDeltaSnapshot() is called only from
+    // onMessage(), which IXWebSocket invokes on one receive thread per
+    // connection. No public method touches delta_value_ / leaf_scratch_, so
+    // both remain callback-thread-only. The publish worker has its own
+    // json_scratch_ buffer.
+    if (delta_value_.is_object())
+        delta_value_.get_object().clear();
+    else
+        delta_value_ = glz::generic_i64::object_t{};
+    if (auto r = sgrn::json::readInto(delta_value_, t_json_payload); r.hasError()) {
+        fmt::print(stderr, fg(fmt::color::yellow), "[GatewayBinding] Unparseable message: {}\n", t_json_payload.substr(0, 80));
+        return;
+    }
+    if (!delta_value_.is_object()) {
         fmt::print(stderr, fg(fmt::color::yellow), "[GatewayBinding] Unparseable message: {}\n", t_json_payload.substr(0, 80));
         return;
     }
 
-    for (auto it = doc.MemberBegin(); it != doc.MemberEnd(); ++it) {
+    for (const auto& [name, val] : delta_value_.get_object()) {
         // Flat leaf-id delta (dictionary mode): {"<id>": value}. The value
         // is a scalar for scalar tags but an OBJECT for UDT tags — so the
         // numeric key decides, not the value shape. Unresolvable numeric
         // keys with object values fall through to the nested DB path (a DB
         // literally named "123" still works).
-        bool is_leaf_id = false;
+        uint32_t leaf_id = 0;
         std::string leaf_path;
-        try {
-            size_t pos = 0;
-            const unsigned long parsed = std::stoul(it->name.GetString(), &pos);
-            if (it->name.GetString()[pos] == '\0' && resolveLeafPath(static_cast<uint32_t>(parsed), leaf_path))
-                is_leaf_id = true;
-        } catch (const std::exception&) {
-        }
+        const char* first = name.data();
+        const char* last = first + name.size();
+        const auto [parsed_end, parse_error] = std::from_chars(first, last, leaf_id);
+        const bool is_leaf_id = parse_error == std::errc{} && parsed_end == last && resolveLeafPath(leaf_id, leaf_path);
+
         if (is_leaf_id) {
+            if (auto result = sgrn::json::writeTo(leaf_scratch_, val); result.hasError()) {
+                fmt::print(stderr, fg(fmt::color::yellow), "[GatewayBinding] Could not serialize leaf '{}': {}\n", leaf_path,
+                    result.error().message);
+                continue;
+            }
             std::string t_err;
-            if (!writeFieldThroughRuntime(leaf_path, rapidjsonValueToString(it->value), t_err))
+            if (!writeFieldThroughRuntime(leaf_path, leaf_scratch_, t_err))
                 fmt::print(stderr, fg(fmt::color::red), "[GatewayBinding] Runtime write failed for '{}': {}\n", leaf_path, t_err);
             continue;
         }
-        if (!it->value.IsObject())
+        if (!val.is_object())
             continue;
 
-        const std::string db_root = it->name.GetString();
-        std::vector<std::pair<std::string, std::string>> fields;
-        flattenJson(it->value, db_root, fields);
-
-        for (const auto& [path, value] : fields) {
+        std::string path = name;
+        auto apply_leaf = [this](const std::string& t_path, const sgrn::json::Value& t_value) {
+            if (auto result = sgrn::json::writeTo(leaf_scratch_, t_value); result.hasError()) {
+                fmt::print(stderr, fg(fmt::color::yellow), "[GatewayBinding] Could not serialize delta value at '{}': {}\n", t_path,
+                    result.error().message);
+                return;
+            }
             std::string t_err;
-            if (!writeFieldThroughRuntime(path, value, t_err))
-                fmt::print(stderr, fg(fmt::color::red), "[GatewayBinding] Runtime write failed for '{}': {}\n", path, t_err);
-        }
+            if (!writeFieldThroughRuntime(t_path, leaf_scratch_, t_err))
+                fmt::print(stderr, fg(fmt::color::red), "[GatewayBinding] Runtime write failed for '{}': {}\n", t_path, t_err);
+        };
+        ::sgrn::gateway::common::visitJsonLeaves(val, path, '.', ::sgrn::gateway::common::JsonArrayPolicy::Skip, apply_leaf);
     }
 }
 
@@ -467,10 +489,7 @@ bool GatewaySync::publishDirtyBatch() {
     if (!publishing_.compare_exchange_strong(expected, true))
         return true;
 
-    rapidjson::Document doc;
-    doc.SetArray();
-    auto& alloc = doc.GetAllocator();
-
+    std::vector<SyncBatchItemJson> updates;
     std::vector<std::pair<uint16_t, ::sgrn::plcsim::runtime::DirtyRegion>> attempted_regions;
     std::vector<std::pair<uint16_t, ::sgrn::plcsim::runtime::DirtyRegion>> unsent_regions;
     std::vector<::sgrn::gateway::adapters::websocket::runtime_sync::Record> sync_records;
@@ -488,20 +507,19 @@ bool GatewaySync::publishDirtyBatch() {
                 unsent_regions.emplace_back(db_num, region);
                 continue;
             }
-            rapidjson::Value item(rapidjson::kObjectType);
-            item.AddMember("db", db_num, alloc);
-            item.AddMember("offset", region.offset, alloc);
-            item.AddMember("size", region.length, alloc);
-            std::string data = sgrn::utils::encoding::toBase64Url(bytes.data(), bytes.size());
-            item.AddMember("data", rapidjson::Value(data.c_str(), alloc), alloc);
-            doc.PushBack(item, alloc);
+            SyncBatchItemJson item;
+            item.db = db_num;
+            item.offset = region.offset;
+            item.size = region.length;
+            item.data = sgrn::utils::encoding::toBase64Url(bytes.data(), bytes.size());
+            updates.push_back(std::move(item));
             sync_records.push_back({db_num, region.offset, std::move(bytes)});
             attempted_regions.emplace_back(db_num, region);
         }
     }
 
     bool db_ok = true;
-    if (doc.Empty()) {
+    if (updates.empty()) {
         // readDbMemory() failed for every region. Put them back into the
         // canonical dirty ledger without waking this same publisher again.
         suppress_publish_ = true;
@@ -512,7 +530,6 @@ bool GatewaySync::publishDirtyBatch() {
     } else {
         bool sent = false;
         std::string send_error;
-        const std::string body = sgrn::utils::json::serializeCompact(doc);
         const uint64_t sequence = next_sequence_.fetch_add(1, std::memory_order_relaxed);
         if (binary_transport_) {
             using namespace ::sgrn::gateway::adapters::websocket::runtime_sync;
@@ -527,12 +544,20 @@ bool GatewaySync::publishDirtyBatch() {
             if (!sent)
                 send_error = "RuntimeSync binary WebSocket send failed";
         } else {
-            const std::string payload =
-                std::string(R"({"command":"write","sequence":)") + std::to_string(sequence) + R"(,"updates":)" + body + "}";
-            auto result = ws_.sendText(payload);
-            sent = result.success;
-            if (!sent)
-                send_error = "RuntimeSync JSON WebSocket send failed";
+            SyncBatchEnvelopeJson envelope;
+            envelope.command = "write";
+            envelope.sequence = sequence;
+            envelope.updates = std::move(updates);
+            // writeTo reuses json_scratch_ across frames (avoids one
+            // std::string allocation per publish on the worker hot path).
+            if (auto w = sgrn::json::writeTo(json_scratch_, envelope); w.hasError()) {
+                send_error = "RuntimeSync JSON envelope serialization failed";
+            } else {
+                auto result = ws_.sendText(json_scratch_);
+                sent = result.success;
+                if (!sent)
+                    send_error = "RuntimeSync JSON WebSocket send failed";
+            }
         }
         bool acknowledgement_timed_out = false;
         if (sent) {
@@ -559,9 +584,7 @@ bool GatewaySync::publishDirtyBatch() {
             // gateways without WS write support still converge over their only
             // channel. On re-read failure, keep the batch for retry instead of
             // pushing possibly-torn state.
-            rapidjson::Document fresh;
-            fresh.SetArray();
-            auto& fresh_alloc = fresh.GetAllocator();
+            std::vector<SyncBatchItemJson> fresh_updates;
             bool fresh_ok = !attempted_regions.empty();
             for (const auto& [db_num, region] : attempted_regions) {
                 std::vector<uint8_t> fresh_bytes(region.length, 0);
@@ -569,28 +592,33 @@ bool GatewaySync::publishDirtyBatch() {
                     fresh_ok = false;
                     break;
                 }
-                rapidjson::Value item(rapidjson::kObjectType);
-                item.AddMember("db", db_num, fresh_alloc);
-                item.AddMember("offset", region.offset, fresh_alloc);
-                item.AddMember("size", region.length, fresh_alloc);
-                std::string data = sgrn::utils::encoding::toBase64Url(fresh_bytes.data(), fresh_bytes.size());
-                item.AddMember("data", rapidjson::Value(data.c_str(), fresh_alloc), fresh_alloc);
-                fresh.PushBack(item, fresh_alloc);
+                SyncBatchItemJson item;
+                item.db = db_num;
+                item.offset = region.offset;
+                item.size = region.length;
+                item.data = sgrn::utils::encoding::toBase64Url(fresh_bytes.data(), fresh_bytes.size());
+                fresh_updates.push_back(std::move(item));
             }
-            if (!fresh_ok || fresh.Empty()) {
+            if (!fresh_ok || fresh_updates.empty()) {
                 send_error = "RuntimeSync fallback re-read failed; batch kept for retry";
             } else {
-                const std::string fresh_body = sgrn::utils::json::serializeCompact(fresh);
-                httplib::Client client(http_base_url_);
-                client.set_connection_timeout(2, 0);
-                client.set_read_timeout(5, 0);
-                client.set_write_timeout(5, 0);
-                auto response = client.Put("/memory/batch", fresh_body, "application/json");
-                if (response && response->status >= 200 && response->status < 300) {
-                    sent = true;
+                // Rare path (5 s ack timeout) — a fresh string here is fine;
+                // do NOT reuse json_scratch_ (different shape: bare array).
+                auto fresh_body_res = sgrn::json::write(fresh_updates);
+                if (fresh_body_res.hasError()) {
+                    send_error = "RuntimeSync fallback serialization failed";
                 } else {
-                    send_error = response ? fmt::format("RuntimeSync fallback failed: HTTP {} {}", response->status, response->body)
-                                          : "RuntimeSync fallback failed: no HTTP response";
+                    httplib::Client client(http_base_url_);
+                    client.set_connection_timeout(2, 0);
+                    client.set_read_timeout(5, 0);
+                    client.set_write_timeout(5, 0);
+                    auto response = client.Put("/memory/batch", fresh_body_res.value(), "application/json");
+                    if (response && response->status >= 200 && response->status < 300) {
+                        sent = true;
+                    } else {
+                        send_error = response ? fmt::format("RuntimeSync fallback failed: HTTP {} {}", response->status, response->body)
+                                              : "RuntimeSync fallback failed: no HTTP response";
+                    }
                 }
             }
         }
@@ -650,9 +678,7 @@ bool GatewaySync::publishPendingTags() {
     if (attempted.empty())
         return true;
 
-    rapidjson::Document doc;
-    doc.SetArray();
-    auto& alloc = doc.GetAllocator();
+    std::vector<SyncAreaItemJson> updates;
     std::vector<std::string> sent_names;
     std::vector<std::string> unsent;
 
@@ -669,38 +695,45 @@ bool GatewaySync::publishPendingTags() {
             unsent.push_back(name);
             continue;
         }
-        rapidjson::Value item(rapidjson::kObjectType);
-        item.AddMember("area", static_cast<unsigned>(tag.addr.area), alloc);
-        item.AddMember("offset", static_cast<uint64_t>(tag.addr.byte_offset), alloc);
-        item.AddMember("size", static_cast<uint64_t>(span), alloc);
-        std::string data = sgrn::utils::encoding::toBase64Url(bytes.data(), bytes.size());
-        item.AddMember("data", rapidjson::Value(data.c_str(), alloc), alloc);
-        doc.PushBack(item, alloc);
+        SyncAreaItemJson item;
+        item.area = static_cast<uint32_t>(tag.addr.area);
+        item.offset = static_cast<uint64_t>(tag.addr.byte_offset);
+        item.size = static_cast<uint64_t>(span);
+        item.data = sgrn::utils::encoding::toBase64Url(bytes.data(), bytes.size());
+        updates.push_back(std::move(item));
         sent_names.push_back(name);
     }
 
     bool sent = false;
     std::string send_error;
     bool acknowledgement_timed_out = false;
-    if (!doc.Empty()) {
-        const std::string body = sgrn::utils::json::serializeCompact(doc);
+    if (!updates.empty()) {
         const uint64_t sequence = next_sequence_.fetch_add(1, std::memory_order_relaxed);
         // Areas always travel as JSON (control traffic is low-rate and stays
         // inspectable), even in binary transport mode.
-        const std::string payload =
-            std::string(R"({"command":"write_area","sequence":)") + std::to_string(sequence) + R"(,"updates":)" + body + "}";
-        auto result = ws_.sendText(payload);
-        sent = result.success;
-        if (!sent) {
-            send_error = "RuntimeSync area WebSocket send failed";
+        SyncAreaEnvelopeJson envelope;
+        envelope.command = "write_area";
+        envelope.sequence = sequence;
+        envelope.updates = std::move(updates);
+        // Same scratch buffer as the DB envelope: publishPendingTags() runs
+        // after publishDirtyBatch() on the single worker thread, and
+        // sendText copies into IXWebSocket's frame buffer before returning.
+        if (auto w = sgrn::json::writeTo(json_scratch_, envelope); w.hasError()) {
+            send_error = "RuntimeSync area envelope serialization failed";
         } else {
-            std::unique_lock<std::mutex> lk(ack_mutex_);
-            const bool acknowledged =
-                ack_cv_.wait_for(lk, std::chrono::seconds(5), [this, sequence]() { return last_ack_sequence_ == sequence; });
-            if (!acknowledged || !last_ack_ok_) {
-                sent = false;
-                acknowledgement_timed_out = !acknowledged;
-                send_error = acknowledged ? "RuntimeSync area write rejected by gateway" : "RuntimeSync area write timed out";
+            auto result = ws_.sendText(json_scratch_);
+            sent = result.success;
+            if (!sent) {
+                send_error = "RuntimeSync area WebSocket send failed";
+            } else {
+                std::unique_lock<std::mutex> lk(ack_mutex_);
+                const bool acknowledged =
+                    ack_cv_.wait_for(lk, std::chrono::seconds(5), [this, sequence]() { return last_ack_sequence_ == sequence; });
+                if (!acknowledged || !last_ack_ok_) {
+                    sent = false;
+                    acknowledgement_timed_out = !acknowledged;
+                    send_error = acknowledged ? "RuntimeSync area write rejected by gateway" : "RuntimeSync area write timed out";
+                }
             }
         }
     } else {

@@ -1,7 +1,8 @@
 #pragma once
 
+#include <sgrn/utils/json-dom.hpp>
+
 #include <sgrn/Result.hpp>
-#include <rapidjson/document.h>
 
 #include <ankerl/unordered_dense.h>
 #include <cstdint>
@@ -47,11 +48,11 @@ struct LeafDictionary {
 /**
  * @brief Resolves a delta/anchor record's numeric IDs back to dotted paths.
  *
- * Takes a rapidjson::Value (a changes/data object), an id_to_path mapping,
+ * Takes a sgrn::json::dom::Value (a changes/data object), an id_to_path mapping,
  * and an allocator. Writes the resolved dotted-path keyed object into t_out.
  */
-sgrn::Result<void, std::string> expandRecordKeys(const rapidjson::Value& t_record, const std::vector<std::string>& t_path_by_id,
-    rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out);
+sgrn::Result<void, std::string> expandRecordKeys(const sgrn::json::dom::Value& t_record, const std::vector<std::string>& t_path_by_id,
+    sgrn::json::dom::Document::AllocatorType& t_alloc, sgrn::json::dom::Value& t_out);
 
 /**
  * @brief Flattens a nested JSON tree into a flat id-keyed map using path_to_id.
@@ -61,9 +62,9 @@ sgrn::Result<void, std::string> expandRecordKeys(const rapidjson::Value& t_recor
  * Array elements are flattened with "[i]" suffix in the path lookup.
  * Leaves whose path is not in path_to_id are skipped.
  */
-sgrn::Result<void, std::string> flattenNestedTree(const rapidjson::Value& t_nested,
-    const ankerl::unordered_dense::map<std::string, LeafId>& t_path_to_id, rapidjson::Document::AllocatorType& t_alloc,
-    rapidjson::Value& t_out);
+sgrn::Result<void, std::string> flattenNestedTree(const sgrn::json::dom::Value& t_nested,
+    const ankerl::unordered_dense::map<std::string, LeafId>& t_path_to_id, sgrn::json::dom::Document::AllocatorType& t_alloc,
+    sgrn::json::dom::Value& t_out);
 
 /**
  * @brief Like flattenNestedTree, but also applies a leaf-ID filter.
@@ -71,8 +72,8 @@ sgrn::Result<void, std::string> flattenNestedTree(const rapidjson::Value& t_nest
  * Only leaves with t_allowed[id] == true are emitted. t_allowed must be
  * pre-built to cover all IDs in the dictionary.
  */
-sgrn::Result<void, std::string> flattenNestedTreeFiltered(const rapidjson::Value& t_nested,
+sgrn::Result<void, std::string> flattenNestedTreeFiltered(const sgrn::json::dom::Value& t_nested,
     const ankerl::unordered_dense::map<std::string, LeafId>& t_path_to_id, const std::vector<bool>& t_allowed,
-    rapidjson::Document::AllocatorType& t_alloc, rapidjson::Value& t_out);
+    sgrn::json::dom::Document::AllocatorType& t_alloc, sgrn::json::dom::Value& t_out);
 
 } // namespace sgrn::gateway::twin

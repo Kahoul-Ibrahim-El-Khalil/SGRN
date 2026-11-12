@@ -1,3 +1,4 @@
+#include <sgrn/utils/json-dom.hpp>
 // ─────────────────────────────────────────────────────────────────────────────
 // SchemaVM.cpp  –  Schema-driven typed virtual machine implementation
 // ─────────────────────────────────────────────────────────────────────────────
@@ -8,10 +9,6 @@
 #include <sgrn/s7shell/connection/S7Connection.hpp>
 #include <sgrn/s7shell/script/ScriptTagTable.hpp>
 #include <scriptarray/scriptarray.h>
-
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 
 #include <cctype>
 #include <cstring>
@@ -1208,26 +1205,26 @@ void registerSchemaTypes(sgrn::scripting::ScriptHost& t_host, const PlcSchemaSto
 // Backed by ScriptTagTable::get/put, so runtime, file-table, online and
 // offline tags share one surface. Errors raise script exceptions.
 
-static double tagJsonToNumber(const rapidjson::Value& t_v, bool& t_ok) {
-    if (t_v.IsNumber()) {
+static double tagJsonToNumber(const sgrn::json::dom::Value& t_v, bool& t_ok) {
+    if (t_v.is_number()) {
         t_ok = true;
-        return t_v.GetDouble();
+        return t_v.getDouble();
     }
-    if (t_v.IsBool()) {
+    if (t_v.is_boolean()) {
         t_ok = true;
-        return t_v.GetBool() ? 1.0 : 0.0;
+        return t_v.getBool() ? 1.0 : 0.0;
     }
     t_ok = false;
     return 0.0;
 }
 
-static std::string tagJsonToString(const rapidjson::Value& t_v) {
-    if (t_v.IsString())
-        return t_v.GetString();
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-    t_v.Accept(writer);
-    return sb.GetString();
+static std::string tagJsonToString(const sgrn::json::dom::Value& t_v) {
+    if (t_v.is_string())
+        return t_v.getString();
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
+    t_v.accept(writer);
+    return sb.getString();
 }
 
 static void tagFail(asIScriptGeneric* tp_gen, const std::string& t_msg) {
@@ -1249,19 +1246,19 @@ static void GenericTagGetter(asIScriptGeneric* tp_gen) {
         fail("tags." + p_meta->tag_name + ": read failed");
         return;
     }
-    rapidjson::Document doc;
-    doc.Parse(json.c_str());
-    if (doc.HasParseError()) {
+    sgrn::json::dom::Document doc;
+    doc.parse(json.c_str());
+    if (doc.hasParseError()) {
         fail("tags." + p_meta->tag_name + ": undecodable value");
         return;
     }
     switch (p_meta->kind) {
         case TagAsKind::Bool: {
             bool v = false;
-            if (doc.IsBool())
-                v = doc.GetBool();
-            else if (doc.IsNumber())
-                v = doc.GetDouble() != 0.0;
+            if (doc.is_boolean())
+                v = doc.getBool();
+            else if (doc.is_number())
+                v = doc.getDouble() != 0.0;
             else {
                 fail("tags." + p_meta->tag_name + ": not a boolean");
                 return;
@@ -1392,31 +1389,31 @@ static void GenericTagSetter(asIScriptGeneric* tp_gen) {
             json = std::to_string(static_cast<uint64_t>(tp_gen->GetArgQWord(0)));
             break;
         case TagAsKind::Float: {
-            rapidjson::StringBuffer sb;
-            rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-            writer.Double(static_cast<double>(tp_gen->GetArgFloat(0)));
-            json = sb.GetString();
+            sgrn::json::dom::StringBuffer sb;
+            sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
+            writer.float64(static_cast<double>(tp_gen->GetArgFloat(0)));
+            json = sb.getString();
             break;
         }
         case TagAsKind::Double: {
-            rapidjson::StringBuffer sb;
-            rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-            writer.Double(tp_gen->GetArgDouble(0));
-            json = sb.GetString();
+            sgrn::json::dom::StringBuffer sb;
+            sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
+            writer.float64(tp_gen->GetArgDouble(0));
+            json = sb.getString();
             break;
         }
         case TagAsKind::String: {
             const std::string& val = *static_cast<const std::string*>(tp_gen->GetArgAddress(0));
-            rapidjson::StringBuffer sb;
-            rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-            writer.String(val.c_str(), static_cast<rapidjson::SizeType>(val.size()));
-            json = sb.GetString();
+            sgrn::json::dom::StringBuffer sb;
+            sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
+            writer.string(val.c_str(), static_cast<sgrn::json::dom::SizeType>(val.size()));
+            json = sb.getString();
             break;
         }
         case TagAsKind::Json: {
             json = *static_cast<const std::string*>(tp_gen->GetArgAddress(0));
-            rapidjson::Document doc;
-            if (doc.Parse(json.c_str()).HasParseError()) {
+            sgrn::json::dom::Document doc;
+            if (doc.parse(json.c_str()).hasParseError()) {
                 tagFail(tp_gen, "tags." + p_meta->tag_name + ": not valid JSON");
                 return;
             }

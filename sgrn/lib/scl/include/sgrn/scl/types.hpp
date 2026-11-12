@@ -10,9 +10,7 @@
 
 #include <fmt/format.h>
 
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
+#include <sgrn/utils/json-dom.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -256,21 +254,21 @@ inline int rawTypeSpanBytes(const RawTypeSpec& t_spec) {
     return rawTypeSpanBytes(t_spec.type, t_spec.count);
 }
 
-inline std::optional<DataType> inferRawType(const rapidjson::Value& t_v) {
-    if (t_v.IsBool()) {
+inline std::optional<DataType> inferRawType(const sgrn::json::dom::Value& t_v) {
+    if (t_v.is_boolean()) {
         return DataType::Bool;
     }
-    if (t_v.IsString()) {
+    if (t_v.is_string()) {
         return DataType::String;
     }
-    if (t_v.IsArray() && t_v.Size() > 0) {
-        return inferRawType(t_v[0]);
+    if (t_v.is_array() && t_v.size() > 0) {
+        return inferRawType(t_v[static_cast<sgrn::json::dom::SizeType>(0)]);
     }
-    if (t_v.IsDouble() && !t_v.IsInt64() && !t_v.IsUint64()) {
+    if (t_v.isDouble() && !t_v.isInt64() && !t_v.isUint64()) {
         return DataType::Real;
     }
-    if (t_v.IsInt64()) {
-        const auto s = t_v.GetInt64();
+    if (t_v.isInt64()) {
+        const auto s = t_v.getInt64();
         if (s < 0) {
             if (s >= -128)
                 return DataType::SInt;
@@ -289,8 +287,8 @@ inline std::optional<DataType> inferRawType(const rapidjson::Value& t_v) {
             return DataType::UDInt;
         return DataType::ULInt;
     }
-    if (t_v.IsUint64()) {
-        const auto u = t_v.GetUint64();
+    if (t_v.isUint64()) {
+        const auto u = t_v.getUint64();
         if (u <= 0xFF)
             return DataType::Byte;
         if (u <= 0xFFFF)

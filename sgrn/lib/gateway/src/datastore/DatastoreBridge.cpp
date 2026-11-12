@@ -1,5 +1,6 @@
 #include <fmt/color.h>
 #include <fmt/core.h>
+#include <sgrn/utils/json-dom.hpp>
 #include <algorithm>
 #include <cctype>
 #include <stdexcept>
@@ -11,9 +12,6 @@
 #include <sgrn/utils/time.hpp>
 #include <filesystem>
 #include <fstream>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 
 namespace sgrn::gateway::backend
 {

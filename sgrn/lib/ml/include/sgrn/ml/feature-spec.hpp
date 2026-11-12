@@ -2,7 +2,6 @@
 
 #include <sgrn/Result.hpp>
 #include <cstdint>
-#include <rapidjson/document.h>
 #include <span>
 #include <string>
 #include <string_view>
@@ -68,8 +67,6 @@ public:
 
     [[nodiscard]] std::string toJson(bool t_pretty = false) const;
     static Result<FeatureSpec> fromJson(std::string_view t_json_str);
-    static Result<FeatureSpec> fromJsonValue(const rapidjson::Value& t_val);
-    void toJsonValue(rapidjson::Value& t_out, rapidjson::Document::AllocatorType& t_allocator) const;
 };
 
 } // namespace sgrn::ml

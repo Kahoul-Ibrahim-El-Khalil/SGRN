@@ -40,7 +40,7 @@ struct MbProxyConfig {
 };
 
 /**
- * @brief Parse the MbProxy configuration from a JSON file using RapidJSON.
+ * @brief Parse the MbProxy configuration from a JSON file using Glaze JSON DOM.
  */
 sgrn::Result<MbProxyConfig, std::string> parseMbProxyConfig(const std::string& t_path);
 

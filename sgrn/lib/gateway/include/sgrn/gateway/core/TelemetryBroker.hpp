@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sgrn/utils/json-dom.hpp>
+
 #include <sgrn/common/TreePath.hpp>
 #include <sgrn/gateway/core/GlobalContext.hpp>
 #include <sgrn/gateway/core/LeafFieldMeta.hpp>
@@ -8,8 +10,6 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
@@ -67,13 +67,13 @@ struct TelemetryEvent {
      * carries no usable JSON object. Callers fall back to their unfiltered
      * behavior on null, exactly as on a local parse failure.
      */
-    const rapidjson::Document* parsedJson() const {
+    const sgrn::json::dom::Document* parsedJson() const {
         if (!parsed_attempted_) {
             parsed_attempted_ = true;
             if (json_value && !json_value->empty()) {
-                auto doc = std::make_shared<rapidjson::Document>();
-                doc->Parse(json_value->c_str());
-                if (!doc->HasParseError() && doc->IsObject())
+                auto doc = std::make_shared<sgrn::json::dom::Document>();
+                doc->parse(json_value->c_str());
+                if (!doc->hasParseError() && doc->is_object())
                     parsed_cache_ = std::move(doc);
             }
         }
@@ -84,7 +84,7 @@ struct TelemetryEvent {
     // (Kept public: TelemetryEvent is constructed with designated
     // initializers at publish sites, which requires an aggregate.)
     mutable bool parsed_attempted_ = false;
-    mutable std::shared_ptr<rapidjson::Document> parsed_cache_;
+    mutable std::shared_ptr<sgrn::json::dom::Document> parsed_cache_;
 };
 
 /**
@@ -165,10 +165,10 @@ public:
         });
     }
 
-    /// Thread-local RapidJSON buffer stream to eliminate malloc/free churn on telemetry ticks
-    static rapidjson::StringBuffer& threadLocalStringBuffer() {
-        thread_local rapidjson::StringBuffer sb;
-        sb.Clear();
+    /// Thread-local Glaze JSON DOM buffer stream to eliminate malloc/free churn on telemetry ticks
+    static sgrn::json::dom::StringBuffer& threadLocalStringBuffer() {
+        thread_local sgrn::json::dom::StringBuffer sb;
+        sb.clear();
         return sb;
     }
 

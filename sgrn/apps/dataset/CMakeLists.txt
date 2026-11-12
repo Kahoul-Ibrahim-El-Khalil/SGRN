@@ -16,7 +16,6 @@ sgrn_add_component_executable(
         sgrn::common
         sgrn::zstd
         sgrn::cxxopts
-        sgrn::rapidjson
         fmt::fmt
     WIN_LIBS
         ${WIN_LIBS_LIST}

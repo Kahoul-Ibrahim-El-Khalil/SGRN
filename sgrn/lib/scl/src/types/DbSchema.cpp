@@ -1,9 +1,7 @@
 #include <sgrn/scl/types/DbSchema.hpp>
+#include <sgrn/utils/json-dom.hpp>
 
 #include <algorithm>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <string>
 
 // -----------------------------------------------------------------------------
@@ -11,15 +9,15 @@
 // -----------------------------------------------------------------------------
 
 std::string toJsonString(const sgrn::scl::DbSchema& t_db) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> t_writer(sb);
     sgrn::scl::db::serializeToWriter(t_writer, t_db);
-    return sb.GetString();
+    return sb.getString();
 }
 
-rapidjson::Document toJson(const sgrn::scl::DbSchema& t_db) {
-    rapidjson::Document doc;
-    doc.Parse(toJsonString(t_db).c_str());
+sgrn::json::dom::Document toJson(const sgrn::scl::DbSchema& t_db) {
+    sgrn::json::dom::Document doc;
+    doc.parse(toJsonString(t_db).c_str());
     return doc;
 }
 
@@ -39,29 +37,29 @@ int fieldSpanBytes(const sgrn::scl::DbField& t_field) {
 }
 } // namespace
 
-sgrn::scl::DbSchema fromJson(const rapidjson::Value& t_node) {
+sgrn::scl::DbSchema fromJson(const sgrn::json::dom::Value& t_node) {
     sgrn::scl::DbSchema t_db;
-    if (!t_node.IsObject())
+    if (!t_node.is_object())
         return t_db;
 
-    if (t_node.HasMember("number"))
-        t_db.db_number = t_node["number"].GetUint();
-    else if (t_node.HasMember("db_number"))
-        t_db.db_number = t_node["db_number"].GetUint();
-    if (t_node.HasMember("db_name") && t_node["db_name"].IsString())
-        t_db.db_name = t_node["db_name"].GetString();
-    if (t_node.HasMember("size_bytes"))
-        t_db.size_bytes = t_node["size_bytes"].GetInt();
-    if (t_node.HasMember("source_file") && t_node["source_file"].IsString())
-        t_db.source_file = t_node["source_file"].GetString();
-    if (t_node.HasMember("endianness") && t_node["endianness"].IsString()) {
-        const std::string e = t_node["endianness"].GetString();
+    if (t_node.hasMember("number"))
+        t_db.db_number = t_node["number"].getUint();
+    else if (t_node.hasMember("db_number"))
+        t_db.db_number = t_node["db_number"].getUint();
+    if (t_node.hasMember("db_name") && t_node["db_name"].is_string())
+        t_db.db_name = t_node["db_name"].getString();
+    if (t_node.hasMember("size_bytes"))
+        t_db.size_bytes = t_node["size_bytes"].getInt();
+    if (t_node.hasMember("source_file") && t_node["source_file"].is_string())
+        t_db.source_file = t_node["source_file"].getString();
+    if (t_node.hasMember("endianness") && t_node["endianness"].is_string()) {
+        const std::string e = t_node["endianness"].getString();
         t_db.endianness = (e == "little" || e == "LITTLE") ? s7codec::Endian::Little : s7codec::Endian::Little;
     }
-    if (t_node.HasMember("trigger_events") && t_node["trigger_events"].IsBool())
-        t_db.trigger_events = t_node["trigger_events"].GetBool();
-    if (t_node.HasMember("modbus_area") && t_node["modbus_area"].IsString()) {
-        const std::string a = t_node["modbus_area"].GetString();
+    if (t_node.hasMember("trigger_events") && t_node["trigger_events"].is_boolean())
+        t_db.trigger_events = t_node["trigger_events"].getBool();
+    if (t_node.hasMember("modbus_area") && t_node["modbus_area"].is_string()) {
+        const std::string a = t_node["modbus_area"].getString();
         if (a == "holding")
             t_db.modbus_area = sgrn::scl::ModbusArea::Holding;
         else if (a == "input")
@@ -71,11 +69,11 @@ sgrn::scl::DbSchema fromJson(const rapidjson::Value& t_node) {
         else if (a == "discrete")
             t_db.modbus_area = sgrn::scl::ModbusArea::Discrete;
     }
-    if (t_node.HasMember("dataset_step_ns") && t_node["dataset_step_ns"].IsUint64())
-        t_db.dataset_step_ns = t_node["dataset_step_ns"].GetUint64();
+    if (t_node.hasMember("dataset_step_ns") && t_node["dataset_step_ns"].isUint64())
+        t_db.dataset_step_ns = t_node["dataset_step_ns"].getUint64();
 
-    if (t_node.HasMember("fields") && t_node["fields"].IsArray()) {
-        for (const auto& field_node : t_node["fields"].GetArray()) {
+    if (t_node.hasMember("fields") && t_node["fields"].is_array()) {
+        for (const auto& field_node : t_node["fields"].elements()) {
             t_db.fields.push_back(sgrn::scl::field::fromJson(field_node));
         }
     }
@@ -91,8 +89,8 @@ sgrn::scl::DbSchema fromJson(const rapidjson::Value& t_node) {
 }
 
 sgrn::scl::DbSchema fromJsonString(const std::string& t_value) {
-    rapidjson::Document doc;
-    doc.Parse(t_value.c_str());
+    sgrn::json::dom::Document doc;
+    doc.parse(t_value.c_str());
     return fromJson(doc);
 }
 

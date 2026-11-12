@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sgrn/utils/json-dom.hpp>
+
 #include <sgrn/Result.hpp>
 #include <sgrn/common/wal-frame.hpp>
 #include <sgrn/gateway/config/persistence.hpp>
@@ -21,8 +23,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-#include <rapidjson/document.h>
 
 namespace sgrn::gateway::database
 {
@@ -56,22 +56,24 @@ using sgrn::common::wal::parseDeltaRuns;
 using sgrn::common::wal::verifyAnchorFrame;
 
 /// Fills id-indexed paths from a {"type":"dictionary","leaves":[...]} line.
-inline void parseDictionaryLine(const rapidjson::Document& t_doc, std::vector<std::string>& t_paths) {
-    if (!t_doc.HasMember("leaves") || !t_doc["leaves"].IsArray())
+template <class JsonDocument>
+inline void parseDictionaryLine(const JsonDocument& t_doc, std::vector<std::string>& t_paths) {
+    if (!t_doc.hasMember("leaves") || !t_doc["leaves"].is_array())
         return;
-    for (const auto& item : t_doc["leaves"].GetArray()) {
-        if (item.IsObject() && item.HasMember("id") && item["id"].IsUint() && item.HasMember("path") && item["path"].IsString()) {
-            const auto id = item["id"].GetUint();
+    for (const auto& item : t_doc["leaves"].elements()) {
+        if (item.is_object() && item.hasMember("id") && item["id"].isUint() && item.hasMember("path") && item["path"].is_string()) {
+            const auto id = item["id"].getUint();
             if (id >= t_paths.size())
                 t_paths.resize(static_cast<size_t>(id) + 1);
-            t_paths[id] = item["path"].GetString();
+            t_paths[id] = item["path"].getString();
         }
     }
 }
 
 /// True for a dictionary line (caller already validated IsObject).
-inline bool isDictionaryRecord(const rapidjson::Document& t_doc) {
-    return t_doc.HasMember("type") && t_doc["type"].IsString() && std::string_view(t_doc["type"].GetString()) == "dictionary";
+template <class JsonDocument>
+inline bool isDictionaryRecord(const JsonDocument& t_doc) {
+    return t_doc.hasMember("type") && t_doc["type"].is_string() && std::string_view(t_doc["type"].getString()) == "dictionary";
 }
 
 /**
@@ -181,7 +183,7 @@ private:
         std::unordered_map<twin::LeafId, std::string> fields; ///< path -> JSON value string
     };
 
-    void mergeOrFlushEvent(twin::LeafId t_id, const std::string& t_value_json, int64_t t_now);
+    void mergeOrFlushEvent(twin::LeafId t_id, std::string_view t_value_json, int64_t t_now);
     void commitMergeBuffer();
 
     // -- WAL archive lifecycle ---------------------------------------------
@@ -194,7 +196,7 @@ private:
     sgrn::Result<void> writeDeltaLine(const std::string& t_record_json);
 
     /// Writes one "anchor" line into the open archive and records its line index.
-    sgrn::Result<void> writeAnchorLine(const std::string& t_full_tree_json, int64_t t_ts);
+    sgrn::Result<void> writeAnchorLine(const std::string& t_full_tree_json, int64_t t_ts, bool t_data_is_flat);
 
     /// Wraps a JSON control record (dictionary / manifest / anchor / footer) in
     /// the binary frame envelope (ts:8)(0xFFFF:2)(len:4)(json) when the archive

@@ -1,7 +1,6 @@
 #include <fmt/core.h>
 #include <sgrn/common/endian-helper.hpp>
 #include <sgrn/common/event-helper.hpp>
-#include <sgrn/common/json-helper.hpp>
 #include <sgrn/common/path-utils.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/gateway/adapters/websocket/WebSocketAdapter.hpp>
@@ -9,13 +8,10 @@
 #include <sgrn/gateway/common/SecurityHelper.hpp>
 #include <sgrn/gateway/core/TelemetryBroker.hpp>
 #include <sgrn/gateway/twin/LeafDictionary.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <sgrn/utils/time.hpp>
 #include <optional>
-#include <rapidjson/document.h>
-#include <rapidjson/error/en.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <stdexcept>
 #include <string>
 
@@ -143,25 +139,25 @@ void WebSocketAdapter::registerRoutes(GatewayApp& t_app) {
             // that opt into dictionary mode can decode flat id-keyed
             // payloads before the first batch arrives.
             if (dict_ && !dict_->path_by_id.empty()) {
-                rapidjson::StringBuffer dsb;
-                rapidjson::Writer<rapidjson::StringBuffer> dw(dsb);
-                dw.StartObject();
-                dw.Key("type");
-                dw.String("dictionary");
-                dw.Key("leaves");
-                dw.StartArray();
+                sgrn::json::dom::StringBuffer dsb;
+                sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> dw(dsb);
+                dw.startObject();
+                dw.key("type");
+                dw.string("dictionary");
+                dw.key("leaves");
+                dw.startArray();
                 for (size_t id = 0; id < dict_->path_by_id.size(); ++id) {
                     const auto& path = dict_->path_by_id[id];
-                    dw.StartObject();
-                    dw.Key("id");
-                    dw.Uint(static_cast<uint32_t>(id));
-                    dw.Key("path");
-                    dw.String(path.c_str(), static_cast<rapidjson::SizeType>(path.size()));
-                    dw.EndObject();
+                    dw.startObject();
+                    dw.key("id");
+                    dw.uint32(static_cast<uint32_t>(id));
+                    dw.key("path");
+                    dw.string(path.c_str(), static_cast<sgrn::json::dom::SizeType>(path.size()));
+                    dw.endObject();
                 }
-                dw.EndArray();
-                dw.EndObject();
-                t_conn.send_text(dsb.GetString());
+                dw.endArray();
+                dw.endObject();
+                t_conn.send_text(dsb.getString());
             }
 
             // The handshake request headers are stashed in userdata at accept

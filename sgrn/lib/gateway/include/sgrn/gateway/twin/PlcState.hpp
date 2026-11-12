@@ -1,4 +1,6 @@
 #pragma once
+
+#include <sgrn/utils/json-dom.hpp>
 // REVAMP-1: New file — PlcState.hpp replaces sgrn/core Registry.hpp for s7 use.
 // Lives in sgrn::gateway::twin namespace. sgrn::Registry kept for sgrn/opc consumers.
 
@@ -14,8 +16,6 @@
 #include <map>
 #include <memory>
 #include <optional>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <s7codec/codec.hpp>
 #include <s7codec/types.hpp>
 #include <shared_mutex>
@@ -199,7 +199,7 @@ struct PlcNode {
         }
     }
     /**
-     * @brief Recursive serialization using RapidJSON Writer.
+     * @brief Recursive serialization using Glaze JSON DOM Writer.
      *
      * SEMANTIC NESTING & SUBTREE EXTRACTION
      * This method provides "First-Class Nesting" by recursively projecting
@@ -432,7 +432,7 @@ public:
     std::string getJsonString(const std::string& t_path) const;
 
     /**
-     * @brief Fast scalar value retrieval — avoids full RapidJSON writer pipeline.
+     * @brief Fast scalar value retrieval — avoids full Glaze JSON DOM writer pipeline.
      * Falls back to getJsonString() for non-scalar nodes.
      */
     std::string getScalarString(const std::string& t_path) const;

@@ -1,18 +1,19 @@
 // PlcState-serialize.hpp — PlcNode::serialize() definition (internal).
 // ─────────────────────────────────────────────────────────────────────────────
-// The recursive RapidJSON projection of a PlcNode tree over the flat arena
+// The recursive Glaze JSON DOM projection of a PlcNode tree over the flat arena
 // lives here rather than in the public PlcState.hpp: it is implementation
 // detail, included only by twin .cpp files that drive a writer
 // (PlcState.cpp, PlcMemory-query.cpp). Not installed / not staged.
 #pragma once
 
 #include <sgrn/gateway/twin/PlcState.hpp>
+#include <sgrn/utils/json-dom.hpp>
 
 namespace sgrn::gateway::twin
 {
 
 /**
- * @brief Recursive serialization using RapidJSON Writer.
+ * @brief Recursive serialization using Glaze JSON DOM Writer.
  *
  * SEMANTIC NESTING & SUBTREE EXTRACTION
  * This method provides "First-Class Nesting" by recursively projecting
@@ -24,7 +25,7 @@ namespace sgrn::gateway::twin
 template <typename Writer>
 void PlcNode::serialize(Writer& t_writer, const ::sgrn::ArenaTree& t_arena, int t_depth, size_t t_extra_offset) const {
     if (!cached_slot_) {
-        t_writer.Null();
+        t_writer.nullValue();
         return;
     }
 
@@ -59,7 +60,7 @@ void PlcNode::serialize(Writer& t_writer, const ::sgrn::ArenaTree& t_arena, int 
     // For arrays, 'size' should be the element size.
     // In loadRegistry, n.size for strings is typeSpanBytes(char_capacity), which is the per-element span.
     if (is_array)
-        t_writer.StartArray();
+        t_writer.startArray();
 
     for (int i = 0; i < (is_array ? local_count : 1); ++i) {
         // Offset for the i-th element of the array
@@ -76,10 +77,10 @@ void PlcNode::serialize(Writer& t_writer, const ::sgrn::ArenaTree& t_arena, int 
         size_t check_size = children_.empty() ? (type_ == s7codec::Type::Bool ? ((is_array ? (local_count + 7) / 8 : 1)) : elem_size) : 0;
         if (current_abs_offset + check_size > cached_slot_->offset + cached_slot_->size) {
             if (children_.empty())
-                t_writer.Null();
+                t_writer.nullValue();
             else {
-                t_writer.StartObject();
-                t_writer.EndObject();
+                t_writer.startObject();
+                t_writer.endObject();
             }
             if (!is_array)
                 break;
@@ -117,7 +118,7 @@ void PlcNode::serialize(Writer& t_writer, const ::sgrn::ArenaTree& t_arena, int 
                     .bit_offset = s7codec::BitOffset{static_cast<uint8_t>(b_idx)},
                     .string_capacity = s7codec::StringCapacity{static_cast<uint32_t>(decode_count)}});
             if (!dv.valid()) {
-                t_writer.Null();
+                t_writer.nullValue();
             } else {
                 // Enum fields round-trip as their symbolic name — scalars
                 // AND array elements (quoted JSON strings); unknown
@@ -129,18 +130,18 @@ void PlcNode::serialize(Writer& t_writer, const ::sgrn::ArenaTree& t_arena, int 
                     if (numeric != INT64_MIN) {
                         auto it = enum_map_.find(static_cast<int>(numeric));
                         if (it != enum_map_.end()) {
-                            t_writer.String(it->second.c_str(), static_cast<rapidjson::SizeType>(it->second.length()));
+                            t_writer.string(it->second.c_str(), static_cast<sgrn::json::dom::SizeType>(it->second.length()));
                         } else {
                             // Unknown numeric value — fall back to the number.
                             switch (dv.kind()) {
                                 case s7codec::ValueKind::SignedInt:
-                                    t_writer.Int64(dv.i());
+                                    t_writer.int64(dv.i());
                                     break;
                                 case s7codec::ValueKind::UnsignedInt:
-                                    t_writer.Uint64(dv.u());
+                                    t_writer.uint64(dv.u());
                                     break;
                                 default:
-                                    t_writer.Null();
+                                    t_writer.nullValue();
                                     break;
                             }
                         }
@@ -152,37 +153,37 @@ void PlcNode::serialize(Writer& t_writer, const ::sgrn::ArenaTree& t_arena, int 
                 // AFTER
                 switch (dv.kind()) {
                     case s7codec::ValueKind::Bool:
-                        t_writer.Bool(dv.b());
+                        t_writer.boolean(dv.b());
                         break;
                     case s7codec::ValueKind::SignedInt:
-                        t_writer.Int64(dv.i());
+                        t_writer.int64(dv.i());
                         break;
                     case s7codec::ValueKind::UnsignedInt:
-                        t_writer.Uint64(dv.u());
+                        t_writer.uint64(dv.u());
                         break;
                     case s7codec::ValueKind::Float:
-                        t_writer.Double(static_cast<double>(dv.f()));
+                        t_writer.float64(static_cast<double>(dv.f()));
                         break;
                     case s7codec::ValueKind::Double:
-                        t_writer.Double(dv.d());
+                        t_writer.float64(dv.d());
                         break;
                     case s7codec::ValueKind::String:
-                        t_writer.String(dv.s().c_str(), static_cast<rapidjson::SizeType>(dv.s().length()));
+                        t_writer.string(dv.s().c_str(), static_cast<sgrn::json::dom::SizeType>(dv.s().length()));
                         break;
                     default:
-                        t_writer.Null();
+                        t_writer.nullValue();
                         break;
                 }
             }
         } else {
             // --- Struct Logic ---
-            t_writer.StartObject();
+            t_writer.startObject();
             for (const auto& child : children_) {
-                t_writer.Key(child.name_.c_str(), static_cast<rapidjson::SizeType>(child.name_.length()));
+                t_writer.key(child.name_.c_str(), static_cast<sgrn::json::dom::SizeType>(child.name_.length()));
                 // Recurse: pass current_abs_offset as the base for the child
                 child.serialize(t_writer, t_arena, t_depth + 1, current_abs_offset);
             }
-            t_writer.EndObject();
+            t_writer.endObject();
         }
 
         if (!is_array)
@@ -190,7 +191,7 @@ void PlcNode::serialize(Writer& t_writer, const ::sgrn::ArenaTree& t_arena, int 
     }
 
     if (is_array)
-        t_writer.EndArray();
+        t_writer.endArray();
 }
 
 } // namespace sgrn::gateway::twin

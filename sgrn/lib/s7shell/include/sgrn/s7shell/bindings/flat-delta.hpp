@@ -1,4 +1,6 @@
 #pragma once
+
+#include <sgrn/utils/json-dom.hpp>
 // =============================================================================
 // flat-delta.hpp — flat leaf-id delta encoding shared by the s7shell server
 // bindings (Gateway, WebSocketServer).
@@ -21,10 +23,6 @@
 
 #include <sgrn/gateway/twin/LeafDictionary.hpp>
 #include <sgrn/plcsim/runtime/PlcRuntime.hpp>
-
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 
 #include <cstdint>
 #include <string>
@@ -90,16 +88,16 @@ inline std::string flatDeltaForDirtyDbs(const ::sgrn::plcsim::runtime::PlcRuntim
             }
             nested += "}";
             if (!first) {
-                rapidjson::Document nested_doc;
-                nested_doc.Parse(nested.c_str());
-                if (!nested_doc.HasParseError() && nested_doc.IsObject()) {
-                    rapidjson::Document flat_doc;
-                    if (!::sgrn::gateway::twin::flattenNestedTree(nested_doc, t_dict.path_to_id, flat_doc.GetAllocator(), flat_doc)
+                sgrn::json::dom::Document nested_doc;
+                nested_doc.parse(nested.c_str());
+                if (!nested_doc.hasParseError() && nested_doc.is_object()) {
+                    sgrn::json::dom::Document flat_doc;
+                    if (!::sgrn::gateway::twin::flattenNestedTree(nested_doc, t_dict.path_to_id, flat_doc.allocator(), flat_doc)
                             .hasError()) {
-                        rapidjson::StringBuffer sb;
-                        rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-                        flat_doc.Accept(writer);
-                        const std::string out = sb.GetString();
+                        sgrn::json::dom::StringBuffer sb;
+                        sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
+                        flat_doc.accept(writer);
+                        const std::string out = sb.getString();
                         if (!out.empty())
                             db_part = out;
                     }

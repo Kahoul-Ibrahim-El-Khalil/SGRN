@@ -21,6 +21,11 @@
 #include <unordered_map>
 #include <vector>
 
+namespace sgrn::json::dom
+{
+class Document;
+}
+
 namespace sgrn::gateway::core
 {
 struct TelemetryEvent;
@@ -170,7 +175,7 @@ private:
         crow::websocket::connection* conn;
         bool needs_filter;
         bool dictionary_mode;
-        std::set<std::string> field_subs;
+        std::set<std::string> field_subs; // normalized dotted PLC paths for json::filterFields()
         std::vector<ClientContext::LeafRange> leaf_ranges;
     };
 
@@ -219,8 +224,8 @@ private:
     std::mutex last_values_mutex_;
     std::unordered_map<twin::LeafId, std::string> last_flat_values_;
 
-    /// Record a flat {"<id>": value} payload into the last-value cache.
-    void rememberFlatValues(const std::string& t_flat_json);
+    /// Record a parsed flat {"<id>": value} document into the last-value cache.
+    void rememberFlatValues(const sgrn::json::dom::Document& t_flat_doc);
     /// Send cached values covered by t_ranges to one client (flat form).
     /// No-op when the cache holds nothing in those ranges.
     void sendCatchUp(crow::websocket::connection& t_conn, const std::vector<ClientContext::LeafRange>& t_ranges);

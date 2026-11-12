@@ -3,6 +3,7 @@
 #include <sgrn/scl/utils.hpp>
 #include <sgrn/utils/encoding.hpp>
 #include <sgrn/utils/endianess.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <sgrn/utils/time.hpp>
 #include <algorithm>
@@ -11,9 +12,6 @@
 #include <ctime>
 #include <map>
 #include <optional>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -143,41 +141,51 @@ std::optional<LocatedField> findFieldByPath(const std::vector<DbField>& t_fields
 
 // forward declarations of internal helpers
 sgrn::Result<void, ::sgrn::scl::SclError> encodeArrayValue(
-    const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, int t_depth, s7codec::Endian t_e);
-void serializeFieldToWriter(
-    rapidjson::Writer<rapidjson::StringBuffer>& t_writer, const DbField& t_field, const uint8_t* tp_ptr, size_t t_buffer_size, int t_depth);
+    const DbField& t_field, const sgrn::json::dom::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, int t_depth, s7codec::Endian t_e);
+void serializeFieldToWriter(sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer>& t_writer, const DbField& t_field, const uint8_t* tp_ptr,
+    size_t t_buffer_size, int t_depth);
+
+// Glaze DOM overload: applies an already-parsed patch object without the
+// serialize→re-parse round trip the string form used to pay per nested struct.
+sgrn::Result<void, ::sgrn::scl::SclError> applyJsonPatchToFields(const std::vector<DbField>& t_fields,
+    const sgrn::json::dom::Value& t_patch, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e);
 
 sgrn::Result<void, ::sgrn::scl::SclError> applyJsonPatchToFields(
     const std::vector<DbField>& t_fields, const std::string& t_patch_json, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e) {
-    rapidjson::Document patch;
-    if (patch.Parse(t_patch_json.c_str()).HasParseError()) {
+    sgrn::json::dom::Document patch;
+    if (patch.parse(t_patch_json.c_str()).hasParseError()) {
         return SclError::ParseError;
     }
-    if (!patch.IsObject()) {
+    if (!patch.is_object()) {
+        return SclError::Generic;
+    }
+    return applyJsonPatchToFields(t_fields, patch, tp_ptr, t_buffer_size, t_e);
+}
+
+sgrn::Result<void, ::sgrn::scl::SclError> applyJsonPatchToFields(const std::vector<DbField>& t_fields,
+    const sgrn::json::dom::Value& t_patch, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e) {
+    if (!t_patch.is_object()) {
         return SclError::Generic;
     }
 
     for (const auto& t_field : t_fields) {
-        if (!patch.HasMember(t_field.name.c_str()))
+        if (!t_patch.hasMember(t_field.name.c_str()))
             continue;
         if (static_cast<size_t>(t_field.offset) >= t_buffer_size)
             continue;
 
-        const rapidjson::Value& val = patch[t_field.name.c_str()];
+        const sgrn::json::dom::Value& val = t_patch[t_field.name.c_str()];
         uint8_t* field_ptr = tp_ptr + t_field.offset;
         size_t field_buffer_remaining = t_buffer_size - t_field.offset;
 
-        if (t_field.type == DataType::Struct && t_field.count <= 1 && val.IsObject()) {
-            rapidjson::StringBuffer sb;
-            rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
-            val.Accept(t_writer);
+        if (t_field.type == DataType::Struct && t_field.count <= 1 && val.is_object()) {
+            // Recurse on the parsed DOM value directly — no buffer round trip.
             sgrn::Result<void, ::sgrn::scl::SclError> status =
-                applyJsonPatchToFields(t_field.children, sb.GetString(), field_ptr, field_buffer_remaining, t_e);
+                applyJsonPatchToFields(t_field.children, val, field_ptr, field_buffer_remaining, t_e);
             if (!status.has_value())
                 return status;
         } else {
-            sgrn::Result<void, ::sgrn::scl::SclError> status =
-                encodeFieldRapidJson(t_field, val, field_ptr, field_buffer_remaining, 0, t_e);
+            sgrn::Result<void, ::sgrn::scl::SclError> status = encodeFieldValue(t_field, val, field_ptr, field_buffer_remaining, 0, t_e);
             if (!status.has_value())
                 return status;
         }
@@ -242,14 +250,14 @@ std::string parseSemanticValue(const std::string& t_raw) {
 std::string parseRawValuePayload(const std::string& t_raw) {
     const std::string trimmed = sgrn::utils::strings::trim(t_raw);
     if (!trimmed.empty()) {
-        rapidjson::Document doc;
-        if (!doc.Parse(trimmed.c_str()).HasParseError())
+        sgrn::json::dom::Document doc;
+        if (!doc.parse(trimmed.c_str()).hasParseError())
             return trimmed;
     }
     if (trimmed.find(',') != std::string::npos) {
-        rapidjson::StringBuffer sb;
-        rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
-        t_writer.StartArray();
+        sgrn::json::dom::StringBuffer sb;
+        sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> t_writer(sb);
+        t_writer.startArray();
         std::istringstream in(trimmed);
         std::string part;
         while (std::getline(in, part, ',')) {
@@ -260,43 +268,43 @@ std::string parseRawValuePayload(const std::string& t_raw) {
             if (!sem.empty() && sem.front() == '"') {
                 // String token — strip surrounding quotes
                 std::string inner = sem.size() >= 2 ? sem.substr(1, sem.size() - 2) : "";
-                t_writer.String(inner.c_str(), static_cast<rapidjson::SizeType>(inner.size()));
+                t_writer.string(inner.c_str(), static_cast<sgrn::json::dom::SizeType>(inner.size()));
             } else if (sem == "true") {
-                t_writer.Bool(true);
+                t_writer.boolean(true);
             } else if (sem == "false") {
-                t_writer.Bool(false);
+                t_writer.boolean(false);
             } else if (sem == "null") {
-                t_writer.Null();
+                t_writer.nullValue();
             } else {
                 // Numeric or complex — parse once and accept
-                rapidjson::Document doc;
-                if (!doc.Parse(sem.c_str()).HasParseError())
-                    doc.Accept(t_writer);
+                sgrn::json::dom::Document doc;
+                if (!doc.parse(sem.c_str()).hasParseError())
+                    doc.accept(t_writer);
                 else
-                    t_writer.Null();
+                    t_writer.nullValue();
             }
         }
-        t_writer.EndArray();
-        return sb.GetString();
+        t_writer.endArray();
+        return sb.getString();
     }
     return parseSemanticValue(trimmed);
 }
 
 sgrn::Result<void, ::sgrn::scl::SclError> encodeDtlValue(
-    const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e) {
+    const sgrn::json::dom::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e) {
     using namespace s7codec;
     DtlComponents dtl;
-    if (t_value.IsObject()) {
-        dtl.year = t_value.HasMember("year") && t_value["year"].IsUint() ? static_cast<uint16_t>(t_value["year"].GetUint()) : 2000;
-        dtl.month = t_value.HasMember("month") && t_value["month"].IsUint() ? static_cast<uint8_t>(t_value["month"].GetUint()) : 1;
-        dtl.day = t_value.HasMember("day") && t_value["day"].IsUint() ? static_cast<uint8_t>(t_value["day"].GetUint()) : 1;
-        dtl.hour = t_value.HasMember("hour") && t_value["hour"].IsUint() ? static_cast<uint8_t>(t_value["hour"].GetUint()) : 0;
-        dtl.minute = t_value.HasMember("minute") && t_value["minute"].IsUint() ? static_cast<uint8_t>(t_value["minute"].GetUint()) : 0;
-        dtl.second = t_value.HasMember("second") && t_value["second"].IsUint() ? static_cast<uint8_t>(t_value["second"].GetUint()) : 0;
+    if (t_value.is_object()) {
+        dtl.year = t_value.hasMember("year") && t_value["year"].isUint() ? static_cast<uint16_t>(t_value["year"].getUint()) : 2000;
+        dtl.month = t_value.hasMember("month") && t_value["month"].isUint() ? static_cast<uint8_t>(t_value["month"].getUint()) : 1;
+        dtl.day = t_value.hasMember("day") && t_value["day"].isUint() ? static_cast<uint8_t>(t_value["day"].getUint()) : 1;
+        dtl.hour = t_value.hasMember("hour") && t_value["hour"].isUint() ? static_cast<uint8_t>(t_value["hour"].getUint()) : 0;
+        dtl.minute = t_value.hasMember("minute") && t_value["minute"].isUint() ? static_cast<uint8_t>(t_value["minute"].getUint()) : 0;
+        dtl.second = t_value.hasMember("second") && t_value["second"].isUint() ? static_cast<uint8_t>(t_value["second"].getUint()) : 0;
         dtl.nanosecond =
-            t_value.HasMember("nanosecond") && t_value["nanosecond"].IsUint() ? static_cast<uint32_t>(t_value["nanosecond"].GetUint()) : 0;
-    } else if (t_value.IsString()) {
-        std::string s = t_value.GetString();
+            t_value.hasMember("nanosecond") && t_value["nanosecond"].isUint() ? static_cast<uint32_t>(t_value["nanosecond"].getUint()) : 0;
+    } else if (t_value.is_string()) {
+        std::string s = t_value.getString();
         int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0, ns = 0;
         bool parsed = false;
 
@@ -370,12 +378,12 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeDtlValue(
 }
 
 sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
-    const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e) {
+    const DbField& t_field, const sgrn::json::dom::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e) {
     using namespace s7codec;
     // Enum fields accept their symbolic name as the wire value (e.g. "ON").
-    auto enum_resolve = [&](const rapidjson::Value& t_v) -> std::optional<std::pair<int64_t, bool>> {
-        if (t_v.IsString() && !t_field.enum_map.empty()) {
-            const std::string s = t_v.GetString();
+    auto enum_resolve = [&](const sgrn::json::dom::Value& t_v) -> std::optional<std::pair<int64_t, bool>> {
+        if (t_v.is_string() && !t_field.enum_map.empty()) {
+            const std::string s = t_v.getString();
             for (const auto& [k, v] : t_field.enum_map) {
                 if (v == s)
                     return std::pair<int64_t, bool>{static_cast<int64_t>(k), true};
@@ -383,53 +391,53 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
         }
         return std::nullopt;
     };
-    auto to_unsigned = [&](const rapidjson::Value& t_v) -> std::optional<uint64_t> {
+    auto to_unsigned = [&](const sgrn::json::dom::Value& t_v) -> std::optional<uint64_t> {
         if (auto e = enum_resolve(t_v); e && e->second && e->first >= 0)
             return static_cast<uint64_t>(e->first);
-        if (t_v.IsUint64())
-            return t_v.GetUint64();
-        if (t_v.IsInt64() && t_v.GetInt64() >= 0)
-            return static_cast<uint64_t>(t_v.GetInt64());
-        if (t_v.IsString()) {
-            std::string s = t_v.GetString();
+        if (t_v.isUint64())
+            return t_v.getUint64();
+        if (t_v.isInt64() && t_v.getInt64() >= 0)
+            return static_cast<uint64_t>(t_v.getInt64());
+        if (t_v.is_string()) {
+            std::string s = t_v.getString();
             if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
                 return sgrn::utils::strings::parseUInt64(s, 16);
             return sgrn::utils::strings::parseUInt64(s);
         }
         return std::nullopt;
     };
-    auto to_signed = [&](const rapidjson::Value& t_v) -> std::optional<int64_t> {
+    auto to_signed = [&](const sgrn::json::dom::Value& t_v) -> std::optional<int64_t> {
         if (auto e = enum_resolve(t_v); e && e->second)
             return e->first;
-        if (t_v.IsInt64())
-            return t_v.GetInt64();
-        if (t_v.IsUint64() && t_v.GetUint64() <= static_cast<uint64_t>(INT64_MAX))
-            return static_cast<int64_t>(t_v.GetUint64());
-        if (t_v.IsString())
-            return sgrn::utils::strings::parseInt64(t_v.GetString());
+        if (t_v.isInt64())
+            return t_v.getInt64();
+        if (t_v.isUint64() && t_v.getUint64() <= static_cast<uint64_t>(INT64_MAX))
+            return static_cast<int64_t>(t_v.getUint64());
+        if (t_v.is_string())
+            return sgrn::utils::strings::parseInt64(t_v.getString());
         return std::nullopt;
     };
-    auto to_float = [](const rapidjson::Value& t_v) -> std::optional<double> {
-        if (t_v.IsNumber())
-            return t_v.GetDouble();
-        if (t_v.IsString())
-            return sgrn::utils::strings::parseDouble(t_v.GetString());
+    auto to_float = [](const sgrn::json::dom::Value& t_v) -> std::optional<double> {
+        if (t_v.is_number())
+            return t_v.getDouble();
+        if (t_v.is_string())
+            return sgrn::utils::strings::parseDouble(t_v.getString());
         return std::nullopt;
     };
 
     switch (t_field.type) {
         case DataType::Bool: {
             bool b = false;
-            if (t_value.IsBool()) {
-                b = t_value.GetBool();
-            } else if (t_value.IsInt()) {
-                b = t_value.GetInt() != 0;
-            } else if (t_value.IsUint()) {
-                b = t_value.GetUint() != 0;
-            } else if (t_value.IsString()) {
-                std::string s = t_value.GetString();
+            if (t_value.is_boolean()) {
+                b = t_value.getBool();
+            } else if (t_value.isInt()) {
+                b = t_value.getInt() != 0;
+            } else if (t_value.isUint()) {
+                b = t_value.getUint() != 0;
+            } else if (t_value.is_string()) {
+                std::string s = t_value.getString();
                 b = (s == "true" || s == "1" || s == "TRUE");
-            } else if (t_value.IsNull()) {
+            } else if (t_value.is_null()) {
                 b = false;
             } else {
                 return SclError::Generic;
@@ -493,8 +501,8 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
         }
         case DataType::Time: {
             int64_t ms = 0;
-            if (t_value.IsString()) {
-                if (!s7codec::parseTimeString(t_value.GetString(), ms))
+            if (t_value.is_string()) {
+                if (!s7codec::parseTimeString(t_value.getString(), ms))
                     return SclError::Generic;
             } else {
                 auto t_v = to_signed(t_value);
@@ -562,9 +570,9 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             return {};
         }
         case DataType::DateTime: {
-            if (!t_value.IsString())
+            if (!t_value.is_string())
                 return SclError::Generic;
-            std::string s = t_value.GetString();
+            std::string s = t_value.getString();
             std::tm tm{};
             if (s == "now" || s == "NOW")
                 tm = sgrn::utils::time::getLocalTime();
@@ -582,9 +590,9 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
             return encodeDtlValue(t_value, tp_ptr, t_buffer_size, t_e);
         case DataType::String:
         case DataType::XString: {
-            if (!t_value.IsString())
+            if (!t_value.is_string())
                 return SclError::Generic;
-            std::string s = t_value.GetString();
+            std::string s = t_value.getString();
             std::expected<void, s7codec::CodecStatus> status;
             // For strings, max_len comes from string_capacity, not count (which is 1 for scalars)
             uint32_t max_len = t_field.string_capacity > 0 ? static_cast<uint32_t>(t_field.string_capacity)
@@ -599,9 +607,9 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
         }
         case DataType::WString:
         case DataType::XWString: {
-            if (!t_value.IsString())
+            if (!t_value.is_string())
                 return SclError::Generic;
-            auto wide = sgrn::utils::strings::utf8ToUtf16(t_value.GetString());
+            auto wide = sgrn::utils::strings::utf8ToUtf16(t_value.getString());
             if (!wide)
                 return SclError::Generic;
             std::expected<void, s7codec::CodecStatus> status;
@@ -625,27 +633,27 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
 
 sgrn::Result<std::string, ::sgrn::scl::SclError> decodeFieldAt(
     const DbField& t_field, const uint8_t* tp_ptr, size_t t_buffer_size, int t_depth, s7codec::Endian t_e) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> t_writer(sb);
     serializeFieldToWriter(t_writer, t_field, tp_ptr, t_buffer_size, t_depth);
-    return std::string(sb.GetString());
+    return std::string(sb.getString());
 }
 
-sgrn::Result<void, ::sgrn::scl::SclError> encodeArrayValue(
-    const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, int t_depth, s7codec::Endian t_e) {
+sgrn::Result<void, ::sgrn::scl::SclError> encodeArrayValue(const DbField& t_field, const sgrn::json::dom::Value& t_value, uint8_t* tp_ptr,
+    size_t t_buffer_size, int t_depth, s7codec::Endian t_e) {
     constexpr int kMaxRecursionDepth = 10;
     if (t_depth > kMaxRecursionDepth)
         return SclError::Generic;
 
-    if (!t_value.IsArray()) {
+    if (!t_value.is_array()) {
         return SclError::Generic;
     }
 
     const uint32_t max_elements = std::max(static_cast<uint32_t>(0), t_field.count);
-    if (!t_field.is_dynamic && t_value.Size() != static_cast<rapidjson::SizeType>(max_elements)) {
+    if (!t_field.is_dynamic && t_value.size() != static_cast<sgrn::json::dom::SizeType>(max_elements)) {
         return SclError::Generic;
     }
-    if (t_field.is_dynamic && t_value.Size() > static_cast<rapidjson::SizeType>(max_elements)) {
+    if (t_field.is_dynamic && t_value.size() > static_cast<sgrn::json::dom::SizeType>(max_elements)) {
         return SclError::Generic;
     }
 
@@ -653,21 +661,21 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeArrayValue(
     if (t_field.is_dynamic) {
         if (t_buffer_size < 4)
             return SclError::Generic;
-        s7codec::toEndian<uint32_t>(static_cast<uint32_t>(t_value.Size()), tp_ptr, t_e);
+        s7codec::toEndian<uint32_t>(static_cast<uint32_t>(t_value.size()), tp_ptr, t_e);
         data_offset = 4;
     }
 
     if (t_field.type == DataType::Bool) {
         // Special case: packed Bool array
-        for (rapidjson::SizeType i = 0; i < t_value.Size(); ++i) {
+        for (sgrn::json::dom::SizeType i = 0; i < t_value.size(); ++i) {
             bool b = false;
             const auto& t_v = t_value[i];
-            if (t_v.IsBool())
-                b = t_v.GetBool();
-            else if (t_v.IsInt())
-                b = t_v.GetInt() != 0;
-            else if (t_v.IsString())
-                b = (std::string(t_v.GetString()) == "true");
+            if (t_v.is_boolean())
+                b = t_v.getBool();
+            else if (t_v.isInt())
+                b = t_v.getInt() != 0;
+            else if (t_v.is_string())
+                b = (std::string(t_v.getString()) == "true");
 
             int byte_off = i / 8;
             int bit_off = i % 8;
@@ -684,7 +692,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeArrayValue(
 
     const int element_size = fieldElementSpanBytes(t_field);
 
-    for (rapidjson::SizeType index = 0; index < t_value.Size(); ++index) {
+    for (sgrn::json::dom::SizeType index = 0; index < t_value.size(); ++index) {
         size_t offset_at = data_offset + static_cast<size_t>(index * element_size);
         if (offset_at + element_size > t_buffer_size)
             return SclError::Generic;
@@ -695,15 +703,15 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeArrayValue(
         element.is_dynamic = false; // The header is already written
 
         sgrn::Result<void, ::sgrn::scl::SclError> status =
-            encodeFieldRapidJson(element, t_value[index], tp_ptr + offset_at, element_size, t_depth + 1, t_e);
+            encodeFieldValue(element, t_value[index], tp_ptr + offset_at, element_size, t_depth + 1, t_e);
         if (!status.has_value())
             return status;
     }
     return {};
 }
 
-sgrn::Result<void, ::sgrn::scl::SclError> encodeFieldRapidJson(
-    const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, int t_depth, s7codec::Endian t_e) {
+sgrn::Result<void, ::sgrn::scl::SclError> encodeFieldValue(const DbField& t_field, const sgrn::json::dom::Value& t_value, uint8_t* tp_ptr,
+    size_t t_buffer_size, int t_depth, s7codec::Endian t_e) {
     constexpr int kMaxRecursionDepth = 10;
     if (t_depth > kMaxRecursionDepth)
         return SclError::Generic;
@@ -711,15 +719,15 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeFieldRapidJson(
     if (t_field.type == DataType::Struct) {
         if (t_field.count > 1)
             return encodeArrayValue(t_field, t_value, tp_ptr, t_buffer_size, t_depth, t_e);
-        if (!t_value.IsObject())
+        if (!t_value.is_object())
             return SclError::Generic;
         for (const DbField& child : t_field.children) {
-            if (!t_value.HasMember(child.name.c_str()))
+            if (!t_value.hasMember(child.name.c_str()))
                 continue;
             if (static_cast<size_t>(child.offset) >= t_buffer_size)
                 return SclError::Generic;
-            sgrn::Result<void, ::sgrn::scl::SclError> status = encodeFieldRapidJson(
-                child, t_value[child.name.c_str()], tp_ptr + child.offset, t_buffer_size - child.offset, t_depth + 1, t_e);
+            sgrn::Result<void, ::sgrn::scl::SclError> status =
+                encodeFieldValue(child, t_value[child.name.c_str()], tp_ptr + child.offset, t_buffer_size - child.offset, t_depth + 1, t_e);
             if (!status.has_value())
                 return status;
         }
@@ -733,100 +741,102 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeFieldRapidJson(
 
 sgrn::Result<void, ::sgrn::scl::SclError> encodeFieldAt(
     const DbField& t_field, const std::string& t_value_json, uint8_t* tp_ptr, size_t t_buffer_size, int t_depth, s7codec::Endian t_e) {
-    rapidjson::Document doc;
-    if (doc.Parse(t_value_json.c_str()).HasParseError())
+    sgrn::json::dom::Document doc;
+    if (doc.parse(t_value_json.c_str()).hasParseError())
         return SclError::ParseError;
-    return encodeFieldRapidJson(t_field, doc, tp_ptr, t_buffer_size, t_depth, t_e);
+    return encodeFieldValue(t_field, doc, tp_ptr, t_buffer_size, t_depth, t_e);
 }
 
 std::string decodeDbBuffer(const sgrn::scl::DbSchema& t_reg, const uint8_t* tp_buf, size_t t_buffer_size) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
-    t_writer.StartObject();
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> t_writer(sb);
+    t_writer.startObject();
     for (const DbField& t_field : t_reg.fields) {
-        t_writer.Key(t_field.name.c_str());
+        t_writer.key(t_field.name.c_str());
         serializeFieldToWriter(t_writer, t_field, tp_buf + t_field.offset, t_buffer_size - t_field.offset, 0);
     }
-    t_writer.EndObject();
-    return std::string(sb.GetString());
+    t_writer.endObject();
+    return std::string(sb.getString());
 }
 
 /// Write a single decoded scalar value to a JSON writer.
 /// Shared by both the array and scalar serialization paths.
-static void writeDecodedValue(rapidjson::Writer<rapidjson::StringBuffer>& t_writer, const s7codec::DecodedValue& t_dv, DataType t_type) {
+static void writeDecodedValue(
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer>& t_writer, const s7codec::DecodedValue& t_dv, DataType t_type) {
     if (!t_dv.valid()) {
-        t_writer.Null();
+        t_writer.nullValue();
         return;
     }
     switch (t_dv.kind()) {
         case s7codec::ValueKind::Bool:
-            t_writer.Bool(t_dv.b());
+            t_writer.boolean(t_dv.b());
             break;
         case s7codec::ValueKind::SignedInt:
             if (t_type == DataType::Time)
-                t_writer.String(s7codec::formatTimeString(static_cast<int32_t>(t_dv.i())).c_str());
+                t_writer.string(s7codec::formatTimeString(static_cast<int32_t>(t_dv.i())).c_str());
             else
-                t_writer.Int64(t_dv.i());
+                t_writer.int64(t_dv.i());
             break;
         case s7codec::ValueKind::UnsignedInt:
             if (t_type == DataType::Byte)
-                t_writer.String(fmt::format("0x{:02X}", static_cast<uint8_t>(t_dv.u())).c_str());
+                t_writer.string(fmt::format("0x{:02X}", static_cast<uint8_t>(t_dv.u())).c_str());
             else if (t_type == DataType::Word)
-                t_writer.String(fmt::format("0x{:04X}", static_cast<uint16_t>(t_dv.u())).c_str());
+                t_writer.string(fmt::format("0x{:04X}", static_cast<uint16_t>(t_dv.u())).c_str());
             else if (t_type == DataType::DWord)
-                t_writer.String(fmt::format("0x{:08X}", static_cast<uint32_t>(t_dv.u())).c_str());
+                t_writer.string(fmt::format("0x{:08X}", static_cast<uint32_t>(t_dv.u())).c_str());
             else
-                t_writer.Uint64(t_dv.u());
+                t_writer.uint64(t_dv.u());
             break;
         case s7codec::ValueKind::Float:
-            t_writer.Double(static_cast<double>(t_dv.f()));
+            t_writer.float64(static_cast<double>(t_dv.f()));
             break;
         case s7codec::ValueKind::Double:
-            t_writer.Double(t_dv.d());
+            t_writer.float64(t_dv.d());
             break;
         case s7codec::ValueKind::String:
-            t_writer.String(t_dv.s().c_str());
+            t_writer.string(t_dv.s().c_str());
             break;
         default:
-            t_writer.Null();
+            t_writer.nullValue();
     }
 }
 
 static void serializeStructToWriter(
-    rapidjson::Writer<rapidjson::StringBuffer>& w, const DbField& f, const uint8_t* ptr, size_t buf_size, int depth) {
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer>& w, const DbField& f, const uint8_t* ptr, size_t buf_size, int depth) {
     if (f.count > 1) {
-        w.StartArray();
+        w.startArray();
         uint32_t struct_size = fieldElementSpanBytes(f);
         for (uint32_t i = 0; i < f.count; ++i) {
-            w.StartObject();
+            w.startObject();
             for (const auto& child : f.children) {
-                w.Key(child.name.c_str());
+                w.key(child.name.c_str());
                 serializeFieldToWriter(
                     w, child, ptr + (i * struct_size) + child.offset, buf_size - (i * struct_size) - child.offset, depth + 1);
             }
-            w.EndObject();
+            w.endObject();
         }
-        w.EndArray();
+        w.endArray();
     } else {
-        w.StartObject();
+        w.startObject();
         for (const auto& child : f.children) {
-            w.Key(child.name.c_str());
+            w.key(child.name.c_str());
             serializeFieldToWriter(w, child, ptr + child.offset, buf_size - child.offset, depth + 1);
         }
-        w.EndObject();
+        w.endObject();
     }
 }
 
-static void serializeStringToWriter(rapidjson::Writer<rapidjson::StringBuffer>& w, const DbField& f, const uint8_t* ptr, size_t buf_size) {
+static void serializeStringToWriter(
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer>& w, const DbField& f, const uint8_t* ptr, size_t buf_size) {
     if (f.count > 1) {
-        w.StartArray();
+        w.startArray();
         uint32_t elem_size = fieldElementSpanBytes(f);
         for (uint32_t i = 0; i < f.count; ++i) {
             auto dv = s7codec::decodeScalar(f.type, s7codec::ReadBuffer{ptr + (i * elem_size), buf_size - (i * elem_size)},
                 s7codec::DecodeOptions{.string_capacity = s7codec::StringCapacity{f.string_capacity}});
             writeDecodedValue(w, dv, f.type);
         }
-        w.EndArray();
+        w.endArray();
     } else {
         auto dv = s7codec::decodeScalar(f.type, s7codec::ReadBuffer{ptr, buf_size},
             s7codec::DecodeOptions{.string_capacity = s7codec::StringCapacity{f.string_capacity}});
@@ -835,9 +845,9 @@ static void serializeStringToWriter(rapidjson::Writer<rapidjson::StringBuffer>& 
 }
 
 static void serializeScalarOrArrayToWriter(
-    rapidjson::Writer<rapidjson::StringBuffer>& w, const DbField& f, const uint8_t* ptr, size_t buf_size) {
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer>& w, const DbField& f, const uint8_t* ptr, size_t buf_size) {
     if (f.count > 1) {
-        w.StartArray();
+        w.startArray();
         uint32_t elem_size = fieldElementSpanBytes(f);
         for (uint32_t i = 0; i < f.count; ++i) {
             const uint8_t* p_elem_ptr = ptr + (i * elem_size);
@@ -852,7 +862,7 @@ static void serializeScalarOrArrayToWriter(
                     .bit_offset = s7codec::BitOffset{static_cast<uint8_t>(b_idx)}});
             writeDecodedValue(w, dv, f.type);
         }
-        w.EndArray();
+        w.endArray();
     } else {
         auto dv = s7codec::decodeScalar(f.type, s7codec::ReadBuffer{ptr, buf_size},
             s7codec::DecodeOptions{//
@@ -862,10 +872,10 @@ static void serializeScalarOrArrayToWriter(
     }
 }
 
-void serializeFieldToWriter(rapidjson::Writer<rapidjson::StringBuffer>& t_writer, const DbField& t_field, const uint8_t* tp_ptr,
+void serializeFieldToWriter(sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer>& t_writer, const DbField& t_field, const uint8_t* tp_ptr,
     size_t t_buffer_size, int t_depth) {
     if (t_depth > 16) {
-        t_writer.String("!!! ERROR: MAX RECURSION DEPTH EXCEEDED !!!");
+        t_writer.string("!!! ERROR: MAX RECURSION DEPTH EXCEEDED !!!");
         return;
     }
     switch (kind_of(t_field)) {

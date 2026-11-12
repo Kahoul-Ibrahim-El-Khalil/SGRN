@@ -147,8 +147,6 @@ sgrn_add_component_library(
         fmt::fmt            # EventSupport.cpp formatting
 )
 
-target_link_libraries(sgrn_wrappers_opcua PRIVATE extern::rapidjson) # EventSupport
-
 set_target_properties(sgrn_wrappers_opcua PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     CXX_STANDARD 23

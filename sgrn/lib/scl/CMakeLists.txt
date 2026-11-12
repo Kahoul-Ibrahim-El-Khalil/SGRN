@@ -15,7 +15,6 @@ set(SGRN_SCL_SOURCES
     src/types/DbField.cpp
     src/types/DbSchema.cpp
     src/types/UdtDefinition.cpp
-    src/types/ParseResult.cpp
     src/AsApiEmitter.cpp
 )
 
@@ -31,7 +30,6 @@ sgrn_add_component_library(
 )
 
 target_link_libraries(sgrn_scl PRIVATE
-    extern::rapidjson
     extern::xml_h
 )
 
@@ -69,6 +67,19 @@ if(SGRN_BUILD_TESTS)
     )
     add_test(NAME scl_directives_test COMMAND scl_directives_test)
     sgrn_target(scl_directives_test)
+
+    sgrn_add_component_executable(
+        TARGET scl_scalar_alias_test
+        SOURCES tests/scl-scalar-alias-tests.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn_scl
+    )
+    target_include_directories(scl_scalar_alias_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    add_test(NAME scl_scalar_alias_test COMMAND scl_scalar_alias_test)
+    sgrn_target(scl_scalar_alias_test)
 endif()
 
 # =============================================================================

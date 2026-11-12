@@ -2,6 +2,7 @@
 #include <sgrn/common/S7SerializationUtils.hpp>
 #include <sgrn/gateway/core/snapshot.hpp>
 #include <sgrn/gateway/twin/utils.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <algorithm>
 #include <stdexcept>
 #include <string>
@@ -16,10 +17,10 @@ std::string buildSnapshotJson(sgrn::gateway::twin::PlcMemory& t_server, const st
         return t_server.getDigitalTwinJsonString();
     }
 
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
 
-    writer.StartObject();
+    writer.startObject();
     for (const auto& [db, ranges] : t_filter) {
         auto it_reg = t_regs.find(db);
         if (it_reg == t_regs.end() || !it_reg->second)
@@ -40,9 +41,9 @@ std::string buildSnapshotJson(sgrn::gateway::twin::PlcMemory& t_server, const st
         size_t b_size = p_db_entry->size;
 
         const std::string key = reg->db_name.empty() ? fmt::format("DB{}", db) : reg->db_name;
-        writer.Key(key.c_str(), static_cast<rapidjson::SizeType>(key.length()));
+        writer.key(key.c_str(), static_cast<sgrn::json::dom::SizeType>(key.length()));
 
-        writer.StartObject();
+        writer.startObject();
         for (const auto& field : reg->fields) {
             uint32_t f_size = (field.type == ::sgrn::scl::DataType::Bool) ? 1 : s7codec::typeSpanBytes(field.type, field.count).value_or(0);
 
@@ -58,15 +59,15 @@ std::string buildSnapshotJson(sgrn::gateway::twin::PlcMemory& t_server, const st
             }
 
             if (overlaps) {
-                writer.Key(field.name.c_str(), static_cast<rapidjson::SizeType>(field.name.length()));
+                writer.key(field.name.c_str(), static_cast<sgrn::json::dom::SizeType>(field.name.length()));
                 sgrn::gateway::adapters::s7::serializeComplexFieldTo(writer, field, buf, b_size, ranges);
             }
         }
-        writer.EndObject();
+        writer.endObject();
     }
-    writer.EndObject();
+    writer.endObject();
 
-    return sb.GetString();
+    return sb.getString();
 }
 
 } // namespace sgrn::gateway::core

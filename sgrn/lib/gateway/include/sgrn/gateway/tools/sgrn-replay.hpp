@@ -1,4 +1,6 @@
 #pragma once
+
+#include <sgrn/utils/json-dom.hpp>
 #include <atomic>
 #include <cstdint>
 #include <deque>
@@ -14,7 +16,6 @@
 #include <sgrn/gateway/twin/PlcMemory.hpp>
 #include <sgrn/scl/DbSchema.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
-#include <rapidjson/document.h>
 
 namespace sgrn::gateway
 {
@@ -83,7 +84,7 @@ private:
     /// they share packed bytes with neighbours, so they are staged into
     /// pending_bits_ for writeBit() instead (same split as DbIOProvider).
     /// Returns false on schema drift or encode failure (caller logs + skips).
-    bool encodeLeaf(const std::string& full_path, const rapidjson::Value& val, std::deque<std::vector<uint8_t>>& storage,
+    bool encodeLeaf(const std::string& full_path, const sgrn::json::dom::Value& val, std::deque<std::vector<uint8_t>>& storage,
         std::vector<sgrn::gateway::twin::DbMemorySpan>& spans);
 
     /// Commits bits staged by encodeLeaf() via PlcMemory::writeBit()

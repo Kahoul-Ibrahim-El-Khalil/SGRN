@@ -3,6 +3,7 @@
 #include <sgrn/scl/schema/SchemaSerializer.hpp>
 #include <sgrn/scl/schema/SclCompiler.hpp>
 #include <sgrn/scl/utils.hpp>
+#include <sgrn/utils/glaze.hpp>
 
 #include <fmt/core.h>
 #include <algorithm>
@@ -98,17 +99,11 @@ sgrn::Result<PlcSchemaStore, SclError> PlcSchemaStore::loadFromFiles(const std::
 }
 
 sgrn::Result<PlcSchemaStore, SclError> PlcSchemaStore::loadFromJsonFile(const std::string& t_path) {
-    std::ifstream file(t_path);
-    if (!file.is_open())
+    auto text = sgrn::json::readFileText(t_path);
+    if (text.hasError())
         return SclError::FileNotFound;
 
-    std::string json_str((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    rapidjson::Document t_root;
-    t_root.Parse(json_str.c_str());
-    if (t_root.HasParseError())
-        return SclError::ParseError;
-
-    auto store_res = loadFromJson(t_root);
+    auto store_res = loadFromJson(text.value());
     if (store_res.hasError())
         return store_res.error();
 
@@ -116,9 +111,9 @@ sgrn::Result<PlcSchemaStore, SclError> PlcSchemaStore::loadFromJsonFile(const st
     return store_res;
 }
 
-sgrn::Result<PlcSchemaStore, SclError> PlcSchemaStore::loadFromJson(const rapidjson::Value& t_root) {
+sgrn::Result<PlcSchemaStore, SclError> PlcSchemaStore::loadFromJson(std::string_view t_text) {
     PlcSchemaStore store;
-    auto res = SchemaSerializer::deserialize(store, t_root);
+    auto res = SchemaSerializer::deserialize(store, t_text);
     if (res.hasError())
         return res.error();
     return store;

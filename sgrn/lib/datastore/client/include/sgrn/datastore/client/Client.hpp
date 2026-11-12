@@ -16,7 +16,6 @@
 #include <sgrn/datastore/client/Types.hpp>
 #include <sgrn/utils/threading.hpp>
 #include <httplib.h>
-#include <rapidjson/document.h>
 #include <stdexcept>
 
 namespace sgrn::datastore::client
@@ -124,8 +123,9 @@ public:
 
     /**
      * @brief Generic data table query (Synchronous).
+     * @return The parsed response, or a null Value on failure.
      */
-    rapidjson::Document query(const std::string& t_table, const std::string& t_params = "");
+    sgrn::json::Value query(const std::string& t_table, const std::string& t_params = "");
 
     /**
      * @brief Account-level listings backing domain navigation (Synchronous).
@@ -217,8 +217,11 @@ public:
     void setSessionToken(std::string t_token);
     void clearSessionToken();
 
-    rapidjson::Document makeRequest(const std::string& t_method, const std::string& t_url, const std::string& t_body = "");
-    rapidjson::Document makeRequest(
+    /// Perform a request and return the parsed JSON body, or a null Value on
+    /// any failure (transport error, non-JSON body). Null is the historical
+    /// "empty response" sentinel callers test for.
+    sgrn::json::Value makeRequest(const std::string& t_method, const std::string& t_url, const std::string& t_body = "");
+    sgrn::json::Value makeRequest(
         const std::string& t_method, const std::string& t_url, const std::string& t_body, const std::string& t_content_type);
 
     struct DownloadResult {

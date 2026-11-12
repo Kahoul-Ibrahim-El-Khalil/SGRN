@@ -1,7 +1,7 @@
 #pragma once
 #include <sgrn/scl/types/DataType.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <cstdint>
-#include <rapidjson/document.h>
 #include <s7codec/codec.hpp>
 #include <string>
 
@@ -31,35 +31,35 @@ namespace sgrn::scl::modbus::entry
 /// Writer-agnostic JSON "form" for a single virtual Modbus entry.
 template <typename Writer>
 inline void serializeToWriter(Writer& t_writer, const sgrn::scl::ModbusVirtualEntry& t_e) {
-    t_writer.StartObject();
-    t_writer.Key("number");
-    t_writer.Int(t_e.db_number);
-    t_writer.Key("field_path");
-    t_writer.String(t_e.field_path.c_str());
-    t_writer.Key("type");
-    t_writer.String(s7codec::s7TypeToString(t_e.type));
-    t_writer.Key("byte_offset");
-    t_writer.Int(t_e.byte_offset);
-    t_writer.Key("bit");
-    t_writer.Int(t_e.bit_index);
-    t_writer.Key("byte_count");
-    t_writer.Int(t_e.byte_count);
-    t_writer.Key("reg_start");
-    t_writer.Int(t_e.reg_start);
-    t_writer.Key("reg_count");
-    t_writer.Int(t_e.reg_count);
-    t_writer.Key("padded");
-    t_writer.Bool(t_e.padded);
-    t_writer.Key("read_only");
-    t_writer.Bool(t_e.read_only);
-    t_writer.EndObject();
+    t_writer.startObject();
+    t_writer.key("number");
+    t_writer.int32(t_e.db_number);
+    t_writer.key("field_path");
+    t_writer.string(t_e.field_path.c_str());
+    t_writer.key("type");
+    t_writer.string(s7codec::s7TypeToString(t_e.type));
+    t_writer.key("byte_offset");
+    t_writer.int32(t_e.byte_offset);
+    t_writer.key("bit");
+    t_writer.int32(t_e.bit_index);
+    t_writer.key("byte_count");
+    t_writer.int32(t_e.byte_count);
+    t_writer.key("reg_start");
+    t_writer.int32(t_e.reg_start);
+    t_writer.key("reg_count");
+    t_writer.int32(t_e.reg_count);
+    t_writer.key("padded");
+    t_writer.boolean(t_e.padded);
+    t_writer.key("read_only");
+    t_writer.boolean(t_e.read_only);
+    t_writer.endObject();
 }
 
 /// from-side lives in its own namespace (C++ cannot overload on return type globally).
-sgrn::scl::ModbusVirtualEntry fromJson(const rapidjson::Value& t_value);
+sgrn::scl::ModbusVirtualEntry fromJson(const sgrn::json::dom::Value& t_value);
 sgrn::scl::ModbusVirtualEntry fromJsonString(const std::string& t_value);
 } // namespace sgrn::scl::modbus::entry
 
 // global namespace — functional JSON form
 std::string toJsonString(const sgrn::scl::ModbusVirtualEntry& t_entry);
-rapidjson::Document toJson(const sgrn::scl::ModbusVirtualEntry& t_entry);
+sgrn::json::dom::Document toJson(const sgrn::scl::ModbusVirtualEntry& t_entry);

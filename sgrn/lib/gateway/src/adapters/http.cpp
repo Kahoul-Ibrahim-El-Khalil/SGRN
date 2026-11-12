@@ -1,6 +1,6 @@
+#include <sgrn/utils/json-dom.hpp>
 /*sgrn/gateway/adapters/http/http.cpp*/
 #include <fmt/core.h>
-#include <sgrn/common/json-helper.hpp>
 #include <sgrn/common/path-utils.hpp>
 #include <sgrn/gateway/adapters/http.hpp>
 #include <sgrn/gateway/adapters/rate-limit.hpp>
@@ -13,9 +13,6 @@
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/utils/json-serialization.hpp>
 #include <chrono>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 
 using sgrn::gateway::common::SecurityHelper;
 namespace sgrn::gateway::adapters
@@ -30,15 +27,10 @@ struct ReplayStatusResponse {
     bool unpaced;
     uint64_t frames;
     int64_t ts;
-
-    static constexpr auto glaze = glz::object("speed", &ReplayStatusResponse::speed, "paused", &ReplayStatusResponse::paused, "unpaced",
-        &ReplayStatusResponse::unpaced, "frames", &ReplayStatusResponse::frames, "ts", &ReplayStatusResponse::ts);
 };
 
 struct ApiErrorResponse {
     std::string error;
-
-    static constexpr auto glaze = glz::object("error", &ApiErrorResponse::error);
 };
 
 } // namespace
@@ -342,17 +334,17 @@ void HttpAdapter::handlePostReplaySpeed(const http::HttpRequest& t_req, http::Ht
         setJsonError(t_res, "replay control unavailable");
         return;
     }
-    rapidjson::Document doc;
-    if (doc.Parse(t_req.body.c_str()).HasParseError() || !doc.IsObject() || !doc.HasMember("speed")) {
+    sgrn::json::dom::Document doc;
+    if (doc.parse(t_req.body.c_str()).hasParseError() || !doc.is_object() || !doc.hasMember("speed")) {
         t_res.status = 400;
         setJsonError(t_res, "expected JSON body with speed field");
         return;
     }
     const auto& v = doc["speed"];
-    if (v.IsString() && std::string_view(v.GetString()) == "unpaced") {
+    if (v.is_string() && std::string_view(v.getString()) == "unpaced") {
         replay_control_->unpaced.store(true, std::memory_order_relaxed);
-    } else if (v.IsNumber()) {
-        const double speed = v.GetDouble();
+    } else if (v.is_number()) {
+        const double speed = v.getDouble();
         if (!(speed > 0) || speed > 1e9) {
             t_res.status = 400;
             setJsonError(t_res, "speed must be a positive number");

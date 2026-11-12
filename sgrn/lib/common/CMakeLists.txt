@@ -18,7 +18,6 @@ target_link_libraries(sgrn_common INTERFACE
     sgrn::utils
     sgrn::scl
     fmt::fmt
-    extern::rapidjson
     sgrn::s7codec
 )
 

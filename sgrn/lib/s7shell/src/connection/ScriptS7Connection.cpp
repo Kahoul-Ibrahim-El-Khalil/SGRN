@@ -19,6 +19,7 @@
 
 #include <fmt/color.h>
 #include <fmt/format.h>
+#include <sgrn/utils/json-dom.hpp>
 #include <algorithm>
 #include <angelscript.h>
 #include <cassert>
@@ -29,9 +30,6 @@
 #include <fstream>
 #include <iostream>
 #include <map>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <regex>
 #include <stdexcept>
 #include <string>
@@ -368,29 +366,29 @@ void ScriptS7Client::tagPut(const std::string& t_name, const std::string& t_raw_
 }
 
 void ScriptS7Client::tagPutDouble(const std::string& t_name, double t_val) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-    writer.Double(t_val);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
+    writer.float64(t_val);
     if (conn_->hasRuntimeTag(t_name)) {
-        (void)shell::ok(conn_->runtimeTagPut(t_name, sb.GetString()));
+        (void)shell::ok(conn_->runtimeTagPut(t_name, sb.getString()));
         return;
     }
     if (!conn_->tag_table_)
         return;
-    (void)shell::ok(conn_->tag_table_->put(conn_->client_, t_name, sb.GetString()));
+    (void)shell::ok(conn_->tag_table_->put(conn_->client_, t_name, sb.getString()));
 }
 
 void ScriptS7Client::tagPutInt(const std::string& t_name, int32_t t_val) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-    writer.Int(t_val);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
+    writer.int32(t_val);
     if (conn_->hasRuntimeTag(t_name)) {
-        (void)shell::ok(conn_->runtimeTagPut(t_name, sb.GetString()));
+        (void)shell::ok(conn_->runtimeTagPut(t_name, sb.getString()));
         return;
     }
     if (!conn_->tag_table_)
         return;
-    (void)shell::ok(conn_->tag_table_->put(conn_->client_, t_name, sb.GetString()));
+    (void)shell::ok(conn_->tag_table_->put(conn_->client_, t_name, sb.getString()));
 }
 
 void ScriptS7Client::tagPutBool(const std::string& t_name, bool t_val) {
@@ -400,10 +398,10 @@ void ScriptS7Client::tagPutBool(const std::string& t_name, bool t_val) {
     }
     if (!conn_->tag_table_)
         return;
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-    writer.Bool(t_val);
-    (void)shell::ok(conn_->tag_table_->put(conn_->client_, t_name, sb.GetString()));
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
+    writer.boolean(t_val);
+    (void)shell::ok(conn_->tag_table_->put(conn_->client_, t_name, sb.getString()));
 }
 
 std::string ScriptS7Client::read(const std::string& t_target) {
@@ -509,24 +507,24 @@ void ScriptS7Client::write(const std::string& t_target, const std::string& t_raw
 }
 
 void ScriptS7Client::write(const std::string& t_target, double t_val) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-    writer.Double(t_val);
-    write(t_target, std::string(sb.GetString()));
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
+    writer.float64(t_val);
+    write(t_target, std::string(sb.getString()));
 }
 
 void ScriptS7Client::write(const std::string& t_target, int32_t t_val) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-    writer.Int(t_val);
-    write(t_target, std::string(sb.GetString()));
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
+    writer.int32(t_val);
+    write(t_target, std::string(sb.getString()));
 }
 
 void ScriptS7Client::write(const std::string& t_target, bool t_val) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-    writer.Bool(t_val);
-    write(t_target, std::string(sb.GetString()));
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
+    writer.boolean(t_val);
+    write(t_target, std::string(sb.getString()));
 }
 
 void ScriptS7Client::reconnect() {

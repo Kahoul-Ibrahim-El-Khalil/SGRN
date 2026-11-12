@@ -182,13 +182,7 @@ sgrn::Result<::sgrn::scl::PlcSchemaStore> EngineStateStore::loadRegistryFromSQLi
             return "SQLite registry table is empty or missing 'current' entry";
         }
 
-        rapidjson::Document root;
-        root.Parse(t_registry_json.c_str());
-        if (root.HasParseError()) {
-            return "Failed to parse JSON from SQLite";
-        }
-
-        auto res = ::sgrn::scl::PlcSchemaStore::loadFromJson(root);
+        auto res = ::sgrn::scl::PlcSchemaStore::loadFromJson(t_registry_json);
         if (res.hasError()) {
             return fmt::format("Failed to parse registry: {}", toString(res.error()));
         }

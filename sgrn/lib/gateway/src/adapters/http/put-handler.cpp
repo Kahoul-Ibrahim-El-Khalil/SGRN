@@ -4,6 +4,7 @@
 #include <sgrn/gateway/twin/PlcMemory.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/utils/encoding.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <sgrn/utils/json.hpp>
 #include <stdexcept>
 #include <string>
@@ -32,9 +33,9 @@ void HttpAdapter::handlePut(const http::HttpRequest& t_req, http::HttpResponse& 
             return;
         }
 
-        rapidjson::Document doc;
-        doc.Parse(t_req.body.c_str());
-        if (doc.HasParseError() || !doc.IsArray()) {
+        sgrn::json::dom::Document doc;
+        doc.parse(t_req.body.c_str());
+        if (doc.hasParseError() || !doc.is_array()) {
             t_res.status = 400;
             t_res.set_content(R"json({"error":"PUT multi-write requires a JSON array"})json", "application/json");
             return;
@@ -46,20 +47,20 @@ void HttpAdapter::handlePut(const http::HttpRequest& t_req, http::HttpResponse& 
         std::vector<std::tuple<uint16_t, size_t, size_t>> item_metadata; // db, offset, size for response
 
         // First pass: validate and collect all items
-        for (rapidjson::SizeType i = 0; i < doc.Size(); i++) {
+        for (sgrn::json::dom::SizeType i = 0; i < doc.size(); i++) {
             const auto& item = doc[i];
-            if (!item.IsObject() || !item.HasMember("db") || !item.HasMember("offset") || !item.HasMember("size") ||
-                !item.HasMember("data")) {
+            if (!item.is_object() || !item.hasMember("db") || !item.hasMember("offset") || !item.hasMember("size") ||
+                !item.hasMember("data")) {
                 t_res.status = 400;
                 t_res.set_content(
                     R"json({"error":"Each item must have t_db, t_offset, t_size, and tp_data (base64)"})json", "application/json");
                 return;
             }
 
-            uint16_t db_num = static_cast<uint16_t>(item["db"].GetUint());
-            size_t item_offset = item["offset"].GetUint64();
-            size_t item_size = item["size"].GetUint64();
-            std::string data_b64 = item["data"].GetString();
+            uint16_t db_num = static_cast<uint16_t>(item["db"].getUint());
+            size_t item_offset = item["offset"].getUint64();
+            size_t item_size = item["size"].getUint64();
+            std::string data_b64 = item["data"].getString();
 
             const std::string& client_ip = t_req.remote_ip;
             if (!isAuthorized(t_req, db_num)) {
@@ -90,36 +91,36 @@ void HttpAdapter::handlePut(const http::HttpRequest& t_req, http::HttpResponse& 
             t_res.status = 413;
             t_res.set_content(
                 fmt::format(R"json({{"error":"Batch write failed: {}","items":{},"reason":"atomic write failed, no items written"}})json",
-                    r.error(), doc.Size()),
+                    r.error(), doc.size()),
                 "application/json");
             return;
         }
 
         // Third pass: build success response
         int written_count = 0;
-        rapidjson::Document response_array;
-        auto& response_alloc = response_array.GetAllocator();
-        response_array.SetArray();
+        sgrn::json::dom::Document response_array;
+        auto& response_alloc = response_array.allocator();
+        response_array.setArray();
 
         for (size_t i = 0; i < payloads.size(); i++) {
             const auto& [db_num, item_offset, item_size] = item_metadata[i];
             const std::string written_hex = sgrn::utils::encoding::toHex(payloads[i].data(), item_size);
-            rapidjson::Value res_item(rapidjson::kObjectType);
-            res_item.AddMember("db", db_num, response_alloc);
-            res_item.AddMember("offset", item_offset, response_alloc);
-            res_item.AddMember("size", item_size, response_alloc);
-            res_item.AddMember("written", rapidjson::Value(written_hex.c_str(), response_alloc), response_alloc);
-            response_array.PushBack(res_item, response_alloc);
+            sgrn::json::dom::Value res_item(sgrn::json::dom::Type::Object);
+            res_item.addMember("db", db_num, response_alloc);
+            res_item.addMember("offset", item_offset, response_alloc);
+            res_item.addMember("size", item_size, response_alloc);
+            res_item.addMember("written", sgrn::json::dom::Value(written_hex.c_str(), response_alloc), response_alloc);
+            response_array.pushBack(res_item, response_alloc);
             written_count++;
         }
 
-        rapidjson::Document root;
-        auto& root_alloc = root.GetAllocator();
-        root.SetObject();
-        root.AddMember("items_written", written_count, root_alloc);
-        rapidjson::Value results_copy;
-        results_copy.CopyFrom(response_array, root_alloc);
-        root.AddMember("results", results_copy, root_alloc);
+        sgrn::json::dom::Document root;
+        auto& root_alloc = root.allocator();
+        root.setObject();
+        root.addMember("items_written", written_count, root_alloc);
+        sgrn::json::dom::Value results_copy;
+        results_copy.copyFrom(response_array, root_alloc);
+        root.addMember("results", results_copy, root_alloc);
 
         t_res.status = 200;
         t_res.set_content(sgrn::utils::json::serializeCompact(root), "application/json");

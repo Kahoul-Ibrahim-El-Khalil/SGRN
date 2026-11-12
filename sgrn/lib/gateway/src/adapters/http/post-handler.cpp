@@ -1,8 +1,10 @@
 #include <fmt/core.h>
+#include <sgrn/utils/json-dom.hpp>
 
 #include <sgrn/gateway/adapters/http.hpp>
 #include <sgrn/gateway/adapters/http/errors.hpp>
 #include <sgrn/gateway/adapters/http/path.hpp>
+#include <sgrn/gateway/common/JsonLeafVisitor.hpp>
 #include <sgrn/gateway/twin/PlcCommandProcessor.hpp>
 #include <sgrn/gateway/twin/PlcMemory.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
@@ -172,16 +174,16 @@ bool splitArrayElement(std::string_view leaf_path, ArrayElementRef& result) {
 }
 
 // -----------------------------------------------------------------------------
-// RapidJSON helpers
+// Glaze JSON DOM helpers
 // -----------------------------------------------------------------------------
 
-std::string serializeJson(const rapidjson::Value& value) {
-    rapidjson::StringBuffer buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+std::string serializeJson(const sgrn::json::dom::Value& value) {
+    sgrn::json::dom::StringBuffer buffer;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(buffer);
 
-    value.Accept(writer);
+    value.accept(writer);
 
-    return buffer.GetString();
+    return buffer.getString();
 }
 
 // Navigate `root` (which must be an array) to `index`, then descend `rest`.
@@ -190,19 +192,21 @@ std::string serializeJson(const rapidjson::Value& value) {
 // Non-numeric path segments address object members.
 //
 // Every segment must already exist.
-bool setNestedLeaf(rapidjson::Value& root, size_t index, std::string_view rest, const rapidjson::Value& value,
-    rapidjson::Document::AllocatorType& allocator, std::string& error) {
-    if (!root.IsArray()) {
+bool setNestedLeaf(sgrn::json::dom::Value& root, size_t index, std::string_view rest, const sgrn::json::dom::Value& value,
+    sgrn::json::dom::Document::AllocatorType& allocator, std::string& error) {
+    if (!root.is_array()) {
         error = "target is not a JSON array";
         return false;
     }
 
-    if (index >= root.Size()) {
+    if (index >= root.size()) {
         error = "array index out of range";
         return false;
     }
 
-    rapidjson::Value* current = &root[static_cast<rapidjson::SizeType>(index)];
+    sgrn::json::dom::Value current_value = sgrn::json::dom::Value::view(root.rawValue().get_array().at(index));
+    sgrn::json::dom::Value* current = &current_value;
+    sgrn::json::dom::Value current_storage;
 
     const auto segments = splitSlashes(rest);
 
@@ -211,44 +215,46 @@ bool setNestedLeaf(rapidjson::Value& root, size_t index, std::string_view rest, 
         const std::string_view segment = segments[i];
 
         if (const auto nested_index = parseIndex(segment)) {
-            if (!current->IsArray()) {
+            if (!current->is_array()) {
                 error = "segment '" + std::string(segment) + "' addresses a non-array";
 
                 return false;
             }
 
-            if (*nested_index >= current->Size()) {
+            if (*nested_index >= current->size()) {
                 error = "nested array index out of range";
                 return false;
             }
 
-            auto& child = (*current)[static_cast<rapidjson::SizeType>(*nested_index)];
+            auto child = (*current)[static_cast<sgrn::json::dom::SizeType>(*nested_index)];
 
             if (last) {
-                child.CopyFrom(value, allocator);
+                child.copyFrom(value, allocator);
                 return true;
             }
 
-            current = &child;
+            current_storage.rebindTo(child);
+            current = &current_storage;
             continue;
         }
 
         const std::string key(segment);
 
-        if (!current->IsObject() || !current->HasMember(key.c_str())) {
+        if (!current->is_object() || !current->hasMember(key.c_str())) {
             error = "unknown field '" + std::string(segment) + "'";
 
             return false;
         }
 
-        auto& child = (*current)[key.c_str()];
+        auto child = (*current)[key.c_str()];
 
         if (last) {
-            child.CopyFrom(value, allocator);
+            child.copyFrom(value, allocator);
             return true;
         }
 
-        current = &child;
+        current_storage.rebindTo(child);
+        current = &current_storage;
     }
 
     error = "empty sub-path";
@@ -349,28 +355,28 @@ LeafWriteOutcome applyLeafWrites(
         if (array_result.hasError())
             continue;
 
-        rapidjson::Document array_document;
+        sgrn::json::dom::Document array_document;
 
-        if (array_document.Parse(array_result.value().c_str()).HasParseError() || !array_document.IsArray()) {
+        if (array_document.parse(array_result.value().c_str()).hasParseError() || !array_document.is_array()) {
             continue;
         }
 
         int group_applied = 0;
 
         for (const auto& operation : group.operations) {
-            if (operation.index >= array_document.Size()) {
+            if (operation.index >= array_document.size()) {
                 // The live array may have been resized since validation.
                 continue;
             }
 
-            rapidjson::Document value_document;
+            sgrn::json::dom::Document value_document;
 
-            if (value_document.Parse(operation.value.c_str()).HasParseError())
+            if (value_document.parse(operation.value.c_str()).hasParseError())
                 continue;
 
             std::string error;
 
-            if (!setNestedLeaf(array_document, operation.index, operation.rest, value_document, array_document.GetAllocator(), error)) {
+            if (!setNestedLeaf(array_document, operation.index, operation.rest, value_document, array_document.allocator(), error)) {
                 continue;
             }
 
@@ -396,8 +402,8 @@ LeafWriteOutcome applyLeafWrites(
         // Read back the last touched element.
         const auto& last = group.operations.back();
 
-        if (last.index < array_document.Size()) {
-            outcome.element_readback = serializeJson(array_document[static_cast<rapidjson::SizeType>(last.index)]);
+        if (last.index < array_document.size()) {
+            outcome.element_readback = serializeJson(array_document[static_cast<sgrn::json::dom::SizeType>(last.index)]);
 
             outcome.has_element_readback = true;
         }
@@ -415,17 +421,17 @@ struct ArrayUpdateResult {
     std::string serialized_element;
 };
 
-std::optional<ArrayUpdateResult> replaceArrayElement(std::string_view array_json, size_t index, const rapidjson::Value& replacement) {
-    rapidjson::Document array_document;
+std::optional<ArrayUpdateResult> replaceArrayElement(std::string_view array_json, size_t index, const sgrn::json::dom::Value& replacement) {
+    sgrn::json::dom::Document array_document;
 
-    if (array_document.Parse(array_json.data(), array_json.size()).HasParseError() || !array_document.IsArray() ||
-        index >= array_document.Size()) {
+    if (array_document.parse(array_json.data(), array_json.size()).hasParseError() || !array_document.is_array() ||
+        index >= array_document.size()) {
         return std::nullopt;
     }
 
-    auto& element = array_document[static_cast<rapidjson::SizeType>(index)];
+    auto element = array_document[static_cast<sgrn::json::dom::SizeType>(index)];
 
-    element.CopyFrom(replacement, array_document.GetAllocator());
+    element.copyFrom(replacement, array_document.allocator());
 
     return ArrayUpdateResult{.serialized_array = serializeJson(array_document), .serialized_element = serializeJson(element)};
 }
@@ -466,10 +472,10 @@ void HttpAdapter::handlePost(const http::HttpRequest& request, http::HttpRespons
     // 2. Parse JSON body
     // -------------------------------------------------------------------------
 
-    rapidjson::Document document;
-    document.Parse(request.body.c_str());
+    sgrn::json::dom::Document document;
+    document.parse(request.body.c_str());
 
-    if (document.HasParseError()) {
+    if (document.hasParseError()) {
         response.status = 400;
 
         response.set_content(R"({"error":"Body is not valid JSON"})", "application/json");
@@ -491,7 +497,7 @@ void HttpAdapter::handlePost(const http::HttpRequest& request, http::HttpRespons
     // -------------------------------------------------------------------------
 
     if (array_index.has_value()) {
-        if (document.IsObject())
+        if (document.is_object())
             return handlePostStructArrayElement(request, response, db_num, field_path, array_rest_path, *array_index, url_path, document);
 
         return handlePostScalarArrayElement(request, response, db_num, field_path, *array_index, url_path, document);
@@ -516,10 +522,10 @@ void HttpAdapter::handlePostMultiDb(const http::HttpRequest& request, http::Http
     PlcMemory& memory = *refs_.memory;
 
     // The body must be a JSON object where keys are DB names.
-    rapidjson::Document document;
-    document.Parse(request.body.c_str());
+    sgrn::json::dom::Document document;
+    document.parse(request.body.c_str());
 
-    if (document.HasParseError() || !document.IsObject()) {
+    if (document.hasParseError() || !document.is_object()) {
         response.status = 400;
         response.set_content(R"({"error":"POST /data/ requires a JSON object with DB names as keys"})", "application/json");
 
@@ -536,8 +542,8 @@ void HttpAdapter::handlePostMultiDb(const http::HttpRequest& request, http::Http
 
     const std::string& client_ip = request.remote_ip;
 
-    for (auto it = document.MemberBegin(); it != document.MemberEnd(); ++it) {
-        const std::string db_name = it->name.GetString();
+    for (auto it = document.memberBegin(); it != document.memberEnd(); ++it) {
+        const std::string db_name = it->name.getString();
 
         auto result = registry.getDbByName(db_name);
 
@@ -551,23 +557,27 @@ void HttpAdapter::handlePostMultiDb(const http::HttpRequest& request, http::Http
 
         const uint16_t db_num = result.value()->db_number;
 
-        std::vector<std::pair<std::string, std::string>> db_leaves;
+        bool authorized = true;
+        std::string path;
+        common::visitJsonLeaves(it->value, path, '/', common::JsonArrayPolicy::TreatAsLeaf,
+            [&](const std::string& leaf_path, const sgrn::json::dom::Value& leaf_value) {
+                if (!authorized)
+                    return;
 
-        collectLeaves(it->value, "", db_leaves);
+                if (!isAuthorizedField(request, db_num, leaf_path, true)) {
+                    response.status = 403;
+                    response.set_content(fmt::format(R"({{"error":"Forbidden: IP {} is not authorised to write path '{}' in DB{}"}})",
+                                             client_ip, leaf_path, db_num),
+                        "application/json");
+                    authorized = false;
+                    return;
+                }
 
-        for (const auto& leaf : db_leaves) {
-            if (!isAuthorizedField(request, db_num, leaf.first, true)) {
-                response.status = 403;
+                all_leaves.push_back({db_num, leaf_path, serializeJson(leaf_value)});
+            });
 
-                response.set_content(fmt::format(R"({{"error":"Forbidden: IP {} is not authorised to write path '{}' in DB{}"}})",
-                                         client_ip, leaf.first, db_num),
-                    "application/json");
-
-                return;
-            }
-
-            all_leaves.push_back({db_num, leaf.first, leaf.second});
-        }
+        if (!authorized)
+            return;
     }
 
     if (all_leaves.empty()) {
@@ -619,7 +629,7 @@ void HttpAdapter::handlePostMultiDb(const http::HttpRequest& request, http::Http
 
 void HttpAdapter::handlePostStructArrayElement(const http::HttpRequest& request, http::HttpResponse& response, uint16_t db_num,
     const std::string& field_path, const std::string& array_rest_path, size_t index, const std::string& url_path,
-    rapidjson::Document& document) {
+    sgrn::json::dom::Document& document) {
     PlcMemory& memory = *refs_.memory;
 
     // -------------------------------------------------------------
@@ -666,38 +676,42 @@ void HttpAdapter::handlePostStructArrayElement(const http::HttpRequest& request,
         return;
     }
 
-    rapidjson::Document array_doc;
-    if (array_doc.Parse(array_result.value().c_str()).HasParseError() || !array_doc.IsArray()) {
+    sgrn::json::dom::Document array_doc;
+    if (array_doc.parse(array_result.value().c_str()).hasParseError() || !array_doc.is_array()) {
         response.status = 422;
         response.set_content(fmt::format(R"({{"error":"Array field '{}' is not a JSON array"}})", field_path), "application/json");
         return;
     }
 
-    if (index >= array_doc.Size()) {
+    if (index >= array_doc.size()) {
         response.status = 416;
         response.set_content(
-            fmt::format(R"X({{"error":"Array index {} out of range (size={})"}})X", index, array_doc.Size()), "application/json");
+            fmt::format(R"X({{"error":"Array index {} out of range (size={})"}})X", index, array_doc.size()), "application/json");
         return;
     }
 
     // If there's a rest path, update the nested field within the array element
     if (!array_rest_path.empty()) {
-        rapidjson::Value& element = array_doc[static_cast<rapidjson::SizeType>(index)];
+        sgrn::json::dom::Value element = sgrn::json::dom::Value::view(array_doc.rawValue().get_array().at(index));
         const auto segments = sgrn::gateway::adapters::splitSlashes(array_rest_path);
-        rapidjson::Value* current = &element;
+        sgrn::json::dom::Value* current = &element;
+        sgrn::json::dom::Value found_value;
         for (size_t i = 0; i < segments.size(); ++i) {
-            if (!current->IsObject()) {
+            if (!current->is_object()) {
                 response.status = 422;
                 response.set_content(
                     fmt::format(R"X({{"error":"Field '{}' not found in array element (not an object)"}})X", array_rest_path),
                     "application/json");
                 return;
             }
-            // Case-insensitive field lookup
-            rapidjson::Value* found = nullptr;
-            for (auto it = current->MemberBegin(); it != current->MemberEnd(); ++it) {
-                if (strcasecmp(it->name.GetString(), segments[i].data()) == 0) {
-                    found = &it->value;
+            // Case-insensitive field lookup. Keep a stable view wrapper so
+            // descending through multiple segments continues to mutate/read
+            // the original parsed tree rather than a detached copy.
+            bool found = false;
+            for (auto it = current->memberBegin(); it != current->memberEnd(); ++it) {
+                if (strcasecmp(it->name.getString(), segments[i].data()) == 0) {
+                    found_value.rebindTo(it->value);
+                    found = true;
                     break;
                 }
             }
@@ -708,16 +722,16 @@ void HttpAdapter::handlePostStructArrayElement(const http::HttpRequest& request,
                 return;
             }
             if (i == segments.size() - 1) {
-                found->RemoveMember(segments[i].data());
-                rapidjson::Value key(segments[i].data(), array_doc.GetAllocator());
-                found->AddMember(key, document, array_doc.GetAllocator());
+                found_value.removeMember(segments[i].data());
+                sgrn::json::dom::Value key(segments[i].data(), array_doc.allocator());
+                found_value.addMember(key, document, array_doc.allocator());
             } else {
-                current = found;
+                current = &found_value;
             }
         }
     } else {
         // Full element replacement
-        array_doc[static_cast<rapidjson::SizeType>(index)].CopyFrom(document, array_doc.GetAllocator());
+        array_doc[static_cast<sgrn::json::dom::SizeType>(index)].copyFrom(document, array_doc.allocator());
     }
 
     const std::string new_array_json = sgrn::gateway::adapters::serializeJson(array_doc);
@@ -739,17 +753,17 @@ void HttpAdapter::handlePostStructArrayElement(const http::HttpRequest& request,
     memory.processor()->processCommands();
 
     // Read back the element for response
-    rapidjson::Document updated_array_doc;
-    updated_array_doc.Parse(new_array_json.c_str());
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-    rapidjson::Value& element = updated_array_doc[static_cast<rapidjson::SizeType>(index)];
-    element.Accept(w);
+    sgrn::json::dom::Document updated_array_doc;
+    updated_array_doc.parse(new_array_json.c_str());
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> w(sb);
+    sgrn::json::dom::Value element = updated_array_doc[static_cast<sgrn::json::dom::SizeType>(index)];
+    element.accept(w);
 
     response.status = 200;
 
     response.set_content(
-        fmt::format(R"({{"db":{},"path":"{}","index":{},"value":{}}})", db_num, url_path, index, sb.GetString()), "application/json");
+        fmt::format(R"({{"db":{},"path":"{}","index":{},"value":{}}})", db_num, url_path, index, sb.getString()), "application/json");
 
     return;
 }
@@ -762,7 +776,7 @@ void HttpAdapter::handlePostStructArrayElement(const http::HttpRequest& request,
 // -----------------------------------------------------------------------------
 
 void HttpAdapter::handlePostScalarArrayElement(const http::HttpRequest& request, http::HttpResponse& response, uint16_t db_num,
-    const std::string& field_path, size_t index, const std::string& url_path, const rapidjson::Document& document) {
+    const std::string& field_path, size_t index, const std::string& url_path, const sgrn::json::dom::Document& document) {
     PlcMemory& memory = *refs_.memory;
 
     // ---------------------------------------------------------------------
@@ -800,9 +814,9 @@ void HttpAdapter::handlePostScalarArrayElement(const http::HttpRequest& request,
     if (!update) {
         // Preserve the original distinction between an invalid array and
         // an out-of-range index where possible.
-        rapidjson::Document array_document;
+        sgrn::json::dom::Document array_document;
 
-        if (array_document.Parse(array_result.value().c_str()).HasParseError() || !array_document.IsArray()) {
+        if (array_document.parse(array_result.value().c_str()).hasParseError() || !array_document.is_array()) {
             response.status = 422;
 
             response.set_content(fmt::format(R"({{"error":"Field '{}' is not a JSON array"}})", field_path), "application/json");
@@ -813,7 +827,7 @@ void HttpAdapter::handlePostScalarArrayElement(const http::HttpRequest& request,
         response.status = 416;
 
         response.set_content(
-            fmt::format(R"X({{"error":"Array index {} out of range (size={})"}})X", index, array_document.Size()), "application/json");
+            fmt::format(R"X({{"error":"Array index {} out of range (size={})"}})X", index, array_document.size()), "application/json");
 
         return;
     }
@@ -855,7 +869,7 @@ void HttpAdapter::handlePostScalarArrayElement(const http::HttpRequest& request,
 // -----------------------------------------------------------------------------
 
 void HttpAdapter::handlePostLeafField(const http::HttpRequest& request, http::HttpResponse& response, uint16_t db_num,
-    const std::string& field_path, const std::string& url_path, const rapidjson::Document& document) {
+    const std::string& field_path, const std::string& url_path, const sgrn::json::dom::Document& document) {
     PlcMemory& memory = *refs_.memory;
 
     // -------------------------------------------------------------------------
@@ -864,7 +878,7 @@ void HttpAdapter::handlePostLeafField(const http::HttpRequest& request, http::Ht
 
     std::vector<std::pair<std::string, std::string>> leaves;
 
-    if (!document.IsObject()) {
+    if (!document.is_object()) {
         // Scalar or array body -> write directly to the resolved field path.
 
         if (field_path.empty()) {

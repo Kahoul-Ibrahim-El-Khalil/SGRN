@@ -1,6 +1,5 @@
 #pragma once
 #include <sgrn/Result.hpp>
-#include <rapidjson/document.h>
 #include <string>
 
 #include <sgrn/datastore/client/Types.hpp>
@@ -40,7 +39,7 @@ public:
     TransferOutcome upload(const std::string& t_remote_path, const std::string& t_local_path, StorageScope t_scope = StorageScope::Auto);
     TransferOutcome download(const std::string& t_remote_path, const std::string& t_local_path, StorageScope t_scope = StorageScope::Auto);
 
-    rapidjson::Document listFiles(const std::string& t_query_params = "");
+    sgrn::json::Value listFiles(const std::string& t_query_params = "");
 
     // Drive API: typed browsing and file-system style operations.
     DriveListing listDrive(const std::string& t_path = "/", StorageScope t_scope = StorageScope::Auto);

@@ -1,291 +1,194 @@
-
 #include <sgrn/gateway/config/gateway.hpp>
-#include <sgrn/utils/json.hpp>
+#include <sgrn/utils/json-serialization.hpp>
 #include <sgrn/utils/strings.hpp>
-#include <fstream>
 
+using sgrn::Result;
 namespace sgrn::gateway::config
 {
 
-sgrn::Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
-    auto parsed = sgrn::utils::json::deserializeFromFile(t_path);
-    if (parsed.hasError()) {
-        return fmt::format("Failed to deserialize config: {}", parsed.error());
-    }
+namespace detail
+{
 
-    const rapidjson::Value& root = parsed.value();
+// File shape of gateway.json. The leaf configs (S7Config, HttpConfig,
+// PersistenceConfig, DatastoreConnectionConfig, ...) are read directly by
+// Glaze's aggregate reflection: JSON key == member name, defaults come from
+// the structs themselves, unknown keys are ignored (sgrn::json::kReadOpts).
+// Only what differs from GatewayConfig's layout is declared here.
+
+struct ProtocolsFile {
+    std::optional<S7Config> s7;
+    std::optional<OpcUaConfig> opcua;
+    std::optional<HttpConfig> http;
+    std::optional<WebSocketConfig> websocket;
+    std::optional<ModbusConfig> modbus;
+    std::optional<EthernetIpConfig> ethernetip;
+};
+
+struct DebugFile {
+    std::optional<bool> incoming;
+    std::optional<bool> tree;
+};
+
+struct ThreadingFile {
+    std::optional<uint16_t> light_threads;
+    std::optional<uint16_t> heavy_threads;
+};
+
+struct NodeFile {
+    std::optional<uint32_t> number;
+    std::optional<uint16_t> db_number; // legacy alias of "number"
+    std::optional<std::string> allowed_ip;
+    std::optional<std::string> dirty_tracker;
+};
+
+struct GatewayFile {
+    std::optional<ProtocolsFile> southbound;
+    std::optional<ProtocolsFile> northbound;
+    std::optional<ProtocolsFile> listen; // legacy: shared block for both directions
+    std::optional<std::string> security_policy;
+    std::optional<std::string> security_script;
+    std::optional<std::string> state_dir;
+    std::optional<std::string> schema;
+    std::optional<std::string> symbols_dir;
+    std::optional<int> reconnect_ms;
+    std::optional<bool> cache_json_north;
+    std::optional<bool> verbose;
+    std::optional<DebugFile> debug;
+    std::optional<uint32_t> database_rotation_interval_s;
+    std::optional<ThreadingFile> threading;
+    std::optional<PersistenceConfig> persistence;
+    std::optional<DatastoreConnectionConfig> datastore;
+    std::optional<std::map<std::string, NodeFile>> nodes;
+};
+
+// Second pass over the same text: the "persistence" keys that PersistenceConfig
+// cannot express (alias, zstd cascade, nested cloud_sync block).
+struct CloudSyncFile {
+    std::optional<bool> enabled;
+    std::optional<std::string> url;
+    std::optional<std::string> public_token;
+    std::optional<std::string> private_token;
+    std::optional<uint32_t> sync_interval_s;
+};
+
+struct PersistenceQuirks {
+    std::optional<uint32_t> max_events; // alias of batch_size, wins when both are given
+    std::optional<uint8_t> zstd_level;  // also sets anchor_zstd_level unless that is given
+    std::optional<uint8_t> anchor_zstd_level;
+    std::optional<CloudSyncFile> cloud_sync;
+};
+
+struct GatewayQuirksFile {
+    std::optional<PersistenceQuirks> persistence;
+};
+
+template <class T>
+void assign(T& t_dst, const std::optional<T>& t_src) {
+    if (t_src.has_value())
+        t_dst = t_src.value();
+}
+
+} // namespace detail
+
+Result<GatewayConfig> parseNodeConfig(const std::string& t_path) {
+    auto text = sgrn::json::readFileText(t_path);
+
+    RETURN_ERROR_IF(text.hasError(), fmt::format("Failed to read config: {}", text.error().what()));
+
+    auto file_res = sgrn::json::read<detail::GatewayFile>(text.value());
+    RETURN_ERROR_IF(file_res.hasError(), fmt::format("Failed to deserialize config: {}", file_res.error().what()));
+
+    auto quirks_res = sgrn::json::read<detail::GatewayQuirksFile>(text.value());
+    RETURN_ERROR_IF(quirks_res.hasError(), fmt::format("Failed to deserialize config: {}", quirks_res.error().what()));
+
+    using detail::assign;
+    const auto& f = file_res.value();
     GatewayConfig cfg;
 
-    // ── Southbound Protocols ──────────────────────────────────────────────────
-    const rapidjson::Value* p_south = root.HasMember("southbound") && root["southbound"].IsObject()
-                                          ? &root["southbound"]
-                                          : (root.HasMember("listen") && root["listen"].IsObject() ? &root["listen"] : nullptr);
+    // ── Protocols ─────────────────────────────────────────────────────────────
+    // "southbound"/"northbound" fall back to the legacy shared "listen" block.
+    // s7 is southbound-only, http/websocket northbound-only; for opcua, modbus
+    // and ethernetip the southbound declaration wins, northbound fills the gap.
+    const detail::ProtocolsFile none;
+    const auto& south = f.southbound ? *f.southbound : (f.listen ? *f.listen : none);
+    const auto& north = f.northbound ? *f.northbound : (f.listen ? *f.listen : none);
 
-    if (p_south) {
-        const auto& south = *p_south;
-        if (south.HasMember("s7") && south["s7"].IsObject()) {
-            S7Config s7;
-            const auto& s7_node = south["s7"];
-            if (s7_node.HasMember("ip") && s7_node["ip"].IsString())
-                s7.ip = s7_node["ip"].GetString();
-            if (s7_node.HasMember("port"))
-                s7.port = static_cast<uint16_t>(s7_node["port"].GetUint());
-            if (s7_node.HasMember("max_clients"))
-                s7.max_clients = s7_node["max_clients"].GetUint();
-            if (s7_node.HasMember("pdu_size"))
-                s7.pdu_size = s7_node["pdu_size"].GetUint();
-            if (s7_node.HasMember("little_endian"))
-                s7.little_endian = s7_node["little_endian"].GetBool();
-            cfg.s7 = s7;
-        }
+    cfg.s7 = south.s7;
+    cfg.opcua = south.opcua ? south.opcua : north.opcua;
+    cfg.modbus = south.modbus ? south.modbus : north.modbus;
+    cfg.ethernetip = south.ethernetip ? south.ethernetip : north.ethernetip;
+    cfg.http = north.http;
+    cfg.websocket = north.websocket;
 
-        // ── Adapter protocols under "southbound" ─────────────────────────────
-        // These are adapter servers, historically configurable under either
-        // "southbound" (e.g. simulations/bottling) or "northbound". The
-        // southbound declaration wins; the northbound block below fills any
-        // protocol not already parsed here.
-        if (south.HasMember("opcua") && south["opcua"].IsObject()) {
-            OpcUaConfig opcua;
-            const auto& opc = south["opcua"];
-            if (opc.HasMember("ip") && opc["ip"].IsString())
-                opcua.ip = opc["ip"].GetString();
-            if (opc.HasMember("port"))
-                opcua.port = static_cast<uint16_t>(opc["port"].GetUint());
-            cfg.opcua = opcua;
-        }
-        if (south.HasMember("modbus") && south["modbus"].IsObject()) {
-            ModbusConfig modbus;
-            const auto& mb = south["modbus"];
-            if (mb.HasMember("ip") && mb["ip"].IsString())
-                modbus.ip = mb["ip"].GetString();
-            if (mb.HasMember("port"))
-                modbus.port = static_cast<uint16_t>(mb["port"].GetUint());
-            cfg.modbus = modbus;
-        }
-        if (south.HasMember("ethernetip") && south["ethernetip"].IsObject()) {
-            EthernetIpConfig eip;
-            const auto& ep = south["ethernetip"];
-            if (ep.HasMember("ip") && ep["ip"].IsString())
-                eip.ip = ep["ip"].GetString();
-            if (ep.HasMember("port") && ep["port"].IsUint())
-                eip.port = static_cast<uint16_t>(ep["port"].GetUint());
-            cfg.ethernetip = eip;
-        }
-    }
-
-    // ── Northbound Protocols ──────────────────────────────────────────────────
-    const rapidjson::Value* p_north = root.HasMember("northbound") && root["northbound"].IsObject()
-                                          ? &root["northbound"]
-                                          : (root.HasMember("listen") && root["listen"].IsObject() ? &root["listen"] : nullptr);
-
-    if (p_north) {
-        const auto& north = *p_north;
-        if (!cfg.opcua.has_value() && north.HasMember("opcua") && north["opcua"].IsObject()) {
-            OpcUaConfig opcua;
-            const auto& opc = north["opcua"];
-            if (opc.HasMember("ip") && opc["ip"].IsString())
-                opcua.ip = opc["ip"].GetString();
-            if (opc.HasMember("port"))
-                opcua.port = static_cast<uint16_t>(opc["port"].GetUint());
-            cfg.opcua = opcua;
-        }
-        if (north.HasMember("http") && north["http"].IsObject()) {
-            HttpConfig http;
-            const auto& ht = north["http"];
-            if (ht.HasMember("ip") && ht["ip"].IsString())
-                http.ip = ht["ip"].GetString();
-            if (ht.HasMember("port"))
-                http.port = static_cast<uint16_t>(ht["port"].GetUint());
-            if (ht.HasMember("rate_limit_max_requests") && ht["rate_limit_max_requests"].IsUint())
-                http.rate_limit_max_requests = ht["rate_limit_max_requests"].GetUint();
-            if (ht.HasMember("rate_limit_window_s") && ht["rate_limit_window_s"].IsUint64())
-                http.rate_limit_window_s = ht["rate_limit_window_s"].GetUint64();
-            cfg.http = http;
-        }
-        if (north.HasMember("websocket") && north["websocket"].IsObject()) {
-            WebSocketConfig websocket;
-            const auto& ws = north["websocket"];
-            if (ws.HasMember("ip") && ws["ip"].IsString())
-                websocket.ip = ws["ip"].GetString();
-            if (ws.HasMember("port"))
-                websocket.port = static_cast<uint16_t>(ws["port"].GetUint());
-            cfg.websocket = websocket;
-        }
-        if (!cfg.modbus.has_value() && north.HasMember("modbus") && north["modbus"].IsObject()) {
-            ModbusConfig modbus;
-            const auto& mb = north["modbus"];
-            if (mb.HasMember("ip") && mb["ip"].IsString())
-                modbus.ip = mb["ip"].GetString();
-            if (mb.HasMember("port"))
-                modbus.port = static_cast<uint16_t>(mb["port"].GetUint());
-            cfg.modbus = modbus;
-        }
-        if (!cfg.ethernetip.has_value() && north.HasMember("ethernetip") && north["ethernetip"].IsObject()) {
-            EthernetIpConfig eip;
-            const auto& ep = north["ethernetip"];
-            if (ep.HasMember("ip") && ep["ip"].IsString())
-                eip.ip = ep["ip"].GetString();
-            if (ep.HasMember("port") && ep["port"].IsUint())
-                eip.port = static_cast<uint16_t>(ep["port"].GetUint());
-            cfg.ethernetip = eip;
-        }
-    }
-
-    if (root.HasMember("security_policy") && root["security_policy"].IsString() &&
-        sgrn::utils::strings::toLower(root["security_policy"].GetString()) == "strict")
+    // ── Scalars & paths ───────────────────────────────────────────────────────
+    if (f.security_policy && sgrn::utils::strings::toLower(*f.security_policy) == "strict")
         cfg.security_policy = ::sgrn::scl::SecurityPolicy::Strict;
-    if (root.HasMember("security_script") && root["security_script"].IsString())
-        cfg.security_script = SGRN_CONFIG_PATH(root["security_script"].GetString());
-    if (root.HasMember("state_dir") && root["state_dir"].IsString())
-        cfg.state_dir = SGRN_CONFIG_PATH(root["state_dir"].GetString());
-    if (root.HasMember("schema") && root["schema"].IsString())
-        cfg.schema_file = SGRN_CONFIG_PATH(root["schema"].GetString());
-    if (root.HasMember("symbols_dir") && root["symbols_dir"].IsString())
-        cfg.symbols_dir = SGRN_CONFIG_PATH(root["symbols_dir"].GetString());
-    if (root.HasMember("reconnect_ms"))
-        cfg.reconnect_ms = root["reconnect_ms"].GetInt();
-    if (root.HasMember("cache_json_north"))
-        cfg.cache_json_north = root["cache_json_north"].GetBool();
-    if (root.HasMember("verbose"))
-        cfg.verbose = root["verbose"].GetBool();
+    if (f.security_script)
+        cfg.security_script = SGRN_CONFIG_PATH(*f.security_script);
+    if (f.state_dir)
+        cfg.state_dir = SGRN_CONFIG_PATH(*f.state_dir);
+    if (f.schema)
+        cfg.schema_file = SGRN_CONFIG_PATH(*f.schema);
+    if (f.symbols_dir)
+        cfg.symbols_dir = SGRN_CONFIG_PATH(*f.symbols_dir);
 
-    if (root.HasMember("debug") && root["debug"].IsObject()) {
-        const auto& d = root["debug"];
-        if (d.HasMember("incoming"))
-            cfg.debug_incoming = d["incoming"].GetBool();
-        if (d.HasMember("tree"))
-            cfg.debug_tree = d["tree"].GetBool();
+    assign(cfg.reconnect_ms, f.reconnect_ms);
+    assign(cfg.cache_json_north, f.cache_json_north);
+    assign(cfg.verbose, f.verbose);
+    assign(cfg.database_rotation_interval_s, f.database_rotation_interval_s);
+
+    if (f.debug) {
+        assign(cfg.debug_incoming, f.debug->incoming);
+        assign(cfg.debug_tree, f.debug->tree);
+    }
+    // Out-of-range thread counts are clamped later in initThreading().
+    if (f.threading.has_value()) {
+        assign(cfg.light_threads, f.threading->light_threads);
+        assign(cfg.heavy_threads, f.threading->heavy_threads);
     }
 
-    if (root.HasMember("database_rotation_interval_s"))
-        cfg.database_rotation_interval_s = root["database_rotation_interval_s"].GetUint();
+    // ── Persistence & datastore ───────────────────────────────────────────────
+    assign(cfg.persistence, f.persistence);
 
-    // ── Threading ─────────────────────────────────────────────────────────
-    // Optional: { "light_threads": 2, "heavy_threads": 4 }. Out-of-range
-    // values are clamped in initThreading(); defaults preserve the
-    // historical 2/2 sizing.
-    if (root.HasMember("threading") && root["threading"].IsObject()) {
-        const auto& t = root["threading"];
-        if (t.HasMember("light_threads") && t["light_threads"].IsInt())
-            cfg.light_threads = t["light_threads"].GetInt();
-        if (t.HasMember("heavy_threads") && t["heavy_threads"].IsInt())
-            cfg.heavy_threads = t["heavy_threads"].GetInt();
-    }
+    if (const auto& q = quirks_res.value().persistence) {
 
-    // ── Persistence & Local Historian ─────────────────────────────────────────
-    if (root.HasMember("persistence") && root["persistence"].IsObject()) {
-        const auto& p = root["persistence"];
-        if (p.HasMember("enabled"))
-            cfg.persistence.enabled = p["enabled"].GetBool();
-        if (p.HasMember("mode") && p["mode"].IsString())
-            cfg.persistence.mode = p["mode"].GetString();
-        if (p.HasMember("format") && p["format"].IsString())
-            cfg.persistence.format = p["format"].GetString();
-        if (p.HasMember("namespaces") && p["namespaces"].IsArray()) {
-            for (const auto& ns : p["namespaces"].GetArray()) {
-                if (ns.IsString())
-                    cfg.persistence.namespaces.push_back(ns.GetString());
-            }
-        }
-        if (p.HasMember("atomic_window_ms"))
-            cfg.persistence.atomic_window_ms = p["atomic_window_ms"].GetUint();
+        assign(cfg.persistence.batch_size, q->max_events);
 
-        // Flexible batching: batch_size (event count threshold) or batch_interval_s (time threshold)
-        if (p.HasMember("batch_size"))
-            cfg.persistence.batch_size = p["batch_size"].GetUint();
-        if (p.HasMember("max_events"))
-            cfg.persistence.batch_size = p["max_events"].GetUint();
-        if (p.HasMember("batch_interval_s"))
-            cfg.persistence.batch_interval_s = p["batch_interval_s"].GetUint();
+        assign(cfg.persistence.zstd_level, q->zstd_level);
+        assign(cfg.persistence.anchor_zstd_level, q->zstd_level);
+        assign(cfg.persistence.anchor_zstd_level, q->anchor_zstd_level);
 
-        if (p.HasMember("anchor_interval_s"))
-            cfg.persistence.anchor_interval_s = p["anchor_interval_s"].GetUint();
-        if (p.HasMember("anchor_change_count"))
-            cfg.persistence.anchor_change_count = p["anchor_change_count"].GetUint();
-        if (p.HasMember("zstd_level")) {
-            uint8_t lvl = static_cast<uint8_t>(p["zstd_level"].GetUint());
-            cfg.persistence.zstd_level = lvl;
-            cfg.persistence.anchor_zstd_level = lvl;
-        }
-        if (p.HasMember("anchor_zstd_level")) {
-            cfg.persistence.anchor_zstd_level = static_cast<uint8_t>(p["anchor_zstd_level"].GetUint());
-        }
-
-        // Nested cloud_sync block support
-        if (p.HasMember("cloud_sync") && p["cloud_sync"].IsObject()) {
-            const auto& cs = p["cloud_sync"];
+        if (q->cloud_sync) {
+            const auto& cs = *q->cloud_sync;
             DatastoreConnectionConfig ds;
-            if (cs.HasMember("enabled"))
-                ds.telemetry_enabled = cs["enabled"].GetBool();
-            if (cs.HasMember("url") && cs["url"].IsString())
-                ds.url = cs["url"].GetString();
-            if (cs.HasMember("public_token") && cs["public_token"].IsString())
-                ds.public_token = cs["public_token"].GetString();
-            if (cs.HasMember("private_token") && cs["private_token"].IsString())
-                ds.private_token = cs["private_token"].GetString();
-            if (cs.HasMember("sync_interval_s"))
-                ds.sync_interval_s = cs["sync_interval_s"].GetUint();
+            assign(ds.telemetry_enabled, cs.enabled);
+            assign(ds.url, cs.url);
+            assign(ds.public_token, cs.public_token);
+            assign(ds.private_token, cs.private_token);
+            assign(ds.sync_interval_s, cs.sync_interval_s);
             cfg.datastore = ds;
         }
     }
 
-    if (root.HasMember("nodes") && root["nodes"].IsObject()) {
-        for (auto it = root["nodes"].MemberBegin(); it != root["nodes"].MemberEnd(); ++it) {
-            const auto& node = it->value;
-            const int db_val =
-                node.HasMember("number") ? node["number"].GetInt() : (node.HasMember("db_number") ? node["db_number"].GetInt() : -1);
-            if (db_val > 0 && sgrn::scl::isInRange<uint16_t>(db_val)) {
-                const uint16_t db = static_cast<uint16_t>(db_val);
-                cfg.declared_db_numbers.insert(db);
-                if (node.HasMember("allowed_ip") && node["allowed_ip"].IsString())
-                    cfg.db_acls[db] = node["allowed_ip"].GetString();
-                if (node.HasMember("dirty_tracker") && node["dirty_tracker"].IsString())
-                    cfg.dirty_trackers[db] = SGRN_CONFIG_PATH(node["dirty_tracker"].GetString());
-            }
+    // The top-level "datastore" block wins over a nested persistence.cloud_sync
+    // block; when it is absent the cloud_sync-parsed values stand.
+    if (f.datastore)
+        cfg.datastore = f.datastore.value();
+
+    // ── Declared DBs ──────────────────────────────────────────────────────────
+    if (f.nodes) {
+        for (const auto& entry : *f.nodes) {
+            const auto& node = entry.second;
+            const int db_val = node.number ? *node.number : (node.db_number ? *node.db_number : -1);
+            if (db_val <= 0 || !sgrn::scl::isInRange<uint16_t>(db_val))
+                continue;
+            const auto db = static_cast<uint16_t>(db_val);
+            cfg.declared_db_numbers.insert(db);
+            if (node.allowed_ip)
+                cfg.db_acls[db] = *node.allowed_ip;
+            if (node.dirty_tracker)
+                cfg.dirty_trackers[db] = SGRN_CONFIG_PATH(*node.dirty_tracker);
         }
-    }
-    // Top-level "datastore" block (optional override). Must NOT clobber a
-    // parsed nested "persistence.cloud_sync" block when it is absent — kill
-    // the old has_datastore_or_buffer logic that replaced cloud_sync values
-    // with a default-constructed config (empty url/tokens -> offline mode).
-    if (root.HasMember("datastore") && root["datastore"].IsObject()) {
-        DatastoreConnectionConfig datastore;
-        const auto& b = root["datastore"];
-        if (b.HasMember("url") && b["url"].IsString())
-            datastore.url = b["url"].GetString();
-        if (b.HasMember("public_token") && b["public_token"].IsString())
-            datastore.public_token = b["public_token"].GetString();
-        if (b.HasMember("private_token") && b["private_token"].IsString())
-            datastore.private_token = b["private_token"].GetString();
-        if (b.HasMember("object_name") && b["object_name"].IsString())
-            datastore.object_name = b["object_name"].GetString();
-        if (b.HasMember("sync_interval_s"))
-            datastore.sync_interval_s = b["sync_interval_s"].GetUint();
-        if (b.HasMember("telemetry_enabled"))
-            datastore.telemetry_enabled = b["telemetry_enabled"].GetBool();
-        if (b.HasMember("upload_mode") && b["upload_mode"].IsString())
-            datastore.upload_mode = b["upload_mode"].GetString();
-        if (b.HasMember("vfs_remote_dir") && b["vfs_remote_dir"].IsString())
-            datastore.vfs_remote_dir = b["vfs_remote_dir"].GetString();
-
-        if (b.HasMember("batch_size"))
-            datastore.batch_size = b["batch_size"].GetUint();
-        if (b.HasMember("batch_interval_s"))
-            datastore.batch_interval_s = b["batch_interval_s"].GetUint();
-        if (b.HasMember("snapshot_mode") && b["snapshot_mode"].IsString())
-            datastore.snapshot_mode = b["snapshot_mode"].GetString();
-        if (b.HasMember("zstd_level"))
-            datastore.zstd_level = static_cast<uint8_t>(b["zstd_level"].GetUint());
-        if (b.HasMember("aggressive_zstd_level"))
-            datastore.aggressive_zstd_level = static_cast<uint8_t>(b["aggressive_zstd_level"].GetUint());
-        if (b.HasMember("enable_aggressive_compression"))
-            datastore.enable_aggressive_compression = b["enable_aggressive_compression"].GetBool();
-        if (b.HasMember("offline_persistence"))
-            datastore.offline_persistence = b["offline_persistence"].GetBool();
-
-        // The top-level block wins over a nested cloud_sync block if both
-        // are given; when it is absent the cloud_sync-parsed values stand.
-        cfg.datastore = datastore;
     }
 
     return cfg;

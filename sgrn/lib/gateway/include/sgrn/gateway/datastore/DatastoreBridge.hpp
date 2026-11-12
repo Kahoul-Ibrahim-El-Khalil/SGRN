@@ -1,10 +1,11 @@
 #pragma once
 
+#include <sgrn/utils/json-dom.hpp>
+
 #include <sgrn/datastore/client/Client.hpp>
 #include <sgrn/gateway/config/datastore.hpp>
 #include <sgrn/gateway/core/snapshot.hpp>
 #include <sgrn/gateway/database/GatewayDatabase.hpp>
-#include <rapidjson/document.h>
 
 #include <sgrn/Result.hpp>
 #include <asio.hpp>

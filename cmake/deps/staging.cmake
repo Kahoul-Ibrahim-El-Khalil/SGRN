@@ -305,18 +305,12 @@ if(TARGET drogon)
     )
 endif()
 
-# 2m. Header-only deps (rapidjson, cpp-httplib, crow, xml_h, sqlite_modern_cpp,
+# 2m. Header-only deps (cpp-httplib, crow, xml_h, sqlite_modern_cpp,
 # unordered_dense, s7codec)
 # These are fetched by the deps-only build (see deps/CMakeLists.txt) so their headers
 # can be staged into the shared prefix here. Guard each with an existence check: when
 # the source is undefined here, install(DIRECTORY "/") would recursively copy the
 # ENTIRE filesystem root into the prefix (catastrophic).
-if(EXISTS "${rapidjson_SOURCE_DIR}/include")
-    install(DIRECTORY "${rapidjson_SOURCE_DIR}/include/"
-        DESTINATION "${_INC}"
-        FILES_MATCHING PATTERN "*.h"
-    )
-endif()
 if(EXISTS "${cpp_httplib_SOURCE_DIR}/httplib.h")
     install(DIRECTORY "${cpp_httplib_SOURCE_DIR}/"
         DESTINATION "${_INC}/httplib"
@@ -580,15 +574,6 @@ if(NOT TARGET extern::opener)
 endif()
 if(NOT TARGET opener)
     add_library(opener ALIAS extern::opener)
-endif()
-
-# ── Header-only: rapidjson ────────────────────────────────────────────────────
-if(NOT TARGET rapidjson)
-    add_library(rapidjson INTERFACE IMPORTED GLOBAL)
-    target_include_directories(rapidjson INTERFACE "${_inc}")
-endif()
-if(NOT TARGET extern::rapidjson)
-    add_library(extern::rapidjson ALIAS rapidjson)
 endif()
 
 # ── Header-only: cpp-httplib ──────────────────────────────────────────────────

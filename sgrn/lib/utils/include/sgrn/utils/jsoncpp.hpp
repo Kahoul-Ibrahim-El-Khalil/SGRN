@@ -1,6 +1,6 @@
 #pragma once
 
-// jsoncpp-only helpers for sgrn/datastore (and jwt). Edge targets use sgrn/utils/json.hpp (rapidjson).
+// jsoncpp-only helpers for sgrn/datastore (and jwt). Edge targets use sgrn/utils/json.hpp (Glaze-backed DOM).
 
 #include <fmt/core.h>
 #include <sgrn/Result.hpp>

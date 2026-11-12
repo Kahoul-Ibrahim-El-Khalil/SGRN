@@ -1,3 +1,4 @@
+#include <sgrn/utils/json-dom.hpp>
 // Archive convert/merge entry points for sgrn-dataset.
 // Split from sgrn-dataset.cpp; consumes the transcode unit.
 #include <fmt/color.h>
@@ -9,10 +10,6 @@
 #include <sgrn/utils/compression.hpp>
 #include <sgrn/utils/time.hpp>
 #include <fstream>
-#include <rapidjson/document.h>
-#include <rapidjson/prettywriter.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <s7codec/endian.hpp>
 #include <stdexcept>
 #include <string>
@@ -183,9 +180,9 @@ sgrn::Result<void> mergeBinaryFrames(const std::string& t_decompressed, const st
         bool drop = false;
         if (fr.db == sgrn::gateway::database::kControlFrameDbNum) {
             const std::string control_json(reinterpret_cast<const char*>(fr.payload), fr.payload_len);
-            rapidjson::Document control_doc;
-            if (!control_doc.Parse(control_json.c_str()).HasParseError() && control_doc.IsObject() && control_doc.HasMember("type") &&
-                control_doc["type"].IsString() && std::string_view(control_doc["type"].GetString()) == "footer") {
+            sgrn::json::dom::Document control_doc;
+            if (!control_doc.parse(control_json.c_str()).hasParseError() && control_doc.is_object() && control_doc.hasMember("type") &&
+                control_doc["type"].is_string() && std::string_view(control_doc["type"].getString()) == "footer") {
                 drop = true;
             }
         }
@@ -293,11 +290,11 @@ sgrn::Result<void> DatasetProcessor::mergeArchives(const std::vector<std::filesy
         auto ingest_jsonl_line = [&](const std::string& t_line) {
             if (t_line.empty())
                 return;
-            rapidjson::Document doc;
-            if (doc.Parse(t_line.c_str()).HasParseError() || !doc.IsObject())
+            sgrn::json::dom::Document doc;
+            if (doc.parse(t_line.c_str()).hasParseError() || !doc.is_object())
                 return;
-            const bool has_type = doc.HasMember("type") && doc["type"].IsString();
-            const std::string_view type = has_type ? std::string_view(doc["type"].GetString()) : std::string_view{};
+            const bool has_type = doc.hasMember("type") && doc["type"].is_string();
+            const std::string_view type = has_type ? std::string_view(doc["type"].getString()) : std::string_view{};
             if (type == "schema") {
                 if (!have_schema) {
                     have_schema = true;
@@ -348,17 +345,17 @@ sgrn::Result<void> DatasetProcessor::mergeArchives(const std::vector<std::filesy
             ++files_merged;
         }
 
-        rapidjson::StringBuffer sb;
-        rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-        w.StartObject();
-        w.Key("type");
-        w.String("footer");
-        w.Key("last_anchor_line");
-        w.Int64(last_anchor_line);
-        w.Key("record_count");
-        w.Uint64(line_no);
-        w.EndObject();
-        (void)writer.writeLine(sb.GetString());
+        sgrn::json::dom::StringBuffer sb;
+        sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> w(sb);
+        w.startObject();
+        w.key("type");
+        w.string("footer");
+        w.key("last_anchor_line");
+        w.int64(last_anchor_line);
+        w.key("record_count");
+        w.uint64(line_no);
+        w.endObject();
+        (void)writer.writeLine(sb.getString());
     }
 
     (void)writer.close();

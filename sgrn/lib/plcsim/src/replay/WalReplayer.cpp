@@ -24,6 +24,7 @@
 #include <sgrn/gateway/twin/encoding.hpp> // twin::encodeFieldAt (JSONL path)
 #include <sgrn/gateway/twin/path.hpp>     // twin::fieldSpanSize (JSONL path)
 #include <sgrn/utils/compression.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <sgrn/utils/time.hpp>
 
 #include <fmt/color.h>
@@ -31,11 +32,9 @@
 #include <stdexcept>
 #include <string>
 
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
-
+#include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <chrono>
 #include <cstring>
 #include <deque>
@@ -90,16 +89,21 @@ struct PendingBit {
 /// Appends the span to t_spans (backed by t_storage, which must outlive the
 /// spans); single-bit bools are staged into t_pending for writeBit().
 /// Returns false on schema drift or encode failure (caller logs + skips).
-bool encodeLeaf(runtime::PlcRuntime& t_runtime, const std::string& t_full_path, const rapidjson::Value& t_val,
-    std::deque<std::vector<uint8_t>>& t_storage, std::vector<twin::DbMemorySpan>& t_spans, std::vector<PendingBit>& t_pending) {
+/// t_json_scratch is a caller-owned buffer reused across leaves so the
+/// per-leaf scalar serialization does not allocate once it has grown.
+bool encodeLeaf(runtime::PlcRuntime& t_runtime, std::string_view t_full_path, const ::sgrn::json::dom::Value& t_val,
+    std::deque<std::vector<uint8_t>>& t_storage, std::vector<twin::DbMemorySpan>& t_spans, std::vector<PendingBit>& t_pending,
+    std::string& t_json_scratch) {
     auto* p_state = &t_runtime.getState();
     const auto& schema = t_runtime.getSchema();
 
     const size_t dot = t_full_path.find('.');
-    if (dot == std::string::npos)
+    if (dot == std::string_view::npos)
         return false;
-    const std::string db_name = t_full_path.substr(0, dot);
-    const std::string field_path = t_full_path.substr(dot + 1);
+    // findSegmentByName takes const std::string&; field_path stays a view
+    // (SchemaStore::findField accepts std::string_view).
+    const std::string db_name{t_full_path.substr(0, dot)};
+    const std::string_view field_path = t_full_path.substr(dot + 1);
     if (db_name.empty() || field_path.empty())
         return false;
 
@@ -120,16 +124,16 @@ bool encodeLeaf(runtime::PlcRuntime& t_runtime, const std::string& t_full_path, 
 
     if (field.type == ::sgrn::scl::DataType::Bool && field.count <= 1) {
         bool bit = false;
-        if (t_val.IsBool())
-            bit = t_val.GetBool();
-        else if (t_val.IsInt())
-            bit = t_val.GetInt() != 0;
-        else if (t_val.IsUint())
-            bit = t_val.GetUint() != 0;
-        else if (t_val.IsString()) {
-            const std::string s = t_val.GetString();
+        if (t_val.is_boolean())
+            bit = t_val.getBool();
+        else if (t_val.isInt())
+            bit = t_val.getInt() != 0;
+        else if (t_val.isUint())
+            bit = t_val.getUint() != 0;
+        else if (t_val.is_string()) {
+            const std::string_view s{t_val.getString(), t_val.getStringLength()};
             bit = (s == "true" || s == "1" || s == "TRUE");
-        } else if (t_val.IsNull()) {
+        } else if (t_val.is_null()) {
             bit = false;
         } else {
             fmt::print(fg(fmt::color::yellow), "[WalReplayer] Unencodable bool '{}', skipping leaf.\n", t_full_path);
@@ -146,14 +150,15 @@ bool encodeLeaf(runtime::PlcRuntime& t_runtime, const std::string& t_full_path, 
     }
     const size_t size = static_cast<size_t>(field_size);
 
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-    t_val.Accept(writer);
+    if (::sgrn::json::writeTo(t_json_scratch, t_val.rawValue()).hasError()) {
+        fmt::print(fg(fmt::color::yellow), "[WalReplayer] Cannot serialize leaf '{}', skipping.\n", t_full_path);
+        return false;
+    }
 
     // deque keeps existing element addresses stable across pushes, so spans
     // built earlier stay valid while later leaves append their buffers.
     t_storage.emplace_back(size, 0);
-    auto res = twin::encodeFieldAt(field, sb.GetString(), t_storage.back().data(), size, /*t_depth=*/0, field.endianness);
+    auto res = twin::encodeFieldAt(field, t_json_scratch, t_storage.back().data(), size, /*t_depth=*/0, field.endianness);
     if (res.hasError()) {
         t_storage.pop_back();
         fmt::print(fg(fmt::color::yellow), "[WalReplayer] Encode failed for '{}': {}\n", t_full_path, ::sgrn::scl::toString(res.error()));
@@ -357,13 +362,23 @@ bool WalReplayer::replayJsonlArchive(const std::string& t_decompressed, uint64_t
 
     int64_t last_ts = -1;
 
-    std::istringstream stream(t_decompressed);
-    std::string line;
-    while (std::getline(stream, line)) {
+    // Scratch reused across lines/leaves: no per-line std::string, no
+    // istringstream copy of the whole archive, no per-leaf buffers.
+    std::deque<std::vector<uint8_t>> storage;
+    std::vector<twin::DbMemorySpan> spans;
+    std::string json_scratch;
+
+    std::string_view rest{t_decompressed};
+    while (!rest.empty()) {
+        const size_t nl = rest.find('\n');
+        const std::string_view line = rest.substr(0, nl);
+        rest = (nl == std::string_view::npos) ? std::string_view{} : rest.substr(nl + 1);
         if (line.empty())
             continue;
-        rapidjson::Document doc;
-        if (doc.Parse(line.c_str()).HasParseError() || !doc.IsObject())
+        // Document::parse copies into a NUL-terminated buffer internally, so
+        // a non-terminated view into the archive is safe here.
+        ::sgrn::json::dom::Document doc;
+        if (doc.parse(line.data(), line.size()).hasParseError() || !doc.is_object())
             continue;
 
         if (database::isDictionaryRecord(doc)) {
@@ -371,41 +386,49 @@ bool WalReplayer::replayJsonlArchive(const std::string& t_decompressed, uint64_t
             continue;
         }
 
-        if (!doc.HasMember("type") || !doc["type"].IsString())
+        if (!doc.hasMember("type") || !doc["type"].is_string())
             continue;
-        const std::string_view line_type = doc["type"].GetString();
+        const auto type_node = doc["type"];
+        const std::string_view line_type{type_node.getString(), type_node.getStringLength()};
         if (line_type != "anchor" && line_type != "delta")
             continue;
 
-        const int64_t ts = (doc.HasMember("ts") && doc["ts"].IsInt64()) ? doc["ts"].GetInt64() : ::sgrn::utils::time::nowMilliseconds();
+        const int64_t ts = (doc.hasMember("ts") && doc["ts"].isInt64()) ? doc["ts"].getInt64() : ::sgrn::utils::time::nowMilliseconds();
 
         paceFrame(last_ts, ts, speed_factor_);
 
-        const rapidjson::Value* payload = nullptr;
-        if (doc.HasMember("changes") && doc["changes"].IsObject())
-            payload = &doc["changes"];
-        else if (doc.HasMember("data") && doc["data"].IsObject())
-            payload = &doc["data"];
-        if (payload == nullptr)
+        // Views are by-value cursors into doc: no subtree copy.
+        const char* payload_key = nullptr;
+        if (doc.hasMember("changes") && doc["changes"].is_object())
+            payload_key = "changes";
+        else if (doc.hasMember("data") && doc["data"].is_object())
+            payload_key = "data";
+        if (payload_key == nullptr)
             continue;
+        const auto payload = doc[payload_key];
 
         // deque keeps span backing buffers stable while later leaves
         // append theirs (see encodeLeaf).
-        std::deque<std::vector<uint8_t>> storage;
-        std::vector<twin::DbMemorySpan> spans;
-        for (auto it = payload->MemberBegin(); it != payload->MemberEnd(); ++it) {
-            std::string key = it->name.GetString();
-            if (!path_by_id.empty() && std::all_of(key.begin(), key.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
-                const size_t id = std::stoul(key);
+        storage.clear();
+        spans.clear();
+        for (auto it = payload.memberBegin(); it != payload.memberEnd(); ++it) {
+            const std::string_view name{it->name.getString(), it->name.getStringLength()};
+            std::string_view key = name;
+            if (!path_by_id.empty() && !name.empty() &&
+                std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
+                size_t id = 0;
+                const auto [end_ptr, ec] = std::from_chars(name.data(), name.data() + name.size(), id);
+                if (ec != std::errc{} || end_ptr != name.data() + name.size())
+                    continue; // overflow: cannot be a valid dictionary id
                 if (id >= path_by_id.size() || path_by_id[id].empty())
                     continue;
-                key = path_by_id[id];
+                key = path_by_id[id]; // stable: path_by_id is not modified in this loop
             }
-            if (it->value.IsObject()) {
+            if (it->value.is_object()) {
                 fmt::print(fg(fmt::color::cyan), "[WalReplayer] Skipping nested member '{}' (legacy anchor shape).\n", key);
                 continue;
             }
-            (void)encodeLeaf(*runtime_, key, it->value, storage, spans, pending_bits);
+            (void)encodeLeaf(*runtime_, key, it->value, storage, spans, pending_bits, json_scratch);
         }
 
         if (spans.empty() && pending_bits.empty())

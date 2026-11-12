@@ -1,14 +1,12 @@
 #include <sgrn/gateway/twin/PlcState.hpp>
 
 #include "PlcState-serialize.hpp" // internal: PlcNode::serialize() definition
+#include <sgrn/utils/json-dom.hpp>
 // REVAMP-1: PlcState.cpp — Implementation for PlcState, PlcPoint, and PlcNode.
 
 #include <fmt/format.h>
 #include <algorithm>
 #include <cstring>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <stdexcept>
 #include <string>
 
@@ -79,10 +77,10 @@ std::string PlcState::getJsonString(const std::string& t_path) const {
     const PlcNode* p_node = find(t_path);
     if (!p_node)
         return "null";
-    rapidjson::StringBuffer buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    sgrn::json::dom::StringBuffer buffer;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(buffer);
     p_node->serialize(writer, tree());
-    return buffer.GetString();
+    return buffer.getString();
 }
 
 std::string PlcState::getScalarString(const std::string& t_path) const {
@@ -159,7 +157,7 @@ std::string PlcState::getScalarString(const std::string& t_path) const {
 
     // Enums round-trip as their symbolic name. The label must be a JSON
     // string (quoted) so every consumer of this value — TreeCacheEngine leaf
-    // inserts, telemetry FieldUpdateNotification::json_value (rapidjson
+    // inserts, telemetry FieldUpdateNotification::json_value (Glaze JSON DOM
     // Parse), the REST element-readback — can render it verbatim. The old
     // bare-token output was neither valid JSON nor consistent with
     // PlcNode::serialize, which already emitted quoted labels.
@@ -170,10 +168,10 @@ std::string PlcState::getScalarString(const std::string& t_path) const {
         if (numeric != INT64_MIN) {
             auto it = p_node->enum_map_.find(static_cast<int>(numeric));
             if (it != p_node->enum_map_.end()) {
-                rapidjson::StringBuffer sb;
-                rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-                w.String(it->second.c_str(), static_cast<rapidjson::SizeType>(it->second.length()));
-                return std::string(sb.GetString());
+                sgrn::json::dom::StringBuffer sb;
+                sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> w(sb);
+                w.string(it->second.c_str(), static_cast<sgrn::json::dom::SizeType>(it->second.length()));
+                return std::string(sb.getString());
             }
         }
     }
@@ -226,10 +224,10 @@ void PlcState::loadFromJson(const std::string& /*root*/) {
 }
 
 std::string PlcState::getFullSnapshot() const {
-    rapidjson::StringBuffer buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    sgrn::json::dom::StringBuffer buffer;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(buffer);
 
-    writer.StartObject();
+    writer.startObject();
     std::vector<uint32_t> top_nums;
     for (auto t_n : topLevelNumbers())
         top_nums.push_back(t_n);
@@ -237,25 +235,25 @@ std::string PlcState::getFullSnapshot() const {
 
     for (const auto& name : top_level_names_) {
         if (const auto* t_node = find(name)) {
-            writer.Key(name.c_str(), static_cast<rapidjson::SizeType>(name.length()));
-            rapidjson::StringBuffer db_buffer;
-            rapidjson::Writer<rapidjson::StringBuffer> db_writer(db_buffer);
+            writer.key(name.c_str(), static_cast<sgrn::json::dom::SizeType>(name.length()));
+            sgrn::json::dom::StringBuffer db_buffer;
+            sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> db_writer(db_buffer);
             t_node->serialize(db_writer, tree());
 
-            std::string db_json = db_buffer.GetString();
-            writer.RawValue(db_json.c_str(), db_json.length(), rapidjson::kObjectType);
+            std::string db_json = db_buffer.getString();
+            writer.rawJson(db_json.c_str(), db_json.length(), sgrn::json::dom::Type::Object);
         }
     }
-    writer.EndObject();
-    return buffer.GetString();
+    writer.endObject();
+    return buffer.getString();
 }
 
 std::string PlcState::getFullSnapshotFlat(
     const std::unordered_map<std::string, uint32_t>& t_path_to_id, const std::vector<bool>& t_allowed_by_id) const {
-    rapidjson::StringBuffer buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    sgrn::json::dom::StringBuffer buffer;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(buffer);
 
-    writer.StartObject();
+    writer.startObject();
     std::vector<uint32_t> top_nums;
     for (auto t_n : topLevelNumbers())
         top_nums.push_back(t_n);
@@ -271,7 +269,7 @@ std::string PlcState::getFullSnapshotFlat(
         auto it = nodes_.find(path);
         if (it != nodes_.end() && it->second) {
             std::string id_str = std::to_string(id);
-            writer.Key(id_str.c_str(), static_cast<rapidjson::SizeType>(id_str.length()));
+            writer.key(id_str.c_str(), static_cast<sgrn::json::dom::SizeType>(id_str.length()));
             it->second->serialize(writer, tree(), 0, 0);
         } else {
             if (!logged_missing) {
@@ -280,15 +278,15 @@ std::string PlcState::getFullSnapshotFlat(
             }
         }
     }
-    writer.EndObject();
-    return buffer.GetString();
+    writer.endObject();
+    return buffer.getString();
 }
 
 std::string PlcState::getDeltaSnapshot(const std::vector<uint16_t>& t_filter) const {
-    rapidjson::StringBuffer buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    sgrn::json::dom::StringBuffer buffer;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(buffer);
 
-    writer.StartObject();
+    writer.startObject();
 
     // Iterate segments by numeric ID — no string comparison for filtering.
     for (const auto& [db_id, p_entry_raw] : tree().segments_by_id()) {
@@ -321,27 +319,27 @@ std::string PlcState::getDeltaSnapshot(const std::vector<uint16_t>& t_filter) co
             std::shared_lock<std::shared_mutex> lk(p_entry->mutex_);
             if (!p_entry->is_dirty_.load(std::memory_order_acquire))
                 continue;
-            rapidjson::StringBuffer db_buffer;
-            rapidjson::Writer<rapidjson::StringBuffer> db_writer(db_buffer);
+            sgrn::json::dom::StringBuffer db_buffer;
+            sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> db_writer(db_buffer);
             t_node->serialize(db_writer, tree());
-            db_json = db_buffer.GetString();
+            db_json = db_buffer.getString();
             p_entry->getAndClearDirty();
         }
 
-        writer.Key(seg_name.c_str(), static_cast<rapidjson::SizeType>(seg_name.length()));
-        writer.RawValue(db_json.c_str(), db_json.length(), rapidjson::kObjectType);
+        writer.key(seg_name.c_str(), static_cast<sgrn::json::dom::SizeType>(seg_name.length()));
+        writer.rawJson(db_json.c_str(), db_json.length(), sgrn::json::dom::Type::Object);
     }
 
-    writer.EndObject();
-    return buffer.GetString();
+    writer.endObject();
+    return buffer.getString();
 }
 
 std::string PlcState::getDeltaSnapshotFlat(
     const ankerl::unordered_dense::map<std::string, uint32_t>& t_path_to_id, const std::vector<uint16_t>& t_filter) const {
-    rapidjson::StringBuffer buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    sgrn::json::dom::StringBuffer buffer;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(buffer);
 
-    writer.StartObject();
+    writer.startObject();
 
     // Mirror the same dirty-segment sweep as getDeltaSnapshot() — zero-copy.
     for (const auto& [db_id, p_entry_raw] : tree().segments_by_id()) {
@@ -398,11 +396,11 @@ std::string PlcState::getDeltaSnapshotFlat(
                     const uint32_t n = pit->second->count_;
                     const size_t stride = static_cast<size_t>(pit->second->size_);
                     if (n <= 4096 && stride > 0 && stride <= (static_cast<size_t>(1) << 20)) {
-                        writer.Key(id_str.c_str(), static_cast<rapidjson::SizeType>(id_str.size()));
-                        writer.StartArray();
+                        writer.key(id_str.c_str(), static_cast<sgrn::json::dom::SizeType>(id_str.size()));
+                        writer.startArray();
                         for (uint32_t i = 0; i < n; ++i)
                             it->second->serialize(writer, tree(), 0, i * stride);
-                        writer.EndArray();
+                        writer.endArray();
                         emitted_array = true;
                     }
                 }
@@ -410,14 +408,14 @@ std::string PlcState::getDeltaSnapshotFlat(
             if (emitted_array)
                 continue;
 
-            writer.Key(id_str.c_str(), static_cast<rapidjson::SizeType>(id_str.size()));
+            writer.key(id_str.c_str(), static_cast<sgrn::json::dom::SizeType>(id_str.size()));
             it->second->serialize(writer, tree(), 0, 0);
         }
         p_entry->getAndClearDirty();
     }
 
-    writer.EndObject();
-    return buffer.GetString();
+    writer.endObject();
+    return buffer.getString();
 }
 
 void PlcState::clear() {

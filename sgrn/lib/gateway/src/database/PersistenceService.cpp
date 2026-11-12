@@ -1,3 +1,4 @@
+#include <sgrn/utils/json-dom.hpp>
 // ─────────────────────────────────────────────────────────────────────────────
 // PersistenceService.cpp
 //
@@ -37,17 +38,16 @@
 
 #include <fmt/color.h>
 #include <fmt/core.h>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <filesystem>
 #include <fstream>
-#include <functional>
+#include <limits>
 
 namespace sgrn::gateway::database
 {
@@ -63,6 +63,11 @@ namespace
 /// this fraction of a full image. The keyframe interval itself comes from
 /// configuration (anchor_interval_s, else the default) — see configure().
 constexpr double kBinaryDeltaMaxRatio = 0.5;
+
+sgrn::json::dom::StringBuffer& threadLocalLeafJsonBuffer() {
+    thread_local sgrn::json::dom::StringBuffer buffer;
+    return buffer;
+}
 
 struct DeltaRun {
     uint32_t offset;
@@ -276,7 +281,7 @@ void PersistenceService::onTelemetryEvent(const TelemetryEvent& t_event) {
     // ── PERFORMANCE NOTE: JSON Parsing and Filtering ─────────────────────────
     // The TelemetryBroker broadcasts the SAME shared_ptr<string> to all subscribers.
     // This JSON was already serialized once by PlcState::getDeltaSnapshot().
-    // PersistenceService must:    //   1. Parse the JSON (RapidJSON DOM construction)
+    // PersistenceService must:    //   1. Parse the JSON (Glaze JSON DOM DOM construction)
     //   2. Extract individual field paths and values
     //   3. Apply namespace filtering per field
     //   4. Re-serialize each field individually as a JSONL delta line
@@ -289,66 +294,79 @@ void PersistenceService::onTelemetryEvent(const TelemetryEvent& t_event) {
     // For the other two modes we apply namespace filtering and atomic merging.
     // Shared lazy DOM: at most one parse per event across all subscribers
     // (WebSocket filtering shares it); null mirrors the old parse failure.
-    const rapidjson::Document* p_doc = t_event.parsedJson();
+    const sgrn::json::dom::Document* p_doc = t_event.parsedJson();
     if (!p_doc)
         return;
-    const rapidjson::Document& doc = *p_doc;
+    const sgrn::json::dom::Document& doc = *p_doc;
 
     // Iterate top-level keys (DB names) → fields recursively.
-    // Delta payloads come in three shapes, all of which must land in the
-    // merge buffer keyed by LeafId:
-    //   nested       {"DbName": {"field": v, "struct": {"sub": v}}}
-    //   flat numeric {"<leaf_id>": v}  (dictionary mode — the common case)
-    //   flat dotted  {"DbName.field": v} (legacy)
-    auto processLeaf = [&](const std::string& t_path, const rapidjson::Value& t_value) {
-        auto id_it = dict_.path_to_id.find(t_path);
-        if (id_it == dict_.path_to_id.end()) {
-            return;
-        }
-        twin::LeafId id = id_it->second;
-        if (!passesFilter(id))
+    // Delta payloads arrive as nested, flat numeric-ID, or legacy dotted JSON.
+    // Keep one mutable path buffer for the recursive tree walk and resolve
+    // numeric IDs directly instead of converting them back to paths and
+    // hashing those paths a second time.
+    auto processLeafId = [&](twin::LeafId t_id, const sgrn::json::dom::Value& t_value) {
+        if (!passesFilter(t_id))
             return;
 
-        rapidjson::StringBuffer sb;
-        rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-        t_value.Accept(w);
+        auto& buffer = threadLocalLeafJsonBuffer();
+        const auto encoded = sgrn::json::writeTo(buffer.mutableString(), t_value.rawValue());
+        if (encoded.hasError())
+            return;
 
-        mergeOrFlushEvent(id, sb.GetString(), t_now);
+        mergeOrFlushEvent(t_id, std::string_view{buffer.getString(), buffer.size()}, t_now);
+    };
+
+    auto processLeafPath = [&](const std::string& t_path, const sgrn::json::dom::Value& t_value) {
+        const auto id_it = dict_.path_to_id.find(t_path);
+        if (id_it != dict_.path_to_id.end())
+            processLeafId(id_it->second, t_value);
     };
 
     // getDeltaSnapshot() may contain nested leaves (e.g. ReactorCore.rods.position_pct),
-    // so we walk the full JSON tree and emit one delta per leaf.
-    std::function<void(const std::string&, const rapidjson::Value&)> walkFields;
-    walkFields = [&](const std::string& t_prefix, const rapidjson::Value& t_obj) {
-        for (auto f_it = t_obj.MemberBegin(); f_it != t_obj.MemberEnd(); ++f_it) {
-            const std::string t_path = t_prefix.empty() ? f_it->name.GetString() : t_prefix + "." + f_it->name.GetString();
-            if (f_it->value.IsObject()) {
-                walkFields(t_path, f_it->value);
-                continue;
+    // so walk the JSON tree with one path string rather than allocating a new
+    // concatenated string at every recursion level.
+    std::string path;
+    path.reserve(128);
+    auto walkFields = [&](auto&& t_self, const sgrn::json::dom::Value& t_obj) -> void {
+        for (auto f_it = t_obj.memberBegin(); f_it != t_obj.memberEnd(); ++f_it) {
+            const size_t previous_size = path.size();
+            if (!path.empty())
+                path.push_back('.');
+            path.append(f_it->name.getString(), f_it->name.getStringLength());
+
+            if (f_it->value.is_object()) {
+                t_self(t_self, f_it->value);
+            } else {
+                processLeafPath(path, f_it->value);
             }
-            processLeaf(t_path, f_it->value);
+            path.resize(previous_size);
         }
     };
 
-    auto isDigits = [](const std::string& t_s) {
+    auto isDigits = [](std::string_view t_s) {
         return !t_s.empty() && t_s.size() <= 10 &&
                std::all_of(t_s.begin(), t_s.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
     };
 
-    for (auto db_it = doc.MemberBegin(); db_it != doc.MemberEnd(); ++db_it) {
-        if (db_it->value.IsObject()) {
-            const std::string db_name = db_it->name.GetString();
-            walkFields(db_name, db_it->value);
+    for (auto db_it = doc.memberBegin(); db_it != doc.memberEnd(); ++db_it) {
+        if (db_it->value.is_object()) {
+            path.assign(db_it->name.getString(), db_it->name.getStringLength());
+            walkFields(walkFields, db_it->value);
+            path.clear();
             continue;
         }
-        // Flat leaf straight at top level: numeric id or dotted path.
-        const std::string key = db_it->name.GetString();
+
+        // Flat leaf straight at top level: numeric ID or dotted path.
+        const std::string_view key{db_it->name.getString(), db_it->name.getStringLength()};
         if (isDigits(key)) {
-            const size_t id = std::stoul(key);
-            if (id < dict_.path_by_id.size() && !dict_.path_by_id[id].empty())
-                processLeaf(dict_.path_by_id[id], db_it->value);
+            twin::LeafId id{};
+            const auto [end, error] = std::from_chars(key.data(), key.data() + key.size(), id);
+            if (error == std::errc{} && end == key.data() + key.size() && id < dict_.path_by_id.size() && !dict_.path_by_id[id].empty()) {
+                processLeafId(id, db_it->value);
+            }
         } else {
-            processLeaf(key, db_it->value);
+            path.assign(key);
+            processLeafPath(path, db_it->value);
         }
     }
 
@@ -370,8 +388,9 @@ void PersistenceService::ingestFullTree(const std::string& t_full_tree_json, con
     // Commit any open atomic merge window so archive ordering is consistent.
     commitMergeBuffer();
 
-    const std::string& anchor_json = t_flat_tree_json.empty() ? t_full_tree_json : t_flat_tree_json;
-    if (auto res = writeAnchorLine(anchor_json, t_now); res.hasError()) {
+    const bool anchor_is_flat = !t_flat_tree_json.empty();
+    const std::string& anchor_json = anchor_is_flat ? t_flat_tree_json : t_full_tree_json;
+    if (auto res = writeAnchorLine(anchor_json, t_now, anchor_is_flat); res.hasError()) {
         fmt::print(fg(fmt::color::red), "[persist] Anchor line write failed: {}\n", res.error());
         return;
     }
@@ -454,32 +473,29 @@ void PersistenceService::rebuildAllowedByIndex() {
 // Atomic merge window
 // ─────────────────────────────────────────────────────────────────────────────
 
-void PersistenceService::mergeOrFlushEvent(twin::LeafId t_id, const std::string& t_value_json, int64_t t_now) {
+void PersistenceService::mergeOrFlushEvent(twin::LeafId t_id, std::string_view t_value_json, int64_t t_now) {
     const uint32_t window = cfg_.atomic_window_ms;
 
     if (window == 0) {
-        // Merging disabled — emit a standalone delta line immediately.
-        rapidjson::StringBuffer sb;
-        rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-        w.StartObject();
-        w.Key("type");
-        w.String("delta");
-        w.Key("ts");
-        w.Int64(t_now);
-        w.Key("changes");
-        w.StartObject();
-        std::string id_str = std::to_string(t_id);
-        w.Key(id_str.c_str(), static_cast<rapidjson::SizeType>(id_str.size()));
-        w.RawValue(t_value_json.c_str(), t_value_json.size(), rapidjson::kObjectType);
-        w.EndObject();
-        w.EndObject();
-        (void)writeDeltaLine(sb.GetString());
+        // t_value_json was produced by the Glaze serializer above. Splice the
+        // trusted fragment directly instead of parsing and serializing it again.
+        const std::string id = std::to_string(t_id);
+        std::string record;
+        record.reserve(t_value_json.size() + id.size() + 64);
+        record.append(R"({"type":"delta","ts":)");
+        record.append(std::to_string(t_now));
+        record.append(R"(,"changes":{")");
+        record.append(id);
+        record.append(R"(":)");
+        record.append(t_value_json);
+        record.append("}}");
+        (void)writeDeltaLine(record);
         return;
     }
 
     // If the merge buffer is open and within the atomic window, accumulate.
     if (merge_buf_.open_ts != 0 && (t_now - merge_buf_.open_ts) <= static_cast<int64_t>(window)) {
-        merge_buf_.fields[t_id] = t_value_json;
+        merge_buf_.fields[t_id] = std::string(t_value_json);
         return;
     }
 
@@ -488,31 +504,40 @@ void PersistenceService::mergeOrFlushEvent(twin::LeafId t_id, const std::string&
         commitMergeBuffer();
 
     merge_buf_.open_ts = t_now;
-    merge_buf_.fields[t_id] = t_value_json;
+    merge_buf_.fields[t_id] = std::string(t_value_json);
 }
 
 void PersistenceService::commitMergeBuffer() {
     if (merge_buf_.open_ts == 0 || merge_buf_.fields.empty())
         return;
 
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-    w.StartObject();
-    w.Key("type");
-    w.String("delta");
-    w.Key("ts");
-    w.Int64(merge_buf_.open_ts);
-    w.Key("changes");
-    w.StartObject();
-    for (const auto& [t_id, val] : merge_buf_.fields) {
-        std::string id_str = std::to_string(t_id);
-        w.Key(id_str.c_str(), static_cast<rapidjson::SizeType>(id_str.size()));
-        w.RawValue(val.c_str(), val.size(), rapidjson::kObjectType);
+    // Values in merge_buf_ are already compact, valid JSON fragments from
+    // the Glaze serializer. Avoid reparsing every leaf through Writer::RawValue.
+    size_t reserve_size = 64;
+    constexpr size_t kLeafIdMaxDigits = std::numeric_limits<twin::LeafId>::digits10 + 1;
+    for (const auto& [id, value] : merge_buf_.fields) {
+        (void)id;
+        reserve_size += kLeafIdMaxDigits + value.size() + 5;
     }
-    w.EndObject();
-    w.EndObject();
 
-    (void)writeDeltaLine(sb.GetString());
+    std::string record;
+    record.reserve(reserve_size);
+    record.append(R"({"type":"delta","ts":)");
+    record.append(std::to_string(merge_buf_.open_ts));
+    record.append(R"(,"changes":{)");
+    bool first = true;
+    for (const auto& [id, value] : merge_buf_.fields) {
+        if (!first)
+            record.push_back(',');
+        first = false;
+        record.push_back('"');
+        record.append(std::to_string(id));
+        record.append(R"(":)");
+        record.append(value);
+    }
+    record.append("}}");
+
+    (void)writeDeltaLine(record);
 
     merge_buf_.open_ts = 0;
     merge_buf_.fields.clear();
@@ -573,20 +598,20 @@ Result<void, std::string> PersistenceService::openNewArchive(int64_t t_now) {
         ++current_line_counter_;
     } else {
         // ── Line 1: schema ───────────────────────────────────────────────────────
-        rapidjson::StringBuffer sb;
-        rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-        w.StartObject();
-        w.Key("type");
-        w.String("schema");
-        w.Key("schema");
+        sgrn::json::dom::StringBuffer sb;
+        sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> w(sb);
+        w.startObject();
+        w.key("type");
+        w.string("schema");
+        w.key("schema");
         if (schema_json_.empty()) {
-            w.Null();
+            w.nullValue();
         } else {
-            w.RawValue(schema_json_.c_str(), schema_json_.size(), rapidjson::kObjectType);
+            w.rawJson(schema_json_.c_str(), schema_json_.size(), sgrn::json::dom::Type::Object);
         }
-        w.EndObject();
+        w.endObject();
 
-        auto schema_res = current_archive_->writeLine(sb.GetString());
+        auto schema_res = current_archive_->writeLine(sb.getString());
         if (schema_res.hasError()) {
             current_archive_.reset();
             current_archive_path_.clear();
@@ -596,30 +621,30 @@ Result<void, std::string> PersistenceService::openNewArchive(int64_t t_now) {
     }
 
     // ── Line 2: dictionary ───────────────────────────────────────────────────
-    rapidjson::StringBuffer dsb;
-    rapidjson::Writer<rapidjson::StringBuffer> dw(dsb);
-    dw.StartObject();
-    dw.Key("type");
-    dw.String("dictionary");
-    dw.Key("leaves");
-    dw.StartArray();
+    sgrn::json::dom::StringBuffer dsb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> dw(dsb);
+    dw.startObject();
+    dw.key("type");
+    dw.string("dictionary");
+    dw.key("leaves");
+    dw.startArray();
     for (size_t id = 0; id < dict_.path_by_id.size(); ++id) {
         const auto& path = dict_.path_by_id[id];
-        dw.StartObject();
-        dw.Key("id");
-        dw.Uint(static_cast<uint32_t>(id));
-        dw.Key("path");
-        dw.String(path.c_str(), static_cast<rapidjson::SizeType>(path.size()));
-        dw.EndObject();
+        dw.startObject();
+        dw.key("id");
+        dw.uint32(static_cast<uint32_t>(id));
+        dw.key("path");
+        dw.string(path.c_str(), static_cast<sgrn::json::dom::SizeType>(path.size()));
+        dw.endObject();
     }
-    dw.EndArray();
-    dw.EndObject();
+    dw.endArray();
+    dw.endObject();
 
     auto dict_res = [&]() -> Result<void> {
         if (is_binary) {
-            return writeBinaryControlLine(dsb.GetString(), t_now);
+            return writeBinaryControlLine(dsb.getString(), t_now);
         }
-        return current_archive_->writeLine(dsb.GetString());
+        return current_archive_->writeLine(dsb.getString());
     }();
     if (dict_res.hasError()) {
         current_archive_.reset();
@@ -629,44 +654,44 @@ Result<void, std::string> PersistenceService::openNewArchive(int64_t t_now) {
     ++current_line_counter_;
 
     // ── Line 3: manifest ─────────────────────────────────────────────────────
-    rapidjson::StringBuffer msb;
-    rapidjson::Writer<rapidjson::StringBuffer> mw(msb);
-    mw.StartObject();
-    mw.Key("type");
-    mw.String("manifest");
-    mw.Key("start_time");
+    sgrn::json::dom::StringBuffer msb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> mw(msb);
+    mw.startObject();
+    mw.key("type");
+    mw.string("manifest");
+    mw.key("start_time");
     const std::string ts_str = sgrn::utils::time::iso8601Timestamp(t_now);
-    mw.String(ts_str.c_str(), static_cast<rapidjson::SizeType>(ts_str.size()));
-    mw.Key("mode");
-    mw.String(cfg_.mode.c_str(), static_cast<rapidjson::SizeType>(cfg_.mode.size()));
-    mw.Key("namespaces");
-    mw.StartArray();
+    mw.string(ts_str.c_str(), static_cast<sgrn::json::dom::SizeType>(ts_str.size()));
+    mw.key("mode");
+    mw.string(cfg_.mode.c_str(), static_cast<sgrn::json::dom::SizeType>(cfg_.mode.size()));
+    mw.key("namespaces");
+    mw.startArray();
     for (const auto& ns : cfg_.namespaces) {
-        mw.String(ns.c_str(), static_cast<rapidjson::SizeType>(ns.size()));
+        mw.string(ns.c_str(), static_cast<sgrn::json::dom::SizeType>(ns.size()));
     }
-    mw.EndArray();
+    mw.endArray();
     // Encoding policy for this file, so readers know the restart-point
     // cadence without consulting gateway.json. Binary keyframes follow
     // anchor_interval_s when set (see configure()), JSONL anchors follow
     // the mode's own anchor triggers.
     if (is_binary) {
-        mw.Key("keyframe_interval_s");
-        mw.Int64(binary_keyframe_interval_ms_ / 1000);
-        mw.Key("delta_ratio");
-        mw.Double(kBinaryDeltaMaxRatio);
+        mw.key("keyframe_interval_s");
+        mw.int64(binary_keyframe_interval_ms_ / 1000);
+        mw.key("delta_ratio");
+        mw.float64(kBinaryDeltaMaxRatio);
     } else {
-        mw.Key("anchor_interval_s");
-        mw.Uint(cfg_.anchor_interval_s);
-        mw.Key("anchor_change_count");
-        mw.Uint(cfg_.anchor_change_count);
+        mw.key("anchor_interval_s");
+        mw.uint32(cfg_.anchor_interval_s);
+        mw.key("anchor_change_count");
+        mw.uint32(cfg_.anchor_change_count);
     }
-    mw.EndObject();
+    mw.endObject();
 
     auto manifest_res = [&]() -> Result<void> {
         if (is_binary) {
-            return writeBinaryControlLine(msb.GetString(), t_now);
+            return writeBinaryControlLine(msb.getString(), t_now);
         }
-        return current_archive_->writeLine(msb.GetString());
+        return current_archive_->writeLine(msb.getString());
     }();
     if (manifest_res.hasError()) {
         current_archive_.reset();
@@ -777,59 +802,64 @@ void PersistenceService::writeBinaryAnchor(uint16_t t_db, const std::vector<uint
     ++anchor_frames_;
 }
 
-Result<void> PersistenceService::writeAnchorLine(const std::string& t_json, int64_t t_ts) {
+Result<void> PersistenceService::writeAnchorLine(const std::string& t_json, int64_t t_ts, bool t_data_is_flat) {
     if (!current_archive_) {
         if (auto res = openNewArchive(sgrn::utils::time::nowMilliseconds()); res.hasError())
             return res.error();
     }
 
-    // Parse the JSON. If it's already flat (numeric keys), we just write it.
-    // Otherwise, flatten it.
-    rapidjson::Document doc;
-    doc.Parse(t_json.c_str());
+    std::string_view data_json{t_json};
+    sgrn::json::dom::StringBuffer flattened_buffer;
 
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-    w.StartObject();
-    w.Key("type");
-    w.String("anchor");
-    w.Key("ts");
-    w.Int64(t_ts);
-    w.Key("data");
-
-    bool is_flat = false;
-    if (!doc.HasParseError() && doc.IsObject() && doc.MemberCount() > 0) {
-        const char* first_key = doc.MemberBegin()->name.GetString();
-        is_flat = std::all_of(first_key, first_key + strlen(first_key), ::isdigit);
-    }
-
-    if (is_flat) {
-        w.RawValue(t_json.c_str(), t_json.size(), rapidjson::kObjectType);
-    } else if (!doc.HasParseError() && doc.IsObject() && !dict_.path_to_id.empty()) {
-        rapidjson::Document flat_doc;
-        if (twin::flattenNestedTreeFiltered(doc, dict_.path_to_id, allowed_by_id_, flat_doc.GetAllocator(), flat_doc).hasError()) {
-            // Fallback: write the raw nested tree if flattening fails.
-            w.RawValue(t_json.c_str(), t_json.size(), rapidjson::kObjectType);
-        } else {
-            rapidjson::StringBuffer flat_sb;
-            rapidjson::Writer<rapidjson::StringBuffer> flat_w(flat_sb);
-            flat_doc.Accept(flat_w);
-            w.RawValue(flat_sb.GetString(), flat_sb.GetSize(), rapidjson::kObjectType);
+    // Snapshots supplied through the explicit flat argument need no parse.
+    // For legacy callers that pass a flat object as the first argument, retain
+    // the old first-key check while avoiding the second parse in RawValue.
+    if (!t_data_is_flat) {
+        sgrn::json::dom::Document doc;
+        doc.parse(t_json.data(), t_json.size());
+        if (doc.hasParseError() || !doc.is_object()) {
+            return fmt::format("Failed to parse nested anchor JSON: {}", doc.errorMessage());
         }
-    } else {
-        w.RawValue(t_json.c_str(), t_json.size(), rapidjson::kObjectType);
+
+        bool already_flat = false;
+        if (doc.memberCount() > 0) {
+            const auto first = doc.memberBegin();
+            const std::string_view first_key{first->name.getString(), first->name.getStringLength()};
+            already_flat = !first_key.empty() &&
+                           std::all_of(first_key.begin(), first_key.end(), [](unsigned char t_char) { return std::isdigit(t_char) != 0; });
+        }
+
+        if (!already_flat && !dict_.path_to_id.empty()) {
+            sgrn::json::dom::Document flat_doc;
+            if (!twin::flattenNestedTreeFiltered(doc, dict_.path_to_id, allowed_by_id_, flat_doc.allocator(), flat_doc).hasError()) {
+                sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> flat_writer(flattened_buffer);
+                if (!flat_doc.accept(flat_writer))
+                    return "Failed to serialize flattened anchor JSON";
+                data_json = std::string_view{flattened_buffer.getString(), flattened_buffer.size()};
+            }
+            // Preserve the previous fallback: if flattening fails, archive the
+            // original nested tree rather than dropping the anchor.
+        }
     }
 
-    w.EndObject();
+    // The data fragment is produced internally by Glaze. Compose the fixed
+    // envelope around it directly; Writer::RawValue would parse it again.
+    std::string record;
+    record.reserve(data_json.size() + 64);
+    record.append(R"({"type":"anchor","ts":)");
+    record.append(std::to_string(t_ts));
+    record.append(R"(,"data":)");
+    record.append(data_json);
+    record.push_back('}');
 
     // In binary mode a raw JSON line would corrupt the frame stream, so the
     // anchor is wrapped in a control frame (db_num 0xFFFF) instead. The
     // JSON control is a transcode shim and doesn't count as an anchor line.
     Result<void> res;
     if (cfg_.format == "binary" || cfg_.format == "bin.zst") {
-        res = writeBinaryControlLine(sb.GetString(), t_ts);
+        res = writeBinaryControlLine(record, t_ts);
     } else {
-        res = current_archive_->writeLine(sb.GetString());
+        res = current_archive_->writeLine(record);
         ++anchor_lines_;
     }
     if (res.hasError())
@@ -841,7 +871,6 @@ Result<void> PersistenceService::writeAnchorLine(const std::string& t_json, int6
     last_anchor_line_index_ = static_cast<int64_t>(current_line_counter_);
     return {};
 }
-
 void PersistenceService::finalizeArchive(int64_t t_ts_end) {
     if (!current_archive_)
         return;
@@ -850,35 +879,35 @@ void PersistenceService::finalizeArchive(int64_t t_ts_end) {
     commitMergeBuffer();
 
     // ── Footer line ──────────────────────────────────────────────────────────
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-    w.StartObject();
-    w.Key("type");
-    w.String("footer");
-    w.Key("last_anchor_line");
-    w.Int64(last_anchor_line_index_);
-    w.Key("record_count");
-    w.Uint64(static_cast<uint64_t>(current_line_counter_));
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> w(sb);
+    w.startObject();
+    w.key("type");
+    w.string("footer");
+    w.key("last_anchor_line");
+    w.int64(last_anchor_line_index_);
+    w.key("record_count");
+    w.uint64(static_cast<uint64_t>(current_line_counter_));
     // Restart-point inventory, counted per format so units never mix:
     // binary files report frames, JSONL files report lines.
     if (cfg_.format == "binary" || cfg_.format == "bin.zst") {
-        w.Key("anchor_count");
-        w.Uint64(anchor_frames_);
-        w.Key("delta_count");
-        w.Uint64(delta_frames_);
+        w.key("anchor_count");
+        w.uint64(anchor_frames_);
+        w.key("delta_count");
+        w.uint64(delta_frames_);
     } else {
-        w.Key("anchor_count");
-        w.Uint64(anchor_lines_);
-        w.Key("delta_count");
-        w.Uint64(delta_lines_);
+        w.key("anchor_count");
+        w.uint64(anchor_lines_);
+        w.key("delta_count");
+        w.uint64(delta_lines_);
     }
-    w.EndObject();
+    w.endObject();
 
     auto footer_res = [&]() -> Result<void> {
         if (cfg_.format == "binary" || cfg_.format == "bin.zst") {
-            return writeBinaryControlLine(sb.GetString(), t_ts_end);
+            return writeBinaryControlLine(sb.getString(), t_ts_end);
         }
-        return current_archive_->writeLine(sb.GetString());
+        return current_archive_->writeLine(sb.getString());
     }();
     if (footer_res.hasError())
         fmt::print(fg(fmt::color::red), "[persist] Footer write failed: {}\n", footer_res.error());

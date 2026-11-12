@@ -3,7 +3,7 @@
 #include <sgrn/Result.hpp>
 #include <sgrn/wrappers/opcua/NodeId.hpp>
 
-#include <rapidjson/document.h>
+#include <sgrn/utils/json-dom.hpp>
 
 #include <cstdint>
 #include <string_view>
@@ -24,10 +24,10 @@ sgrn::Result<NodeId> registerAlarmEventType(Server& t_server);
 /// @param event_type        NodeId returned by registerAlarmEventType().
 /// @param db                PLC data-block number (used as event source identifier).
 /// @param path              Dot-separated field path within the data-block.
-/// @param alarm_obj         RapidJSON value describing the alarm payload.
+/// @param alarm_obj         JSON DOM value describing the alarm payload.
 ///                          May be a scalar, object, or array element.
 /// @param timestamp_ms      Unix epoch milliseconds for the event SourceTimestamp.
-void triggerAlarm(Server& t_server, const NodeId& t_event_type, uint16_t t_db, std::string_view t_path, const rapidjson::Value& t_alarm_obj,
-    uint64_t t_timestamp_ms);
+void triggerAlarm(Server& t_server, const NodeId& t_event_type, uint16_t t_db, std::string_view t_path,
+    const sgrn::json::dom::Value& t_alarm_obj, uint64_t t_timestamp_ms);
 
 } // namespace sgrn::wrappers::opcua

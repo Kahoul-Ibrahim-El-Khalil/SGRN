@@ -7,16 +7,13 @@
 #include <sgrn/s7shell/schema/schema.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/utils/filesystem.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <cctype>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <optional>
-#include <rapidjson/document.h>
-#include <rapidjson/error/en.h>
-#include <rapidjson/prettywriter.h>
-#include <rapidjson/stringbuffer.h>
 #ifndef _WIN32
 #include <readline/readline.h>
 #endif

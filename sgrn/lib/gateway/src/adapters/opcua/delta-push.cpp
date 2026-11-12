@@ -9,11 +9,9 @@
 #include <sgrn/Result.hpp>
 
 #include <fmt/core.h>
+#include <sgrn/utils/json-dom.hpp>
 #include <open62541/types_generated.h>
 #include <open62541/types_generated_handling.h>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <stdexcept>
 #include <string>
 

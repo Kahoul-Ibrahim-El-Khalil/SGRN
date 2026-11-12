@@ -1,13 +1,12 @@
 #include <sgrn/gateway/twin/LeafDictionary.hpp>
 #include <sgrn/utils/compression.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <sgrn/utils/json.hpp>
 
 #include <fmt/core.h>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 #include <algorithm>
 #include <filesystem>
@@ -20,11 +19,8 @@
 namespace fs = std::filesystem;
 using namespace sgrn::gateway::twin;
 
-std::string serializeCompact(const rapidjson::Value& t_value) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-    t_value.Accept(w);
-    return sb.GetString();
+std::string serializeCompact(const sgrn::json::dom::Value& t_value) {
+    return sgrn::utils::json::serializeCompact(t_value);
 }
 
 std::string archiveSortKey(const fs::path& t_path) {
@@ -130,39 +126,39 @@ int main(int argc, char** argv) {
         std::string archive_schema_json;
         std::string archive_dict_json;
         std::vector<std::string> path_by_id;
-        rapidjson::Document manifest_doc;
-        rapidjson::Document footer_doc;
+        sgrn::json::dom::Document manifest_doc;
+        sgrn::json::dom::Document footer_doc;
 
         bool has_dictionary = false;
 
         while (reader.readLine(line)) {
-            rapidjson::Document doc;
-            doc.Parse(line.c_str());
-            if (doc.HasParseError() || !doc.IsObject())
+            sgrn::json::dom::Document doc;
+            doc.parse(line.data(), line.size());
+            if (doc.hasParseError() || !doc.is_object())
                 continue;
 
-            const char* type = doc.HasMember("type") && doc["type"].IsString() ? doc["type"].GetString() : "";
+            const char* type = doc.hasMember("type") && doc["type"].is_string() ? doc["type"].getString() : "";
 
             if (std::string_view(type) == "schema") {
                 archive_schema_json = serializeCompact(doc["schema"]);
             } else if (std::string_view(type) == "dictionary") {
                 has_dictionary = true;
                 archive_dict_json = line; // Stash the whole dictionary line JSON
-                if (doc.HasMember("leaves") && doc["leaves"].IsArray()) {
-                    for (const auto& item : doc["leaves"].GetArray()) {
-                        if (item.IsObject() && item.HasMember("id") && item["id"].IsUint() && item.HasMember("path") &&
-                            item["path"].IsString()) {
-                            auto id = item["id"].GetUint();
+                if (doc.hasMember("leaves") && doc["leaves"].is_array()) {
+                    for (const auto& item : doc["leaves"].elements()) {
+                        if (item.is_object() && item.hasMember("id") && item["id"].isUint() && item.hasMember("path") &&
+                            item["path"].is_string()) {
+                            auto id = item["id"].getUint();
                             if (id >= path_by_id.size())
                                 path_by_id.resize(id + 1);
-                            path_by_id[id] = item["path"].GetString();
+                            path_by_id[id] = item["path"].getString();
                         }
                     }
                 }
             } else if (std::string_view(type) == "manifest") {
-                manifest_doc.CopyFrom(doc, manifest_doc.GetAllocator());
+                manifest_doc.copyFrom(doc, manifest_doc.allocator());
             } else if (std::string_view(type) == "footer") {
-                footer_doc.CopyFrom(doc, footer_doc.GetAllocator());
+                footer_doc.copyFrom(doc, footer_doc.allocator());
             } else if (std::string_view(type) == "anchor" || std::string_view(type) == "delta") {
                 bool schema_drift = (archive_schema_json != current_schema_json || archive_dict_json != current_dict_json);
 
@@ -180,30 +176,26 @@ int main(int argc, char** argv) {
                     data_out.open(current_group_dir + "/data.jsonl", std::ios::app);
 
                     // Write schema.json
-                    rapidjson::Document s_doc;
+                    sgrn::json::dom::Document s_doc;
                     if (!archive_schema_json.empty() && archive_schema_json != "null") {
-                        s_doc.Parse(archive_schema_json.c_str());
+                        s_doc.parse(archive_schema_json.c_str());
                     } else {
-                        s_doc.SetObject();
+                        s_doc.setObject();
                     }
                     if (has_dictionary) {
-                        rapidjson::Document d_doc;
-                        d_doc.Parse(archive_dict_json.c_str());
-                        if (d_doc.HasMember("leaves")) {
-                            rapidjson::Value leaves_copy(d_doc["leaves"], s_doc.GetAllocator());
-                            s_doc.AddMember("leaves", leaves_copy, s_doc.GetAllocator());
+                        sgrn::json::dom::Document d_doc;
+                        d_doc.parse(archive_dict_json.c_str());
+                        if (d_doc.hasMember("leaves")) {
+                            s_doc.addMember("leaves", d_doc["leaves"], s_doc.allocator());
                         }
                     }
-                    rapidjson::StringBuffer sb;
-                    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-                    s_doc.Accept(w);
                     std::ofstream schema_out(current_group_dir + "/schema.json");
-                    schema_out << sb.GetString() << "\n";
+                    schema_out << serializeCompact(s_doc) << "\n";
                 }
 
-                rapidjson::Document doc_out;
+                sgrn::json::dom::Document doc_out;
                 if (!path_by_id.empty()) {
-                    if (!expandRecordKeys(doc, path_by_id, doc_out.GetAllocator(), doc_out).hasError()) {
+                    if (!expandRecordKeys(doc, path_by_id, doc_out.allocator(), doc_out).hasError()) {
                         data_out << serializeCompact(doc_out) << "\n";
                         continue;
                     }
@@ -212,15 +204,13 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (!current_group_dir.empty() && !manifest_doc.IsNull()) {
-            if (!footer_doc.IsNull()) {
-                if (footer_doc.HasMember("record_count")) {
-                    rapidjson::Value count_copy(footer_doc["record_count"], manifest_doc.GetAllocator());
-                    manifest_doc.AddMember("record_count", count_copy, manifest_doc.GetAllocator());
+        if (!current_group_dir.empty() && !manifest_doc.is_null()) {
+            if (!footer_doc.is_null()) {
+                if (footer_doc.hasMember("record_count")) {
+                    manifest_doc.addMember("record_count", footer_doc["record_count"], manifest_doc.allocator());
                 }
-                if (footer_doc.HasMember("last_anchor_line")) {
-                    rapidjson::Value anchor_copy(footer_doc["last_anchor_line"], manifest_doc.GetAllocator());
-                    manifest_doc.AddMember("last_anchor_line", anchor_copy, manifest_doc.GetAllocator());
+                if (footer_doc.hasMember("last_anchor_line")) {
+                    manifest_doc.addMember("last_anchor_line", footer_doc["last_anchor_line"], manifest_doc.allocator());
                 }
             }
             std::ofstream manifest_out(current_group_dir + "/manifest.json");

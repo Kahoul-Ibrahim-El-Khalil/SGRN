@@ -1,9 +1,9 @@
+#include <sgrn/utils/json-dom.hpp>
 // WebSocketAdapter outbound push path (PLC -> clients).
 // Split from WebSocketAdapter.cpp; mirrors adapters/opcua/delta_push.cpp.
 #include <fmt/core.h>
 #include <sgrn/common/endian-helper.hpp>
 #include <sgrn/common/event-helper.hpp>
-#include <sgrn/common/json-helper.hpp>
 #include <sgrn/common/path-utils.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/gateway/adapters/websocket/WebSocketAdapter.hpp>
@@ -11,15 +11,14 @@
 #include <sgrn/gateway/common/SecurityHelper.hpp>
 #include <sgrn/gateway/core/TelemetryBroker.hpp>
 #include <sgrn/gateway/twin/LeafDictionary.hpp>
+#include <sgrn/utils/json-ops.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <sgrn/utils/time.hpp>
+#include <cstdint>
 #include <optional>
-#include <rapidjson/document.h>
-#include <rapidjson/error/en.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 #include <algorithm>
 #include <limits>
@@ -36,13 +35,87 @@ using sgrn::scl::PlcSchemaStore;
 namespace sgrn::gateway::adapters::websocket
 {
 
+namespace
+{
+
+// Leaf ranges are sorted and coalesced by resolveLeafRanges(). Find the first
+// range whose end can contain the id instead of scanning every range.
+template <class Ranges>
+bool containsLeafId(const Ranges& t_ranges, twin::LeafId t_id) noexcept {
+    const auto it = std::lower_bound(
+        t_ranges.begin(), t_ranges.end(), t_id, [](const auto& t_range, twin::LeafId t_value) { return t_range.end < t_value; });
+    return it != t_ranges.end() && it->start <= t_id;
+}
+
+// Flat dictionary payloads have decimal leaf IDs as keys. Parse without
+// std::stoul: malformed wire keys must not throw out of the broker callback.
+std::optional<twin::LeafId> parseLeafId(std::string_view t_text) noexcept {
+    if (t_text.empty() || t_text.size() > 10)
+        return std::nullopt;
+
+    uint64_t value = 0;
+    constexpr uint64_t max_value = std::numeric_limits<twin::LeafId>::max();
+    for (const unsigned char ch : t_text) {
+        if (ch < '0' || ch > '9')
+            return std::nullopt;
+        const uint64_t digit = static_cast<uint64_t>(ch - '0');
+        if (digit > max_value || value > (max_value - digit) / 10)
+            return std::nullopt;
+        value = value * 10 + digit;
+    }
+    return static_cast<twin::LeafId>(value);
+}
+
+// Serialize only the selected entries of a flat dictionary document. Building
+// a second DOM would deep-copy every selected subtree and then walk it again
+// to serialize; direct fragment serialization avoids that intermediate tree.
+template <class Ranges>
+std::optional<std::string> filterFlatDictionaryJson(const sgrn::json::dom::Document& t_doc, const Ranges& t_ranges) {
+    std::string output;
+    output.reserve(128);
+    output.push_back('{');
+    bool first = true;
+    std::string value_json;
+
+    for (auto it = t_doc.memberBegin(); it != t_doc.memberEnd(); ++it) {
+        const std::string_view key{it->name.getString(), it->name.getStringLength()};
+        const auto id = parseLeafId(key);
+        if (!id || !containsLeafId(t_ranges, *id))
+            continue;
+
+        const auto& value = static_cast<const sgrn::json::dom::Value&>(it->value);
+        const auto serialized = sgrn::json::writeTo(value_json, value.rawValue());
+        if (serialized.hasError())
+            return std::nullopt;
+
+        if (!first)
+            output.push_back(',');
+        first = false;
+        output.push_back('"');
+        output.append(key); // parseLeafId guarantees a decimal-only JSON key
+        output.append(R"(":)");
+        output.append(value_json);
+    }
+
+    if (first)
+        return std::string{};
+    output.push_back('}');
+    return output;
+}
+
+} // namespace
+
 void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
     RETURN_IF(t_event.type != EventType::DeltaSnapshot, ;);
 
-    // Feed the last-value cache so late subscribers get current state even
-    // when no further deltas arrive (quiet twin, finished replay).
+    // Parse once into TelemetryEvent's shared lazy DOM. The last-value cache
+    // and any filtered subscribers reuse this same parse instead of parsing
+    // the flat payload independently.
+    const sgrn::json::dom::Document* parsed_doc = nullptr;
     if (t_event.is_flat && t_event.json_value && !t_event.json_value->empty() && *t_event.json_value != "{}") {
-        rememberFlatValues(*t_event.json_value);
+        parsed_doc = t_event.parsedJson();
+        if (parsed_doc)
+            rememberFlatValues(*parsed_doc);
     }
 
     // Collect target clients and determine if any needs field-level filtering
@@ -66,24 +139,18 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
     RETURN_IF(targets.empty() && binary_targets.empty(), ;);
 
     // ── PERFORMANCE NOTE: Shared JSON Parsing ─────────────────────────────────
-    // The TelemetryBroker broadcasts the SAME shared_ptr<string> to all subscribers
-    // (WebSocket, Persistence, DatastoreBridge, OPC-UA). Each subscriber may parse it
-    // independently. This is an intentional architectural trade-off for loose coupling.
-    //
-    // WebSocket optimization paths:
-    //   - Firehose mode (no subscriptions): sends JSON directly, zero-copy, ~0μs overhead
-    //   - Field-filtered mode: parses JSON once, reuses parsed document for all filtered clients
-    //
-    // If ANY client needs field-level filtering, we parse the JSON once here.
-    // The parsed document is reused for all filtered clients to avoid duplicate parsing.
-    // This is still additional work beyond firehose mode, but avoids N parses for N clients.
+    // Flat snapshots are parsed once for the last-value cache (needed to seed
+    // late dictionary-mode subscribers); filtered clients reuse that same
+    // TelemetryEvent DOM instead of parsing the payload again. Firehose sends
+    // still forward the original shared JSON string without building a
+    // per-client output DOM. Non-flat events are parsed only when filtering
+    // actually requires inspection.
     // ──────────────────────────────────────────────────────────────────────────
 
-    // Parse the full JSON once if any client needs field-level filtering.
-    // Shared lazy DOM: at most one parse per event across ALL subscribers
-    // (persistence shares it); null when the payload is not a JSON object,
-    // in which case every client below falls back to the unfiltered send.
-    const rapidjson::Document* parsed_doc = t_any_needs_filter ? t_event.parsedJson() : nullptr;
+    // Persistence, the last-value cache, and filtered clients share the same
+    // lazy document.
+    if (t_any_needs_filter && !parsed_doc)
+        parsed_doc = t_event.parsedJson();
 
     // Build (connection, payload) pairs first; payloads are shared — the
     // firehose paths below alias the broker's own string (zero copies until
@@ -108,25 +175,9 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
                     if (!parsed_doc)
                         parsed_doc = t_event.parsedJson();
                     if (parsed_doc) {
-                        rapidjson::Document filtered_doc;
-                        filtered_doc.SetObject();
-                        for (auto it = parsed_doc->MemberBegin(); it != parsed_doc->MemberEnd(); ++it) {
-                            twin::LeafId id = static_cast<twin::LeafId>(std::stoul(it->name.GetString()));
-                            for (const auto& range : target.leaf_ranges) {
-                                if (id >= range.start && id <= range.end) {
-                                    rapidjson::Value key, val;
-                                    key.CopyFrom(it->name, filtered_doc.GetAllocator());
-                                    val.CopyFrom(it->value, filtered_doc.GetAllocator());
-                                    filtered_doc.AddMember(key, val, filtered_doc.GetAllocator());
-                                    break;
-                                }
-                            }
-                        }
-                        rapidjson::StringBuffer filtered_sb;
-                        rapidjson::Writer<rapidjson::StringBuffer> filtered_w(filtered_sb);
-                        filtered_doc.Accept(filtered_w);
-                        if (!filtered_doc.ObjectEmpty())
-                            text_sends.emplace_back(target.conn, std::make_shared<const std::string>(filtered_sb.GetString()));
+                        auto filtered = filterFlatDictionaryJson(*parsed_doc, target.leaf_ranges);
+                        if (filtered && !filtered->empty())
+                            text_sends.emplace_back(target.conn, std::make_shared<const std::string>(std::move(*filtered)));
                     } else {
                         text_sends.emplace_back(target.conn, t_event.json_value);
                     }
@@ -138,33 +189,17 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
                 if (!parsed_doc)
                     parsed_doc = t_event.parsedJson();
                 if (parsed_doc) {
-                    rapidjson::Document flat_doc;
-                    if (!twin::flattenNestedTree(*parsed_doc, dict_->path_to_id, flat_doc.GetAllocator(), flat_doc).hasError()) {
+                    sgrn::json::dom::Document flat_doc;
+                    if (!twin::flattenNestedTree(*parsed_doc, dict_->path_to_id, flat_doc.allocator(), flat_doc).hasError()) {
                         if (!target.leaf_ranges.empty()) {
-                            rapidjson::Document filtered_doc;
-                            filtered_doc.SetObject();
-                            for (auto it = flat_doc.MemberBegin(); it != flat_doc.MemberEnd(); ++it) {
-                                twin::LeafId id = static_cast<twin::LeafId>(std::stoul(it->name.GetString()));
-                                for (const auto& range : target.leaf_ranges) {
-                                    if (id >= range.start && id <= range.end) {
-                                        rapidjson::Value key, val;
-                                        key.CopyFrom(it->name, filtered_doc.GetAllocator());
-                                        val.CopyFrom(it->value, filtered_doc.GetAllocator());
-                                        filtered_doc.AddMember(key, val, filtered_doc.GetAllocator());
-                                        break;
-                                    }
-                                }
-                            }
-                            rapidjson::StringBuffer filtered_sb;
-                            rapidjson::Writer<rapidjson::StringBuffer> filtered_w(filtered_sb);
-                            filtered_doc.Accept(filtered_w);
-                            if (!filtered_doc.ObjectEmpty())
-                                text_sends.emplace_back(target.conn, std::make_shared<const std::string>(filtered_sb.GetString()));
+                            auto filtered = filterFlatDictionaryJson(flat_doc, target.leaf_ranges);
+                            if (filtered && !filtered->empty())
+                                text_sends.emplace_back(target.conn, std::make_shared<const std::string>(std::move(*filtered)));
                         } else {
-                            rapidjson::StringBuffer flat_sb;
-                            rapidjson::Writer<rapidjson::StringBuffer> flat_w(flat_sb);
-                            flat_doc.Accept(flat_w);
-                            text_sends.emplace_back(target.conn, std::make_shared<const std::string>(flat_sb.GetString()));
+                            std::string flat_json;
+                            const auto serialized = sgrn::json::writeTo(flat_json, flat_doc.rawValue());
+                            if (!serialized.hasError())
+                                text_sends.emplace_back(target.conn, std::make_shared<const std::string>(std::move(flat_json)));
                         }
                     } else {
                         text_sends.emplace_back(target.conn, t_event.json_value);
@@ -175,11 +210,9 @@ void WebSocketAdapter::handleTelemetryEvent(const TelemetryEvent& t_event) {
             }
         } else if (target.needs_filter && parsed_doc) {
             // Non-dictionary filtered client: legacy path-based filtering
-            std::set<std::string> dotted_subs;
-            for (const auto& sub : target.field_subs) {
-                dotted_subs.insert(path_utils::topicToPlcPath(sub));
-            }
-            auto payload = json_helper::filterFields(*parsed_doc, dotted_subs);
+            // field_subs are normalized to dotted PLC paths when targets are
+            // collected; do not rebuild the set for every event.
+            auto payload = sgrn::utils::json::filterFields(*parsed_doc, target.field_subs);
             if (!payload.empty() && payload != "{}")
                 text_sends.emplace_back(target.conn, std::make_shared<const std::string>(std::move(payload)));
         } else {
@@ -257,6 +290,12 @@ std::vector<WebSocketAdapter::TargetInfo> WebSocketAdapter::collectTargets(const
     std::vector<TargetInfo> targets;
     t_any_needs_filter = false;
 
+    // Convert dirty TreePaths lazily: firehose / DB-level-only events do not
+    // need dotted strings at all. Once a field filter needs them, share the
+    // conversion across every client and subscription for this event.
+    std::vector<std::string> dirty_dotted;
+    bool dirty_dotted_ready = false;
+
     // Map membership implies an open connection: entries are added in onopen
     // and removed in onclose. Sends re-validate under the same mutex.
     std::lock_guard<std::mutex> lk(clients_mutex_);
@@ -274,19 +313,29 @@ std::vector<WebSocketAdapter::TargetInfo> WebSocketAdapter::collectTargets(const
         std::set<std::string> t_field_subs;
 
         if (needs_filter) {
-            // Collect the field-level subscriptions that overlap dirty paths
+            if (!dirty_dotted_ready) {
+                dirty_dotted.reserve(t_event.dirty_paths.size());
+                for (const auto& dirty : t_event.dirty_paths)
+                    dirty_dotted.push_back(dirty.toDotted());
+                dirty_dotted_ready = true;
+            }
+
+            // Collect the field-level subscriptions that overlap dirty paths.
             for (const auto& sub : subs) {
                 if (sub.find('/') == std::string::npos)
                     continue; // DB-level subscription — not field-level
                 std::string sub_dotted = path_utils::topicToPlcPath(sub);
-                for (const auto& dirty : t_event.dirty_paths) {
-                    std::string dirty_str = dirty.toDotted();
-                    // MED-6: Require a dot boundary so "React" does not
-                    // accidentally match "ReactorCore".
+                for (const auto& dirty_str : dirty_dotted) {
+                    // Require a dot boundary so "React" does not accidentally
+                    // match "ReactorCore"; avoid allocating prefix + "." strings.
                     const bool exact_or_sub =
-                        dirty_str == sub_dotted || dirty_str.starts_with(sub_dotted + ".") || sub_dotted.starts_with(dirty_str + ".");
+                        dirty_str == sub_dotted ||
+                        (dirty_str.size() > sub_dotted.size() && dirty_str.starts_with(sub_dotted) &&
+                            dirty_str[sub_dotted.size()] == '.') ||
+                        (sub_dotted.size() > dirty_str.size() && sub_dotted.starts_with(dirty_str) && sub_dotted[dirty_str.size()] == '.');
                     if (exact_or_sub) {
-                        t_field_subs.insert(sub);
+                        // Store the dotted form consumed by filterFields().
+                        t_field_subs.insert(std::move(sub_dotted));
                         break;
                     }
                 }
@@ -364,116 +413,137 @@ bool WebSocketAdapter::sendBinaryFrame(
     return true;
 }
 
-void WebSocketAdapter::rememberFlatValues(const std::string& t_flat_json) {
-    rapidjson::Document doc;
-    doc.Parse(t_flat_json.c_str());
-    RETURN_IF(doc.HasParseError() || !doc.IsObject(), ;);
+void WebSocketAdapter::rememberFlatValues(const sgrn::json::dom::Document& t_flat_doc) {
+    if (!t_flat_doc.is_object())
+        return;
 
-    std::lock_guard<std::mutex> lk(last_values_mutex_);
-    for (auto it = doc.MemberBegin(); it != doc.MemberEnd(); ++it) {
-        const char* name = it->name.GetString();
-        size_t len = it->name.GetStringLength();
-        if (len == 0 || len > 10)
+    // Serialize outside last_values_mutex_: catch-up readers should not wait
+    // for every changed leaf to be encoded. Commit all updates under one lock.
+    std::vector<std::pair<twin::LeafId, std::string>> updates;
+    updates.reserve(t_flat_doc.memberCount());
+
+    std::string value_json;
+    for (auto it = t_flat_doc.memberBegin(); it != t_flat_doc.memberEnd(); ++it) {
+        const std::string_view key{it->name.getString(), it->name.getStringLength()};
+        const auto id = parseLeafId(key);
+        if (!id)
             continue;
-        bool numeric = true;
-        for (size_t i = 0; i < len; ++i) {
-            if (name[i] < '0' || name[i] > '9') {
-                numeric = false;
-                break;
-            }
-        }
-        if (!numeric)
+
+        const auto& value = static_cast<const sgrn::json::dom::Value&>(it->value);
+        const auto serialized = sgrn::json::writeTo(value_json, value.rawValue());
+        if (serialized.hasError())
             continue;
-        rapidjson::StringBuffer sb;
-        rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-        it->value.Accept(w);
-        last_flat_values_[static_cast<twin::LeafId>(std::stoul(name))] = sb.GetString();
+
+        updates.emplace_back(*id, value_json);
     }
+
+    if (updates.empty())
+        return;
+
+    std::lock_guard<std::mutex> lock(last_values_mutex_);
+    for (auto& [id, json_str] : updates)
+        last_flat_values_.insert_or_assign(id, std::move(json_str));
 }
 
 void WebSocketAdapter::sendCatchUp(crow::websocket::connection& t_conn, const std::vector<ClientContext::LeafRange>& t_ranges) {
     RETURN_IF(t_ranges.empty(), ;);
 
-    rapidjson::Document out;
-    out.SetObject();
+    // Values were serialized when rememberFlatValues() populated the cache.
+    // Build the numeric-keyed object by splicing those trusted fragments;
+    // reparsing every value into a temporary Document is unnecessary.
+    std::string payload;
     {
         std::lock_guard<std::mutex> lk(last_values_mutex_);
         RETURN_IF(last_flat_values_.empty(), ;);
+
+        size_t reserve_size = 2;
+        constexpr size_t kLeafIdMaxDigits = std::numeric_limits<twin::LeafId>::digits10 + 1;
         for (const auto& [id, value_json] : last_flat_values_) {
-            bool covered = false;
-            for (const auto& range : t_ranges) {
-                if (id >= range.start && id <= range.end) {
-                    covered = true;
-                    break;
-                }
-            }
-            if (!covered)
-                continue;
-            rapidjson::Document value_doc;
-            value_doc.Parse(value_json.c_str());
-            if (value_doc.HasParseError())
-                continue;
-            rapidjson::Value key(std::to_string(id).c_str(), out.GetAllocator());
-            rapidjson::Value val;
-            val.CopyFrom(value_doc, out.GetAllocator());
-            out.AddMember(key, val, out.GetAllocator());
+            if (containsLeafId(t_ranges, id))
+                reserve_size += kLeafIdMaxDigits + value_json.size() + 4;
         }
+        payload.reserve(reserve_size);
+        payload.push_back('{');
+        bool first = true;
+        for (const auto& [id, value_json] : last_flat_values_) {
+            if (!containsLeafId(t_ranges, id))
+                continue;
+            if (!first)
+                payload.push_back(',');
+            first = false;
+            payload.push_back('"');
+            payload.append(std::to_string(id));
+            payload.append(R"(":)");
+            payload.append(value_json);
+        }
+        payload.push_back('}');
     }
 
-    RETURN_IF(out.ObjectEmpty(), ;);
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-    out.Accept(w);
+    RETURN_IF(payload == "{}", ;);
     std::lock_guard<std::mutex> lk(clients_mutex_);
     RETURN_IF(clients_.find(&t_conn) == clients_.end(), ;); // disconnected while we were assembling the catch-up
-    sendText(t_conn, sb.GetString());
+    sendText(t_conn, payload);
 }
 
 void WebSocketAdapter::resolveLeafRanges(ClientContext& t_ctx) {
     t_ctx.leaf_ranges.clear();
     RETURN_IF(!dict_ || dict_->path_to_id.empty() || !t_ctx.dictionary_mode, ;);
 
-    // For each subscription, find all matching leaf ids and collect their ranges.
-    // LeafDictionary assigns ids contiguously per DB in DB-ascending order,
-    // so a whole-DB subscription is exactly one contiguous range.
+    // path_by_id is already ordered by LeafId. Scan it as string_views and
+    // coalesce matching runs as we go, avoiding a map traversal plus
+    // temporary DB/field strings and one {id,id} allocation per leaf.
     for (const auto& sub : t_ctx.subscriptions) {
-        // Convert slash-separated topic path to dotted PLC path
-        std::string dotted = path_utils::topicToPlcPath(sub);
-        auto dot_pos = dotted.find('.');
-        std::string sub_db = dot_pos != std::string::npos ? dotted.substr(0, dot_pos) : dotted;
-        std::string sub_field = dot_pos != std::string::npos ? dotted.substr(dot_pos + 1) : "";
+        const std::string dotted = path_utils::topicToPlcPath(sub);
+        const size_t sub_dot = dotted.find('.');
+        const std::string_view sub_db = sub_dot == std::string::npos ? std::string_view{dotted} : std::string_view{dotted.data(), sub_dot};
+        const std::string_view sub_field =
+            sub_dot == std::string::npos ? std::string_view{} : std::string_view{dotted.data() + sub_dot + 1, dotted.size() - sub_dot - 1};
 
-        for (const auto& [path, id] : dict_->path_to_id) {
-            // Check if this leaf matches the subscription
-            auto leaf_dot = path.find('.');
-            std::string leaf_db = leaf_dot != std::string::npos ? path.substr(0, leaf_dot) : path;
-            std::string leaf_field = leaf_dot != std::string::npos ? path.substr(leaf_dot + 1) : "";
+        bool in_run = false;
+        ClientContext::LeafRange run{};
+        for (size_t index = 0; index < dict_->path_by_id.size(); ++index) {
+            const std::string& path = dict_->path_by_id[index];
+            const size_t leaf_dot = path.find('.');
+            const std::string_view leaf_db =
+                leaf_dot == std::string::npos ? std::string_view{path} : std::string_view{path.data(), leaf_dot};
+            const std::string_view leaf_field = leaf_dot == std::string::npos
+                                                    ? std::string_view{}
+                                                    : std::string_view{path.data() + leaf_dot + 1, path.size() - leaf_dot - 1};
 
-            if (sub_db != leaf_db)
-                continue;
-
-            // DB-level subscription: all fields in the DB match
-            if (sub_field.empty()) {
-                t_ctx.leaf_ranges.push_back({id, id});
-                continue;
+            bool matches = leaf_db == sub_db;
+            if (matches && !sub_field.empty()) {
+                matches = leaf_field == sub_field || (leaf_field.size() > sub_field.size() && leaf_field.starts_with(sub_field) &&
+                                                         leaf_field[sub_field.size()] == '.');
             }
 
-            // Field-level subscription: exact match or prefix match
-            if (leaf_field == sub_field || (leaf_field.substr(0, sub_field.size()) == sub_field &&
-                                               (leaf_field.size() == sub_field.size() || leaf_field[sub_field.size()] == '.'))) {
-                t_ctx.leaf_ranges.push_back({id, id});
+            const auto id = static_cast<twin::LeafId>(index);
+            if (matches) {
+                if (in_run && run.end != std::numeric_limits<twin::LeafId>::max() && id == run.end + 1) {
+                    run.end = id;
+                } else {
+                    if (in_run)
+                        t_ctx.leaf_ranges.push_back(run);
+                    run = {id, id};
+                    in_run = true;
+                }
+            } else if (in_run) {
+                t_ctx.leaf_ranges.push_back(run);
+                in_run = false;
             }
         }
+        if (in_run)
+            t_ctx.leaf_ranges.push_back(run);
     }
 
-    // Merge overlapping/adjacent ranges for efficiency
+    // Merge overlaps/adjacent runs produced by multiple subscriptions.
     if (t_ctx.leaf_ranges.size() > 1) {
         std::sort(t_ctx.leaf_ranges.begin(), t_ctx.leaf_ranges.end(), [](const auto& a, const auto& b) { return a.start < b.start; });
         std::vector<ClientContext::LeafRange> merged;
-        merged.push_back(t_ctx.leaf_ranges[0]);
+        merged.reserve(t_ctx.leaf_ranges.size());
+        merged.push_back(t_ctx.leaf_ranges.front());
         for (size_t i = 1; i < t_ctx.leaf_ranges.size(); ++i) {
             auto& back = merged.back();
-            if (t_ctx.leaf_ranges[i].start <= back.end + 1) {
+            if (back.end != std::numeric_limits<twin::LeafId>::max() && t_ctx.leaf_ranges[i].start <= back.end + 1) {
                 back.end = std::max(back.end, t_ctx.leaf_ranges[i].end);
             } else {
                 merged.push_back(t_ctx.leaf_ranges[i]);

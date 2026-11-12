@@ -382,7 +382,7 @@ if(NOT TARGET sgrn::scl)
         IMPORTED_LOCATION "${_scl_lib}"
         IMPORTED_IMPLIB "${_scl_lib}"
         INTERFACE_INCLUDE_DIRECTORIES "${_inc}"
-        INTERFACE_LINK_LIBRARIES "sgrn::core;sgrn::utils;fmt::fmt;rapidjson;xml_h"
+        INTERFACE_LINK_LIBRARIES "sgrn::core;sgrn::utils;fmt::fmt;xml_h"
     )
 endif()
 

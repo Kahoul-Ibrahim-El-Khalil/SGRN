@@ -7,7 +7,6 @@
 #include <deque>
 #include <map>
 #include <optional>
-#include <rapidjson/document.h>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -45,7 +44,7 @@ public:
     static sgrn::Result<PlcSchemaStore, SclError> loadFromFile(const std::string& t_filepath, bool t_force = false);
     static sgrn::Result<PlcSchemaStore, SclError> loadFromFiles(const std::vector<std::string>& t_filepaths, bool t_force = false);
     static sgrn::Result<PlcSchemaStore, SclError> loadFromJsonFile(const std::string& t_path);
-    static sgrn::Result<PlcSchemaStore, SclError> loadFromJson(const rapidjson::Value& t_root);
+    static sgrn::Result<PlcSchemaStore, SclError> loadFromJson(std::string_view t_text);
 
     /// Decodes a binary schema payload (see SchemaSerializer::serializeBinary).
     static sgrn::Result<PlcSchemaStore, SclError> loadFromBinary(std::string_view t_bytes);

@@ -6,6 +6,7 @@
 // quickly and deterministically.
 
 #include <sgrn/gateway/adapters/websocket/RuntimeSyncProtocol.hpp>
+#include <sgrn/utils/json-serialization.hpp>
 
 #include <cstdint>
 #include <cstdio>
@@ -133,6 +134,53 @@ void checkMalformedFramesFailClosed() {
     CHECK(error == "invalid runtime-sync frame size");
 }
 
+void checkJsonDtoRoundTrip() {
+    namespace wire = ::sgrn::gateway::adapters::websocket::runtime_sync::json;
+
+    wire::DbWriteEnvelope envelope;
+    envelope.command = "write";
+    envelope.sequence = 42;
+    wire::DbWriteRecord record;
+    record.db = 7;
+    record.offset = 16;
+    record.size = 3;
+    record.data = "AQID";
+    envelope.updates.push_back(record);
+
+    auto encoded = sgrn::json::write(envelope);
+    CHECK(!encoded.hasError());
+    CHECK(encoded.value().find(R"("command":"write")") != std::string::npos);
+    CHECK(encoded.value().find(R"("db":7)") != std::string::npos);
+
+    auto decoded = sgrn::json::read<wire::DbWriteEnvelope>(encoded.value());
+    CHECK(!decoded.hasError());
+    CHECK(decoded.value().command == "write");
+    CHECK(decoded.value().sequence == 42);
+    CHECK(decoded.value().updates.size() == 1);
+    CHECK(decoded.value().updates[0].db.has_value() && *decoded.value().updates[0].db == 7);
+    CHECK(decoded.value().updates[0].offset.has_value() && *decoded.value().updates[0].offset == 16);
+    CHECK(decoded.value().updates[0].size.has_value() && *decoded.value().updates[0].size == 3);
+    CHECK(decoded.value().updates[0].data.has_value() && *decoded.value().updates[0].data == "AQID");
+
+    wire::WriteAck ack;
+    ack.type = "write_ack";
+    ack.sequence = 42;
+    ack.ok = false;
+    ack.error = "denied";
+    auto ack_json = sgrn::json::writeOmitNull(ack);
+    CHECK(!ack_json.hasError());
+    CHECK(ack_json.value().find(R"("ok":false)") != std::string::npos);
+    CHECK(ack_json.value().find(R"("error":"denied")") != std::string::npos);
+
+    wire::WriteAck ok_ack;
+    ok_ack.type = "write_ack";
+    ok_ack.ok = true;
+    auto ok_ack_json = sgrn::json::writeOmitNull(ok_ack);
+    CHECK(!ok_ack_json.hasError());
+    CHECK(ok_ack_json.value().find("sequence") == std::string::npos);
+    CHECK(ok_ack_json.value().find("error") == std::string::npos);
+}
+
 void checkEncodeLimit() {
     Frame frame;
     frame.kind = Kind::Write;
@@ -164,6 +212,7 @@ int main() {
     checkRoundTrip();
     checkKindsAndEmptyAck();
     checkMalformedFramesFailClosed();
+    checkJsonDtoRoundTrip();
     checkEncodeLimit();
     checkRandomInputsDoNotCrash();
     return g_failures == 0 ? 0 : 1;

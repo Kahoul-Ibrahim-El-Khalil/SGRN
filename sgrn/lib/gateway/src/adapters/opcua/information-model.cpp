@@ -1,3 +1,4 @@
+#include <sgrn/utils/json-dom.hpp>
 // sgrn/gateway/src/adapters/opcua/information-model.cpp
 
 #include <fmt/core.h>
@@ -299,9 +300,9 @@ UA_UInt16 severityForPriority(int t_priority) {
 
 // AlarmCode / Priority — the S7AlarmEventType-specific properties.
 [[maybe_unused]] void writeAlarmSpecificProperties(
-    UA_Server* p_raw, const UA_NodeId& t_event_id, const rapidjson::Value& t_alarm_obj, int t_priority) {
-    if (t_alarm_obj.HasMember("code")) {
-        UA_UInt16 code = static_cast<UA_UInt16>(t_alarm_obj["code"].GetUint());
+    UA_Server* p_raw, const UA_NodeId& t_event_id, const sgrn::json::dom::Value& t_alarm_obj, int t_priority) {
+    if (t_alarm_obj.hasMember("code")) {
+        UA_UInt16 code = static_cast<UA_UInt16>(t_alarm_obj["code"].getUint());
         UA_Server_writeObjectProperty_scalar(p_raw, t_event_id, UA_QUALIFIEDNAME(1, (char*)"AlarmCode"), &code, &UA_TYPES[UA_TYPES_UINT16]);
     }
     UA_Byte uaprio = static_cast<UA_Byte>(t_priority);
@@ -398,17 +399,17 @@ void buildAddressSpace(const OpcUaAddressSpaceContext& t_context, const ::sgrn::
 }
 
 void triggerAlarmEvent(Server& t_server, const NodeId& t_alarm_event_type_id, uint16_t t_db_number, const std::string& t_path,
-    const rapidjson::Value& t_alarm_obj, uint64_t t_timestamp_ms) {
-    if (!t_alarm_obj.IsObject())
+    const sgrn::json::dom::Value& t_alarm_obj, uint64_t t_timestamp_ms) {
+    if (!t_alarm_obj.is_object())
         return;
-    if (!t_alarm_obj.HasMember("active") || !t_alarm_obj["active"].IsBool() || !t_alarm_obj["active"].GetBool())
+    if (!t_alarm_obj.hasMember("active") || !t_alarm_obj["active"].is_boolean() || !t_alarm_obj["active"].getBool())
         return;
 
     (void)t_timestamp_ms;
     UA_Server* p_raw = t_server.raw();
-    const int priority = t_alarm_obj.HasMember("priority") ? t_alarm_obj["priority"].GetInt() : 0;
+    const int priority = t_alarm_obj.hasMember("priority") ? t_alarm_obj["priority"].getInt() : 0;
     const std::string msg_str = fmt::format(
-        "Alarm {} triggered on DB{}.{}", t_alarm_obj.HasMember("code") ? t_alarm_obj["code"].GetUint() : 0, t_db_number, t_path);
+        "Alarm {} triggered on DB{}.{}", t_alarm_obj.hasMember("code") ? t_alarm_obj["code"].getUint() : 0, t_db_number, t_path);
 
     UA_LocalizedText msg = UA_LOCALIZEDTEXT(const_cast<char*>("en-US"), const_cast<char*>(msg_str.c_str()));
     UA_NodeId source_node = UA_NODEID_NUMERIC(0, UA_NS0ID_SERVER);

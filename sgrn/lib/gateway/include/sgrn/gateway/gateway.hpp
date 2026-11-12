@@ -39,9 +39,6 @@
 #include <sgrn/debug.hpp>
 #include <asio.hpp>
 #include <asio/thread_pool.hpp>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <stdexcept>
 #include <string>
 
@@ -68,8 +65,8 @@ using namespace sgrn::gateway::core;
 /// Thread-count bounds for the configurable pools (see GatewayConfig::
 /// light_threads/heavy_threads). Single-threaded floors keep every pipeline
 /// functional; the ceiling guards against absurd configs.
-constexpr int kMinThreads = 1;
-constexpr int kMaxThreads = 64;
+constexpr uint16_t kMinThreads = 1;
+constexpr uint16_t kMaxThreads = 64;
 
 class GatewayApplication {
 public:

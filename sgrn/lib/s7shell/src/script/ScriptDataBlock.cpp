@@ -15,15 +15,12 @@
 
 #include <fmt/color.h>
 #include <fmt/format.h>
+#include <sgrn/utils/json-dom.hpp>
 #include <algorithm>
 #include <angelscript.h>
 #include <chrono>
 #include <cstring>
 #include <iostream>
-#include <rapidjson/document.h>
-#include <rapidjson/prettywriter.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <scriptarray/scriptarray.h>
 #include <scriptdictionary/scriptdictionary.h>
 #include <stdexcept>
@@ -1066,21 +1063,21 @@ void ScriptDataBlock::put(const std::string& t_path, const std::string& t_raw_va
 }
 
 void ScriptDataBlock::putDouble(const std::string& t_path, double t_val) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-    writer.Double(t_val);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
+    writer.float64(t_val);
     // Explicit std::string: a bare const char* would resolve to the
     // put(string, bool) overload (pointer→bool beats user conversion) and
     // write "true" instead of the number.
-    put(t_path, std::string(sb.GetString()));
+    put(t_path, std::string(sb.getString()));
 }
 
 void ScriptDataBlock::putInt(const std::string& t_path, int32_t t_val) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-    writer.Int(t_val);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
+    writer.int32(t_val);
     // See putDouble: explicit std::string defeats the bool overload.
-    put(t_path, std::string(sb.GetString()));
+    put(t_path, std::string(sb.getString()));
 }
 
 void ScriptDataBlock::putBool(const std::string& t_path, bool t_val) {
@@ -1131,13 +1128,13 @@ std::string ScriptDataBlock::toJson() const {
 
 void ScriptDataBlock::print() const {
     const std::string compact = toJson();
-    rapidjson::Document doc;
-    if (!doc.Parse(compact.c_str()).HasParseError()) {
-        rapidjson::StringBuffer buf;
-        rapidjson::PrettyWriter<rapidjson::StringBuffer> w(buf);
-        w.SetIndent(' ', 2);
-        doc.Accept(w);
-        fmt::print("{}\n", buf.GetString());
+    sgrn::json::dom::Document doc;
+    if (!doc.parse(compact.c_str()).hasParseError()) {
+        sgrn::json::dom::StringBuffer buf;
+        sgrn::json::dom::PrettyWriter<sgrn::json::dom::StringBuffer> w(buf);
+        w.setIndent(' ', 2);
+        doc.accept(w);
+        fmt::print("{}\n", buf.getString());
     } else {
         fmt::print("{}\n", compact);
     }
@@ -1265,20 +1262,20 @@ bool ScriptDataBlock::putRetry(const std::string& t_path, const std::string& t_r
 }
 
 bool ScriptDataBlock::putRetryDouble(const std::string& t_path, double t_val, int t_max_retries) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-    w.Double(t_val);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> w(sb);
+    w.float64(t_val);
     // Explicit std::string (see putDouble): bare const char* would bind the
     // putRetry(string, bool, int) overload and retry writing "true".
-    return putRetry(t_path, std::string(sb.GetString()), t_max_retries);
+    return putRetry(t_path, std::string(sb.getString()), t_max_retries);
 }
 
 bool ScriptDataBlock::putRetryInt(const std::string& t_path, int32_t t_val, int t_max_retries) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-    w.Int(t_val);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> w(sb);
+    w.int32(t_val);
     // See putRetryDouble: explicit std::string defeats the bool overload.
-    return putRetry(t_path, std::string(sb.GetString()), t_max_retries);
+    return putRetry(t_path, std::string(sb.getString()), t_max_retries);
 }
 
 bool ScriptDataBlock::putRetryBool(const std::string& t_path, bool t_val, int t_max_retries) {

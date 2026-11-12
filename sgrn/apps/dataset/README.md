@@ -63,5 +63,4 @@ sgrn_dataset --man   # full manual page
 ## Dependencies
 
 Links `sgrn_ml` (resampler & columnar dataset), `sgrn_gateway_twin`,
-`sgrn::scl` (schema store), `sgrn_utils`, `sgrn::common`, zstd, cxxopts,
-RapidJSON and fmt. Offline tool: no PLC, server, or network access.
+`sgrn::scl` (schema store), `sgrn_utils`, `sgrn::common`, zstd, cxxopts and fmt. Offline tool: no PLC, server, or network access.

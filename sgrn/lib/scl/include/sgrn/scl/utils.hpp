@@ -3,12 +3,12 @@
 #include <sgrn/scl/errors.hpp>
 #include <sgrn/scl/types.hpp>
 #include <sgrn/scl/types/DbField.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <ctime>
 #include <limits>
 #include <map>
 #include <optional>
-#include <rapidjson/document.h>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -91,20 +91,20 @@ std::string parseSemanticValue(const std::string& t_raw);
 std::string parseRawValuePayload(const std::string& t_raw);
 
 sgrn::Result<void, SclError> encodeDtlValue(
-    const rapidjson::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e = s7codec::Endian::Little);
+    const sgrn::json::dom::Value& t_value, uint8_t* tp_ptr, size_t t_buffer_size, s7codec::Endian t_e = s7codec::Endian::Little);
 
 uint32_t fieldSpanSize(const DbField& t_field);
 uint32_t fieldElementSpanBytes(const DbField& f);
-sgrn::Result<void, SclError> encodeScalarValue(const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr,
+sgrn::Result<void, SclError> encodeScalarValue(const DbField& t_field, const sgrn::json::dom::Value& t_value, uint8_t* tp_ptr,
     size_t t_buffer_size, s7codec::Endian t_e = s7codec::Endian::Little);
 
-sgrn::Result<void, SclError> encodeArrayValue(const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr,
+sgrn::Result<void, SclError> encodeArrayValue(const DbField& t_field, const sgrn::json::dom::Value& t_value, uint8_t* tp_ptr,
     size_t t_buffer_size, int t_depth = 0, s7codec::Endian t_e = s7codec::Endian::Little);
 
 sgrn::Result<std::string, SclError> decodeFieldAt(
     const DbField& t_field, const uint8_t* tp_ptr, size_t t_buffer_size, int t_depth = 0, s7codec::Endian t_e = s7codec::Endian::Little);
 
-sgrn::Result<void, SclError> encodeFieldRapidJson(const DbField& t_field, const rapidjson::Value& t_value, uint8_t* tp_ptr,
+sgrn::Result<void, SclError> encodeFieldValue(const DbField& t_field, const sgrn::json::dom::Value& t_value, uint8_t* tp_ptr,
     size_t t_buffer_size, int t_depth = 0, s7codec::Endian t_e = s7codec::Endian::Little);
 
 sgrn::Result<void, SclError> encodeFieldAt(const DbField& t_field, const std::string& t_value_json, uint8_t* tp_ptr, size_t t_buffer_size,

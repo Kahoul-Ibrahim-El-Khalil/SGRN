@@ -1,4 +1,5 @@
 #include <sgrn/s7shell/S7Shell.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <string>
 #include <string_view>
 
@@ -13,10 +14,6 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <rapidjson/document.h>
-#include <rapidjson/error/en.h>
-#include <rapidjson/prettywriter.h>
-#include <rapidjson/stringbuffer.h>
 #ifndef _WIN32
 #include <readline/readline.h>
 #endif

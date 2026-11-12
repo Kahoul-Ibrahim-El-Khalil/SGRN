@@ -1,3 +1,4 @@
+#include <sgrn/utils/json-dom.hpp>
 // Wire-level regression tests for the encoder/decoder layer migrated to the
 // s7codec span/options API.
 //
@@ -41,9 +42,6 @@
 #include <map>
 #include <string>
 #include <vector>
-
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 
 namespace
 {
@@ -99,11 +97,11 @@ std::string render(const DbField& t_field, const std::vector<uint8_t>& t_buf) {
 
 // Decode render via the S7 adapter hop (count driven, Byte/Char/Word hex).
 std::string renderAdapter(const DbField& t_field, const std::vector<uint8_t>& t_buf) {
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> t_writer(sb);
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> t_writer(sb);
     sgrn::gateway::adapters::s7::serializeFieldTo(t_writer, t_field, t_buf.data(), t_buf.size());
-    t_writer.Flush();
-    return sb.GetString();
+    t_writer.flush();
+    return sb.getString();
 }
 
 template <size_t N>

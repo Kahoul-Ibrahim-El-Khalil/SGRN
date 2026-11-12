@@ -1,9 +1,9 @@
 #pragma once
 #include <fmt/format.h>
 #include <sgrn/scl/types/DataType.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <map>
 #include <optional>
-#include <rapidjson/document.h>
 #include <s7codec/codec.hpp>
 #include <stdexcept>
 #include <string>
@@ -122,187 +122,187 @@ inline const char* to_string(FieldKind k) noexcept {
 namespace sgrn::scl::field
 {
 /// Writer-agnostic JSON "form" for DbField. Serializes the full field
-/// (including nested children) into any rapidjson Writer.
+/// (including nested children) into any sgrn::json::dom::Writer.
 template <typename Writer>
 inline void serializeToWriter(Writer& t_writer, const sgrn::scl::DbField& t_field) {
-    t_writer.StartObject();
-    t_writer.Key("name");
-    t_writer.String(t_field.name.c_str());
-    t_writer.Key("offset");
-    t_writer.Int(t_field.offset);
-    t_writer.Key("bit");
-    t_writer.Int(t_field.bit_index);
-    t_writer.Key("type");
-    t_writer.String(s7codec::s7TypeToString(t_field.type));
+    t_writer.startObject();
+    t_writer.key("name");
+    t_writer.string(t_field.name.c_str());
+    t_writer.key("offset");
+    t_writer.int32(t_field.offset);
+    t_writer.key("bit");
+    t_writer.int32(t_field.bit_index);
+    t_writer.key("type");
+    t_writer.string(s7codec::s7TypeToString(t_field.type));
 
     const bool is_string = t_field.type == DataType::String || t_field.type == DataType::WString || t_field.type == DataType::XString ||
                            t_field.type == DataType::XWString;
     if (is_string) {
         if (t_field.struct_size > 0) { // array of strings
-            t_writer.Key("count");
-            t_writer.Int(t_field.count);
-            t_writer.Key("capacity");
-            t_writer.Int(t_field.struct_size);
+            t_writer.key("count");
+            t_writer.int32(t_field.count);
+            t_writer.key("capacity");
+            t_writer.int32(t_field.struct_size);
         } else { // scalar string
-            t_writer.Key("count");
-            t_writer.Int(1);
-            t_writer.Key("capacity");
-            t_writer.Int(t_field.count);
+            t_writer.key("count");
+            t_writer.int32(1);
+            t_writer.key("capacity");
+            t_writer.int32(t_field.count);
         }
     } else {
-        t_writer.Key("count");
-        t_writer.Int(t_field.count);
+        t_writer.key("count");
+        t_writer.int32(t_field.count);
     }
     if (!t_field.udt_name.empty()) {
-        t_writer.Key("udt_name");
-        t_writer.String(t_field.udt_name.c_str());
+        t_writer.key("udt_name");
+        t_writer.string(t_field.udt_name.c_str());
     }
     if (!t_field.children.empty()) {
-        t_writer.Key("children");
-        t_writer.StartArray();
+        t_writer.key("children");
+        t_writer.startArray();
         for (const auto& child : t_field.children) {
             serializeToWriter(t_writer, child);
         }
-        t_writer.EndArray();
+        t_writer.endArray();
     }
     if (t_field.struct_size > 0) {
-        t_writer.Key("struct_size");
-        t_writer.Int(t_field.struct_size);
+        t_writer.key("struct_size");
+        t_writer.int32(t_field.struct_size);
     }
     if (t_field.unit.has_value()) {
-        t_writer.Key("unit");
-        t_writer.String(t_field.unit.value().c_str());
+        t_writer.key("unit");
+        t_writer.string(t_field.unit.value().c_str());
     }
     if (t_field.dimension.has_value()) {
-        t_writer.Key("dimension");
-        t_writer.String(t_field.dimension.value().c_str());
+        t_writer.key("dimension");
+        t_writer.string(t_field.dimension.value().c_str());
     }
     if (t_field.description.has_value()) {
-        t_writer.Key("description");
-        t_writer.String(t_field.description.value().c_str());
+        t_writer.key("description");
+        t_writer.string(t_field.description.value().c_str());
     }
     if (t_field.precision.has_value()) {
-        t_writer.Key("precision");
-        t_writer.Int(t_field.precision.value());
+        t_writer.key("precision");
+        t_writer.int32(t_field.precision.value());
     }
     if (t_field.nominal.has_value()) {
-        t_writer.Key("nominal");
-        t_writer.Double(t_field.nominal.value());
+        t_writer.key("nominal");
+        t_writer.float64(t_field.nominal.value());
     }
     if (t_field.alarm_lo.has_value() && t_field.alarm_hi.has_value()) {
-        t_writer.Key("alarm_lo");
-        t_writer.Double(t_field.alarm_lo.value());
-        t_writer.Key("alarm_hi");
-        t_writer.Double(t_field.alarm_hi.value());
+        t_writer.key("alarm_lo");
+        t_writer.float64(t_field.alarm_lo.value());
+        t_writer.key("alarm_hi");
+        t_writer.float64(t_field.alarm_hi.value());
     }
     if (t_field.is_label) {
-        t_writer.Key("is_label");
-        t_writer.Bool(true);
+        t_writer.key("is_label");
+        t_writer.boolean(true);
     }
     if (t_field.is_transient) {
-        t_writer.Key("is_transient");
-        t_writer.Bool(true);
+        t_writer.key("is_transient");
+        t_writer.boolean(true);
     }
     if (t_field.is_read_only) {
-        t_writer.Key("is_read_only");
-        t_writer.Bool(true);
+        t_writer.key("is_read_only");
+        t_writer.boolean(true);
     }
     if (t_field.description.has_value()) {
-        t_writer.Key("description");
-        t_writer.String(t_field.description.value().c_str());
+        t_writer.key("description");
+        t_writer.string(t_field.description.value().c_str());
     }
     if (t_field.precision.has_value()) {
-        t_writer.Key("precision");
-        t_writer.Int(t_field.precision.value());
+        t_writer.key("precision");
+        t_writer.int32(t_field.precision.value());
     }
     if (t_field.nominal.has_value()) {
-        t_writer.Key("nominal");
-        t_writer.Double(t_field.nominal.value());
+        t_writer.key("nominal");
+        t_writer.float64(t_field.nominal.value());
     }
     if (t_field.alarm_lo.has_value() && t_field.alarm_hi.has_value()) {
-        t_writer.Key("alarm_lo");
-        t_writer.Double(t_field.alarm_lo.value());
-        t_writer.Key("alarm_hi");
-        t_writer.Double(t_field.alarm_hi.value());
+        t_writer.key("alarm_lo");
+        t_writer.float64(t_field.alarm_lo.value());
+        t_writer.key("alarm_hi");
+        t_writer.float64(t_field.alarm_hi.value());
     }
     if (t_field.is_label) {
-        t_writer.Key("is_label");
-        t_writer.Bool(true);
+        t_writer.key("is_label");
+        t_writer.boolean(true);
     }
     if (t_field.is_transient) {
-        t_writer.Key("is_transient");
-        t_writer.Bool(true);
+        t_writer.key("is_transient");
+        t_writer.boolean(true);
     }
     if (t_field.is_read_only) {
-        t_writer.Key("is_read_only");
-        t_writer.Bool(true);
+        t_writer.key("is_read_only");
+        t_writer.boolean(true);
     }
     if (t_field.min_val.has_value()) {
-        t_writer.Key("min");
-        t_writer.Double(t_field.min_val.value());
+        t_writer.key("min");
+        t_writer.float64(t_field.min_val.value());
     }
     if (t_field.max_val.has_value()) {
-        t_writer.Key("max");
-        t_writer.Double(t_field.max_val.value());
+        t_writer.key("max");
+        t_writer.float64(t_field.max_val.value());
     }
     if (!t_field.enum_map.empty()) {
-        t_writer.Key("enum");
-        t_writer.StartObject();
+        t_writer.key("enum");
+        t_writer.startObject();
         for (const auto& [k, v] : t_field.enum_map) {
-            t_writer.Key(std::to_string(k).c_str());
-            t_writer.String(v.c_str());
+            t_writer.key(std::to_string(k).c_str());
+            t_writer.string(v.c_str());
         }
-        t_writer.EndObject();
+        t_writer.endObject();
     }
     if (!t_field.init_value.empty()) {
-        t_writer.Key("init");
-        t_writer.String(t_field.init_value.c_str());
+        t_writer.key("init");
+        t_writer.string(t_field.init_value.c_str());
     }
     if (t_field.endianness != s7codec::Endian::Little) {
-        t_writer.Key("endianness");
-        t_writer.String(t_field.endianness == s7codec::Endian::Little ? "little" : "big");
+        t_writer.key("endianness");
+        t_writer.string(t_field.endianness == s7codec::Endian::Little ? "little" : "big");
     }
     if (t_field.trigger_events) {
-        t_writer.Key("trigger_events");
-        t_writer.Bool(true);
+        t_writer.key("trigger_events");
+        t_writer.boolean(true);
     }
     if (t_field.is_dynamic) {
-        t_writer.Key("is_dynamic");
-        t_writer.Bool(true);
+        t_writer.key("is_dynamic");
+        t_writer.boolean(true);
     }
     if (t_field.agg_type != AggregationType::Default) {
-        t_writer.Key("agg");
-        t_writer.String(to_string(t_field.agg_type));
+        t_writer.key("agg");
+        t_writer.string(to_string(t_field.agg_type));
     }
     if (t_field.is_timestamp) {
-        t_writer.Key("is_timestamp");
-        t_writer.Bool(true);
+        t_writer.key("is_timestamp");
+        t_writer.boolean(true);
     }
     if (!t_field.timestamp_for.empty()) {
-        t_writer.Key("timestamp_for");
-        t_writer.StartArray();
+        t_writer.key("timestamp_for");
+        t_writer.startArray();
         for (const auto& target : t_field.timestamp_for) {
-            t_writer.String(target.c_str());
+            t_writer.string(target.c_str());
         }
-        t_writer.EndArray();
+        t_writer.endArray();
     }
     if (t_field.dataset_step_ns > 0) {
-        t_writer.Key("dataset_step_ns");
-        t_writer.Uint64(t_field.dataset_step_ns);
+        t_writer.key("dataset_step_ns");
+        t_writer.uint64(t_field.dataset_step_ns);
     }
-    t_writer.EndObject();
+    t_writer.endObject();
 }
 
 /// from-side lives in its own namespace because C++ cannot overload a global
 /// function purely on its return type (DbField/UdtDefinition/DbSchema all
-/// parse from the same rapidjson::Value shape).
-sgrn::scl::DbField fromJson(const rapidjson::Value& t_value);
+/// parse from the same sgrn::json::dom::Value shape).
+sgrn::scl::DbField fromJson(const sgrn::json::dom::Value& t_value);
 sgrn::scl::DbField fromJsonString(const std::string& t_value);
 } // namespace sgrn::scl::field
 
 // global namespace — functional JSON form for DbField
 std::string toJsonString(const sgrn::scl::DbField& t_field);
-rapidjson::Document toJson(const sgrn::scl::DbField& t_field);
+sgrn::json::dom::Document toJson(const sgrn::scl::DbField& t_field);
 
 template <>
 struct fmt::formatter<sgrn::scl::DbField> : formatter<std::string_view> {

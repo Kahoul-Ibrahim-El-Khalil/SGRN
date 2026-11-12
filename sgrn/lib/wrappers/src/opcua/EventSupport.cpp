@@ -32,20 +32,20 @@ sgrn::Result<NodeId> registerAlarmEventType(Server& t_server) {
     return nodeIdFromRaw(alarm_type_id);
 }
 
-void triggerAlarm(Server& t_server, const NodeId& t_event_type, uint16_t t_db, std::string_view t_path, const rapidjson::Value& t_alarm_obj,
-    uint64_t t_timestamp_ms) {
+void triggerAlarm(Server& t_server, const NodeId& t_event_type, uint16_t t_db, std::string_view t_path,
+    const sgrn::json::dom::Value& t_alarm_obj, uint64_t t_timestamp_ms) {
     (void)t_timestamp_ms;
     UA_Server* p_raw = t_server.raw();
 
     // ── Severity (default 500 / medium) ─────────────────────────────────────
     UA_UInt16 severity = 500;
-    if (t_alarm_obj.IsObject() && t_alarm_obj.HasMember("severity") && t_alarm_obj["severity"].IsUint())
-        severity = static_cast<UA_UInt16>(t_alarm_obj["severity"].GetUint());
+    if (t_alarm_obj.is_object() && t_alarm_obj.hasMember("severity") && t_alarm_obj["severity"].isUint())
+        severity = static_cast<UA_UInt16>(t_alarm_obj["severity"].getUint());
 
     // ── Message ──────────────────────────────────────────────────────────────
     std::string msg_str;
-    if (t_alarm_obj.IsObject() && t_alarm_obj.HasMember("message") && t_alarm_obj["message"].IsString())
-        msg_str = t_alarm_obj["message"].GetString();
+    if (t_alarm_obj.is_object() && t_alarm_obj.hasMember("message") && t_alarm_obj["message"].is_string())
+        msg_str = t_alarm_obj["message"].getString();
     else
         msg_str = fmt::format("Alarm at DB{}/{}", t_db, t_path);
 

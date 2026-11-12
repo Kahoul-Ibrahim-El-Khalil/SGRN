@@ -1,148 +1,107 @@
+#include "spec-json.hpp"
 #include <sgrn/ml/manifest.hpp>
+#include <sgrn/utils/glaze.hpp>
 #include <sgrn/utils/hashing.hpp>
-#include <sgrn/utils/json.hpp>
-#include <fstream>
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JSON (Glaze mirror structs)
+//
+// The manifest JSON layout is a compatibility contract (manifests are written
+// next to the trained model and read back on load). The shape is mirrored by a
+// Json-suffixed struct whose member names match the JSON keys, so plain Glaze
+// reflection reads and writes it (see spec-json.hpp for the shared FeatureSpec
+// mirrors and the naming precedent).
+//
+// Member declaration order matches the historical key order byte-for-byte —
+// that is why MlpConfigJson declares use_batch_norm before layers and
+// TrainInfoJson puts dataset_sha256 before metrics, unlike the domain structs.
+// Where a domain struct's member names, types and order already match the
+// keys (MlpLayerConfig, ThresholdsConfig), it is reused directly. Absent keys
+// keep the domain defaults on read.
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace sgrn::ml::detail
+{
+
+struct MlpConfigJson {
+    bool use_batch_norm = false;
+    std::vector<MlpLayerConfig> layers; ///< domain type reused: keys and order match
+};
+
+struct TrainInfoJson {
+    uint64_t timestamp_ns = 0;
+    uint32_t epochs_trained = 0;
+    float final_loss = 0.0f;
+    std::string dataset_sha256;
+    std::map<std::string, float> metrics;
+};
+
+struct ModelManifestJson {
+    std::string name;
+    std::string version = "1.0.0";
+    std::string backend = "torch";
+    std::string weights_file;
+    std::string weights_sha256;
+    FeatureSpecJson spec;
+    MlpConfigJson mlp;
+    TrainInfoJson train;
+    ThresholdsConfig thresholds; ///< domain type reused: keys and order match
+};
+
+} // namespace sgrn::ml::detail
 
 namespace sgrn::ml
 {
 
 std::string ModelManifest::toJson(bool t_pretty) const {
-    rapidjson::Document doc;
-    doc.SetObject();
-    auto& alloc = doc.GetAllocator();
+    detail::ModelManifestJson w;
+    w.name = name;
+    w.version = version;
+    w.backend = backend;
+    w.weights_file = weights_file;
+    w.weights_sha256 = weights_sha256;
+    w.spec = detail::specToJson(spec);
+    w.mlp.use_batch_norm = mlp.use_batch_norm;
+    w.mlp.layers = mlp.layers;
+    w.train.timestamp_ns = train.timestamp_ns;
+    w.train.epochs_trained = train.epochs_trained;
+    w.train.final_loss = train.final_loss;
+    w.train.dataset_sha256 = train.dataset_sha256;
+    w.train.metrics = train.metrics;
+    w.thresholds = thresholds;
 
-    doc.AddMember("name", rapidjson::Value(name.c_str(), alloc), alloc);
-    doc.AddMember("version", rapidjson::Value(version.c_str(), alloc), alloc);
-    doc.AddMember("backend", rapidjson::Value(backend.c_str(), alloc), alloc);
-    doc.AddMember("weights_file", rapidjson::Value(weights_file.c_str(), alloc), alloc);
-    doc.AddMember("weights_sha256", rapidjson::Value(weights_sha256.c_str(), alloc), alloc);
-
-    rapidjson::Value spec_val(rapidjson::kObjectType);
-    spec.toJsonValue(spec_val, alloc);
-    doc.AddMember("spec", spec_val, alloc);
-
-    // MLP config
-    rapidjson::Value mlp_val(rapidjson::kObjectType);
-    mlp_val.AddMember("use_batch_norm", mlp.use_batch_norm, alloc);
-    rapidjson::Value layers_arr(rapidjson::kArrayType);
-    for (const auto& layer : mlp.layers) {
-        rapidjson::Value l_val(rapidjson::kObjectType);
-        l_val.AddMember("units", static_cast<uint64_t>(layer.units), alloc);
-        l_val.AddMember("activation", rapidjson::Value(layer.activation.c_str(), alloc), alloc);
-        l_val.AddMember("dropout", layer.dropout, alloc);
-        layers_arr.PushBack(l_val, alloc);
-    }
-    mlp_val.AddMember("layers", layers_arr, alloc);
-    doc.AddMember("mlp", mlp_val, alloc);
-
-    // Train info
-    rapidjson::Value train_val(rapidjson::kObjectType);
-    train_val.AddMember("timestamp_ns", train.timestamp_ns, alloc);
-    train_val.AddMember("epochs_trained", train.epochs_trained, alloc);
-    train_val.AddMember("final_loss", train.final_loss, alloc);
-    train_val.AddMember("dataset_sha256", rapidjson::Value(train.dataset_sha256.c_str(), alloc), alloc);
-    rapidjson::Value metrics_obj(rapidjson::kObjectType);
-    for (const auto& [k, v] : train.metrics) {
-        rapidjson::Value key(k.c_str(), alloc);
-        rapidjson::Value val(v);
-        metrics_obj.AddMember(key, val, alloc);
-    }
-    train_val.AddMember("metrics", metrics_obj, alloc);
-    doc.AddMember("train", train_val, alloc);
-
-    // Thresholds
-    rapidjson::Value thresh_val(rapidjson::kObjectType);
-    thresh_val.AddMember("warning", thresholds.warning, alloc);
-    thresh_val.AddMember("alarm", thresholds.alarm, alloc);
-    thresh_val.AddMember("anomaly", thresholds.anomaly, alloc);
-    doc.AddMember("thresholds", thresh_val, alloc);
-
-    return sgrn::utils::json::serialize(doc, t_pretty);
+    const auto res = t_pretty ? sgrn::json::writePretty(w) : sgrn::json::write(w);
+    // Plain mirror structs cannot fail to write; degrade to an empty payload.
+    return res.value_or(std::string{});
 }
 
 Result<ModelManifest> ModelManifest::fromJson(std::string_view t_json_str) {
-    auto doc_res = sgrn::utils::json::deserialize(t_json_str);
-    RETURN_ERROR_IF(doc_res.hasError(), "Failed to parse ModelManifest JSON: " + doc_res.error());
+    auto w_res = sgrn::json::read<detail::ModelManifestJson>(t_json_str);
+    RETURN_ERROR_IF(w_res.hasError(), "Failed to parse ModelManifest JSON: " + w_res.error().what());
 
-    const auto& doc = doc_res.value();
-    RETURN_ERROR_IF(!doc.IsObject(), "ModelManifest JSON must be an object");
-
+    const auto& w = w_res.value();
     ModelManifest manifest;
-    if (doc.HasMember("name") && doc["name"].IsString())
-        manifest.name = doc["name"].GetString();
-    if (doc.HasMember("version") && doc["version"].IsString())
-        manifest.version = doc["version"].GetString();
-    if (doc.HasMember("backend") && doc["backend"].IsString())
-        manifest.backend = doc["backend"].GetString();
-    if (doc.HasMember("weights_file") && doc["weights_file"].IsString())
-        manifest.weights_file = doc["weights_file"].GetString();
-    if (doc.HasMember("weights_sha256") && doc["weights_sha256"].IsString())
-        manifest.weights_sha256 = doc["weights_sha256"].GetString();
-
-    if (doc.HasMember("spec") && doc["spec"].IsObject()) {
-        auto spec_res = FeatureSpec::fromJsonValue(doc["spec"]);
-        RETURN_ERROR_IF(spec_res.hasError(), "Failed to parse FeatureSpec inside manifest: " + spec_res.error());
-        manifest.spec = std::move(spec_res.value());
-    }
-
-    if (doc.HasMember("mlp") && doc["mlp"].IsObject()) {
-        const auto& m = doc["mlp"];
-        if (m.HasMember("use_batch_norm") && m["use_batch_norm"].IsBool()) {
-            manifest.mlp.use_batch_norm = m["use_batch_norm"].GetBool();
-        }
-        if (m.HasMember("layers") && m["layers"].IsArray()) {
-            for (const auto& l : m["layers"].GetArray()) {
-                if (!l.IsObject())
-                    continue;
-                MlpLayerConfig lc;
-                if (l.HasMember("units") && l["units"].IsUint64())
-                    lc.units = l["units"].GetUint64();
-                if (l.HasMember("activation") && l["activation"].IsString())
-                    lc.activation = l["activation"].GetString();
-                if (l.HasMember("dropout") && l["dropout"].IsNumber())
-                    lc.dropout = static_cast<float>(l["dropout"].GetDouble());
-                manifest.mlp.layers.push_back(std::move(lc));
-            }
-        }
-    }
-
-    if (doc.HasMember("train") && doc["train"].IsObject()) {
-        const auto& t = doc["train"];
-        if (t.HasMember("timestamp_ns") && t["timestamp_ns"].IsUint64())
-            manifest.train.timestamp_ns = t["timestamp_ns"].GetUint64();
-        if (t.HasMember("epochs_trained") && t["epochs_trained"].IsUint())
-            manifest.train.epochs_trained = t["epochs_trained"].GetUint();
-        if (t.HasMember("final_loss") && t["final_loss"].IsNumber())
-            manifest.train.final_loss = static_cast<float>(t["final_loss"].GetDouble());
-        if (t.HasMember("dataset_sha256") && t["dataset_sha256"].IsString())
-            manifest.train.dataset_sha256 = t["dataset_sha256"].GetString();
-        if (t.HasMember("metrics") && t["metrics"].IsObject()) {
-            for (auto it = t["metrics"].MemberBegin(); it != t["metrics"].MemberEnd(); ++it) {
-                if (it->name.IsString() && it->value.IsNumber()) {
-                    manifest.train.metrics[it->name.GetString()] = static_cast<float>(it->value.GetDouble());
-                }
-            }
-        }
-    }
-
-    if (doc.HasMember("thresholds") && doc["thresholds"].IsObject()) {
-        const auto& th = doc["thresholds"];
-        if (th.HasMember("warning") && th["warning"].IsNumber())
-            manifest.thresholds.warning = static_cast<float>(th["warning"].GetDouble());
-        if (th.HasMember("alarm") && th["alarm"].IsNumber())
-            manifest.thresholds.alarm = static_cast<float>(th["alarm"].GetDouble());
-        if (th.HasMember("anomaly") && th["anomaly"].IsNumber())
-            manifest.thresholds.anomaly = static_cast<float>(th["anomaly"].GetDouble());
-    }
-
+    manifest.name = w.name;
+    manifest.version = w.version;
+    manifest.backend = w.backend;
+    manifest.weights_file = w.weights_file;
+    manifest.weights_sha256 = w.weights_sha256;
+    manifest.spec = detail::specFromJson(w.spec);
+    manifest.mlp.use_batch_norm = w.mlp.use_batch_norm;
+    manifest.mlp.layers = std::move(w.mlp.layers);
+    manifest.train.timestamp_ns = w.train.timestamp_ns;
+    manifest.train.epochs_trained = w.train.epochs_trained;
+    manifest.train.final_loss = w.train.final_loss;
+    manifest.train.dataset_sha256 = std::move(w.train.dataset_sha256);
+    manifest.train.metrics = std::move(w.train.metrics);
+    manifest.thresholds = w.thresholds;
     return manifest;
 }
 
 Result<ModelManifest> ModelManifest::fromFile(const std::filesystem::path& t_file_path) {
-    std::ifstream ifs(t_file_path, std::ios::binary);
-    RETURN_ERROR_IF(!ifs.is_open(), "Failed to open file: " + t_file_path.string());
-    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-    return fromJson(content);
+    auto content = sgrn::json::readFileText(t_file_path);
+    RETURN_ERROR_IF(content.hasError(), "Failed to open file: " + t_file_path.string());
+    return fromJson(content.value());
 }
 
 Result<void> ModelManifest::validateWeights(std::string_view t_bytes) const {

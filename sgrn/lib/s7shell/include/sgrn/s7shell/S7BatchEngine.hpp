@@ -1,4 +1,6 @@
 #pragma once
+
+#include <sgrn/utils/json-dom.hpp>
 // ─────────────────────────────────────────────────────────────────────────────
 // S7BatchEngine.hpp  –  PDU-Aware Atomic Batch Engine
 //
@@ -32,9 +34,6 @@
 #include <sgrn/gateway/twin/DbIoError.hpp>
 #include <sgrn/wrappers/s7/S7Client.hpp>
 #include <optional>
-#include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 #include <s7codec/s7.hpp>
 #include <stdexcept>
 #include <string>
@@ -241,19 +240,19 @@ template <typename Provider>
 inline sgrn::Result<std::string, SclError> S7BatchEngine<Provider>::toJson() const {
     RETURN_ERROR_IF(last_error_.has_value(), *last_error_);
 
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
-    writer.StartObject();
+    sgrn::json::dom::StringBuffer sb;
+    sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> writer(sb);
+    writer.startObject();
     for (const auto& t_p : pending_paths_) {
-        writer.Key(t_p.c_str());
+        writer.key(t_p.c_str());
         auto val_res = provider_.read(t_p);
         RETURN_IF(val_res.hasError(), proto_bridge(val_res.error()));
-        rapidjson::Document d;
-        d.Parse(val_res.value().c_str());
-        d.Accept(writer);
+        sgrn::json::dom::Document d;
+        d.parse(val_res.value().c_str());
+        d.accept(writer);
     }
-    writer.EndObject();
-    return std::string(sb.GetString());
+    writer.endObject();
+    return std::string(sb.getString());
 }
 template <typename Provider>
 inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::put(S7Client& t_client) {

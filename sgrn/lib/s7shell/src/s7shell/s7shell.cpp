@@ -5,15 +5,12 @@
 #include <sgrn/s7shell/bindings/registration.hpp>
 #include <sgrn/scl/schema/PlcSchemaStore.hpp>
 #include <sgrn/utils/filesystem.hpp>
+#include <sgrn/utils/json-dom.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <cctype>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <rapidjson/document.h>
-#include <rapidjson/error/en.h>
-#include <rapidjson/prettywriter.h>
-#include <rapidjson/stringbuffer.h>
 #ifndef _WIN32
 #include <readline/readline.h>
 #endif
@@ -34,15 +31,15 @@ using sgrn::utils::strings::trim;
 // Falls back to the raw string if it is not valid JSON.
 // ─────────────────────────────────────────────────────────────────────────────
 static std::string prettyJsonImpl(const std::string& t_compact) {
-    rapidjson::Document doc;
-    if (doc.Parse(t_compact.c_str()).HasParseError())
+    sgrn::json::dom::Document doc;
+    if (doc.parse(t_compact.c_str()).hasParseError())
         return t_compact; // not JSON — return as-is
 
-    rapidjson::StringBuffer buf;
-    rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buf);
-    writer.SetIndent(' ', 2);
-    doc.Accept(writer);
-    return buf.GetString();
+    sgrn::json::dom::StringBuffer buf;
+    sgrn::json::dom::PrettyWriter<sgrn::json::dom::StringBuffer> writer(buf);
+    writer.setIndent(' ', 2);
+    doc.accept(writer);
+    return buf.getString();
 }
 
 // AngelScript wrapper (value-type string semantics)
