@@ -3,6 +3,7 @@
 
 #include <drogon/drogon.h>
 #include <drogon/orm/CoroMapper.h>
+#include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/utils/safe-access.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/jsoncpp.hpp>
@@ -116,22 +117,12 @@ Task<HttpResponsePtr> QueryApiHandler::handleQueryUserInfo(HttpRequestPtr tsp_ht
     try {
         auto result = co_await client->execSqlCoro(query_user_info, user_id_opt.value());
 
-        if (result.empty()) {
+        auto response_opt = sgrn::orm::fromSingleResultByName<UserInfoResponse>(result);
+        if (!response_opt) {
             co_return sgrn::createErrorResponse(QueryApiError::UserNotFound);
         }
 
-        auto row = result.front();
-        UserInfoResponse response{
-            row["id"].as<int32_t>(),
-            row["first_name"].as<std::string>(),
-            row["family_name"].as<std::string>(),
-            row["email"].as<std::string>(),
-            row["organisation"].as<std::string>(),
-            row["domain"].isNull() ? "" : row["domain"].as<std::string>(),
-            row["status"].as<std::string>(),
-        };
-
-        co_return createTypedJsonResponse(response, k200OK);
+        co_return createTypedJsonResponse(*response_opt, k200OK);
 
     } catch (const std::exception& e) {
         ERROR_LOG("DB Error: {}", e.what());

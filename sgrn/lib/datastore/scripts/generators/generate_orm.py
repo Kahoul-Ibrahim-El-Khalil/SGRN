@@ -56,6 +56,41 @@ def findPgBinary(name: str) -> str | None:
             return str(cand)
     return None
 
+def findDrogonCtl(custom_path: str | None = None) -> str | None:
+    if custom_path:
+        cp = Path(custom_path)
+        if cp.is_file() and os.access(cp, os.X_OK):
+            return str(cp)
+    env_ctl = os.environ.get("DROGON_CTL")
+    if env_ctl:
+        ep = Path(env_ctl)
+        if ep.is_file() and os.access(ep, os.X_OK):
+            return str(ep)
+    which_bin = shutil.which("drogon_ctl")
+    if which_bin:
+        return which_bin
+    conda_prefix = os.environ.get("CONDA_PREFIX")
+    candidates = []
+    if conda_prefix:
+        candidates.append(Path(conda_prefix) / "bin" / "drogon_ctl")
+    candidates.extend([
+        REPO_ROOT / ".prefix" / "linux-static" / "bin" / "drogon_ctl",
+        REPO_ROOT / ".prefix" / "bin" / "drogon_ctl",
+        REPO_ROOT / ".build" / "linux-deps-static" / "extern" / "drogon" / "drogon_ctl" / "drogon_ctl",
+        REPO_ROOT / ".build" / "linux-static-release" / "extern" / "drogon" / "drogon_ctl" / "drogon_ctl",
+        Path("/usr/local/bin/drogon_ctl"),
+        Path("/usr/bin/drogon_ctl"),
+    ])
+    home = Path.home()
+    candidates.extend([
+        home / "micromamba" / "envs" / "SGRN" / "bin" / "drogon_ctl",
+        home / ".micromamba" / "envs" / "SGRN" / "bin" / "drogon_ctl",
+    ])
+    for cand in candidates:
+        if cand.is_file() and os.access(cand, os.X_OK):
+            return str(cand)
+    return None
+
 def isPortOpen(host: str, port: int) -> bool:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -226,30 +261,46 @@ def generateViews(host, port, dbname, user, password):
     print(f">> Generating CRUD views against '{dbname}'...")
     subprocess.run(cmd, check=True)
 
-def generateModelOrm(schema, target_dir, db_config):
+def generateModelOrm(schema, target_dir, db_config, drogon_ctl_bin=None):
     print(f">> Generating standard tables for schema: {schema}")
-    
+
     orm_schema_dir = os.path.join(target_dir, schema)
-    
+
     # 1. Create directory (mkdir -p)
     os.makedirs(orm_schema_dir, exist_ok=True)
-    
+
     # 2. Prepare config for this specific schema
     current_config = db_config.copy()
     current_config["schema"] = schema
-    
+
     config_path = os.path.join(orm_schema_dir, "model.json")
-    
+
     # 3. Write JSON config
     with open(config_path, 'w') as f:
         json.dump(current_config, f, indent=4)
-    
-    # 4. Run drogon_ctl
+
+    # 4. Resolve drogon_ctl
+    ctl = drogon_ctl_bin or findDrogonCtl()
+    if not ctl:
+        existing_models = [f for f in os.listdir(orm_schema_dir) if f.endswith((".h", ".cc"))]
+        if existing_models:
+            print(f">> [generate_orm] Note: drogon_ctl not found; preserving {len(existing_models)} existing model files for schema '{schema}'.")
+            return
+        raise FileNotFoundError(
+            f"drogon_ctl executable was not found in PATH or prefix directories, "
+            f"and no pre-generated models exist in {orm_schema_dir}."
+        )
+
+    # 5. Run drogon_ctl
     try:
-        cmd = ["drogon_ctl", "create", "model", orm_schema_dir]
+        cmd = [ctl, "create", "model", orm_schema_dir]
         subprocess.run(cmd, check=True, input=b"y\n")
-    except subprocess.CalledProcessError as e:
-        print(f"Error generating model for {schema}: {e}")
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        existing_models = [f for f in os.listdir(orm_schema_dir) if f.endswith((".h", ".cc"))]
+        if existing_models:
+            print(f">> [generate_orm] Warning: drogon_ctl execution failed ({e}); preserving existing models for schema '{schema}'.")
+        else:
+            raise
 
 def normalizeOrmNamespace(target_dir: str, actual_dbname: str, target_namespace: str = "sgrn"):
     if actual_dbname == target_namespace:
@@ -271,7 +322,7 @@ def normalizeOrmNamespace(target_dir: str, actual_dbname: str, target_namespace:
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(content)
 
-def runGeneration(target_dbname, target_dir, db_config, clean, views):
+def runGeneration(target_dbname, target_dir, db_config, clean, views, drogon_ctl_bin=None):
     # Optional: Clean old models
     if clean and os.path.exists(target_dir):
         print(f"Cleaning {target_dir}...")
@@ -282,7 +333,7 @@ def runGeneration(target_dbname, target_dir, db_config, clean, views):
 
     # Generate for all schemas
     for schema in DEFAULT_SCHEMAS:
-        generateModelOrm(schema, target_dir, db_config)
+        generateModelOrm(schema, target_dir, db_config, drogon_ctl_bin)
 
     # Normalize namespace back to project canonical 'sgrn'
     normalizeOrmNamespace(target_dir, target_dbname, "sgrn")
@@ -331,6 +382,7 @@ def main():
     parser.add_argument("--superuser-password", type=str, default=os.environ.get("POSTGRES_SUPERUSER_PASSWORD", "dracaeris"), help="PostgreSQL superuser password")
     parser.add_argument("--host", type=str, default=DB_CONFIG_TEMPLATE["host"], help="Database host")
     parser.add_argument("--port", type=int, default=DB_CONFIG_TEMPLATE["port"], help="Database port")
+    parser.add_argument("--drogon-ctl", type=str, default=None, help="Path to drogon_ctl binary")
     args = parser.parse_args()
 
     target_dir = DEFAULT_TARGET_DIR
@@ -359,7 +411,7 @@ def main():
                 superuser_password=e_super_pass
             )
 
-            runGeneration(target_dbname, target_dir, db_config, args.clean, args.views)
+            runGeneration(target_dbname, target_dir, db_config, args.clean, args.views, args.drogon_ctl)
     else:
         db_config = DB_CONFIG_TEMPLATE.copy()
         db_config["dbname"] = target_dbname
@@ -380,7 +432,7 @@ def main():
                     superuser_password=args.superuser_password
                 )
 
-            runGeneration(target_dbname, target_dir, db_config, args.clean, args.views)
+            runGeneration(target_dbname, target_dir, db_config, args.clean, args.views, args.drogon_ctl)
         finally:
             if build_db_name and not args.keep_db:
                 dropDatabase(

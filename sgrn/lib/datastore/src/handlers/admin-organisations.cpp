@@ -2,6 +2,7 @@
 // organisation listing (platform: all; org admin: own row only).
 #include "admin-common.hpp"
 
+#include <sgrn/datastore/core/orm-glaze.hpp>
 #include <optional>
 #include <string>
 
@@ -51,17 +52,6 @@ std::optional<int64_t> optionalCap(const Json::Value& t_json, const char* t_key,
     }
     return t_json[t_key].asInt64();
 }
-
-OrganisationRow organisationRow(const drogon::orm::Row& t_row) {
-    return {t_row["name"].as<std::string>(),
-        t_row["description"].isNull() ? std::nullopt : std::optional<std::string>(t_row["description"].as<std::string>()),
-        t_row["domain"].isNull() ? std::nullopt : std::optional<std::string>(t_row["domain"].as<std::string>()),
-        t_row["status"].as<std::string>(), t_row["total_virtual_size"].as<int64_t>(),
-        t_row["storage_limit"].isNull() ? std::nullopt : std::optional<int64_t>(t_row["storage_limit"].as<int64_t>()),
-        t_row["total_entry_count"].as<int64_t>(),
-        t_row["entry_count_limit"].isNull() ? std::nullopt : std::optional<int64_t>(t_row["entry_count_limit"].as<int64_t>()),
-        t_row["rate_limit_rpm"].isNull() ? std::nullopt : std::optional<int32_t>(t_row["rate_limit_rpm"].as<int>())};
-}
 } // namespace
 
 Task<HttpResponsePtr> AdminApiHandler::handleListOrganisations(HttpRequestPtr tsp_req) {
@@ -75,17 +65,15 @@ Task<HttpResponsePtr> AdminApiHandler::handleListOrganisations(HttpRequestPtr ts
         }
         auto db = db_res.value();
 
-        static constexpr const char* kSelect =
+        static constexpr char kSelect[] =
             "SELECT name, description, domain, status, total_virtual_size, storage_limit, total_entry_count, entry_count_limit, "
             "rate_limit_rpm FROM core.organisations ";
         auto rows = is_platform ? co_await db->execSqlCoro(std::string(kSelect) + "ORDER BY name")
                                 : co_await db->execSqlCoro(std::string(kSelect) + "WHERE name = $1", ctx.organisation);
 
-        OrganisationListResponse resp;
-        resp.organisations.reserve(rows.size());
-        for (const auto& row : rows) {
-            resp.organisations.push_back(organisationRow(row));
-        }
+        const OrganisationListResponse resp{
+            .organisations = sgrn::orm::fromResult<OrganisationRow, kSelect>(rows),
+        };
         co_return createTypedJsonResponse(resp, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to list organisations: {}", e.what());

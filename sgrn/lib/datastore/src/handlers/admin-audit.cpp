@@ -1,6 +1,7 @@
 // admin-audit.cpp — Audit-log administration.
 #include "admin-common.hpp"
 
+#include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/utils/json-serialization.hpp>
 
 #include <optional>
@@ -94,9 +95,10 @@ Task<HttpResponsePtr> AdminApiHandler::handleGetAuditLogs(HttpRequestPtr tsp_req
 
         auto db = db_res.value();
 
-        std::string query = "SELECT id, organisation, actor_type, actor_id, actor_name, action, target_type, target_id, ip::text, details, "
-                            "status, created_at "
-                            "FROM core.audit_logs WHERE organisation = $1";
+        static constexpr char kQuerySelect[] =
+            "SELECT id, organisation, actor_type, actor_id, actor_name, action, target_type, target_id, ip::text AS ip, "
+            "status, created_at, details FROM core.audit_logs ";
+        std::string query = std::string(kQuerySelect) + "WHERE organisation = $1";
         std::vector<std::string> params = {org};
         int p_idx = 2;
 
@@ -121,41 +123,13 @@ Task<HttpResponsePtr> AdminApiHandler::handleGetAuditLogs(HttpRequestPtr tsp_req
 
         auto res = co_await sgrn::datastore::core::execSqlCoroVec(db, query, params);
 
-        std::vector<detail::AuditLogEntry> audit_logs;
-        audit_logs.reserve(res.size());
-        for (const auto& row : res) {
-            detail::AuditLogEntry entry;
-            entry.id = row["id"].as<int64_t>();
-            entry.organisation = row["organisation"].as<std::string>();
-            entry.actor_type = row["actor_type"].as<std::string>();
-            if (!row["actor_id"].isNull()) {
-                entry.actor_id = row["actor_id"].as<int32_t>();
-            }
-            entry.actor_name = row["actor_name"].as<std::string>();
-            entry.action = row["action"].as<std::string>();
-            entry.target_type = row["target_type"].isNull() ? "" : row["target_type"].as<std::string>();
-            entry.target_id = row["target_id"].isNull() ? "" : row["target_id"].as<std::string>();
-            entry.ip = row["ip"].as<std::string>();
-            entry.status = row["status"].as<std::string>();
-            entry.created_at = row["created_at"].as<std::string>();
-            if (!row["details"].isNull()) {
-                entry.details = sgrn::json::RawJson{row["details"].as<std::string>()};
-            }
-            audit_logs.push_back(std::move(entry));
-        }
-
-        detail::AuditLogsResponse resp;
-        resp.audit_logs = std::move(audit_logs);
-        resp.limit = limit;
-        resp.offset = offset;
-
-        auto response_result = sgrn::json::write(resp);
-        if (response_result.hasError()) {
-            ADMIN_ERROR_LOG("Failed to serialize audit logs response: {}", response_result.error().what());
-            co_return createErrorResponse("Failed to serialize audit logs response", k500InternalServerError, "AdminApi");
-        }
-        std::string response_json = std::move(response_result).value();
-        co_return createJsonResponse(std::move(response_json), k200OK);
+        detail::AuditLogsResponse resp{
+            .success = true,
+            .audit_logs = sgrn::orm::fromResult<detail::AuditLogEntry, kQuerySelect>(res),
+            .limit = limit,
+            .offset = offset,
+        };
+        co_return createTypedJsonResponse(resp, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to fetch audit logs: {}", e.what());
         co_return createErrorResponse(std::string("Failed to fetch audit logs: ") + e.what(), k400BadRequest, "AdminApi");

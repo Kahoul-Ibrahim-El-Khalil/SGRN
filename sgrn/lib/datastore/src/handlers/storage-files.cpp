@@ -1,6 +1,7 @@
 #include <drogon/orm/Exception.h>
 #include <fmt/core.h>
 #include <sgrn/datastore/core/db.hpp>
+#include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/error/ApiErrors.hpp>
 #include <sgrn/datastore/handlers/storage.hpp>
 #include <sgrn/datastore/services/helpers/magic.hpp>
@@ -58,6 +59,37 @@ using sgrn::datastore::services::storage::StorageScope;
 
 namespace
 {
+// Target struct for file metadata items. Hydrated via Glaze compile-time reflection
+// and serialized directly to JSON/binary formats.
+struct FileMetadataItem {
+    int64_t id{0};
+    std::string name;
+    std::string full_path;
+    std::string directory_path;
+    std::optional<int64_t> directory_id;
+    std::string extension;
+    std::string created_at;
+    bool is_compressed{false};
+    std::optional<std::string> compression_algorithm;
+    std::optional<int64_t> compression_level;
+    std::optional<int64_t> session_id;
+    std::optional<int32_t> user_id;
+    std::optional<int32_t> automated_service_id;
+    std::optional<std::string> domain;
+    std::string organisation;
+    int64_t object_id{0};
+    std::string bucket;
+    std::string key;
+    int64_t size{0};
+    std::string object_created_at;
+    std::string mime_type;
+    std::string upload_mode;
+    std::optional<int64_t> part_count;
+    std::optional<int64_t> part_size_bytes;
+    std::optional<std::string> sha256;
+    std::optional<std::string> etag; // Computed post-hydration (S3-compatible: "sha256-<hex>")
+};
+
 // Columns exposed by the metadata endpoints, aliased to the historical
 // postgrest.files wire names so existing consumers keep working.
 constexpr std::string_view kFileMetadataColumns =
@@ -65,17 +97,6 @@ constexpr std::string_view kFileMetadataColumns =
     "is_compressed, compression_algorithm, compression_level, session_id, user_id, automated_service_id, "
     "domain_name AS domain, organisation_name AS organisation, object_id, bucket, key, object_size AS size, "
     "object_created_at, mime_type, upload_mode, part_count, part_size_bytes, sha256";
-
-// ── SQL-side JSON envelope (no per-row C++ serialization) ───────────────────
-// The metadata response is built by Postgres itself: jsonb_build_object
-// renders each row directly with the same wire types as the old libjson
-// rendering (integers as JSON numbers, booleans as booleans, text/timestamps
-// as strings, SQL NULL as null), and the S3-compatible etag (quoted sha256)
-// is appended server-side. A jsonb column's text is a valid JSON document by
-// construction, so the handler splices it into the HTTP body verbatim — no
-// Json::Value DOM, no re-serialization pass. (The validity gate used for
-// arbitrary text JSONB columns in the CRUD engine is unnecessary for a
-// jsonb-typed column.)
 
 // Applies one whitelisted `?col=op.value` filter onto t_sql/t_binds.
 // Operators mirror the generated CRUD grammar; `*` in like/ilike patterns
@@ -221,40 +242,16 @@ Task<HttpResponsePtr> runFileMetadataQuery(HttpRequestPtr tsp_req, std::string t
         co_return sgrn::createJsonResponse(db_res);
     }
     try {
-        // Inner query: same shape as always (filters accumulated above onto
-        // t_sql), now ordered and paginated in a subquery so LIMIT/OFFSET cut
-        // the correct page before aggregation. The final array order is
-        // enforced again inside jsonb_agg by the client-facing alias (which
-        // is the raw column in the subquery output), so ordering is
-        // guaranteed, not an artifact of subquery scan order.
-        const std::string inner_sql = fmt::format("{} ORDER BY {} LIMIT {} OFFSET {}", t_sql, order_sql, limit, offset);
-        const std::string envelope_sql =
-            fmt::format("SELECT COALESCE(jsonb_agg("
-                        // Row document built per column (jsonb nests integers as numbers,
-                        // booleans as booleans, strings as strings) with timestamps cast
-                        // to text so they render exactly like the old libjson wire body.
-                        "jsonb_build_object("
-                        "'id', s.id, 'name', s.name, 'full_path', s.full_path, 'directory_path', s.directory_path, "
-                        "'directory_id', s.directory_id, 'extension', s.extension, 'created_at', s.created_at::text, "
-                        "'is_compressed', s.is_compressed, 'compression_algorithm', s.compression_algorithm, "
-                        "'compression_level', s.compression_level, 'session_id', s.session_id, 'user_id', s.user_id, "
-                        "'automated_service_id', s.automated_service_id, 'domain', s.domain, "
-                        "'organisation', s.organisation, 'object_id', s.object_id, 'bucket', s.bucket, "
-                        "'key', s.key, 'size', s.size, 'object_created_at', s.object_created_at::text, "
-                        "'mime_type', s.mime_type, 'upload_mode', s.upload_mode, 'part_count', s.part_count, "
-                        "'part_size_bytes', s.part_size_bytes, 'sha256', s.sha256) "
-                        // ETag derived from sha256 (S3-compatible format: "sha256-<hex>")
-                        // appended server-side. s.sha256 (bpchar) splices with its padding,
-                        // exactly like the old Field::as<std::string> rendering.
-                        "|| CASE WHEN s.sha256 IS NULL THEN '{{}}'::jsonb "
-                        "ELSE jsonb_build_object('etag', '\"' || s.sha256 || '\"') END "
-                        "ORDER BY {}), '[]'::jsonb) AS envelope "
-                        "FROM ({}) s",
-                order_key, inner_sql);
-        auto res = co_await sgrn::datastore::core::execSqlCoroVec(db_res.value(), envelope_sql, t_binds);
-        // The envelope is one jsonb column: libpq delivers its canonical
-        // JSON text, spliced verbatim into the body.
-        co_return createJsonResponse(res[0]["envelope"].as<std::string>());
+        const std::string paginated_sql = fmt::format("{} ORDER BY {} LIMIT {} OFFSET {}", t_sql, order_sql, limit, offset);
+        auto res = co_await sgrn::datastore::core::execSqlCoroVec(db_res.value(), paginated_sql, t_binds);
+
+        auto files = sgrn::orm::fromResultByName<FileMetadataItem>(res);
+        for (auto& f : files) {
+            if (f.sha256.has_value() && !f.sha256->empty()) {
+                f.etag = '"' + *f.sha256 + '"';
+            }
+        }
+        co_return createTypedJsonResponse(files, k200OK);
     } catch (const std::exception& e) {
         ERROR_LOG("Files metadata DB error: {}", e.what());
         co_return createJsonErrorResponse(fmt::format("Database error: {}", e.what()), k500InternalServerError);

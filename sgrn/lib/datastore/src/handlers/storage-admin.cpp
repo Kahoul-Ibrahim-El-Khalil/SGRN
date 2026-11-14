@@ -3,6 +3,7 @@
 #include <sgrn/datastore/audit/AuditLogger.hpp>
 #include <sgrn/datastore/config/config.hpp>
 #include <sgrn/datastore/core/db.hpp>
+#include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/init/rate-limit.hpp>
 #include <sgrn/datastore/plugins/aws/S3Client.hpp>
 #include <sgrn/datastore/services/storage.hpp>
@@ -1238,17 +1239,6 @@ bool jsonBool(const Json::Value& t_v, bool t_dflt) {
     return t_v.isBool() ? t_v.asBool() : t_dflt;
 }
 
-FormatRecord formatRow(const drogon::orm::Row& t_row) {
-    return {
-        t_row["extension"].as<std::string>(),
-        t_row["mime_type"].as<std::string>(),
-        t_row["is_compressed"].as<std::string>() == "t",
-        t_row["is_allowed"].as<std::string>() == "t",
-        t_row["description"].isNull() ? std::nullopt : std::optional<std::string>(t_row["description"].as<std::string>()),
-        t_row["created_at"].as<std::string>(),
-    };
-}
-
 } // namespace
 
 Task<HttpResponsePtr> StorageAdminHandler::handleListFormats(HttpRequestPtr tsp_req) {
@@ -1266,21 +1256,24 @@ Task<HttpResponsePtr> StorageAdminHandler::handleListFormats(HttpRequestPtr tsp_
         }
         auto db = db_res.value();
 
+        static constexpr char kQuery[] =
+            "SELECT extension, mime_type, is_compressed, is_allowed, description, created_at FROM storage.formats";
+
         // $1 search (empty matches all), $2 allowed filter (empty = any).
         auto rows = co_await sgrn::datastore::core::execSqlCoroVec(db,
-            "SELECT extension, mime_type, is_compressed, is_allowed, description, created_at FROM storage.formats "
-            "WHERE (extension LIKE '%' || $1 || '%' ESCAPE '\\' OR mime_type ILIKE '%' || $1 || '%' ESCAPE '\\') "
-            "AND ($2 = '' OR is_allowed = ($2 = 'true')) "
-            "ORDER BY extension LIMIT " +
+            std::string(kQuery) +
+                " WHERE (extension LIKE '%' || $1 || '%' ESCAPE '\\' OR mime_type ILIKE '%' || $1 || '%' ESCAPE '\\') "
+                "AND ($2 = '' OR is_allowed = ($2 = 'true')) "
+                "ORDER BY extension LIMIT " +
                 std::to_string(limit),
             {escapeLike(search), allowed});
 
-        std::vector<FormatRecord> formats;
-        formats.reserve(rows.size());
-        for (const auto& row : rows) {
-            formats.push_back(formatRow(row));
-        }
-        co_return sgrn::createTypedJsonResponse(FormatsResponse{std::move(formats), static_cast<int64_t>(rows.size())}, k200OK);
+        co_return sgrn::createTypedJsonResponse(
+            FormatsResponse{
+                .formats = sgrn::orm::fromResult<FormatRecord, kQuery>(rows),
+                .count = static_cast<int64_t>(rows.size()),
+            },
+            k200OK);
     } catch (const std::exception& e) {
         co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "StorageAdmin");
     }
@@ -1329,7 +1322,7 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpsertFormat(HttpRequestPtr tsp
                 "VALUES ($1, $2, ($3 = 'true'), ($4 = 'true'), NULLIF($5, '')) "
                 "RETURNING extension, mime_type, is_compressed, is_allowed, description, created_at",
                 {ext, mime, is_compressed ? "true" : "false", is_allowed ? "true" : "false", description});
-            row = formatRow(inserted[0]);
+            row = sgrn::orm::fromRow<FormatRecord>(inserted[0]);
             created = true;
         } else {
             // Only touch description when the caller sent one.
@@ -1340,7 +1333,7 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpsertFormat(HttpRequestPtr tsp
                 "RETURNING extension, mime_type, is_compressed, is_allowed, description, created_at",
                 {ext, mime, is_compressed ? "true" : "false", is_allowed ? "true" : "false", description,
                     has_description ? "true" : "false"});
-            row = formatRow(updated[0]);
+            row = sgrn::orm::fromRow<FormatRecord>(updated[0]);
         }
         co_return sgrn::createTypedJsonResponse(
             FormatUpsertResponse{

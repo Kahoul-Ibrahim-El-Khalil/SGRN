@@ -9,6 +9,7 @@
 #include <json/json.h>
 #include <mutex>
 #include <openssl/evp.h>
+#include <optional>
 #include <regex>
 #include <string>
 #include <unordered_map>
@@ -17,6 +18,47 @@
 
 namespace sgrn::datastore::handlers::storage
 {
+
+namespace detail
+{
+struct VirtualFolderItem {
+    std::string name;
+    std::string path;
+    std::optional<std::string> display_name;
+};
+
+struct FolderItem {
+    int64_t id{0};
+    std::string name;
+    std::string path;
+    std::string created_at;
+    int64_t virtual_size{0};
+    int64_t real_size{0};
+    int64_t count_sub_files{0};
+    int64_t count_sub_directories{0};
+};
+
+struct FileItem {
+    int64_t id{0};
+    std::string name;
+    std::string path;
+    std::string extension;
+    int64_t size{0};
+    int64_t original_size{0};
+    std::string upload_mode;
+    std::optional<int64_t> part_count;
+    std::string created_at;
+    bool is_encrypted{false};
+    std::optional<std::string> key_id;
+};
+
+struct NormalDriveListingResult {
+    std::vector<FolderItem> folders;
+    std::vector<FileItem> files;
+    int32_t total_folders{0};
+    int32_t total_files{0};
+};
+} // namespace detail
 
 class StorageApiHandler : public IHandler<StorageApiHandler> {
 public:
@@ -132,19 +174,12 @@ private:
     void removeUploadState(const std::string& t_upload_id);
 
     // Helpers for handleDriveList
-    // Builders write directly into pre-allocated JSON array strings
-    // (no intermediate Json::Value tree — eliminates per-row heap allocations).
-    // The folder/file arrays assembled here are complete SQL-side jsonb
-    // documents (Postgres serializes, C++ only splices the text verbatim).
-    // Virtual-root variant additionally reports the folder total so the
-    // caller no longer derives it from the response body.
-
-    drogon::Task<::sgrn::datastore::BackendResult<void>> buildVirtualRootListing(std::string& t_folders_json, int32_t& t_out_total_folders,
+    drogon::Task<::sgrn::datastore::BackendResult<std::vector<detail::VirtualFolderItem>>> buildVirtualRootListing(
         const std::string& t_namespace_prefix, ::sgrn::datastore::services::storage::StorageScope t_scope,
         const std::string& t_organisation, const drogon::orm::DbClientPtr& tsp_db_client);
 
-    drogon::Task<std::pair<int32_t, int32_t>> buildNormalDriveListing(std::string& t_folders_json, std::string& t_files_json,
-        const std::string& t_namespace_prefix, const std::string& t_current_path, int32_t t_user_id, int32_t t_target_owner_id,
+    drogon::Task<detail::NormalDriveListingResult> buildNormalDriveListing(const std::string& t_namespace_prefix,
+        const std::string& t_current_path, int32_t t_user_id, int32_t t_target_owner_id,
         ::sgrn::datastore::services::storage::StorageScope t_scope, const drogon::orm::DbClientPtr& tsp_db_client, int32_t t_limit,
         int32_t t_page, const std::string& t_search, const std::string& t_sort_key = "name", bool t_sort_desc = false);
 

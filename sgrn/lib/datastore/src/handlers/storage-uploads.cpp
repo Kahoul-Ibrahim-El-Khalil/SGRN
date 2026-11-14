@@ -868,7 +868,8 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
         const std::string seg_role = (final_segments.size() == 1) ? "primary" : "part";
         for (const auto& [pidx, obj_id] : final_segments) {
             co_await db->execSqlCoro("INSERT INTO storage.file_objects (file_id, object_id, part_index, role) "
-                                     "VALUES ($1, $2, $3, $4) ON CONFLICT (file_id, part_index) DO NOTHING",
+                                     "VALUES ($1, $2, $3, $4) ON CONFLICT (file_id, part_index) DO UPDATE SET object_id = "
+                                     "EXCLUDED.object_id, role = EXCLUDED.role",
                 file_id, obj_id, pidx, seg_role);
         }
 

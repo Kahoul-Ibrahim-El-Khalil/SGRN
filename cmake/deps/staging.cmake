@@ -56,6 +56,7 @@ foreach(_t IN ITEMS
     angelscript_addons
     trantor
     drogon
+    drogon_ctl
     ixwebsocket
     modbus
     opener

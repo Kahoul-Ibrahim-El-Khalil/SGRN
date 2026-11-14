@@ -28,6 +28,22 @@ find_program(CLANG_FORMAT_BIN NAMES clang-format clang-format-22 clang-format-21
         "$ENV{HOME}/.micromamba/envs/SGRN/bin"
 )
 
+find_program(DROGON_CTL_BIN NAMES drogon_ctl
+    HINTS
+        "${SGRN_LOCAL_PREFIX}/bin"
+        "${SGRN_DEPS_PREFIX}/bin"
+        "${CMAKE_SOURCE_DIR}/.prefix/linux-static/bin"
+        "${CMAKE_SOURCE_DIR}/.prefix/bin"
+        "${CMAKE_SOURCE_DIR}/.build/linux-deps-static/extern/drogon/drogon_ctl"
+        "$ENV{CONDA_PREFIX}/bin"
+        "/usr/local/bin"
+)
+
+set(SGRN_ORM_GEN_ARGS --build-db --views)
+if(DROGON_CTL_BIN)
+    list(APPEND SGRN_ORM_GEN_ARGS --drogon-ctl "${DROGON_CTL_BIN}")
+endif()
+
 set(SGRN_FORMAT_ARGS cpp --dir "${PROJECT_SOURCE_DIR}/src/orm/models" --dir "${PROJECT_SOURCE_DIR}/src/handlers/generated")
 if(CLANG_FORMAT_BIN)
     list(APPEND SGRN_FORMAT_ARGS --clang-format "${CLANG_FORMAT_BIN}")
@@ -36,7 +52,7 @@ endif()
 if(SGRN_AUTO_CODEGEN)
     add_custom_command(
         OUTPUT "${SGRN_CODEGEN_STAMP}"
-        COMMAND "${Python3_EXECUTABLE}" "${SGRN_ORM_GEN_SCRIPT}" --build-db --views
+        COMMAND "${Python3_EXECUTABLE}" "${SGRN_ORM_GEN_SCRIPT}" ${SGRN_ORM_GEN_ARGS}
         COMMAND "${Python3_EXECUTABLE}" "${SGRN_FORMAT_SCRIPT}" ${SGRN_FORMAT_ARGS}
         COMMAND "${CMAKE_COMMAND}" -E touch "${SGRN_CODEGEN_STAMP}"
         DEPENDS
@@ -65,7 +81,7 @@ endif()
 
 # Manual regeneration target
 add_custom_target(sgrn_generate_views
-    COMMAND "${Python3_EXECUTABLE}" "${SGRN_ORM_GEN_SCRIPT}" --build-db --views
+    COMMAND "${Python3_EXECUTABLE}" "${SGRN_ORM_GEN_SCRIPT}" ${SGRN_ORM_GEN_ARGS}
     COMMAND "${Python3_EXECUTABLE}" "${SGRN_FORMAT_SCRIPT}" ${SGRN_FORMAT_ARGS}
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Manual regeneration of Drogon ORM models and CRUD views via isolated build database with formatting"

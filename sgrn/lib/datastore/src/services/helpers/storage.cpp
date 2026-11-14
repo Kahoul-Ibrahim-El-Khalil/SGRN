@@ -1,4 +1,5 @@
 #include <sgrn/datastore/DbError.hpp>
+#include <sgrn/datastore/crypto/key-store.hpp>
 #include <sgrn/datastore/plugins/threadpool/Threadpool.hpp>
 #include <sgrn/datastore/services/helpers/storage.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
@@ -271,17 +272,138 @@ Task<BackendResult<int64_t>> insertFile(drogon::orm::DbClientPtr tsp_db_client, 
                 stored_extension = *t_format->getExtension();
         }
 
-        drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro(
-            "INSERT INTO storage.files (name, user_id, automated_service_id, session_id, extension, directory_id, domain, key_id, "
-            "is_encrypted) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
-            std::move(t_name), t_user_id, t_automated_service_id, t_session_id, std::move(stored_extension), t_directory_id,
-            t_domain.empty() ? std::optional<std::string>(std::nullopt) : std::optional<std::string>(t_domain), t_key_id, t_is_encrypted);
+        // 1. Check if this logical file entry already exists in the destination
+        std::optional<drogon::orm::Result> existing_res_opt;
 
-        if (tp_res.empty()) {
+        if (domain_scoped) {
+            if (t_directory_id.has_value()) {
+                existing_res_opt = co_await tsp_db_client->execSqlCoro("SELECT id, key_id, is_encrypted FROM storage.files "
+                                                                       "WHERE domain = $1 AND directory_id = $2 AND name = $3 FOR UPDATE",
+                    t_domain, *t_directory_id, t_name);
+            } else {
+                existing_res_opt =
+                    co_await tsp_db_client->execSqlCoro("SELECT id, key_id, is_encrypted FROM storage.files "
+                                                        "WHERE domain = $1 AND directory_id IS NULL AND name = $2 FOR UPDATE",
+                        t_domain, t_name);
+            }
+        } else if (t_automated_service_id.has_value()) {
+            if (t_directory_id.has_value()) {
+                existing_res_opt = co_await tsp_db_client->execSqlCoro(
+                    "SELECT id, key_id, is_encrypted FROM storage.files "
+                    "WHERE automated_service_id = $1 AND domain IS NULL AND directory_id = $2 AND name = $3 FOR UPDATE",
+                    *t_automated_service_id, *t_directory_id, t_name);
+            } else {
+                existing_res_opt = co_await tsp_db_client->execSqlCoro(
+                    "SELECT id, key_id, is_encrypted FROM storage.files "
+                    "WHERE automated_service_id = $1 AND domain IS NULL AND directory_id IS NULL AND name = $2 FOR UPDATE",
+                    *t_automated_service_id, t_name);
+            }
+        } else if (t_user_id.has_value()) {
+            if (t_directory_id.has_value()) {
+                existing_res_opt = co_await tsp_db_client->execSqlCoro(
+                    "SELECT id, key_id, is_encrypted FROM storage.files "
+                    "WHERE user_id = $1 AND domain IS NULL AND directory_id = $2 AND name = $3 FOR UPDATE",
+                    *t_user_id, *t_directory_id, t_name);
+            } else {
+                existing_res_opt = co_await tsp_db_client->execSqlCoro(
+                    "SELECT id, key_id, is_encrypted FROM storage.files "
+                    "WHERE user_id = $1 AND domain IS NULL AND directory_id IS NULL AND name = $2 FOR UPDATE",
+                    *t_user_id, t_name);
+            }
+        }
+
+        if (existing_res_opt && !existing_res_opt->empty()) {
+            const int64_t file_id = (*existing_res_opt)[0]["id"].as<int64_t>();
+            const bool old_is_encrypted = (*existing_res_opt)[0]["is_encrypted"].as<bool>();
+            const std::string old_key_id =
+                (*existing_res_opt)[0]["key_id"].isNull() ? "" : (*existing_res_opt)[0]["key_id"].as<std::string>();
+
+            // Crypto-shred the previous key if it is being replaced or removed
+            if (old_is_encrypted && !old_key_id.empty() && (!t_key_id.has_value() || *t_key_id != old_key_id)) {
+                if (auto ks = sgrn::datastore::crypto::getKeyStore()) {
+                    (void)ks->shred(old_key_id);
+                }
+            }
+
+            // Update logical file entry
+            co_await tsp_db_client->execSqlCoro("UPDATE storage.files "
+                                                "SET session_id = $2, extension = $3, key_id = $4, is_encrypted = $5, created_at = NOW() "
+                                                "WHERE id = $1",
+                file_id, t_session_id, stored_extension, t_key_id, t_is_encrypted);
+
+            // Clean up any stale secondary parts from prior multipart uploads
+            co_await tsp_db_client->execSqlCoro("DELETE FROM storage.file_objects WHERE file_id = $1 AND part_index > 0", file_id);
+
+            // Map the primary object (part_index = 0) to the new storage object
+            co_await tsp_db_client->execSqlCoro(
+                "INSERT INTO storage.file_objects (file_id, object_id, part_index, role) "
+                "VALUES ($1, $2, 0, 'primary') "
+                "ON CONFLICT (file_id, part_index) DO UPDATE SET object_id = EXCLUDED.object_id, role = EXCLUDED.role",
+                file_id, t_object_id);
+
+            co_return file_id;
+        }
+
+        // 2. New file insert with collision fallback
+        // co_await is not allowed inside a catch handler, so we use a flag to
+        // detect a duplicate-key violation and perform the fallback after the try/catch.
+        bool need_fallback = false;
+        std::optional<drogon::orm::Result> tp_res_opt;
+        try {
+            tp_res_opt = co_await tsp_db_client->execSqlCoro(
+                "INSERT INTO storage.files (name, user_id, automated_service_id, session_id, extension, directory_id, domain, key_id, "
+                "is_encrypted) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
+                t_name, t_user_id, t_automated_service_id, t_session_id, stored_extension, t_directory_id,
+                t_domain.empty() ? std::optional<std::string>(std::nullopt) : std::optional<std::string>(t_domain), t_key_id,
+                t_is_encrypted);
+        } catch (const drogon::orm::DrogonDbException& ex) {
+            std::string err_str = ex.base().what();
+            if (err_str.find("uq_files") != std::string::npos ||
+                err_str.find("duplicate key value violates unique constraint") != std::string::npos) {
+                need_fallback = true;
+            } else {
+                throw;
+            }
+        }
+
+        if (need_fallback) {
+            std::optional<drogon::orm::Result> retry_res_opt;
+            if (domain_scoped) {
+                retry_res_opt = co_await tsp_db_client->execSqlCoro(
+                    "SELECT id FROM storage.files WHERE domain = $1 AND directory_id IS NOT DISTINCT FROM $2 AND name = $3", t_domain,
+                    t_directory_id, t_name);
+            } else if (t_automated_service_id.has_value()) {
+                retry_res_opt = co_await tsp_db_client->execSqlCoro("SELECT id FROM storage.files WHERE automated_service_id = $1 AND "
+                                                                    "domain IS NULL AND directory_id IS NOT DISTINCT FROM $2 AND name = $3",
+                    *t_automated_service_id, t_directory_id, t_name);
+            } else if (t_user_id.has_value()) {
+                retry_res_opt = co_await tsp_db_client->execSqlCoro("SELECT id FROM storage.files WHERE user_id = $1 AND domain IS NULL "
+                                                                    "AND directory_id IS NOT DISTINCT FROM $2 AND name = $3",
+                    *t_user_id, t_directory_id, t_name);
+            }
+            if (retry_res_opt && !retry_res_opt->empty()) {
+                const int64_t file_id = (*retry_res_opt)[0]["id"].as<int64_t>();
+                co_await tsp_db_client->execSqlCoro(
+                    "UPDATE storage.files "
+                    "SET session_id = $2, extension = $3, key_id = $4, is_encrypted = $5, created_at = NOW() "
+                    "WHERE id = $1",
+                    file_id, t_session_id, stored_extension, t_key_id, t_is_encrypted);
+                co_await tsp_db_client->execSqlCoro("DELETE FROM storage.file_objects WHERE file_id = $1 AND part_index > 0", file_id);
+                co_await tsp_db_client->execSqlCoro(
+                    "INSERT INTO storage.file_objects (file_id, object_id, part_index, role) "
+                    "VALUES ($1, $2, 0, 'primary') "
+                    "ON CONFLICT (file_id, part_index) DO UPDATE SET object_id = EXCLUDED.object_id, role = EXCLUDED.role",
+                    file_id, t_object_id);
+                co_return file_id;
+            }
+            CO_RETURN_ERROR(BackendError(BackendErrorKind::Database, "Duplicate key but could not find conflicting file row"));
+        }
+
+        if (!tp_res_opt || tp_res_opt->empty()) {
             CO_RETURN_ERROR(BackendError(BackendErrorKind::Database, "Failed to insert file"));
         }
-        const int64_t file_id = tp_res[0]["id"].as<int64_t>();
+        const int64_t file_id = (*tp_res_opt)[0]["id"].as<int64_t>();
 
         co_await tsp_db_client->execSqlCoro(
             "INSERT INTO storage.file_objects (file_id, object_id, part_index, role) VALUES ($1, $2, 0, 'primary')", file_id, t_object_id);

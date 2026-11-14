@@ -2,6 +2,7 @@
 
 #include <drogon/HttpClient.h>
 #include <drogon/orm/CoroMapper.h>
+#include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/utils/safe-access.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/hashing.hpp>
@@ -109,17 +110,7 @@ Task<std::vector<WebhookEndpoint>> WebhookService::getWebhooks(const std::string
         "SELECT id, organisation, url, secret, is_active, created_at FROM core.webhooks WHERE organisation = $1 ORDER BY id DESC",
         organisation);
 
-    for (const auto& row : rows) {
-        WebhookEndpoint ep;
-        ep.id = row["id"].as<int32_t>();
-        ep.organisation = row["organisation"].as<std::string>();
-        ep.url = row["url"].as<std::string>();
-        ep.secret = row["secret"].as<std::string>();
-        ep.is_active = row["is_active"].as<bool>();
-        ep.created_at = row["created_at"].as<std::string>();
-        result.push_back(ep);
-    }
-    co_return result;
+    co_return sgrn::orm::fromResultByName<WebhookEndpoint>(rows);
 }
 
 Task<std::optional<WebhookEndpoint>> WebhookService::createWebhook(

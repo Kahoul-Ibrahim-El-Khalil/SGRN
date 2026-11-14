@@ -86,6 +86,8 @@ jobs:
           echo "CC_BIN=$CONDA_PREFIX/bin/clang" >> "$GITHUB_ENV"
           echo "CXX_BIN=$CONDA_PREFIX/bin/clang++" >> "$GITHUB_ENV"
           echo "PATH_TO_NINJA=$CONDA_PREFIX/bin/ninja" >> "$GITHUB_ENV"
+          echo "$GITHUB_WORKSPACE/.prefix/linux-static/bin" >> "$GITHUB_PATH"
+          echo "$GITHUB_WORKSPACE/.prefix/bin" >> "$GITHUB_PATH"
 
       - name: Configure dependencies
         run: |

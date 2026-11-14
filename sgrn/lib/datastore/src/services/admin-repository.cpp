@@ -1,4 +1,5 @@
 #include <sgrn/datastore/core/db.hpp>
+#include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/services/admin-repository.hpp>
 
 namespace sgrn::datastore::services::admin
@@ -12,9 +13,10 @@ BackendError databaseError(const std::exception& t_error) {
 
 drogon::Task<BackendResult<RoleAccess>> AdminRepository::roleAccess(int32_t t_role_id) {
     try {
-        const auto rows = co_await db_->execSqlCoro("SELECT organisation, is_system FROM core.roles WHERE id = $1", t_role_id);
+        static constexpr char kQuery[] = "SELECT organisation, is_system AS system FROM core.roles WHERE id = $1";
+        const auto rows = co_await db_->execSqlCoro(kQuery, t_role_id);
         CO_RETURN_ERROR_IF(rows.empty(), makeBackendError(BackendErrorKind::Auth, "role not found"));
-        co_return RoleAccess{rows[0]["organisation"].as<std::string>(), rows[0]["is_system"].as<bool>()};
+        co_return sgrn::orm::fromRow<RoleAccess, kQuery>(rows[0]);
     } catch (const std::exception& e) {
         co_return databaseError(e);
     }
@@ -22,17 +24,10 @@ drogon::Task<BackendResult<RoleAccess>> AdminRepository::roleAccess(int32_t t_ro
 
 drogon::Task<BackendResult<std::vector<RoleRecord>>> AdminRepository::listRoles(const std::string& t_organisation) {
     try {
-        const auto rows = co_await db_->execSqlCoro("SELECT id, name, description, permissions, is_system, created_at, updated_at "
-                                                    "FROM core.roles WHERE organisation = $1 ORDER BY name",
-            t_organisation);
-        std::vector<RoleRecord> result;
-        result.reserve(rows.size());
-        for (const auto& row : rows) {
-            result.push_back({row["id"].as<int32_t>(), row["name"].as<std::string>(),
-                row["description"].isNull() ? "" : row["description"].as<std::string>(), row["permissions"].as<std::string>(),
-                row["is_system"].as<bool>(), row["created_at"].as<std::string>(), row["updated_at"].as<std::string>()});
-        }
-        co_return result;
+        static constexpr char kQuery[] = "SELECT id, name, description, permissions, is_system AS system, created_at, updated_at "
+                                         "FROM core.roles WHERE organisation = $1 ORDER BY name";
+        const auto rows = co_await db_->execSqlCoro(kQuery, t_organisation);
+        co_return sgrn::orm::fromResult<RoleRecord, kQuery>(rows);
     } catch (const std::exception& e) {
         co_return databaseError(e);
     }

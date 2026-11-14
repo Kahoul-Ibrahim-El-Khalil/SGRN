@@ -1,6 +1,8 @@
 // admin-permissions.cpp — User permission administration.
 #include "admin-common.hpp"
 
+#include <sgrn/datastore/core/orm-glaze.hpp>
+
 namespace sgrn::datastore::handlers::admin
 {
 using namespace drogon;
@@ -40,17 +42,6 @@ struct PermissionRevokeResponse {
     std::string revoked;
     std::optional<std::string> warning;
 };
-
-bool rowBool(const drogon::orm::Row& t_row, const char* t_col) {
-    if (t_row[t_col].isNull()) {
-        return false;
-    }
-    try {
-        return t_row[t_col].as<bool>();
-    } catch (const std::exception&) {
-        return t_row[t_col].as<std::string>() == "t";
-    }
-}
 } // namespace
 
 Task<HttpResponsePtr> AdminApiHandler::handleListPermissions(HttpRequestPtr tsp_req) {
@@ -98,7 +89,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleListPermissions(HttpRequestPtr tsp_
 
         // Filters are ANDed; each absent filter matches everything. LIKE
         // patterns go through parameters (no string splicing of values).
-        auto rows = co_await db->execSqlCoro(
+        static constexpr char kQuery[] =
             "SELECT p.id, p.user_id, u.email, p.organisation, p.domain, p.allowed_subpath, p.can_read, p.can_write, p.can_delete "
             "FROM core.user_domain_permissions p JOIN core.users u ON u.id = p.user_id "
             "WHERE u.deleted_at IS NULL "
@@ -106,17 +97,14 @@ Task<HttpResponsePtr> AdminApiHandler::handleListPermissions(HttpRequestPtr tsp_
             "AND ($2 = '' OR u.email ILIKE '%' || $2 || '%') "
             "AND ($3 = '' OR p.domain = $3) "
             "AND ($4 = '' OR p.organisation = $4) "
-            "ORDER BY u.email, p.domain LIMIT $5",
-            user_id, email, domain, organisation, static_cast<int64_t>(limit));
+            "ORDER BY u.email, p.domain LIMIT $5";
 
-        PermissionListResponse out;
-        out.permissions.reserve(rows.size());
-        for (const auto& row : rows) {
-            out.permissions.push_back({row["id"].as<int64_t>(), row["user_id"].as<int32_t>(), row["email"].as<std::string>(),
-                row["organisation"].as<std::string>(), row["domain"].as<std::string>(), row["allowed_subpath"].as<std::string>(),
-                rowBool(row, "can_read"), rowBool(row, "can_write"), rowBool(row, "can_delete")});
-        }
-        out.count = static_cast<int64_t>(rows.size());
+        auto rows = co_await db->execSqlCoro(kQuery, user_id, email, domain, organisation, static_cast<int64_t>(limit));
+
+        const PermissionListResponse out{
+            .permissions = sgrn::orm::fromResult<PermissionRow, kQuery>(rows),
+            .count = static_cast<int64_t>(rows.size()),
+        };
         co_return createTypedJsonResponse(out, k200OK);
     } catch (const drogon::orm::DrogonDbException& e) {
         ADMIN_ERROR_LOG("Permission list DB error: {}", e.base().what());
@@ -255,8 +243,18 @@ Task<HttpResponsePtr> AdminApiHandler::handleGrantPermission(HttpRequestPtr tsp_
             "RETURNING id, allowed_subpath, can_read, can_write, can_delete",
             user_id, organisation, domain, subpath, can_read, can_write, can_delete);
         const auto& row = upserted[0];
-        PermissionGrantResponse out{row["id"].as<int64_t>(), user_id, email, organisation, domain, row["allowed_subpath"].as<std::string>(),
-            rowBool(row, "can_read"), rowBool(row, "can_write"), rowBool(row, "can_delete"), std::nullopt};
+        PermissionGrantResponse out{
+            .id = sgrn::orm::detail::extractField<int64_t>(row[0]),
+            .user_id = user_id,
+            .email = email,
+            .organisation = organisation,
+            .domain = domain,
+            .allowed_subpath = sgrn::orm::detail::extractField<std::string>(row[1]),
+            .can_read = sgrn::orm::detail::extractField<bool>(row[2]),
+            .can_write = sgrn::orm::detail::extractField<bool>(row[3]),
+            .can_delete = sgrn::orm::detail::extractField<bool>(row[4]),
+            .note = std::nullopt,
+        };
         if (first_grant) {
             out.note = "First domain grant for this user — storage access unlocked (zero-trust default was deny-all).";
         }

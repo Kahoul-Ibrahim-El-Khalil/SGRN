@@ -1,6 +1,7 @@
 #include <drogon/orm/Exception.h>
 #include <fmt/core.h>
 #include <sgrn/datastore/core/db.hpp>
+#include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/crypto/key-store.hpp>
 #include <sgrn/datastore/error/ApiErrors.hpp>
 #include <sgrn/datastore/handlers/storage.hpp>
@@ -72,6 +73,40 @@ struct StorageStatsResponse {
     int64_t total_compressed_bytes{0};
     std::optional<int64_t> storage_limit;
 };
+
+struct TrailNode {
+    std::string path;
+    std::string name;
+    std::optional<int64_t> id;
+    std::optional<std::string> display_name;
+};
+
+struct Capabilities {
+    bool can_read{false};
+    bool can_write{false};
+    bool can_delete{false};
+    std::string allowed_subpath;
+};
+
+template <typename FolderT>
+struct GenericDriveListResponse {
+    std::string path;
+    std::vector<TrailNode> trail;
+    std::vector<FolderT> folders;
+    std::vector<FileItem> files;
+    Capabilities capabilities;
+    int32_t total_folders{0};
+    int32_t total_files{0};
+    int32_t total_items{0};
+    int32_t page{1};
+    int32_t page_size{20};
+    int32_t total_pages{1};
+    std::string sort;
+    std::string order;
+};
+
+using VirtualDriveListResponse = GenericDriveListResponse<VirtualFolderItem>;
+using NormalDriveListResponse = GenericDriveListResponse<FolderItem>;
 } // namespace detail
 
 // ============================================================================
@@ -164,15 +199,6 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
         }
         auto db_client = db_res.value();
 
-        // folders_json/files_json arrive as complete SQL-side jsonb arrays
-        // (built by buildVirtualRootListing / buildNormalDriveListing); only
-        // the trail is still assembled row by row here.
-        std::string folders_json;
-        // Virtual-root listings contain folders only.  Keep this valid JSON
-        // when buildVirtualRootListing intentionally does not populate files.
-        std::string files_json = "[]";
-        std::string trail_json = "[";
-
         // 4. Trail Construction
         std::string target_domain = "";
         if (scope == StorageScope::Domain) {
@@ -187,16 +213,6 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
             }
         }
 
-        // Builds a PostgreSQL text[] literal string from a vector of path strings,
-        // e.g. ["/a", "/a/b"] → '{"/ a","/a/b"}'
-        //
-        // Why a literal string instead of a parameterised array?
-        // drogon's execSqlCoro binds each $N to a single scalar. There is no
-        // built-in way to bind a std::vector<std::string> as a $N parameter.
-        // The alternative — one query per segment — is what this replaces: N RTTs
-        // → 1 RTT. The paths here come from the URL's own path component, not
-        // from user-supplied free-text, so they will never contain '"' or '\'.
-        // The escaping below is kept for correctness anyway.
         auto make_pg_array = [](const std::vector<std::string>& paths) -> std::string {
             std::string arr = "{";
             bool first = true;
@@ -219,17 +235,11 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
             return arr;
         };
 
-        auto append_trail_node = [&trail_json](std::string t_path, std::string t_name, std::optional<int64_t> t_id = std::nullopt,
+        std::vector<detail::TrailNode> trail;
+        auto append_trail_node = [&trail](std::string t_path, std::string t_name, std::optional<int64_t> t_id = std::nullopt,
                                      std::optional<std::string> t_display_name = std::nullopt) {
-            if (trail_json.size() > 1)
-                trail_json += ',';
-            if (t_id.has_value()) {
-                trail_json += fmt::format(R"({{"path":"{}","name":"{}","id":{}{}}})", jsonEscape(t_path), jsonEscape(t_name), *t_id,
-                    t_display_name ? fmt::format(R"(,"display_name":"{}")", jsonEscape(*t_display_name)) : "");
-            } else {
-                trail_json += fmt::format(R"({{"path":"{}","name":"{}","id":null{}}})", jsonEscape(t_path), jsonEscape(t_name),
-                    t_display_name ? fmt::format(R"(,"display_name":"{}")", jsonEscape(*t_display_name)) : "");
-            }
+            trail.push_back(detail::TrailNode{
+                .path = std::move(t_path), .name = std::move(t_name), .id = t_id, .display_name = std::move(t_display_name)});
         };
 
         if (!is_virtual_root && current_path != "/") {
@@ -352,41 +362,82 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
         int32_t total_folders = 0;
         int32_t total_files = 0;
 
-        // 6. Build Content Listing (Virtual Root vs Normal Drive)
-        if (is_virtual_root) {
-            const std::string& organisation = session["user"]["organisation"].asString();
-
-            BackendResult<void> vrl_res =
-                co_await buildVirtualRootListing(folders_json, total_folders, namespace_prefix, scope, organisation, db_client);
-            if (vrl_res.hasError()) {
-                co_return createJsonErrorResponse(
-                    std::format("Failed to list virtual root: {}", vrl_res.error().message_), drogon::k500InternalServerError);
-            }
-        } else {
-            auto stats = co_await buildNormalDriveListing(folders_json, files_json, namespace_prefix, current_path, user_id,
-                target_owner_id, scope, db_client, limit, page, search, sort_key, sort_desc);
-            total_folders = stats.first;
-            total_files = stats.second;
-        }
-
-        // Close the trail array (folders/files arrive complete from SQL).
-        trail_json += ']';
-
         // Strip trailing slash from current_path for display
         std::string display_path = current_path;
         if (display_path.length() > 1 && display_path.back() == '/') {
             display_path.pop_back();
         }
-
         const std::string display_path_val =
             (display_path == "/" && !namespace_prefix.empty()) ? namespace_prefix : namespace_prefix + display_path;
-        const int32_t total_pages = std::max(1, (int32_t)std::ceil((double)(total_folders + total_files) / limit));
 
-        co_return createJsonResponse(fmt::format(
-            R"({{"path":"{}","trail":{},"folders":{},"files":{},"capabilities":{{"can_read":{},"can_write":{},"can_delete":{},"allowed_subpath":"{}"}},"total_folders":{},"total_files":{},"total_items":{},"page":{},"page_size":{},"total_pages":{},"sort":"{}","order":"{}"}})",
-            jsonEscape(display_path_val), trail_json, folders_json, files_json, scope_res->can_read ? "true" : "false",
-            scope_res->can_write ? "true" : "false", scope_res->can_delete ? "true" : "false", jsonEscape(scope_res->allowed_subpath),
-            total_folders, total_files, total_folders + total_files, page, limit, total_pages, sort_key, sort_order));
+        // 6. Build Content Listing (Virtual Root vs Normal Drive)
+        if (is_virtual_root) {
+            const std::string& organisation = session["user"]["organisation"].asString();
+
+            auto vrl_res = co_await buildVirtualRootListing(namespace_prefix, scope, organisation, db_client);
+            if (vrl_res.hasError()) {
+                co_return createJsonErrorResponse(
+                    std::format("Failed to list virtual root: {}", vrl_res.error().message_), drogon::k500InternalServerError);
+            }
+            auto v_folders = std::move(vrl_res).value();
+            total_folders = static_cast<int32_t>(v_folders.size());
+            total_files = 0;
+
+            const int32_t total_pages = std::max(1, (int32_t)std::ceil((double)(total_folders + total_files) / limit));
+
+            detail::VirtualDriveListResponse resp{
+                .path = display_path_val,
+                .trail = std::move(trail),
+                .folders = std::move(v_folders),
+                .files = {},
+                .capabilities =
+                    {
+                        .can_read = scope_res->can_read,
+                        .can_write = scope_res->can_write,
+                        .can_delete = scope_res->can_delete,
+                        .allowed_subpath = scope_res->allowed_subpath,
+                    },
+                .total_folders = total_folders,
+                .total_files = total_files,
+                .total_items = total_folders + total_files,
+                .page = page,
+                .page_size = limit,
+                .total_pages = total_pages,
+                .sort = sort_key,
+                .order = sort_order,
+            };
+            co_return createTypedJsonResponse(resp, k200OK);
+        } else {
+            auto listing = co_await buildNormalDriveListing(
+                namespace_prefix, current_path, user_id, target_owner_id, scope, db_client, limit, page, search, sort_key, sort_desc);
+            total_folders = listing.total_folders;
+            total_files = listing.total_files;
+
+            const int32_t total_pages = std::max(1, (int32_t)std::ceil((double)(total_folders + total_files) / limit));
+
+            detail::NormalDriveListResponse resp{
+                .path = display_path_val,
+                .trail = std::move(trail),
+                .folders = std::move(listing.folders),
+                .files = std::move(listing.files),
+                .capabilities =
+                    {
+                        .can_read = scope_res->can_read,
+                        .can_write = scope_res->can_write,
+                        .can_delete = scope_res->can_delete,
+                        .allowed_subpath = scope_res->allowed_subpath,
+                    },
+                .total_folders = total_folders,
+                .total_files = total_files,
+                .total_items = total_folders + total_files,
+                .page = page,
+                .page_size = limit,
+                .total_pages = total_pages,
+                .sort = sort_key,
+                .order = sort_order,
+            };
+            co_return createTypedJsonResponse(resp, k200OK);
+        }
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Drive list DB exception: {}", e.base().what());
         co_return createErrorResponse(GenericApiError::InternalServerError);
@@ -396,47 +447,41 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
     }
 }
 
-Task<BackendResult<void>> StorageApiHandler::buildVirtualRootListing(std::string& t_folders_json, int32_t& t_out_total_folders,
+Task<BackendResult<std::vector<detail::VirtualFolderItem>>> StorageApiHandler::buildVirtualRootListing(
     const std::string& t_namespace_prefix, StorageScope t_scope, const std::string& t_organisation,
     const drogon::orm::DbClientPtr& tsp_db_client) {
 
     try {
-        // SQL-side JSON envelope: Postgres assembles the complete folders
-        // array (aggregated with jsonb_agg, ordered by name) plus the total
-        // count in one round trip, and C++ splices the returned text
-        // verbatim — no per-row field extraction, no fmt/jsonEscape pass.
-        // jsonb_strip_nulls drops the display_name key for non-service rows
-        // so the wire shape matches the old per-row fmt::format output
-        // exactly (display_name existed only for automated services).
         const std::string sql = (t_scope == StorageScope::AutomatedServices)
-                                    ? "WITH items AS (SELECT token::text AS name, name AS display_name FROM core.automated_services "
-                                      "WHERE organisation = $1 AND deleted_at IS NULL) "
-                                      "SELECT COALESCE(jsonb_agg(jsonb_strip_nulls(jsonb_build_object("
-                                      "'name', it.name, 'display_name', it.display_name, 'path', $2 || '/' || it.name)) "
-                                      "ORDER BY it.name), '[]'::jsonb) AS folders, count(*)::bigint AS total FROM items it"
-                                : (t_scope == StorageScope::Domain)
-                                    ? "WITH items AS (SELECT name FROM core.domains WHERE organisation = $1) "
-                                      "SELECT COALESCE(jsonb_agg(jsonb_strip_nulls(jsonb_build_object("
-                                      "'name', it.name, 'display_name', NULL::text, 'path', $2 || '/' || it.name)) "
-                                      "ORDER BY it.name), '[]'::jsonb) AS folders, count(*)::bigint AS total FROM items it"
-                                    : "WITH items AS (SELECT email AS name FROM core.users WHERE organisation = $1 AND deleted_at IS NULL) "
-                                      "SELECT COALESCE(jsonb_agg(jsonb_strip_nulls(jsonb_build_object("
-                                      "'name', it.name, 'display_name', NULL::text, 'path', $2 || '/' || it.name)) "
-                                      "ORDER BY it.name), '[]'::jsonb) AS folders, count(*)::bigint AS total FROM items it";
+                                    ? "SELECT token::text AS name, name AS display_name FROM core.automated_services "
+                                      "WHERE organisation = $1 AND deleted_at IS NULL ORDER BY name"
+                                : (t_scope == StorageScope::Domain) ? "SELECT name, NULL::text AS display_name FROM core.domains "
+                                                                      "WHERE organisation = $1 ORDER BY name"
+                                                                    : "SELECT email AS name, NULL::text AS display_name FROM core.users "
+                                                                      "WHERE organisation = $1 AND deleted_at IS NULL ORDER BY name";
 
-        drogon::orm::Result res = co_await tsp_db_client->execSqlCoro(sql, t_organisation, t_namespace_prefix);
-        t_folders_json = res[0]["folders"].as<std::string>();
-        t_out_total_folders = static_cast<int32_t>(res[0]["total"].as<int64_t>());
-        co_return {};
+        drogon::orm::Result res = co_await tsp_db_client->execSqlCoro(sql, t_organisation);
+        std::vector<detail::VirtualFolderItem> items;
+        items.reserve(res.size());
+        for (const auto& row : res) {
+            detail::VirtualFolderItem item;
+            item.name = row["name"].as<std::string>();
+            item.path = t_namespace_prefix + "/" + item.name;
+            if (!row["display_name"].isNull()) {
+                item.display_name = row["display_name"].as<std::string>();
+            }
+            items.push_back(std::move(item));
+        }
+        co_return items;
 
     } catch (const std::exception& ex) {
         co_return BackendError{"Database", std::string("buildVirtualRootListing failed: ") + ex.what()};
     }
 }
 
-Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(std::string& t_folders_json, std::string& t_files_json,
-    const std::string& t_namespace_prefix, const std::string& t_current_path_in, int32_t t_user_id, int32_t t_target_owner_id,
-    StorageScope t_scope, const drogon::orm::DbClientPtr& tsp_db_client, int32_t t_limit, int32_t t_page, const std::string& t_search,
+Task<detail::NormalDriveListingResult> StorageApiHandler::buildNormalDriveListing(const std::string& t_namespace_prefix,
+    const std::string& t_current_path_in, int32_t t_user_id, int32_t t_target_owner_id, StorageScope t_scope,
+    const drogon::orm::DbClientPtr& tsp_db_client, int32_t t_limit, int32_t t_page, const std::string& t_search,
     const std::string& t_sort_key, bool t_sort_desc) {
 
     std::string current_path = t_current_path_in;
@@ -451,34 +496,6 @@ Task<std::pair<int32_t, int32_t>> StorageApiHandler::buildNormalDriveListing(std
     const bool is_automated = (t_scope == StorageScope::AutomatedServices);
     const int32_t offset = (t_page - 1) * t_limit;
 
-    // ── One-round-trip SQL-side JSON envelope ─────────────────────────────────
-    //
-    // The previous implementation issued 3 queries (counts, folders, files)
-    // and re-serialized every row into JSON with fmt::format + jsonEscape.
-    // One statement now produces the page directly as jsonb: folder and file
-    // rows are rendered by jsonb_build_object with the exact same wire keys
-    // and types as the old fmt output (integers as JSON numbers, timestamps
-    // as strings via ::text, NULL extension as "", NULL part_count as null),
-    // and the totals are computed from the same CTEs that feed the page —
-    // C++ only splices the returned text into the response, no per-row
-    // field extraction or escaping at all.
-    //
-    // Pagination semantics are preserved exactly:
-    //   folder page   : LIMIT min(limit, total_folders - offset) OFFSET offset
-    //   folders used  : min(max(total_folders - offset, 0), limit)
-    //   file page     : LIMIT (limit - folders_used) OFFSET max(0, offset - total_folders)
-    //
-    // PARAMETERS:
-    //   {0} owner column (directories), {1} owner column with alias `f`
-    //   (files_cte), {2} unqualified owner column (file_totals has no alias
-    //   on storage.files — the aliased form cannot resolve there), then
-    //   $2/$3 predicate arguments:
-    //     plain  = current_path (root guard `$2 = '/'`), $3 = parent path
-    //     search = ILIKE pattern, $3 = recursive LIKE pattern
-    //   $4 limit, $5 page offset, $6 namespace prefix for path fields.
-    //
-    // TO ADD A NEW COLUMN: extend the relevant CTE SELECT list and the
-    // matching jsonb_build_object() call in the final SELECT.
     static const std::string kListingPlainTemplate = R"SQL(
 WITH parent_dirs AS (
   SELECT id FROM storage.directories WHERE {0} = $1 AND path = $3
@@ -518,20 +535,73 @@ file_page AS (
   LIMIT greatest($4::int - least(greatest((SELECT n::int FROM folder_totals) - $5::int, 0), $4::int), 0)
   OFFSET greatest($5::int - (SELECT n::int FROM folder_totals), 0)
 )
-SELECT
-  COALESCE((SELECT jsonb_agg(jsonb_build_object(
-    'id', s.id, 'name', s.name, 'path', $6 || s.path, 'created_at', s.created_at,
-    'virtual_size', s.virtual_size, 'real_size', s.real_size,
-    'count_sub_files', s.count_sub_files, 'count_sub_directories', s.count_sub_directories)
-    ORDER BY %FOLDER_AGG_ORDER%) FROM folder_page s), '[]'::jsonb) AS folders,
-  COALESCE((SELECT jsonb_agg(jsonb_build_object(
-    'id', s.id, 'name', s.name, 'path', $6 || s.full_path, 'extension', coalesce(s.extension, ''),
-    'size', s.compressed_size, 'original_size', s.original_size, 'upload_mode', s.upload_mode,
-    'part_count', s.part_count, 'created_at', s.created_at,
-    'is_encrypted', coalesce(s.is_encrypted, false), 'key_id', s.key_id)
-    ORDER BY %FILE_AGG_ORDER%) FROM file_page s), '[]'::jsonb) AS files,
-  (SELECT n FROM folder_totals) AS total_folders,
-  (SELECT n FROM file_totals) AS total_files
+SELECT * FROM (
+  SELECT
+    1 AS item_type,
+    row_number() OVER (ORDER BY %FOLDER_PAGE_ORDER%) AS ord,
+    s.id,
+    s.name,
+    $6 || s.path AS path,
+    s.created_at,
+    s.virtual_size,
+    s.real_size,
+    s.count_sub_files,
+    s.count_sub_directories,
+    '' AS extension,
+    0::bigint AS size,
+    0::bigint AS original_size,
+    '' AS upload_mode,
+    NULL::bigint AS part_count,
+    false AS is_encrypted,
+    NULL::text AS key_id,
+    (SELECT n FROM folder_totals) AS total_folders,
+    (SELECT n FROM file_totals) AS total_files
+  FROM folder_page s
+  UNION ALL
+  SELECT
+    2 AS item_type,
+    row_number() OVER (ORDER BY %FILE_PAGE_ORDER%) AS ord,
+    s.id,
+    s.name,
+    $6 || s.full_path AS path,
+    s.created_at,
+    0::bigint AS virtual_size,
+    0::bigint AS real_size,
+    0::bigint AS count_sub_files,
+    0::bigint AS count_sub_directories,
+    coalesce(s.extension, '') AS extension,
+    s.compressed_size AS size,
+    s.original_size AS original_size,
+    s.upload_mode AS upload_mode,
+    s.part_count AS part_count,
+    coalesce(s.is_encrypted, false) AS is_encrypted,
+    s.key_id AS key_id,
+    (SELECT n FROM folder_totals) AS total_folders,
+    (SELECT n FROM file_totals) AS total_files
+  FROM file_page s
+  UNION ALL
+  SELECT
+    0 AS item_type,
+    0::bigint AS ord,
+    0::bigint AS id,
+    '' AS name,
+    '' AS path,
+    '' AS created_at,
+    0::bigint AS virtual_size,
+    0::bigint AS real_size,
+    0::bigint AS count_sub_files,
+    0::bigint AS count_sub_directories,
+    '' AS extension,
+    0::bigint AS size,
+    0::bigint AS original_size,
+    '' AS upload_mode,
+    NULL::bigint AS part_count,
+    false AS is_encrypted,
+    NULL::text AS key_id,
+    (SELECT n FROM folder_totals) AS total_folders,
+    (SELECT n FROM file_totals) AS total_files
+  WHERE NOT EXISTS (SELECT 1 FROM folder_page) AND NOT EXISTS (SELECT 1 FROM file_page)
+) u ORDER BY item_type, ord
 )SQL";
 
     static const std::string kListingSearchTemplate = R"SQL(
@@ -570,20 +640,73 @@ file_page AS (
   LIMIT greatest($4::int - least(greatest((SELECT n::int FROM folder_totals) - $5::int, 0), $4::int), 0)
   OFFSET greatest($5::int - (SELECT n::int FROM folder_totals), 0)
 )
-SELECT
-  COALESCE((SELECT jsonb_agg(jsonb_build_object(
-    'id', s.id, 'name', s.name, 'path', $6 || s.path, 'created_at', s.created_at,
-    'virtual_size', s.virtual_size, 'real_size', s.real_size,
-    'count_sub_files', s.count_sub_files, 'count_sub_directories', s.count_sub_directories)
-    ORDER BY %FOLDER_AGG_ORDER%) FROM folder_page s), '[]'::jsonb) AS folders,
-  COALESCE((SELECT jsonb_agg(jsonb_build_object(
-    'id', s.id, 'name', s.name, 'path', $6 || s.full_path, 'extension', coalesce(s.extension, ''),
-    'size', s.compressed_size, 'original_size', s.original_size, 'upload_mode', s.upload_mode,
-    'part_count', s.part_count, 'created_at', s.created_at,
-    'is_encrypted', coalesce(s.is_encrypted, false), 'key_id', s.key_id)
-    ORDER BY %FILE_AGG_ORDER%) FROM file_page s), '[]'::jsonb) AS files,
-  (SELECT n FROM folder_totals) AS total_folders,
-  (SELECT n FROM file_totals) AS total_files
+SELECT * FROM (
+  SELECT
+    1 AS item_type,
+    row_number() OVER (ORDER BY %FOLDER_PAGE_ORDER%) AS ord,
+    s.id,
+    s.name,
+    $6 || s.path AS path,
+    s.created_at,
+    s.virtual_size,
+    s.real_size,
+    s.count_sub_files,
+    s.count_sub_directories,
+    '' AS extension,
+    0::bigint AS size,
+    0::bigint AS original_size,
+    '' AS upload_mode,
+    NULL::bigint AS part_count,
+    false AS is_encrypted,
+    NULL::text AS key_id,
+    (SELECT n FROM folder_totals) AS total_folders,
+    (SELECT n FROM file_totals) AS total_files
+  FROM folder_page s
+  UNION ALL
+  SELECT
+    2 AS item_type,
+    row_number() OVER (ORDER BY %FILE_PAGE_ORDER%) AS ord,
+    s.id,
+    s.name,
+    $6 || s.full_path AS path,
+    s.created_at,
+    0::bigint AS virtual_size,
+    0::bigint AS real_size,
+    0::bigint AS count_sub_files,
+    0::bigint AS count_sub_directories,
+    coalesce(s.extension, '') AS extension,
+    s.compressed_size AS size,
+    s.original_size AS original_size,
+    s.upload_mode AS upload_mode,
+    s.part_count AS part_count,
+    coalesce(s.is_encrypted, false) AS is_encrypted,
+    s.key_id AS key_id,
+    (SELECT n FROM folder_totals) AS total_folders,
+    (SELECT n FROM file_totals) AS total_files
+  FROM file_page s
+  UNION ALL
+  SELECT
+    0 AS item_type,
+    0::bigint AS ord,
+    0::bigint AS id,
+    '' AS name,
+    '' AS path,
+    '' AS created_at,
+    0::bigint AS virtual_size,
+    0::bigint AS real_size,
+    0::bigint AS count_sub_files,
+    0::bigint AS count_sub_directories,
+    '' AS extension,
+    0::bigint AS size,
+    0::bigint AS original_size,
+    '' AS upload_mode,
+    NULL::bigint AS part_count,
+    false AS is_encrypted,
+    NULL::text AS key_id,
+    (SELECT n FROM folder_totals) AS total_folders,
+    (SELECT n FROM file_totals) AS total_files
+  WHERE NOT EXISTS (SELECT 1 FROM folder_page) AND NOT EXISTS (SELECT 1 FROM file_page)
+) u ORDER BY item_type, ord
 )SQL";
 
     // Owner predicates are substituted from the shared templates once at
@@ -640,8 +763,6 @@ SELECT
     };
     replace_token(order_sql, "%FOLDER_PAGE_ORDER%", make_order(sort_cols.folders, false));
     replace_token(order_sql, "%FILE_PAGE_ORDER%", make_order(sort_cols.files, false));
-    replace_token(order_sql, "%FOLDER_AGG_ORDER%", make_order(sort_cols.folders, true));
-    replace_token(order_sql, "%FILE_AGG_ORDER%", make_order(sort_cols.files, true));
 
     std::string target_domain;
     if (is_domain) {
@@ -675,12 +796,68 @@ SELECT
         co_return co_await tsp_db_client->execSqlCoro(order_sql, owner_id, predicate_2, predicate_3, t_limit, offset, t_namespace_prefix);
     }();
 
-    // Complete jsonb arrays + totals from one row; spliced verbatim by the
-    // caller into the response envelope.
-    t_folders_json = listing_res[0]["folders"].as<std::string>();
-    t_files_json = listing_res[0]["files"].as<std::string>();
-    co_return {static_cast<int32_t>(listing_res[0]["total_folders"].as<int64_t>()),
-        static_cast<int32_t>(listing_res[0]["total_files"].as<int64_t>())};
+    detail::NormalDriveListingResult result;
+    if (listing_res.empty()) {
+        co_return result;
+    }
+
+    constexpr drogon::orm::Row::SizeType kColItemType = 0;
+    constexpr drogon::orm::Row::SizeType kColOrd = 1;
+    constexpr drogon::orm::Row::SizeType kColId = 2;
+    constexpr drogon::orm::Row::SizeType kColName = 3;
+    constexpr drogon::orm::Row::SizeType kColPath = 4;
+    constexpr drogon::orm::Row::SizeType kColCreatedAt = 5;
+    constexpr drogon::orm::Row::SizeType kColVirtualSize = 6;
+    constexpr drogon::orm::Row::SizeType kColRealSize = 7;
+    constexpr drogon::orm::Row::SizeType kColCountSubFiles = 8;
+    constexpr drogon::orm::Row::SizeType kColCountSubDirectories = 9;
+    constexpr drogon::orm::Row::SizeType kColExtension = 10;
+    constexpr drogon::orm::Row::SizeType kColSize = 11;
+    constexpr drogon::orm::Row::SizeType kColOriginalSize = 12;
+    constexpr drogon::orm::Row::SizeType kColUploadMode = 13;
+    constexpr drogon::orm::Row::SizeType kColPartCount = 14;
+    constexpr drogon::orm::Row::SizeType kColIsEncrypted = 15;
+    constexpr drogon::orm::Row::SizeType kColKeyId = 16;
+    constexpr drogon::orm::Row::SizeType kColTotalFolders = 17;
+    constexpr drogon::orm::Row::SizeType kColTotalFiles = 18;
+
+    result.total_folders = static_cast<int32_t>(listing_res[0][kColTotalFolders].as<int64_t>());
+    result.total_files = static_cast<int32_t>(listing_res[0][kColTotalFiles].as<int64_t>());
+
+    for (const auto& row : listing_res) {
+        int item_type = row[kColItemType].as<int>();
+        if (item_type == 1) {
+            detail::FolderItem folder;
+            folder.id = row[kColId].as<int64_t>();
+            folder.name = row[kColName].as<std::string>();
+            folder.path = row[kColPath].as<std::string>();
+            folder.created_at = row[kColCreatedAt].as<std::string>();
+            folder.virtual_size = row[kColVirtualSize].as<int64_t>();
+            folder.real_size = row[kColRealSize].as<int64_t>();
+            folder.count_sub_files = row[kColCountSubFiles].as<int64_t>();
+            folder.count_sub_directories = row[kColCountSubDirectories].as<int64_t>();
+            result.folders.push_back(std::move(folder));
+        } else if (item_type == 2) {
+            detail::FileItem file;
+            file.id = row[kColId].as<int64_t>();
+            file.name = row[kColName].as<std::string>();
+            file.path = row[kColPath].as<std::string>();
+            file.extension = row[kColExtension].as<std::string>();
+            file.created_at = row[kColCreatedAt].as<std::string>();
+            file.size = row[kColSize].as<int64_t>();
+            file.original_size = row[kColOriginalSize].as<int64_t>();
+            file.upload_mode = row[kColUploadMode].as<std::string>();
+            if (!row[kColPartCount].isNull()) {
+                file.part_count = row[kColPartCount].as<int64_t>();
+            }
+            file.is_encrypted = row[kColIsEncrypted].as<bool>();
+            if (!row[kColKeyId].isNull()) {
+                file.key_id = row[kColKeyId].as<std::string>();
+            }
+            result.files.push_back(std::move(file));
+        }
+    }
+    co_return result;
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handleCreateDirectory(HttpRequestPtr tsp_req) {
@@ -1478,23 +1655,22 @@ Task<HttpResponsePtr> StorageApiHandler::handleGetStorageStats(HttpRequestPtr ts
         auto sp_db_client = db_res.value();
 
         // Query pre-calculated stats from core.users and count files from storage.files
-        try {
-            auto result = co_await sp_db_client->execSqlCoro("SELECT u.total_virtual_size, u.total_real_size, u.storage_limit, "
-                                                             "       (SELECT COUNT(*) FROM storage.files WHERE user_id = $1) as file_count "
-                                                             "FROM core.users u "
-                                                             "WHERE u.id = $1",
-                user_id);
+        static constexpr char kStatsQuery[] = "SELECT (SELECT COUNT(*) FROM storage.files WHERE user_id = $1) AS file_count, "
+                                              "u.total_virtual_size AS total_original_bytes, "
+                                              "u.total_real_size AS total_compressed_bytes, "
+                                              "u.storage_limit "
+                                              "FROM core.users u WHERE u.id = $1";
 
-            if (result.empty()) {
+        try {
+            auto result = co_await sp_db_client->execSqlCoro(kStatsQuery, user_id);
+
+            auto stats_opt = sgrn::orm::fromSingleResult<detail::StorageStatsResponse, kStatsQuery>(result);
+            if (!stats_opt) {
                 SGRN_WARN_LOG("handleGetStorageStats: User {} not found in core.users", user_id);
                 co_return createTypedJsonResponse(detail::StorageStatsResponse{}, k200OK);
             }
 
-            const auto& row = result[0];
-            detail::StorageStatsResponse stats{row["file_count"].as<int64_t>(), row["total_virtual_size"].as<int64_t>(),
-                row["total_real_size"].as<int64_t>(),
-                row["storage_limit"].isNull() ? std::nullopt : std::optional<int64_t>(row["storage_limit"].as<int64_t>())};
-
+            const auto& stats = *stats_opt;
             DEBUG_LOG("Storage stats for user {}: files={}, raw={}, compressed={}, limit={}", user_id, stats.file_count,
                 stats.total_original_bytes, stats.total_compressed_bytes,
                 stats.storage_limit ? std::to_string(*stats.storage_limit) : "unlimited");

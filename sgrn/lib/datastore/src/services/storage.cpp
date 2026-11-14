@@ -1,4 +1,5 @@
 // src/sgrn/services/storage/service.cpp
+#include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/crypto/key-store.hpp>
 #include <sgrn/datastore/services/helpers/magic.hpp>
 #include <sgrn/datastore/services/helpers/storage.hpp>
@@ -415,24 +416,17 @@ Task<HttpResponsePtr> StorageService::handleListObjects(int32_t t_automated_serv
     drogon::orm::DbClientPtr sp_db_client = db_res.value();
 
     try {
-        auto result = co_await sp_db_client->execSqlCoro("SELECT f.id, f.name, f.full_path, f.extension, f.created_at, "
-                                                         "       so.size AS compressed_size, so.original_size, "
-                                                         "       so.is_compressed, so.compression_algorithm "
-                                                         "FROM storage.files f "
-                                                         "JOIN storage.objects so ON so.id = f.object_id "
-                                                         "WHERE f.automated_service_id = $1 "
-                                                         "ORDER BY f.created_at DESC",
-            t_automated_service_id);
+        static constexpr char kQuery[] = "SELECT f.id, f.name, f.full_path, f.extension, f.created_at, "
+                                         "       so.size, so.original_size, "
+                                         "       so.is_compressed, so.compression_algorithm "
+                                         "FROM storage.files f "
+                                         "JOIN storage.objects so ON so.id = f.object_id "
+                                         "WHERE f.automated_service_id = $1 "
+                                         "ORDER BY f.created_at DESC";
 
-        std::vector<ServiceObjectResponse> objects;
-        objects.reserve(result.size());
-        for (const auto& row : result) {
-            objects.push_back({row["id"].as<int64_t>(), row["name"].as<std::string>(), row["full_path"].as<std::string>(),
-                row["extension"].isNull() ? "" : row["extension"].as<std::string>(), row["created_at"].as<std::string>(),
-                row["compressed_size"].as<int64_t>(), row["original_size"].as<int64_t>(), row["is_compressed"].as<bool>(),
-                row["compression_algorithm"].isNull() ? std::nullopt
-                                                      : std::optional<std::string>(row["compression_algorithm"].as<std::string>())});
-        }
+        auto result = co_await sp_db_client->execSqlCoro(kQuery, t_automated_service_id);
+
+        auto objects = sgrn::orm::fromResult<ServiceObjectResponse, kQuery>(result);
         auto json_result = sgrn::json::write(objects);
         if (json_result.hasError()) {
             co_return createErrorResponse("Failed to serialize object list", k500InternalServerError, "StorageService");
