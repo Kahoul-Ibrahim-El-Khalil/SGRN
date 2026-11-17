@@ -3,6 +3,7 @@
 #include <sgrn/datastore/core/db.hpp>
 #include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/error/ApiErrors.hpp>
+#include <sgrn/datastore/filters/types.hpp>
 #include <sgrn/datastore/handlers/storage.hpp>
 #include <sgrn/datastore/services/helpers/magic.hpp>
 #include <sgrn/datastore/services/storage.hpp>
@@ -223,7 +224,7 @@ Task<HttpResponsePtr> runFileMetadataQuery(HttpRequestPtr tsp_req, std::string t
         }
         std::string error;
         if (!appendFileFilter(t_sql, t_binds, key, raw, error)) {
-            co_return createJsonErrorResponse(error, k400BadRequest);
+            co_return createTypedResponse(BackendErrorResponse{error, k400BadRequest});
         }
     }
 
@@ -231,7 +232,7 @@ Task<HttpResponsePtr> runFileMetadataQuery(HttpRequestPtr tsp_req, std::string t
     std::string order_key = "id ASC";
     if (auto order_opt = tsp_req->getOptionalParameter<std::string>("order"); order_opt.has_value()) {
         if (!parseFileOrder(*order_opt, order_sql, order_key)) {
-            co_return createJsonErrorResponse("Unsupported sort column", k400BadRequest);
+            co_return createTypedResponse(BackendErrorResponse{"Unsupported sort column", k400BadRequest});
         }
     }
     const std::size_t limit = parseClampedSize(tsp_req, "limit", 500, 500);
@@ -239,7 +240,7 @@ Task<HttpResponsePtr> runFileMetadataQuery(HttpRequestPtr tsp_req, std::string t
 
     auto db_res = sgrn::datastore::core::getDbClient();
     if (!db_res.has_value()) {
-        co_return sgrn::createJsonResponse(db_res);
+        co_return createTypedResponse(BackendErrorResponse{db_res.error()});
     }
     try {
         const std::string paginated_sql = fmt::format("{} ORDER BY {} LIMIT {} OFFSET {}", t_sql, order_sql, limit, offset);
@@ -251,35 +252,42 @@ Task<HttpResponsePtr> runFileMetadataQuery(HttpRequestPtr tsp_req, std::string t
                 f.etag = '"' + *f.sha256 + '"';
             }
         }
-        co_return createTypedJsonResponse(files, k200OK);
+        co_return createTypedResponse(tsp_req, files, k200OK);
     } catch (const std::exception& e) {
         ERROR_LOG("Files metadata DB error: {}", e.what());
-        co_return createJsonErrorResponse(fmt::format("Database error: {}", e.what()), k500InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{fmt::format("Database error: {}", e.what()), k500InternalServerError});
     }
 }
 } // namespace
 
 Task<HttpResponsePtr> StorageApiHandler::handleGetFilesMetadata(HttpRequestPtr tsp_req) {
-    // find() first: attributes()->get() throws on a missing key, and an
-    // exception escaping a coroutine terminates the process. The auth
-    // filter always sets session_json, but never trust that blindly here.
-    if (!tsp_req->attributes()->find("session_json")) {
-        co_return createJsonErrorResponse("No session found", k401Unauthorized);
+    std::string org;
+    int64_t session_id = 0;
+    if (tsp_req->attributes()->find("auth_context")) {
+        const auto& auth = tsp_req->attributes()->get<filters::AuthContext>("auth_context");
+        org = auth.user.organisation;
+        session_id = auth.session_id;
+    } else if (tsp_req->attributes()->find("session_claims")) {
+        const auto& session = tsp_req->attributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims");
+        if (session.user.organisation.empty()) {
+            co_return createTypedResponse(BackendErrorResponse{"No session found", k401Unauthorized});
+        }
+        org = session.user.organisation;
+        session_id = session.session_id;
+    } else {
+        co_return createTypedResponse(BackendErrorResponse{"No session found", k401Unauthorized});
     }
-    auto session = tsp_req->attributes()->get<Json::Value>("session_json");
-    if (!session || !session.isMember("user") || !session["user"].isMember("organisation") || !session["user"]["organisation"].isString()) {
-        co_return createJsonErrorResponse("No session found", k401Unauthorized);
+    if (org.empty()) {
+        co_return createTypedResponse(BackendErrorResponse{"No session found", k401Unauthorized});
     }
-    const std::string org = session["user"]["organisation"].asString();
 
     // Back-compat: `?session_id=eq.current` scopes to the caller's own
     // session (previously expanded by the PostgREST proxy layer).
     if (auto sid_opt = tsp_req->getOptionalParameter<std::string>("session_id"); sid_opt.has_value() && *sid_opt == "eq.current") {
-        const Json::Value& sid_node = session["session_id"];
-        if (!sid_node.isInt() && !sid_node.isInt64() && !sid_node.isUInt() && !sid_node.isUInt64()) {
-            co_return createJsonErrorResponse("Corrupted session: session_id missing", k500InternalServerError);
+        if (session_id <= 0) {
+            co_return createTypedResponse(BackendErrorResponse{"Corrupted session: session_id missing", k500InternalServerError});
         }
-        tsp_req->setParameter("session_id", fmt::format("eq.{}", sid_node.asInt64()));
+        tsp_req->setParameter("session_id", fmt::format("eq.{}", session_id));
     }
 
     // organisation_name is bound server-side from the session — the
@@ -295,7 +303,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleAutomatedServiceGetFilesMetadata(
     try {
         automated_service_id = tsp_req->getAttributes()->get<int32_t>("automated_service_id");
     } catch (const std::exception&) {
-        co_return createJsonErrorResponse("No session found", k401Unauthorized);
+        co_return createTypedResponse(BackendErrorResponse{"No session found", k401Unauthorized});
     }
 
     std::string sql = fmt::format(
@@ -372,11 +380,11 @@ Task<HttpResponsePtr> StorageApiHandler::handleFileRequest(HttpRequestPtr tsp_re
         std::string scope = tsp_req->getOptionalParameter<std::string>("scope").value_or("personal");
 
         // ── 1. Session Integrity ─────────────────────────────────────────────
-        auto session = tsp_req->getAttributes()->get<Json::Value>("session_json");
-        if (!session) {
+        if (!tsp_req->attributes()->find("session_claims")) {
             ERROR_LOG("User session not found");
-            co_return createJsonErrorResponse("No session found", k401Unauthorized, "StorageApi");
+            co_return createTypedResponse(BackendErrorResponse{"No session found", k401Unauthorized, "StorageApi"});
         }
+        auto session = tsp_req->getAttributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims");
 
         std::string path_str;
 
@@ -384,12 +392,12 @@ Task<HttpResponsePtr> StorageApiHandler::handleFileRequest(HttpRequestPtr tsp_re
             // ── 2. Handle Download (GET) ─────────────────────────────────────
             auto path_opt = tsp_req->getOptionalParameter<std::string>("path");
             if (!path_opt.has_value()) {
-                co_return createJsonErrorResponse("Missing path parameter", k400BadRequest, "StorageApi");
+                co_return createTypedResponse(BackendErrorResponse{"Missing path parameter", k400BadRequest, "StorageApi"});
             }
 
             auto norm = normalizePath(std::move(path_opt.value()));
             if (!norm.has_value()) {
-                co_return createJsonErrorResponse("Invalid path", k400BadRequest, "StorageApi");
+                co_return createTypedResponse(BackendErrorResponse{"Invalid path", k400BadRequest, "StorageApi"});
             }
             path_str = std::move(*norm);
             std::string range_hdr = tsp_req->getHeader("Range");
@@ -403,7 +411,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleFileRequest(HttpRequestPtr tsp_re
                 const std::string& ct = tsp_req->getHeader("Content-Type");
                 size_t body_len = tsp_req->body().size();
                 ERROR_LOG("[handleFileRequest] Failed to parse multipart request body. CT: '{}', Size: {} bytes", ct, body_len);
-                co_return createJsonErrorResponse("Failed to parse multipart request body", k400BadRequest, "StorageApi");
+                co_return createTypedResponse(BackendErrorResponse{"Failed to parse multipart request body", k400BadRequest, "StorageApi"});
             }
 
             // Extract metadata from form parameters if provided
@@ -432,12 +440,13 @@ Task<HttpResponsePtr> StorageApiHandler::handleFileRequest(HttpRequestPtr tsp_re
             }
 
             if (path_str.empty()) {
-                co_return createJsonErrorResponse("Missing path parameter", k400BadRequest, "StorageApi");
+                co_return createTypedResponse(BackendErrorResponse{"Missing path parameter", k400BadRequest, "StorageApi"});
             }
 
             const std::vector<HttpFile>& files = file_upload.getFiles();
             if (files.empty()) {
-                co_return createJsonErrorResponse("No file parts found in multipart request", k400BadRequest, "StorageApi");
+                co_return createTypedResponse(
+                    BackendErrorResponse{"No file parts found in multipart request", k400BadRequest, "StorageApi"});
             }
 
             DEBUG_LOG("[StorageApiHandler::handleFileRequest] POST - scope: {}, path: {}, count: {}", scope, path_str, files.size());
@@ -453,14 +462,14 @@ Task<HttpResponsePtr> StorageApiHandler::handleFileRequest(HttpRequestPtr tsp_re
                 // SEC: Sanitize the relative path segment before merging with the base path
                 auto safe_rel = sgrn::utils::strings::sanitizeRelativeFilename(file_rel_path);
                 if (!safe_rel.has_value()) {
-                    co_return createJsonErrorResponse("Invalid filename: path traversal detected", k400BadRequest);
+                    co_return createTypedResponse(BackendErrorResponse{"Invalid filename: path traversal detected", k400BadRequest});
                 }
                 file_rel_path = std::move(*safe_rel);
 
                 std::string path_error;
                 auto target_opt = resolveSingleUploadTarget(file_upload.getParameters(), path_str, file_rel_path, path_error);
                 if (!target_opt) {
-                    co_return createJsonErrorResponse(path_error, k400BadRequest, "StorageApi");
+                    co_return createTypedResponse(BackendErrorResponse{path_error, k400BadRequest, "StorageApi"});
                 }
                 std::string target_path = std::move(*target_opt);
                 DEBUG_LOG("[StorageApiHandler::handleFileRequest] Target path: '{}'", target_path);
@@ -474,14 +483,14 @@ Task<HttpResponsePtr> StorageApiHandler::handleFileRequest(HttpRequestPtr tsp_re
             }
         }
 
-        co_return createJsonErrorResponse("Method not allowed", k405MethodNotAllowed);
+        co_return createTypedResponse(BackendErrorResponse{"Method not allowed", k405MethodNotAllowed});
 
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Handler DB exception: {}", e.base().what());
-        co_return createErrorResponse(GenericApiError::InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
     } catch (const std::exception& ex) {
         ERROR_LOG("Handler exception: {}", ex.what());
-        co_return createErrorResponse(GenericApiError::InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
     }
 }
 

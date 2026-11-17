@@ -3,12 +3,65 @@
 
 #include <sgrn/crud/CrudViewHandler.hpp>
 #include <array>
+#include <cstdint>
+#include <optional>
+#include <string>
 #include <vector>
+
+namespace sgrn::crud::generated {
+
+struct {{ class_name }}ResponseRow {
+    {% for field in response_fields %}
+    {{ field.type }} {{ field.name }}{};
+    {% endfor %}
+};
+
+struct {{ class_name }}CreateBody {
+    {% for field in request_fields %}
+    {{ field.type }} {{ field.name }};
+    {% endfor %}
+};
+
+struct {{ class_name }}UpdateBody {
+    {% for field in request_fields %}
+    {{ field.type }} {{ field.name }};
+    {% endfor %}
+};
+
+} // namespace sgrn::crud::generated
+
+template <>
+struct glz::meta<sgrn::crud::generated::{{ class_name }}ResponseRow> {
+    using T = sgrn::crud::generated::{{ class_name }}ResponseRow;
+    static constexpr auto value = glz::object(
+        {% for field in response_fields %}"{{ field.name }}", {{ field.member }}{% if not loop.last %}, {% endif %}{% endfor %}
+    );
+};
+
+template <>
+struct glz::meta<sgrn::crud::generated::{{ class_name }}CreateBody> {
+    using T = sgrn::crud::generated::{{ class_name }}CreateBody;
+    static constexpr auto value = glz::object(
+        {% for field in request_fields %}"{{ field.name }}", {{ field.member }}{% if not loop.last %}, {% endif %}{% endfor %}
+    );
+};
+
+template <>
+struct glz::meta<sgrn::crud::generated::{{ class_name }}UpdateBody> {
+    using T = sgrn::crud::generated::{{ class_name }}UpdateBody;
+    static constexpr auto value = glz::object(
+        {% for field in request_fields %}"{{ field.name }}", {{ field.member }}{% if not loop.last %}, {% endif %}{% endfor %}
+    );
+};
 
 namespace sgrn::crud::generated {
 
 class {{ class_name }} : public sgrn::crud::CrudViewHandler<{{ class_name }}> {
 public:
+    using ResponseRow = {{ class_name }}ResponseRow;
+    using CreateBody = {{ class_name }}CreateBody;
+    using UpdateBody = {{ class_name }}UpdateBody;
+
     static inline const sgrn::crud::CrudPolicy kPolicy{
         .read_scope = sgrn::crud::ReadScope::{{ read_scope_pascal }},
         .write_scope = sgrn::crud::WriteScope::{{ write_scope_pascal }},

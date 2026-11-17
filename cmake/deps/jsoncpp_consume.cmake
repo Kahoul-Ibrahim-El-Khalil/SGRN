@@ -1,4 +1,4 @@
-# cmake/jsoncpp.cmake — expose jsoncpp as sgrn::jsoncpp / JsonCpp::JsonCpp
+# cmake/deps/jsoncpp_consume.cmake — expose jsoncpp as sgrn::jsoncpp
 # ─────────────────────────────────────────────────────────────────────────────
 include_guard(GLOBAL)
 

@@ -1,6 +1,7 @@
 // admin-webhooks.cpp — Webhook administration.
 #include "admin-common.hpp"
 
+#include <sgrn/datastore/wire/wire.hpp>
 #include <sgrn/utils/json-serialization.hpp>
 
 namespace sgrn::datastore::handlers::admin
@@ -9,41 +10,19 @@ using namespace drogon;
 
 namespace detail
 {
-struct WebhookResponse {
-    int32_t id{0};
-    std::string organisation;
-    std::string url;
-    bool is_active{false};
-    std::string created_at;
-};
+using WebhookResponse = ::sgrn::datastore::admin::Webhook;
 
-struct WebhookRegistrationResponse {
-    int32_t id{0};
-    std::string url;
-    std::string organisation;
-    std::string created_at;
-};
+using RegisterWebhookRequest = ::sgrn::datastore::admin::RegisterWebhookRequest;
 
-struct WebhookDeleteResponse {
-    bool success{true};
-    std::string message;
-};
+using WebhookRegistrationResponse = ::sgrn::datastore::admin::WebhookRegistration;
 
-template <typename T>
-Task<HttpResponsePtr> jsonResponse(T t_value, HttpStatusCode t_status) {
-    auto response_result = sgrn::json::write(t_value);
-    if (response_result.hasError()) {
-        co_return createErrorResponse("Failed to serialize webhook response", k500InternalServerError, "AdminApi");
-    }
-    std::string response_json = std::move(response_result).value();
-    co_return createJsonResponse(std::move(response_json), t_status);
-}
+using WebhookDeleteResponse = ::sgrn::datastore::common::Message;
+
 } // namespace detail
 
 Task<HttpResponsePtr> AdminApiHandler::handleListWebhooks(HttpRequestPtr tsp_req) {
     try {
-        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
-        const std::string org = session["user"]["organisation"].asString();
+        const std::string org = sgrn::datastore::getSessionOrganisation(tsp_req);
 
         auto endpoints = co_await sgrn::datastore::services::WebhookService::instance().getWebhooks(org);
         std::vector<detail::WebhookResponse> list;
@@ -51,55 +30,52 @@ Task<HttpResponsePtr> AdminApiHandler::handleListWebhooks(HttpRequestPtr tsp_req
         for (const auto& ep : endpoints) {
             list.push_back({ep.id, ep.organisation, ep.url, ep.is_active, ep.created_at});
         }
-        co_return co_await detail::jsonResponse(std::move(list), k200OK);
+        co_return createTypedResponse(tsp_req, list, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed listing webhooks: {}", e.what());
-        co_return createErrorResponse(AdminApiError::DbError);
+        co_return createTypedResponse(BackendErrorResponse{AdminApiError::DbError});
     }
 }
 
 Task<HttpResponsePtr> AdminApiHandler::handleRegisterWebhook(HttpRequestPtr tsp_req) {
     try {
-        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
-        const std::string org = session["user"]["organisation"].asString();
-        auto json = tsp_req->getJsonObject();
-
-        if (!json || !json->isMember("url") || !(*json)["url"].isString()) {
-            co_return createErrorResponse("url is required", k400BadRequest, "AdminApi");
+        const std::string org = sgrn::datastore::getSessionOrganisation(tsp_req);
+        auto body_res = parseTypedRequest<detail::RegisterWebhookRequest>(tsp_req);
+        if (body_res.hasError() || body_res->url.empty()) {
+            co_return createTypedResponse(BackendErrorResponse{"url is required", k400BadRequest, "AdminApi"});
         }
 
-        std::string url = (*json)["url"].asString();
-        std::string secret = json->get("secret", "").asString();
-        std::vector<std::string> events = {"user.signin", "user.signout", "service.signin"};
+        const auto& req = body_res.value();
+        const std::vector<std::string>& events =
+            req.events.empty() ? std::vector<std::string>{"user.signin", "user.signout", "service.signin"} : req.events;
 
-        auto ep_opt = co_await sgrn::datastore::services::WebhookService::instance().createWebhook(org, url, secret, events);
+        auto ep_opt = co_await sgrn::datastore::services::WebhookService::instance().createWebhook(org, req.url, req.secret, events);
         if (!ep_opt) {
-            co_return createErrorResponse("Failed creating webhook subscription", k400BadRequest, "AdminApi");
+            co_return createTypedResponse(BackendErrorResponse{"Failed creating webhook subscription", k400BadRequest, "AdminApi"});
         }
 
-        co_return co_await detail::jsonResponse(
-            detail::WebhookRegistrationResponse{ep_opt->id, ep_opt->url, ep_opt->organisation, ep_opt->created_at}, k201Created);
+        co_return createTypedResponse(
+            tsp_req, detail::WebhookRegistrationResponse{ep_opt->id, ep_opt->url, ep_opt->organisation, ep_opt->created_at}, k201Created);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed registering webhook: {}", e.what());
-        co_return createErrorResponse(AdminApiError::DbError);
+        co_return createTypedResponse(BackendErrorResponse{AdminApiError::DbError});
     }
 }
 
 Task<HttpResponsePtr> AdminApiHandler::handleDeleteWebhook(HttpRequestPtr tsp_req, std::string t_id) {
     try {
-        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
-        const std::string org = session["user"]["organisation"].asString();
+        const std::string org = sgrn::datastore::getSessionOrganisation(tsp_req);
         int32_t webhook_id = std::stoi(t_id);
 
         bool deleted = co_await sgrn::datastore::services::WebhookService::instance().deleteWebhook(org, webhook_id);
         if (!deleted) {
-            co_return createErrorResponse("Webhook not found", k404NotFound, "AdminApi");
+            co_return createTypedResponse(BackendErrorResponse{"Webhook not found", k404NotFound, "AdminApi"});
         }
 
-        co_return co_await detail::jsonResponse(detail::WebhookDeleteResponse{true, "Webhook deleted successfully"}, k200OK);
+        co_return createTypedResponse(tsp_req, detail::WebhookDeleteResponse{"Webhook deleted successfully"}, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed deleting webhook: {}", e.what());
-        co_return createErrorResponse(AdminApiError::DbError);
+        co_return createTypedResponse(BackendErrorResponse{AdminApiError::DbError});
     }
 }
 

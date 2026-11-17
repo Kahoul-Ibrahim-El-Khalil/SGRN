@@ -8,11 +8,50 @@
 #include <sgrn/datastore/BackendError.hpp>
 #include <sgrn/datastore/ResultJson.hpp>
 #include <sgrn/datastore/error/SgrnError.hpp>
-#include <sgrn/datastore/error/exception.hpp>
-#include <sgrn/types/HttpResponseCallback.hpp>
+#include <sgrn/datastore/wire/codec.hpp>
+#include <sgrn/datastore/wire/common.hpp>
+#include <sgrn/utils/glaze.hpp>
 #include <sgrn/utils/json-serialization.hpp>
+#include <algorithm>
 #include <cctype>
-#include <charconv>
+#include <glaze/msgpack.hpp>
+
+// Glaze provides BEVE and CBOR specializations for basic_raw_json and basic_text,
+// but omits MSGPACK. Provide them here so types containing RawJson can be serialized to MessagePack.
+namespace glz
+{
+template <class T>
+struct to<MSGPACK, basic_raw_json<T>> final {
+    template <auto Opts, class... Args>
+    GLZ_ALWAYS_INLINE static void op(auto&& value, is_context auto&& ctx, Args&&... args) {
+        serialize<MSGPACK>::op<Opts>(value.str, ctx, std::forward<Args>(args)...);
+    }
+};
+
+template <class T>
+struct to<MSGPACK, basic_text<T>> final {
+    template <auto Opts, class... Args>
+    GLZ_ALWAYS_INLINE static void op(auto&& value, is_context auto&& ctx, Args&&... args) {
+        serialize<MSGPACK>::op<Opts>(value.str, ctx, std::forward<Args>(args)...);
+    }
+};
+
+template <class T>
+struct from<MSGPACK, basic_raw_json<T>> final {
+    template <auto Opts, class... Args>
+    GLZ_ALWAYS_INLINE static void op(auto&& value, Args&&... args) {
+        from<MSGPACK, T>::template op<Opts>(value.str, std::forward<Args>(args)...);
+    }
+};
+
+template <class T>
+struct from<MSGPACK, basic_text<T>> final {
+    template <auto Opts, class... Args>
+    GLZ_ALWAYS_INLINE static void op(auto&& value, Args&&... args) {
+        from<MSGPACK, T>::template op<Opts>(value.str, std::forward<Args>(args)...);
+    }
+};
+} // namespace glz
 #include <json/json.h>
 #include <stdexcept>
 #include <string>
@@ -23,8 +62,12 @@
 namespace sgrn
 {
 
-constexpr const char json_content_type[] = "application/json";
-constexpr const char plain_content_type[] = "text/plain";
+using MessageResponse = ::sgrn::datastore::common::Message;
+
+inline constexpr auto json_content_type = ::sgrn::wire::kJsonContentType;
+inline constexpr const char plain_content_type[] = "text/plain";
+inline constexpr auto beve_content_type = ::sgrn::wire::kBeveContentType;
+inline constexpr auto msgpack_content_type = ::sgrn::wire::kMsgpackContentType;
 
 // =========================================================
 // JSON string escaping (for dynamic values in fmt responses)
@@ -63,349 +106,167 @@ inline std::string jsonEscape(std::string_view t_value) {
     return out;
 }
 
-// Small allocation-conscious writer for fixed-shape response objects. It owns
-// its final body and is moved into Drogon; it never exposes a reusable buffer
-// that could be modified while a response is in flight.
-class JsonObjectBuilder {
-public:
-    explicit JsonObjectBuilder(std::size_t t_reserve = 128) {
-        body_.reserve(t_reserve);
-        body_ += '{';
-    }
-
-    JsonObjectBuilder& string(std::string_view t_key, std::string_view t_value) {
-        key(t_key);
-        body_ += '"';
-        appendJsonEscaped(body_, t_value);
-        body_ += '"';
-        return *this;
-    }
-
-    JsonObjectBuilder& int64(std::string_view t_key, std::int64_t t_value) {
-        key(t_key);
-        char buffer[32];
-        const auto result = std::to_chars(std::begin(buffer), std::end(buffer), t_value);
-        body_.append(buffer, result.ptr);
-        return *this;
-    }
-
-    JsonObjectBuilder& uint64(std::string_view t_key, std::uint64_t t_value) {
-        key(t_key);
-        char buffer[32];
-        const auto result = std::to_chars(std::begin(buffer), std::end(buffer), t_value);
-        body_.append(buffer, result.ptr);
-        return *this;
-    }
-
-    JsonObjectBuilder& boolean(std::string_view t_key, bool t_value) {
-        key(t_key);
-        body_ += t_value ? "true" : "false";
-        return *this;
-    }
-
-    JsonObjectBuilder& null(std::string_view t_key) {
-        key(t_key);
-        body_ += "null";
-        return *this;
-    }
-
-    JsonObjectBuilder& raw(std::string_view t_key, std::string_view t_json) {
-        key(t_key);
-        body_ += t_json;
-        return *this;
-    }
-
-    std::string finish() && {
-        body_ += '}';
-        return std::move(body_);
-    }
-
-private:
-    void key(std::string_view t_key) {
-        if (!first_) {
-            body_ += ',';
-        }
-        first_ = false;
-        body_ += '"';
-        appendJsonEscaped(body_, t_key);
-        body_ += R"(":)";
-    }
-
-    std::string body_;
-    bool first_{true};
-};
-
 // =========================================================
 // 1. Core Response Factory
 // =========================================================
-inline drogon::HttpResponsePtr createEmptyResponse(drogon::HttpStatusCode t_http_code) {
-    auto resp = drogon::HttpResponse::newHttpResponse();
-    resp->setStatusCode(t_http_code);
-    return resp;
-}
-
-// =========================================================
-// 2. Generic Text Response
-// =========================================================
-// NOTE: setContentTypeString() REPLACES the response's default content type
-// (drogon's newHttpResponse starts as "text/html; charset=utf-8"). addHeader()
-// would APPEND a second Content-Type header; proxies (nginx) keep only the
-// first one, so clients would see "text/html" on perfectly valid JSON and the
-// dashboard would refuse to parse it.
-inline drogon::HttpResponsePtr createResponse(
-    const std::string& t_body, drogon::HttpStatusCode t_http_code, std::string_view t_content_type = plain_content_type) {
-    auto resp = drogon::HttpResponse::newHttpResponse();
-    resp->setStatusCode(t_http_code);
-    resp->setContentTypeString(t_content_type);
-    resp->setBody(t_body);
-    return resp;
-}
-inline drogon::HttpResponsePtr createResponse(
-    std::string&& t_body, drogon::HttpStatusCode t_http_code, std::string_view t_content_type = plain_content_type) {
+namespace detail
+{
+inline drogon::HttpResponsePtr makeWireResponse(std::string t_body, drogon::HttpStatusCode t_http_code, std::string_view t_content_type) {
     auto resp = drogon::HttpResponse::newHttpResponse();
     resp->setStatusCode(t_http_code);
     resp->setContentTypeString(t_content_type);
     resp->setBody(std::move(t_body));
     return resp;
 }
+} // namespace detail
 
 // =========================================================
-// Helper: Map BackendErrorKind to HttpStatusCode
+// Wire-format content negotiation
 //
-// This is the single, type-safe mapping point.  Every BackendError
-// carries a kind_ that must route through here — no string comparisons.
+// Inspect the request's Accept header and return the best supported format.
+// JSON is the default: a client that sends no Accept header, `*/*`,
+// `application/*`, or only types we do not produce gets JSON. Binary formats
+// are served only when the client names them explicitly.
+//
+// curl / no Accept / `*/*`:           JSON    — the default.
+// Dashboard / TS client:              JSON    — sends it explicitly.
+// Server-to-server (Drogon, C++):     BEVE    — when explicitly requested.
+// `Accept: application/msgpack`:      Msgpack — when explicitly requested.
+//
+// Error responses are always JSON (see createTypedResponse), whatever was
+// negotiated, so a client can read a failure without a binary decoder.
 // =========================================================
-inline drogon::HttpStatusCode kindToHttpStatusCode(::sgrn::datastore::BackendErrorKind t_kind) noexcept {
-    switch (t_kind) {
-        case ::sgrn::datastore::BackendErrorKind::Database:
-            return drogon::k500InternalServerError;
-        case ::sgrn::datastore::BackendErrorKind::AlreadyExists:
-            return drogon::k409Conflict;
-        case ::sgrn::datastore::BackendErrorKind::Garage:
-            return drogon::k500InternalServerError;
-        case ::sgrn::datastore::BackendErrorKind::Auth:
-            return drogon::k401Unauthorized;
-        case ::sgrn::datastore::BackendErrorKind::Filesystem:
-            return drogon::k500InternalServerError;
-        case ::sgrn::datastore::BackendErrorKind::Network:
-            return drogon::k503ServiceUnavailable;
-        case ::sgrn::datastore::BackendErrorKind::Compression:
-            return drogon::k500InternalServerError;
-        case ::sgrn::datastore::BackendErrorKind::Hashing:
-            return drogon::k500InternalServerError;
-        case ::sgrn::datastore::BackendErrorKind::Runtime:
-            return drogon::k500InternalServerError;
-        case ::sgrn::datastore::BackendErrorKind::Generic:
-            return drogon::k500InternalServerError;
+
+/// The wire formats themselves live in <sgrn/datastore/wire/codec.hpp>, which
+/// has no Drogon dependency and is shared with the C++ client. These aliases
+/// keep the existing server-facing spellings (sgrn::WireFormat, sgrn::Json…).
+using WireFormat = ::sgrn::wire::Format;
+
+/// Format served when the client expresses no preference we can honor.
+inline constexpr WireFormat kDefaultWireFormat = ::sgrn::wire::kDefaultFormat;
+
+/// Resolve the wire format from a raw Accept header value.
+inline WireFormat negotiateFormatFromAccept(std::string_view t_accept) {
+    return ::sgrn::wire::negotiateFromAccept(t_accept, kDefaultWireFormat);
+}
+
+/// Inspect the Accept header of @p t_req and return the negotiated WireFormat.
+/// A null request or a missing header yields the default (MessagePack).
+inline WireFormat negotiateFormat(const drogon::HttpRequestPtr& t_req) {
+    if (!t_req) {
+        return kDefaultWireFormat;
     }
-    return drogon::k500InternalServerError;
+    return negotiateFormatFromAccept(t_req->getHeader("Accept"));
 }
 
-/// @deprecated Use kindToHttpStatusCode(err.kind_) instead.
-/// Kept only to ease incremental migration of any remaining legacy call sites.
-inline drogon::HttpStatusCode errorScopeToHttpStatusCode(const std::string& /*t_scope*/) {
-    return drogon::k500InternalServerError;
+namespace detail
+{
+// These keep the historical server-local names. The implementation lives in
+// wire/codec.hpp so the client uses exactly the same encoder and decoder.
+template <class T>
+[[nodiscard]] inline sgrn::Result<std::string, ::sgrn::json::JsonError> writeMsgpack(const T& t_val) {
+    return ::sgrn::wire::encode(t_val, WireFormat::Msgpack);
 }
 
-// =========================================================
-// 3. JSON Response Helpers
-// =========================================================
-
-// From Json::Value
-inline drogon::HttpResponsePtr createJsonResponse(const Json::Value& t_json_object, drogon::HttpStatusCode t_http_code = drogon::k200OK) {
-    auto resp = drogon::HttpResponse::newHttpJsonResponse(t_json_object);
-    resp->setStatusCode(t_http_code);
-    return resp;
+// Request bodies are read leniently, exactly like the JSON path: unknown keys
+// are skipped, not rejected. This matters beyond convenience — the auth-scope
+// filter (OrgBodyProbe) and the rate limiter (AuthProbe) read only one or
+// three keys out of a larger body, and with glaze's default
+// (error_on_unknown_keys = true) the probe would fail, silently skipping the
+// cross-organisation body check and the per-account rate-limit key.
+template <class T>
+[[nodiscard]] inline sgrn::Result<T, ::sgrn::json::JsonError> readMsgpack(std::string_view t_data) {
+    return ::sgrn::wire::decode<T>(t_data, WireFormat::Msgpack);
 }
+} // namespace detail
 
-inline drogon::HttpResponsePtr createJsonResponse(Json::Value&& t_json_object, drogon::HttpStatusCode t_http_code = drogon::k200OK) {
-    auto resp = drogon::HttpResponse::newHttpJsonResponse(std::move(t_json_object));
-    resp->setStatusCode(t_http_code);
-    return resp;
-}
-
-// From ::sgrn::datastore::BackendError
-inline drogon::HttpResponsePtr createJsonResponse(
-    const ::sgrn::datastore::BackendError& t_error, std::optional<drogon::HttpStatusCode> t_http_code = std::nullopt) {
-    auto code = t_http_code.value_or(kindToHttpStatusCode(t_error.kind_));
-    return createJsonResponse(::sgrn::utils::json::toJson(t_error), code);
-}
-
-// From ::sgrn::Result<T, BackendError>
+// Declared before the convenience overload below: unqualified lookup from a
+// template only sees declarations that precede its definition, and ADL does
+// not reach sgrn for types declared in sgrn::datastore::*.
 template <typename T>
-inline drogon::HttpResponsePtr createJsonResponse(
-    const ::sgrn::Result<T, ::sgrn::datastore::BackendError>& t_result, std::optional<drogon::HttpStatusCode> t_http_code = std::nullopt) {
-    if (t_result.has_value()) {
-        return createJsonResponse(::sgrn::utils::json::toJson(t_result), t_http_code.value_or(drogon::k200OK));
-    } else {
-        const auto& err = t_result.error();
-        auto code = t_http_code.value_or(kindToHttpStatusCode(err.kind_));
-        return createJsonResponse(::sgrn::utils::json::toJson(t_result), code);
-    }
+inline drogon::HttpResponsePtr createTypedResponse(const T& t_value, WireFormat t_fmt, drogon::HttpStatusCode t_http_code = drogon::k200OK);
+
+/// Fallback overload for call sites that have no request to negotiate with.
+/// Deliberately stays JSON (NOT kDefaultWireFormat): those handlers are read by
+/// clients that parse JSON unconditionally, and they cannot have asked for
+/// anything else. Handlers that hold the request use the overload below.
+template <typename T>
+inline drogon::HttpResponsePtr createTypedResponse(const T& t_value, drogon::HttpStatusCode t_http_code = drogon::k200OK) {
+    return createTypedResponse(t_value, WireFormat::Json, t_http_code);
 }
 
-// From std::string (raw pre-serialized body — same replacement rule as above:
-// never duplicate the default Content-Type header).
-inline drogon::HttpResponsePtr createJsonResponse(const std::string& t_json, drogon::HttpStatusCode t_http_code = drogon::k200OK) {
-    auto resp = drogon::HttpResponse::newHttpResponse();
-    resp->setStatusCode(t_http_code);
-    resp->setContentTypeString(::sgrn::json_content_type);
-    resp->setBody(t_json);
-    return resp;
-}
-
-inline drogon::HttpResponsePtr createJsonResponse(std::string&& t_json, drogon::HttpStatusCode t_http_code = drogon::k200OK) {
-    auto resp = drogon::HttpResponse::newHttpResponse();
-    resp->setStatusCode(t_http_code);
-    resp->setContentTypeString(::sgrn::json_content_type);
-    resp->setBody(std::move(t_json));
-    return resp;
-}
-
-// From std::string_view
-inline drogon::HttpResponsePtr createJsonResponse(std::string_view t_json, drogon::HttpStatusCode t_http_code = drogon::k200OK) {
-    return createJsonResponse(std::string(t_json), t_http_code);
-}
-
-// From const char*
-inline drogon::HttpResponsePtr createJsonResponse(const char* tp_json, drogon::HttpStatusCode t_http_code = drogon::k200OK) {
-    return createJsonResponse(std::string_view(tp_json), t_http_code);
-}
-
-inline drogon::HttpResponsePtr createErrorResponse(
-    std::string_view t_message, drogon::HttpStatusCode t_http_code, std::string_view t_scope = "Unknown") {
-
-    // Auto-scope 401/403 errors to Authentication if otherwise unknown
-    if (t_scope == "Unknown" && (t_http_code == drogon::k401Unauthorized || t_http_code == drogon::k403Forbidden)) {
-        t_scope = "Authentication";
+/// Serialize @p t_value in the requested wire format and return the response.
+/// Error responses are always JSON regardless of the negotiated format so that
+/// clients can parse them without a binary decoder.
+template <typename T>
+inline drogon::HttpResponsePtr createTypedResponse(const T& t_value, WireFormat t_fmt, drogon::HttpStatusCode t_http_code) {
+    if constexpr (requires { t_value.http_status; }) {
+        auto serialized = ::sgrn::json::writeOmitNull(t_value);
+        if (serialized.hasError()) {
+            return detail::makeWireResponse(R"({"error":"Failed to serialize error response","scope":"Serialization"})",
+                drogon::k500InternalServerError, ::sgrn::json_content_type);
+        }
+        return detail::makeWireResponse(std::move(serialized).value(), t_value.http_status, ::sgrn::json_content_type);
     }
 
-    std::string msg(t_message);
-    if (msg.find("duplicate key value violates unique constraint") != std::string::npos || msg.find("uq_files") != std::string::npos ||
-        msg.find("already exists") != std::string::npos) {
-        msg = "A file or directory with that name already exists in this location.";
-    } else if (msg.find("violates foreign key constraint") != std::string::npos) {
-        msg = "Referenced entity does not exist.";
-    }
-
-    // Emit JSON directly — no intermediate Json::Value tree or temporary
-    // escaped strings needed for the common two-field error response.
     auto resp = drogon::HttpResponse::newHttpResponse();
     resp->setStatusCode(t_http_code);
-    resp->setContentTypeString(::sgrn::json_content_type);
-    std::string body;
-    body.reserve(msg.size() + t_scope.size() + 24);
-    body += R"({"error":")";
-    appendJsonEscaped(body, msg);
-    body += R"(","scope":")";
-    appendJsonEscaped(body, t_scope);
-    body += R"("})";
-    resp->setBody(std::move(body));
-    return resp;
-}
 
-// Overload for BackendError (pass by const ref — preferred)
-inline drogon::HttpResponsePtr createErrorResponse(
-    const ::sgrn::datastore::BackendError& t_error, std::optional<drogon::HttpStatusCode> t_http_code = std::nullopt) {
-    auto code = t_http_code.value_or(kindToHttpStatusCode(t_error.kind_));
-    return createJsonResponse(::sgrn::utils::json::toJson(t_error), code);
-}
-
-// Overload for domain enums (ApiErrors)
-// Produces the full wire shape: { error, scope, code, metadata? }
-// The scope is derived from the code_name prefix (e.g. "ADMIN_API_USER_ALREADY_EXISTS" → "AdminApi").
-template <typename EnumT, std::enable_if_t<std::is_enum_v<EnumT>, int> = 0>
-inline drogon::HttpResponsePtr createErrorResponse(EnumT t_api_error, std::optional<drogon::HttpStatusCode> t_http_code = std::nullopt) {
-    auto err = makeHttpError(t_api_error);
-    // Derive scope from code_name prefix: "ADMIN_API_X" → "AdminApi", "AUTH_API_X" → "AuthApi"
-    std::string scope = "Unknown";
-    {
-        auto pos = err.code_name.find('_');
-        if (pos != std::string::npos) {
-            std::string first = err.code_name.substr(0, pos);
-            auto pos2 = err.code_name.find('_', pos + 1);
-            std::string second =
-                (pos2 != std::string::npos) ? err.code_name.substr(pos + 1, pos2 - pos - 1) : err.code_name.substr(pos + 1);
-            // Capitalize first letter, lowercase rest, concatenate
-            if (!first.empty())
-                first[0] = static_cast<char>(std::toupper(first[0]));
-            for (size_t i = 1; i < first.size(); ++i)
-                first[i] = static_cast<char>(std::tolower(first[i]));
-            if (!second.empty())
-                second[0] = static_cast<char>(std::toupper(second[0]));
-            for (size_t i = 1; i < second.size(); ++i)
-                second[i] = static_cast<char>(std::tolower(second[i]));
-            scope = first + second;
+    switch (t_fmt) {
+        case WireFormat::Beve: {
+            auto result = ::sgrn::json::writeBeve(t_value);
+            if (result.hasError())
+                return detail::makeWireResponse(R"({"error":"Failed to serialize BEVE response","scope":"Serialization"})",
+                    drogon::k500InternalServerError, ::sgrn::json_content_type);
+            resp->setContentTypeString(beve_content_type);
+            resp->setBody(std::move(result).value());
+            return resp;
+        }
+        case WireFormat::Msgpack: {
+            auto result = detail::writeMsgpack(t_value);
+            if (result.hasError())
+                return detail::makeWireResponse(R"({"error":"Failed to serialize MessagePack response","scope":"Serialization"})",
+                    drogon::k500InternalServerError, ::sgrn::json_content_type);
+            resp->setContentTypeString(msgpack_content_type);
+            resp->setBody(std::move(result).value());
+            return resp;
+        }
+        case WireFormat::Json:
+        default: {
+            auto result = ::sgrn::json::write(t_value);
+            if (result.hasError())
+                return detail::makeWireResponse(R"({"error":"Failed to serialize JSON response","scope":"Serialization"})",
+                    drogon::k500InternalServerError, ::sgrn::json_content_type);
+            resp->setContentTypeString(json_content_type);
+            resp->setBody(std::move(result).value());
+            return resp;
         }
     }
-    Json::Value error_json;
-    error_json["error"] = err.message;
-    error_json["scope"] = scope;
-    auto code = t_http_code.value_or(err.status);
-    auto resp = drogon::HttpResponse::newHttpJsonResponse(std::move(error_json));
-    resp->setStatusCode(code);
-    return resp;
 }
 
-// Serialize a fixed-shape response DTO directly with Glaze. Handlers should
-// use this for typed responses instead of constructing a Json::Value tree.
+/// Convenience overload: negotiate the format from the request and serialize.
 template <typename T>
-inline drogon::HttpResponsePtr createTypedJsonResponse(const T& t_value, drogon::HttpStatusCode t_http_code = drogon::k200OK) {
-    auto json_result = ::sgrn::json::write(t_value);
-    if (json_result.hasError()) {
-        return createErrorResponse("Failed to serialize JSON response", drogon::k500InternalServerError, "Serialization");
+inline drogon::HttpResponsePtr createTypedResponse(
+    const drogon::HttpRequestPtr& t_req, const T& t_value, drogon::HttpStatusCode t_http_code = drogon::k200OK) {
+    return createTypedResponse(t_value, negotiateFormat(t_req), t_http_code);
+}
+
+/// Deserialize an incoming request body (JSON, Msgpack, or BEVE) into concrete struct T.
+template <typename T>
+[[nodiscard]] inline sgrn::Result<T, std::string> parseTypedRequest(const drogon::HttpRequestPtr& t_req) {
+    if (!t_req) {
+        return sgrn::Result<T, std::string>::Error("Null request pointer");
     }
-    std::string response_json = std::move(json_result).value();
-    return createJsonResponse(std::move(response_json), t_http_code);
-}
+    const std::string_view body = t_req->body();
+    if (body.empty()) {
+        return sgrn::Result<T, std::string>::Error("Empty request body");
+    }
 
-// Overload for SgrnException
-inline drogon::HttpResponsePtr createErrorResponse(const SgrnException& t_exception) {
-    return createErrorResponse(t_exception.what(), t_exception.getStatus());
-}
-
-inline drogon::HttpResponsePtr createJsonErrorResponse(
-    std::string_view t_message, drogon::HttpStatusCode t_http_code, std::string_view t_scope = "Unknown") {
-    return createErrorResponse(t_message, t_http_code, t_scope);
-}
-
-// Overload for BackendError (pass by const ref — preferred)
-inline drogon::HttpResponsePtr createJsonErrorResponse(
-    const ::sgrn::datastore::BackendError& t_error, std::optional<drogon::HttpStatusCode> t_http_code = std::nullopt) {
-    return createErrorResponse(t_error, t_http_code);
-}
-
-// =========================================================
-// 4. Senders
-// =========================================================
-inline void respondWithError(
-    std::string_view t_message_view, drogon::HttpStatusCode t_http_code, const HttpResponseCallback& tsp_response_callback) {
-    tsp_response_callback(createErrorResponse(t_message_view, t_http_code));
-}
-
-inline void respondWithJson(
-    const Json::Value& t_json_object, drogon::HttpStatusCode t_http_code, const HttpResponseCallback& tsp_response_callback) {
-    tsp_response_callback(createJsonResponse(t_json_object, t_http_code));
-}
-
-inline void respondWithJson(
-    Json::Value&& t_json_object, drogon::HttpStatusCode t_http_code, const HttpResponseCallback& tsp_response_callback) {
-    tsp_response_callback(createJsonResponse(std::move(t_json_object), t_http_code));
-}
-
-template <typename T>
-inline void respondWithJson(const ::sgrn::Result<T>& t_result, const HttpResponseCallback& tsp_response_callback,
-    std::optional<drogon::HttpStatusCode> t_http_code = std::nullopt) {
-    tsp_response_callback(createJsonResponse(t_result, t_http_code));
-}
-
-inline void respondWithText(
-    std::string_view t_text, drogon::HttpStatusCode t_http_code, const HttpResponseCallback& tsp_response_callback) {
-    tsp_response_callback(createResponse(std::string(t_text), t_http_code));
-}
-
-inline void sendResponse(std::string_view t_text, drogon::HttpStatusCode t_http_code, const HttpResponseCallback& tsp_response_callback) {
-    respondWithText(t_text, t_http_code, tsp_response_callback);
+    auto res = ::sgrn::wire::decode<T>(body, t_req->getHeader("content-type"));
+    if (res.hasError()) {
+        return sgrn::Result<T, std::string>::Error(res.error().what());
+    }
+    return res.value();
 }
 
 } // namespace sgrn

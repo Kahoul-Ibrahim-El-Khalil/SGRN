@@ -16,19 +16,14 @@
 
 namespace sgrn::datastore::core
 {
-using ::sgrn::datastore::BackendError;
-using ::sgrn::datastore::BackendResult;
-
-using ::sgrn::Result;
-
 /**
  * @brief Safely retrieve the default database client.
  */
-inline BackendResult<drogon::orm::DbClientPtr> getDbClient() {
+inline Result<drogon::orm::DbClientPtr, BackendError> getDbClient() {
     auto db = drogon::app().getDbClient();
     if (!db) {
         DB_ERROR_LOG("Database client is not initialized or unavailable");
-        RETURN_ERROR(BackendError{"Database", "Database client is not initialized or unavailable"});
+        RETURN_ERROR(BackendError(BackendErrorKind::Database, "Database client is not initialized or unavailable"));
     }
     return db;
 }
@@ -37,10 +32,10 @@ inline BackendResult<drogon::orm::DbClientPtr> getDbClient() {
  * @brief Safely retrieve a Drogon plugin by type.
  */
 template <typename T>
-inline BackendResult<T*> getPlugin() {
+inline Result<T*, BackendError> getPlugin() {
     auto* p_plugin = drogon::app().getPlugin<T>();
     if (!p_plugin) {
-        RETURN_ERROR(BackendError{"Runtime", "Required system plugin is not initialized"});
+        RETURN_ERROR(BackendError(BackendErrorKind::Runtime, "Required system plugin is not initialized"));
     }
     return p_plugin;
 }

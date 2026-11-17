@@ -2,8 +2,12 @@
 // Source: core.user_domain_permissions
 #pragma once
 #include <sgrn/datastore/handlers/CrudViewHandler.hpp>
+#include <sgrn/utils/json-serialization.hpp>
 
 #include <array>
+#include <cstdint>
+#include <optional>
+#include <string>
 
 namespace sgrn::datastore::handlers::query
 {
@@ -13,8 +17,28 @@ using sgrn::datastore::query::FieldType;
 using sgrn::datastore::query::Op;
 using sgrn::datastore::query::PrimaryKey;
 
+// Response row of core.user_domain_permissions — the whitelisted SELECT columns.
+struct UserDomainPermissionsRow {
+    std::optional<std::string> id;
+    std::optional<std::string> organisation;
+    std::optional<std::int32_t> user_id;
+    std::optional<std::string> domain;
+    std::optional<std::string> allowed_subpath;
+    std::optional<bool> can_read;
+    std::optional<bool> can_write;
+    std::optional<bool> can_delete;
+    std::optional<std::string> created_at;
+    std::optional<std::string> updated_at;
+};
+
 class UserDomainPermissionsView : public CrudViewHandler<UserDomainPermissionsView> {
 public:
+    using Row = UserDomainPermissionsRow;
+    static constexpr char kPrimaryKeyName[] = "id";
+
+    static constexpr char kRowProjection[] = "SELECT id, organisation, user_id, domain, allowed_subpath, can_read, can_write, "
+                                             "can_delete, created_at, updated_at FROM core.user_domain_permissions";
+
     static constexpr std::array<Field, 8> kFields = {{
         {"user_id", FieldType::Int, Op::Eq | Op::In, true, true},
         {"domain", FieldType::Text, static_cast<uint8_t>(Op::Eq), true, true},

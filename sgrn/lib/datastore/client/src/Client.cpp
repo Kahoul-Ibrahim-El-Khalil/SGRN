@@ -3,12 +3,16 @@
 #include <sgrn/datastore/client/StorageClient.hpp>
 #include <sgrn/datastore/client/Types.hpp>
 
+#include <sgrn/datastore/wire/auth.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/compression.hpp>
 #include <sgrn/utils/filesystem.hpp>
 #include <sgrn/utils/glaze.hpp>
 #include <sgrn/utils/mime.hpp>
 #include <sgrn/utils/strings.hpp>
+
+#include <algorithm>
+#include <cctype>
 
 #include <fmt/chrono.h>
 #include <fmt/format.h>
@@ -27,19 +31,19 @@ static constexpr std::string_view kSignInUserPath = "/api/v1/auth/user/signin";
 DatastoreClient::DatastoreClient(DatastoreClientConfig t_config)
     : config_(std::move(t_config)) {
 
-    http_client_ = std::make_unique<httplib::Client>(config_.backend_url_);
+    http_client_ = std::make_unique<httplib::Client>(config_.backend_url);
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
     http_client_->enable_server_certificate_verification(false);
 #endif
 
-    http_client_->set_connection_timeout(std::chrono::seconds(static_cast<long>(config_.storage_timeout_s_)));
-    http_client_->set_read_timeout(std::chrono::seconds(static_cast<long>(config_.storage_timeout_s_)));
-    http_client_->set_write_timeout(std::chrono::seconds(static_cast<long>(config_.storage_timeout_s_)));
+    http_client_->set_connection_timeout(std::chrono::seconds(static_cast<long>(config_.storage_timeout_s)));
+    http_client_->set_read_timeout(std::chrono::seconds(static_cast<long>(config_.storage_timeout_s)));
+    http_client_->set_write_timeout(std::chrono::seconds(static_cast<long>(config_.storage_timeout_s)));
     http_client_->set_keep_alive(true);
 
     storage_client_ = std::make_unique<StorageClient>(*this);
 
-    if (config_.auth_mode_ == AuthMode::SessionToken) {
+    if (config_.auth_mode == AuthMode::SessionToken) {
         signInSessionToken();
     } else {
         signIn();
@@ -47,7 +51,7 @@ DatastoreClient::DatastoreClient(DatastoreClientConfig t_config)
 
     pool_ = std::make_unique<sgrn::utils::DynamicThreadPool>(2);
 
-    SGRN_INFO("DatastoreClient", "Initialized with backend: {}", config_.backend_url_);
+    SGRN_INFO("DatastoreClient", "Initialized with backend: {}", config_.backend_url);
 }
 
 DatastoreClient::~DatastoreClient() {
@@ -91,7 +95,12 @@ void DatastoreClient::processTask(const Task& t_task) {
 // ─── Synchronous Operations (Helpers) ────────────────────────────────────────
 
 sgrn::json::Value DatastoreClient::query(const std::string& t_table, const std::string& t_params) {
-    std::string endpoint = "/api/v1/postgrest/automated-service/storage/files";
+    // The table becomes a path segment: accept identifier characters only so a
+    // caller cannot inject "../" or extra segments. Empty/invalid -> "files".
+    const auto is_ident = [](unsigned char c) { return std::isalnum(c) || c == '_' || c == '-'; };
+    const bool valid = !t_table.empty() && std::all_of(t_table.begin(), t_table.end(), is_ident);
+    const std::string table = valid ? t_table : std::string{"files"};
+    const std::string endpoint = "/api/v1/postgrest/automated-service/storage/" + table;
 
     std::string url = endpoint + (t_params.empty() ? "" : "?" + t_params);
     return makeRequest("GET", std::move(url));
@@ -144,12 +153,12 @@ std::vector<IdNamePair> parseIdNamePairs(const sgrn::json::Value& t_val) {
         if (e.contains("id")) {
             const auto& id = e.at("id");
             if (id.is_string())
-                p.id_ = id.get_string();
+                p.id = id.get_string();
             else if (id.is_number())
-                p.id_ = std::to_string(id.as<int64_t>());
+                p.id = std::to_string(id.as<int64_t>());
         }
         if (e.contains("name") && e.at("name").is_string())
-            p.name_ = e.at("name").get_string();
+            p.name = e.at("name").get_string();
         out.push_back(std::move(p));
     }
     return out;
@@ -247,12 +256,12 @@ sgrn::Result<std::vector<AdminUserEntry>, std::string> DatastoreClient::tryListU
         if (!e.is_object())
             continue;
         AdminUserEntry u;
-        u.id_ = e.contains("id") && e.at("id").is_number() ? e.at("id").as<int64_t>() : 0;
-        u.email_ = strField(e, "email");
-        u.first_name_ = strField(e, "first_name");
-        u.family_name_ = strField(e, "family_name");
-        u.domain_ = strField(e, "domain");
-        u.status_ = strField(e, "status");
+        u.id = e.contains("id") && e.at("id").is_number() ? e.at("id").as<int64_t>() : 0;
+        u.email = strField(e, "email");
+        u.first_name = strField(e, "first_name");
+        u.family_name = strField(e, "family_name");
+        u.domain = strField(e, "domain");
+        u.status = strField(e, "status");
         out.push_back(std::move(u));
     }
     return out;
@@ -260,14 +269,14 @@ sgrn::Result<std::vector<AdminUserEntry>, std::string> DatastoreClient::tryListU
 
 sgrn::Result<std::string, std::string> DatastoreClient::registerUser(const NewUser& t_user) {
     detail::NewUserJson body;
-    body.first_name = t_user.first_name_;
-    body.family_name = t_user.family_name_;
-    body.email = t_user.email_;
-    body.password = t_user.password_;
-    body.phone_number = t_user.phone_number_;
-    body.organisation = t_user.organisation_;
-    body.status = t_user.status_;
-    body.domain = t_user.domain_;
+    body.first_name = t_user.first_name;
+    body.family_name = t_user.family_name;
+    body.email = t_user.email;
+    body.password = t_user.password;
+    body.phone_number = t_user.phone_number;
+    body.organisation = t_user.organisation;
+    body.status = t_user.status;
+    body.domain = t_user.domain;
     auto r = postJson(*this, "/api/v1/admin/users/register", sgrn::json::write(body).value_or(std::string{}));
     PROPAGATE_ERROR_IF(r);
     RETURN_ERROR_IF(!responseOk(r.value()), responseMessage(r.value(), "registration failed"));
@@ -286,12 +295,12 @@ sgrn::Result<std::vector<ServiceEntry>, std::string> DatastoreClient::tryListSer
         // computed columns: accept numeric-or-string ids and derive
         // is_active from status here.
         ServiceEntry s;
-        s.id_ = e.contains("id") ? parseIntField(e.at("id")) : 0;
-        s.name_ = strField(e, "name");
-        s.token_ = strField(e, "token");
-        s.is_active_ = strField(e, "status") == "active";
-        s.domain_ = strField(e, "domain");
-        s.created_at_ = strField(e, "created_at");
+        s.id = e.contains("id") ? parseIntField(e.at("id")) : 0;
+        s.name = strField(e, "name");
+        s.token = strField(e, "token");
+        s.is_active = strField(e, "status") == "active";
+        s.domain = strField(e, "domain");
+        s.created_at = strField(e, "created_at");
         out.push_back(std::move(s));
     }
     return out;
@@ -299,19 +308,19 @@ sgrn::Result<std::vector<ServiceEntry>, std::string> DatastoreClient::tryListSer
 
 sgrn::Result<ServiceCredentials, std::string> DatastoreClient::registerService(const NewService& t_service) {
     detail::ServiceRegistrationJson body;
-    body.name = t_service.name_;
-    body.organisation = t_service.organisation_;
-    body.domain = t_service.domain_;
-    if (!t_service.kind_.empty()) {
-        body.metadata.kind = t_service.kind_;
+    body.name = t_service.name;
+    body.organisation = t_service.organisation;
+    body.domain = t_service.domain;
+    if (!t_service.kind.empty()) {
+        body.metadata.kind = t_service.kind;
     }
     auto r = postJson(*this, "/api/v1/admin/automated-services/register", sgrn::json::writeOmitNull(body).value_or(std::string{}));
     PROPAGATE_ERROR_IF(r);
     RETURN_ERROR_IF(!responseOk(r.value()), responseMessage(r.value(), "registration failed"));
     ServiceCredentials creds;
-    creds.message_ = responseMessage(r.value(), "registered");
-    creds.token_ = strField(r.value(), "token");
-    creds.token_secret_ = strField(r.value(), "token_secret");
+    creds.message = responseMessage(r.value(), "registered");
+    creds.token = strField(r.value(), "token");
+    creds.token_secret = strField(r.value(), "token_secret");
     return creds;
 }
 
@@ -322,15 +331,15 @@ sgrn::Result<ServiceCredentials, std::string> DatastoreClient::rotateServiceToke
     PROPAGATE_ERROR_IF(r);
     RETURN_ERROR_IF(!responseOk(r.value()), responseMessage(r.value(), "rotation failed"));
     ServiceCredentials creds;
-    creds.message_ = responseMessage(r.value(), "rotated");
-    creds.token_ = strField(r.value(), "token");
-    creds.token_secret_ = strField(r.value(), "token_secret");
+    creds.message = responseMessage(r.value(), "rotated");
+    creds.token = strField(r.value(), "token");
+    creds.token_secret = strField(r.value(), "token_secret");
     return creds;
 }
 
 bool DatastoreClient::signOut() {
     const std::string path =
-        (config_.auth_mode_ == AuthMode::UserPassword) ? "/api/v1/auth/user/signout" : "/api/v1/auth/automated-service/signout";
+        (config_.auth_mode == AuthMode::UserPassword) ? "/api/v1/auth/user/signout" : "/api/v1/auth/automated-service/signout";
     auto doc = makeRequest("POST", path);
     if (doc.is_null())
         return false;
@@ -357,7 +366,9 @@ sgrn::Result<std::string, std::string> DatastoreClient::userInfoJson() {
 
 sgrn::Result<std::string, std::string> DatastoreClient::storageStatsJson() {
     auto doc = makeRequest("GET", "/api/v1/storage/stats");
+
     RETURN_ERROR_IF(doc.is_null(), "stats failed: empty response");
+
     return writeCompact(doc);
 }
 
@@ -429,45 +440,46 @@ sgrn::Result<sgrn::json::Value, std::string> parseAdminStorageJson(sgrn::Result<
 } // namespace
 
 sgrn::Result<std::vector<StorageBucketCensus>, std::string> DatastoreClient::tryStorageAdminOverview(uint32_t t_max_pages) {
-    auto doc_res = parseAdminStorageJson(storageAdminOverviewJson(t_max_pages), "storage overview");
-    PROPAGATE_ERROR_IF(doc_res);
-    const sgrn::json::Value& doc = doc_res.value();
-    if (!doc.is_object() || !doc.contains("buckets") || !doc.at("buckets").is_array())
-        return ::sgrn::Error("storage overview: unexpected response shape");
-    std::vector<StorageBucketCensus> out;
-    for (const auto& b : doc.at("buckets").get_array()) {
-        if (!b.is_object())
-            continue;
-        auto c_res = sgrn::json::readFromValue<detail::StorageBucketCensusJson>(b);
-        if (c_res.hasError())
-            continue;
-        out.push_back(detail::censusFromJson(c_res.value()));
-    }
-    return out;
+    auto w_res = makeTypedRequest<sgrn::datastore::storage::StorageOverview>(
+        "GET", "/api/v1/admin/storage/overview?max_pages=" + std::to_string(t_max_pages));
+    PROPAGATE_ERROR_IF(w_res);
+    return std::move(w_res).value().buckets;
 }
 
 sgrn::Result<StorageOrphansReport, std::string> DatastoreClient::tryStorageAdminOrphans(
     const std::string& t_bucket, const std::string& t_prefix, uint32_t t_limit, uint32_t t_max_pages) {
-    auto doc_res = parseAdminStorageJson(storageAdminOrphansJson(t_bucket, t_prefix, t_limit, t_max_pages), "storage orphans");
-    PROPAGATE_ERROR_IF(doc_res);
-    const sgrn::json::Value& doc = doc_res.value();
-    auto w_res = sgrn::json::readFromValue<detail::StorageOrphansReportJson>(doc);
-    RETURN_ERROR_IF(w_res.hasError(), "storage orphans: unexpected response shape");
-    return detail::orphansReportFromJson(w_res.value());
+    std::string url = "/api/v1/admin/storage/orphans?limit=" + std::to_string(t_limit) + "&max_pages=" + std::to_string(t_max_pages);
+    if (!t_bucket.empty())
+        url += "&bucket=" + urlEncodeQueryValue(t_bucket);
+    if (!t_prefix.empty())
+        url += "&prefix=" + urlEncodeQueryValue(t_prefix);
+    return makeTypedRequest<StorageOrphansReport>("GET", url);
 }
 
+// Purge: dry-run and real responses have different shapes.
+// dry run : {"would_delete":[{"key":..}], "would_delete_count":N, "skipped":[{key,reason}]}
+// real    : {"deleted":["k"], "errors":[<S3 error objects>], "skipped":[...]}
+// The old mirror expected would_delete as strings and errors as strings, so every
+// dry run (and every purge with S3 errors) failed with "unexpected response shape".
 sgrn::Result<StoragePurgeResult, std::string> DatastoreClient::tryStorageAdminPurge(
     const std::string& t_bucket, const std::vector<std::string>& t_keys, const std::string& t_prefix, bool t_dry_run, uint32_t t_limit) {
     auto doc_res = parseAdminStorageJson(storageAdminPurgeOrphansJson(t_bucket, t_keys, t_prefix, t_dry_run, t_limit), "storage purge");
     PROPAGATE_ERROR_IF(doc_res);
     const sgrn::json::Value& doc = doc_res.value();
-    auto w_res = sgrn::json::readFromValue<detail::StoragePurgeResultJson>(doc);
+
+    const bool is_dry_run_shape = doc.is_object() && doc.contains("would_delete");
+    if (is_dry_run_shape) {
+        auto w_res = sgrn::json::readFromValue<detail::PurgeDryRunJson>(doc);
+        RETURN_ERROR_IF(w_res.hasError(), "storage purge: unexpected dry-run response shape");
+        return detail::purgeResultFromJson(w_res.value());
+    }
+    auto w_res = sgrn::json::readFromValue<detail::PurgeResponseJson>(doc);
     RETURN_ERROR_IF(w_res.hasError(), "storage purge: unexpected response shape");
     return detail::purgeResultFromJson(w_res.value());
 }
 
 bool DatastoreClient::signIn() {
-    switch (config_.auth_mode_) {
+    switch (config_.auth_mode) {
         case AuthMode::AutomatedService:
             return signInAutomatedService();
         case AuthMode::UserPassword:
@@ -486,25 +498,38 @@ bool DatastoreClient::signInAutomatedService() {
     if (public_token.empty() || private_token.empty())
         return false;
 
-    detail::SignInServiceJson body;
+    sgrn::datastore::auth::ServiceSignInRequest body;
     body.token = std::string(public_token);
     body.secret = std::string(private_token);
 
     try {
-        auto res = http_client_->Post(std::string(kSignInServicePath), sgrn::json::write(body).value_or(std::string{}), "application/json");
-        if (res) {
-            if (res->status == 200) {
-                auto root_res = sgrn::json::parseValue(res->body);
-                const auto& root = root_res.value();
-                if (!root_res.hasError() && root.is_object() && root.contains("token") && root.at("token").is_string()) {
-                    setSessionToken(root.at("token").get_string());
-                    return true;
-                }
-            } else {
-                SGRN_ERROR("DatastoreClient", "Sign-in failed with status {}: {}", res->status, res->body);
-            }
-        } else {
+        auto encoded = sgrn::wire::encode(body, sgrn::wire::Format::Beve);
+        if (encoded.hasError())
+            return false;
+
+        httplib::Headers headers;
+        headers.emplace("Accept", "application/x-beve, application/json");
+        auto res = http_client_->Post(std::string(kSignInServicePath), headers, encoded.value(), std::string(sgrn::wire::kBeveContentType));
+        if (!res) {
             SGRN_ERROR("DatastoreClient", "Sign-in failed: No response from backend (check URL/Connectivity)");
+            return false;
+        }
+        if (res->status != 200) {
+            SGRN_ERROR("DatastoreClient", "Sign-in failed with status {}: {}", res->status, res->body);
+            return false;
+        }
+
+        auto decoded = sgrn::wire::decode<sgrn::datastore::auth::ServiceSignInResponse>(res->body, res->get_header_value("Content-Type"));
+        if (!decoded.hasError() && !decoded.value().token.empty()) {
+            setSessionToken(std::move(decoded).value().token);
+            return true;
+        }
+        // Last resort: dynamic JSON token extraction (historical behavior).
+        auto root_res = sgrn::json::parseValue(res->body);
+        if (!root_res.hasError() && root_res.value().is_object() && root_res.value().contains("token") &&
+            root_res.value().at("token").is_string()) {
+            setSessionToken(root_res.value().at("token").get_string());
+            return true;
         }
     } catch (const std::exception& e) {
         SGRN_ERROR("DatastoreClient", "Sign-in exception: {}", e.what());
@@ -513,22 +538,36 @@ bool DatastoreClient::signInAutomatedService() {
 }
 
 bool DatastoreClient::signInUser() {
-    if (config_.email_.empty() || config_.password_.empty())
+    if (config_.email.empty() || config_.password.empty())
         return false;
 
-    detail::SignInUserJson body;
-    body.email = config_.email_;
-    body.password = config_.password_;
+    sgrn::datastore::auth::SignInRequest body;
+    body.email = config_.email;
+    body.password = config_.password;
 
     try {
-        auto res = http_client_->Post(std::string(kSignInUserPath), sgrn::json::write(body).value_or(std::string{}), "application/json");
-        if (res && res->status == 200) {
-            auto root_res = sgrn::json::parseValue(res->body);
-            const auto& root = root_res.value();
-            if (!root_res.hasError() && root.is_object() && root.contains("token") && root.at("token").is_string()) {
-                setSessionToken(root.at("token").get_string());
-                return true;
-            }
+        auto encoded = sgrn::wire::encode(body, sgrn::wire::Format::Beve);
+        if (encoded.hasError())
+            return false;
+
+        httplib::Headers headers;
+        headers.emplace("Accept", "application/x-beve, application/json");
+        auto res = http_client_->Post(std::string(kSignInUserPath), headers, encoded.value(), std::string(sgrn::wire::kBeveContentType));
+        if (!res || res->status != 200) {
+            return false;
+        }
+
+        auto decoded = sgrn::wire::decode<sgrn::datastore::auth::UserSignInResponse>(res->body, res->get_header_value("Content-Type"));
+        if (!decoded.hasError() && !decoded.value().token.empty()) {
+            setSessionToken(std::move(decoded).value().token);
+            return true;
+        }
+        // Last resort: dynamic JSON token extraction (historical behavior).
+        auto root_res = sgrn::json::parseValue(res->body);
+        if (!root_res.hasError() && root_res.value().is_object() && root_res.value().contains("token") &&
+            root_res.value().at("token").is_string()) {
+            setSessionToken(root_res.value().at("token").get_string());
+            return true;
         }
     } catch (...) {
     }
@@ -536,9 +575,9 @@ bool DatastoreClient::signInUser() {
 }
 
 bool DatastoreClient::signInSessionToken() {
-    if (config_.session_token_.empty())
+    if (config_.session_token.empty())
         return false;
-    setSessionToken(config_.session_token_);
+    setSessionToken(config_.session_token);
     return true;
 }
 
@@ -573,6 +612,11 @@ sgrn::json::Value DatastoreClient::makeRequest(
 
     httplib::Headers headers;
     headers.emplace("Authorization", "Bearer " + getSessionToken());
+    headers.emplace("Accept", "application/json");
+    // The generic makeRequest path keeps JSON because glz::generic_i64 (the
+    // dynamic Value type) is JSON-only and cannot round-trip through BEVE.
+    // Typed callers that use readBeve<T> / readMsgpack<T> set their own Accept
+    // header through makeTypedRequest (below).
 
     httplib::Result res;
     if (t_method == "GET")
@@ -584,7 +628,7 @@ sgrn::json::Value DatastoreClient::makeRequest(
     else if (t_method == "DELETE")
         res = http_client_->Delete(t_url, headers);
 
-    if (res && (res->status == 401 || res->status == 403) && config_.retry_on_unauthorized_) {
+    if (res && (res->status == 401 || res->status == 403) && config_.retry_on_unauthorized) {
         clearSessionToken();
         if (signIn() && hasSessionToken()) {
             headers.erase("Authorization");
@@ -605,12 +649,12 @@ sgrn::json::Value DatastoreClient::makeRequest(
 
     if (res) {
         if (res->status >= 400) {
+            // Error bodies are always JSON (server never sends binary errors)
             SGRN_ERROR("DatastoreClient", "Request failed: {} {} -> status {}, body: {}", t_method, t_url, res->status, res->body);
         }
         auto root_res = sgrn::json::parseValue(res->body);
-        if (!root_res.hasError()) {
+        if (!root_res.hasError())
             return root_res.value();
-        }
     } else {
         SGRN_ERROR("DatastoreClient", "Request failed: {} {} -> No response", t_method, t_url);
     }
@@ -623,7 +667,7 @@ DatastoreClient::UploadResult DatastoreClient::doUpload(const std::string& t_rem
         signIn();
 
     const auto actual_scope = (t_scope == StorageScope::Auto)
-                                  ? (config_.auth_mode_ == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
+                                  ? (config_.auth_mode == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
                                   : t_scope;
 
     const std::string scope_str = sgrn::datastore::client::detail::storageScopeToString(actual_scope);
@@ -636,10 +680,11 @@ DatastoreClient::UploadResult DatastoreClient::doUpload(const std::string& t_rem
 
     httplib::Headers headers;
     headers.emplace("Authorization", "Bearer " + getSessionToken());
+    headers.emplace("Accept", "application/json");
 
     auto res_http = http_client_->Post(endpoint, headers, items);
 
-    if (res_http && res_http->status == 401 && config_.retry_on_unauthorized_) {
+    if (res_http && res_http->status == 401 && config_.retry_on_unauthorized) {
         clearSessionToken();
         if (signIn() && hasSessionToken()) {
             headers.erase("Authorization");
@@ -679,7 +724,7 @@ DatastoreClient::DownloadResult DatastoreClient::doDownload(const std::string& t
         signIn();
 
     const auto actual_scope = (t_scope == StorageScope::Auto)
-                                  ? (config_.auth_mode_ == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
+                                  ? (config_.auth_mode == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
                                   : t_scope;
 
     std::string endpoint = sgrn::datastore::client::detail::resolveStoragePath(config_) + "?path=" + urlEncodeQueryValue(t_remote_path) +
@@ -689,7 +734,7 @@ DatastoreClient::DownloadResult DatastoreClient::doDownload(const std::string& t
 
     auto res_http = http_client_->Get(endpoint, headers);
 
-    if (res_http && res_http->status == 401 && config_.retry_on_unauthorized_) {
+    if (res_http && res_http->status == 401 && config_.retry_on_unauthorized) {
         clearSessionToken();
         if (signIn() && hasSessionToken()) {
             headers.erase("Authorization");
@@ -738,7 +783,7 @@ DatastoreClient::DownloadResult DatastoreClient::doDownloadDriveZip(const std::s
         signIn();
 
     const auto actual_scope = (t_scope == StorageScope::Auto)
-                                  ? (config_.auth_mode_ == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
+                                  ? (config_.auth_mode == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
                                   : t_scope;
     std::string endpoint = sgrn::datastore::client::detail::resolveDriveBase(config_) + "/zip?path=" + urlEncodeQueryValue(t_path) +
                            "&scope=" + sgrn::datastore::client::detail::storageScopeToString(actual_scope);
@@ -748,7 +793,7 @@ DatastoreClient::DownloadResult DatastoreClient::doDownloadDriveZip(const std::s
 
     auto res_http = http_client_->Get(endpoint, headers);
 
-    if (res_http && res_http->status == 401 && config_.retry_on_unauthorized_) {
+    if (res_http && res_http->status == 401 && config_.retry_on_unauthorized) {
         clearSessionToken();
         if (signIn() && hasSessionToken()) {
             headers.erase("Authorization");
@@ -773,33 +818,30 @@ DatastoreClient::DownloadResult DatastoreClient::doDownloadDriveZip(const std::s
 
 DriveListing DatastoreClient::listDrive(const std::string& t_path, StorageScope t_scope) {
     const auto actual_scope = (t_scope == StorageScope::Auto)
-                                  ? (config_.auth_mode_ == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
+                                  ? (config_.auth_mode == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
                                   : t_scope;
     std::string endpoint = sgrn::datastore::client::detail::resolveDriveBase(config_) + "/list?path=" + t_path +
                            "&scope=" + sgrn::datastore::client::detail::storageScopeToString(actual_scope);
-    auto t_json = makeRequest("GET", endpoint);
-    if (t_json.is_null())
+    auto w_res = makeTypedRequest<DriveListing>("GET", endpoint);
+    if (w_res.hasError()) {
+        SGRN_WARN("DatastoreClient", "list '{}' failed: {}", t_path, w_res.error());
         return {};
-    auto w_res = sgrn::json::readFromValue<detail::DriveListingJson>(t_json);
-    return w_res.hasError() ? DriveListing{} : detail::listingFromJson(w_res.value());
+    }
+    return std::move(w_res).value();
 }
 
 sgrn::Result<DriveListing, std::string> DatastoreClient::tryListDrive(const std::string& t_path, StorageScope t_scope) {
     const auto actual_scope = (t_scope == StorageScope::Auto)
-                                  ? (config_.auth_mode_ == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
+                                  ? (config_.auth_mode == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
                                   : t_scope;
     std::string endpoint = sgrn::datastore::client::detail::resolveDriveBase(config_) + "/list?path=" + t_path +
                            "&scope=" + sgrn::datastore::client::detail::storageScopeToString(actual_scope);
-    auto t_json = makeRequest("GET", endpoint);
-    RETURN_ERROR_IF(t_json.is_null(), fmt::format("list '{}' failed: empty response (check URL, network and session)", t_path));
-    auto w_res = sgrn::json::readFromValue<detail::DriveListingJson>(t_json);
-    RETURN_ERROR_IF(w_res.hasError(), fmt::format("list '{}' failed: unexpected response shape", t_path));
-    return detail::listingFromJson(w_res.value());
+    return makeTypedRequest<DriveListing>("GET", endpoint);
 }
 
 bool DatastoreClient::createDriveDirectory(const std::string& t_path, StorageScope t_scope) {
     const auto actual_scope = (t_scope == StorageScope::Auto)
-                                  ? (config_.auth_mode_ == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
+                                  ? (config_.auth_mode == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
                                   : t_scope;
     std::string endpoint = sgrn::datastore::client::detail::resolveDriveBase(config_) + "/mkdir?path=" + t_path +
                            "&scope=" + sgrn::datastore::client::detail::storageScopeToString(actual_scope);
@@ -817,7 +859,7 @@ bool DatastoreClient::moveDriveItem(
     }
 
     const auto actual_scope = (t_scope == StorageScope::Auto)
-                                  ? (config_.auth_mode_ == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
+                                  ? (config_.auth_mode == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
                                   : t_scope;
     std::string endpoint = sgrn::datastore::client::detail::resolveDriveBase(config_) +
                            "/move?type=" + sgrn::datastore::client::detail::driveItemTypeToString(t_type) + "&id=" + std::to_string(t_id) +
@@ -827,7 +869,7 @@ bool DatastoreClient::moveDriveItem(
 
 bool DatastoreClient::deleteDriveItem(int64_t t_id, DriveItemType t_type, StorageScope t_scope) {
     const auto actual_scope = (t_scope == StorageScope::Auto)
-                                  ? (config_.auth_mode_ == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
+                                  ? (config_.auth_mode == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices)
                                   : t_scope;
     std::string endpoint = sgrn::datastore::client::detail::resolveDriveBase(config_) +
                            "/delete?type=" + sgrn::datastore::client::detail::driveItemTypeToString(t_type) +
@@ -864,11 +906,12 @@ sgrn::Result<bool, std::string> DatastoreClient::uploadChunk(
         "/api/v1/storage/upload/chunk?upload_id=" + urlEncodeQueryValue(t_upload_id) + "&chunk_index=" + std::to_string(t_chunk_index);
     httplib::Headers headers;
     headers.emplace("Authorization", "Bearer " + getSessionToken());
+    headers.emplace("Accept", "application/json");
     std::string payload(t_data, t_size);
 
     auto res = http_client_->Put(endpoint, headers, payload, "application/octet-stream");
 
-    if (res && res->status == 401 && config_.retry_on_unauthorized_) {
+    if (res && res->status == 401 && config_.retry_on_unauthorized) {
         clearSessionToken();
         if (signIn() && hasSessionToken()) {
             headers.erase("Authorization");
@@ -930,6 +973,18 @@ sgrn::Result<std::string, std::string> DatastoreClient::listWebhooksJson() {
     return writeCompact(doc);
 }
 
+sgrn::Result<std::vector<sgrn::datastore::admin::ActiveSession>, std::string> DatastoreClient::tryListActiveSessions() {
+    auto decoded = makeTypedRequest<std::vector<sgrn::datastore::admin::ActiveSession>>("GET", "/api/v1/admin/metaprobe/sessions");
+    PROPAGATE_ERROR_IF(decoded);
+    return std::move(decoded).value();
+}
+
+sgrn::Result<std::vector<sgrn::datastore::admin::Webhook>, std::string> DatastoreClient::tryListWebhooks() {
+    auto decoded = makeTypedRequest<std::vector<sgrn::datastore::admin::Webhook>>("GET", "/api/v1/admin/webhooks");
+    PROPAGATE_ERROR_IF(decoded);
+    return std::move(decoded).value();
+}
+
 sgrn::Result<std::string, std::string> DatastoreClient::registerWebhookJson(const std::string& t_url, const std::string& t_secret) {
     detail::RegisterWebhookJson body;
     body.url = t_url;
@@ -948,8 +1003,9 @@ sgrn::Result<std::string, std::string> DatastoreClient::deleteWebhookJson(int32_
     const std::string endpoint = "/api/v1/admin/webhooks/" + std::to_string(t_webhook_id);
     httplib::Headers headers;
     headers.emplace("Authorization", "Bearer " + getSessionToken());
+    headers.emplace("Accept", "application/json");
     auto res = http_client_->Delete(endpoint, headers);
-    if (res && res->status == 401 && config_.retry_on_unauthorized_) {
+    if (res && res->status == 401 && config_.retry_on_unauthorized) {
         clearSessionToken();
         if (signIn() && hasSessionToken()) {
             headers.erase("Authorization");

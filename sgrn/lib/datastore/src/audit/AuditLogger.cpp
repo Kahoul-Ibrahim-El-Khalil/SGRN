@@ -1,5 +1,6 @@
 #include <sgrn/datastore/audit/AuditLogger.hpp>
 
+#include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/utils/crypto.hpp>
 #include <sgrn/utils/encoding.hpp>
 #include <sgrn/utils/hashing.hpp>
@@ -10,6 +11,51 @@
 
 namespace sgrn::datastore::audit
 {
+namespace
+{
+
+struct AuditChainVerificationRow {
+    bool is_valid{false};
+    int64_t total_rows{0};
+    std::optional<int64_t> first_broken_seq;
+    std::optional<int64_t> first_broken_id;
+    std::string failure_reason;
+};
+
+struct AuditCheckpointRow {
+    int64_t id{0};
+    int64_t last_seq{0};
+    std::string last_hash;
+    std::optional<std::string> signature;
+    std::optional<std::string> public_key;
+};
+
+struct LatestAuditRow {
+    int64_t seq{0};
+    std::string row_hash;
+};
+
+struct CheckpointIdRow {
+    int64_t id{0};
+};
+
+struct OrganisationNameRow {
+    std::string organisation;
+};
+
+static constexpr char kOrganisationsQuery[] = "SELECT DISTINCT organisation FROM core.audit_logs ORDER BY organisation";
+static constexpr char kVerifyChainQuery[] = "SELECT is_valid, total_rows, first_broken_seq, first_broken_id, failure_reason "
+                                            "FROM core.verify_audit_chain($1::text)";
+static constexpr char kCheckpointsQuery[] = "SELECT id, last_seq, last_hash, signature, public_key "
+                                            "FROM core.audit_checkpoints WHERE organisation = $1::text ORDER BY last_seq ASC";
+static constexpr char kLatestAuditQuery[] =
+    "SELECT seq, row_hash FROM core.audit_logs WHERE organisation = $1::text ORDER BY seq DESC LIMIT 1";
+static constexpr char kInsertCheckpointQuery[] =
+    "INSERT INTO core.audit_checkpoints (organisation, last_seq, last_hash, sink_target, signature, public_key) "
+    "VALUES ($1::text, $2::bigint, $3::text, $4::text, $5::text, $6::text) "
+    "RETURNING id";
+
+} // namespace
 
 drogon::Task<bool> AuditLogger::logSerialized(drogon::orm::DbClientPtr tsp_db_client, std::string t_organisation, std::string t_actor_type,
     std::optional<int32_t> t_actor_id, std::string t_actor_name, std::string t_action, std::string t_target_type, std::string t_target_id,
@@ -65,9 +111,10 @@ drogon::Task<AuditVerificationResult> AuditLogger::verifyChain(drogon::orm::DbCl
         if (!t_organisation.empty()) {
             orgs_to_verify.push_back(t_organisation);
         } else {
-            auto org_res = co_await tsp_db_client->execSqlCoro("SELECT DISTINCT organisation FROM core.audit_logs ORDER BY organisation");
-            for (const auto& row : org_res) {
-                orgs_to_verify.push_back(row["organisation"].as<std::string>());
+            auto org_res = co_await tsp_db_client->execSqlCoro(kOrganisationsQuery);
+            const auto org_rows = sgrn::orm::fromResult<OrganisationNameRow, kOrganisationsQuery>(org_res);
+            for (const auto& row : org_rows) {
+                orgs_to_verify.push_back(row.organisation);
             }
         }
 
@@ -78,10 +125,7 @@ drogon::Task<AuditVerificationResult> AuditLogger::verifyChain(drogon::orm::DbCl
         }
 
         for (const auto& org : orgs_to_verify) {
-            auto verify_res =
-                co_await tsp_db_client->execSqlCoro("SELECT is_valid, total_rows, first_broken_seq, first_broken_id, failure_reason "
-                                                    "FROM core.verify_audit_chain($1::text)",
-                    org);
+            auto verify_res = co_await tsp_db_client->execSqlCoro(kVerifyChainQuery, org);
 
             if (verify_res.empty()) {
                 result.is_valid = false;
@@ -89,44 +133,32 @@ drogon::Task<AuditVerificationResult> AuditLogger::verifyChain(drogon::orm::DbCl
                 co_return result;
             }
 
-            const auto& row = verify_res[0];
-            const bool valid = row["is_valid"].as<bool>();
-            const int64_t rows = row["total_rows"].as<int64_t>();
-            result.total_rows += rows;
+            const auto row = sgrn::orm::fromRow<AuditChainVerificationRow, kVerifyChainQuery>(verify_res[0]);
+            result.total_rows += row.total_rows;
 
-            if (!valid) {
+            if (!row.is_valid) {
                 result.is_valid = false;
-                if (!row["first_broken_seq"].isNull()) {
-                    result.first_broken_seq = row["first_broken_seq"].as<int64_t>();
-                }
-                if (!row["first_broken_id"].isNull()) {
-                    result.first_broken_id = row["first_broken_id"].as<int64_t>();
-                }
-                result.failure_reason = "Org '" + org + "': " + row["failure_reason"].as<std::string>();
+                result.first_broken_seq = row.first_broken_seq;
+                result.first_broken_id = row.first_broken_id;
+                result.failure_reason = "Org '" + org + "': " + row.failure_reason;
                 co_return result;
             }
 
             // Verify checkpoints for this org
-            auto chk_res =
-                co_await tsp_db_client->execSqlCoro("SELECT id, last_seq, last_hash, signature, public_key "
-                                                    "FROM core.audit_checkpoints WHERE organisation = $1::text ORDER BY last_seq ASC",
-                    org);
+            auto chk_res = co_await tsp_db_client->execSqlCoro(kCheckpointsQuery, org);
 
-            for (const auto& chk : chk_res) {
-                if (chk["signature"].isNull() || chk["public_key"].isNull()) {
+            const auto checkpoints = sgrn::orm::fromResult<AuditCheckpointRow, kCheckpointsQuery>(chk_res);
+            for (const auto& checkpoint : checkpoints) {
+                if (!checkpoint.signature.has_value() || !checkpoint.public_key.has_value()) {
                     continue;
                 }
-                const std::string sig_hex = chk["signature"].as<std::string>();
-                const std::string pub_hex = chk["public_key"].as<std::string>();
-                const int64_t last_seq = chk["last_seq"].as<int64_t>();
-                const std::string last_hash = chk["last_hash"].as<std::string>();
 
-                const std::string checkpoint_payload = org + ":" + std::to_string(last_seq) + ":" + last_hash;
-                if (!verifyEd25519(checkpoint_payload, sig_hex, pub_hex)) {
+                const std::string checkpoint_payload = org + ":" + std::to_string(checkpoint.last_seq) + ":" + checkpoint.last_hash;
+                if (!verifyEd25519(checkpoint_payload, *checkpoint.signature, *checkpoint.public_key)) {
                     result.is_valid = false;
-                    result.first_broken_seq = last_seq;
+                    result.first_broken_seq = checkpoint.last_seq;
                     result.failure_reason =
-                        "Checkpoint Ed25519 signature verification failed for checkpoint ID " + std::to_string(chk["id"].as<int64_t>());
+                        "Checkpoint Ed25519 signature verification failed for checkpoint ID " + std::to_string(checkpoint.id);
                     co_return result;
                 }
                 ++result.verified_checkpoints;
@@ -158,16 +190,16 @@ drogon::Task<AuditCheckpointResult> AuditLogger::createCheckpoint(
 
     try {
         // Find latest audit record for organisation
-        auto latest_res = co_await tsp_db_client->execSqlCoro(
-            "SELECT seq, row_hash FROM core.audit_logs WHERE organisation = $1::text ORDER BY seq DESC LIMIT 1", t_organisation);
+        auto latest_res = co_await tsp_db_client->execSqlCoro(kLatestAuditQuery, t_organisation);
 
         if (latest_res.empty()) {
             result.error = "No audit log records exist for organisation: " + t_organisation;
             co_return result;
         }
 
-        const int64_t last_seq = latest_res[0]["seq"].as<int64_t>();
-        const std::string last_hash = latest_res[0]["row_hash"].as<std::string>();
+        const auto latest = sgrn::orm::fromRow<LatestAuditRow, kLatestAuditQuery>(latest_res[0]);
+        const int64_t last_seq = latest.seq;
+        const std::string& last_hash = latest.row_hash;
 
         std::string priv_hex;
         std::string pub_hex;
@@ -184,13 +216,10 @@ drogon::Task<AuditCheckpointResult> AuditLogger::createCheckpoint(
         }
 
         auto ins_res = co_await tsp_db_client->execSqlCoro(
-            "INSERT INTO core.audit_checkpoints (organisation, last_seq, last_hash, sink_target, signature, public_key) "
-            "VALUES ($1::text, $2::bigint, $3::text, $4::text, $5::text, $6::text) "
-            "RETURNING id",
-            t_organisation, last_seq, last_hash, t_sink_target, sig_hex, pub_hex);
+            kInsertCheckpointQuery, t_organisation, last_seq, last_hash, t_sink_target, sig_hex, pub_hex);
 
         result.success = true;
-        result.checkpoint_id = ins_res[0]["id"].as<int64_t>();
+        result.checkpoint_id = sgrn::orm::fromRowByName<CheckpointIdRow>(ins_res[0]).id;
         result.last_seq = last_seq;
         result.last_hash = last_hash;
         result.signature = sig_hex;

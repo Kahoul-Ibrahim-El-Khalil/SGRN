@@ -11,7 +11,7 @@ export function EventHandlerInit() {
 
     useEffect(() => {
         setGlobalEventHandler(showEvent);
-        return () => setGlobalEventHandler(() => {});
+        return () => setGlobalEventHandler(null);
     }, [showEvent]);
 
     return null;

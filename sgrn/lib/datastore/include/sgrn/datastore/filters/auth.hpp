@@ -14,9 +14,9 @@ namespace sgrn::datastore::filters
  *   1. Extract Bearer UUID Token
  *   2. Look up session in SessionStore (RAM cache / PostgreSQL)
  *   3. Assert the session belongs to an automated service, not a human user
- *      — checked via session_json["user"]["automated_service_id"] presence
+ *      — checked via typed SessionClaims::user.automated_service_id
  *   4. Hydrate request attributes:
- *        "session_json"           → full Json::Value session payload
+ *        "session_claims"         → typed SessionClaims
  *        "automated_service_id"   → int32_t
  *
  * Using a dedicated filter (rather than reusing AuthFilter + AdminFilter)

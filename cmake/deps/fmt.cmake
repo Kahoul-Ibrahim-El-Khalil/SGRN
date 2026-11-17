@@ -1,4 +1,4 @@
-# cmake/fmt.cmake — Single {fmt} resolver (deps-only AND normal builds)
+# cmake/deps/fmt.cmake — Single {fmt} resolver (deps-only AND normal builds)
 # ─────────────────────────────────────────────────────────────────────────────
 include_guard(GLOBAL)
 

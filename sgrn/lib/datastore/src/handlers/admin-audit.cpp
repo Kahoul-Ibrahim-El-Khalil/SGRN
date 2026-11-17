@@ -41,14 +41,12 @@ struct AuditLogEntry {
 };
 
 struct AuditLogsResponse {
-    bool success{true};
     std::vector<AuditLogEntry> audit_logs;
     int32_t limit{0};
     int32_t offset{0};
 };
 
 struct AuditPurgeResponse {
-    bool success{true};
     int64_t records_purged{0};
     int32_t older_than_days{0};
     std::string message;
@@ -69,6 +67,19 @@ struct AuditVerificationDetails {
     int64_t verified_checkpoints{0};
 };
 
+struct AuditOrganisationRow {
+    std::string organisation;
+};
+
+struct AuditPurgeResultRow {
+    int64_t purged_count{0};
+    std::string status_message;
+};
+
+static constexpr char kAuditOrganisationsQuery[] = "SELECT DISTINCT organisation FROM core.audit_logs ORDER BY organisation";
+static constexpr char kPurgeAuditLogsQuery[] =
+    "SELECT purged_count, status_message FROM core.purge_audit_logs($1::text, ($2 || ' days')::interval)";
+
 } // namespace detail
 
 } // namespace sgrn::datastore::handlers::admin
@@ -78,8 +89,7 @@ namespace sgrn::datastore::handlers::admin
 
 Task<HttpResponsePtr> AdminApiHandler::handleGetAuditLogs(HttpRequestPtr tsp_req) {
     try {
-        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
-        const std::string org = session["user"]["organisation"].asString();
+        const std::string org = sgrn::datastore::getSessionOrganisation(tsp_req);
 
         const std::string actor_type = tsp_req->getParameter("actor_type");
         const std::string action = tsp_req->getParameter("action");
@@ -91,7 +101,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleGetAuditLogs(HttpRequestPtr tsp_req
         int32_t offset = offset_raw.empty() ? 0 : std::stoi(offset_raw);
 
         auto db_res = sgrn::datastore::core::getDbClient();
-        CO_RETURN_IF(db_res.hasError(), createJsonResponse(db_res));
+        CO_RETURN_IF(db_res.hasError(), createTypedResponse(BackendErrorResponse{db_res.error()}));
 
         auto db = db_res.value();
 
@@ -124,40 +134,41 @@ Task<HttpResponsePtr> AdminApiHandler::handleGetAuditLogs(HttpRequestPtr tsp_req
         auto res = co_await sgrn::datastore::core::execSqlCoroVec(db, query, params);
 
         detail::AuditLogsResponse resp{
-            .success = true,
             .audit_logs = sgrn::orm::fromResult<detail::AuditLogEntry, kQuerySelect>(res),
             .limit = limit,
             .offset = offset,
         };
-        co_return createTypedJsonResponse(resp, k200OK);
+        co_return createTypedResponse(tsp_req, resp, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to fetch audit logs: {}", e.what());
-        co_return createErrorResponse(std::string("Failed to fetch audit logs: ") + e.what(), k400BadRequest, "AdminApi");
+        co_return createTypedResponse(
+            BackendErrorResponse{std::string("Failed to fetch audit logs: ") + e.what(), k400BadRequest, "AdminApi"});
     }
 }
 
 Task<HttpResponsePtr> AdminApiHandler::handlePurgeAuditLogs(HttpRequestPtr tsp_req) {
     try {
         if (!sgrn::datastore::isPlatformAdmin(tsp_req)) {
-            co_return createErrorResponse(
-                "Forbidden: Platform administrator privileges required to purge audit logs", k403Forbidden, "AdminApi");
+            co_return createTypedResponse(BackendErrorResponse{
+                "Forbidden: Platform administrator privileges required to purge audit logs", k403Forbidden, "AdminApi"});
         }
 
-        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
-        const int32_t actor_id = session["user"]["id"].asInt();
-        const std::string actor_name = session["user"]["email"].asString();
+        const auto ctx = detail::requestContext(tsp_req);
+        const int32_t actor_id = ctx.actor_id;
+        const std::string actor_name = ctx.actor_name;
 
         const std::string days_raw = tsp_req->getParameter("older_than_days");
         int32_t days = days_raw.empty() ? 90 : std::stoi(days_raw);
         if (days < 90) {
-            co_return createErrorResponse("Audit logs purge requires a minimum retention period of 90 days", k400BadRequest, "AdminApi");
+            co_return createTypedResponse(
+                BackendErrorResponse{"Audit logs purge requires a minimum retention period of 90 days", k400BadRequest, "AdminApi"});
         }
 
         const std::string org_filter = tsp_req->getParameter("organisation");
 
         auto db_res = sgrn::datastore::core::getDbClient();
 
-        CO_RETURN_IF(db_res.hasError(), createJsonResponse(db_res));
+        CO_RETURN_IF(db_res.hasError(), createTypedResponse(BackendErrorResponse{db_res.error()}));
 
         auto db = db_res.value();
 
@@ -166,21 +177,20 @@ Task<HttpResponsePtr> AdminApiHandler::handlePurgeAuditLogs(HttpRequestPtr tsp_r
         if (!org_filter.empty()) {
             orgs_to_purge.push_back(org_filter);
         } else {
-            auto org_rows = co_await db->execSqlCoro("SELECT DISTINCT organisation FROM core.audit_logs ORDER BY organisation");
-            for (const auto& r : org_rows) {
-                orgs_to_purge.push_back(r["organisation"].as<std::string>());
+            auto org_rows = co_await db->execSqlCoro(detail::kAuditOrganisationsQuery);
+            for (const auto& row : sgrn::orm::fromResult<detail::AuditOrganisationRow, detail::kAuditOrganisationsQuery>(org_rows)) {
+                orgs_to_purge.push_back(row.organisation);
             }
         }
 
         std::string purge_status_msg;
         for (const auto& target_org : orgs_to_purge) {
-            auto res = co_await db->execSqlCoro(
-                "SELECT purged_count, purged_up_to_seq, status_message FROM core.purge_audit_logs($1::text, ($2 || ' days')::interval)",
-                target_org, std::to_string(days));
+            auto res = co_await db->execSqlCoro(detail::kPurgeAuditLogsQuery, target_org, std::to_string(days));
             if (!res.empty()) {
-                purged_count += res[0]["purged_count"].as<int64_t>();
+                const auto row = sgrn::orm::fromRow<detail::AuditPurgeResultRow, detail::kPurgeAuditLogsQuery>(res[0]);
+                purged_count += row.purged_count;
                 if (purge_status_msg.empty()) {
-                    purge_status_msg = res[0]["status_message"].as<std::string>();
+                    purge_status_msg = row.status_message;
                 }
             }
         }
@@ -203,16 +213,11 @@ Task<HttpResponsePtr> AdminApiHandler::handlePurgeAuditLogs(HttpRequestPtr tsp_r
         resp.older_than_days = days;
         resp.message = purge_status_msg.empty() ? "Audit logs purged successfully" : purge_status_msg;
 
-        auto response_result = sgrn::json::write(resp);
-        if (response_result.hasError()) {
-            ADMIN_ERROR_LOG("Failed to serialize audit purge response: {}", response_result.error().what());
-            co_return createErrorResponse("Failed to serialize audit purge response", k500InternalServerError, "AdminApi");
-        }
-        std::string response_json = std::move(response_result).value();
-        co_return createJsonResponse(std::move(response_json), k200OK);
+        co_return createTypedResponse(tsp_req, resp, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to purge audit logs: {}", e.what());
-        co_return createErrorResponse(std::string("Failed to purge audit logs: ") + e.what(), k400BadRequest, "AdminApi");
+        co_return createTypedResponse(
+            BackendErrorResponse{std::string("Failed to purge audit logs: ") + e.what(), k400BadRequest, "AdminApi"});
     }
 }
 
@@ -225,7 +230,8 @@ Task<HttpResponsePtr> AdminApiHandler::handleVerifyAuditLogs(HttpRequestPtr tsp_
         const std::string q_org = tsp_req->getParameter("organisation");
         if (!q_org.empty()) {
             if (!is_platform && q_org != session_org) {
-                co_return createErrorResponse("Forbidden: cannot verify audit logs of another organisation", k403Forbidden, "AdminApi");
+                co_return createTypedResponse(
+                    BackendErrorResponse{"Forbidden: cannot verify audit logs of another organisation", k403Forbidden, "AdminApi"});
             }
             target_org = q_org;
         } else if (is_platform) {
@@ -233,16 +239,15 @@ Task<HttpResponsePtr> AdminApiHandler::handleVerifyAuditLogs(HttpRequestPtr tsp_
         }
 
         auto db_res = sgrn::datastore::core::getDbClient();
-        if (db_res.hasError())
-            co_return sgrn::createJsonResponse(db_res);
+        CO_RETURN_IF(db_res.hasError(), createTypedResponse(BackendErrorResponse{db_res.error()}));
         auto db = db_res.value();
 
         auto verify_res = co_await sgrn::datastore::audit::AuditLogger::verifyChain(db, target_org);
 
         // Audit the verification run
-        const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
-        const int32_t actor_id = session["user"]["id"].asInt();
-        const std::string actor_name = session["user"]["email"].asString();
+        const auto ctx = detail::requestContext(tsp_req);
+        const int32_t actor_id = ctx.actor_id;
+        const std::string actor_name = ctx.actor_name;
 
         co_await sgrn::datastore::audit::AuditLogger::log(db, session_org, "user", actor_id, actor_name, "audit.verified", "audit_logs",
             target_org, tsp_req->getPeerAddr().toIp(),
@@ -265,16 +270,11 @@ Task<HttpResponsePtr> AdminApiHandler::handleVerifyAuditLogs(HttpRequestPtr tsp_
             resp.first_broken_id = verify_res.first_broken_id;
         }
 
-        auto response_result = sgrn::json::write(resp);
-        if (response_result.hasError()) {
-            ADMIN_ERROR_LOG("Failed to serialize audit verification response: {}", response_result.error().what());
-            co_return createErrorResponse("Failed to serialize audit verification response", k500InternalServerError, "AdminApi");
-        }
-        std::string response_json = std::move(response_result).value();
-        co_return createJsonResponse(std::move(response_json), verify_res.is_valid ? k200OK : k409Conflict);
+        co_return createTypedResponse(tsp_req, resp, verify_res.is_valid ? k200OK : k409Conflict);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to verify audit logs: {}", e.what());
-        co_return createErrorResponse(std::string("Failed to verify audit logs: ") + e.what(), k400BadRequest, "AdminApi");
+        co_return createTypedResponse(
+            BackendErrorResponse{std::string("Failed to verify audit logs: ") + e.what(), k400BadRequest, "AdminApi"});
     }
 }
 

@@ -5,6 +5,7 @@
 #include <drogon/orm/DbClient.h>
 #include <drogon/utils/coroutine.h>
 #include <fmt/core.h>
+#include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/filters/types.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
@@ -17,6 +18,20 @@
 
 namespace sgrn::datastore::filters
 {
+
+namespace detail
+{
+struct OrgBodyProbe {
+    std::optional<std::string> organisation;
+};
+
+struct AdminLevelRow {
+    std::optional<int32_t> admin_level;
+};
+
+static constexpr char kAdminLevelQuery[] = "SELECT core.admin_level($1::int, $2::text, $3::int) AS admin_level";
+static constexpr char kOrganisationAdminLevelQuery[] = "SELECT core.admin_level($1::int, $2::text, NULL) AS admin_level";
+} // namespace detail
 
 AdminLevelCache& AdminLevelCache::instance() {
     static AdminLevelCache cache;
@@ -48,15 +63,19 @@ drogon::Task<AdminLevel> AdminLevelCache::resolveAdminLevel(
         if (db) {
             std::optional<drogon::orm::Result> res_opt;
             if (t_domain_id.has_value()) {
-                res_opt = co_await db->execSqlCoro("SELECT core.admin_level($1::int, $2::text, $3::int)", t_user_id, t_org, *t_domain_id);
+                res_opt = co_await db->execSqlCoro(detail::kAdminLevelQuery, t_user_id, t_org, *t_domain_id);
             } else {
-                res_opt = co_await db->execSqlCoro("SELECT core.admin_level($1::int, $2::text, NULL)", t_user_id, t_org);
+                res_opt = co_await db->execSqlCoro(detail::kOrganisationAdminLevelQuery, t_user_id, t_org);
             }
 
-            if (res_opt && !res_opt->empty() && !(*res_opt)[0][0].isNull()) {
-                const int val = (*res_opt)[0][0].as<int>();
-                resolved_level = static_cast<AdminLevel>(val);
-                db_queried = true;
+            if (res_opt && !res_opt->empty()) {
+                const auto row = t_domain_id.has_value()
+                                     ? sgrn::orm::fromRow<detail::AdminLevelRow, detail::kAdminLevelQuery>((*res_opt)[0])
+                                     : sgrn::orm::fromRow<detail::AdminLevelRow, detail::kOrganisationAdminLevelQuery>((*res_opt)[0]);
+                if (row.admin_level) {
+                    resolved_level = static_cast<AdminLevel>(*row.admin_level);
+                    db_queried = true;
+                }
             }
         }
     } catch (const std::exception& e) {
@@ -143,26 +162,32 @@ ScopeFilter::ScopeFilter(AdminLevel t_required_level, TargetResourceResolver t_r
 void ScopeFilter::doFilter(const drogon::HttpRequestPtr& tsp_req, drogon::FilterCallback&& tsp_filter_callback,
     drogon::FilterChainCallback&& t_filter_chain_callback) {
     // 1. Verify authentication context
-    if (!tsp_req->attributes()->find("session_json")) {
-        respondWithError("Unauthorized: Authentication Required", drogon::k401Unauthorized, std::move(tsp_filter_callback));
+    int32_t caller_user_id = 0;
+    std::string caller_email;
+    std::string session_org;
+    bool is_platform_caller = false;
+
+    if (tsp_req->attributes()->find("auth_context")) {
+        const auto& auth = tsp_req->attributes()->get<AuthContext>("auth_context");
+        caller_user_id = auth.user.id;
+        caller_email = auth.user.email;
+        session_org = auth.user.organisation;
+        is_platform_caller = auth.user.is_platform_admin || sgrn::datastore::auth::emailIsConfiguredPlatformAdmin(caller_email);
+    } else if (tsp_req->attributes()->find("session_claims")) {
+        const auto& claims = tsp_req->attributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims");
+        if (claims.user.id <= 0) {
+            tsp_filter_callback(
+                createTypedResponse(BackendErrorResponse{"Unauthorized: Incomplete Session Claims", drogon::k401Unauthorized}));
+            return;
+        }
+        caller_user_id = claims.user.id;
+        caller_email = claims.user.email;
+        session_org = claims.user.organisation;
+        is_platform_caller = sgrn::datastore::auth::emailIsConfiguredPlatformAdmin(caller_email);
+    } else {
+        tsp_filter_callback(createTypedResponse(BackendErrorResponse{"Unauthorized: Authentication Required", drogon::k401Unauthorized}));
         return;
     }
-
-    const Json::Value& session_json = tsp_req->attributes()->get<Json::Value>("session_json");
-    if (!session_json.isMember("user")) {
-        respondWithError("Unauthorized: Incomplete Session Claims", drogon::k401Unauthorized, std::move(tsp_filter_callback));
-        return;
-    }
-
-    const Json::Value& user_obj = session_json["user"];
-    const int32_t caller_user_id = user_obj.isMember("id") ? user_obj["id"].asInt() : 0;
-    const std::string caller_email = user_obj.isMember("email") ? user_obj["email"].asString() : "";
-    const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
-
-    // 2. Check if platform admin via configuration/email
-    // The request attribute is populated by this filter, so before the async
-    // DB lookup only the bootstrap list can be known locally.
-    const bool is_platform_caller = sgrn::datastore::auth::emailIsConfiguredPlatformAdmin(caller_email);
 
     // 3. Resolve target resource
     TargetResource target_res;
@@ -178,19 +203,20 @@ void ScopeFilter::doFilter(const drogon::HttpRequestPtr& tsp_req, drogon::Filter
         const std::string q_org = tsp_req->getParameter("organisation");
         if (!q_org.empty() && q_org != session_org) {
             SGRN_WARN_LOG("ScopeFilter: Rejected cross-organisation query param '{}' for non-platform user '{}'", q_org, caller_email);
-            respondWithError("Forbidden: Cross-organisation targeting disallowed", drogon::k403Forbidden, std::move(tsp_filter_callback));
+            tsp_filter_callback(
+                createTypedResponse(BackendErrorResponse{"Forbidden: Cross-organisation targeting disallowed", drogon::k403Forbidden}));
             return;
         }
 
-        // Also check JSON body if present and contains "organisation"
-        auto p_body = tsp_req->getJsonObject();
-        if (p_body && p_body->isMember("organisation")) {
-            const std::string body_org = (*p_body)["organisation"].asString();
+        // Also check body if present and contains "organisation"
+        auto p_body = parseTypedRequest<detail::OrgBodyProbe>(tsp_req);
+        if (p_body.has_value() && p_body->organisation.has_value()) {
+            const std::string& body_org = *p_body->organisation;
             if (!body_org.empty() && body_org != session_org) {
                 SGRN_WARN_LOG(
                     "ScopeFilter: Rejected cross-organisation body payload '{}' for non-platform user '{}'", body_org, caller_email);
-                respondWithError(
-                    "Forbidden: Cross-organisation targeting disallowed", drogon::k403Forbidden, std::move(tsp_filter_callback));
+                tsp_filter_callback(
+                    createTypedResponse(BackendErrorResponse{"Forbidden: Cross-organisation targeting disallowed", drogon::k403Forbidden}));
                 return;
             }
         }
@@ -227,9 +253,10 @@ void ScopeFilter::doFilter(const drogon::HttpRequestPtr& tsp_req, drogon::Filter
             if (static_cast<uint8_t>(caller_level) < static_cast<uint8_t>(req_level)) {
                 SGRN_WARN_LOG("ScopeFilter: Denied access for user '{}' (level={}, required={}) on org '{}'", caller_email,
                     adminLevelToString(caller_level), adminLevelToString(req_level), target_res.organisation);
-                respondWithError(fmt::format("Forbidden: Insufficient Administrative Privilege (requires {}, caller is {})",
-                                     adminLevelToString(req_level), adminLevelToString(caller_level)),
-                    drogon::k403Forbidden, tsp_filter_callback);
+                tsp_filter_callback(createTypedResponse(
+                    BackendErrorResponse{fmt::format("Forbidden: Insufficient Administrative Privilege (requires {}, caller is {})",
+                                             adminLevelToString(req_level), adminLevelToString(caller_level)),
+                        drogon::k403Forbidden}));
                 co_return;
             }
 

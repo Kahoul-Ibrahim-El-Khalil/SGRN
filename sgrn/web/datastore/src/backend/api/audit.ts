@@ -27,14 +27,12 @@ export interface FetchAuditLogsParams {
 }
 
 export interface AuditLogsResult {
-    success: boolean;
     audit_logs: AuditLogEntry[];
     limit: number;
     offset: number;
 }
 
 export interface PurgeAuditLogsResult {
-    success: boolean;
     records_purged: number;
     older_than_days: number;
     message: string;

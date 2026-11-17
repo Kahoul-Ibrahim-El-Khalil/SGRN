@@ -48,18 +48,18 @@ public:
         : db_(std::move(t_db)) {
     }
 
-    drogon::Task<BackendResult<RoleAccess>> roleAccess(int32_t t_role_id);
-    drogon::Task<BackendResult<std::vector<RoleRecord>>> listRoles(const std::string& t_organisation);
-    drogon::Task<BackendResult<int32_t>> createRole(
+    drogon::Task<Result<RoleAccess, BackendError>> roleAccess(int32_t t_role_id);
+    drogon::Task<Result<std::vector<RoleRecord>, BackendError>> listRoles(const std::string& t_organisation);
+    drogon::Task<Result<int32_t, BackendError>> createRole(
         const std::string& t_organisation, const std::string& t_name, const std::string& t_description, const std::string& t_permissions);
-    drogon::Task<BackendResult<bool>> updateRole(int32_t t_role_id, const std::string& t_organisation,
+    drogon::Task<Result<bool, BackendError>> updateRole(int32_t t_role_id, const std::string& t_organisation,
         const std::optional<std::string>& t_description, const std::optional<std::string>& t_permissions);
-    drogon::Task<BackendResult<bool>> deleteRole(int32_t t_role_id, const std::string& t_organisation);
-    drogon::Task<BackendResult<SubjectOrganisation>> userOrganisation(int32_t t_user_id);
-    drogon::Task<BackendResult<SubjectOrganisation>> serviceOrganisation(int32_t t_service_id);
-    drogon::Task<BackendResult<bool>> isLastPlatformAdmin(int32_t t_user_id);
-    drogon::Task<BackendResult<void>> assignRole(const RoleTarget& t_target, int32_t t_role_id);
-    drogon::Task<BackendResult<void>> revokeRole(const RoleTarget& t_target, int32_t t_role_id);
+    drogon::Task<Result<bool, BackendError>> deleteRole(int32_t t_role_id, const std::string& t_organisation);
+    drogon::Task<Result<SubjectOrganisation, BackendError>> userOrganisation(int32_t t_user_id);
+    drogon::Task<Result<SubjectOrganisation, BackendError>> serviceOrganisation(int32_t t_service_id);
+    drogon::Task<Result<bool, BackendError>> isLastPlatformAdmin(int32_t t_user_id);
+    drogon::Task<Result<void, BackendError>> assignRole(const RoleTarget& t_target, int32_t t_role_id);
+    drogon::Task<Result<void, BackendError>> revokeRole(const RoleTarget& t_target, int32_t t_role_id);
 
 private:
     drogon::orm::DbClientPtr db_;

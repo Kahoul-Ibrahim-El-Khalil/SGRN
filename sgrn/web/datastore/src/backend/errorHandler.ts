@@ -4,17 +4,7 @@ import { isError } from "@sgrn/types";
 
 let global_event_handler: ((t_event_type: EventType, t_message: string, t_scope?: string) => void) | null = null;
 
-// Legacy function for backward compatibility (kept for existing code)
-export function setGlobalErrorHandler(t_handler: (t_message: string) => void) {
-    global_event_handler = (t_event_type: EventType, t_message: string) => {
-        if (t_event_type === "error") {
-            t_handler(t_message);
-        }
-    };
-}
-
-// New function that supports all event types
-export function setGlobalEventHandler(t_handler: (t_event_type: EventType, t_message: string, t_scope?: string) => void) {
+export function setGlobalEventHandler(t_handler: ((t_event_type: EventType, t_message: string, t_scope?: string) => void) | null) {
     global_event_handler = t_handler;
 }
 
@@ -39,28 +29,4 @@ export function handleSgrnResult<T>(t_result: SgrnResult<T>): t_result is { data
         return false;
     }
     return true;
-}
-
-export function handleApiSuccess(t_message: string) {
-    if (global_event_handler) {
-        global_event_handler("success", t_message);
-    } else {
-        console.log("No event handler registered:", t_message);
-    }
-}
-
-export function handleApiInfo(t_message: string) {
-    if (global_event_handler) {
-        global_event_handler("info", t_message);
-    } else {
-        console.info("No event handler registered:", t_message);
-    }
-}
-
-export function handleApiWarning(t_message: string) {
-    if (global_event_handler) {
-        global_event_handler("warning", t_message);
-    } else {
-        console.warn("No event handler registered:", t_message);
-    }
 }

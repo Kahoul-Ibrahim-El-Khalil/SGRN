@@ -3,7 +3,7 @@
 namespace sgrn::datastore::shell
 {
 
-sgrn::Result<void> DatastoreShell::cmdLs(const std::vector<std::string>& t_args) {
+Result<void> DatastoreShell::cmdLs(const std::vector<std::string>& t_args) {
     const std::string path = t_args.empty() ? cwd_ : normalizePath(t_args[0]);
     RETURN_ERROR_IF(!storage_, "not connected");
     auto r = storage_->tryListDrive(path, scope_);
@@ -11,22 +11,22 @@ sgrn::Result<void> DatastoreShell::cmdLs(const std::vector<std::string>& t_args)
     // Align the size column; directories render cyan with a trailing slash.
     size_t name_width = 0;
     for (const auto& d : r.value().folders)
-        name_width = std::max(name_width, displayWidth(d.name_));
+        name_width = std::max(name_width, displayWidth(d.name));
     for (const auto& f : r.value().files)
-        name_width = std::max(name_width, displayWidth(f.name_));
+        name_width = std::max(name_width, displayWidth(f.name));
     for (const auto& d : r.value().folders)
-        fmt::print(styleDir(), "{}/\n", padCell(d.name_, name_width, false));
+        fmt::print(styleDir(), "{}/\n", padCell(d.name, name_width, false));
     for (const auto& f : r.value().files) {
         if (f.is_encrypted) {
-            fmt::print("{}  {}  [enc]\n", padCell(f.name_, name_width, false), humanBytes(f.size));
+            fmt::print("{}  {}  [enc]\n", padCell(f.name, name_width, false), humanBytes(f.size));
         } else {
-            fmt::print("{}  {}\n", padCell(f.name_, name_width, false), humanBytes(f.size));
+            fmt::print("{}  {}\n", padCell(f.name, name_width, false), humanBytes(f.size));
         }
     }
     return {};
 }
 
-sgrn::Result<void> DatastoreShell::cmdCd(const std::vector<std::string>& t_args) {
+Result<void> DatastoreShell::cmdCd(const std::vector<std::string>& t_args) {
     if (t_args.empty()) {
         cwd_ = "/";
         return {};
@@ -37,13 +37,15 @@ sgrn::Result<void> DatastoreShell::cmdCd(const std::vector<std::string>& t_args)
         return {};
     }
     auto hit = resolve(path);
+
     RETURN_IF(hit.hasError(), hit.error());
+
     RETURN_ERROR_IF(!hit.value() || !hit.value()->is_dir, fmt::format("{}: No such directory", path));
     cwd_ = path;
     return {};
 }
 
-sgrn::Result<void> DatastoreShell::cmdCat(const std::vector<std::string>& t_args) {
+Result<void> DatastoreShell::cmdCat(const std::vector<std::string>& t_args) {
     RETURN_ERROR_IF(t_args.empty(), "missing file operand");
     const std::string path = normalizePath(t_args[0]);
     RETURN_ERROR_IF(!client_, "not connected");
@@ -53,7 +55,7 @@ sgrn::Result<void> DatastoreShell::cmdCat(const std::vector<std::string>& t_args
     return {};
 }
 
-sgrn::Result<void> DatastoreShell::cmdGet(const std::vector<std::string>& t_args) {
+Result<void> DatastoreShell::cmdGet(const std::vector<std::string>& t_args) {
     RETURN_ERROR_IF(t_args.empty(), "missing remote path (get <remote> [local])");
     const std::string remote = normalizePath(t_args[0]);
     std::string local = (t_args.size() > 1) ? expandLocalPath(t_args[1]) : baseName(remote);
@@ -66,7 +68,7 @@ sgrn::Result<void> DatastoreShell::cmdGet(const std::vector<std::string>& t_args
     return {};
 }
 
-sgrn::Result<void> DatastoreShell::cmdPut(const std::vector<std::string>& t_args) {
+Result<void> DatastoreShell::cmdPut(const std::vector<std::string>& t_args) {
     RETURN_ERROR_IF(t_args.empty(), "missing local path (put <local> [remote] [--encrypt])");
     for (const auto& a : t_args) {
         if (a == "--encrypt" || a == "-e")
@@ -88,14 +90,14 @@ sgrn::Result<void> DatastoreShell::cmdPut(const std::vector<std::string>& t_args
     return {};
 }
 
-sgrn::Result<void> DatastoreShell::cmdMkdir(const std::vector<std::string>& t_args) {
+Result<void> DatastoreShell::cmdMkdir(const std::vector<std::string>& t_args) {
     RETURN_ERROR_IF(t_args.empty(), "missing operand");
     const std::string path = normalizePath(t_args[0]);
     RETURN_ERROR_IF(!storage_ || !storage_->createDirectory(path, scope_), fmt::format("cannot create directory '{}'", path));
     return {};
 }
 
-sgrn::Result<void> DatastoreShell::cmdMv(const std::vector<std::string>& t_args) {
+Result<void> DatastoreShell::cmdMv(const std::vector<std::string>& t_args) {
     RETURN_ERROR_IF(t_args.size() < 2, "missing operand (mv <src> <dst>)");
     const std::string src = normalizePath(t_args[0]);
     const std::string dst = normalizePath(t_args[1]);
@@ -127,7 +129,7 @@ sgrn::Result<void> DatastoreShell::cmdMv(const std::vector<std::string>& t_args)
     return {};
 }
 
-sgrn::Result<void> DatastoreShell::cmdRm(const std::vector<std::string>& t_args) {
+Result<void> DatastoreShell::cmdRm(const std::vector<std::string>& t_args) {
     bool recursive = false;
     std::vector<std::string> paths;
     for (const auto& a : t_args) {
@@ -178,13 +180,13 @@ sgrn::Result<void> DatastoreShell::cmdRm(const std::vector<std::string>& t_args)
     return {};
 }
 
-sgrn::Result<void> DatastoreShell::cmdTree(const std::vector<std::string>& t_args) {
+Result<void> DatastoreShell::cmdTree(const std::vector<std::string>& t_args) {
     const std::string path = t_args.empty() ? cwd_ : normalizePath(t_args[0]);
     fmt::print("{}\n", path);
     return treeRecursive(path, "");
 }
 
-sgrn::Result<void> DatastoreShell::cmdDu(const std::vector<std::string>& t_args) {
+Result<void> DatastoreShell::cmdDu(const std::vector<std::string>& t_args) {
     const std::string path = t_args.empty() ? cwd_ : normalizePath(t_args[0]);
     auto total = duRecursive(path);
     RETURN_IF(total.hasError(), total.error());
@@ -192,7 +194,7 @@ sgrn::Result<void> DatastoreShell::cmdDu(const std::vector<std::string>& t_args)
     return {};
 }
 
-sgrn::Result<void> DatastoreShell::cmdZip(const std::vector<std::string>& t_args) {
+Result<void> DatastoreShell::cmdZip(const std::vector<std::string>& t_args) {
     RETURN_ERROR_IF(t_args.empty(), "missing remote path (zip <remote-dir> [local.zip])");
     const std::string remote = normalizePath(t_args[0]);
     const std::string local = (t_args.size() > 1) ? expandLocalPath(t_args[1]) : baseName(remote) + ".zip";

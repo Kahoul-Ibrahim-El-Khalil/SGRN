@@ -2,8 +2,12 @@
 // Source: core.admin_assignments
 #pragma once
 #include <sgrn/datastore/handlers/CrudViewHandler.hpp>
+#include <sgrn/utils/json-serialization.hpp>
 
 #include <array>
+#include <cstdint>
+#include <optional>
+#include <string>
 
 namespace sgrn::datastore::handlers::query
 {
@@ -13,8 +17,27 @@ using sgrn::datastore::query::FieldType;
 using sgrn::datastore::query::Op;
 using sgrn::datastore::query::PrimaryKey;
 
+// Response row of core.admin_assignments — the whitelisted SELECT columns.
+struct AdminAssignmentsRow {
+    std::optional<std::string> id;
+    std::optional<std::string> organisation;
+    std::optional<std::int32_t> user_id;
+    std::optional<std::string> scope;
+    std::optional<std::int32_t> domain_id;
+    std::optional<bool> can_manage_users;
+    std::optional<bool> can_manage_keys;
+    std::optional<std::int32_t> granted_by;
+    std::optional<std::string> created_at;
+};
+
 class AdminAssignmentsView : public CrudViewHandler<AdminAssignmentsView> {
 public:
+    using Row = AdminAssignmentsRow;
+    static constexpr char kPrimaryKeyName[] = "id";
+
+    static constexpr char kRowProjection[] = "SELECT id, organisation, user_id, scope, domain_id, can_manage_users, "
+                                             "can_manage_keys, granted_by, created_at FROM core.admin_assignments";
+
     static constexpr std::array<Field, 7> kFields = {{
         {"user_id", FieldType::Int, Op::Eq | Op::In, true, true},
         {"scope", FieldType::Text, static_cast<uint8_t>(Op::Eq), true, true},

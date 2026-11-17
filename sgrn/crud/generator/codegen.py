@@ -23,6 +23,66 @@ class CppCodeGenerator:
         else:
             self.env = None
 
+    @staticmethod
+    def _response_fields(manifest: Dict[str, Any]) -> List[Dict[str, str]]:
+        table = manifest["table"]
+        fields = manifest.get("fields", {})
+        names = [table["primary_key"]]
+        tenant = manifest.get("tenant", {}).get("column", "")
+        if tenant and tenant not in names:
+            names.append(tenant)
+        names.extend(name for name, field in fields.items()
+                     if field.get("readable") and name not in names)
+
+        cpp_types = {
+            "Int": "std::int32_t",
+            "BigInt": "std::string",
+            "Text": "std::string",
+            "Bool": "bool",
+            "Timestamp": "std::string",
+            "Jsonb": "glz::raw_json",
+        }
+        primary_key_type = table.get("primary_key_type", "int").lower()
+        primary_key_fallback = "BigInt" if primary_key_type in ("bigint", "long") else (
+            "Int" if primary_key_type in ("int", "integer") else "Text"
+        )
+        response_fields = []
+        for name in names:
+            field = fields.get(name, {})
+            fallback_type = primary_key_fallback if name == table["primary_key"] else "Text"
+            field_type = field.get("type_pascal", fallback_type)
+            cpp_type = cpp_types.get(field_type, "std::string")
+            nullable = name not in (table["primary_key"], tenant) and field.get("nullable", True)
+            response_fields.append({
+                "name": name,
+                "type": f"std::optional<{cpp_type}>" if nullable else cpp_type,
+                "member": f"&T::{name}",
+            })
+        return response_fields
+
+    @staticmethod
+    def _request_fields(manifest: Dict[str, Any]) -> List[Dict[str, str]]:
+        cpp_types = {
+            "Int": "std::int32_t",
+            "BigInt": "std::int64_t",
+            "Text": "std::string",
+            "Bool": "bool",
+            "Timestamp": "std::string",
+            "Jsonb": "glz::generic",
+        }
+        excluded = {manifest["table"]["primary_key"], manifest.get("tenant", {}).get("column", "")}
+        request_fields = []
+        for name, field in manifest.get("fields", {}).items():
+            if not field.get("writable") or field.get("soft_delete_field") or name in excluded:
+                continue
+            cpp_type = cpp_types.get(field.get("type_pascal", "Text"), "std::string")
+            request_fields.append({
+                "name": name,
+                "type": f"std::optional<{cpp_type}>",
+                "member": f"&T::{name}",
+            })
+        return request_fields
+
     def generate_handler(self, manifest: Dict[str, Any]) -> str:
         if HAS_JINJA2 and self.env:
             template = self.env.get_template("handler.gen.hpp.j2")
@@ -38,7 +98,9 @@ class CppCodeGenerator:
                 class_name=class_name,
                 read_scope_pascal=read_scope,
                 write_scope_pascal=write_scope,
-                delete_scope_pascal=delete_scope
+                delete_scope_pascal=delete_scope,
+                response_fields=self._response_fields(manifest),
+                request_fields=self._request_fields(manifest),
             )
 
         # Fallback pure-Python rendering if jinja2 is absent
@@ -79,6 +141,12 @@ class CppCodeGenerator:
             fields_code.append(field_str)
 
         fields_joined = ",\n".join(fields_code)
+        response_fields = self._response_fields(manifest)
+        response_struct_fields = "\n".join(f"    {field['type']} {field['name']}{{}};" for field in response_fields)
+        response_meta_fields = ", ".join(f'"{field["name"]}", {field["member"]}' for field in response_fields)
+        request_fields = self._request_fields(manifest)
+        request_struct_fields = "\n".join(f"    {field['type']} {field['name']};" for field in request_fields)
+        request_meta_fields = ", ".join(f'"{field["name"]}", {field["member"]}' for field in request_fields)
 
         routes = manifest.get("routes", {})
         list_route = routes.get("list", {})
@@ -92,12 +160,52 @@ class CppCodeGenerator:
 
 #include <sgrn/crud/CrudViewHandler.hpp>
 #include <array>
+#include <cstdint>
+#include <optional>
+#include <string>
 #include <vector>
+
+namespace sgrn::crud::generated {{
+
+struct {class_name}ResponseRow {{
+{response_struct_fields}
+}};
+
+struct {class_name}CreateBody {{
+{request_struct_fields}
+}};
+
+struct {class_name}UpdateBody {{
+{request_struct_fields}
+}};
+
+}} // namespace sgrn::crud::generated
+
+template <>
+struct glz::meta<sgrn::crud::generated::{class_name}ResponseRow> {{
+    using T = sgrn::crud::generated::{class_name}ResponseRow;
+    static constexpr auto value = glz::object({response_meta_fields});
+}};
+
+template <>
+struct glz::meta<sgrn::crud::generated::{class_name}CreateBody> {{
+    using T = sgrn::crud::generated::{class_name}CreateBody;
+    static constexpr auto value = glz::object({request_meta_fields});
+}};
+
+template <>
+struct glz::meta<sgrn::crud::generated::{class_name}UpdateBody> {{
+    using T = sgrn::crud::generated::{class_name}UpdateBody;
+    static constexpr auto value = glz::object({request_meta_fields});
+}};
 
 namespace sgrn::crud::generated {{
 
 class {class_name} : public sgrn::crud::CrudViewHandler<{class_name}> {{
 public:
+    using ResponseRow = {class_name}ResponseRow;
+    using CreateBody = {class_name}CreateBody;
+    using UpdateBody = {class_name}UpdateBody;
     static inline const sgrn::crud::CrudPolicy kPolicy{{
         .read_scope = sgrn::crud::ReadScope::{read_scope},
         .write_scope = sgrn::crud::WriteScope::{write_scope},

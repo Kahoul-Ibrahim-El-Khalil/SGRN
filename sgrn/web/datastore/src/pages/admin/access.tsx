@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { Loader2, Search, Plus, Trash2, Shield, RefreshCw, Save, UserPlus, UserMinus } from "lucide-react";
 import { useEvent } from "@/contexts/EventContext";
-import { authenticatedFetch } from "@/backend/api/fetcher";
+import { authenticatedFetch, readBody } from "@/backend/api/fetcher";
 import { fetchPermissions, grantPermission, revokePermission, type DomainPermission } from "@/backend/api/permissions";
 import {
     fetchRoles,
@@ -87,7 +87,7 @@ export default function PermissionsPanel() {
             // ?organisation= — the default list is scoped server-side.
             const res = await authenticatedFetch(t_kind === "user" ? "/api/v1/users" : "/api/v1/automated-services");
             if (!res.ok) return;
-            const data = await res.json();
+            const data = await readBody(res);
             if (!Array.isArray(data)) return;
             const parsed: AssignTarget[] = data.map((entry: Record<string, unknown>) =>
                 t_kind === "user"

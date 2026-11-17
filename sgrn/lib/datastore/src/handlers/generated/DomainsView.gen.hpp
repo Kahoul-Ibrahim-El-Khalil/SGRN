@@ -2,8 +2,12 @@
 // Source: core.domains
 #pragma once
 #include <sgrn/datastore/handlers/CrudViewHandler.hpp>
+#include <sgrn/utils/json-serialization.hpp>
 
 #include <array>
+#include <cstdint>
+#include <optional>
+#include <string>
 
 namespace sgrn::datastore::handlers::query
 {
@@ -13,8 +17,41 @@ using sgrn::datastore::query::FieldType;
 using sgrn::datastore::query::Op;
 using sgrn::datastore::query::PrimaryKey;
 
+// Request body of POST /api/v1/domains — the insertable columns of core.domains.
+struct DomainsCreateBody {
+    std::optional<std::string> name;
+    std::optional<int32_t> parent_id;
+    std::optional<std::string> encryption_policy;
+};
+
+// Request body of PATCH /api/v1/domains/{id} — the updatable columns of core.domains.
+struct DomainsUpdateBody {
+    std::optional<std::string> encryption_policy;
+};
+
+// Response row of core.domains — the whitelisted SELECT columns.
+struct DomainsRow {
+    std::optional<std::int32_t> id;
+    std::optional<std::string> organisation;
+    std::optional<std::string> name;
+    std::optional<std::int32_t> parent_id;
+    std::optional<std::string> path;
+    std::optional<std::string> encryption_policy;
+    std::optional<std::string> storage_limit;
+    std::optional<std::string> entry_count_limit;
+};
+
 class DomainsView : public CrudViewHandler<DomainsView> {
 public:
+    using CreateBody = DomainsCreateBody;
+    using UpdateBody = DomainsUpdateBody;
+
+    using Row = DomainsRow;
+    static constexpr char kPrimaryKeyName[] = "id";
+
+    static constexpr char kRowProjection[] = "SELECT id, organisation, name, parent_id, path, encryption_policy, storage_limit, "
+                                             "entry_count_limit FROM core.domains";
+
     static constexpr std::array<Field, 6> kFields = {{
         {"name", FieldType::Text, Op::Eq | Op::Like, true, false},
         {"parent_id", FieldType::Int, static_cast<uint8_t>(Op::Eq), true, false},

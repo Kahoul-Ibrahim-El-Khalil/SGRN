@@ -1,13 +1,60 @@
 #pragma once
+#include <sgrn/datastore/query/CrudViewBody.hpp>
+#include <sgrn/datastore/query/CrudViewBodyBind.hpp>
 #include <sgrn/datastore/query/CrudViewEngine.hpp>
+#include <sgrn/datastore/query/CrudViewRows.hpp>
 #include <sgrn/datastore/utils/IHandler.hpp>
+#include <sgrn/datastore/utils/helpers.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 
 #include <json/json.h>
+#include <optional>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace sgrn::datastore::handlers::query
 {
+
+// Sinks used by the generated views (which define `Row`) to collect the
+// engine's rows and serialize them in the negotiated wire format.
+template <typename Row, sgrn::orm::FixedString Query>
+class TypedRowsSink final : public sgrn::datastore::query::TypedRowSink {
+public:
+    void add(const drogon::orm::Row& t_row) override {
+        rows_.push_back(sgrn::datastore::query::rowFromOrm<Row, Query>(t_row));
+    }
+
+    drogon::HttpResponsePtr makeResponse(const drogon::HttpRequestPtr& tsp_req, drogon::HttpStatusCode t_code) override {
+        return sgrn::createTypedResponse(tsp_req, rows_, t_code);
+    }
+
+private:
+    std::vector<Row> rows_;
+};
+
+template <typename Row, sgrn::orm::FixedString Query, sgrn::orm::FixedString PrimaryKey>
+class TypedRowSinkOne final : public sgrn::datastore::query::TypedRowSink {
+public:
+    void add(const drogon::orm::Row& t_row) override {
+        row_ = sgrn::datastore::query::rowFromOrm<Row, Query>(t_row);
+    }
+
+    std::string primaryKeyText(const drogon::orm::Row& t_row, std::string_view t_field_name) override {
+        if (t_field_name != PrimaryKey.view()) {
+            throw std::runtime_error("Generated CRUD primary key does not match its row type");
+        }
+        Row row = sgrn::datastore::query::rowFromOrm<Row, Query>(t_row);
+        return sgrn::datastore::query::rowPrimaryKeyText<Row, PrimaryKey>(row);
+    }
+
+    drogon::HttpResponsePtr makeResponse(const drogon::HttpRequestPtr& tsp_req, drogon::HttpStatusCode t_code) override {
+        return sgrn::createTypedResponse(tsp_req, row_, t_code);
+    }
+
+private:
+    std::optional<Row> row_;
+};
 
 // CRTP base that plugs the generic CRUD engine into the existing
 // route-registration system. Generated views derive from this; hand-written
@@ -34,61 +81,97 @@ public:
     drogon::Task<drogon::HttpResponsePtr> handleList(drogon::HttpRequestPtr tsp_req) {
         std::string tenant = tenantOf(tsp_req);
         if (tenant.empty()) {
-            co_return sgrn::createErrorResponse("Missing organisation identity in session", drogon::k401Unauthorized, "Authentication");
+            co_return sgrn::createTypedResponse(
+                BackendErrorResponse{"Missing organisation identity in session", drogon::k401Unauthorized, "Authentication"});
         }
-        co_return co_await sgrn::datastore::query::executeViewList(Derived::kSpec, tsp_req, std::move(tenant));
+        if constexpr (requires { typename Derived::Row; }) {
+            TypedRowsSink<typename Derived::Row, Derived::kRowProjection> sink;
+            co_return co_await sgrn::datastore::query::executeViewList(Derived::kSpec, tsp_req, std::move(tenant), &sink);
+        } else {
+            co_return co_await sgrn::datastore::query::executeViewList(Derived::kSpec, tsp_req, std::move(tenant));
+        }
     }
 
     drogon::Task<drogon::HttpResponsePtr> handleGet(drogon::HttpRequestPtr tsp_req, std::string t_id) {
         std::string tenant = tenantOf(tsp_req);
         if (tenant.empty()) {
-            co_return sgrn::createErrorResponse("Missing organisation identity in session", drogon::k401Unauthorized, "Authentication");
+            co_return sgrn::createTypedResponse(
+                BackendErrorResponse{"Missing organisation identity in session", drogon::k401Unauthorized, "Authentication"});
         }
-        co_return co_await sgrn::datastore::query::executeViewGet(Derived::kSpec, tsp_req, std::move(tenant), std::move(t_id));
+        if constexpr (requires { typename Derived::Row; }) {
+            TypedRowSinkOne<typename Derived::Row, Derived::kRowProjection, Derived::kPrimaryKeyName> sink;
+            co_return co_await sgrn::datastore::query::executeViewGet(Derived::kSpec, tsp_req, std::move(tenant), std::move(t_id), &sink);
+        } else {
+            co_return co_await sgrn::datastore::query::executeViewGet(Derived::kSpec, tsp_req, std::move(tenant), std::move(t_id));
+        }
     }
 
     drogon::Task<drogon::HttpResponsePtr> handleCreate(drogon::HttpRequestPtr tsp_req) {
         std::string tenant = tenantOf(tsp_req);
         if (tenant.empty()) {
-            co_return sgrn::createErrorResponse("Missing organisation identity in session", drogon::k401Unauthorized, "Authentication");
+            co_return sgrn::createTypedResponse(
+                BackendErrorResponse{"Missing organisation identity in session", drogon::k401Unauthorized, "Authentication"});
         }
-        co_return co_await sgrn::datastore::query::executeViewInsert(Derived::kSpec, tsp_req, std::move(tenant));
+        // The request body is decoded straight into the view's concrete body
+        // struct (Glaze reflection; JSON, MessagePack or BEVE by content type).
+        using Body = typename Derived::CreateBody;
+        auto body_res = sgrn::parseTypedRequest<Body>(tsp_req);
+        if (body_res.hasError()) {
+            co_return sgrn::createTypedResponse(BackendErrorResponse{body_res.error(), drogon::k400BadRequest, "Body"});
+        }
+        const Body& body = body_res.value();
+        auto bound = sgrn::datastore::query::bindBody(Derived::kSpec, body, sgrn::datastore::query::WriteOp::Insert);
+        if (bound.hasError()) {
+            co_return sgrn::createTypedResponse(BackendErrorResponse{bound.error(), drogon::k400BadRequest, "Body"});
+        }
+        if constexpr (requires { typename Derived::Row; }) {
+            TypedRowSinkOne<typename Derived::Row, Derived::kRowProjection, Derived::kPrimaryKeyName> sink;
+            co_return co_await sgrn::datastore::query::executeViewInsertBound(Derived::kSpec, tsp_req, std::move(tenant),
+                std::move(bound).value(), sgrn::datastore::query::auditDetailsJson(body), &sink);
+        } else {
+            co_return co_await sgrn::datastore::query::executeViewInsertBound(
+                Derived::kSpec, tsp_req, std::move(tenant), std::move(bound).value(), sgrn::datastore::query::auditDetailsJson(body));
+        }
     }
 
     drogon::Task<drogon::HttpResponsePtr> handleUpdate(drogon::HttpRequestPtr tsp_req, std::string t_id) {
         std::string tenant = tenantOf(tsp_req);
         if (tenant.empty()) {
-            co_return sgrn::createErrorResponse("Missing organisation identity in session", drogon::k401Unauthorized, "Authentication");
+            co_return sgrn::createTypedResponse(
+                BackendErrorResponse{"Missing organisation identity in session", drogon::k401Unauthorized, "Authentication"});
         }
-        co_return co_await sgrn::datastore::query::executeViewUpdate(Derived::kSpec, tsp_req, std::move(tenant), std::move(t_id));
+        using Body = typename Derived::UpdateBody;
+        auto body_res = sgrn::parseTypedRequest<Body>(tsp_req);
+        if (body_res.hasError()) {
+            co_return sgrn::createTypedResponse(BackendErrorResponse{body_res.error(), drogon::k400BadRequest, "Body"});
+        }
+        const Body& body = body_res.value();
+        auto bound = sgrn::datastore::query::bindBody(Derived::kSpec, body, sgrn::datastore::query::WriteOp::Update);
+        if (bound.hasError()) {
+            co_return sgrn::createTypedResponse(BackendErrorResponse{bound.error(), drogon::k400BadRequest, "Body"});
+        }
+        if constexpr (requires { typename Derived::Row; }) {
+            TypedRowSinkOne<typename Derived::Row, Derived::kRowProjection, Derived::kPrimaryKeyName> sink;
+            co_return co_await sgrn::datastore::query::executeViewUpdateBound(Derived::kSpec, tsp_req, std::move(tenant), std::move(t_id),
+                std::move(bound).value(), sgrn::datastore::query::auditDetailsJson(body), &sink);
+        } else {
+            co_return co_await sgrn::datastore::query::executeViewUpdateBound(Derived::kSpec, tsp_req, std::move(tenant), std::move(t_id),
+                std::move(bound).value(), sgrn::datastore::query::auditDetailsJson(body));
+        }
     }
 
     drogon::Task<drogon::HttpResponsePtr> handleDelete(drogon::HttpRequestPtr tsp_req, std::string t_id) {
         std::string tenant = tenantOf(tsp_req);
         if (tenant.empty()) {
-            co_return sgrn::createErrorResponse("Missing organisation identity in session", drogon::k401Unauthorized, "Authentication");
+            co_return sgrn::createTypedResponse(
+                BackendErrorResponse{"Missing organisation identity in session", drogon::k401Unauthorized, "Authentication"});
         }
         co_return co_await sgrn::datastore::query::executeViewDelete(Derived::kSpec, tsp_req, std::move(tenant), std::move(t_id));
     }
 
 protected:
     static std::string tenantOf(const drogon::HttpRequestPtr& tsp_req) {
-        try {
-            if (!tsp_req->attributes()->find("session_json")) {
-                return {};
-            }
-            const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
-            if (!session.isMember("user") || !session["user"].isMember("organisation")) {
-                return {};
-            }
-            const Json::Value& org = session["user"]["organisation"];
-            if (!org.isString()) {
-                return {};
-            }
-            return org.asString();
-        } catch (const std::exception&) {
-            return {};
-        }
+        return sgrn::datastore::getSessionOrganisation(tsp_req);
     }
 };
 

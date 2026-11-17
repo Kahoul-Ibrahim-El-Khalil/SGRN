@@ -76,26 +76,26 @@ sgrn::Result<void> DatastoreShell::cmdConnect(const std::vector<std::string>& t_
     if (!email.empty()) {
         RETURN_ERROR_IF(password.empty(), "email needs --password (or SGRN_DATASTORE_PASSWORD)");
         sgrn::datastore::client::DatastoreClientConfig cfg;
-        cfg.backend_url_ = url;
-        cfg.auth_mode_ = sgrn::datastore::client::AuthMode::UserPassword;
-        cfg.email_ = email;
-        cfg.password_ = password;
+        cfg.backend_url = url;
+        cfg.auth_mode = sgrn::datastore::client::AuthMode::UserPassword;
+        cfg.email = email;
+        cfg.password = password;
         RETURN_IF(establish(std::move(cfg), "user").hasError(), fmt::format("user sign-in failed for {}", url));
         return {};
     }
     if (!session_token.empty()) {
         sgrn::datastore::client::DatastoreClientConfig cfg;
-        cfg.backend_url_ = url;
-        cfg.auth_mode_ = sgrn::datastore::client::AuthMode::SessionToken;
-        cfg.session_token_ = session_token;
+        cfg.backend_url = url;
+        cfg.auth_mode = sgrn::datastore::client::AuthMode::SessionToken;
+        cfg.session_token = session_token;
         RETURN_IF(establish(std::move(cfg), "session-token").hasError(), fmt::format("session token rejected by {}", url));
         return {};
     }
     RETURN_ERROR_IF(token.empty(), "need credentials (--token/--email/--session-token, see 'help')");
     sgrn::datastore::client::DatastoreClientConfig cfg;
-    cfg.backend_url_ = url;
-    cfg.token_ = token;
-    cfg.secret_ = secret;
+    cfg.backend_url = url;
+    cfg.token = token;
+    cfg.secret = secret;
     RETURN_IF(establish(std::move(cfg), "service").hasError(), fmt::format("service sign-in failed for {}", url));
     return {};
 }
@@ -120,10 +120,10 @@ sgrn::Result<void> DatastoreShell::cmdLogin(const std::vector<std::string>& t_ar
         password = promptSecretInput("password: ");
     RETURN_ERROR_IF(url.empty() || email.empty() || password.empty(), "need --url URL, an email and a password");
     sgrn::datastore::client::DatastoreClientConfig cfg;
-    cfg.backend_url_ = url;
-    cfg.auth_mode_ = sgrn::datastore::client::AuthMode::UserPassword;
-    cfg.email_ = email;
-    cfg.password_ = password;
+    cfg.backend_url = url;
+    cfg.auth_mode = sgrn::datastore::client::AuthMode::UserPassword;
+    cfg.email = email;
+    cfg.password = password;
     RETURN_IF(establish(std::move(cfg), "user").hasError(), fmt::format("sign-in failed for {} as {}", url, email));
     return {};
 }

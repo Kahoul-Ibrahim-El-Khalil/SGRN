@@ -127,7 +127,8 @@ inline void initRateLimiting() {
             }
 
             const uint64_t retry_s = (decision.retry_after_ms + 999) / 1000;
-            auto resp = sgrn::createErrorResponse("Rate limit exceeded, retry later", drogon::k429TooManyRequests, "RateLimit");
+            auto resp = sgrn::createTypedResponse(
+                BackendErrorResponse{"Rate limit exceeded, retry later", drogon::k429TooManyRequests, "RateLimit"});
             resp->addHeader("Retry-After", std::to_string(retry_s < 1 ? 1 : retry_s));
             t_respond(resp);
         });

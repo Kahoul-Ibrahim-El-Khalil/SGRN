@@ -1,5 +1,6 @@
 import { AdminBackendApiEndpoints } from "@/backend/endpoints";
-import { authenticatedFetch, processResponse } from "@/backend/api/fetcher";
+import { authenticatedFetch, jsonBody, processResponse, rawJson } from "@/backend/api/fetcher";
+import type { UpdateSystemConfigRequest } from "@sgrn/datastore/requests";
 import type { SgrnResult } from "@sgrn/types";
 import { ErrorScope } from "@sgrn/types";
 
@@ -24,7 +25,6 @@ export interface SystemConfigDocument {
 }
 
 export interface SystemConfigSaveResult {
-    success: boolean;
     config_path: string;
     backup_path: string;
     applied_hot: string[];
@@ -82,8 +82,7 @@ export async function updateSystemConfig(t_values: Record<string, any>): Promise
     try {
         const res = await authenticatedFetch(AdminBackendApiEndpoints.SYSTEM_CONFIG, {
             method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ values: t_values }),
+            ...jsonBody<UpdateSystemConfigRequest>({ values: rawJson(t_values) }),
         });
         return await processResponse<SystemConfigSaveResult>(res);
     } catch (e) {

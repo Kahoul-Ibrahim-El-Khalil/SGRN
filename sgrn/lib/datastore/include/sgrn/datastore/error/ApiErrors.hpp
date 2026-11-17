@@ -11,13 +11,9 @@
 // BackendErrorKind represents resource/infra-level failures (DB,
 // S3). They are two separate layers that are never merged.
 // Both must always produce the SAME wire shape:
-//   { error, scope, code?, metadata? }
-// The createErrorResponse(EnumT) bridge maps each ApiErrors variant to
-// an HttpError {code_name, message, status}, and the scope field is
-// derived from the code_name prefix (e.g. "ADMIN_API_*" → "AdminApi").
-// BackendErrorKind::toScopeString() provides the scope for the infra
-// path. Both paths converge on the same JSON wire format via
-// ResultJson::toJson() / createErrorResponse().
+//   { error, scope, code? }
+// Each ApiErrors variant maps to HttpError {code_name, message, status};
+// BackendErrorResponse converts it to the reflected HTTP error wire type.
 // =========================================================
 
 namespace sgrn

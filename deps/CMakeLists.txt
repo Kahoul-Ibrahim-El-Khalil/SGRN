@@ -24,7 +24,7 @@
 #   - All add_subdirectory() calls use EXCLUDE_FROM_ALL so that third-party
 #     install() rules are suppressed. Only staging.cmake controls what goes where.
 #
-# See BUILD_SYSTEM.md §"deps/ — Third-party dependency phase" for details.
+# See documentation/BUILD.md for the third-party dependency build workflow.
 # ─────────────────────────────────────────────────────────────────────────────
 cmake_minimum_required(VERSION 3.25)
 project(sgrn_deps LANGUAGES CXX C)
@@ -152,7 +152,7 @@ add_custom_target(sgrn_force_build_all ALL)
 if(TARGET open62541 AND NOT TARGET extern::open62541_imported)
     add_dependencies(sgrn_force_build_all open62541)
 endif()
-# cmake/fmt.cmake (Phase A) requested a source-built fmt for win64; ensure it is
+# cmake/deps/fmt.cmake requests a source-built fmt; ensure it is
 # compiled during `--target install` (it is otherwise EXCLUDE_FROM_ALL).
 if(SGRN_FMT_FORCE_BUILD AND TARGET fmt)
     add_dependencies(sgrn_force_build_all fmt)
@@ -171,6 +171,9 @@ endif()
 
 if(TARGET drogon)
     add_dependencies(sgrn_force_build_all drogon)
+endif()
+if(TARGET drogon_ctl)
+    add_dependencies(sgrn_force_build_all drogon_ctl)
 endif()
 if(TARGET trantor)
     add_dependencies(sgrn_force_build_all trantor)

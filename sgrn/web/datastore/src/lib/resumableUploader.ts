@@ -1,4 +1,7 @@
 import { StorageBackendApiEndpoints } from "../backend/endpoints";
+import { jsonBody, readBody } from "@/backend/api/fetcher";
+import type { UploadCompleteRequest, UploadInitRequest } from "@sgrn/datastore/requests";
+import type { UploadInitResponse, UploadCompleteResponse } from "@sgrn/types";
 
 export interface ChunkUploadProgress {
     uploadId: string;
@@ -94,7 +97,7 @@ export class ResumableUploader {
 
             // 409 = duplicate — propagate immediately, no retry.
             if (resp.status === 409) {
-                const body = await resp.json().catch(() => ({}));
+                const body = await readBody(resp, {});
                 throw new Error(body.message || "A file with that name already exists.");
             }
 
@@ -112,7 +115,7 @@ export class ResumableUploader {
                 continue;
             }
 
-            const body = await resp.json().catch(() => ({}));
+            const body = await readBody(resp, {});
             throw new Error(body.message || `Chunk ${chunkIdx + 1}/${totalChunks} failed (HTTP ${resp.status})`);
         }
         throw new Error(`Chunk ${chunkIdx + 1}/${totalChunks} failed after retries`);
@@ -128,8 +131,7 @@ export class ResumableUploader {
             // 1. Initialize upload session
             const initResp = await authenticatedFetch(StorageBackendApiEndpoints.UPLOAD_INIT, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
+                ...jsonBody<UploadInitRequest>({
                     filename: this.file.name,
                     target_path: this.targetPath,
                     scope: this.scope,
@@ -144,11 +146,11 @@ export class ResumableUploader {
             // the `error` key so the real reason reaches the UI (not just the
             // generic HTTP-status line).
             if (!initResp.ok) {
-                const errData = await initResp.json().catch(() => ({}));
+                const errData = await readBody(initResp, {});
                 throw new Error(errData.error || errData.message || `Failed to initialize upload session (HTTP ${initResp.status})`);
             }
 
-            const initData = await initResp.json();
+            const initData = await readBody<UploadInitResponse>(initResp);
             this.uploadId = initData.upload_id;
             // init answers the effective early: `required` upgrades, `none` downgrades.
             if (typeof initData.is_encrypted === "boolean") {
@@ -179,18 +181,17 @@ export class ResumableUploader {
             // 3. Complete upload — server assembles chunks, hashes, and pushes to S3
             const completeResp = await authenticatedFetch(StorageBackendApiEndpoints.UPLOAD_COMPLETE, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ upload_id: this.uploadId }),
+                ...jsonBody<UploadCompleteRequest>({ upload_id: this.uploadId ?? "" }),
             });
 
             if (!completeResp.ok) {
-                const errData = await completeResp.json().catch(() => ({}));
+                const errData = await readBody(completeResp, {});
                 throw new Error(errData.error || errData.message || `Failed to finalize upload (HTTP ${completeResp.status})`);
             }
 
             // The completion receipt is authoritative for the encryption state.
             try {
-                const completeData = await completeResp.json();
+                const completeData = await readBody<UploadCompleteResponse>(completeResp);
                 if (typeof completeData.is_encrypted === "boolean") {
                     this.serverEncrypted = completeData.is_encrypted;
                 }

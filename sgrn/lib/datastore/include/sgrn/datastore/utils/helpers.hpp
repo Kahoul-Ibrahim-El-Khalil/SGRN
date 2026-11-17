@@ -4,8 +4,10 @@
 #include <drogon/HttpTypes.h>
 #include <sgrn/Result.hpp>
 #include <sgrn/datastore/BackendError.hpp>
+#include <sgrn/datastore/filters/types.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe-access.hpp>
+#include <sgrn/datastore/wire/auth.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/types/HttpResponseCallback.hpp>
 #include <sgrn/utils/jsoncpp.hpp>
@@ -18,7 +20,6 @@
 
 namespace sgrn
 {
-using sgrn::datastore::BackendResult;
 constexpr const char sgrn_session_token_field_identifier[] = "Authorization";
 
 static std::string db_client_connection_error_message = "Failed to connect to DB client";
@@ -29,19 +30,20 @@ static std::string http_session_retrieval_error_message = "Failed to retrieve HT
 inline drogon::SessionPtr getDrogonSession(const drogon::HttpRequestPtr& tsp_arg_req, HttpResponseCallback& tsp_arg_callback) {
     auto p_session = tsp_arg_req->getSession();
     if (!p_session) {
-        respondWithError(http_session_retrieval_error_message, drogon::k500InternalServerError, tsp_arg_callback);
+        tsp_arg_callback(
+            createTypedResponse(datastore::BackendErrorResponse{http_session_retrieval_error_message, drogon::k500InternalServerError}));
         return nullptr;
     }
     return p_session;
 }
 
-inline BackendResult<drogon::orm::DbClientPtr> getDrogonDbClient() {
+inline Result<drogon::orm::DbClientPtr, datastore::BackendError> getDrogonDbClient() {
     return sgrn::datastore::core::getDbClient();
 }
 
 inline void respondWithDbError(const drogon::orm::DrogonDbException& t_e, const HttpResponseCallback& tsp_arg_callback) {
     std::string err_msg = fmt::format("Database Error: {} - {}", db_error, t_e.base().what());
-    respondWithError(std::move(err_msg), drogon::k500InternalServerError, tsp_arg_callback);
+    tsp_arg_callback(createTypedResponse(datastore::BackendErrorResponse{err_msg, drogon::k500InternalServerError}));
 }
 
 inline std::optional<std::string> getBearerToken(const drogon::HttpRequestPtr& tsp_http_req) {
@@ -127,10 +129,10 @@ inline std::optional<T> extractHeaderNumericalValue(const drogon::HttpRequestPtr
     return value;
 }
 
-inline BackendResult<std::string> extractRequiredParam(const drogon::HttpRequestPtr& tsp_req, const std::string& t_name) {
+inline Result<std::string, datastore::BackendError> extractRequiredParam(const drogon::HttpRequestPtr& tsp_req, const std::string& t_name) {
     std::string value = tsp_req->getParameter(t_name);
     if (value.empty()) {
-        RETURN_ERROR(datastore::BackendError{"Application", "Missing required parameter: " + t_name});
+        RETURN_ERROR(datastore::BackendError(datastore::BackendErrorKind::Generic, "Application", "Missing required parameter: " + t_name));
     }
     return value;
 }
@@ -196,34 +198,55 @@ inline bool emailIsConfiguredPlatformAdmin(const std::string& t_email_raw) {
     return false;
 }
 
+inline const filters::AuthContext* getAuthContext(const drogon::HttpRequestPtr& tsp_req) {
+    if (!tsp_req || !tsp_req->attributes()->find("auth_context")) {
+        return nullptr;
+    }
+    return &tsp_req->attributes()->get<filters::AuthContext>("auth_context");
+}
+
 inline bool isPlatformAdmin(const drogon::HttpRequestPtr& tsp_req) {
+    if (!tsp_req) {
+        return false;
+    }
 
-    RETURN_IF(!tsp_req || !tsp_req->attributes()->find("session_json"), false);
+    if (tsp_req->attributes()->find("auth_context")) {
+        const auto& auth = tsp_req->attributes()->get<filters::AuthContext>("auth_context");
+        return auth.user.is_platform_admin;
+    }
 
-    const auto& session = tsp_req->attributes()->get<Json::Value>("session_json");
-
-    RETURN_IF(!session.isMember("user") || !session["user"].isMember("email") || !session["user"]["email"].isString(), false);
+    RETURN_IF(!tsp_req->attributes()->find("session_claims"), false);
+    const auto& claims = tsp_req->attributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims");
 
     RETURN_IF(tsp_req->attributes()->find("is_platform_admin"), tsp_req->attributes()->get<bool>("is_platform_admin"));
 
-    return emailIsConfiguredPlatformAdmin(session["user"]["email"].asString());
+    return emailIsConfiguredPlatformAdmin(claims.user.email);
 }
 
 inline std::string getSessionOrganisation(const drogon::HttpRequestPtr& tsp_req) {
-    if (!tsp_req || !tsp_req->attributes()->find("session_json")) {
+    if (!tsp_req) {
         return "";
     }
-    const auto& session = tsp_req->attributes()->get<Json::Value>("session_json");
-    if (session.isMember("user") && session["user"].isMember("organisation") && session["user"]["organisation"].isString()) {
-        return session["user"]["organisation"].asString();
+    if (tsp_req->attributes()->find("auth_context")) {
+        const auto& auth = tsp_req->attributes()->get<filters::AuthContext>("auth_context");
+        if (!auth.user.organisation.empty()) {
+            return auth.user.organisation;
+        }
     }
-    return "";
+    if (!tsp_req->attributes()->find("session_claims")) {
+        return "";
+    }
+    return tsp_req->attributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims").user.organisation;
 }
 
 } // namespace datastore::auth
 
 namespace datastore
 {
+inline const filters::AuthContext* getAuthContext(const drogon::HttpRequestPtr& tsp_req) {
+    return auth::getAuthContext(tsp_req);
+}
+
 inline bool isPlatformAdmin(const drogon::HttpRequestPtr& tsp_req) {
     return auth::isPlatformAdmin(tsp_req);
 }
@@ -232,6 +255,10 @@ inline std::string getSessionOrganisation(const drogon::HttpRequestPtr& tsp_req)
     return auth::getSessionOrganisation(tsp_req);
 }
 } // namespace datastore
+
+inline const datastore::filters::AuthContext* getAuthContext(const drogon::HttpRequestPtr& tsp_req) {
+    return datastore::auth::getAuthContext(tsp_req);
+}
 
 inline bool isPlatformAdmin(const drogon::HttpRequestPtr& tsp_req) {
     return datastore::auth::isPlatformAdmin(tsp_req);

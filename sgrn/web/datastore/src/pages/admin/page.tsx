@@ -33,7 +33,16 @@ import type { IdNamePair } from "@/types/IdNamePair";
 import { AdminBackendApiEndpoints } from "@/backend/endpoints";
 import { mbToBytes, updateQuota } from "@/backend/api/governance";
 import { useEvent } from "@/contexts/EventContext";
-import { authenticatedFetch } from "@/backend/api/fetcher";
+import { authenticatedFetch, jsonBody, rawJson, readBody } from "@/backend/api/fetcher";
+import type {
+    PurgeOrphansRequest,
+    RegisterAutomatedServiceRequest,
+    RegisterUserRequest,
+    RotateAutomatedServiceTokenRequest,
+    SetStatusRequest,
+    UpdateAutomatedServiceMetadataRequest,
+} from "@sgrn/datastore/requests";
+import type { ServiceRotationResponse, ServiceRegistrationResponse, OverviewResponse, OrphansResponse } from "@sgrn/types";
 import { useAuth } from "@/contexts/AuthContext";
 
 // Utility hook for fetching dependencies
@@ -146,7 +155,7 @@ export default function AdminTab() {
             if (!response.ok) {
                 throw new Error("Failed to load automated services");
             }
-            const payload = await response.json();
+            const payload = await readBody<AutomatedServiceListEntry[]>(response);
             if (!Array.isArray(payload)) {
                 throw new Error("Unexpected automated service list format");
             }
@@ -203,11 +212,10 @@ export default function AdminTab() {
             try {
                 const response = await authenticatedFetch(AdminBackendApiEndpoints.ROTATE_AUTOMATED_SERVICE_TOKEN, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ automated_service_id: svcId }),
+                    ...jsonBody<RotateAutomatedServiceTokenRequest>({ automated_service_id: svcId }),
                 });
-                const payload = await response.json();
-                if (!response.ok || !payload.success) {
+                const payload = await readBody<ServiceRotationResponse>(response);
+                if (!response.ok) {
                     throw new Error(payload.error || "Rotation failed");
                 }
                 setAutomatedServiceToken(payload.token);
@@ -270,10 +278,12 @@ export default function AdminTab() {
             try {
                 const response = await authenticatedFetch(AdminBackendApiEndpoints.UPDATE_AUTOMATED_SERVICE_METADATA(t_svc.id), {
                     method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ metadata: parsed, description: draft.description }),
+                    ...jsonBody<UpdateAutomatedServiceMetadataRequest>({
+                        metadata: rawJson(parsed),
+                        description: draft.description,
+                    }),
                 });
-                const payload = await response.json().catch(() => ({}));
+                const payload = await readBody(response, {});
                 if (!response.ok) {
                     throw new Error(payload.error || `Failed to update metadata (HTTP ${response.status})`);
                 }
@@ -295,10 +305,9 @@ export default function AdminTab() {
             try {
                 const response = await authenticatedFetch(AdminBackendApiEndpoints.AUTOMATED_SERVICE_STATUS(t_svc.id), {
                     method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ status: t_status }),
+                    ...jsonBody<SetStatusRequest>({ status: t_status }),
                 });
-                const payload = await response.json().catch(() => ({}));
+                const payload = await readBody(response, {});
                 if (!response.ok) {
                     throw new Error(payload.error || `Failed to set status (HTTP ${response.status})`);
                 }
@@ -391,7 +400,7 @@ export default function AdminTab() {
                 const response = await authenticatedFetch(AdminBackendApiEndpoints.AUTOMATED_SERVICE_ITEM(t_svc.id), {
                     method: "DELETE",
                 });
-                const payload = await response.json().catch(() => ({}));
+                const payload = await readBody(response, {});
                 if (!response.ok) {
                     throw new Error(payload.error || `Failed to delete service (HTTP ${response.status})`);
                 }
@@ -413,7 +422,7 @@ export default function AdminTab() {
             const form = new FormData(t_event.currentTarget);
             const formEl = t_event.currentTarget;
 
-            const payload = {
+            const payload: RegisterUserRequest = {
                 first_name: form.get("first_name")?.toString().trim() || "",
                 family_name: form.get("family_name")?.toString().trim() || "",
                 email: form.get("email")?.toString().trim() || "",
@@ -441,11 +450,10 @@ export default function AdminTab() {
             try {
                 const response = await authenticatedFetch(AdminBackendApiEndpoints.REGISTER_USER, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload),
+                    ...jsonBody<RegisterUserRequest>(payload),
                 });
-                const result = await response.json();
-                if (response.ok && result.success) {
+                const result = await readBody<{ message?: string }>(response);
+                if (response.ok) {
                     showEvent("success", `User ${payload.email} registered!`);
                     formEl.reset();
                     setSelectedOrg(null);
@@ -469,10 +477,10 @@ export default function AdminTab() {
             const formEl = t_event.currentTarget;
 
             const serviceKind = form.get("service_kind")?.toString().trim() || "";
-            const payload: Record<string, unknown> = {
+            const payload: RegisterAutomatedServiceRequest = {
                 name: form.get("service_name")?.toString().trim() || "",
                 organisation: form.get("organisation")?.toString() || "",
-                metadata: serviceKind ? { kind: serviceKind } : {},
+                metadata: rawJson(serviceKind ? { kind: serviceKind } : {}),
                 domain: form.get("domain")?.toString()?.trim() || "",
             };
 
@@ -500,11 +508,10 @@ export default function AdminTab() {
             try {
                 const response = await authenticatedFetch(AdminBackendApiEndpoints.REGISTER_AUTOMATED_SERVICE, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload),
+                    ...jsonBody<RegisterAutomatedServiceRequest>(payload),
                 });
-                const result = await response.json();
-                if (response.ok && result.success) {
+                const result = await readBody<ServiceRegistrationResponse>(response);
+                if (response.ok) {
                     showEvent("success", `Service ${payload.name} registered!`);
                     setAutomatedServiceToken(result.token);
                     setAutomatedServiceSecret(result.token_secret);
@@ -540,7 +547,7 @@ export default function AdminTab() {
             const url = queryParams ? `${endpoint}?${queryParams.startsWith("?") ? queryParams.slice(1) : queryParams}` : endpoint;
 
             const response = await authenticatedFetch(url);
-            const data = await response.json();
+            const data = await readBody(response);
             setQueryResult(data);
             if (!response.ok) {
                 showEvent("error", `Query failed: ${data.message || response.statusText}`);
@@ -564,9 +571,9 @@ export default function AdminTab() {
         setLoadingStorageOverview(true);
         try {
             const response = await authenticatedFetch(AdminBackendApiEndpoints.STORAGE_OVERVIEW);
-            const payload = await response.json();
+            const payload = await readBody<OverviewResponse>(response);
             if (!response.ok) {
-                throw new Error(payload.error || "Failed to load storage census");
+                throw new Error((payload as any).error || "Failed to load storage census");
             }
             setStorageBuckets(Array.isArray(payload.buckets) ? payload.buckets : []);
         } catch (error) {
@@ -586,7 +593,7 @@ export default function AdminTab() {
         setSearchingStorage(true);
         try {
             const response = await authenticatedFetch(`${AdminBackendApiEndpoints.STORAGE_SEARCH}?key=${encodeURIComponent(hash)}`);
-            const payload = await response.json();
+            const payload = await readBody(response);
             if (!response.ok) {
                 throw new Error(payload.error || "Storage search failed");
             }
@@ -608,9 +615,9 @@ export default function AdminTab() {
             if (orphanPrefix.trim()) params.set("prefix", orphanPrefix.trim());
             const query = params.toString() ? `?${params.toString()}` : "";
             const response = await authenticatedFetch(`${AdminBackendApiEndpoints.STORAGE_ORPHANS}${query}`);
-            const payload = await response.json();
+            const payload = await readBody<OrphansResponse>(response);
             if (!response.ok) {
-                throw new Error(payload.error || "Orphan scan failed");
+                throw new Error((payload as any).error || "Orphan scan failed");
             }
             setOrphanReport(payload);
         } catch (error) {
@@ -628,14 +635,13 @@ export default function AdminTab() {
             try {
                 const response = await authenticatedFetch(AdminBackendApiEndpoints.STORAGE_PURGE_ORPHANS, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
+                    ...jsonBody<PurgeOrphansRequest>({
                         bucket: orphanReport.bucket,
                         prefix: orphanReport.prefix ?? "",
                         dry_run: dryRun,
                     }),
                 });
-                const payload = await response.json();
+                const payload = await readBody(response);
                 if (!response.ok) {
                     throw new Error(payload.error || "Purge failed");
                 }

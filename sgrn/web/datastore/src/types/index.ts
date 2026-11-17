@@ -65,14 +65,13 @@ export interface WindowProps {
 // API Response Types
 // -----------------------------------------------------------------------
 export interface ApiResponse<T = any> {
-    success: boolean;
+    success?: boolean;
     result?: string;
     data?: T;
     error?: string;
 }
 
 export interface UploadResponse {
-    success: boolean;
     result: string;
     uploaded_files?: string[];
     failed_files?: Array<{

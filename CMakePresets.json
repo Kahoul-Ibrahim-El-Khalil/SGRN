@@ -53,7 +53,6 @@
       "cacheVariables": {
         "SGRN_DEPS_ONLY": "ON",
         "SGRN_USE_INSTALLED_DEPS": "OFF",
-        "SGRN_BUILD_BACKEND": "ON",
         "SGRN_BUILD_EXTERN_BACKEND": "ON",
         "CMAKE_BUILD_TYPE": "Release",
         "DROGON_BUILD_STATIC": "ON",
@@ -84,7 +83,6 @@
         "CMAKE_TOOLCHAIN_FILE": "cmake/toolchain_win64.cmake",
         "SGRN_WIN64_PREFIX": "$env{CONDA_PREFIX}/../SGRN-WIN64",
         "SGRN_BUILD_EXTERN_BACKEND": "OFF",
-        "SGRN_BUILD_BACKEND": "OFF",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/.prefix/win64"
       }
     },
@@ -99,7 +97,6 @@
         "CMAKE_TOOLCHAIN_FILE": "cmake/toolchain_arm64.cmake",
         "SGRN_ARM64_PREFIX": "$env{CONDA_PREFIX}/../SGRN-ARM64",
         "SGRN_BUILD_EXTERN_BACKEND": "OFF",
-        "SGRN_BUILD_BACKEND": "OFF",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/.prefix/linux-arm64"
       }
     },
@@ -113,7 +110,7 @@
         "CMAKE_C_COMPILER": "$env{CONDA_PREFIX}/bin/clang",
         "CMAKE_CXX_COMPILER": "$env{CONDA_PREFIX}/bin/clang++",
         "CMAKE_BUILD_TYPE": "Debug",
-        "SGRN_BUILD_BACKEND": "ON",
+        "SGRN_BUILD_DATASTORE": "ON",
         "SGRN_BUILD_UTILS": "ON",
         "SGRN_BUILD_SDK": "ON",
         "SGRN_BUILD_S7": "ON",
@@ -130,7 +127,7 @@
         "SGRN_PLATFORM": "win64",
         "CMAKE_TOOLCHAIN_FILE": "cmake/toolchain_win64.cmake",
         "CMAKE_BUILD_TYPE": "Debug",
-        "SGRN_BUILD_BACKEND": "OFF",
+        "SGRN_BUILD_DATASTORE": "OFF",
         "SGRN_BUILD_UTILS": "ON",
         "SGRN_BUILD_SDK": "ON",
         "SGRN_BUILD_S7": "ON",
@@ -156,7 +153,7 @@
         "SGRN_PLATFORM": "linux-arm64",
         "CMAKE_TOOLCHAIN_FILE": "cmake/toolchain_arm64.cmake",
         "CMAKE_BUILD_TYPE": "Debug",
-        "SGRN_BUILD_BACKEND": "OFF",
+        "SGRN_BUILD_DATASTORE": "OFF",
         "SGRN_BUILD_UTILS": "ON",
         "SGRN_BUILD_SDK": "ON",
         "SGRN_BUILD_S7": "ON",
@@ -274,7 +271,6 @@
         "SGRN_WIN64_PREFIX": "$env{CONDA_PREFIX}/../SGRN-WIN64",
         "BUILD_SHARED_LIBS": "OFF",
         "SGRN_BUILD_EXTERN_BACKEND": "OFF",
-        "SGRN_BUILD_BACKEND": "OFF",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/.prefix/win64-static"
       }
     },
@@ -291,7 +287,6 @@
         "SGRN_ARM64_PREFIX": "$env{CONDA_PREFIX}/../SGRN-ARM64",
         "BUILD_SHARED_LIBS": "OFF",
         "SGRN_BUILD_EXTERN_BACKEND": "OFF",
-        "SGRN_BUILD_BACKEND": "OFF",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/.prefix/linux-arm64-static"
       }
     },
@@ -315,7 +310,6 @@
         "Python3_EXECUTABLE": "$penv{CONDA_PREFIX}/python.exe",
         "BUILD_SHARED_LIBS": "OFF",
         "SGRN_BUILD_EXTERN_BACKEND": "OFF",
-        "SGRN_BUILD_BACKEND": "OFF",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/.prefix/win64-static"
       }
     },
@@ -337,7 +331,7 @@
         "CPM_SOURCE_CACHE": "$penv{USERPROFILE}/.cache/CPM",
         "CMAKE_TOOLCHAIN_FILE": "cmake/toolchain_win64.cmake",
         "CMAKE_BUILD_TYPE": "Debug",
-        "SGRN_BUILD_BACKEND": "OFF",
+        "SGRN_BUILD_DATASTORE": "OFF",
         "SGRN_BUILD_UTILS": "ON",
         "SGRN_BUILD_SDK": "ON",
         "SGRN_BUILD_S7": "ON",

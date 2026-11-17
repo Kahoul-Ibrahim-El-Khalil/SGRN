@@ -8,7 +8,9 @@ import { useState, useCallback, useEffect } from "react";
 import { Loader2, Plus, Trash2, Save, Lock, ShieldCheck, RefreshCw, ChevronDown, ChevronUp, ShieldAlert } from "lucide-react";
 import { UserStatus } from "@/types";
 import { useEvent } from "@/contexts/EventContext";
-import { authenticatedFetch } from "@/backend/api/fetcher";
+import { authenticatedFetch, jsonBody, readBody } from "@/backend/api/fetcher";
+import type { DomainsCreateRequest, DomainsUpdateRequest, UsersUpdateRequest } from "@sgrn/datastore/crud-requests";
+import type { MoveDomainRequest, RegisterUserRequest, RenameDomainRequest } from "@sgrn/datastore/requests";
 import { AdminBackendApiEndpoints } from "@/backend/endpoints";
 import { resetUserPassword, setUserStatus, deleteUser } from "@/backend/api/accountAdmin";
 
@@ -98,14 +100,14 @@ export function UserConfigPanel() {
             if (!res.ok) {
                 throw new Error(`Failed to load user roster (HTTP ${res.status})`);
             }
-            const data = await res.json();
+            const data = await readBody<UserRecord[]>(res);
             if (!Array.isArray(data)) {
                 throw new Error("Unexpected user list format");
             }
             setUsers(data as UserRecord[]);
             const resDom = await authenticatedFetch("/api/v1/domains");
             if (resDom.ok) {
-                const domData = await resDom.json();
+                const domData = await readBody<DomainRecord[]>(resDom);
                 if (Array.isArray(domData)) {
                     setDomains(domData as DomainRecord[]);
                 }
@@ -121,7 +123,7 @@ export function UserConfigPanel() {
     const loadDomains = useCallback(async () => {
         const res = await authenticatedFetch("/api/v1/domains");
         if (res.ok) {
-            const data = await res.json();
+            const data = await readBody<DomainRecord[]>(res);
             if (Array.isArray(data)) {
                 setDomains(data as DomainRecord[]);
             }
@@ -175,7 +177,7 @@ export function UserConfigPanel() {
             }
             setSavingId(t_user.id);
             try {
-                const body: Record<string, unknown> = {};
+                const body: UsersUpdateRequest = {};
                 if (first !== (t_user.first_name ?? "")) body.first_name = first;
                 if (family !== (t_user.family_name ?? "")) body.family_name = family;
                 if (phone !== (t_user.phone_number ?? "")) body.phone_number = phone;
@@ -201,11 +203,10 @@ export function UserConfigPanel() {
                 if (Object.keys(body).length > 0) {
                     const res = await authenticatedFetch(`/api/v1/users/${t_user.id}`, {
                         method: "PATCH",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify(body),
+                        ...jsonBody<UsersUpdateRequest>(body),
                     });
                     if (!res.ok) {
-                        const err = await res.json().catch(() => ({}));
+                        const err = await readBody(res, {});
                         throw new Error(err.message || err.error || `Failed to update user (HTTP ${res.status})`);
                     }
                 }
@@ -533,7 +534,7 @@ export function RegisterUserForm() {
     const load = useCallback(async () => {
         const res = await authenticatedFetch("/api/v1/query/organisations");
         if (res.ok) {
-            const data = await res.json();
+            const data = await readBody<Array<{ id: number | string; name: string }>>(res);
             if (Array.isArray(data) && data.length > 0) {
                 setOrganisation(data[0].name);
             }
@@ -559,10 +560,9 @@ export function RegisterUserForm() {
         try {
             const res = await authenticatedFetch("/api/v1/admin/users/register", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email, password, organisation, first_name: firstName, family_name: familyName }),
+                ...jsonBody<RegisterUserRequest>({ email, password, organisation, first_name: firstName, family_name: familyName }),
             });
-            const data = await res.json().catch(() => ({}));
+            const data = await readBody(res, {});
             if (res.ok) {
                 showEvent("success", "User registered successfully");
                 setEmail("");
@@ -655,7 +655,7 @@ export function DomainConfigPanel() {
             if (!res.ok) {
                 throw new Error(`Failed to load domains (HTTP ${res.status})`);
             }
-            const data = await res.json();
+            const data = await readBody<DomainRecord[]>(res);
             if (!Array.isArray(data)) {
                 throw new Error("Unexpected domain list format");
             }
@@ -683,17 +683,16 @@ export function DomainConfigPanel() {
         }
         setCreating(true);
         try {
-            const body: Record<string, unknown> = { name: newName.trim(), encryption_policy: newPolicy };
+            const body: DomainsCreateRequest = { name: newName.trim(), encryption_policy: newPolicy };
             if (newParent) {
                 body.parent_id = Number(newParent);
             }
             const res = await authenticatedFetch("/api/v1/domains", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body),
+                ...jsonBody<DomainsCreateRequest>(body),
             });
             if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
+                const err = await readBody(res, {});
                 throw new Error(err.message || err.error || `Failed to create domain (HTTP ${res.status})`);
             }
             showEvent("success", `Domain "${newName.trim()}" registered with encryption policy: ${newPolicy}`);
@@ -733,33 +732,30 @@ export function DomainConfigPanel() {
                     }
                     const rres = await authenticatedFetch(AdminBackendApiEndpoints.DOMAIN_RENAME(t_domain.id), {
                         method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ name: draft.name.trim() }),
+                        ...jsonBody<RenameDomainRequest>({ name: draft.name.trim() }),
                     });
                     if (!rres.ok) {
-                        const err = await rres.json().catch(() => ({}));
+                        const err = await readBody(rres, {});
                         throw new Error(err.message || err.error || `Failed to rename domain (HTTP ${rres.status})`);
                     }
                 }
                 if (parentChanged) {
                     const mres = await authenticatedFetch(AdminBackendApiEndpoints.DOMAIN_MOVE(t_domain.id), {
                         method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ parent_id: draft.parent_id }),
+                        ...jsonBody<MoveDomainRequest>({ parent_id: draft.parent_id }),
                     });
                     if (!mres.ok) {
-                        const err = await mres.json().catch(() => ({}));
+                        const err = await readBody(mres, {});
                         throw new Error(err.message || err.error || `Failed to move domain (HTTP ${mres.status})`);
                     }
                 }
                 if (policyChanged) {
                     const res = await authenticatedFetch(`/api/v1/domains/${t_domain.id}`, {
                         method: "PATCH",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ encryption_policy: draft.encryption_policy }),
+                        ...jsonBody<DomainsUpdateRequest>({ encryption_policy: draft.encryption_policy }),
                     });
                     if (!res.ok) {
-                        const err = await res.json().catch(() => ({}));
+                        const err = await readBody(res, {});
                         throw new Error(err.message || err.error || `Failed to update domain (HTTP ${res.status})`);
                     }
                 }
@@ -784,7 +780,7 @@ export function DomainConfigPanel() {
             try {
                 const res = await authenticatedFetch(`/api/v1/domains/${t_domain.id}`, { method: "DELETE" });
                 if (!res.ok && res.status !== 204) {
-                    const err = await res.json().catch(() => ({}));
+                    const err = await readBody(res, {});
                     throw new Error(err.message || err.error || `Failed to delete domain (HTTP ${res.status})`);
                 }
                 showEvent("success", `Domain "${t_domain.name}" deleted`);

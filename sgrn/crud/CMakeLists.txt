@@ -26,6 +26,7 @@ target_link_libraries(sgrn_crud
         sgrn::drogon
         sgrn::trantor
         sgrn::jsoncpp
+        sgrn::core
 )
 
 target_compile_features(sgrn_crud PUBLIC cxx_std_20)

@@ -174,7 +174,7 @@ private:
     void removeUploadState(const std::string& t_upload_id);
 
     // Helpers for handleDriveList
-    drogon::Task<::sgrn::datastore::BackendResult<std::vector<detail::VirtualFolderItem>>> buildVirtualRootListing(
+    drogon::Task<Result<std::vector<detail::VirtualFolderItem>, BackendError>> buildVirtualRootListing(
         const std::string& t_namespace_prefix, ::sgrn::datastore::services::storage::StorageScope t_scope,
         const std::string& t_organisation, const drogon::orm::DbClientPtr& tsp_db_client);
 

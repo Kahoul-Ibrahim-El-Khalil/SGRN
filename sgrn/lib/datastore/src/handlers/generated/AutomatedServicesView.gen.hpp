@@ -2,8 +2,12 @@
 // Source: core.automated_services
 #pragma once
 #include <sgrn/datastore/handlers/CrudViewHandler.hpp>
+#include <sgrn/utils/json-serialization.hpp>
 
 #include <array>
+#include <cstdint>
+#include <optional>
+#include <string>
 
 namespace sgrn::datastore::handlers::query
 {
@@ -13,8 +17,50 @@ using sgrn::datastore::query::FieldType;
 using sgrn::datastore::query::Op;
 using sgrn::datastore::query::PrimaryKey;
 
+// Request body of PATCH /api/v1/automated-services/{id} — the updatable columns of core.automated_services.
+struct AutomatedServicesUpdateBody {
+    std::optional<std::string> name;
+    std::optional<std::string> description;
+    std::optional<std::string> domain;
+    std::optional<std::string> status;
+};
+
+// Response row of core.automated_services — the whitelisted SELECT columns.
+struct AutomatedServicesRow {
+    std::optional<std::int32_t> id;
+    std::optional<std::string> organisation;
+    std::optional<std::string> name;
+    std::optional<std::string> description;
+    std::optional<std::string> token;
+    std::optional<std::string> domain;
+    std::optional<std::string> deleted_at;
+    std::optional<std::string> status;
+    std::optional<sgrn::json::Value> metadata;
+    std::optional<std::string> total_virtual_size;
+    std::optional<std::string> total_real_size;
+    std::optional<std::string> storage_limit;
+    std::optional<std::string> total_entry_count;
+    std::optional<std::string> entry_count_limit;
+    std::optional<std::int32_t> rate_limit_rpm;
+    std::optional<std::string> max_file_size_mb;
+    std::optional<std::int32_t> preferred_chunk_size_mb;
+    std::optional<std::int32_t> rate_limit_upload_rpm;
+    std::optional<std::string> created_at;
+    std::optional<std::string> updated_at;
+};
+
 class AutomatedServicesView : public CrudViewHandler<AutomatedServicesView> {
 public:
+    using UpdateBody = AutomatedServicesUpdateBody;
+
+    using Row = AutomatedServicesRow;
+    static constexpr char kPrimaryKeyName[] = "id";
+
+    static constexpr char kRowProjection[] = "SELECT id, organisation, name, description, token, domain, deleted_at, status, "
+                                             "metadata, total_virtual_size, total_real_size, storage_limit, total_entry_count, "
+                                             "entry_count_limit, rate_limit_rpm, max_file_size_mb, preferred_chunk_size_mb, "
+                                             "rate_limit_upload_rpm, created_at, updated_at FROM core.automated_services";
+
     static constexpr std::array<Field, 18> kFields = {{
         {"name", FieldType::Text, Op::Eq | Op::Like, true, true},
         {"description", FieldType::Text, 0, true, true},

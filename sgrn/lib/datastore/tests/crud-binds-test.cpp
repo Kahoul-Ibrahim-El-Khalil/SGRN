@@ -17,6 +17,8 @@
 #include <sgrn/datastore/core/db.hpp>
 #include <sgrn/datastore/query/CrudViewEngine.hpp>
 #include <sgrn/datastore/query/CrudViewSpec.hpp>
+#include <sgrn/datastore/utils/respond.hpp>
+#include <sgrn/utils/json-serialization.hpp>
 
 #include <drogon/HttpAppFramework.h>
 #include <drogon/HttpRequest.h>
@@ -28,21 +30,26 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <netdb.h>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <sys/socket.h>
 #include <thread>
 #include <unistd.h>
+#include <vector>
 
 namespace
 {
 
 int g_failures = 0;
+
+using ::sgrn::datastore::BackendErrorResponse;
 
 #define CHECK(cond)                                                                                                                        \
     do {                                                                                                                                   \
@@ -73,6 +80,252 @@ Json::Value parse(std::string_view t_json) {
         std::printf("FAIL test JSON does not parse: %.*s (%s)\n", static_cast<int>(t_json.size()), t_json.data(), errors.c_str());
     }
     return v;
+}
+
+// Mirrors the generated `<View>Row` shape: every member optional, bigint as a
+// string, jsonb as a dynamic Glaze value.
+struct WireRow {
+    std::optional<std::int32_t> id;
+    std::optional<std::string> tenant;
+    std::optional<std::int32_t> c_int;
+    std::optional<std::string> c_bigint;
+    std::optional<std::string> c_text;
+    std::optional<bool> c_bool;
+    std::optional<std::string> c_ts;
+    std::optional<sgrn::json::Value> c_jsonb;
+    std::optional<std::string> c_nasty;
+    std::optional<std::string> c_fakejsonb;
+};
+
+static constexpr char kWireProjection[] =
+    "SELECT id, tenant, c_int, c_bigint, c_text, c_bool, c_ts, c_jsonb, c_nasty, c_fakejsonb FROM crud_wire_test";
+
+// Test-only TypedRowSink: exercises the exact path the generated views use
+// (rowFromOrm -> reflected row -> createTypedResponse).
+class WireListSink final : public sgrn::datastore::query::TypedRowSink {
+public:
+    explicit WireListSink(sgrn::WireFormat t_fmt)
+        : fmt_(t_fmt) {
+    }
+
+    void add(const drogon::orm::Row& t_row) override {
+        rows_.push_back(sgrn::datastore::query::rowFromOrm<WireRow, kWireProjection>(t_row));
+    }
+
+    drogon::HttpResponsePtr makeResponse(const drogon::HttpRequestPtr&, drogon::HttpStatusCode t_code) override {
+        return sgrn::createTypedResponse(rows_, fmt_, t_code);
+    }
+
+    const std::vector<WireRow>& rows() const {
+        return rows_;
+    }
+
+private:
+    sgrn::WireFormat fmt_;
+    std::vector<WireRow> rows_;
+};
+
+class WireOneSink final : public sgrn::datastore::query::TypedRowSink {
+public:
+    explicit WireOneSink(sgrn::WireFormat t_fmt)
+        : fmt_(t_fmt) {
+    }
+
+    void add(const drogon::orm::Row& t_row) override {
+        row_ = sgrn::datastore::query::rowFromOrm<WireRow, kWireProjection>(t_row);
+    }
+
+    drogon::HttpResponsePtr makeResponse(const drogon::HttpRequestPtr&, drogon::HttpStatusCode t_code) override {
+        return sgrn::createTypedResponse(row_, fmt_, t_code);
+    }
+
+    const std::optional<WireRow>& row() const {
+        return row_;
+    }
+
+private:
+    sgrn::WireFormat fmt_;
+    std::optional<WireRow> row_;
+};
+
+drogon::HttpRequestPtr requestWithAccept(std::string_view t_accept) {
+    auto req = drogon::HttpRequest::newHttpRequest();
+    if (!t_accept.empty()) {
+        req->addHeader("Accept", std::string(t_accept));
+    }
+    return req;
+}
+
+// Content negotiation must honor q-values, prefer binary on ties, and keep
+// JSON as the default for clients that send nothing or `*/*`.
+void checkContentNegotiation() {
+    using sgrn::negotiateFormat;
+    using sgrn::WireFormat;
+
+    CHECK(negotiateFormat(requestWithAccept("")) == WireFormat::Json);
+    CHECK(negotiateFormat(requestWithAccept("*/*")) == WireFormat::Json);
+    CHECK(negotiateFormat(requestWithAccept("application/json")) == WireFormat::Json);
+    CHECK(negotiateFormat(requestWithAccept("application/msgpack")) == WireFormat::Msgpack);
+    CHECK(negotiateFormat(requestWithAccept("application/x-beve")) == WireFormat::Beve);
+    // The old browser header asked for JSON first; it must stay JSON.
+    CHECK(negotiateFormat(requestWithAccept("application/json, application/msgpack;q=0.9")) == WireFormat::Json);
+    // The new browser header is binary-first.
+    CHECK(negotiateFormat(requestWithAccept("application/msgpack, application/json;q=0.5")) == WireFormat::Msgpack);
+    CHECK(negotiateFormat(requestWithAccept("application/json;q=0.5, application/msgpack")) == WireFormat::Msgpack);
+    // q=0 explicitly excludes a type.
+    CHECK(negotiateFormat(requestWithAccept("application/msgpack;q=0, application/json;q=0.2")) == WireFormat::Json);
+    // Unsupported types only -> JSON.
+    CHECK(negotiateFormat(requestWithAccept("text/html, application/xml")) == WireFormat::Json);
+    // Ties prefer binary (BEVE > msgpack).
+    CHECK(negotiateFormat(requestWithAccept("application/json, application/msgpack")) == WireFormat::Msgpack);
+    CHECK(negotiateFormat(requestWithAccept("application/json, application/msgpack, application/x-beve")) == WireFormat::Beve);
+
+    // Errors stay JSON in every format so clients can always parse them.
+    auto err = sgrn::createTypedResponse(BackendErrorResponse{"bad request", drogon::k400BadRequest, "Test"});
+    CHECK(err->getStatusCode() == drogon::k400BadRequest);
+    CHECK(err->contentTypeString().find("application/json") != std::string::npos);
+    const Json::Value err_body = parse(err->getBody());
+    CHECK(err_body["error"].asString() == "bad request");
+    CHECK(err_body["scope"].asString() == "Test");
+    CHECK(!err_body.isMember("code"));
+
+    auto api_err = sgrn::createTypedResponse(BackendErrorResponse{sgrn::AuthApiError::InvalidCredentials});
+    CHECK(api_err->getStatusCode() == drogon::k401Unauthorized);
+    CHECK(parse(api_err->getBody())["scope"].asString() == "AuthApi");
+}
+
+// The generated rows must serialize natively in every wire format: optional
+// members stay optional, bigint stays a string, and jsonb stays a nested
+// document instead of a JSON fragment string.
+void checkTypedRowEncoding() {
+    std::vector<WireRow> rows;
+    WireRow full;
+    full.id = 7;
+    full.c_bigint = "9007199254740993";
+    full.c_bool = true;
+    auto doc = sgrn::json::parseValue("{\"a\":1,\"b\":[2,3]}");
+    CHECK(!doc.hasError());
+    full.c_jsonb = std::move(doc).value();
+    full.c_text = "hello";
+    rows.push_back(std::move(full));
+    rows.push_back(WireRow{}); // all NULL
+
+    // JSON: unchanged shape for default clients.
+    {
+        auto resp = sgrn::createTypedResponse(requestWithAccept(""), rows, drogon::k200OK);
+        CHECK(resp->contentTypeString().find("application/json") != std::string::npos);
+        const std::string_view body = resp->getBody();
+        CHECK(body.find("\"id\":7") != std::string::npos);
+        CHECK(body.find("\"c_bigint\":\"9007199254740993\"") != std::string::npos);
+        CHECK(body.find("\"c_bool\":true") != std::string::npos);
+        CHECK(body.find("\"c_jsonb\":{\"a\":1,\"b\":[2,3]}") != std::string::npos);
+        // NULL columns keep the legacy shape: the key is present with null,
+        // not omitted (kWriteOpts sets skip_null_members = false).
+        CHECK(body.find("\"id\":null") != std::string::npos);
+        CHECK(body.find("\"c_jsonb\":null") != std::string::npos);
+    }
+
+    // MessagePack: nested document, not a string.
+    {
+        auto resp = sgrn::createTypedResponse(requestWithAccept("application/msgpack"), rows, drogon::k200OK);
+        CHECK(resp->contentTypeString().find("application/msgpack") != std::string::npos);
+        auto decoded = sgrn::detail::readMsgpack<std::vector<WireRow>>(resp->getBody());
+        CHECK(!decoded.hasError());
+        if (!decoded.hasError()) {
+            const auto& out = decoded.value();
+            CHECK(out.size() == 2);
+            if (out.size() == 2) {
+                CHECK(out[0].id == 7);
+                CHECK(out[0].c_bigint == "9007199254740993");
+                CHECK(out[0].c_bool == true);
+                CHECK(out[0].c_jsonb.has_value() && out[0].c_jsonb->is_object());
+                CHECK(!out[1].id.has_value());
+                CHECK(!out[1].c_jsonb.has_value());
+            }
+        }
+    }
+
+    // BEVE: same reflected shape, Glaze-native.
+    {
+        auto resp = sgrn::createTypedResponse(requestWithAccept("application/x-beve"), rows, drogon::k200OK);
+        CHECK(resp->contentTypeString().find("application/x-beve") != std::string::npos);
+        auto decoded = sgrn::json::readBeve<std::vector<WireRow>>(resp->getBody());
+        CHECK(!decoded.hasError());
+        if (!decoded.hasError()) {
+            const auto& out = decoded.value();
+            CHECK(out.size() == 2);
+            if (out.size() == 2) {
+                CHECK(out[0].id == 7);
+                CHECK(out[0].c_bigint == "9007199254740993");
+                CHECK(out[0].c_jsonb.has_value() && out[0].c_jsonb->is_object());
+                CHECK(!out[1].id.has_value());
+            }
+        }
+    }
+}
+
+// Mirrors the reflected sign-in body: a nested role struct and optional
+// 64-bit limits. Confirms the user payload is a real nested object in every
+// wire format (RawJson used to degrade to a string in MessagePack/BEVE).
+struct WireUserRole {
+    std::string name;
+    std::int32_t code{0};
+};
+
+struct WireUser {
+    std::int32_t id{0};
+    std::string email;
+    std::string organisation;
+    bool is_active{true};
+    std::optional<std::int64_t> storage_limit;
+    WireUserRole role;
+};
+
+struct WireSignIn {
+    std::string token;
+    WireUser user;
+};
+
+void checkSignInEncoding() {
+    WireSignIn signin;
+    signin.token = "session-token";
+    signin.user.id = 5;
+    signin.user.email = "user@example.com";
+    signin.user.organisation = "acme";
+    signin.user.is_active = true;
+    signin.user.storage_limit = 10737418240;
+    signin.user.role = WireUserRole{"admin", 0};
+
+    auto json_resp = sgrn::createTypedResponse(requestWithAccept(""), signin, drogon::k200OK);
+    CHECK(json_resp->contentTypeString().find("application/json") != std::string::npos);
+    const Json::Value json = parse(json_resp->getBody());
+    CHECK(json["token"].asString() == "session-token");
+    CHECK(json["user"]["id"].asInt() == 5);
+    CHECK(json["user"]["role"]["name"].asString() == "admin");
+    CHECK(json["user"]["role"]["code"].asInt() == 0);
+    CHECK(json["user"]["storage_limit"].asInt64() == 10737418240LL);
+
+    auto msgpack_resp = sgrn::createTypedResponse(requestWithAccept("application/msgpack"), signin, drogon::k200OK);
+    CHECK(msgpack_resp->contentTypeString().find("application/msgpack") != std::string::npos);
+    auto decoded = sgrn::detail::readMsgpack<WireSignIn>(msgpack_resp->getBody());
+    CHECK(!decoded.hasError());
+    if (!decoded.hasError()) {
+        CHECK(decoded.value().token == "session-token");
+        CHECK(decoded.value().user.id == 5);
+        CHECK(decoded.value().user.role.name == "admin");
+        CHECK(decoded.value().user.role.code == 0);
+        CHECK(decoded.value().user.storage_limit == 10737418240LL);
+    }
+
+    auto beve_resp = sgrn::createTypedResponse(requestWithAccept("application/x-beve"), signin, drogon::k200OK);
+    CHECK(beve_resp->contentTypeString().find("application/x-beve") != std::string::npos);
+    auto beve = sgrn::json::readBeve<WireSignIn>(beve_resp->getBody());
+    CHECK(!beve.hasError());
+    if (!beve.hasError()) {
+        CHECK(beve.value().user.email == "user@example.com");
+        CHECK(beve.value().user.role.name == "admin");
+        CHECK(beve.value().user.storage_limit == 10737418240LL);
+    }
 }
 
 void checkBindOk(FieldType t_type, const Json::Value& t_value, const std::string& t_expected) {
@@ -337,6 +590,56 @@ void runWireFormatTests() {
         CHECK(static_cast<int>(x_resp->getStatusCode()) == 404);
     }
 
+    // --- Typed sink path: exactly what the generated views execute ---------
+    {
+        WireListSink sink(sgrn::WireFormat::Msgpack);
+        auto resp = drogon::sync_wait(executeViewList(wireSpec(), requestWithAccept("application/msgpack"), "t1", &sink));
+        CHECK(static_cast<int>(resp->getStatusCode()) == 200);
+        CHECK(resp->contentTypeString().find("application/msgpack") != std::string::npos);
+
+        auto decoded = sgrn::detail::readMsgpack<std::vector<WireRow>>(resp->getBody());
+        CHECK(!decoded.hasError());
+        if (!decoded.hasError()) {
+            const auto& out = decoded.value();
+            CHECK(out.size() == 2);
+            const WireRow* full = nullptr;
+            const WireRow* null_row = nullptr;
+            for (const auto& row : out) {
+                if (row.c_text && *row.c_text == "hello") {
+                    full = &row;
+                } else {
+                    null_row = &row;
+                }
+            }
+            CHECK(full != nullptr && null_row != nullptr);
+            if (full != nullptr && null_row != nullptr) {
+                CHECK(full->id.has_value());
+                CHECK(full->tenant == "t1");
+                CHECK(full->c_int == 42);
+                CHECK(full->c_bigint == "9007199254740993");
+                CHECK(full->c_bool == true);
+                CHECK(full->c_ts.has_value() && !full->c_ts->empty());
+                CHECK(full->c_jsonb.has_value() && full->c_jsonb->is_object());
+                CHECK(full->c_nasty == nastyText());
+                CHECK(full->c_fakejsonb == "{oops"); // corrupt JSONB text degrades to a string
+                CHECK(null_row->id.has_value());
+                CHECK(null_row->tenant == "t1");
+                CHECK(!null_row->c_int && !null_row->c_bigint && !null_row->c_text && !null_row->c_bool);
+                CHECK(!null_row->c_ts && !null_row->c_jsonb && !null_row->c_nasty && !null_row->c_fakejsonb);
+
+                // GET through the single-row sink, JSON (default client).
+                WireOneSink one(sgrn::WireFormat::Json);
+                auto get = drogon::sync_wait(executeViewGet(wireSpec(), requestWithAccept(""), "t1", std::to_string(*full->id), &one));
+                CHECK(static_cast<int>(get->getStatusCode()) == 200);
+                CHECK(one.row().has_value());
+                if (one.row().has_value()) {
+                    CHECK(one.row()->c_text == "hello");
+                    CHECK(one.row()->c_jsonb.has_value() && one.row()->c_jsonb->is_object());
+                }
+            }
+        }
+    }
+
     try {
         execSetup(drogon::app().getDbClient(), "DROP TABLE IF EXISTS crud_wire_test");
     } catch (const std::exception&) {
@@ -346,6 +649,11 @@ void runWireFormatTests() {
 } // namespace
 
 int main() {
+    // --- DB-free: content negotiation and typed response encoding ----------
+    checkContentNegotiation();
+    checkTypedRowEncoding();
+    checkSignInEncoding();
+
     // --- Int: integers, decimal strings, hex strings bind canonically ------
     checkBindOk(FieldType::Int, parse("30"), "30");
     checkBindOk(FieldType::Int, parse("-5"), "-5");

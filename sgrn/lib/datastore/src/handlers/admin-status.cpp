@@ -1,7 +1,11 @@
 // admin-status.cpp — Status, endpoint discovery and meta-probe sessions..
 #include "admin-common.hpp"
 
+#include <sgrn/datastore/core/orm-glaze.hpp>
+#include <sgrn/datastore/wire/admin.hpp>
 #include <sgrn/utils/json-serialization.hpp>
+
+#include <optional>
 
 namespace sgrn::datastore::handlers::admin::detail
 {
@@ -20,20 +24,15 @@ struct SessionRevokedAuditDetails {
 };
 
 struct SessionRevokedResponse {
-    bool success{true};
     std::string revoked_session;
 };
 
-struct ActiveSessionResponse {
-    std::string token;
-    std::optional<int32_t> user_id;
-    std::optional<int32_t> automated_service_id;
-    std::string ip;
-    std::string created_at;
-    std::string expires_at;
-    std::string actor_type;
-    std::string actor_name;
+struct SessionOwnerOrganisations {
+    std::optional<std::string> user_org;
+    std::optional<std::string> service_org;
 };
+
+using ActiveSessionResponse = ::sgrn::datastore::admin::ActiveSession;
 } // namespace sgrn::datastore::handlers::admin::detail
 
 namespace sgrn::datastore::handlers::admin
@@ -46,12 +45,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleGetStatus(HttpRequestPtr tsp_req) {
         .version = "1.0.0",
         .timestamp = trantor::Date::now().toFormattedString(false),
     };
-    auto response_result = sgrn::json::write(status);
-    if (response_result.hasError()) {
-        co_return createErrorResponse("Failed to serialize status response", k500InternalServerError, "AdminApi");
-    }
-    std::string response_json = std::move(response_result).value();
-    co_return createJsonResponse(std::move(response_json), k200OK);
+    co_return createTypedResponse(tsp_req, status, k200OK);
 }
 
 Task<HttpResponsePtr> AdminApiHandler::handleGetEndpoints(HttpRequestPtr tsp_req) {
@@ -71,12 +65,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleGetEndpoints(HttpRequestPtr tsp_req
         "/api/v1/admin/analytics/overview",
         "/api/v1/admin/analytics/breakdown",
     }};
-    auto response_result = sgrn::json::write(endpoints.endpoints);
-    if (response_result.hasError()) {
-        co_return createErrorResponse("Failed to serialize endpoint response", k500InternalServerError, "AdminApi");
-    }
-    std::string response_json = std::move(response_result).value();
-    co_return createJsonResponse(std::move(response_json), k200OK);
+    co_return createTypedResponse(tsp_req, endpoints.endpoints, k200OK);
 }
 
 Task<HttpResponsePtr> AdminApiHandler::handleGetMetaProbeSessions(HttpRequestPtr tsp_req) {
@@ -94,10 +83,10 @@ Task<HttpResponsePtr> AdminApiHandler::handleGetMetaProbeSessions(HttpRequestPtr
             response.push_back({session.token, session.user_id, session.automated_service_id, session.ip, session.created_at,
                 session.expires_at, session.actor_type, session.actor_name});
         }
-        co_return createTypedJsonResponse(response, k200OK);
+        co_return createTypedResponse(tsp_req, response, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to get live sessions: {}", e.what());
-        co_return createErrorResponse(AdminApiError::DbError);
+        co_return createTypedResponse(BackendErrorResponse{AdminApiError::DbError});
     }
 }
 
@@ -111,31 +100,30 @@ Task<HttpResponsePtr> AdminApiHandler::handleRevokeSession(HttpRequestPtr tsp_re
         const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
         const std::string token = sgrn::utils::strings::trim(std::move(t_id));
         if (token.empty()) {
-            co_return createErrorResponse(AdminApiError::InvalidPayload);
+            co_return createTypedResponse(BackendErrorResponse{AdminApiError::InvalidPayload});
         }
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db = db_res.value();
 
-        auto res = co_await sgrn::datastore::core::execSqlCoroVec(db,
+        static constexpr char kSessionOwnerOrganisationsQuery[] =
             "SELECT s.token::text, u.organisation AS user_org, a.organisation AS service_org "
             "FROM core.sessions s "
             "LEFT JOIN core.users u ON u.id = s.user_id "
             "LEFT JOIN core.automated_services a ON a.id = s.automated_service_id "
-            "WHERE s.token = $1::uuid AND s.terminated_at IS NULL",
-            {token});
+            "WHERE s.token = $1::uuid AND s.terminated_at IS NULL";
+        auto res = co_await sgrn::datastore::core::execSqlCoroVec(db, kSessionOwnerOrganisationsQuery, {token});
         if (res.empty()) {
-            co_return createErrorResponse(AdminApiError::InvalidUserId);
+            co_return createTypedResponse(BackendErrorResponse{AdminApiError::InvalidUserId});
         }
-        const std::string owner_org = res[0]["user_org"].isNull()
-                                          ? (res[0]["service_org"].isNull() ? "" : res[0]["service_org"].as<std::string>())
-                                          : res[0]["user_org"].as<std::string>();
+        const auto owner = sgrn::orm::fromRow<detail::SessionOwnerOrganisations, kSessionOwnerOrganisationsQuery>(res[0]);
+        const std::string owner_org = owner.user_org.value_or(owner.service_org.value_or(""));
         if (!is_platform && owner_org != ctx.organisation) {
             // missing OR other tenant — same answer
-            co_return createErrorResponse(AdminApiError::InvalidUserId);
+            co_return createTypedResponse(BackendErrorResponse{AdminApiError::InvalidUserId});
         }
 
         // revokeSession stamps terminated_at, evicts the local RAM copy,
@@ -146,10 +134,11 @@ Task<HttpResponsePtr> AdminApiHandler::handleRevokeSession(HttpRequestPtr tsp_re
         co_await sgrn::datastore::audit::AuditLogger::log(db, ctx.organisation, "user", ctx.actor_id, ctx.actor_name, "session.revoked",
             "session", token, tsp_req->getPeerAddr().toIp(), detail::SessionRevokedAuditDetails{token.substr(0, 8)}, "success");
 
-        co_return createTypedJsonResponse(detail::SessionRevokedResponse{true, token}, k200OK);
+        co_return createTypedResponse(tsp_req, detail::SessionRevokedResponse{token}, k200OK);
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Failed to revoke session: {}", e.what());
-        co_return createErrorResponse(std::string("Failed to revoke session: ") + e.what(), k400BadRequest, "AdminApi");
+        co_return createTypedResponse(
+            BackendErrorResponse{std::string("Failed to revoke session: ") + e.what(), k400BadRequest, "AdminApi"});
     }
 }
 

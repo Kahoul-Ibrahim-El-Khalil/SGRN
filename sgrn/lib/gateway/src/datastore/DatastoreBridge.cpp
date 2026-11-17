@@ -126,10 +126,10 @@ void DatastoreBridge::tryConnect() {
             // Initialize the SGRN SDK client if needed.
             if (!client_) {
                 sgrn::sdk::SgrnClientConfig sdk;
-                sdk.backend_url_ = cfg_.url;
-                sdk.auth_mode_ = sgrn::sdk::AuthMode::AutomatedService;
-                sdk.public_token_ = cfg_.public_token;
-                sdk.private_token_ = cfg_.private_token;
+                sdk.backend_url = cfg_.url;
+                sdk.auth_mode = sgrn::sdk::AuthMode::AutomatedService;
+                sdk.public_token = cfg_.public_token;
+                sdk.private_token = cfg_.private_token;
                 client_ = std::make_unique<sgrn::sdk::SgrnClient>(std::move(sdk));
             }
 

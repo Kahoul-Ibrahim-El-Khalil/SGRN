@@ -4,6 +4,7 @@
 #include <sgrn/datastore/handlers/admin.hpp>
 #include <sgrn/datastore/handlers/storage-admin.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
+#include <sgrn/datastore/wire/auth.hpp>
 
 #include <drogon/HttpAppFramework.h>
 #include <drogon/HttpRequest.h>
@@ -45,13 +46,12 @@ HttpRequestPtr makeRequest(HttpMethod t_method, const std::string& t_path, const
     req->setMethod(t_method);
     req->setPath(t_path);
 
-    Json::Value session;
-    session["user"]["id"] = t_user_id;
-    session["user"]["email"] = t_email;
-    session["user"]["organisation"] = t_org;
-    session["user"]["role"] = "admin";
-
-    req->attributes()->insert("session_json", session);
+    sgrn::datastore::auth::SessionClaims claims;
+    claims.user.id = t_user_id;
+    claims.user.email = t_email;
+    claims.user.organisation = t_org;
+    claims.user.role = {"admin", 0};
+    req->attributes()->insert("session_claims", std::move(claims));
     req->attributes()->insert("user_role_code", sgrn::datastore::filters::UserRoleEnum::ADMIN);
     return req;
 }

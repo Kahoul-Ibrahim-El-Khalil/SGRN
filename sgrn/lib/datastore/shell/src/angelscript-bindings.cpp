@@ -74,16 +74,15 @@ std::string DatastoreShell::as_createUser(const std::string& t_first, const std:
     if (!client_)
         return "error: not connected";
     sgrn::datastore::client::NewUser u;
-    u.first_name_ = t_first;
-    u.family_name_ = t_family;
-    u.email_ = t_email;
-    u.password_ = t_password;
-    u.organisation_ = t_org;
-    u.status_ = t_status;
+    u.first_name = t_first;
+    u.family_name = t_family;
+    u.email = t_email;
+    u.password = t_password;
+    u.organisation = t_org;
+    u.status = t_status;
     auto r = client_->registerUser(u);
-    if (r.hasError()) {
-        return "error: " + r.error();
-    }
+
+    RETURN_IF(r.hasError(), "error: " + r.error());
     return r.value();
 }
 
@@ -95,13 +94,13 @@ std::string DatastoreShell::as_createService(const std::string& t_name, const st
     if (!client_)
         return "error: not connected";
     sgrn::datastore::client::NewService s;
-    s.name_ = t_name;
-    s.organisation_ = t_org;
+    s.name = t_name;
+    s.organisation = t_org;
     auto r = client_->registerService(s);
-    if (r.hasError()) {
-        return "error: " + r.error();
-    }
-    return fmt::format("{} | token: {} secret: {}", r.value().message_, r.value().token_, r.value().token_secret_);
+
+    RETURN_IF(r.hasError(), "error: " + r.error());
+
+    return fmt::format("{} | token: {} secret: {}", r.value().message, r.value().token, r.value().token_secret);
 }
 
 void DatastoreShell::as_listServices() {
@@ -112,12 +111,13 @@ std::string DatastoreShell::as_rotateServiceToken(const std::string& t_name_or_i
     if (!client_)
         return "error: not connected";
     auto id = resolveServiceId(t_name_or_id);
-    if (id.hasError())
-        return "error: " + id.error();
+
+    RETURN_IF(id.hasError(), "error: " + id.error());
+
     auto r = client_->rotateServiceToken(id.value());
-    if (r.hasError())
-        return "error: " + r.error();
-    return fmt::format("{} | token: {} secret: {}", r.value().message_, r.value().token_, r.value().token_secret_);
+
+    RETURN_IF(r.hasError(), "error: " + r.error());
+    return fmt::format("{} | token: {} secret: {}", r.value().message, r.value().token, r.value().token_secret);
 }
 
 void DatastoreShell::as_listOrgs() {

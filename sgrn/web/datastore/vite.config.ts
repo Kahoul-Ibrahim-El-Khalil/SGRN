@@ -36,6 +36,9 @@ export default defineConfig(({ command }): UserConfig => {
                 // (instead of the stale copy under node_modules/@sgrn/types).
                 "@sgrn/types": path.resolve(__dirname, "../../typescript/types/src/index.ts"),
                 "@sgrn/datastore/web": path.resolve(__dirname, "../../typescript/datastore/src/web.ts"),
+                "@sgrn/datastore/requests": path.resolve(__dirname, "../../typescript/datastore/src/requests.ts"),
+                "@sgrn/datastore/crud-requests": path.resolve(__dirname, "../../typescript/datastore/src/crud-requests.gen.ts"),
+                "@sgrn/datastore/crud-responses": path.resolve(__dirname, "../../typescript/datastore/src/crud-responses.gen.ts"),
                 "@sgrn/datastore": path.resolve(__dirname, "../../typescript/datastore/src/index.ts"),
             },
         },

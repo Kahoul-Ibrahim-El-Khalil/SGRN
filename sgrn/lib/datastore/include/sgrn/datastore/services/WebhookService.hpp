@@ -3,10 +3,12 @@
 #include <drogon/HttpAppFramework.h>
 #include <drogon/HttpClient.h>
 #include <drogon/utils/coroutine.h>
-#include <json/json.h>
+#include <sgrn/debug.hpp>
+#include <sgrn/utils/json-serialization.hpp>
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace sgrn::datastore::services
@@ -26,8 +28,16 @@ class WebhookService {
 public:
     static WebhookService& instance();
 
-    // Asynchronously dispatch webhook payload to matching subscribers in an organization
-    void dispatchEvent(const std::string& organisation, const std::string& event_type, const Json::Value& payload);
+    // Asynchronously dispatch a typed payload to matching subscribers.
+    template <typename T>
+    void dispatchEvent(const std::string& organisation, const std::string& event_type, const T& payload) {
+        auto serialized = sgrn::json::writeOmitNull(payload);
+        if (serialized.hasError()) {
+            SGRN_ERROR("WebhookService", "Failed to serialize '{}' payload: {}", event_type, serialized.error().message);
+            return;
+        }
+        dispatchSerializedEvent(organisation, event_type, std::move(serialized).value());
+    }
 
     // Database CRUD operations for webhooks
     drogon::Task<std::vector<WebhookEndpoint>> getWebhooks(const std::string& organisation);
@@ -38,6 +48,7 @@ public:
 private:
     WebhookService() = default;
 
+    void dispatchSerializedEvent(const std::string& organisation, const std::string& event_type, std::string payload_json);
     std::string calculateHmacSha256(const std::string& secret, const std::string& payload);
     void sendHttpRequest(const std::string& url, const std::string& secret, const std::string& event_type, const std::string& body);
 };

@@ -12,6 +12,7 @@
 #include <sgrn/s7shell/script/ScriptTagTable.hpp>
 #include <sgrn/s7shell/utils/json-helpers.hpp>
 
+#include <sgrn/Result.hpp>
 #include <sgrn/gateway/twin/twin.hpp>
 #include <sgrn/utils/filesystem.hpp>
 #include <sgrn/utils/strings.hpp>
@@ -105,14 +106,12 @@ sgrn::Result<void, SclError> ScriptS7Connection::reconnect() {
     (void)client_.disconnect();
     if (conn_use_tsap_) {
         auto res = client_.connectWithTsap(conn_ip_, conn_local_tsap_, conn_remote_tsap_);
-        if (res.hasError())
-            return proto_bridge(res.error());
+        RETURN_IF(res.hasError(), proto_bridge(res.error()));
         was_connected_ = true;
         return {};
     }
     auto res = client_.connect(conn_ip_, conn_rack_, conn_slot_, conn_type_, conn_port_);
-    if (res.hasError())
-        return proto_bridge(res.error());
+    RETURN_IF(res.hasError(), proto_bridge(res.error()));
     was_connected_ = true;
     return {};
 }
@@ -132,8 +131,7 @@ sgrn::Result<void, SclError> ScriptS7Connection::connectWithTsap(const std::stri
     conn_remote_tsap_ = t_remote_tsap;
     (void)client_.disconnect();
     auto res = client_.connectWithTsap(t_ip, t_local_tsap, t_remote_tsap);
-    if (res.hasError())
-        return proto_bridge(res.error());
+    RETURN_IF(res.hasError(), proto_bridge(res.error()));
     was_connected_ = true;
     return {};
 }
@@ -210,14 +208,12 @@ void fillRuntimeTagItem(
 sgrn::Result<std::string, ::sgrn::wrappers::s7::S7Error> ScriptS7Connection::runtimeTagGet(const std::string& t_name) {
     using ::sgrn::wrappers::s7::S7Error;
     auto desc = runtime_->describeTag(t_name);
-    if (desc.hasError())
-        return S7Error::ReadError;
+    RETURN_IF(desc.hasError(), S7Error::ReadError);
     const auto tag = desc.value();
 
     if (!client_.isConnected()) {
         auto r = runtime_->readTagJson(t_name);
-        if (r.hasError())
-            return ::sgrn::wrappers::s7::fromSclErrorToS7Error(r.error());
+        RETURN_IF(r.hasError(), ::sgrn::wrappers::s7::fromSclErrorToS7Error(r.error()));
         return r.value();
     }
 
@@ -225,8 +221,7 @@ sgrn::Result<std::string, ::sgrn::wrappers::s7::S7Error> ScriptS7Connection::run
     std::vector<uint8_t> buf;
     fillRuntimeTagItem(tag.addr, tag.span_bytes, item, buf);
     auto rc = client_.readMultiVars(&item, 1);
-    if (rc.hasError() || item.Result != 0)
-        return S7Error::ReadError;
+    RETURN_IF(rc.hasError() || item.Result != 0, S7Error::ReadError);
 
     // Commit wire bytes into the shared backing (dirty only on change, like
     // the DB get-diff path) so runtime, PLC and S7 clients stay identical.
@@ -240,16 +235,15 @@ sgrn::Result<std::string, ::sgrn::wrappers::s7::S7Error> ScriptS7Connection::run
     }
 
     auto r = runtime_->readTagJson(t_name);
-    if (r.hasError())
-        return ::sgrn::wrappers::s7::fromSclErrorToS7Error(r.error());
+    RETURN_IF(r.hasError(), ::sgrn::wrappers::s7::fromSclErrorToS7Error(r.error()));
     return r.value();
 }
 
 sgrn::Result<void, ::sgrn::wrappers::s7::S7Error> ScriptS7Connection::runtimeTagPut(
     const std::string& t_name, const std::string& t_json_val) {
     using ::sgrn::wrappers::s7::S7Error;
-    if (auto r = runtime_->writeTagJson(t_name, t_json_val); r.hasError())
-        return S7Error::WriteError;
+    auto result = runtime_->writeTagJson(t_name, t_json_val);
+    RETURN_IF(result.hasError(), S7Error::WriteError);
     if (!client_.isConnected())
         return {};
 
@@ -260,14 +254,13 @@ sgrn::Result<void, ::sgrn::wrappers::s7::S7Error> ScriptS7Connection::runtimeTag
 sgrn::Result<void, ::sgrn::wrappers::s7::S7Error> ScriptS7Connection::wirePushTag(const std::string& t_name) {
     using ::sgrn::wrappers::s7::S7Error;
     auto desc = runtime_->describeTag(t_name);
-    if (desc.hasError())
-        return S7Error::WriteError;
+    RETURN_IF(desc.hasError(), S7Error::WriteError);
     const auto tag = desc.value();
     const size_t off = static_cast<size_t>(tag.addr.byte_offset);
     const size_t span = static_cast<size_t>(tag.span_bytes);
     std::vector<uint8_t> buf(span, 0);
-    if (!runtime_->readAreaMemory(tag.addr.area, off, span, buf.data()).hasValue())
-        return S7Error::WriteError;
+    auto read_res = runtime_->readAreaMemory(tag.addr.area, off, span, buf.data());
+    RETURN_IF(read_res.hasError(), S7Error::WriteError);
 
     ::sgrn::wrappers::s7::S7DataItem item{};
     item.Area = tag.addr.area;
@@ -277,8 +270,7 @@ sgrn::Result<void, ::sgrn::wrappers::s7::S7Error> ScriptS7Connection::wirePushTa
     item.Amount = (tag.addr.word_len == S7WLBit) ? 1 : static_cast<int>(span);
     item.pdata = buf.data();
     auto rc = client_.writeMultiVars(&item, 1);
-    if (rc.hasError() || item.Result != 0)
-        return S7Error::WriteError;
+    RETURN_IF(rc.hasError() || item.Result != 0, S7Error::WriteError);
     return {};
 }
 

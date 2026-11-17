@@ -1,5 +1,6 @@
 import { AdminBackendApiEndpoints } from "@/backend/endpoints";
-import { authenticatedFetch, processResponse } from "@/backend/api/fetcher";
+import { authenticatedFetch, jsonBody, processResponse } from "@/backend/api/fetcher";
+import type { GrantPermissionRequest } from "@sgrn/datastore/requests";
 import type { SgrnResult } from "@sgrn/types";
 import { ErrorScope } from "@sgrn/types";
 
@@ -22,7 +23,6 @@ export interface PermissionsList {
 }
 
 export interface RevokeResult {
-    success: boolean;
     revoked: string;
     warning?: string;
 }
@@ -61,8 +61,7 @@ export function grantPermission(t_body: {
 }): Promise<SgrnResult<DomainPermission>> {
     return request<DomainPermission>(AdminBackendApiEndpoints.PERMISSIONS, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(t_body),
+        ...jsonBody<GrantPermissionRequest>(t_body),
     });
 }
 

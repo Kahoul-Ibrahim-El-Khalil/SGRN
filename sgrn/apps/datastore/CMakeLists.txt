@@ -7,6 +7,16 @@ add_executable(sgrn_datastore
     "${SQL_GEN_DIR}/sql_assets.hpp"
     "${CONFIG_GEN_DIR}/config_assets.hpp"
 )
+
+# main.cpp embeds the generated asset headers (init/assets.hpp -> web_assets.hpp,
+# etc.). Recompiling against a changed header normally happens via depfile
+# tracking, but ninja's deps-log validation silently fails to invalidate the
+# object here (reproducible with `touch web_assets.hpp` + `ninja -d explain`:
+# the binary kept serving a stale embedded dashboard). Declare the dependency
+# explicitly on the compile edge so restat propagation applies.
+set_source_files_properties(main.cpp PROPERTIES
+    OBJECT_DEPENDS "${DASHBOARD_GEN_DIR}/web_assets.hpp;${SQL_GEN_DIR}/sql_assets.hpp;${CONFIG_GEN_DIR}/config_assets.hpp"
+)
 sgrn_use_pch(sgrn_datastore sgrn_pch_net)
 add_dependencies(sgrn_datastore sgrn_dashboard_assets sgrn_sql_assets sgrn_config_assets)
 target_include_directories(sgrn_datastore PRIVATE "${DASHBOARD_GEN_DIR}" "${SQL_GEN_DIR}" "${CONFIG_GEN_DIR}")

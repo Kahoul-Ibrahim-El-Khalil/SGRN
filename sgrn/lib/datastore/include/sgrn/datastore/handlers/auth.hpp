@@ -28,11 +28,15 @@ public:
 private:
     inline static const std::array<typename sgrn::IHandler<AuthApiHandler>::RouteConfig, 6> kRoutes{
         {{"/api/v1/auth/user/signin", &AuthApiHandler::handleSignIn, {drogon::Post}, {}},
+
             {"/api/v1/auth/automated-service/signin", &AuthApiHandler::handleAutomatedServiceSignIn, {drogon::Post}, {}},
+
             {"/api/v1/auth/automated-service/signout", &AuthApiHandler::handleAutomatedServiceSignOut, {drogon::Post},
                 {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}},
+
             {"/api/v1/auth/automated-service/session", &AuthApiHandler::handleGetAutomatedServiceSession, {drogon::Get},
                 {"sgrn::datastore::filters::AutomatedServiceAuthFilter"}},
+
             {"/api/v1/auth/user/signout", &AuthApiHandler::handleSignOut, {drogon::Post}, {"sgrn::datastore::filters::UserAuthFilter"}},
 
             {"/api/v1/auth/user/password", &AuthApiHandler::handleUpdatePassword, {drogon::Post},

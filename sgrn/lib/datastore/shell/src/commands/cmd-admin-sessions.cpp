@@ -7,64 +7,40 @@ namespace sgrn::datastore::shell
 
 sgrn::Result<void> DatastoreShell::cmdSessions() {
     RETURN_ERROR_IF(!client_, "not connected");
-    auto r = client_->listActiveSessionsJson();
+    auto r = client_->tryListActiveSessions();
     RETURN_IF(r.hasError(), r.error());
-    // Try to render as a table when response is a JSON array
-    Json::CharReaderBuilder builder;
-    std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
-    Json::Value root;
-    std::string errs;
-    const std::string& raw = r.value();
-    if (reader->parse(raw.data(), raw.data() + raw.size(), &root, &errs) && root.isArray()) {
-        std::vector<std::vector<std::string>> rows;
-        for (const auto& s : root) {
-            rows.push_back({
-                s.get("user_id", "").asString(),
-                s.get("email", "").asString(),
-                s.get("domain", "").asString(),
-                s.get("auth_mode", "").asString(),
-                s.get("ip", s.get("remote_ip", "")).asString(),
-                s.get("created_at", s.get("logged_in_at", "")).asString(),
-            });
-        }
-        if (rows.empty()) {
-            fmt::print("(no active sessions)\n");
-        } else {
-            printTable({"USER ID", "EMAIL", "DOMAIN", "AUTH", "IP", "SINCE"}, std::move(rows), {0});
-        }
+    std::vector<std::vector<std::string>> rows;
+    rows.reserve(r.value().size());
+    for (const auto& s : r.value()) {
+        // A session belongs to either a user or an automated service.
+        std::string id;
+        if (s.user_id)
+            id = std::to_string(*s.user_id);
+        else if (s.automated_service_id)
+            id = std::to_string(*s.automated_service_id);
+        rows.push_back({id, s.actor_type, s.actor_name, s.ip, s.created_at, s.expires_at});
+    }
+    if (rows.empty()) {
+        fmt::print("(no active sessions)\n");
     } else {
-        printJsonPretty(raw);
+        printTable({"ID", "ACTOR", "NAME", "IP", "SINCE", "EXPIRES"}, std::move(rows), {0});
     }
     return {};
 }
 
 sgrn::Result<void> DatastoreShell::cmdWebhooks() {
     RETURN_ERROR_IF(!client_, "not connected");
-    auto r = client_->listWebhooksJson();
+    auto r = client_->tryListWebhooks();
     RETURN_IF(r.hasError(), r.error());
-    Json::CharReaderBuilder builder;
-    std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
-    Json::Value root;
-    std::string errs;
-    const std::string& raw = r.value();
-    if (reader->parse(raw.data(), raw.data() + raw.size(), &root, &errs) && root.isArray()) {
-        std::vector<std::vector<std::string>> rows;
-        for (const auto& w : root) {
-            rows.push_back({
-                w.get("id", "").asString(),
-                w.get("url", "").asString(),
-                w.get("organisation", "").asString(),
-                w.get("is_active", false).asBool() ? "active" : "inactive",
-                w.get("created_at", "").asString(),
-            });
-        }
-        if (rows.empty()) {
-            fmt::print("(no webhooks registered)\n");
-        } else {
-            printTable({"ID", "URL", "ORG", "STATUS", "CREATED"}, std::move(rows), {0});
-        }
+    std::vector<std::vector<std::string>> rows;
+    rows.reserve(r.value().size());
+    for (const auto& w : r.value()) {
+        rows.push_back({std::to_string(w.id), w.url, w.organisation, w.is_active ? "active" : "inactive", w.created_at});
+    }
+    if (rows.empty()) {
+        fmt::print("(no webhooks registered)\n");
     } else {
-        printJsonPretty(raw);
+        printTable({"ID", "URL", "ORG", "STATUS", "CREATED"}, std::move(rows), {0});
     }
     return {};
 }

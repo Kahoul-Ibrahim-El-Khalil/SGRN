@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <sgrn/datastore/core/db.hpp>
+#include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/error/ApiErrors.hpp>
 #include <sgrn/datastore/filters/admin.hpp>
 #include <sgrn/datastore/handlers/admin.hpp>
@@ -48,12 +49,18 @@ struct RequestContext {
 };
 
 inline RequestContext requestContext(const drogon::HttpRequestPtr& t_req) {
-    const auto& session = t_req->attributes()->get<Json::Value>("session_json");
-    const auto& user = session["user"];
-    return {
-        user["organisation"].asString(),
-        user["id"].asInt(),
-        user["email"].asString(),
-    };
+    if (t_req && t_req->attributes()->find("auth_context")) {
+        const auto& auth = t_req->attributes()->get<filters::AuthContext>("auth_context");
+        return {
+            auth.user.organisation,
+            auth.user.id,
+            auth.user.email,
+        };
+    }
+    if (t_req && t_req->attributes()->find("session_claims")) {
+        const auto& user = t_req->attributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims").user;
+        return {user.organisation, user.id, user.email};
+    }
+    return {};
 }
 } // namespace sgrn::datastore::handlers::admin::detail

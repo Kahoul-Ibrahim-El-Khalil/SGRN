@@ -126,11 +126,20 @@ if(SGRN_BUILD_DROGON)
             set(BUILD_CTL ON CACHE BOOL "" FORCE)
         endif()
 
+        set(_drogon_jsoncpp_target sgrn::jsoncpp)
+        if(TARGET jsoncpp_static)
+            set(_drogon_jsoncpp_target jsoncpp_static)
+        endif()
+
         if(NOT TARGET Jsoncpp_lib AND TARGET sgrn::jsoncpp)
             add_library(Jsoncpp_lib INTERFACE IMPORTED GLOBAL)
             set_target_properties(Jsoncpp_lib PROPERTIES
-                INTERFACE_LINK_LIBRARIES sgrn::jsoncpp
+                INTERFACE_LINK_LIBRARIES "${_drogon_jsoncpp_target}"
             )
+        endif()
+        if(NOT TARGET jsoncpp_lib AND TARGET sgrn::jsoncpp)
+            add_library(jsoncpp_lib INTERFACE IMPORTED GLOBAL)
+            target_link_libraries(jsoncpp_lib INTERFACE "${_drogon_jsoncpp_target}")
         endif()
 
         # Prevent drogon from finding jsoncpp in the Conda environment which clashes with

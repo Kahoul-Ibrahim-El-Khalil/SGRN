@@ -209,7 +209,7 @@ inline void registerDashboardAssets() {
         drogon::app().registerHandlerViaRegex("^/(?!api($|/)|assets($|/)).*$",
             [index_handler](const drogon::HttpRequestPtr& tsp_req, std::function<void(const drogon::HttpResponsePtr&)>&& tsp_callback) {
                 if (tsp_req->method() != drogon::Get) {
-                    tsp_callback(::sgrn::createErrorResponse("Unkown path", drogon::k403Forbidden));
+                    tsp_callback(::sgrn::createTypedResponse(BackendErrorResponse{"Unkown path", drogon::k403Forbidden}));
                     return;
                 }
                 const std::string& path = tsp_req->path();
@@ -223,7 +223,7 @@ inline void registerDashboardAssets() {
                         return s.size() >= p.size() && s.substr(0, p.size()) == p;
                     };
                     if (path == "/api" || starts_with(path, "/api/") || path == "/assets" || starts_with(path, "/assets/")) {
-                        tsp_callback(::sgrn::createErrorResponse("Unkown path", drogon::k403Forbidden));
+                        tsp_callback(::sgrn::createTypedResponse(BackendErrorResponse{"Unkown path", drogon::k403Forbidden}));
                         return;
                     }
                     // Only browser navigations (Accept includes text/html) get
@@ -237,7 +237,7 @@ inline void registerDashboardAssets() {
                         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                     }
                     if (accept.find("text/html") == std::string::npos) {
-                        tsp_callback(::sgrn::createErrorResponse("Unkown path", drogon::k403Forbidden));
+                        tsp_callback(::sgrn::createTypedResponse(BackendErrorResponse{"Unkown path", drogon::k403Forbidden}));
                         return;
                     }
                 }

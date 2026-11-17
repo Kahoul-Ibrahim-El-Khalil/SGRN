@@ -1,11 +1,14 @@
 #include <drogon/orm/Exception.h>
 #include <fmt/core.h>
 #include <sgrn/datastore/core/db.hpp>
+#include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/crypto/key-store.hpp>
 #include <sgrn/datastore/error/ApiErrors.hpp>
+#include <sgrn/datastore/filters/types.hpp>
 #include <sgrn/datastore/handlers/storage.hpp>
 #include <sgrn/datastore/services/helpers/magic.hpp>
 #include <sgrn/datastore/services/storage.hpp>
+#include <sgrn/datastore/utils/helpers.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe-access.hpp>
 #include <sgrn/debug.hpp>
@@ -50,22 +53,182 @@ using namespace drogon;
 using sgrn::datastore::services::storage::ScopeContext;
 using sgrn::datastore::services::storage::StorageScope;
 
-namespace
+namespace detail
 {
+
+struct UploadInitRequest {
+    std::string filename;
+    std::string target_path{"/"};
+    std::string scope;
+    std::string mime_type{"application/octet-stream"};
+    int64_t total_size{0};
+    int64_t chunk_size{0};
+    bool encrypt{false};
+};
+
+struct UploadCompleteRequest {
+    std::string upload_id;
+};
+
+struct UploadInitResponse {
+    std::string upload_id;
+    int64_t chunk_size{0};
+    int32_t total_chunks{0};
+    std::string status{"active"};
+    bool is_encrypted{false};
+};
+
+struct UploadChunkResponse {
+    std::string upload_id;
+    int32_t chunk_index{0};
+    bool received{true};
+    std::size_t segments_flushed{0};
+    bool duplicate{false};
+};
+
+struct UploadStatusResponse {
+    std::string upload_id;
+    std::string filename;
+    std::string target_path;
+    int64_t total_size{0};
+    int64_t chunk_size{0};
+    int32_t total_chunks{0};
+    int32_t uploaded_chunks_count{0};
+    std::string status;
+    std::vector<int32_t> uploaded_chunk_indices;
+};
+
+struct UploadStatusRow {
+    std::string filename;
+    std::string target_path;
+    int64_t total_size{0};
+    int64_t chunk_size{0};
+    int32_t total_chunks{0};
+    int32_t uploaded_chunks_count{0};
+    std::string status;
+};
+
+struct UploadCompleteResponse {
+    std::string upload_id;
+    int64_t file_id{0};
+    std::string file_hash;
+    std::size_t segment_count{0};
+    int64_t original_bytes{0};
+    bool is_encrypted{false};
+    std::string message{"Upload completed successfully"};
+};
+
+struct UploadAbortResponse {
+    std::string message{"Upload session aborted"};
+};
+
+struct UploadUserQuotaRow {
+    std::optional<int64_t> storage_limit;
+    int64_t total_real_size{0};
+    std::optional<int64_t> max_file_size_mb;
+    std::optional<int32_t> preferred_chunk_size_mb;
+};
+
+struct DomainEncryptionPolicyRow {
+    std::optional<std::string> encryption_policy;
+};
+
+struct UploadMimeStatusRow {
+    std::string mime_type;
+    std::string status;
+};
+
+struct UploadSessionCompletionRow {
+    std::optional<int32_t> user_id;
+    std::optional<int32_t> automated_service_id;
+    int32_t total_chunks{0};
+    int32_t uploaded_chunks_count{0};
+    std::string filename;
+    std::string target_path;
+    int64_t total_size{0};
+    std::optional<std::string> mime_type;
+    bool is_encrypted{false};
+    std::optional<std::string> domain;
+    std::string status;
+    bool expired{false};
+    std::string scope;
+    std::optional<int32_t> owner_user_id;
+    std::optional<int32_t> owner_service_id;
+    std::optional<int64_t> owner_session_id;
+};
+
+struct ChunkIndexRow {
+    int32_t chunk_index{0};
+};
+
+struct ExistingSegmentRow {
+    int64_t object_id{0};
+    std::string key;
+};
+
+struct ObjectIdRow {
+    int64_t id{0};
+};
+
+static constexpr char kUploadUserQuotaQuery[] =
+    "SELECT storage_limit, total_real_size, max_file_size_mb, preferred_chunk_size_mb FROM core.users WHERE id = $1";
+static constexpr char kDomainEncryptionPolicyQuery[] = "SELECT encryption_policy FROM core.domains WHERE name = $1 AND organisation = $2";
+static constexpr char kUploadMimeStatusQuery[] =
+    "SELECT mime_type, status FROM storage.upload_sessions WHERE id = $1 AND (user_id = $2 OR automated_service_id = $3)";
+static constexpr char kUploadStatusQuery[] =
+    "SELECT filename, target_path, total_size, chunk_size, total_chunks, uploaded_chunks_count, status "
+    "FROM storage.upload_sessions WHERE id = $1 AND (user_id = $2 OR automated_service_id = $3)";
+static constexpr char kUploadCompletionQuery[] =
+    "SELECT user_id, automated_service_id, total_chunks, uploaded_chunks_count, filename, target_path, total_size, "
+    "mime_type, is_encrypted, domain, status, (expires_at < NOW()) AS expired, scope, owner_user_id, owner_service_id, "
+    "owner_session_id FROM storage.upload_sessions WHERE id = $1";
 
 struct SessionActor {
     std::optional<int32_t> user_id;
     std::optional<int32_t> service_id;
 };
 
-SessionActor sessionActor(const Json::Value& t_session) {
+SessionActor sessionActor(const ::sgrn::datastore::auth::SessionClaims& t_session) {
     SessionActor a;
-    const Json::Value& u = t_session["user"];
-    if (u.isMember("automated_service_id") && !u["automated_service_id"].isNull())
-        a.service_id = u["automated_service_id"].asInt();
-    else if (u.isMember("id") && !u["id"].isNull())
-        a.user_id = u["id"].asInt();
+    if (t_session.user.automated_service_id)
+        a.service_id = t_session.user.automated_service_id;
+    else if (t_session.user.id > 0)
+        a.user_id = t_session.user.id;
     return a;
+}
+
+SessionActor sessionActor(const drogon::HttpRequestPtr& t_req) {
+    if (t_req && t_req->attributes()->find("auth_context")) {
+        const auto& auth = t_req->attributes()->get<filters::AuthContext>("auth_context");
+        SessionActor a;
+        if (auth.automated_service_id.has_value()) {
+            a.service_id = auth.automated_service_id;
+        } else if (auth.user.id > 0) {
+            a.user_id = auth.user.id;
+        }
+        return a;
+    }
+    if (t_req && t_req->attributes()->find("session_claims")) {
+        return sessionActor(t_req->attributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims"));
+    }
+    return {};
+}
+
+enum class UploadIdSource { Query, JsonBody, QueryOrJsonBody };
+
+std::string uploadIdFromRequest(const drogon::HttpRequestPtr& t_req, UploadIdSource t_source = UploadIdSource::Query) {
+    if (t_source != UploadIdSource::JsonBody) {
+        std::string upload_id = t_req->getParameter("upload_id");
+        if (!upload_id.empty() || t_source == UploadIdSource::Query) {
+            return upload_id;
+        }
+    }
+
+    if (t_source != UploadIdSource::Query) {
+        auto req_res = parseTypedRequest<UploadCompleteRequest>(t_req);
+        return req_res.hasError() ? std::string{} : req_res->upload_id;
+    }
+    return {};
 }
 
 bool hasUnsafePath(std::string_view t_path) {
@@ -96,23 +259,25 @@ const char* scopeName(StorageScope t_scope) {
     }
 }
 
-} // namespace
+} // namespace detail
+using namespace detail;
 
 Task<HttpResponsePtr> StorageApiHandler::handleInitUploadSession(HttpRequestPtr tsp_req) {
     DEBUG_HTTP_REQUEST(tsp_req, "handleInitUploadSession");
-    auto p_json = tsp_req->getJsonObject();
-    if (!p_json) {
-        co_return createJsonErrorResponse("Invalid JSON payload", k400BadRequest);
+    auto req_res = parseTypedRequest<UploadInitRequest>(tsp_req);
+    if (req_res.hasError()) {
+        co_return createTypedResponse(BackendErrorResponse{"Invalid JSON payload", k400BadRequest});
     }
+    const auto& req = req_res.value();
 
-    const std::string filename = p_json->get("filename", "").asString();
-    const std::string raw_target = p_json->get("target_path", "/").asString();
-    std::string scope_str = p_json->get("scope", "").asString();
-    const std::string mime_type = p_json->get("mime_type", "application/octet-stream").asString();
-    const int64_t total_size = p_json->get("total_size", 0).asInt64();
+    const std::string& filename = req.filename;
+    const std::string& raw_target = req.target_path.empty() ? "/" : req.target_path;
+    std::string scope_str = req.scope;
+    const std::string& mime_type = req.mime_type.empty() ? "application/octet-stream" : req.mime_type;
+    const int64_t total_size = req.total_size;
     int64_t chunk_size = 0;
-    if (p_json->isMember("chunk_size") && (*p_json)["chunk_size"].asInt64() > 0) {
-        chunk_size = (*p_json)["chunk_size"].asInt64();
+    if (req.chunk_size > 0) {
+        chunk_size = req.chunk_size;
     } else if (total_size > static_cast<int64_t>(5ULL * 1024ULL * 1024ULL * 1024ULL)) {
         chunk_size = 32 * 1024 * 1024;
     } else if (total_size > 500 * 1024 * 1024) {
@@ -124,18 +289,18 @@ Task<HttpResponsePtr> StorageApiHandler::handleInitUploadSession(HttpRequestPtr 
     }
 
     if (filename.empty() || total_size <= 0 || chunk_size <= 0) {
-        co_return createJsonErrorResponse("filename, total_size, and chunk_size are required", k400BadRequest);
+        co_return createTypedResponse(BackendErrorResponse{"filename, total_size, and chunk_size are required", k400BadRequest});
     }
     if (filename.find_first_of("/\\") != std::string::npos || filename.find('\0') != std::string::npos || filename == "." ||
         filename == "..") {
-        co_return createJsonErrorResponse("Invalid filename", k400BadRequest);
+        co_return createTypedResponse(BackendErrorResponse{"Invalid filename", k400BadRequest});
     }
     if (hasUnsafePath(raw_target)) {
-        co_return createJsonErrorResponse("Invalid target_path", k400BadRequest);
+        co_return createTypedResponse(BackendErrorResponse{"Invalid target_path", k400BadRequest});
     }
     auto norm = normalizePath(raw_target.empty() ? std::string("/") : raw_target);
     if (!norm) {
-        co_return createJsonErrorResponse("Invalid target_path", k400BadRequest);
+        co_return createTypedResponse(BackendErrorResponse{"Invalid target_path", k400BadRequest});
     }
     const std::string requested_path = *norm;
 
@@ -144,85 +309,83 @@ Task<HttpResponsePtr> StorageApiHandler::handleInitUploadSession(HttpRequestPtr 
         scope_str = (requested_path.rfind("/domains/", 0) == 0) ? "domain" : "personal";
     }
 
-    const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
-    const SessionActor actor = sessionActor(session);
+    const SessionActor actor = sessionActor(tsp_req);
     if (!actor.user_id && !actor.service_id) {
-        co_return createJsonErrorResponse("Unauthenticated", k401Unauthorized);
+        co_return createTypedResponse(BackendErrorResponse{"Unauthenticated", k401Unauthorized});
     }
+    const auto& session = tsp_req->attributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims");
 
     try {
         auto db_res = sgrn::datastore::core::getDbClient();
-        if (db_res.hasError())
-            co_return sgrn::createJsonResponse(db_res);
+        CO_RETURN_IF(db_res.hasError(), createTypedResponse(BackendErrorResponse{db_res.error()}));
         auto db = db_res.value();
 
         // ── Resolve the real destination (same code path as the non-chunked upload) ──
         const StorageScope scope = storage_service_.parseScope(scope_str);
         auto scope_res = co_await storage_service_.resolveScopeSession(session, scope, requested_path);
-        if (scope_res.hasError())
-            co_return sgrn::createJsonResponse(scope_res);
+        CO_RETURN_IF(scope_res.hasError(), createTypedResponse(BackendErrorResponse{scope_res.error()}));
         const ScopeContext ctx = scope_res.value();
 
         if (ctx.is_virtual_root) {
-            co_return createJsonErrorResponse("Select a folder inside a domain, user or service namespace", k400BadRequest);
+            co_return createTypedResponse(
+                BackendErrorResponse{"Select a folder inside a domain, user or service namespace", k400BadRequest});
         }
         if (!ctx.can_write) {
-            co_return createJsonErrorResponse("You do not have write permission for this location", k403Forbidden);
+            co_return createTypedResponse(BackendErrorResponse{"You do not have write permission for this location", k403Forbidden});
         }
         if (scope == StorageScope::Domain && ctx.domain.empty()) {
-            co_return createJsonErrorResponse("Could not resolve target domain", k400BadRequest);
+            co_return createTypedResponse(BackendErrorResponse{"Could not resolve target domain", k400BadRequest});
         }
 
         // ── User constraints (quota, max file size, chunk size) ──
         if (actor.user_id) {
-            auto user_row = co_await db->execSqlCoro(
-                "SELECT storage_limit, total_real_size, max_file_size_mb, preferred_chunk_size_mb FROM core.users WHERE id = $1",
-                *actor.user_id);
+            auto user_row = co_await db->execSqlCoro(kUploadUserQuotaQuery, *actor.user_id);
             if (!user_row.empty()) {
-                const auto& u = user_row[0];
-                if (!u["max_file_size_mb"].isNull()) {
-                    const int64_t max_bytes = u["max_file_size_mb"].as<int64_t>() * 1024 * 1024;
+                const auto u = sgrn::orm::fromRow<UploadUserQuotaRow, kUploadUserQuotaQuery>(user_row[0]);
+                if (u.max_file_size_mb) {
+                    const int64_t max_bytes = *u.max_file_size_mb * 1024 * 1024;
                     if (total_size > max_bytes) {
-                        co_return createJsonErrorResponse(
+                        co_return createTypedResponse(BackendErrorResponse{
                             fmt::format("File size ({:.1f} MB) exceeds your account maximum allowed file size ({:.1f} MB)",
                                 static_cast<double>(total_size) / (1024.0 * 1024.0), static_cast<double>(max_bytes) / (1024.0 * 1024.0)),
-                            k400BadRequest);
+                            k400BadRequest});
                     }
                 }
-                if (!u["storage_limit"].isNull()) {
-                    if (u["total_real_size"].as<int64_t>() + total_size > u["storage_limit"].as<int64_t>()) {
-                        co_return createJsonErrorResponse(
-                            "Storage quota exceeded. Please delete unused files or request a quota increase.", k413RequestEntityTooLarge);
+                if (u.storage_limit) {
+                    if (u.total_real_size + total_size > *u.storage_limit) {
+                        co_return createTypedResponse(BackendErrorResponse{
+                            "Storage quota exceeded. Please delete unused files or request a quota increase.", k413RequestEntityTooLarge});
                     }
                 }
-                if (!u["preferred_chunk_size_mb"].isNull() && u["preferred_chunk_size_mb"].as<int32_t>() > 0) {
-                    chunk_size = static_cast<int64_t>(u["preferred_chunk_size_mb"].as<int32_t>()) * 1024 * 1024;
+                if (u.preferred_chunk_size_mb && *u.preferred_chunk_size_mb > 0) {
+                    chunk_size = static_cast<int64_t>(*u.preferred_chunk_size_mb) * 1024 * 1024;
                 }
             }
         }
         const int32_t total_chunks = static_cast<int32_t>((total_size + chunk_size - 1) / chunk_size);
 
         // ── Encryption policy: only domain targets are governed, and it fails CLOSED ──
-        bool encrypt = p_json->get("encrypt", false).asBool();
+        bool encrypt = req.encrypt;
         if (!ctx.domain.empty()) {
-            const std::string org = (session["user"].isMember("organisation") && session["user"]["organisation"].isString())
-                                        ? session["user"]["organisation"].asString()
-                                        : std::string{};
+            const std::string org = sgrn::datastore::getSessionOrganisation(tsp_req);
             if (org.empty()) {
-                co_return createJsonErrorResponse("Organisation claim missing from session", k403Forbidden);
+                co_return createTypedResponse(BackendErrorResponse{"Organisation claim missing from session", k403Forbidden});
             }
-            auto dom_rows = co_await db->execSqlCoro(
-                "SELECT encryption_policy FROM core.domains WHERE name = $1 AND organisation = $2", ctx.domain, org);
-            if (dom_rows.empty() || dom_rows[0]["encryption_policy"].isNull()) {
-                co_return createJsonErrorResponse("Unknown domain '" + ctx.domain + "'", k404NotFound);
+            auto dom_rows = co_await db->execSqlCoro(kDomainEncryptionPolicyQuery, ctx.domain, org);
+            if (dom_rows.empty()) {
+                co_return createTypedResponse(BackendErrorResponse{"Unknown domain '" + ctx.domain + "'", k404NotFound});
             }
-            const std::string policy = dom_rows[0]["encryption_policy"].as<std::string>();
+            const auto domain = sgrn::orm::fromRow<DomainEncryptionPolicyRow, kDomainEncryptionPolicyQuery>(dom_rows[0]);
+            if (!domain.encryption_policy) {
+                co_return createTypedResponse(BackendErrorResponse{"Unknown domain '" + ctx.domain + "'", k404NotFound});
+            }
+            const std::string& policy = *domain.encryption_policy;
             if (policy == "required") {
                 encrypt = true; // upgrade silently; the response tells the client
             } else if (policy == "none") {
                 encrypt = false; // downgrade silently
             } else if (policy != "optional") {
-                co_return createJsonErrorResponse("Domain has an invalid encryption policy", k500InternalServerError);
+                co_return createTypedResponse(BackendErrorResponse{"Domain has an invalid encryption policy", k500InternalServerError});
             }
         }
 
@@ -237,12 +400,18 @@ Task<HttpResponsePtr> StorageApiHandler::handleInitUploadSession(HttpRequestPtr 
             upload_id, actor.user_id, actor.service_id, ctx.actual_path, filename, mime_type, total_size, chunk_size, total_chunks, encrypt,
             domain_opt, std::string(scopeName(scope)), ctx.user_id, ctx.t_automated_service_id, owner_session);
 
-        co_return createJsonResponse(
-            fmt::format(R"({{"upload_id":"{}","chunk_size":{},"total_chunks":{},"status":"active","is_encrypted":{}}})", upload_id,
-                chunk_size, total_chunks, encrypt ? "true" : "false"));
+        co_return createTypedResponse(tsp_req,
+            UploadInitResponse{
+                .upload_id = upload_id,
+                .chunk_size = chunk_size,
+                .total_chunks = total_chunks,
+                .status = "active",
+                .is_encrypted = encrypt,
+            },
+            k200OK);
     } catch (const std::exception& e) {
         ERROR_LOG("Init upload session error: {}", e.what());
-        co_return createJsonErrorResponse("Failed to initialize upload session", k500InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{"Failed to initialize upload session", k500InternalServerError});
     }
 }
 
@@ -293,9 +462,8 @@ void StorageApiHandler::removeUploadState(const std::string& t_upload_id) {
 
 // ── Flush one full segment from seg_buf to Garage ─────────────────────────
 // Returns the new storage.objects id, or error.
-static Task<sgrn::datastore::BackendResult<int64_t>> flushSegment(sgrn::datastore::plugins::aws::S3Client* s3,
-    const drogon::orm::DbClientPtr& db, const std::string& bucket, const std::string& upload_id, int32_t seg_idx,
-    std::vector<char>& seg_buf, const std::string& mime_type) {
+static Task<Result<int64_t, BackendError>> flushSegment(sgrn::datastore::plugins::aws::S3Client* s3, const drogon::orm::DbClientPtr& db,
+    const std::string& bucket, const std::string& upload_id, int32_t seg_idx, std::vector<char>& seg_buf, const std::string& mime_type) {
     using namespace sgrn::datastore;
     using namespace sgrn::datastore::services::storage;
 
@@ -322,63 +490,68 @@ static Task<sgrn::datastore::BackendResult<int64_t>> flushSegment(sgrn::datastor
 
 Task<HttpResponsePtr> StorageApiHandler::handleUploadChunk(HttpRequestPtr tsp_req) {
     DEBUG_HTTP_REQUEST(tsp_req, "handleUploadChunk");
-    std::string upload_id = tsp_req->getParameter("upload_id");
+    std::string upload_id = uploadIdFromRequest(tsp_req);
     std::string chunk_idx_str = tsp_req->getParameter("chunk_index");
     if (upload_id.empty() || chunk_idx_str.empty()) {
-        co_return createJsonErrorResponse("upload_id and chunk_index parameters are required", k400BadRequest);
+        co_return createTypedResponse(BackendErrorResponse{"upload_id and chunk_index parameters are required", k400BadRequest});
     }
 
     int32_t chunk_index = 0;
     try {
         chunk_index = std::stoi(chunk_idx_str);
     } catch (...) {
-        co_return createJsonErrorResponse("chunk_index must be an integer", k400BadRequest);
+        co_return createTypedResponse(BackendErrorResponse{"chunk_index must be an integer", k400BadRequest});
     }
 
     const std::string_view body = tsp_req->getBody();
     if (body.empty()) {
-        co_return createJsonErrorResponse("Chunk payload is empty", k400BadRequest);
+        co_return createTypedResponse(BackendErrorResponse{"Chunk payload is empty", k400BadRequest});
     }
 
     try {
         auto db_res = sgrn::datastore::core::getDbClient();
-        if (db_res.hasError())
-            co_return sgrn::createJsonResponse(db_res);
+        CO_RETURN_IF(db_res.hasError(), createTypedResponse(BackendErrorResponse{db_res.error()}));
         auto db = db_res.value();
 
         // ── 1. Load session to get mime_type ────────────────────────────────
-        const SessionActor actor = sessionActor(tsp_req->attributes()->get<Json::Value>("session_json"));
-        auto s_rows = co_await db->execSqlCoro("SELECT mime_type, status FROM storage.upload_sessions WHERE id = $1 "
-                                               "AND (user_id = $2 OR automated_service_id = $3)",
-            upload_id, actor.user_id, actor.service_id);
+        const SessionActor actor = sessionActor(tsp_req);
+        auto s_rows = co_await db->execSqlCoro(kUploadMimeStatusQuery, upload_id, actor.user_id, actor.service_id);
         if (s_rows.empty())
-            co_return createJsonErrorResponse("Upload session not found", k404NotFound);
-        if (s_rows[0]["status"].as<std::string>() != "active")
-            co_return createJsonErrorResponse("Upload session is not active", k400BadRequest);
-        const std::string mime_type = s_rows[0]["mime_type"].as<std::string>();
+            co_return createTypedResponse(BackendErrorResponse{"Upload session not found", k404NotFound});
+        const auto upload = sgrn::orm::fromRow<UploadMimeStatusRow, kUploadMimeStatusQuery>(s_rows[0]);
+        if (upload.status != "active")
+            co_return createTypedResponse(BackendErrorResponse{"Upload session is not active", k400BadRequest});
+        const std::string& mime_type = upload.mime_type;
 
         // ── 2. Get-or-create the per-session streaming state ────────────────
         auto state = getOrCreateUploadState(upload_id, mime_type, kCompressionLevel);
         if (!state) {
-            co_return createJsonErrorResponse("Failed to allocate upload stream state", k500InternalServerError);
+            co_return createTypedResponse(BackendErrorResponse{"Failed to allocate upload stream state", k500InternalServerError});
         }
 
         // ── 2b. Streaming state is strictly sequential (hash + zstd + seg_buf) ──
         if (chunk_index < state->processed_chunks) {
             // client retry after a lost response: already consumed, do NOT feed it twice
-            co_return createJsonResponse(fmt::format(
-                R"({{"upload_id":"{}","chunk_index":{},"received":true,"duplicate":true,"segments_flushed":0}})", upload_id, chunk_index));
+            co_return createTypedResponse(tsp_req,
+                UploadChunkResponse{
+                    .upload_id = upload_id,
+                    .chunk_index = chunk_index,
+                    .received = true,
+                    .segments_flushed = 0,
+                    .duplicate = true,
+                },
+                k200OK);
         }
         if (chunk_index != state->processed_chunks) {
-            co_return createJsonErrorResponse(
+            co_return createTypedResponse(BackendErrorResponse{
                 fmt::format("Out-of-order chunk: expected {} (stream state is in-memory; restart the upload if the server restarted)",
                     state->processed_chunks),
-                k409Conflict);
+                k409Conflict});
         }
 
         auto s3_res = storage_service_.S3Client();
-        if (s3_res.hasError())
-            co_return createJsonErrorResponse(fmt::format("S3 unavailable: {}", s3_res.error().message_), k500InternalServerError);
+        CO_RETURN_IF(s3_res.hasError(),
+            createTypedResponse(BackendErrorResponse{fmt::format("S3 unavailable: {}", s3_res.error().message), k500InternalServerError}));
         auto* s3 = s3_res.value();
         const services::storage::StorageConfig live_cfg = services::storage::currentStorageConfig();
         const std::string bucket = live_cfg.default_bucket;
@@ -399,8 +572,8 @@ Task<HttpResponsePtr> StorageApiHandler::handleUploadChunk(HttpRequestPtr tsp_re
                 ZSTD_outBuffer zstd_out{out_buf.data(), out_buf_size, 0};
                 size_t ret = ZSTD_compressStream(state->cstream, &zstd_out, &zstd_in);
                 if (ZSTD_isError(ret)) {
-                    co_return createJsonErrorResponse(
-                        fmt::format("Compression error: {}", ZSTD_getErrorName(ret)), k500InternalServerError);
+                    co_return createTypedResponse(
+                        BackendErrorResponse{fmt::format("Compression error: {}", ZSTD_getErrorName(ret)), k500InternalServerError});
                 }
                 state->seg_buf.insert(state->seg_buf.end(), out_buf.data(), out_buf.data() + zstd_out.pos);
             }
@@ -422,8 +595,8 @@ Task<HttpResponsePtr> StorageApiHandler::handleUploadChunk(HttpRequestPtr tsp_re
             // Temporarily swap into the flushSegment-friendly overwrite
             auto flush_res = co_await flushSegment(s3, db, bucket, upload_id, seg_idx, seg_data, mime_type);
             if (flush_res.hasError()) {
-                co_return createJsonErrorResponse(
-                    fmt::format("Failed to store segment {}: {}", seg_idx, flush_res.error().message_), k500InternalServerError);
+                co_return createTypedResponse(BackendErrorResponse{
+                    fmt::format("Failed to store segment {}: {}", seg_idx, flush_res.error().message), k500InternalServerError});
             }
             new_segments.emplace_back(seg_idx, flush_res.value());
         }
@@ -454,61 +627,67 @@ Task<HttpResponsePtr> StorageApiHandler::handleUploadChunk(HttpRequestPtr tsp_re
                                  "    updated_at = NOW() WHERE id = $1",
             upload_id, state->processed_chunks);
 
-        co_return createJsonResponse(fmt::format(
-            R"({{"upload_id":"{}","chunk_index":{},"received":true,"segments_flushed":{}}})", upload_id, chunk_index, new_segments.size()));
+        co_return createTypedResponse(tsp_req,
+            UploadChunkResponse{
+                .upload_id = upload_id,
+                .chunk_index = chunk_index,
+                .received = true,
+                .segments_flushed = new_segments.size(),
+                .duplicate = false,
+            },
+            k200OK);
 
     } catch (const std::exception& e) {
         ERROR_LOG("Upload chunk error: {}", e.what());
-        co_return createJsonErrorResponse("Failed storing chunk", k500InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{"Failed storing chunk", k500InternalServerError});
     }
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handleGetUploadStatus(HttpRequestPtr tsp_req) {
     DEBUG_HTTP_REQUEST(tsp_req, "handleGetUploadStatus");
-    std::string upload_id = tsp_req->getParameter("upload_id");
+    std::string upload_id = uploadIdFromRequest(tsp_req);
     if (upload_id.empty()) {
-        co_return createJsonErrorResponse("upload_id is required", k400BadRequest);
+        co_return createTypedResponse(BackendErrorResponse{"upload_id is required", k400BadRequest});
     }
 
     try {
         auto db_res = sgrn::datastore::core::getDbClient();
-        if (db_res.hasError())
-            co_return sgrn::createJsonResponse(db_res);
+        CO_RETURN_IF(db_res.hasError(), createTypedResponse(BackendErrorResponse{db_res.error()}));
         auto db = db_res.value();
 
-        const SessionActor actor = sessionActor(tsp_req->attributes()->get<Json::Value>("session_json"));
-        auto s_rows = co_await db->execSqlCoro("SELECT filename, target_path, total_size, chunk_size, total_chunks, uploaded_chunks_count, "
-                                               "status FROM storage.upload_sessions WHERE id = $1 "
-                                               "AND (user_id = $2 OR automated_service_id = $3)",
-            upload_id, actor.user_id, actor.service_id);
+        const SessionActor actor = sessionActor(tsp_req);
+        auto s_rows = co_await db->execSqlCoro(kUploadStatusQuery, upload_id, actor.user_id, actor.service_id);
 
         if (s_rows.empty()) {
-            co_return createJsonErrorResponse("Upload session not found", k404NotFound);
+            co_return createTypedResponse(BackendErrorResponse{"Upload session not found", k404NotFound});
         }
 
-        const auto& s = s_rows[0];
-
-        auto idx_rows = co_await db->execSqlCoro(
-            "SELECT chunk_index FROM storage.upload_chunks WHERE upload_id = $1 ORDER BY chunk_index ASC", upload_id);
-        std::string indices_json = "[";
-        bool first_idx = true;
-        for (const auto& idx_row : idx_rows) {
-            if (!first_idx)
-                indices_json += ',';
-            first_idx = false;
-            indices_json += std::to_string(idx_row["chunk_index"].as<int32_t>());
+        static constexpr char kChunkIndexQuery[] =
+            "SELECT chunk_index FROM storage.upload_chunks WHERE upload_id = $1 ORDER BY chunk_index ASC";
+        auto idx_rows = co_await db->execSqlCoro(kChunkIndexQuery, upload_id);
+        std::vector<int32_t> uploaded_chunk_indices;
+        uploaded_chunk_indices.reserve(idx_rows.size());
+        for (const auto& idx_row : sgrn::orm::fromResult<ChunkIndexRow, kChunkIndexQuery>(idx_rows)) {
+            uploaded_chunk_indices.push_back(idx_row.chunk_index);
         }
-        indices_json += "]";
 
-        co_return createJsonResponse(fmt::format(
-            R"({{"upload_id":"{}","filename":"{}","target_path":"{}","total_size":{},"chunk_size":{},"total_chunks":{},"uploaded_chunks_count":{},"status":"{}","uploaded_chunk_indices":{}}})",
-            upload_id, jsonEscape(s["filename"].as<std::string>()), jsonEscape(s["target_path"].as<std::string>()),
-            s["total_size"].as<int64_t>(), s["chunk_size"].as<int64_t>(), s["total_chunks"].as<int32_t>(),
-            s["uploaded_chunks_count"].as<int32_t>(), s["status"].as<std::string>(), indices_json));
+        const auto row = sgrn::orm::fromRow<UploadStatusRow, kUploadStatusQuery>(s_rows[0]);
+        UploadStatusResponse response{
+            .upload_id = upload_id,
+            .filename = row.filename,
+            .target_path = row.target_path,
+            .total_size = row.total_size,
+            .chunk_size = row.chunk_size,
+            .total_chunks = row.total_chunks,
+            .uploaded_chunks_count = row.uploaded_chunks_count,
+            .status = row.status,
+            .uploaded_chunk_indices = std::move(uploaded_chunk_indices),
+        };
+        co_return createTypedResponse(tsp_req, response, k200OK);
 
     } catch (const std::exception& e) {
         ERROR_LOG("Get upload status error: {}", e.what());
-        co_return createJsonErrorResponse("Failed fetching upload status", k500InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{"Failed fetching upload status", k500InternalServerError});
     }
 }
 
@@ -524,94 +703,84 @@ static Task<void> rollbackEncryptedUpload(sgrn::datastore::plugins::aws::S3Clien
 
 Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequestPtr tsp_req) {
     DEBUG_HTTP_REQUEST(tsp_req, "handleCompleteUploadSession");
-    auto p_json = tsp_req->getJsonObject();
-    if (!p_json || !p_json->isMember("upload_id"))
-        co_return createJsonErrorResponse("upload_id is required", k400BadRequest);
-
-    const std::string upload_id = (*p_json)["upload_id"].asString();
+    const std::string upload_id = uploadIdFromRequest(tsp_req, UploadIdSource::JsonBody);
+    if (upload_id.empty())
+        co_return createTypedResponse(BackendErrorResponse{"upload_id is required", k400BadRequest});
 
     try {
         auto db_res = sgrn::datastore::core::getDbClient();
-        if (db_res.hasError())
-            co_return sgrn::createJsonResponse(db_res);
+        CO_RETURN_IF(db_res.hasError(), createTypedResponse(BackendErrorResponse{db_res.error()}));
         auto db = db_res.value();
 
         // -- 1. Load and validate session
-        auto s_rows = co_await db->execSqlCoro(
-            "SELECT user_id, automated_service_id, total_chunks, uploaded_chunks_count, filename, target_path, total_size, "
-            "mime_type, is_encrypted, domain, status, (expires_at < NOW()) AS expired, scope, owner_user_id, owner_service_id, "
-            "owner_session_id FROM storage.upload_sessions WHERE id = $1",
-            upload_id);
+        auto s_rows = co_await db->execSqlCoro(kUploadCompletionQuery, upload_id);
         if (s_rows.empty())
-            co_return createJsonErrorResponse("Upload session not found", k404NotFound);
+            co_return createTypedResponse(BackendErrorResponse{"Upload session not found", k404NotFound});
 
-        const auto& s = s_rows[0];
-        const Json::Value& auth_session = tsp_req->attributes()->get<Json::Value>("session_json");
-        const SessionActor actor = sessionActor(auth_session);
-        const bool is_uploader =
-            (!s["user_id"].isNull() && actor.user_id && s["user_id"].as<int32_t>() == *actor.user_id) ||
-            (!s["automated_service_id"].isNull() && actor.service_id && s["automated_service_id"].as<int32_t>() == *actor.service_id);
+        const auto s = sgrn::orm::fromRow<UploadSessionCompletionRow, kUploadCompletionQuery>(s_rows[0]);
+        const SessionActor actor = sessionActor(tsp_req);
+        const bool is_uploader = (s.user_id && actor.user_id && *s.user_id == *actor.user_id) ||
+                                 (s.automated_service_id && actor.service_id && *s.automated_service_id == *actor.service_id);
         if (!is_uploader)
-            co_return createJsonErrorResponse("Upload session not found", k404NotFound);
-        if (s["status"].as<std::string>() != "active")
-            co_return createJsonErrorResponse("Upload session is not active", k409Conflict);
-        if (s["expired"].as<bool>())
-            co_return createJsonErrorResponse("Upload session expired", k410Gone);
+            co_return createTypedResponse(BackendErrorResponse{"Upload session not found", k404NotFound});
+        if (s.status != "active")
+            co_return createTypedResponse(BackendErrorResponse{"Upload session is not active", k409Conflict});
+        if (s.expired)
+            co_return createTypedResponse(BackendErrorResponse{"Upload session expired", k410Gone});
 
-        const int32_t total_chunks = s["total_chunks"].as<int32_t>();
-        if (s["uploaded_chunks_count"].as<int32_t>() < total_chunks)
-            co_return createJsonErrorResponse("Cannot complete: not all chunks have been uploaded", k400BadRequest);
+        const int32_t total_chunks = s.total_chunks;
+        if (s.uploaded_chunks_count < total_chunks)
+            co_return createTypedResponse(BackendErrorResponse{"Cannot complete: not all chunks have been uploaded", k400BadRequest});
 
-        const std::string filename = s["filename"].as<std::string>();
-        const std::string target_path = s["target_path"].as<std::string>();
-        const int64_t declared_size = s["total_size"].as<int64_t>();
-        const std::string mime_type = s["mime_type"].isNull() ? "application/octet-stream" : s["mime_type"].as<std::string>();
-        const bool is_encrypted = !s["is_encrypted"].isNull() && s["is_encrypted"].as<bool>();
-        const std::string domain_str = s["domain"].isNull() ? "" : s["domain"].as<std::string>();
-        const std::string scope_name = s["scope"].as<std::string>();
+        const std::string& filename = s.filename;
+        const std::string& target_path = s.target_path;
+        const int64_t declared_size = s.total_size;
+        const std::string mime_type = s.mime_type.value_or("application/octet-stream");
+        const bool is_encrypted = s.is_encrypted;
+        const std::string domain_str = s.domain.value_or("");
+        const std::string& scope_name = s.scope;
 
         // Owner of the resulting file (resolved at init, never re-derived from the path)
-        std::optional<int32_t> owner_user;
-        std::optional<int32_t> owner_service;
-        if (!s["owner_user_id"].isNull())
-            owner_user = s["owner_user_id"].as<int32_t>();
-        if (!s["owner_service_id"].isNull())
-            owner_service = s["owner_service_id"].as<int32_t>();
+        std::optional<int32_t> owner_user = s.owner_user_id;
+        std::optional<int32_t> owner_service = s.owner_service_id;
         if (!owner_user && !owner_service) { // fallback: uploader
-            owner_user = s["user_id"].isNull() ? std::nullopt : std::optional<int32_t>(s["user_id"].as<int32_t>());
-            owner_service =
-                s["automated_service_id"].isNull() ? std::nullopt : std::optional<int32_t>(s["automated_service_id"].as<int32_t>());
+            owner_user = s.user_id;
+            owner_service = s.automated_service_id;
         }
 
-        int64_t owner_session = auth_session.isMember("session_id") ? auth_session["session_id"].asInt64() : 0;
-        if ((scope_name == "users" || scope_name == "automated_services") && !s["owner_session_id"].isNull() &&
-            s["owner_session_id"].as<int64_t>() > 0) {
-            owner_session = s["owner_session_id"].as<int64_t>();
+        int64_t owner_session = 0;
+        if (tsp_req->attributes()->find("auth_context")) {
+            owner_session = tsp_req->attributes()->get<filters::AuthContext>("auth_context").session_id;
+        } else if (tsp_req->attributes()->find("session_claims")) {
+            owner_session = tsp_req->attributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims").session_id;
+        }
+        if ((scope_name == "users" || scope_name == "automated_services") && s.owner_session_id && *s.owner_session_id > 0) {
+            owner_session = *s.owner_session_id;
         }
 
         // -- 2. Recover streaming pipeline state
         auto state = getOrCreateUploadState(upload_id, mime_type, kCompressionLevel);
         if (!state)
-            co_return createJsonErrorResponse("Failed to recover upload stream state", k500InternalServerError);
+            co_return createTypedResponse(BackendErrorResponse{"Failed to recover upload stream state", k500InternalServerError});
 
         auto s3_res = storage_service_.S3Client();
-        if (s3_res.hasError())
-            co_return createJsonErrorResponse(fmt::format("S3 unavailable: {}", s3_res.error().message_), k500InternalServerError);
+        CO_RETURN_IF(s3_res.hasError(),
+            createTypedResponse(BackendErrorResponse{fmt::format("S3 unavailable: {}", s3_res.error().message), k500InternalServerError}));
         auto* s3 = s3_res.value();
         const services::storage::StorageConfig live_cfg = services::storage::currentStorageConfig();
         const std::string bucket = live_cfg.default_bucket;
 
         // -- 3. Collect already-flushed segments from DB
-        auto seg_rows = co_await db->execSqlCoro("SELECT uc.object_id, o.key "
-                                                 "FROM storage.upload_chunks uc "
-                                                 "JOIN storage.objects o ON o.id = uc.object_id "
-                                                 "WHERE uc.upload_id = $1 AND uc.object_id IS NOT NULL",
-            upload_id);
+        static constexpr char kSegmentQuery[] = "SELECT uc.object_id, o.key "
+                                                "FROM storage.upload_chunks uc "
+                                                "JOIN storage.objects o ON o.id = uc.object_id "
+                                                "WHERE uc.upload_id = $1 AND uc.object_id IS NOT NULL";
+        auto seg_rows = co_await db->execSqlCoro(kSegmentQuery, upload_id);
 
         std::map<int32_t, int64_t> existing_segs;
-        for (const auto& row : seg_rows) {
-            std::string key = row["key"].as<std::string>();
-            int64_t oid = row["object_id"].as<int64_t>();
+        for (const auto& row : sgrn::orm::fromResult<ExistingSegmentRow, kSegmentQuery>(seg_rows)) {
+            const std::string& key = row.key;
+            const int64_t oid = row.object_id;
             auto slash = key.rfind('/');
             if (slash != std::string::npos) {
                 try {
@@ -631,8 +800,8 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
                 size_t ret = ZSTD_endStream(state->cstream, &zstd_out);
                 if (ZSTD_isError(ret)) {
                     removeUploadState(upload_id);
-                    co_return createJsonErrorResponse(
-                        fmt::format("Compression flush error: {}", ZSTD_getErrorName(ret)), k500InternalServerError);
+                    co_return createTypedResponse(
+                        BackendErrorResponse{fmt::format("Compression flush error: {}", ZSTD_getErrorName(ret)), k500InternalServerError});
                 }
                 state->seg_buf.insert(state->seg_buf.end(), out_buf.data(), out_buf.data() + zstd_out.pos);
                 done = (ret == 0);
@@ -644,8 +813,8 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
             auto flush_res = co_await flushSegment(s3, db, bucket, upload_id, seg_idx, state->seg_buf, mime_type);
             if (flush_res.hasError()) {
                 removeUploadState(upload_id);
-                co_return createJsonErrorResponse(
-                    fmt::format("Failed to store final segment: {}", flush_res.error().message_), k500InternalServerError);
+                co_return createTypedResponse(BackendErrorResponse{
+                    fmt::format("Failed to store final segment: {}", flush_res.error().message), k500InternalServerError});
             }
             existing_segs.emplace(seg_idx, flush_res.value());
             state->seg_buf.clear();
@@ -653,7 +822,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
 
         if (existing_segs.empty()) {
             removeUploadState(upload_id);
-            co_return createJsonErrorResponse("No segments produced", k500InternalServerError);
+            co_return createTypedResponse(BackendErrorResponse{"No segments produced", k500InternalServerError});
         }
 
         // -- 5. Finalize SHA-256 hash over original bytes
@@ -661,7 +830,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
         unsigned int hash_len = 0;
         if (EVP_DigestFinal_ex(state->hash_ctx, hash_bytes.data(), &hash_len) != 1) {
             removeUploadState(upload_id);
-            co_return createJsonErrorResponse("Failed to finalize file hash", k500InternalServerError);
+            co_return createTypedResponse(BackendErrorResponse{"Failed to finalize file hash", k500InternalServerError});
         }
         static constexpr char kHexChars[] = "0123456789abcdef";
         std::string file_hash;
@@ -677,8 +846,8 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
         // Integrity: a retried/duplicated chunk or a lost stream state shows up here.
         if (original_bytes != declared_size) {
             co_await db->execSqlCoro("UPDATE storage.upload_sessions SET status = 'aborted', updated_at = NOW() WHERE id = $1", upload_id);
-            co_return createJsonErrorResponse(
-                fmt::format("Size mismatch: received {} bytes, declared {}", original_bytes, declared_size), k422UnprocessableEntity);
+            co_return createTypedResponse(BackendErrorResponse{
+                fmt::format("Size mismatch: received {} bytes, declared {}", original_bytes, declared_size), k422UnprocessableEntity});
         }
 
         std::string ext(services::storage::helpers::extractExtension(filename));
@@ -691,7 +860,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
                 auto* s3_sniff = s3_res2.value();
                 std::string first_key = existing_segs.empty() ? "" : "pending/" + upload_id + "/0";
                 if (!first_key.empty()) {
-                    BackendResult<std::string> content_res = co_await s3_sniff->getObjectContent(bucket, first_key, 4096);
+                    auto content_res = co_await s3_sniff->getObjectContent(bucket, first_key, 4096);
                     if (content_res.has_value()) {
                         std::string_view data(*content_res);
                         std::string preview(data.substr(0, std::min<size_t>(data.size(), 4096)));
@@ -715,10 +884,10 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
             if (!::sgrn::datastore::services::helpers::isCompatibleSniffedFormat(declared_lower, sniffed_lower)) {
                 auto format_res = co_await services::storage::helpers::getFormat(db, sniffed_lower);
                 if (format_res.has_value()) {
-                    co_return createJsonErrorResponse(
-                        fmt::format("Content type mismatch: file content appears to be '{}' but was declared as '{}'", sniffed_lower,
-                            declared_lower),
-                        k422UnprocessableEntity);
+                    co_return createTypedResponse(
+                        BackendErrorResponse{fmt::format("Content type mismatch: file content appears to be '{}' but was declared as '{}'",
+                                                 sniffed_lower, declared_lower),
+                            k422UnprocessableEntity});
                 }
             }
         }
@@ -731,14 +900,14 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
         if (is_encrypted) {
             auto key_store = sgrn::datastore::crypto::getKeyStore();
             if (!key_store)
-                co_return createJsonErrorResponse("Key store is not initialized", k500InternalServerError);
+                co_return createTypedResponse(BackendErrorResponse{"Key store is not initialized", k500InternalServerError});
 
             // Ciphertext must NEVER share the content-addressed "uploads/<hash>/" namespace.
             final_obj_key = "enc/" + upload_id + "/0";
 
             auto pending_res = key_store->createPending(final_obj_key);
-            if (pending_res.hasError())
-                co_return createJsonErrorResponse("Failed to create key record: " + pending_res.error(), k500InternalServerError);
+            CO_RETURN_IF(pending_res.hasError(),
+                createTypedResponse(BackendErrorResponse{"Failed to create key record: " + pending_res.error(), k500InternalServerError}));
             auto key_rec = std::move(pending_res.value());
             final_key_id = key_rec.key_id;
 
@@ -750,7 +919,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
                 auto get_res = co_await s3->getObjectContent(bucket, prov_key);
                 if (get_res.hasError()) {
                     (void)key_store->shred(final_key_id);
-                    co_return createJsonErrorResponse("Failed to read segment for encryption", k500InternalServerError);
+                    co_return createTypedResponse(BackendErrorResponse{"Failed to read segment for encryption", k500InternalServerError});
                 }
                 payload_to_encrypt.append(*get_res);
             }
@@ -759,7 +928,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
             auto enc_res = sgrn::utils::crypto::encryptBuffer(plain_span, key_rec.dek, final_key_id, key_rec.chunk_size);
             if (enc_res.hasError()) {
                 (void)key_store->shred(final_key_id);
-                co_return createJsonErrorResponse("Encryption failed: " + enc_res.error(), k500InternalServerError);
+                co_return createTypedResponse(BackendErrorResponse{"Encryption failed: " + enc_res.error(), k500InternalServerError});
             }
             const auto& ciphertext = enc_res.value();
 
@@ -767,7 +936,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
                 std::string(reinterpret_cast<const char*>(ciphertext.data()), ciphertext.size()), "application/octet-stream");
             if (put_res.hasError()) {
                 (void)key_store->shred(final_key_id);
-                co_return createJsonErrorResponse("Failed to upload ciphertext to storage", k500InternalServerError);
+                co_return createTypedResponse(BackendErrorResponse{"Failed to upload ciphertext to storage", k500InternalServerError});
             }
 
             for (const auto& [old_seg_idx, old_obj_id] : existing_segs) {
@@ -790,7 +959,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
                 "compression_level, upload_mode) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'single') RETURNING id",
                 bucket, final_obj_key, static_cast<int64_t>(ciphertext.size()), original_bytes, ct_sha, server_compressed, comp_alg,
                 comp_lvl);
-            final_segments.emplace_back(0, obj_res[0]["id"].as<int64_t>());
+            final_segments.emplace_back(0, sgrn::orm::fromRowByName<ObjectIdRow>(obj_res[0]).id);
         } else {
             int32_t part_idx = 0;
             for (const auto& [old_seg_idx, old_obj_id] : existing_segs) {
@@ -802,14 +971,14 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
 
                 int64_t final_obj_id = 0;
                 if (!dedup_rows.empty()) {
-                    final_obj_id = dedup_rows[0]["id"].as<int64_t>();
+                    final_obj_id = sgrn::orm::fromRowByName<ObjectIdRow>(dedup_rows[0]).id;
                     co_await s3->deleteFile(bucket, prov_key);
                     co_await db->execSqlCoro("DELETE FROM storage.objects WHERE id = $1", old_obj_id);
                 } else {
                     auto copy_res = co_await s3->copyFile(bucket, prov_key, bucket, final_key);
-                    if (copy_res.hasError())
-                        co_return createJsonErrorResponse(
-                            fmt::format("Failed to rename segment {}: {}", part_idx, copy_res.error().message_), k500InternalServerError);
+                    CO_RETURN_IF(copy_res.hasError(),
+                        createTypedResponse(BackendErrorResponse{
+                            fmt::format("Failed to rename segment {}: {}", part_idx, copy_res.error().message), k500InternalServerError}));
                     co_await s3->deleteFile(bucket, prov_key);
                     co_await db->execSqlCoro(
                         "UPDATE storage.objects SET key = $1, sha256 = $2 WHERE id = $3", final_key, file_hash, old_obj_id);
@@ -843,9 +1012,9 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
             if (is_encrypted)
                 co_await rollbackEncryptedUpload(s3, db, bucket, final_obj_key, final_key_id, final_segments[0].second, std::nullopt);
             const BackendError& err = file_res.error();
-            if (err.kind_ == BackendErrorKind::AlreadyExists)
-                co_return createJsonErrorResponse("A file with that name already exists in this location.", k409Conflict);
-            co_return createJsonErrorResponse(err.message_, k500InternalServerError);
+            if (err.kind == BackendErrorKind::AlreadyExists)
+                co_return createTypedResponse(BackendErrorResponse{"A file with that name already exists in this location.", k409Conflict});
+            co_return createTypedResponse(BackendErrorResponse{err.message, k500InternalServerError});
         }
         const int64_t file_id = file_res.value();
 
@@ -853,15 +1022,15 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
             auto ks = sgrn::datastore::crypto::getKeyStore();
             if (!ks) {
                 co_await rollbackEncryptedUpload(s3, db, bucket, final_obj_key, final_key_id, final_segments[0].second, file_id);
-                co_return createJsonErrorResponse("Key store is not initialized", k500InternalServerError);
+                co_return createTypedResponse(BackendErrorResponse{"Key store is not initialized", k500InternalServerError});
             }
             auto act_res = ks->activate(final_key_id, std::to_string(file_id));
             if (act_res.hasError()) {
                 // A file whose key never activates is undecryptable: do not leave it behind.
                 SGRN_ERROR("StorageUpload", "Key activation failed for key {}: {}", final_key_id, act_res.error());
                 co_await rollbackEncryptedUpload(s3, db, bucket, final_obj_key, final_key_id, final_segments[0].second, file_id);
-                co_return createJsonErrorResponse(
-                    fmt::format("Failed to activate encryption key: {}", act_res.error()), k500InternalServerError);
+                co_return createTypedResponse(
+                    BackendErrorResponse{fmt::format("Failed to activate encryption key: {}", act_res.error()), k500InternalServerError});
             }
         }
 
@@ -883,49 +1052,49 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
                                  "    updated_at = NOW() WHERE id = $1",
             upload_id, file_hash, file_id);
 
-        co_return createJsonResponse(fmt::format(
-            R"({{"success":true,"upload_id":"{}","file_id":{},"file_hash":"{}","segment_count":{},"original_bytes":{},"is_encrypted":{},"message":"Upload completed successfully"}})",
-            upload_id, file_id, file_hash, final_segments.size(), original_bytes, is_encrypted ? "true" : "false"));
+        co_return createTypedResponse(tsp_req,
+            UploadCompleteResponse{
+                .upload_id = upload_id,
+                .file_id = file_id,
+                .file_hash = std::move(file_hash),
+                .segment_count = final_segments.size(),
+                .original_bytes = original_bytes,
+                .is_encrypted = is_encrypted,
+                .message = "Upload completed successfully",
+            },
+            k200OK);
 
     } catch (const std::exception& e) {
         removeUploadState(upload_id);
         ERROR_LOG("Complete upload error: {}", e.what());
-        co_return createJsonErrorResponse("Failed completing upload", k500InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{"Failed completing upload", k500InternalServerError});
     }
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handleAbortUploadSession(HttpRequestPtr tsp_req) {
     DEBUG_HTTP_REQUEST(tsp_req, "handleAbortUploadSession");
-    std::string upload_id = tsp_req->getParameter("upload_id");
+    std::string upload_id = uploadIdFromRequest(tsp_req, UploadIdSource::QueryOrJsonBody);
     if (upload_id.empty()) {
-        auto p_json = tsp_req->getJsonObject();
-        if (p_json && p_json->isMember("upload_id")) {
-            upload_id = (*p_json)["upload_id"].asString();
-        }
-    }
-
-    if (upload_id.empty()) {
-        co_return createJsonErrorResponse("upload_id is required", k400BadRequest);
+        co_return createTypedResponse(BackendErrorResponse{"upload_id is required", k400BadRequest});
     }
 
     try {
         auto db_res = sgrn::datastore::core::getDbClient();
-        if (db_res.hasError())
-            co_return sgrn::createJsonResponse(db_res);
+        CO_RETURN_IF(db_res.hasError(), createTypedResponse(BackendErrorResponse{db_res.error()}));
         auto db = db_res.value();
 
-        const SessionActor actor = sessionActor(tsp_req->attributes()->get<Json::Value>("session_json"));
+        const SessionActor actor = sessionActor(tsp_req);
         auto res = co_await db->execSqlCoro("UPDATE storage.upload_sessions SET status = 'aborted', updated_at = NOW() WHERE id = $1 "
                                             "AND (user_id = $2 OR automated_service_id = $3)",
             upload_id, actor.user_id, actor.service_id);
         if (res.affectedRows() == 0)
-            co_return createJsonErrorResponse("Upload session not found", k404NotFound);
+            co_return createTypedResponse(BackendErrorResponse{"Upload session not found", k404NotFound});
 
-        co_return createJsonResponse(R"({"success":true,"message":"Upload session aborted"})");
+        co_return createTypedResponse(tsp_req, UploadAbortResponse{"Upload session aborted"}, k200OK);
 
     } catch (const std::exception& e) {
         ERROR_LOG("Abort upload error: {}", e.what());
-        co_return createJsonErrorResponse("Failed aborting upload", k500InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{"Failed aborting upload", k500InternalServerError});
     }
 }
 

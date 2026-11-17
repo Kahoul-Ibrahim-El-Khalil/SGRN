@@ -4,6 +4,7 @@
 #include <sgrn/datastore/services/helpers/magic.hpp>
 #include <sgrn/datastore/services/helpers/storage.hpp>
 #include <sgrn/datastore/services/storage.hpp>
+#include <sgrn/datastore/wire/storage.hpp>
 #include <sgrn/utils/crypto/stream.hpp>
 
 #include <drogon/HttpAppFramework.h>
@@ -38,11 +39,36 @@ namespace sgrn::datastore::services::storage
 
 namespace
 {
-struct StorageConstraintsResponse {
-    std::uint64_t max_file_size_mb{0};
-    std::uint64_t max_file_size_bytes{0};
-    bool encryption_supported{false};
+struct FilePathRow {
+    int64_t id{0};
+    std::string full_path;
 };
+
+struct ObjectKeyRow {
+    std::string key;
+};
+
+struct FileObjectRow {
+    int64_t id{0};
+    int64_t object_id{0};
+    std::string bucket;
+    std::string key;
+};
+
+struct ReferenceCountRow {
+    int64_t cnt{0};
+};
+
+struct FileEncryptionRow {
+    std::optional<std::string> key_id;
+    bool is_encrypted{false};
+};
+
+struct EncryptionPolicyRow {
+    std::string encryption_policy;
+};
+
+using StorageConstraintsResponse = ::sgrn::datastore::storage::StorageConstraints;
 
 struct ServiceObjectResponse {
     int64_t id{0};
@@ -55,6 +81,48 @@ struct ServiceObjectResponse {
     bool is_compressed{false};
     std::optional<std::string> compression_algorithm;
 };
+
+struct CreateDirectoryResponse {
+    std::optional<int64_t> directory_id;
+};
+
+struct CreateObjectResponse {
+    int64_t id{0};
+};
+
+struct RenameFileResponse {
+    int64_t id{0};
+    std::string name;
+    std::string full_path;
+    std::string old_name;
+};
+
+struct DeleteFileServiceResponse {
+    std::string name;
+};
+
+static constexpr char kPartObjectKeysQuery[] = "SELECT o.key FROM storage.file_objects fo JOIN storage.objects o ON o.id = fo.object_id "
+                                               "WHERE fo.file_id = $1 ORDER BY fo.part_index ASC";
+static constexpr char kEncryptionPolicyQuery[] = "SELECT encryption_policy FROM core.domains WHERE organisation = $1 AND name = $2";
+static constexpr char kFilePathQuery[] = "SELECT id, full_path FROM storage.files "
+                                         "WHERE automated_service_id = $1 AND name = $2 "
+                                         "ORDER BY created_at DESC LIMIT 1";
+static constexpr char kFileObjectQuery[] = "SELECT f.id, "
+                                           "       o.id AS object_id, "
+                                           "       o.bucket, "
+                                           "       o.key "
+                                           "FROM storage.files f "
+                                           "JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
+                                           "JOIN storage.objects o ON o.id = f.object_id "
+                                           "WHERE f.automated_service_id = $1 "
+                                           "  AND f.name = $2 "
+                                           "ORDER BY f.created_at DESC "
+                                           "LIMIT 1";
+static constexpr char kReferenceCountQuery[] = "SELECT COUNT(*) AS cnt "
+                                               "FROM storage.files "
+                                               "WHERE object_id = $1";
+static constexpr char kFileEncryptionQuery[] = "SELECT key_id, is_encrypted FROM storage.files WHERE id = $1";
+
 } // namespace
 namespace fs = std::filesystem;
 using namespace drogon;
@@ -69,11 +137,11 @@ StorageService::StorageService() {
     publishStorageConfig(StorageConfig::loadFromConfig());
 }
 
-BackendResult<plugins::aws::S3Client*> StorageService::S3Client() const {
+Result<sgrn::datastore::plugins::aws::S3Client*, BackendError> StorageService::S3Client() const {
     return getPlugin<plugins::aws::S3Client>();
 }
 
-BackendResult<drogon::orm::DbClientPtr> StorageService::getDbClient() const {
+Result<drogon::orm::DbClientPtr, BackendError> StorageService::getDbClient() const {
     return drogon::app().getDbClient();
 }
 
@@ -87,11 +155,11 @@ StorageScope StorageService::parseScope(const std::string& t_scope_str) {
     return StorageScope::Personal;
 }
 
-Task<BackendResult<ScopeContext>> StorageService::resolveScopeSession(
-    const Json::Value& t_session, StorageScope t_scope, const std::string& t_path) {
-    BackendResult<drogon::orm::DbClientPtr> db_res = getDbClient();
-    if (!db_res.has_value())
-        co_return db_res.error();
+Task<Result<ScopeContext, BackendError>> StorageService::resolveScopeSession(
+    const ::sgrn::datastore::auth::SessionClaims& t_session, StorageScope t_scope, const std::string& t_path) {
+    auto db_res = getDbClient();
+    CO_RETURN_IF(!db_res.has_value(), db_res.error());
+
     co_return co_await helpers::resolveScopeSession(db_res.value(), t_session, t_scope, t_path);
 }
 
@@ -100,47 +168,45 @@ Task<BackendResult<ScopeContext>> StorageService::resolveScopeSession(
 // ============================================================================
 
 Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(
-    Json::Value t_session, std::string t_scope, std::string t_file_path, std::string t_range_header) {
-    BackendResult<drogon::orm::DbClientPtr> db_res = getDbClient();
+    ::sgrn::datastore::auth::SessionClaims t_session, std::string t_scope, std::string t_file_path, std::string t_range_header) {
+    auto db_res = getDbClient();
     if (!db_res.has_value())
-        co_return sgrn::createJsonResponse(std::move(db_res));
+        co_return sgrn::createTypedResponse(BackendErrorResponse{db_res.error()});
     drogon::orm::DbClientPtr sp_db_client = db_res.value();
 
     StorageScope parsed_scope = parseScope(t_scope);
-    BackendResult<ScopeContext> scope_res = co_await resolveScopeSession(t_session, parsed_scope, t_file_path);
+    auto scope_res = co_await resolveScopeSession(t_session, parsed_scope, t_file_path);
     if (scope_res.hasError()) {
-        co_return sgrn::createJsonResponse(std::move(scope_res));
+        co_return sgrn::createTypedResponse(BackendErrorResponse{scope_res.error()});
     }
 
     if (!scope_res->can_read) {
-        co_return createJsonErrorResponse("Download Denied: Read privileges missing for this scope space.", drogon::k403Forbidden);
+        co_return createTypedResponse(
+            BackendErrorResponse{"Download Denied: Read privileges missing for this scope space.", drogon::k403Forbidden});
     }
 
     if (scope_res->is_virtual_root) {
-        co_return createJsonErrorResponse("Cannot download a directory", drogon::k400BadRequest);
+        co_return createTypedResponse(BackendErrorResponse{"Cannot download a directory", drogon::k400BadRequest});
     }
 
-    BackendResult<UserFileRecord> record_res = co_await helpers::fetchFileRecord(sp_db_client, *scope_res);
+    auto record_res = co_await helpers::fetchFileRecord(sp_db_client, *scope_res);
     if (record_res.hasError()) {
-        co_return sgrn::createJsonResponse(std::move(record_res));
+        co_return sgrn::createTypedResponse(BackendErrorResponse{record_res.error()});
     }
 
-    auto part_rows =
-        co_await sp_db_client->execSqlCoro("SELECT o.key FROM storage.file_objects fo JOIN storage.objects o ON o.id = fo.object_id "
-                                           "WHERE fo.file_id = $1 ORDER BY fo.part_index ASC",
-            record_res->id);
+    auto part_rows = co_await sp_db_client->execSqlCoro(kPartObjectKeysQuery, record_res->id);
 
     if (part_rows.empty()) {
-        co_return createJsonErrorResponse("File storage object not found", drogon::k404NotFound);
+        co_return createTypedResponse(BackendErrorResponse{"File storage object not found", drogon::k404NotFound});
     }
 
     std::string file_data;
     const std::string bucket = currentStorageConfig().default_bucket;
-    for (const auto& prow : part_rows) {
-        std::string key = prow["key"].as<std::string>();
-        BackendResult<std::string> chunk_res = co_await downloadFile(bucket, key);
+    for (const auto& prow : sgrn::orm::fromResult<ObjectKeyRow, kPartObjectKeysQuery>(part_rows)) {
+        std::string key = prow.key;
+        auto chunk_res = co_await downloadFile(bucket, key);
         if (chunk_res.hasError()) {
-            co_return sgrn::createJsonResponse(std::move(chunk_res));
+            co_return sgrn::createTypedResponse(BackendErrorResponse{chunk_res.error()});
         }
         file_data.append(chunk_res.value());
     }
@@ -157,15 +223,15 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(
 
     if (record_res->is_encrypted) {
         if (!record_res->key_id.has_value() || record_res->key_id->empty()) {
-            co_return createJsonErrorResponse("File is marked encrypted but has no key", drogon::k500InternalServerError);
+            co_return createTypedResponse(BackendErrorResponse{"File is marked encrypted but has no key", drogon::k500InternalServerError});
         }
         auto key_store = sgrn::datastore::crypto::getKeyStore();
         if (!key_store) {
-            co_return createJsonErrorResponse("Key store unavailable", drogon::k500InternalServerError);
+            co_return createTypedResponse(BackendErrorResponse{"Key store unavailable", drogon::k500InternalServerError});
         }
         auto key_res = key_store->get(*record_res->key_id);
         if (key_res.hasError()) {
-            co_return createJsonErrorResponse("Failed to retrieve file decryption key", drogon::k500InternalServerError);
+            co_return createTypedResponse(BackendErrorResponse{"Failed to retrieve file decryption key", drogon::k500InternalServerError});
         }
         const auto& key_rec = key_res.value();
         std::span<const uint8_t> ct_span(reinterpret_cast<const uint8_t*>(file_data.data()), file_data.size());
@@ -185,7 +251,8 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(
                 size_t hdr_len = 0;
                 auto hdr_res = sgrn::utils::crypto::StreamHeader::deserialize(ct_span, hdr_len);
                 if (hdr_res.hasError()) {
-                    co_return createJsonErrorResponse("Corrupted encrypted stream header", drogon::k500InternalServerError);
+                    co_return createTypedResponse(
+                        BackendErrorResponse{"Corrupted encrypted stream header", drogon::k500InternalServerError});
                 }
                 uint64_t total_plain_size = hdr_res.value().total_plaintext_size;
                 if (!end_str.empty()) {
@@ -203,7 +270,7 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(
                     auto range_res =
                         sgrn::utils::crypto::decryptRange(ct_span, key_rec.dek, start_byte, content_length, *record_res->key_id);
                     if (range_res.hasError()) {
-                        co_return createJsonErrorResponse("Range decryption failed", drogon::k500InternalServerError);
+                        co_return createTypedResponse(BackendErrorResponse{"Range decryption failed", drogon::k500InternalServerError});
                     }
                     std::string chunk(reinterpret_cast<const char*>(range_res.value().data()), range_res.value().size());
                     sp_resp->setStatusCode(k206PartialContent);
@@ -229,7 +296,7 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(
         // Full file decryption
         auto dec_res = sgrn::utils::crypto::decryptBuffer(ct_span, key_rec.dek, *record_res->key_id);
         if (dec_res.hasError()) {
-            co_return createJsonErrorResponse("Decryption failed", drogon::k500InternalServerError);
+            co_return createTypedResponse(BackendErrorResponse{"Decryption failed", drogon::k500InternalServerError});
         }
         file_data = std::string(reinterpret_cast<const char*>(dec_res.value().data()), dec_res.value().size());
     }
@@ -295,36 +362,36 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(
 }
 
 Task<HttpResponsePtr> StorageService::handleUploadFileRequest(
-    Json::Value t_session, std::string t_scope, std::string t_file_path, const drogon::HttpFile& t_http_file) {
+    ::sgrn::datastore::auth::SessionClaims t_session, std::string t_scope, std::string t_file_path, const drogon::HttpFile& t_http_file) {
     StorageScope parsed_scope = parseScope(t_scope);
-    BackendResult<ScopeContext> scope_res = co_await resolveScopeSession(t_session, parsed_scope, t_file_path);
+    auto scope_res = co_await resolveScopeSession(t_session, parsed_scope, t_file_path);
     if (scope_res.hasError()) {
-        co_return sgrn::createJsonResponse(scope_res);
+        co_return createTypedResponse(BackendErrorResponse{scope_res.error()});
     }
 
     if (!scope_res->can_write) {
-        co_return createJsonErrorResponse("Upload Denied: Write privileges missing for this scope space.", drogon::k403Forbidden);
+        co_return createTypedResponse(
+            BackendErrorResponse{"Upload Denied: Write privileges missing for this scope space.", drogon::k403Forbidden});
     }
 
     // The single-shot endpoint has no encryption pipeline. Never let it
     // bypass a domain's required-encryption policy.
     if (!scope_res->domain.empty()) {
-        const std::string organisation = t_session["user"].isMember("organisation") ? t_session["user"]["organisation"].asString() : "";
+        const std::string& organisation = t_session.user.organisation;
         auto db_res = getDbClient();
         if (db_res.hasError())
-            co_return sgrn::createJsonResponse(db_res);
-        auto policy = co_await db_res.value()->execSqlCoro(
-            "SELECT encryption_policy FROM core.domains WHERE organisation = $1 AND name = $2", organisation, scope_res->domain);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
+        auto policy = co_await db_res.value()->execSqlCoro(kEncryptionPolicyQuery, organisation, scope_res->domain);
         if (policy.empty())
-            co_return createJsonErrorResponse("Unknown domain", drogon::k404NotFound);
-        if (policy[0]["encryption_policy"].as<std::string>() == "required") {
-            co_return createJsonErrorResponse(
-                "This domain requires encryption: use the chunked upload endpoint.", drogon::k428PreconditionRequired);
+            co_return createTypedResponse(BackendErrorResponse{"Unknown domain", drogon::k404NotFound});
+        if (sgrn::orm::fromRow<EncryptionPolicyRow, kEncryptionPolicyQuery>(policy[0]).encryption_policy == "required") {
+            co_return createTypedResponse(BackendErrorResponse{
+                "This domain requires encryption: use the chunked upload endpoint.", drogon::k428PreconditionRequired});
         }
     }
 
     if (scope_res->t_session_id <= 0 || scope_res->owner_id <= 0) {
-        co_return createJsonErrorResponse("Upload session is missing or invalid", drogon::k401Unauthorized);
+        co_return createTypedResponse(BackendErrorResponse{"Upload session is missing or invalid", drogon::k401Unauthorized});
     }
 
     std::string decoded_name = drogon::utils::urlDecode(t_http_file.getFileName());
@@ -336,19 +403,19 @@ Task<HttpResponsePtr> StorageService::handleUploadFileRequest(
         .domain = scope_res->domain,
         .user_id = scope_res->is_automated_service ? std::nullopt : std::optional<int32_t>(scope_res->owner_id),
         .automated_service_id = scope_res->is_automated_service ? std::optional<int32_t>(scope_res->owner_id) : std::nullopt,
-        .organisation = t_session["user"].isMember("organisation") ? t_session["user"]["organisation"].asString() : "",
+        .organisation = t_session.user.organisation,
         .bucket = currentStorageConfig().default_bucket};
 
-    BackendResult<UploadResponse> r = co_await uploadFile(std::move(t_context), t_http_file);
+    auto r = co_await uploadFile(std::move(t_context), t_http_file);
     if (r.hasError()) {
-        co_return sgrn::createJsonResponse(r);
+        co_return sgrn::createTypedResponse(BackendErrorResponse{r.error()});
     }
-    co_return sgrn::createTypedJsonResponse(r.value(), k200OK);
+    co_return sgrn::createTypedResponse(r.value(), k200OK);
 }
 
-Task<HttpResponsePtr> StorageService::handleGetConstraints() {
+Task<HttpResponsePtr> StorageService::handleGetConstraints(HttpRequestPtr tsp_req) {
     const StorageConfig cfg = currentStorageConfig();
-    co_return sgrn::createTypedJsonResponse(
+    co_return sgrn::createTypedResponse(tsp_req,
         StorageConstraintsResponse{
             cfg.max_file_size_mb,
             cfg.maxFileSizeBytes(),
@@ -357,62 +424,54 @@ Task<HttpResponsePtr> StorageService::handleGetConstraints() {
         k200OK);
 }
 
-Task<HttpResponsePtr> StorageService::handleCreateDirectoryRequest(Json::Value t_session, std::string t_scope, std::string t_path) {
-    BackendResult<drogon::orm::DbClientPtr> db_res = getDbClient();
+Task<HttpResponsePtr> StorageService::handleCreateDirectoryRequest(
+    ::sgrn::datastore::auth::SessionClaims t_session, std::string t_scope, std::string t_path) {
+    auto db_res = getDbClient();
     if (db_res.hasError()) {
-        co_return sgrn::createJsonResponse(db_res);
+        co_return createTypedResponse(BackendErrorResponse{db_res.error()});
     }
     drogon::orm::DbClientPtr sp_db_client = db_res.value();
 
     StorageScope parsed_scope = parseScope(t_scope);
-    BackendResult<ScopeContext> scope_res = co_await resolveScopeSession(t_session, parsed_scope, t_path);
+    auto scope_res = co_await resolveScopeSession(t_session, parsed_scope, t_path);
     if (scope_res.hasError()) {
-        co_return sgrn::createJsonResponse(scope_res);
+        co_return createTypedResponse(BackendErrorResponse{scope_res.error()});
     }
 
     if (!scope_res->can_write) {
-        co_return createJsonErrorResponse(
-            "Directory Creation Denied: Write privileges missing for this scope space.", drogon::k403Forbidden);
+        co_return createTypedResponse(
+            BackendErrorResponse{"Directory Creation Denied: Write privileges missing for this scope space.", drogon::k403Forbidden});
     }
 
-    BackendResult<std::optional<int64_t>> r = co_await helpers::ensureDirectoryPath(sp_db_client, scope_res->user_id,
-        scope_res->t_automated_service_id, scope_res->t_session_id, scope_res->actual_path, scope_res.value().domain);
+    auto r = co_await helpers::ensureDirectoryPath(sp_db_client, scope_res->user_id, scope_res->t_automated_service_id,
+        scope_res->t_session_id, scope_res->actual_path, scope_res.value().domain);
     if (r.hasError()) {
-        co_return sgrn::createJsonResponse(r);
+        co_return sgrn::createTypedResponse(BackendErrorResponse{r.error()});
     }
 
-    auto response = sgrn::JsonObjectBuilder(64).boolean("success", true);
-    if (r->has_value()) {
-        response.int64("directory_id", **r);
-    } else {
-        response.null("directory_id");
-    }
-    co_return sgrn::createJsonResponse(std::move(response).finish());
+    co_return sgrn::createTypedResponse(CreateDirectoryResponse{r->has_value() ? std::make_optional(**r) : std::nullopt});
 }
 
-Task<HttpResponsePtr> StorageService::handleCreateObject(const Json::Value& t_json) {
+Task<HttpResponsePtr> StorageService::handleCreateObject(const CreateObjectRequest& t_req) {
     // This is a lower-level API for creating objects directly in the DB
-    BackendResult<drogon::orm::DbClientPtr> db_res = getDbClient();
+    auto db_res = getDbClient();
     if (db_res.hasError()) {
-        co_return sgrn::createJsonResponse(db_res);
+        co_return createTypedResponse(BackendErrorResponse{db_res.error()});
     }
     drogon::orm::DbClientPtr sp_db_client = db_res.value();
 
-    std::string sha256 = t_json.isMember("sha256") ? t_json["sha256"].asString() : "";
-    BackendResult<int64_t> r = co_await helpers::insertObject(sp_db_client, t_json["bucket"].asString(), t_json["key"].asString(),
-        t_json["size"].asInt64(), t_json["original_size"].asInt64(), sha256, t_json["is_compressed"].asBool(),
-        t_json.isMember("compression_algorithm") ? std::optional<std::string>(t_json["compression_algorithm"].asString()) : std::nullopt);
+    auto r = co_await helpers::insertObject(sp_db_client, t_req.bucket, t_req.key, t_req.size, t_req.original_size, t_req.sha256,
+        t_req.is_compressed, t_req.compression_algorithm);
 
     if (!r.has_value())
-        co_return sgrn::createJsonResponse(r);
-    auto response = sgrn::JsonObjectBuilder(48).boolean("success", true).int64("id", *r);
-    co_return sgrn::createJsonResponse(std::move(response).finish());
+        co_return sgrn::createTypedResponse(BackendErrorResponse{r.error()});
+    co_return sgrn::createTypedResponse(CreateObjectResponse{*r});
 }
 
 Task<HttpResponsePtr> StorageService::handleListObjects(int32_t t_automated_service_id) {
-    BackendResult<drogon::orm::DbClientPtr> db_res = getDbClient();
+    auto db_res = getDbClient();
     if (!db_res.has_value())
-        co_return sgrn::createJsonResponse(db_res);
+        co_return createTypedResponse(BackendErrorResponse{db_res.error()});
     drogon::orm::DbClientPtr sp_db_client = db_res.value();
 
     try {
@@ -429,35 +488,34 @@ Task<HttpResponsePtr> StorageService::handleListObjects(int32_t t_automated_serv
         auto objects = sgrn::orm::fromResult<ServiceObjectResponse, kQuery>(result);
         auto json_result = sgrn::json::write(objects);
         if (json_result.hasError()) {
-            co_return createErrorResponse("Failed to serialize object list", k500InternalServerError, "StorageService");
+            co_return createTypedResponse(
+                BackendErrorResponse{"Failed to serialize object list", k500InternalServerError, "StorageService"});
         }
         std::string response_json = std::move(json_result).value();
-        co_return createJsonResponse(std::move(response_json), k200OK);
+        co_return createTypedResponse(sgrn::json::RawJson{std::move(response_json)}, k200OK);
     } catch (const std::exception& ex) {
-        co_return createJsonErrorResponse(std::format("Database error: {}", ex.what()), k500InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{std::format("Database error: {}", ex.what()), k500InternalServerError});
     }
 }
 
 Task<HttpResponsePtr> StorageService::handleMoveObject(
-    Json::Value t_session, int32_t t_automated_service_id, std::string t_name, std::string t_new_name) {
-    BackendResult<drogon::orm::DbClientPtr> db_res = getDbClient();
+    ::sgrn::datastore::auth::SessionClaims t_session, int32_t t_automated_service_id, std::string t_name, std::string t_new_name) {
+    auto db_res = getDbClient();
     if (!db_res.has_value())
-        co_return sgrn::createJsonResponse(db_res);
+        co_return createTypedResponse(BackendErrorResponse{db_res.error()});
     drogon::orm::DbClientPtr sp_db_client = db_res.value();
 
     try {
         // 1. Fetch the file to move
-        auto file_res = co_await sp_db_client->execSqlCoro("SELECT id, full_path FROM storage.files "
-                                                           "WHERE automated_service_id = $1 AND name = $2 "
-                                                           "ORDER BY created_at DESC LIMIT 1",
-            t_automated_service_id, t_name);
+        auto file_res = co_await sp_db_client->execSqlCoro(kFilePathQuery, t_automated_service_id, t_name);
 
         if (file_res.empty()) {
-            co_return createJsonErrorResponse("Object not found", k404NotFound);
+            co_return createTypedResponse(BackendErrorResponse{"Object not found", k404NotFound});
         }
 
-        const int64_t t_file_id = file_res[0]["id"].as<int64_t>();
-        const std::string full_path = file_res[0]["full_path"].as<std::string>();
+        const auto file = sgrn::orm::fromRow<FilePathRow, kFilePathQuery>(file_res[0]);
+        const int64_t t_file_id = file.id;
+        const std::string& full_path = file.full_path;
 
         // 2. Derive new full_path by replacing the filename component
         const std::string::size_type last_slash = full_path.rfind('/');
@@ -468,66 +526,49 @@ Task<HttpResponsePtr> StorageService::handleMoveObject(
                                                                 "WHERE automated_service_id = $1 AND name = $2 AND id <> $3",
             t_automated_service_id, t_new_name, t_file_id);
         if (!collision_res.empty()) {
-            co_return createJsonErrorResponse("An object with that name already exists", k409Conflict);
+            co_return createTypedResponse(BackendErrorResponse{"An object with that name already exists", k409Conflict});
         }
 
         // 4. Perform the rename
         auto update_res = co_await sp_db_client->execSqlCoro(
             "UPDATE storage.files SET name = $1, full_path = $2 WHERE id = $3", t_new_name, new_full_path, t_file_id);
         if (update_res.affectedRows() == 0) {
-            co_return createJsonErrorResponse("Rename failed", k500InternalServerError);
+            co_return createTypedResponse(BackendErrorResponse{"Rename failed", k500InternalServerError});
         }
 
-        auto response = sgrn::JsonObjectBuilder(192)
-                            .boolean("success", true)
-                            .int64("id", t_file_id)
-                            .string("name", t_new_name)
-                            .string("full_path", new_full_path)
-                            .string("old_name", t_name);
-        co_return sgrn::createJsonResponse(std::move(response).finish());
+        co_return sgrn::createTypedResponse(RenameFileResponse{t_file_id, t_new_name, new_full_path, t_name});
     } catch (const std::exception& ex) {
-        co_return createJsonErrorResponse(std::format("Database error: {}", ex.what()), k500InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{std::format("Database error: {}", ex.what()), k500InternalServerError});
     }
 }
 
-Task<HttpResponsePtr> StorageService::handleDeleteObject(Json::Value t_session, int32_t t_automated_service_id, std::string t_name) {
-    BackendResult<drogon::orm::DbClientPtr> db_res = getDbClient();
+Task<HttpResponsePtr> StorageService::handleDeleteObject(
+    ::sgrn::datastore::auth::SessionClaims t_session, int32_t t_automated_service_id, std::string t_name) {
+    auto db_res = getDbClient();
     if (db_res.hasError()) {
-        co_return sgrn::createJsonResponse(db_res);
+        co_return createTypedResponse(BackendErrorResponse{db_res.error()});
     }
 
     auto tsp_db_client = db_res.value();
 
     try {
         // 1. Fetch metadata
-        auto meta_res = co_await tsp_db_client->execSqlCoro("SELECT f.id, "
-                                                            "       o.id AS object_id, "
-                                                            "       o.bucket, "
-                                                            "       o.key "
-                                                            "FROM storage.files f "
-                                                            "JOIN storage.objects o ON o.id = f.object_id "
-                                                            "WHERE f.automated_service_id = $1 "
-                                                            "  AND f.name = $2 "
-                                                            "ORDER BY f.created_at DESC "
-                                                            "LIMIT 1",
-            t_automated_service_id, t_name);
+        auto meta_res = co_await tsp_db_client->execSqlCoro(kFileObjectQuery, t_automated_service_id, t_name);
 
         if (meta_res.empty()) {
-            co_return createJsonErrorResponse("Object not found", k404NotFound);
+            co_return createTypedResponse(BackendErrorResponse{"Object not found", k404NotFound});
         }
 
-        const int64_t t_file_id = meta_res[0]["id"].as<int64_t>();
-        const int64_t object_id = meta_res[0]["object_id"].as<int64_t>();
-        const std::string t_bucket = meta_res[0]["bucket"].as<std::string>();
-        const std::string t_key = meta_res[0]["key"].as<std::string>();
+        const auto metadata = sgrn::orm::fromRow<FileObjectRow, kFileObjectQuery>(meta_res[0]);
+        const int64_t t_file_id = metadata.id;
+        const int64_t object_id = metadata.object_id;
+        const std::string& t_bucket = metadata.bucket;
+        const std::string& t_key = metadata.key;
 
         // 2. Check whether deleting this file will orphan the object
-        auto ref_res = co_await tsp_db_client->execSqlCoro("SELECT COUNT(*) AS cnt "
-                                                           "FROM storage.files "
-                                                           "WHERE object_id = $1",
-            object_id);
+        auto ref_res = co_await tsp_db_client->execSqlCoro(kReferenceCountQuery, object_id);
 
-        const int64_t ref_count = ref_res[0]["cnt"].as<int64_t>();
+        const int64_t ref_count = sgrn::orm::fromRow<ReferenceCountRow, kReferenceCountQuery>(ref_res[0]).cnt;
 
         const bool will_be_orphaned = (ref_count == 1);
 
@@ -536,7 +577,7 @@ Task<HttpResponsePtr> StorageService::handleDeleteObject(Json::Value t_session, 
             auto s3 = drogon::app().getPlugin<sgrn::datastore::plugins::aws::S3Client>();
 
             if (!s3) {
-                co_return createJsonErrorResponse("Storage backend unavailable", drogon::k503ServiceUnavailable);
+                co_return createTypedResponse(BackendErrorResponse{"Storage backend unavailable", drogon::k503ServiceUnavailable});
             }
 
             auto s3_res = co_await s3->deleteFile(t_bucket, t_key);
@@ -544,25 +585,27 @@ Task<HttpResponsePtr> StorageService::handleDeleteObject(Json::Value t_session, 
             if (!s3_res.has_value()) {
                 ERROR_LOG("[handleDeleteObject] S3 cleanup failed for {}/{}: {}", t_bucket, t_key, s3_res.error().message);
 
-                co_return createJsonErrorResponse(
-                    std::format("Storage deletion failed: {}", s3_res.error().message_), drogon::k500InternalServerError);
+                co_return createTypedResponse(BackendErrorResponse{
+                    std::format("Storage deletion failed: {}", s3_res.error().message), drogon::k500InternalServerError});
             }
         }
 
         // 4. Crypto-shred if encrypted, then delete file row
-        auto key_rows = co_await tsp_db_client->execSqlCoro("SELECT key_id, is_encrypted FROM storage.files WHERE id = $1", t_file_id);
-        if (!key_rows.empty() && key_rows[0]["is_encrypted"].as<bool>() && !key_rows[0]["key_id"].isNull()) {
-            std::string kid = key_rows[0]["key_id"].as<std::string>();
-            auto ks = sgrn::datastore::crypto::getKeyStore();
-            if (ks) {
-                (void)ks->shred(kid);
+        auto key_rows = co_await tsp_db_client->execSqlCoro(kFileEncryptionQuery, t_file_id);
+        if (!key_rows.empty()) {
+            const auto file = sgrn::orm::fromRow<FileEncryptionRow, kFileEncryptionQuery>(key_rows[0]);
+            if (file.is_encrypted && file.key_id) {
+                auto ks = sgrn::datastore::crypto::getKeyStore();
+                if (ks) {
+                    (void)ks->shred(*file.key_id);
+                }
             }
         }
 
         auto del_res = co_await tsp_db_client->execSqlCoro("DELETE FROM storage.files WHERE id = $1", t_file_id);
 
         if (del_res.affectedRows() == 0) {
-            co_return createJsonErrorResponse("Deletion failed", k500InternalServerError);
+            co_return createTypedResponse(BackendErrorResponse{"Deletion failed", k500InternalServerError});
         }
 
         // 5. Remove orphaned object row if your DB no longer does this automatically
@@ -572,10 +615,9 @@ Task<HttpResponsePtr> StorageService::handleDeleteObject(Json::Value t_session, 
                 object_id);
         }
 
-        auto response = sgrn::JsonObjectBuilder(96).boolean("success", true).string("name", t_name);
-        co_return sgrn::createJsonResponse(std::move(response).finish());
+        co_return sgrn::createTypedResponse(DeleteFileServiceResponse{t_name});
     } catch (const std::exception& ex) {
-        co_return createJsonErrorResponse(std::format("Database error: {}", ex.what()), k500InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{std::format("Database error: {}", ex.what()), k500InternalServerError});
     }
 }
 } // namespace sgrn::datastore::services::storage

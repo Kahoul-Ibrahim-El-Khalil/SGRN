@@ -7,8 +7,30 @@ namespace sgrn::datastore::handlers::admin
 {
 using namespace drogon;
 
-namespace
+namespace detail
 {
+static constexpr char kUserByIdQuery[] = "SELECT email, organisation FROM core.users WHERE id = $1 AND deleted_at IS NULL";
+static constexpr char kUserByEmailQuery[] = "SELECT id, organisation FROM core.users WHERE email = $1 AND deleted_at IS NULL";
+static constexpr char kPermissionCountQuery[] = "SELECT COUNT(*) AS count FROM core.user_domain_permissions WHERE user_id = $1";
+static constexpr char kUpsertPermissionQuery[] =
+    "INSERT INTO core.user_domain_permissions (user_id, organisation, domain, allowed_subpath, can_read, can_write, can_delete) "
+    "VALUES ($1, $2, $3, $4, $5, $6, $7) "
+    "ON CONFLICT (user_id, organisation, domain) DO UPDATE SET allowed_subpath = EXCLUDED.allowed_subpath, "
+    "can_read = EXCLUDED.can_read, can_write = EXCLUDED.can_write, can_delete = EXCLUDED.can_delete, "
+    "updated_at = now() "
+    "RETURNING id, allowed_subpath, can_read, can_write, can_delete";
+
+struct GrantPermissionRequest {
+    std::optional<int32_t> user_id;
+    std::optional<std::string> email;
+    std::string domain;
+    std::optional<std::string> organisation;
+    std::string allowed_subpath{"/"};
+    bool can_read{true};
+    bool can_write{true};
+    bool can_delete{false};
+};
+
 struct PermissionRow {
     int64_t id{0};
     int32_t user_id{0};
@@ -37,12 +59,43 @@ struct PermissionGrantResponse {
     bool can_delete{false};
     std::optional<std::string> note;
 };
+
+struct PermissionGrantRow {
+    int64_t id{0};
+    std::string allowed_subpath;
+    bool can_read{false};
+    bool can_write{false};
+    bool can_delete{false};
+};
+
 struct PermissionRevokeResponse {
-    bool success{true};
     std::string revoked;
     std::optional<std::string> warning;
 };
-} // namespace
+
+struct UserEmailOrganisationRow {
+    std::string email;
+    std::string organisation;
+};
+
+struct UserIdOrganisationRow {
+    int32_t id{0};
+    std::string organisation;
+};
+
+struct OrganisationRow {
+    std::string organisation;
+};
+
+struct UserIdRow {
+    int32_t user_id{0};
+};
+
+struct CountRow {
+    std::string count;
+};
+} // namespace detail
+using namespace detail;
 
 Task<HttpResponsePtr> AdminApiHandler::handleListPermissions(HttpRequestPtr tsp_req) {
     try {
@@ -56,7 +109,8 @@ Task<HttpResponsePtr> AdminApiHandler::handleListPermissions(HttpRequestPtr tsp_
 
         if (!is_platform) {
             if (!organisation.empty() && organisation != session_org) {
-                co_return createErrorResponse("Forbidden: cannot view permissions of another organisation", k403Forbidden, "AdminApi");
+                co_return createTypedResponse(
+                    BackendErrorResponse{"Forbidden: cannot view permissions of another organisation", k403Forbidden, "AdminApi"});
             }
             organisation = session_org;
         }
@@ -74,16 +128,16 @@ Task<HttpResponsePtr> AdminApiHandler::handleListPermissions(HttpRequestPtr tsp_
             try {
                 user_id = static_cast<int32_t>(std::stoi(user_id_raw));
             } catch (const std::exception&) {
-                co_return createErrorResponse("user_id must be an integer", k400BadRequest, "AdminApi");
+                co_return createTypedResponse(BackendErrorResponse{"user_id must be an integer", k400BadRequest, "AdminApi"});
             }
             if (user_id <= 0) {
-                co_return createErrorResponse("user_id must be positive", k400BadRequest, "AdminApi");
+                co_return createTypedResponse(BackendErrorResponse{"user_id must be positive", k400BadRequest, "AdminApi"});
             }
         }
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db = db_res.value();
 
@@ -105,21 +159,24 @@ Task<HttpResponsePtr> AdminApiHandler::handleListPermissions(HttpRequestPtr tsp_
             .permissions = sgrn::orm::fromResult<PermissionRow, kQuery>(rows),
             .count = static_cast<int64_t>(rows.size()),
         };
-        co_return createTypedJsonResponse(out, k200OK);
+        co_return createTypedResponse(tsp_req, out, k200OK);
     } catch (const drogon::orm::DrogonDbException& e) {
         ADMIN_ERROR_LOG("Permission list DB error: {}", e.base().what());
-        co_return createErrorResponse(AdminApiError::DbError);
+        co_return createTypedResponse(BackendErrorResponse{AdminApiError::DbError});
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Permission list error: {}", e.what());
-        co_return createErrorResponse(std::string("Failed to list permissions: ") + e.what(), k400BadRequest, "AdminApi");
+        co_return createTypedResponse(
+            BackendErrorResponse{std::string("Failed to list permissions: ") + e.what(), k400BadRequest, "AdminApi"});
     }
 }
 
 Task<HttpResponsePtr> AdminApiHandler::handleGrantPermission(HttpRequestPtr tsp_req) {
-    auto json = tsp_req->getJsonObject();
-    if (json == nullptr || !json->isObject()) {
-        co_return createErrorResponse(AdminApiError::InvalidPayload);
+    auto req_res = parseTypedRequest<GrantPermissionRequest>(tsp_req);
+    if (req_res.hasError()) {
+        co_return createTypedResponse(BackendErrorResponse{AdminApiError::InvalidPayload});
     }
+    const auto& req = req_res.value();
+
     try {
         const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
         const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
@@ -127,30 +184,26 @@ Task<HttpResponsePtr> AdminApiHandler::handleGrantPermission(HttpRequestPtr tsp_
         // Resolve caller session user ID for self-grant prevention
         int32_t actor_id = 0;
         std::string actor_name;
-        if (tsp_req->attributes()->find("session_json")) {
-            const auto& session = tsp_req->attributes()->get<Json::Value>("session_json");
-            if (session.isMember("user")) {
-                if (session["user"].isMember("id") && session["user"]["id"].isInt()) {
-                    actor_id = session["user"]["id"].asInt();
-                }
-                if (session["user"].isMember("email") && session["user"]["email"].isString()) {
-                    actor_name = session["user"]["email"].asString();
-                }
-            }
+        if (tsp_req->attributes()->find("auth_context")) {
+            const auto& auth = tsp_req->attributes()->get<filters::AuthContext>("auth_context");
+            actor_id = auth.user.id;
+            actor_name = auth.user.email;
+        } else if (tsp_req->attributes()->find("session_claims")) {
+            const auto& user = tsp_req->attributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims").user;
+            actor_id = user.id;
+            actor_name = user.email;
         }
 
         // Escalation guard: self-grant is strictly forbidden (checked before DB dependency)
-        if ((actor_id > 0 && json->isMember("user_id") && (*json)["user_id"].isInt() && (*json)["user_id"].asInt() == actor_id) ||
-            (!actor_name.empty() && json->isMember("email") && (*json)["email"].isString() &&
-                sgrn::utils::strings::trim((*json)["email"].asString()) == actor_name)) {
+        if ((actor_id > 0 && req.user_id.has_value() && *req.user_id == actor_id) ||
+            (!actor_name.empty() && req.email.has_value() && sgrn::utils::strings::trim(*req.email) == actor_name)) {
             auto db_res = sgrn::datastore::core::getDbClient();
             if (!db_res.hasError()) {
                 co_await sgrn::datastore::audit::AuditLogger::log(db_res.value(), session_org, "user", actor_id, actor_name,
-                    "permission.grant_rejected_self_grant", "user", std::to_string(actor_id), tsp_req->getPeerAddr().toIp(), *json,
-                    "failed");
+                    "permission.grant_rejected_self_grant", "user", std::to_string(actor_id), tsp_req->getPeerAddr().toIp(), req, "failed");
             }
-            co_return createErrorResponse(
-                "Forbidden: cannot grant permissions to yourself (self-grant prohibited)", k403Forbidden, "AdminApi");
+            co_return createTypedResponse(
+                BackendErrorResponse{"Forbidden: cannot grant permissions to yourself (self-grant prohibited)", k403Forbidden, "AdminApi"});
         }
 
         // Resolve the user by id or email (must exist and not be soft-deleted).
@@ -159,115 +212,108 @@ Task<HttpResponsePtr> AdminApiHandler::handleGrantPermission(HttpRequestPtr tsp_
         std::string user_org;
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db = db_res.value();
 
-        if (json->isMember("user_id") && (*json)["user_id"].isInt() && (*json)["user_id"].asInt() > 0) {
-            user_id = (*json)["user_id"].asInt();
-            auto hit = co_await db->execSqlCoro("SELECT email, organisation FROM core.users WHERE id = $1 AND deleted_at IS NULL", user_id);
+        if (req.user_id.has_value() && *req.user_id > 0) {
+            user_id = *req.user_id;
+            auto hit = co_await db->execSqlCoro(kUserByIdQuery, user_id);
             if (hit.empty()) {
-                co_return createErrorResponse("No such user (or soft-deleted)", k404NotFound, "AdminApi");
+                co_return createTypedResponse(BackendErrorResponse{"No such user (or soft-deleted)", k404NotFound, "AdminApi"});
             }
-            email = hit[0]["email"].as<std::string>();
-            user_org = hit[0]["organisation"].as<std::string>();
-        } else if (json->isMember("email") && (*json)["email"].isString() && !(*json)["email"].asString().empty()) {
-            email = sgrn::utils::strings::trim((*json)["email"].asString());
-            auto hit = co_await db->execSqlCoro("SELECT id, organisation FROM core.users WHERE email = $1 AND deleted_at IS NULL", email);
+            const auto row = sgrn::orm::fromRow<UserEmailOrganisationRow, kUserByIdQuery>(hit[0]);
+            email = row.email;
+            user_org = row.organisation;
+        } else if (req.email.has_value() && !req.email->empty()) {
+            email = sgrn::utils::strings::trim(*req.email);
+            auto hit = co_await db->execSqlCoro(kUserByEmailQuery, email);
             if (hit.empty()) {
-                co_return createErrorResponse("No such user (or soft-deleted)", k404NotFound, "AdminApi");
+                co_return createTypedResponse(BackendErrorResponse{"No such user (or soft-deleted)", k404NotFound, "AdminApi"});
             }
-            user_id = hit[0]["id"].as<int32_t>();
-            user_org = hit[0]["organisation"].as<std::string>();
+            const auto row = sgrn::orm::fromRow<UserIdOrganisationRow, kUserByEmailQuery>(hit[0]);
+            user_id = row.id;
+            user_org = row.organisation;
         } else {
-            co_return createErrorResponse("user_id or email is required", k400BadRequest, "AdminApi");
+            co_return createTypedResponse(BackendErrorResponse{"user_id or email is required", k400BadRequest, "AdminApi"});
         }
 
         if (!is_platform && user_org != session_org) {
-            co_return createErrorResponse(
-                "Forbidden: cannot grant permissions to users in another organisation", k403Forbidden, "AdminApi");
+            co_return createTypedResponse(
+                BackendErrorResponse{"Forbidden: cannot grant permissions to users in another organisation", k403Forbidden, "AdminApi"});
         }
 
-        if (!json->isMember("domain") || !(*json)["domain"].isString() || (*json)["domain"].asString().empty()) {
-            co_return createErrorResponse("domain is required", k400BadRequest, "AdminApi");
+        if (req.domain.empty()) {
+            co_return createTypedResponse(BackendErrorResponse{"domain is required", k400BadRequest, "AdminApi"});
         }
-        const std::string domain = sgrn::utils::strings::trim((*json)["domain"].asString());
+        const std::string domain = sgrn::utils::strings::trim(req.domain);
 
         // Organisation defaults to the user's own; cross-org grants are
         // refused (a user belongs to exactly one organisation, and the
         // enforcement lookup is domain-scoped within it).
         std::string organisation = user_org;
-        if (json->isMember("organisation") && (*json)["organisation"].isString() && !(*json)["organisation"].asString().empty()) {
-            organisation = sgrn::utils::strings::trim((*json)["organisation"].asString());
+        if (req.organisation.has_value() && !req.organisation->empty()) {
+            organisation = sgrn::utils::strings::trim(*req.organisation);
             if (organisation != user_org) {
-                co_return createErrorResponse("organisation must match the user's own organisation", k400BadRequest, "AdminApi");
+                co_return createTypedResponse(
+                    BackendErrorResponse{"organisation must match the user's own organisation", k400BadRequest, "AdminApi"});
             }
         }
         if (!is_platform && organisation != session_org) {
-            co_return createErrorResponse("Forbidden: cannot grant permissions for another organisation", k403Forbidden, "AdminApi");
+            co_return createTypedResponse(
+                BackendErrorResponse{"Forbidden: cannot grant permissions for another organisation", k403Forbidden, "AdminApi"});
         }
 
         // The FK would 500 on an unknown domain — pre-check for a clean 400.
         auto dom = co_await db->execSqlCoro("SELECT 1 FROM core.domains WHERE organisation = $1 AND name = $2", organisation, domain);
         if (dom.empty()) {
-            co_return createErrorResponse(
-                "Unknown domain '" + domain + "' in organisation '" + organisation + "'", k400BadRequest, "AdminApi");
+            co_return createTypedResponse(
+                BackendErrorResponse{"Unknown domain '" + domain + "' in organisation '" + organisation + "'", k400BadRequest, "AdminApi"});
         }
 
-        std::string subpath = "/";
-        if (json->isMember("allowed_subpath") && (*json)["allowed_subpath"].isString()) {
-            subpath = sgrn::utils::strings::trim((*json)["allowed_subpath"].asString());
-            if (subpath.empty()) {
-                subpath = "/";
-            }
+        std::string subpath = req.allowed_subpath.empty() ? "/" : sgrn::utils::strings::trim(req.allowed_subpath);
+        if (subpath.empty()) {
+            subpath = "/";
         }
         if (subpath.front() != '/') {
-            co_return createErrorResponse("allowed_subpath must start with '/'", k400BadRequest, "AdminApi");
+            co_return createTypedResponse(BackendErrorResponse{"allowed_subpath must start with '/'", k400BadRequest, "AdminApi"});
         }
-        auto flag = [&](const char* t_key, bool t_dflt) {
-            return (json->isMember(t_key) && (*json)[t_key].isBool()) ? (*json)[t_key].asBool() : t_dflt;
-        };
-        const bool can_read = flag("can_read", true);
-        const bool can_write = flag("can_write", true);
-        const bool can_delete = flag("can_delete", false);
+        const bool can_read = req.can_read;
+        const bool can_write = req.can_write;
+        const bool can_delete = req.can_delete;
 
-        auto before = co_await db->execSqlCoro("SELECT COUNT(*) FROM core.user_domain_permissions WHERE user_id = $1", user_id);
-        const bool first_grant = !before.empty() && before[0][0].as<std::string>() == "0";
+        auto before = co_await db->execSqlCoro(kPermissionCountQuery, user_id);
+        const bool first_grant = !before.empty() && sgrn::orm::fromRow<CountRow, kPermissionCountQuery>(before[0]).count == "0";
 
-        auto upserted = co_await db->execSqlCoro(
-            "INSERT INTO core.user_domain_permissions (user_id, organisation, domain, allowed_subpath, can_read, can_write, can_delete) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7) "
-            "ON CONFLICT (user_id, organisation, domain) DO UPDATE SET allowed_subpath = EXCLUDED.allowed_subpath, "
-            "can_read = EXCLUDED.can_read, can_write = EXCLUDED.can_write, can_delete = EXCLUDED.can_delete, "
-            "updated_at = now() "
-            "RETURNING id, allowed_subpath, can_read, can_write, can_delete",
-            user_id, organisation, domain, subpath, can_read, can_write, can_delete);
-        const auto& row = upserted[0];
+        auto upserted =
+            co_await db->execSqlCoro(kUpsertPermissionQuery, user_id, organisation, domain, subpath, can_read, can_write, can_delete);
+        const auto row = sgrn::orm::fromRowByName<PermissionGrantRow>(upserted[0]);
         PermissionGrantResponse out{
-            .id = sgrn::orm::detail::extractField<int64_t>(row[0]),
+            .id = row.id,
             .user_id = user_id,
             .email = email,
             .organisation = organisation,
             .domain = domain,
-            .allowed_subpath = sgrn::orm::detail::extractField<std::string>(row[1]),
-            .can_read = sgrn::orm::detail::extractField<bool>(row[2]),
-            .can_write = sgrn::orm::detail::extractField<bool>(row[3]),
-            .can_delete = sgrn::orm::detail::extractField<bool>(row[4]),
+            .allowed_subpath = row.allowed_subpath,
+            .can_read = row.can_read,
+            .can_write = row.can_write,
+            .can_delete = row.can_delete,
             .note = std::nullopt,
         };
         if (first_grant) {
             out.note = "First domain grant for this user — storage access unlocked (zero-trust default was deny-all).";
         }
         co_await sgrn::datastore::audit::AuditLogger::log(db, organisation, "user", actor_id, actor_name, "permission.granted", "user",
-            std::to_string(user_id), tsp_req->getPeerAddr().toIp(), *json, "success");
+            std::to_string(user_id), tsp_req->getPeerAddr().toIp(), req, "success");
         sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(user_id);
-        co_return createTypedJsonResponse(out, k200OK);
+        co_return createTypedResponse(tsp_req, out, k200OK);
     } catch (const drogon::orm::DrogonDbException& e) {
         ADMIN_ERROR_LOG("Permission grant DB error: {}", e.base().what());
-        co_return createErrorResponse(AdminApiError::DbError);
+        co_return createTypedResponse(BackendErrorResponse{AdminApiError::DbError});
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Permission grant error: {}", e.what());
-        co_return createErrorResponse(std::string("Failed to grant permission: ") + e.what(), k400BadRequest, "AdminApi");
+        co_return createTypedResponse(
+            BackendErrorResponse{std::string("Failed to grant permission: ") + e.what(), k400BadRequest, "AdminApi"});
     }
 }
 
@@ -278,7 +324,7 @@ Task<HttpResponsePtr> AdminApiHandler::handleRevokePermission(HttpRequestPtr tsp
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db = db_res.value();
 
@@ -291,12 +337,12 @@ Task<HttpResponsePtr> AdminApiHandler::handleRevokePermission(HttpRequestPtr tsp
             try {
                 id = std::stoll(id_raw);
             } catch (const std::exception&) {
-                co_return createErrorResponse("id must be an integer", k400BadRequest, "AdminApi");
+                co_return createTypedResponse(BackendErrorResponse{"id must be an integer", k400BadRequest, "AdminApi"});
             }
             if (!is_platform) {
                 auto hit = co_await db->execSqlCoro("SELECT organisation FROM core.user_domain_permissions WHERE id = $1", id);
-                if (hit.empty() || hit[0]["organisation"].as<std::string>() != session_org) {
-                    co_return createErrorResponse("No such permission grant", k404NotFound, "AdminApi");
+                if (hit.empty() || sgrn::orm::fromRowByName<OrganisationRow>(hit[0]).organisation != session_org) {
+                    co_return createTypedResponse(BackendErrorResponse{"No such permission grant", k404NotFound, "AdminApi"});
                 }
             }
             revoke_sql = "DELETE FROM core.user_domain_permissions WHERE id = $1 RETURNING user_id";
@@ -310,15 +356,17 @@ Task<HttpResponsePtr> AdminApiHandler::handleRevokePermission(HttpRequestPtr tsp
             try {
                 user_id = static_cast<int32_t>(std::stoi(user_id_raw));
             } catch (const std::exception&) {
-                co_return createErrorResponse("supply ?id= or ?user_id=&organisation=&domain=", k400BadRequest, "AdminApi");
+                co_return createTypedResponse(
+                    BackendErrorResponse{"supply ?id= or ?user_id=&organisation=&domain=", k400BadRequest, "AdminApi"});
             }
             if (user_id <= 0 || domain.empty()) {
-                co_return createErrorResponse("supply ?id= or ?user_id=&organisation=&domain=", k400BadRequest, "AdminApi");
+                co_return createTypedResponse(
+                    BackendErrorResponse{"supply ?id= or ?user_id=&organisation=&domain=", k400BadRequest, "AdminApi"});
             }
             if (!is_platform) {
                 if (!organisation.empty() && organisation != session_org) {
-                    co_return createErrorResponse(
-                        "Forbidden: cannot revoke permissions for another organisation", k403Forbidden, "AdminApi");
+                    co_return createTypedResponse(
+                        BackendErrorResponse{"Forbidden: cannot revoke permissions for another organisation", k403Forbidden, "AdminApi"});
                 }
                 organisation = session_org;
             } else if (organisation.empty()) {
@@ -336,24 +384,26 @@ Task<HttpResponsePtr> AdminApiHandler::handleRevokePermission(HttpRequestPtr tsp
         // fails to compile (SqlBinder has no vector operator<<).
         auto deleted = co_await sgrn::datastore::core::execSqlCoroVec(db, revoke_sql, revoke_binds);
         if (deleted.empty()) {
-            co_return createErrorResponse("No such permission grant", k404NotFound, "AdminApi");
+            co_return createTypedResponse(BackendErrorResponse{"No such permission grant", k404NotFound, "AdminApi"});
         }
-        const int32_t affected_user = deleted[0]["user_id"].as<int32_t>();
-        auto remaining = co_await db->execSqlCoro("SELECT COUNT(*) FROM core.user_domain_permissions WHERE user_id = $1", affected_user);
+        const int32_t affected_user = sgrn::orm::fromRowByName<UserIdRow>(deleted[0]).user_id;
+        auto remaining =
+            co_await db->execSqlCoro("SELECT COUNT(*) AS count FROM core.user_domain_permissions WHERE user_id = $1", affected_user);
 
         PermissionRevokeResponse out;
         out.revoked = id_desc;
-        if (!remaining.empty() && remaining[0][0].as<std::string>() == "0") {
+        if (!remaining.empty() && sgrn::orm::fromRowByName<CountRow>(remaining[0]).count == "0") {
             out.warning = "User now holds no domain grants — zero-trust default-deny locks them out of storage entirely.";
         }
         sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(affected_user);
-        co_return createTypedJsonResponse(out, k200OK);
+        co_return createTypedResponse(tsp_req, out, k200OK);
     } catch (const drogon::orm::DrogonDbException& e) {
         ADMIN_ERROR_LOG("Permission revoke DB error: {}", e.base().what());
-        co_return createErrorResponse(AdminApiError::DbError);
+        co_return createTypedResponse(BackendErrorResponse{AdminApiError::DbError});
     } catch (const std::exception& e) {
         ADMIN_ERROR_LOG("Permission revoke error: {}", e.what());
-        co_return createErrorResponse(std::string("Failed to revoke permission: ") + e.what(), k400BadRequest, "AdminApi");
+        co_return createTypedResponse(
+            BackendErrorResponse{std::string("Failed to revoke permission: ") + e.what(), k400BadRequest, "AdminApi"});
     }
 }
 

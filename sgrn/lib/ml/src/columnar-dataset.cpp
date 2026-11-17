@@ -1,6 +1,5 @@
 #include <sgrn/ml/columnar-dataset.hpp>
 #include <sgrn/utils/hashing.hpp>
-#include <sgrn/utils/json.hpp>
 
 #include <cmath>
 #include <cstring>

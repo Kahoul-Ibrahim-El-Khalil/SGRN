@@ -2,8 +2,10 @@
 
 #include <sgrn/datastore/audit/AuditLogger.hpp>
 #include <sgrn/datastore/core/db.hpp>
+#include <sgrn/datastore/filters/types.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe-access.hpp>
+#include <sgrn/datastore/wire/auth.hpp>
 
 #include <fmt/core.h>
 #include <fmt/format.h>
@@ -119,8 +121,8 @@ std::string rowToJsonString(const drogon::orm::Row& t_row, const CrudViewSpec& t
 
 // --- raw-string list serialization (executeViewList only) ------------------
 // Builds the response body directly instead of a Json::Value DOM that
-// createJsonResponse would flatten back to text (two full passes over up to
-// max_limit rows).
+// serializing through a Json::Value DOM would flatten back to text (two full
+// passes over up to max_limit rows).
 
 // Escapes exactly what the JSON spec requires — quote, backslash, and
 // control characters below 0x20. Bytes 0x20 and above, including multi-byte
@@ -391,33 +393,35 @@ std::string selectList(const CrudViewSpec& t_spec) {
 // Audit failure must not turn a committed write into a 500: AuditLogger logs
 // internally, and anything thrown here is swallowed.
 drogon::Task<void> auditCrudMutation(const drogon::HttpRequestPtr& tsp_req, const CrudViewSpec& t_spec, std::string_view t_op,
-    const std::string& t_target_id, const Json::Value& t_body) {
+    const std::string& t_target_id, std::string t_details_json) {
     try {
-        if (!tsp_req || !tsp_req->attributes()->find("session_json")) {
+        std::string org;
+        int32_t actor_id = 0;
+        std::string actor_name;
+        if (tsp_req && tsp_req->attributes()->find("auth_context")) {
+            const auto& auth = tsp_req->attributes()->get<filters::AuthContext>("auth_context");
+            org = auth.user.organisation;
+            actor_id = auth.user.id;
+            actor_name = auth.user.email;
+        } else if (tsp_req && tsp_req->attributes()->find("session_claims")) {
+            const auto& user = tsp_req->attributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims").user;
+            org = user.organisation;
+            actor_id = user.id;
+            actor_name = user.email;
+        } else {
             co_return;
         }
-        const Json::Value session = tsp_req->attributes()->get<Json::Value>("session_json");
-        if (!session.isObject() || !session.isMember("user") || !session["user"].isObject()) {
-            co_return;
-        }
-        const Json::Value& user = session["user"];
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
             co_return;
         }
 
-        Json::Value details(Json::objectValue);
-        for (const auto& field : t_spec.fields) {
-            const std::string key(field.name);
-            if (t_body.isObject() && t_body.isMember(key)) {
-                details[key] = t_body[key];
-            }
-        }
-
-        co_await sgrn::datastore::audit::AuditLogger::log(db_res.value(), user["organisation"].asString(), "user", user["id"].asInt(),
-            user["email"].asString(), fmt::format("crud.{}.{}", t_spec.write_table, t_op), std::string(t_spec.write_table), t_target_id,
-            tsp_req->getPeerAddr().toIp(), details, "success");
+        // The details are the written columns as a compact JSON object,
+        // serialized once by the caller (Glaze on the typed path).
+        co_await sgrn::datastore::audit::AuditLogger::logSerialized(db_res.value(), org, "user", actor_id, actor_name,
+            fmt::format("crud.{}.{}", t_spec.write_table, t_op), std::string(t_spec.write_table), t_target_id,
+            tsp_req->getPeerAddr().toIp(), std::move(t_details_json), "success");
     } catch (const std::exception&) {
         // Never fail a committed write because the audit sink hiccuped.
     }
@@ -456,10 +460,11 @@ sgrn::Result<std::string> fieldValueToBind(std::string_view t_field_name, FieldT
 
 // --- LIST --------------------------------------------------------------
 
-drogon::Task<HttpResponsePtr> executeViewList(const CrudViewSpec& t_spec, HttpRequestPtr tsp_req, std::string t_tenant) {
+drogon::Task<HttpResponsePtr> executeViewList(
+    const CrudViewSpec& t_spec, HttpRequestPtr tsp_req, std::string t_tenant, TypedRowSink* tp_sink) {
     auto db_res = sgrn::datastore::core::getDbClient();
     if (db_res.hasError()) {
-        co_return sgrn::createJsonResponse(db_res);
+        co_return createTypedResponse(BackendErrorResponse{db_res.error()});
     }
 
     // Tenant predicate is ALWAYS bound as $1, before any client-controlled
@@ -479,12 +484,13 @@ drogon::Task<HttpResponsePtr> executeViewList(const CrudViewSpec& t_spec, HttpRe
             !(field->filter_ops & static_cast<uint8_t>(parsed->first))) {
             // Explicit rejection, not silent ignoring — an unlisted column
             // or disallowed operator is a client error, not a no-op.
-            co_return sgrn::createErrorResponse(fmt::format("Unsupported filter: {}", key), k400BadRequest, "Query");
+            co_return sgrn::createTypedResponse(BackendErrorResponse{fmt::format("Unsupported filter: {}", key), k400BadRequest, "Query"});
         }
         if (parsed->first == Op::In) {
             auto parts = splitCsv(parsed->second);
             if (parts.empty()) {
-                co_return sgrn::createErrorResponse(fmt::format("Unsupported filter: {}", key), k400BadRequest, "Query");
+                co_return sgrn::createTypedResponse(
+                    BackendErrorResponse{fmt::format("Unsupported filter: {}", key), k400BadRequest, "Query"});
             }
             std::string placeholders;
             for (const auto& p : parts) {
@@ -509,7 +515,7 @@ drogon::Task<HttpResponsePtr> executeViewList(const CrudViewSpec& t_spec, HttpRe
         std::string col = order_raw.substr(0, order_raw.find('.'));
         const Field* f = findField(t_spec, col);
         if (f == nullptr) {
-            co_return sgrn::createErrorResponse("Unsupported sort column", k400BadRequest, "Query");
+            co_return sgrn::createTypedResponse(BackendErrorResponse{"Unsupported sort column", k400BadRequest, "Query"});
         }
         order_col = std::string(f->name);
     }
@@ -535,6 +541,12 @@ drogon::Task<HttpResponsePtr> executeViewList(const CrudViewSpec& t_spec, HttpRe
 
     try {
         auto result = co_await sgrn::datastore::core::execSqlCoroVec(db_res.value(), sql, binds);
+        if (tp_sink != nullptr) {
+            for (const auto& row : result) {
+                tp_sink->add(row);
+            }
+            co_return tp_sink->makeResponse(tsp_req, k200OK);
+        }
         // Single-pass serialization: build the response body directly
         // instead of a Json::Value DOM (see appendFieldValueRaw above).
         std::string body;
@@ -561,18 +573,19 @@ drogon::Task<HttpResponsePtr> executeViewList(const CrudViewSpec& t_spec, HttpRe
             body += '}';
         }
         body += ']';
-        co_return sgrn::createJsonResponse(std::move(body), k200OK);
+        co_return sgrn::createTypedResponse(sgrn::json::RawJson{std::move(body)}, k200OK);
     } catch (const std::exception& e) {
-        co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "Database");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k500InternalServerError, "Database"});
     }
 }
 
 // --- GET one -------------------------------------------------------------
 
-drogon::Task<HttpResponsePtr> executeViewGet(const CrudViewSpec& t_spec, HttpRequestPtr, std::string t_tenant, std::string t_id) {
+drogon::Task<HttpResponsePtr> executeViewGet(
+    const CrudViewSpec& t_spec, HttpRequestPtr tsp_req, std::string t_tenant, std::string t_id, TypedRowSink* tp_sink) {
     auto db_res = sgrn::datastore::core::getDbClient();
     if (db_res.hasError()) {
-        co_return sgrn::createJsonResponse(db_res);
+        co_return createTypedResponse(BackendErrorResponse{db_res.error()});
     }
 
     std::string sql = fmt::format(
@@ -580,37 +593,30 @@ drogon::Task<HttpResponsePtr> executeViewGet(const CrudViewSpec& t_spec, HttpReq
     try {
         auto result = co_await db_res.value()->execSqlCoro(sql, t_id, t_tenant);
         if (result.empty()) {
-            co_return sgrn::createErrorResponse("No matching row", k404NotFound, "NotFound");
+            co_return sgrn::createTypedResponse(BackendErrorResponse{"No matching row", k404NotFound, "NotFound"});
+        }
+        if (tp_sink != nullptr) {
+            tp_sink->add(result[0]);
+            co_return tp_sink->makeResponse(tsp_req, k200OK);
         }
         std::string response_json = rowToJsonString(result[0], t_spec);
-        co_return sgrn::createJsonResponse(std::move(response_json), k200OK);
+        co_return sgrn::createTypedResponse(sgrn::json::RawJson{std::move(response_json)}, k200OK);
     } catch (const std::exception& e) {
-        co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "Database");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k500InternalServerError, "Database"});
     }
 }
 
-// --- INSERT ----------------------------------------------------------------
+// --- INSERT ------------------------------------------------------------
 
-drogon::Task<HttpResponsePtr> executeViewInsert(const CrudViewSpec& t_spec, HttpRequestPtr tsp_req, std::string t_tenant) {
-    auto json = tsp_req->getJsonObject();
-    if (!json) {
-        co_return sgrn::createErrorResponse("Expected JSON body", k400BadRequest, "Body");
-    }
-
+drogon::Task<HttpResponsePtr> executeViewInsertBound(const CrudViewSpec& t_spec, HttpRequestPtr tsp_req, std::string t_tenant,
+    std::vector<BoundField> t_fields, std::string t_audit_json, TypedRowSink* tp_sink) {
     // tenant_column is always first and always server-derived — the body
     // cannot set it, even if it includes a key with that name.
     std::vector<std::string> cols{std::string(t_spec.tenant_column)};
     std::vector<std::string> binds{t_tenant};
-    for (const auto& field : t_spec.fields) {
-        if (!field.insertable || !json->isMember(std::string(field.name))) {
-            continue;
-        }
-        auto bind_res = fieldValueToBind(field.name, field.type, (*json)[std::string(field.name)]);
-        if (bind_res.hasError()) {
-            co_return sgrn::createErrorResponse(bind_res.error(), k400BadRequest, "Body");
-        }
+    for (auto& field : t_fields) {
         cols.emplace_back(field.name);
-        binds.push_back(std::move(bind_res).value());
+        binds.push_back(std::move(field.value));
     }
 
     std::string col_list;
@@ -628,54 +634,47 @@ drogon::Task<HttpResponsePtr> executeViewInsert(const CrudViewSpec& t_spec, Http
 
     auto db_res = sgrn::datastore::core::getDbClient();
     if (db_res.hasError()) {
-        co_return sgrn::createJsonResponse(db_res);
+        co_return createTypedResponse(BackendErrorResponse{db_res.error()});
     }
     try {
         auto result = co_await sgrn::datastore::core::execSqlCoroVec(db_res.value(), sql, binds);
         if (result.empty()) {
-            co_return sgrn::createErrorResponse("Insert returned no row", k500InternalServerError, "Database");
+            co_return sgrn::createTypedResponse(BackendErrorResponse{"Insert returned no row", k500InternalServerError, "Database"});
         }
-        const std::string created_id = result[0][std::string(t_spec.pk.name)].as<std::string>();
-        co_await auditCrudMutation(tsp_req, t_spec, "create", created_id, *json);
+        const std::string created_id = tp_sink != nullptr ? tp_sink->primaryKeyText(result[0], t_spec.pk.name)
+                                                          : result[0][std::string(t_spec.pk.name)].as<std::string>();
+        co_await auditCrudMutation(tsp_req, t_spec, "create", created_id, std::move(t_audit_json));
+        if (tp_sink != nullptr) {
+            tp_sink->add(result[0]);
+            co_return tp_sink->makeResponse(tsp_req, k201Created);
+        }
         std::string response_json = rowToJsonString(result[0], t_spec);
-        co_return sgrn::createJsonResponse(std::move(response_json), k201Created);
+        co_return sgrn::createTypedResponse(sgrn::json::RawJson{std::move(response_json)}, k201Created);
     } catch (const std::exception& e) {
-        co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "Database");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k500InternalServerError, "Database"});
     }
 }
 
 // --- UPDATE ------------------------------------------------------------
 
-drogon::Task<HttpResponsePtr> executeViewUpdate(
-    const CrudViewSpec& t_spec, HttpRequestPtr tsp_req, std::string t_tenant, std::string t_id) {
-    auto json = tsp_req->getJsonObject();
-    if (!json) {
-        co_return sgrn::createErrorResponse("Expected JSON body", k400BadRequest, "Body");
-    }
-
+drogon::Task<HttpResponsePtr> executeViewUpdateBound(const CrudViewSpec& t_spec, HttpRequestPtr tsp_req, std::string t_tenant,
+    std::string t_id, std::vector<BoundField> t_fields, std::string t_audit_json, TypedRowSink* tp_sink) {
     std::vector<std::string> binds;
     std::string set_clause;
-    for (const auto& field : t_spec.fields) {
-        if (!field.updatable || !json->isMember(std::string(field.name))) {
-            continue;
-        }
+    for (auto& field : t_fields) {
         // The tenant column can never be updated, even if a generator bug
         // ever marked it updatable — defence in depth.
         if (field.name == t_spec.tenant_column) {
             continue;
         }
-        auto bind_res = fieldValueToBind(field.name, field.type, (*json)[std::string(field.name)]);
-        if (bind_res.hasError()) {
-            co_return sgrn::createErrorResponse(bind_res.error(), k400BadRequest, "Body");
-        }
-        binds.push_back(std::move(bind_res).value());
+        binds.push_back(std::move(field.value));
         if (!set_clause.empty()) {
             set_clause += ", ";
         }
         set_clause += fmt::format("{} = ${}", field.name, binds.size());
     }
     if (set_clause.empty()) {
-        co_return sgrn::createErrorResponse("No updatable fields supplied", k400BadRequest, "Body");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{"No updatable fields supplied", k400BadRequest, "Body"});
     }
 
     binds.push_back(t_id);
@@ -685,19 +684,86 @@ drogon::Task<HttpResponsePtr> executeViewUpdate(
 
     auto db_res = sgrn::datastore::core::getDbClient();
     if (db_res.hasError()) {
-        co_return sgrn::createJsonResponse(db_res);
+        co_return createTypedResponse(BackendErrorResponse{db_res.error()});
     }
     try {
         auto result = co_await sgrn::datastore::core::execSqlCoroVec(db_res.value(), sql, binds);
         if (result.empty()) {
-            co_return sgrn::createErrorResponse("No matching row", k404NotFound, "NotFound");
+            co_return sgrn::createTypedResponse(BackendErrorResponse{"No matching row", k404NotFound, "NotFound"});
         }
-        co_await auditCrudMutation(tsp_req, t_spec, "update", t_id, *json);
+        co_await auditCrudMutation(tsp_req, t_spec, "update", t_id, std::move(t_audit_json));
+        if (tp_sink != nullptr) {
+            tp_sink->add(result[0]);
+            co_return tp_sink->makeResponse(tsp_req, k200OK);
+        }
         std::string response_json = rowToJsonString(result[0], t_spec);
-        co_return sgrn::createJsonResponse(std::move(response_json), k200OK);
+        co_return sgrn::createTypedResponse(sgrn::json::RawJson{std::move(response_json)}, k200OK);
     } catch (const std::exception& e) {
-        co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "Database");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k500InternalServerError, "Database"});
     }
+}
+
+// --- dynamic-body entry points (JsonCpp) ------------------------------------
+//
+// Same whitelist and validation as before, expressed as "build the bound
+// columns + audit JSON from a Json::Value, then call the Bound core".
+
+namespace
+{
+std::string compactJson(const Json::Value& t_value) {
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    return Json::writeString(builder, t_value);
+}
+} // namespace
+
+drogon::Task<HttpResponsePtr> executeViewInsert(const CrudViewSpec& t_spec, HttpRequestPtr tsp_req, std::string t_tenant) {
+    auto json = tsp_req->getJsonObject();
+    if (!json) {
+        co_return sgrn::createTypedResponse(BackendErrorResponse{"Expected JSON body", k400BadRequest, "Body"});
+    }
+
+    std::vector<BoundField> fields;
+    Json::Value details(Json::objectValue);
+    for (const auto& field : t_spec.fields) {
+        if (!field.insertable || !json->isMember(std::string(field.name))) {
+            continue;
+        }
+        auto bind_res = fieldValueToBind(field.name, field.type, (*json)[std::string(field.name)]);
+        if (bind_res.hasError()) {
+            co_return sgrn::createTypedResponse(BackendErrorResponse{bind_res.error(), k400BadRequest, "Body"});
+        }
+        fields.push_back({field.name, std::move(bind_res).value()});
+        details[std::string(field.name)] = (*json)[std::string(field.name)];
+    }
+    co_return co_await executeViewInsertBound(t_spec, std::move(tsp_req), std::move(t_tenant), std::move(fields), compactJson(details));
+}
+
+drogon::Task<HttpResponsePtr> executeViewUpdate(
+    const CrudViewSpec& t_spec, HttpRequestPtr tsp_req, std::string t_tenant, std::string t_id) {
+    auto json = tsp_req->getJsonObject();
+    if (!json) {
+        co_return sgrn::createTypedResponse(BackendErrorResponse{"Expected JSON body", k400BadRequest, "Body"});
+    }
+
+    std::vector<BoundField> fields;
+    Json::Value details(Json::objectValue);
+    for (const auto& field : t_spec.fields) {
+        if (!field.updatable || !json->isMember(std::string(field.name))) {
+            continue;
+        }
+        if (field.name == t_spec.tenant_column) {
+            continue;
+        }
+        auto bind_res = fieldValueToBind(field.name, field.type, (*json)[std::string(field.name)]);
+        if (bind_res.hasError()) {
+            co_return sgrn::createTypedResponse(BackendErrorResponse{bind_res.error(), k400BadRequest, "Body"});
+        }
+        fields.push_back({field.name, std::move(bind_res).value()});
+        details[std::string(field.name)] = (*json)[std::string(field.name)];
+    }
+    co_return co_await executeViewUpdateBound(
+        t_spec, std::move(tsp_req), std::move(t_tenant), std::move(t_id), std::move(fields), compactJson(details));
 }
 
 // --- DELETE ------------------------------------------------------------
@@ -708,16 +774,16 @@ drogon::Task<HttpResponsePtr> executeViewDelete(
 
     auto db_res = sgrn::datastore::core::getDbClient();
     if (db_res.hasError()) {
-        co_return sgrn::createJsonResponse(db_res);
+        co_return createTypedResponse(BackendErrorResponse{db_res.error()});
     }
     try {
         auto deleted_rows = co_await db_res.value()->execSqlCoro(sql, t_id, t_tenant);
         if (deleted_rows.affectedRows() > 0) {
-            co_await auditCrudMutation(tsp_req, t_spec, "delete", t_id, Json::objectValue);
+            co_await auditCrudMutation(tsp_req, t_spec, "delete", t_id, "{}");
         }
         co_return drogon::HttpResponse::newHttpResponse(k204NoContent, drogon::CT_NONE);
     } catch (const std::exception& e) {
-        co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "Database");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k500InternalServerError, "Database"});
     }
 }
 

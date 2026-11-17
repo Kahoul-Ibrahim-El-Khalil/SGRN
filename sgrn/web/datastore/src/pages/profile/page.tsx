@@ -22,7 +22,8 @@ import { Lock, Loader2, User, Mail, Shield, Building2, Phone, HardDrive, Zap } f
 import { PageLayout } from "@/components/PageLayout";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEvent } from "@/contexts/EventContext";
-import { authenticatedFetch, processResponse } from "@/backend/api/fetcher";
+import { authenticatedFetch, jsonBody, processResponse } from "@/backend/api/fetcher";
+import type { UpdatePasswordRequest, UpdateUserInfoRequest } from "@sgrn/datastore/requests";
 import { SessionBackendApiEndpoints, QueryListBackendApiEndpoints, StorageBackendApiEndpoints } from "@/backend/endpoints";
 import { handleSgrnResult } from "@/backend/errorHandler";
 
@@ -97,8 +98,7 @@ function useProfileForm(
         try {
             const res = await authenticatedFetch(QueryListBackendApiEndpoints.UPDATE_USER_INFO, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(fields),
+                ...jsonBody<UpdateUserInfoRequest>(fields),
             });
             const result = await processResponse<{ message: string }>(res);
             if (handleSgrnResult(result)) {
@@ -143,8 +143,7 @@ function usePasswordForm(
         try {
             const res = await authenticatedFetch(SessionBackendApiEndpoints.UPDATE_PASSWORD, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
+                ...jsonBody<UpdatePasswordRequest>({
                     old_password: fields.old_password,
                     new_password: fields.new_password,
                 }),

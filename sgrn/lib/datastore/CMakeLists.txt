@@ -18,6 +18,7 @@ set(DROGON_LIBRARIES sgrn::drogon)
 include(cmake/sgrn_datastore_core.cmake)
 
 # ==================== Project Subdirectories ====================
+add_subdirectory(wire)
 add_subdirectory(src)
 
 # ==================== Tests ====================

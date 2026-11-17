@@ -22,8 +22,6 @@
 namespace sgrn::datastore::plugins::aws
 {
 
-using ::sgrn::Result;
-
 /**
  * Drogon Plugin: S3Client
  *
@@ -62,82 +60,83 @@ public:
     // ========================================================================
     // Bucket Operations
     // ========================================================================
-    drogon::Task<BackendResult<Json::Value>> listBuckets();
-    drogon::Task<BackendResult<void>> createBucket(std::string t_bucket);
-    drogon::Task<BackendResult<void>> deleteBucket(std::string t_bucket);
-    drogon::Task<BackendResult<bool>> bucketExists(std::string t_bucket);
+    drogon::Task<Result<Json::Value, BackendError>> listBuckets();
+    drogon::Task<Result<void, BackendError>> createBucket(std::string t_bucket);
+    drogon::Task<Result<void, BackendError>> deleteBucket(std::string t_bucket);
+    drogon::Task<Result<bool, BackendError>> bucketExists(std::string t_bucket);
 
     // ========================================================================
     // Object Operations
     // ========================================================================
-    drogon::Task<BackendResult<void>> uploadFile(std::string t_bucket, std::string t_key, std::string t_file_path);
+    drogon::Task<Result<void, BackendError>> uploadFile(std::string t_bucket, std::string t_key, std::string t_file_path);
 
-    drogon::Task<BackendResult<void>> uploadFromMemory(
+    drogon::Task<Result<void, BackendError>> uploadFromMemory(
         std::string t_bucket, std::string t_key, std::string t_data, std::string t_content_type);
 
-    drogon::Task<BackendResult<void>> uploadWithMetadata(
+    drogon::Task<Result<void, BackendError>> uploadWithMetadata(
         std::string t_bucket, std::string t_key, std::string t_file_path, Json::Value t_metadata);
 
-    drogon::Task<BackendResult<void>> downloadFile(std::string t_bucket, std::string t_key, std::string t_download_path);
+    drogon::Task<Result<void, BackendError>> downloadFile(std::string t_bucket, std::string t_key, std::string t_download_path);
 
-    drogon::Task<BackendResult<void>> downloadFileRange(
+    drogon::Task<Result<void, BackendError>> downloadFileRange(
         std::string t_bucket, std::string t_key, std::string t_download_path, int64_t t_start, int64_t t_end);
 
-    drogon::Task<BackendResult<std::string>> getObjectContent(std::string t_bucket, std::string t_key, int64_t t_max_bytes = 0);
+    drogon::Task<Result<std::string, BackendError>> getObjectContent(std::string t_bucket, std::string t_key, int64_t t_max_bytes = 0);
 
-    drogon::Task<BackendResult<void>> deleteFile(std::string t_bucket, std::string t_key);
+    drogon::Task<Result<void, BackendError>> deleteFile(std::string t_bucket, std::string t_key);
 
-    drogon::Task<BackendResult<Json::Value>> deleteFiles(std::string t_bucket, std::vector<std::string> t_keys);
+    drogon::Task<Result<Json::Value, BackendError>> deleteFiles(std::string t_bucket, std::vector<std::string> t_keys);
 
-    drogon::Task<BackendResult<void>> copyFile(
+    drogon::Task<Result<void, BackendError>> copyFile(
         std::string t_src_bucket, std::string t_src_key, std::string t_dest_bucket, std::string t_dest_key);
 
-    drogon::Task<BackendResult<bool>> exists(std::string t_bucket, std::string t_key);
+    drogon::Task<Result<bool, BackendError>> exists(std::string t_bucket, std::string t_key);
 
-    drogon::Task<BackendResult<Json::Value>> statObject(std::string t_bucket, std::string t_key);
+    drogon::Task<Result<Json::Value, BackendError>> statObject(std::string t_bucket, std::string t_key);
 
-    drogon::Task<BackendResult<Json::Value>> listObjects(
+    drogon::Task<Result<Json::Value, BackendError>> listObjects(
         std::string t_bucket, std::string t_prefix = "", std::string t_continuation_token = "", uint32_t t_max_keys = 1000);
 
     // ========================================================================
     // Multipart Upload Operations
     // ========================================================================
-    drogon::Task<BackendResult<std::string>> createMultipartUpload(std::string t_bucket, std::string t_key, std::string t_content_type);
+    drogon::Task<Result<std::string, BackendError>> createMultipartUpload(
+        std::string t_bucket, std::string t_key, std::string t_content_type);
 
-    drogon::Task<BackendResult<std::string>> uploadPart(
+    drogon::Task<Result<std::string, BackendError>> uploadPart(
         std::string t_bucket, std::string t_key, std::string t_upload_id, int t_part_number, std::string t_body);
 
-    drogon::Task<BackendResult<void>> completeMultipartUpload(
+    drogon::Task<Result<void, BackendError>> completeMultipartUpload(
         std::string t_bucket, std::string t_key, std::string t_upload_id, Json::Value t_parts);
 
-    drogon::Task<BackendResult<void>> abortMultipartUpload(std::string t_bucket, std::string t_key, std::string t_upload_id);
+    drogon::Task<Result<void, BackendError>> abortMultipartUpload(std::string t_bucket, std::string t_key, std::string t_upload_id);
 
     /// Streams a local file as a real multipart upload (bounded memory:
     /// ~one part in RAM). Resolves with the number of parts assembled,
     /// stored by the service layer as the upload's chunking trace.
-    drogon::Task<BackendResult<int>> uploadFileMultipart(
+    drogon::Task<Result<int, BackendError>> uploadFileMultipart(
         std::string t_bucket, std::string t_key, std::string t_content_type, std::filesystem::path t_file_path, size_t t_part_size_bytes);
 
-    drogon::Task<BackendResult<Json::Value>> listParts(
+    drogon::Task<Result<Json::Value, BackendError>> listParts(
         std::string t_bucket, std::string t_key, std::string t_upload_id, uint32_t t_max_parts = 1000);
 
     // ========================================================================
     // Tagging & Metadata Operations
     // ========================================================================
-    drogon::Task<BackendResult<void>> putObjectTags(std::string t_bucket, std::string t_key, Json::Value t_tags);
+    drogon::Task<Result<void, BackendError>> putObjectTags(std::string t_bucket, std::string t_key, Json::Value t_tags);
 
-    drogon::Task<BackendResult<Json::Value>> getObjectTags(std::string t_bucket, std::string t_key);
+    drogon::Task<Result<Json::Value, BackendError>> getObjectTags(std::string t_bucket, std::string t_key);
 
-    drogon::Task<BackendResult<void>> deleteObjectTags(std::string t_bucket, std::string t_key);
+    drogon::Task<Result<void, BackendError>> deleteObjectTags(std::string t_bucket, std::string t_key);
 
     // ========================================================================
     // Presigned URL Operations
     // ========================================================================
-    drogon::Task<BackendResult<std::string>> presignedGetUrl(std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds);
+    drogon::Task<Result<std::string, BackendError>> presignedGetUrl(std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds);
 
-    drogon::Task<BackendResult<std::string>> presignedPutUrl(std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds);
+    drogon::Task<Result<std::string, BackendError>> presignedPutUrl(std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds);
 
-    drogon::Task<BackendResult<std::string>> presignedDeleteUrl(std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds);
+    drogon::Task<Result<std::string, BackendError>> presignedDeleteUrl(std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds);
 
     /// Returns the raw pool from the shared Threadpool plugin.
     /// Callers in service.cpp use this via sgrn::utils::runInPool().
@@ -165,11 +164,11 @@ private:
         return drogon::app().getPlugin<sgrn::datastore::plugins::Threadpool>();
     }
 
-    drogon::Task<BackendResult<std::string>> generatePresignedUrl(
+    drogon::Task<Result<std::string, BackendError>> generatePresignedUrl(
         std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds, Aws::Http::HttpMethod t_method);
 
     template <typename ReturnType, typename CallableType>
-    drogon::Task<BackendResult<ReturnType>> execute(CallableType&& t_fun) {
+    drogon::Task<Result<ReturnType, BackendError>> execute(CallableType&& t_fun) {
         std::shared_ptr<Aws::S3::S3Client> sp_client_copy;
         {
             std::lock_guard lock(client_mutex_);
@@ -183,11 +182,11 @@ private:
 
         auto* p_tp = threadpool();
         if (p_tp == nullptr) {
-            co_return BackendError{"Runtime", "Threadpool plugin not initialized"};
+            co_return BackendError(BackendErrorKind::Runtime, "Threadpool plugin not initialized");
         }
 
         co_return co_await p_tp->run(
-            [client_ = std::move(sp_client_copy), t_fun = std::forward<CallableType>(t_fun)]() mutable -> BackendResult<ReturnType> {
+            [client_ = std::move(sp_client_copy), t_fun = std::forward<CallableType>(t_fun)]() mutable -> Result<ReturnType, BackendError> {
                 try {
                     if constexpr (std::is_void_v<ReturnType>) {
                         auto res = t_fun(*client_);

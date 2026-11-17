@@ -3,6 +3,7 @@
 
 #include <drogon/drogon.h>
 #include <drogon/orm/CoroMapper.h>
+#include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/services/admin.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/debug.hpp>
@@ -30,31 +31,14 @@ namespace sgrn::datastore::handlers::admin
 using drogon::Task;
 using namespace drogon::orm;
 using namespace drogon_model::sgrn;
+using sgrn::utils::strings::toLower;
+using sgrn::utils::strings::toPascalCase;
+using sgrn::utils::strings::trim;
 
 /* ---------------------------------------------------------
  * PURE DESERIALIZATION LOGIC
  * --------------------------------------------------------- */
-std::optional<RegisterUserPayload> deserializeRegisterUserPayload(
-    const std::shared_ptr<Json::Value>& tsp_json, std::string& t_out_error_message) {
-    if (!tsp_json) {
-        t_out_error_message = "Invalid JSON body";
-        return std::nullopt;
-    }
-
-    RegisterUserPayload p;
-    p.first_name = sgrn::utils::strings::toPascalCase(sgrn::utils::strings::trim(tsp_json->get("first_name", "").asString()));
-    p.family_name = sgrn::utils::strings::toPascalCase(sgrn::utils::strings::trim(tsp_json->get("family_name", "").asString()));
-    p.email = sgrn::utils::strings::toLower(sgrn::utils::strings::trim(tsp_json->get("email", "").asString()));
-    p.password = tsp_json->get("password", "").asString();
-    p.phone_number = sgrn::utils::strings::trim(tsp_json->get("phone_number", "").asString());
-    p.organisation = sgrn::utils::strings::trim(tsp_json->get("organisation", "").asString());
-
-    p.status = sgrn::utils::strings::trim(tsp_json->get("status", "active").asString());
-    p.domain = sgrn::utils::strings::trim(tsp_json->get("domain", "").asString());
-    if (tsp_json->isMember("storage_limit") && (*tsp_json)["storage_limit"].isInt64()) {
-        p.storage_limit = (*tsp_json)["storage_limit"].asInt64();
-    }
-
+bool validateRegisterUserPayload(const RegisterUserPayload& p, std::string& t_out_error_message) {
     std::vector<std::string> missing_fields;
     if (p.first_name.empty())
         missing_fields.emplace_back("first_name");
@@ -66,7 +50,6 @@ std::optional<RegisterUserPayload> deserializeRegisterUserPayload(
         missing_fields.emplace_back("password");
     if (p.organisation.empty())
         missing_fields.emplace_back("organisation");
-
     if (p.status.empty())
         missing_fields.emplace_back("status");
 
@@ -78,7 +61,7 @@ std::optional<RegisterUserPayload> deserializeRegisterUserPayload(
                 t_out_error_message += ", ";
             }
         }
-        return std::nullopt;
+        return false;
     }
 
     // ── Validation ───────────────────────────────────────────────────────────
@@ -86,22 +69,22 @@ std::optional<RegisterUserPayload> deserializeRegisterUserPayload(
     // 1. Length constraints
     if (p.first_name.length() > 64) {
         t_out_error_message = "First name is too long (max 64)";
-        return std::nullopt;
+        return false;
     }
     if (p.family_name.length() > 64) {
         t_out_error_message = "Family name is too long (max 64)";
-        return std::nullopt;
+        return false;
     }
     if (p.email.length() > 128) {
         t_out_error_message = "Email is too long (max 128)";
-        return std::nullopt;
+        return false;
     }
 
     // 2. Email format
     static const std::regex kEmailRegex(R"(^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$)");
     if (!std::regex_match(p.email, kEmailRegex)) {
         t_out_error_message = "Invalid email format";
-        return std::nullopt;
+        return false;
     }
 
     // 3. Phone number (optional, but if present must be valid)
@@ -109,11 +92,11 @@ std::optional<RegisterUserPayload> deserializeRegisterUserPayload(
         static const std::regex kPhoneRegex(R"(^\+?[0-9]{7,15}$)");
         if (!std::regex_match(p.phone_number, kPhoneRegex)) {
             t_out_error_message = "Invalid phone number format (7-15 digits)";
-            return std::nullopt;
+            return false;
         }
     }
 
-    return p;
+    return true;
 }
 
 /* ---------------------------------------------------------
@@ -124,66 +107,42 @@ std::optional<RegisterUserPayload> deserializeRegisterUserPayload(
  * (values: 'admin', 'user').  We pass the role string directly
  * to the ORM — no role-ID lookup needed.
  * --------------------------------------------------------- */
-Task<Json::Value> registerUser(
+Task<Result<datastore::admin::RegisteredUser, BackendError>> registerUser(
     const drogon::orm::DbClientPtr& tsp_db_client, const RegisterUserPayload& t_register_user_payload, const std::string& t_role) {
-    Json::Value response;
-    std::string role_lower = sgrn::utils::strings::toLower(t_role);
+
+    using User = ::sgrn::datastore::admin::RegisteredUser;
+    const std::string role_lower = toLower(t_role);
 
     // Validate the role value before hitting the DB so we surface a clear
     // error instead of a cryptic CHECK-constraint violation.
     if (role_lower != "admin" && role_lower != "user") {
-        ERROR_LOG("Invalid role provided: {}", role_lower);
-        response["success"] = false;
-        response["error"] = "Invalid role — must be 'admin' or 'user'";
-        co_return response;
+        co_return BackendError(BackendErrorKind::Auth, "Invalid role — must be 'admin' or 'user'");
     }
-    /* -----------------------------------------------------
-     * Build and Persist user — using raw SQL to support new 'domain' column
-     * while avoiding immediate ORM regeneration.
-     * ----------------------------------------------------- */
+
+    static constexpr char kInsert[] =
+        "INSERT INTO core.users (first_name, family_name, email, password, role, organisation, status, domain, phone_number, "
+        "storage_limit) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) "
+        "RETURNING id, first_name, family_name, email, role, organisation, status, domain, phone_number";
+
     try {
-        auto res = co_await tsp_db_client->execSqlCoro(
-            "INSERT INTO core.users (first_name, family_name, email, password, role, organisation, status, domain, phone_number, "
-            "storage_limit) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) "
-            "RETURNING id, first_name, family_name, email, role, organisation, status, domain, phone_number",
-            t_register_user_payload.first_name, t_register_user_payload.family_name, t_register_user_payload.email,
-            t_register_user_payload.password, role_lower, t_register_user_payload.organisation, t_register_user_payload.status,
-            t_register_user_payload.domain.empty() ? std::optional<std::string>{}
-                                                   : std::optional<std::string>(t_register_user_payload.domain),
-            t_register_user_payload.phone_number.empty() ? std::optional<std::string>{} : t_register_user_payload.phone_number,
-            t_register_user_payload.storage_limit);
+        std::optional<std::string> domain = t_register_user_payload.domain.empty()
+                                                ? std::optional<std::string>{}
+                                                : std::optional<std::string>(t_register_user_payload.domain);
 
-        if (res.empty()) {
-            response["success"] = false;
-            response["error"] = "Failed to insert user";
-            co_return response;
-        }
+        std::optional<std::string> phone_number =
+            t_register_user_payload.phone_number.empty() ? std::optional<std::string>{} : t_register_user_payload.phone_number;
 
-        const auto& row = res[0];
-        Json::Value user_json;
-        user_json["id"] = row["id"].as<int32_t>();
-        user_json["first_name"] = row["first_name"].as<std::string>();
-        user_json["family_name"] = row["family_name"].as<std::string>();
-        user_json["email"] = row["email"].as<std::string>();
-        user_json["role"] = row["role"].as<std::string>();
-        user_json["organisation"] = row["organisation"].as<std::string>();
+        auto res = co_await tsp_db_client->execSqlCoro(kInsert, t_register_user_payload.first_name, t_register_user_payload.family_name,
+            t_register_user_payload.email, t_register_user_payload.password, role_lower, t_register_user_payload.organisation,
+            t_register_user_payload.status, std::move(domain), std::move(phone_number), t_register_user_payload.storage_limit);
 
-        user_json["status"] = row["status"].as<std::string>();
-        user_json["domain"] = row["domain"].isNull() ? "" : row["domain"].as<std::string>();
-        user_json["phone_number"] = row["phone_number"].isNull() ? "" : row["phone_number"].as<std::string>();
+        CO_RETURN_IF(res.empty(), BackendError(BackendErrorKind::Database, "Failed to insert user"));
 
-        response["success"] = true;
-        response["message"] = "User registered successfully";
-        response["user"] = std::move(user_json);
-
+        co_return sgrn::orm::fromRowByName<User>(res[0]);
     } catch (const std::exception& e) {
-        ERROR_LOG("Database error during user registration: {}", e.what());
-        response["success"] = false;
-        response["error"] = std::string("Registration failed: ") + e.what();
+        co_return BackendError(BackendErrorKind::Database, std::string("Registration failed: ") + e.what());
     }
-
-    co_return response;
 }
 
 } // namespace sgrn::datastore::handlers::admin

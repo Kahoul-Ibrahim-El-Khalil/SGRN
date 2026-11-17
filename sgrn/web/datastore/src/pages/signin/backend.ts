@@ -1,7 +1,8 @@
 // @/pages/signin/backend.ts
 import { QueryListBackendApiEndpoints, SessionBackendApiEndpoints } from "@/backend/endpoints";
 import { handleApiError } from "@/backend/errorHandler";
-import { authenticatedFetch, processResponse } from "@/backend/api/fetcher";
+import { authenticatedFetch, jsonBody, processResponse, readBody } from "@/backend/api/fetcher";
+import type { SignInRequest } from "@sgrn/datastore/requests";
 import type { IdNamePair } from "@/types/IdNamePair";
 import type { LoginResponse } from "./types.ts";
 import type { SgrnResult } from "@sgrn/types";
@@ -9,8 +10,8 @@ import { isSuccess } from "@sgrn/types";
 
 export async function fetchOrganisations(): Promise<IdNamePair[]> {
     try {
-        const res = await authenticatedFetch(QueryListBackendApiEndpoints.LIST_ORGANISATIONS);
-        const data = await res.json();
+        const res = await authenticatedFetch(QueryListBackendApiEndpoints.LIST_ORGANISATIONS, {});
+        const data = await readBody<IdNamePair[]>(res);
         if (Array.isArray(data)) return data;
         console.error("Unexpected organisations response", data);
         return [];
@@ -24,8 +25,8 @@ export async function fetchDomains(): Promise<IdNamePair[]> {
     try {
         // Tenant-scoped server-side: the session's organisation determines
         // the rows, so no organisation parameter is sent (or trusted).
-        const res = await authenticatedFetch(QueryListBackendApiEndpoints.LIST_DOMAINS);
-        const data = await res.json();
+        const res = await authenticatedFetch(QueryListBackendApiEndpoints.LIST_DOMAINS, {});
+        const data = await readBody<IdNamePair[]>(res);
         if (Array.isArray(data)) return data;
         return [];
     } catch (err) {
@@ -37,8 +38,8 @@ export async function fetchDomains(): Promise<IdNamePair[]> {
 export async function fetchStatuses(t_organisation: string): Promise<IdNamePair[]> {
     try {
         const url = `${QueryListBackendApiEndpoints.LIST_STATUSES}?organisation=${encodeURIComponent(t_organisation)}`;
-        const res = await authenticatedFetch(url);
-        const data = await res.json();
+        const res = await authenticatedFetch(url, {});
+        const data = await readBody<IdNamePair[]>(res);
         if (Array.isArray(data)) return data;
         return [];
     } catch (err) {
@@ -53,11 +54,13 @@ export interface SignInPayload {
 }
 
 export async function doSignIn(t_signin_payload: SignInPayload): Promise<SgrnResult<LoginResponse>> {
-    const res = await fetch(SessionBackendApiEndpoints.SIGN_IN, {
+    const encoded = jsonBody<SignInRequest>(t_signin_payload);
+    // authenticatedFetch also sets Accept: application/json, so the server
+    // answers with JSON rather than its binary default.
+    const res = await authenticatedFetch(SessionBackendApiEndpoints.SIGN_IN, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(t_signin_payload),
+        headers: encoded.headers,
+        body: encoded.body,
     });
 
     const result = await processResponse<LoginResponse>(res);

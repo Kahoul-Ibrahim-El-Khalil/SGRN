@@ -19,7 +19,7 @@
 //       never insertable/updatable, and no secret column ever leaks onto
 //       the API surface.
 //    3. Filter behavior: OrgAdminFilter really rejects a plain-user
-//       session (in-process, session_json injected — same harness as
+//       session (in-process, typed SessionClaims injected — same harness as
 //       authz_matrix_test) and accepts org/platform admins.
 //    4. Engine honors updatable=false: a PATCH body may contain a locked
 //       key next to an allowed key — the engine builds its SET clause
@@ -33,6 +33,7 @@
 #include <sgrn/datastore/filters/types.hpp>
 #include <sgrn/datastore/query/CrudViewEngine.hpp>
 #include <sgrn/datastore/query/CrudViewSpec.hpp>
+#include <sgrn/datastore/wire/auth.hpp>
 
 #include "handlers/generated/AdminAssignmentsView.gen.hpp"
 #include "handlers/generated/AutomatedServicesView.gen.hpp"
@@ -321,14 +322,12 @@ void testOrgAdminFilter() {
         auto req = drogon::HttpRequest::newHttpRequest();
         req->setMethod(t_method);
         req->setPath(t_path);
-        Json::Value session;
-        session["user"]["id"] = t_uid;
-        session["user"]["email"] = "probe@example.com";
-        session["user"]["organisation"] = t_session_org;
-        session["user"]["role"] = t_role;
-        session["user"]["is_platform_admin"] = false;
-        session["user"]["admin_level"] = 0;
-        req->attributes()->insert("session_json", session);
+        sgrn::datastore::auth::SessionClaims claims;
+        claims.user.id = t_uid;
+        claims.user.email = "probe@example.com";
+        claims.user.organisation = t_session_org;
+        claims.user.role = {t_role, std::string(t_role) == "admin" ? 0 : 1};
+        req->attributes()->insert("session_claims", std::move(claims));
         req->attributes()->insert("user_role_code",
             std::string(t_role) == "admin" ? sgrn::datastore::filters::UserRoleEnum::ADMIN : sgrn::datastore::filters::UserRoleEnum::USER);
         return req;
@@ -515,13 +514,13 @@ void testEngineHonorsLocks() {
         {
             const Json::Value body = parse("{\"first_name\":\"Eve\",\"is_platform_admin\":true,\"storage_limit\":null}");
             auto req = drogon::HttpRequest::newHttpJsonRequest(body);
-            Json::Value session;
-            session["user"]["id"] = Json::Int64(777);
-            session["user"]["email"] = "audit-probe@sgrn.local";
+            sgrn::datastore::auth::SessionClaims claims;
+            claims.user.id = 777;
+            claims.user.email = "audit-probe@sgrn.local";
             // Must reference a real organisation: core.audit_logs.organisation
             // carries an FK to core.organisations(name).
-            session["user"]["organisation"] = "CIC-Moulins Guelma";
-            req->attributes()->insert("session_json", session);
+            claims.user.organisation = "CIC-Moulins Guelma";
+            req->attributes()->insert("session_claims", std::move(claims));
             auto resp = drogon::sync_wait(sgrn::datastore::query::executeViewUpdate(lockSpec(), req, "t1", "1"));
             CHECK(static_cast<int>(resp->getStatusCode()) == 200);
             auto row = drogon::sync_wait(sgrn::datastore::core::execSqlCoroVec(
@@ -562,11 +561,11 @@ void testEngineHonorsLocks() {
         try {
             const Json::Value rogue = parse("{\"first_name\":\"Mallory\",\"secret_backdoor_key\":\"pwn\"}");
             auto req2 = drogon::HttpRequest::newHttpJsonRequest(rogue);
-            Json::Value session2;
-            session2["user"]["id"] = Json::Int64(777);
-            session2["user"]["email"] = "audit-probe@sgrn.local";
-            session2["user"]["organisation"] = "CIC-Moulins Guelma";
-            req2->attributes()->insert("session_json", session2);
+            sgrn::datastore::auth::SessionClaims claims2;
+            claims2.user.id = 777;
+            claims2.user.email = "audit-probe@sgrn.local";
+            claims2.user.organisation = "CIC-Moulins Guelma";
+            req2->attributes()->insert("session_claims", std::move(claims2));
             drogon::sync_wait(sgrn::datastore::query::executeViewUpdate(lockSpec(), req2, "t1", "1"));
             auto drows = drogon::sync_wait(sgrn::datastore::core::execSqlCoroVec(client,
                 "SELECT details::text AS d FROM core.audit_logs WHERE action = 'crud.crud_lock_test.update' AND target_id = '1' "

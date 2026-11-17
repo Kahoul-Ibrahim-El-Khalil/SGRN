@@ -32,9 +32,7 @@ bool DatastoreShell::connected() const {
 }
 
 std::string DatastoreShell::promptString() const {
-    if (connected()) {
-        return fmt::format("dss [{}] {}$ ", sgrn::datastore::client::detail::storageScopeToString(scope_), cwd_);
-    }
+    RETURN_IF(connected(), fmt::format("dss [{}] {}$ ", sgrn::datastore::client::detail::storageScopeToString(scope_), cwd_));
     return "dss (offline)$ ";
 }
 
@@ -162,18 +160,18 @@ std::vector<std::string> DatastoreShell::generateCompletions(const std::string& 
             auto r = storage_->tryListDrive(parent, scope_);
             if (!r.hasError()) {
                 for (const auto& folder : r.value().folders) {
-                    if (folder.name_.rfind(prefix, 0) == 0) {
+                    if (folder.name.rfind(prefix, 0) == 0) {
                         const std::string candidate = (t_text.find('/') != std::string::npos)
-                                                          ? (parent == "/" ? "/" + folder.name_ + "/" : parent + "/" + folder.name_ + "/")
-                                                          : folder.name_ + "/";
+                                                          ? (parent == "/" ? "/" + folder.name + "/" : parent + "/" + folder.name + "/")
+                                                          : folder.name + "/";
                         matches.insert(candidate);
                     }
                 }
                 for (const auto& file : r.value().files) {
-                    if (file.name_.rfind(prefix, 0) == 0) {
+                    if (file.name.rfind(prefix, 0) == 0) {
                         const std::string candidate = (t_text.find('/') != std::string::npos)
-                                                          ? (parent == "/" ? "/" + file.name_ : parent + "/" + file.name_)
-                                                          : file.name_;
+                                                          ? (parent == "/" ? "/" + file.name : parent + "/" + file.name)
+                                                          : file.name;
                         matches.insert(candidate);
                     }
                 }

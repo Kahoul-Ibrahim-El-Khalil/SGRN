@@ -18,6 +18,10 @@
 #define SGRN_HAS_DROGON
 #endif
 
+#if __has_include(<sgrn/utils/glaze.hpp>)
+#include <sgrn/utils/glaze.hpp>
+#endif
+
 #ifdef SGRN_HAS_DROGON
 
 template <>
@@ -51,6 +55,42 @@ struct fmt::formatter<drogon::HttpStatusCode> : formatter<int> {
     }
 };
 #endif
+
+// ============ Glaze Reflection Debugging ============
+
+// Pretty-prints any type using Glaze reflection with fmt::format
+// Produces nicely formatted JSON output for debugging sessions
+// Falls back to basic fmt::format if Glaze reflection not available
+template <typename T>
+std::string glaze_pretty_print(const T& value) {
+    // Try Glaze reflection first using the codebase's writePretty utility
+    // SGRN_HAS_DROGON is defined when building with drogon (core library)
+    // DEBUG is defined for debug builds
+#if defined(SGRN_HAS_DROGON) || defined(DEBUG)
+    constexpr bool kEnableGlaze = true;
+#else
+    constexpr bool kEnableGlaze = false;
+#endif
+    if constexpr (kEnableGlaze) {
+        auto result = sgrn::json::writePretty(value);
+        if (result) {
+            // writePretty already produces pretty-printed JSON
+            return *result;
+        }
+    }
+    // Fallback: basic fmt::format string representation
+    return fmt::format("{}", value);
+}
+
+// Convenience macro for INFO logging with Glaze pretty-printing
+#define INFO_GLAZE_DEBUG(component, value)                                                                                                 \
+    do {                                                                                                                                   \
+        auto _pretty = glaze_pretty_print(value);                                                                                          \
+        SGRN_INFO(component, "{}", _pretty);                                                                                               \
+    } while (0)
+
+// Convenience macro for single-argument debugging
+#define INFO_GLAZE(value) INFO_GLAZE_DEBUG(::sgrn::default_component, value)
 
 namespace sgrn
 {

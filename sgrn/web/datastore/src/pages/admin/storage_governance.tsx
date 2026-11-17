@@ -2,7 +2,8 @@ import { useState, useCallback, useEffect } from "react";
 import { Loader2, Search, Plus, Trash2, Save, Lock, ShieldCheck, RefreshCw } from "lucide-react";
 import { useEvent } from "@/contexts/EventContext";
 import { QueryListBackendApiEndpoints } from "@/backend/endpoints";
-import { authenticatedFetch } from "@/backend/api/fetcher";
+import { authenticatedFetch, jsonBody, readBody } from "@/backend/api/fetcher";
+import type { DomainsUpdateRequest } from "@sgrn/datastore/crud-requests";
 import {
     fetchFormats,
     upsertFormat,
@@ -619,7 +620,7 @@ export function EncryptionPoliciesPanel() {
             if (!res.ok) {
                 throw new Error(`Failed to load domains (HTTP ${res.status})`);
             }
-            const data = await res.json();
+            const data = await readBody<DomainRecord[]>(res);
             if (Array.isArray(data)) {
                 setDomains(data);
                 const map: Record<number, string> = {};
@@ -647,11 +648,10 @@ export function EncryptionPoliciesPanel() {
             try {
                 const res = await authenticatedFetch(`/api/v1/domains/${domain.id}`, {
                     method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ encryption_policy: newPolicy }),
+                    ...jsonBody<DomainsUpdateRequest>({ encryption_policy: newPolicy }),
                 });
                 if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
+                    const err = await readBody(res, {});
                     throw new Error(err.message || `Failed to update policy (HTTP ${res.status})`);
                 }
                 showEvent("success", `Domain "${domain.name}" encryption policy set to: ${newPolicy}`);

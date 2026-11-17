@@ -1,4 +1,5 @@
-import { authenticatedFetch, processResponse } from "./fetcher";
+import { authenticatedFetch, jsonBody, processResponse, rawJson } from "./fetcher";
+import type { CreateRoleRequest, RoleTargetRequest, UpdateRoleRequest } from "@sgrn/datastore/requests";
 import { AdminBackendApiEndpoints } from "../endpoints";
 import type { SgrnResult } from "@sgrn/types";
 import { ErrorScope } from "@sgrn/types";
@@ -14,12 +15,10 @@ export interface RoleEntry {
 }
 
 export interface RolesListResult {
-    success: boolean;
     roles: RoleEntry[];
 }
 
 export interface GenericRoleResult {
-    success: boolean;
     message: string;
     role_id?: number;
 }
@@ -45,7 +44,6 @@ export interface RoleAssignment {
 }
 
 export interface RoleAssignmentsResult {
-    success: boolean;
     assignments: RoleAssignment[];
     count: number;
 }
@@ -70,8 +68,11 @@ export async function createRole(role: {
     try {
         const res = await authenticatedFetch(AdminBackendApiEndpoints.ROLES, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(role),
+            ...jsonBody<CreateRoleRequest>({
+                name: role.name,
+                description: role.description,
+                permissions: role.permissions !== undefined ? rawJson(role.permissions) : undefined,
+            }),
         });
         return await processResponse<GenericRoleResult>(res);
     } catch (e) {
@@ -89,8 +90,10 @@ export async function updateRole(
     try {
         const res = await authenticatedFetch(AdminBackendApiEndpoints.ROLES_ITEM(id), {
             method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(role),
+            ...jsonBody<UpdateRoleRequest>({
+                description: role.description,
+                permissions: role.permissions !== undefined ? rawJson(role.permissions) : undefined,
+            }),
         });
         return await processResponse<GenericRoleResult>(res);
     } catch (e) {
@@ -123,8 +126,7 @@ export async function assignRole(payload: {
     try {
         const res = await authenticatedFetch(AdminBackendApiEndpoints.ROLES_ASSIGN, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
+            ...jsonBody<RoleTargetRequest>(payload),
         });
         return await processResponse<GenericRoleResult>(res);
     } catch (e) {
@@ -143,8 +145,7 @@ export async function revokeRole(payload: {
     try {
         const res = await authenticatedFetch(AdminBackendApiEndpoints.ROLES_REVOKE, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
+            ...jsonBody<RoleTargetRequest>(payload),
         });
         return await processResponse<GenericRoleResult>(res);
     } catch (e) {

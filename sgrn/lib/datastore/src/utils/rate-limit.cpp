@@ -1,6 +1,7 @@
 #include <sgrn/datastore/utils/rate-limit.hpp>
 
 #include <drogon/utils/Utilities.h>
+#include <sgrn/datastore/utils/respond.hpp>
 
 #include <sgrn/Result.hpp>
 #include <algorithm>
@@ -9,8 +10,13 @@
 namespace sgrn::datastore::ratelimit
 {
 
-namespace
+namespace detail
 {
+struct AuthProbe {
+    std::string email;
+    std::string token;
+    std::string secret;
+};
 
 uint32_t jsonUint(const Json::Value& t_obj, const char* t_key, uint32_t t_dflt) {
     if (!t_obj.isMember(t_key)) {
@@ -77,7 +83,8 @@ std::string jsonStringField(const Json::Value& t_obj, const char* t_key) {
     return v.isString() ? v.asString() : std::string{};
 }
 
-} // namespace
+} // namespace detail
+using namespace detail;
 
 RateLimitConfig RateLimitConfig::fromJson(const Json::Value& t_custom_config) {
     RateLimitConfig cfg;
@@ -168,17 +175,26 @@ std::string buildKey(RateClass t_class, std::string_view t_ip, std::string_view 
 
 std::string authAccountId(const drogon::HttpRequestPtr& t_req) {
     RETURN_IF_NULL(t_req, {});
-    Json::Value body;
-    try {
-        auto json = t_req->getJsonObject();
-        if (!json) {
-            return {};
-        }
-        body = *json;
-    } catch (const std::exception&) {
+    if (classifyPath(t_req->path()) != RateClass::Auth) {
         return {};
     }
-    return authAccountFromJson(t_req->path(), body);
+    auto probe_res = parseTypedRequest<AuthProbe>(t_req);
+    if (!probe_res.has_value()) {
+        return {};
+    }
+    const auto& probe = probe_res.value();
+    if (!probe.email.empty()) {
+        std::string lower = probe.email;
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
+        return "email:" + lower;
+    }
+    if (!probe.token.empty()) {
+        return "token:" + hexDigest(probe.token);
+    }
+    if (!probe.secret.empty()) {
+        return "secret:" + hexDigest(probe.secret);
+    }
+    return {};
 }
 
 std::string authAccountFromJson(std::string_view t_path, const Json::Value& t_body) {

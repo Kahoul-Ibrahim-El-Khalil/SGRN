@@ -6,6 +6,8 @@ import type {
   UploadResult,
 } from "@sgrn/types";
 import { ErrorScope, isError } from "@sgrn/types";
+import type { ServiceSignInRequest } from "./requests";
+import { jsonBody } from "./wire";
 
 declare const Bun: {
   file(path: string): Blob;
@@ -53,17 +55,16 @@ export class AutomatedServiceClient {
   }
 
   async signIn(): Promise<SgrnResult<AutomatedServiceSession>> {
+    const sign_in_body: ServiceSignInRequest = {
+      token: this.credentials.token,
+      secret: this.credentials.secret,
+    };
     const res = await this.request<{
       token: string;
       automated_service: Record<string, unknown>;
       automated_service_id?: number;
       session_id?: string;
-    }>(
-      "POST",
-      URLS.sign_in,
-      { token: this.credentials.token, secret: this.credentials.secret },
-      false,
-    );
+    }>("POST", URLS.sign_in, sign_in_body, false);
 
     if (isError(res)) {
       return res;
@@ -189,11 +190,12 @@ export class AutomatedServiceClient {
       const res = await fetch(url, {
         method: "POST",
         headers,
-        body: compressed_body,
+        body: compressed_body as BodyInit,
       });
       if (!res.ok) {
         return await this.processErrorResponse(res);
       }
+      const contentType = res.headers.get("Content-Type") || "";
       const data = (await res.json()) as UploadResult;
       return { data };
     } catch (e) {
@@ -254,14 +256,20 @@ export class AutomatedServiceClient {
   private async request<T>(
     t_method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
     t_path: string,
-    t_body?: unknown,
+    t_body?: object,
     t_auth = true,
   ): Promise<SgrnResult<T>> {
     try {
       const url = `${this.base_url}${t_path}`;
       const headers: Record<string, string> = {
-        "Content-Type": "application/json",
+        Accept: "application/json",
       };
+      let body: BodyInit | undefined;
+      if (t_body !== undefined) {
+        const encoded = jsonBody(t_body);
+        Object.assign(headers, encoded.headers);
+        body = encoded.body;
+      }
 
       if (t_auth) {
         const auth_res = this.authHeaders();
@@ -274,7 +282,7 @@ export class AutomatedServiceClient {
       const res = await fetch(url, {
         method: t_method,
         headers,
-        body: t_body !== undefined ? JSON.stringify(t_body) : undefined,
+        body,
       });
 
       if (!res.ok) {
@@ -283,6 +291,7 @@ export class AutomatedServiceClient {
 
       if (res.status === 204) return { data: undefined as unknown as T };
 
+      const contentType = res.headers.get("Content-Type") || "";
       const data = (await res.json()) as T;
       return { data };
     } catch (e) {

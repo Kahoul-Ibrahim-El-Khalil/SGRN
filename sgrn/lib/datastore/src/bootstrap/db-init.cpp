@@ -6,6 +6,7 @@
 #include <sgrn/datastore/bootstrap/db-init.hpp>
 
 #include <fmt/core.h>
+#include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/compression.hpp>
 #include <sgrn/utils/process.hpp>
@@ -18,6 +19,22 @@
 namespace sgrn::datastore::bootstrap
 {
 
+namespace
+{
+struct LiveEstimateRow {
+    long long live{0};
+};
+
+struct CoreRowsRow {
+    long long core_rows{0};
+};
+
+static constexpr char kLiveEstimateQuery[] = "SELECT COALESCE(SUM(n_live_tup), 0)::bigint AS live FROM pg_stat_all_tables "
+                                             "WHERE schemaname NOT IN ('pg_catalog', 'information_schema')";
+static constexpr char kCoreRowsQuery[] =
+    "SELECT (SELECT count(*) FROM core.users) + (SELECT count(*) FROM core.organisations) AS core_rows";
+} // namespace
+
 // ---------------------------------------------------------------------------
 // Live-row estimate (destructive-rebuild guard)
 // ---------------------------------------------------------------------------
@@ -27,13 +44,11 @@ long long estimateLiveRows(const std::string& t_conn) {
     loop_thread.run();
     try {
         auto client = drogon::orm::DbClient::newPgClient(t_conn, 1, loop_thread.getLoop());
-        auto result = client->execSqlSync("SELECT COALESCE(SUM(n_live_tup), 0)::bigint AS live FROM pg_stat_all_tables "
-                                          "WHERE schemaname NOT IN ('pg_catalog', 'information_schema')");
-        const long long stats_estimate = result.empty() ? -1 : result[0]["live"].as<long long>();
+        auto result = client->execSqlSync(kLiveEstimateQuery);
+        const long long stats_estimate = result.empty() ? -1 : sgrn::orm::fromRow<LiveEstimateRow, kLiveEstimateQuery>(result[0]).live;
         try {
-            auto core_total =
-                client->execSqlSync("SELECT (SELECT count(*) FROM core.users) + (SELECT count(*) FROM core.organisations) AS core_rows");
-            const long long core_rows = core_total[0]["core_rows"].as<long long>();
+            auto core_total = client->execSqlSync(kCoreRowsQuery);
+            const long long core_rows = sgrn::orm::fromRow<CoreRowsRow, kCoreRowsQuery>(core_total[0]).core_rows;
             return std::max(stats_estimate, core_rows);
         } catch (const std::exception&) {
             // No core schema yet (fresh cluster, DB created empty): the stats

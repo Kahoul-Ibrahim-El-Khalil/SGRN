@@ -48,8 +48,7 @@ void UserAuthFilter::doFilter(
         for (const auto& [key, value] : tsp_req->headers()) {
             all_headers += key + ": " + value + " | ";
         }
-        SGRN_WARN_LOG("Unauthorized access attempt. Path: {} | Headers: {}", tsp_req->path(), all_headers);
-        respondWithError("Unauthorized: Missing Authorization Header", drogon::k401Unauthorized, tsp_cb);
+        tsp_cb(createTypedResponse(BackendErrorResponse{"Unauthorized: Missing Authorization Header", drogon::k401Unauthorized}));
         return;
     }
 
@@ -57,54 +56,57 @@ void UserAuthFilter::doFilter(
 
     // Fast-path: Reject malformed / fake external tokens synchronously (<5ns) without spawning async tasks
     if (!isValidTokenFormat(t_token)) {
-        SGRN_WARN_LOG("Fast-reject malformed token format: {}", redactToken(t_token));
-        respondWithError("Unauthorized: Invalid token format", drogon::k401Unauthorized, tsp_cb);
+        tsp_cb(createTypedResponse(BackendErrorResponse{"Unauthorized: Invalid token format", drogon::k401Unauthorized}));
         return;
     }
 
     // 2. Retrieve session from SessionStore (RAM Cache / PostgreSQL) asynchronously
     drogon::async_run([tsp_req, tsp_cb = std::move(tsp_cb), t_chain = std::move(t_chain), t_token]() mutable -> drogon::Task<void> {
-        auto session_opt = co_await sgrn::datastore::session::SessionStore::instance().getSession(t_token);
+        std::optional<datastore::auth::SessionClaims> session_opt =
+            co_await sgrn::datastore::session::SessionStore::instance().getSession(t_token);
+
         if (!session_opt.has_value()) {
-            SGRN_WARN_LOG("Session not found for token: {}", redactToken(t_token));
-            respondWithError("Unauthorized: Session expired or invalid", drogon::k401Unauthorized, tsp_cb);
+            tsp_cb(createTypedResponse(BackendErrorResponse{"Unauthorized: Session expired or invalid", drogon::k401Unauthorized}));
             co_return;
         }
 
-        Json::Value session_claims = std::move(session_opt.value());
+        const auto& claims = session_opt.value();
 
-        UserRoleEnum role = UserRoleEnum::USER;
-        if (session_claims.isMember("user") && session_claims["user"].isMember("role") && session_claims["user"]["role"].isMember("code")) {
-            role = static_cast<UserRoleEnum>(session_claims["user"]["role"]["code"].asUInt());
-        }
+        UserRoleEnum role = static_cast<UserRoleEnum>(claims.user.role.code);
 
-        // Hydrate session JSON with caller's computed admin level (fail closed to NONE)
+        // Hydrate admin level from cache (fail closed to NONE)
         AdminLevel level = AdminLevel::NONE;
-        int32_t uid = 0;
-        std::string org = "";
-        std::string email = "";
-        if (session_claims.isMember("user")) {
-            if (session_claims["user"].isMember("id")) {
-                uid = session_claims["user"]["id"].asInt();
-            }
-            if (session_claims["user"].isMember("organisation")) {
-                org = session_claims["user"]["organisation"].asString();
-            }
-            if (session_claims["user"].isMember("email")) {
-                email = session_claims["user"]["email"].asString();
-            }
-        }
+        int32_t uid = claims.user.id;
+        std::string org = claims.user.organisation;
+        std::string email = claims.user.email;
         if (uid > 0) {
             level = co_await sgrn::datastore::filters::AdminLevelCache::instance().resolveAdminLevel(uid, org, std::nullopt, email);
         }
-        session_claims["user"]["admin_level"] = static_cast<int>(level);
-        session_claims["user"]["admin_level_name"] = adminLevelToString(level);
-        session_claims["user"]["is_platform_admin"] = (level == AdminLevel::PLATFORM);
 
+        // Determine role name from claims
+        std::string role_name = "user";
+        if (!claims.user.role.name.empty()) {
+            role_name = claims.user.role.name;
+        }
+
+        AuthContext auth_ctx;
+        auth_ctx.user.id = uid;
+        auth_ctx.user.email = std::move(email);
+        auth_ctx.user.organisation = std::move(org);
+        auth_ctx.user.role = role_name;
+        auth_ctx.user.admin_level = level;
+        auth_ctx.user.admin_level_name = adminLevelToString(level);
+        auth_ctx.user.is_platform_admin = (level == AdminLevel::PLATFORM);
+        if (claims.session_id != 0) {
+            auth_ctx.session_id = claims.session_id;
+        }
+
+        tsp_req->attributes()->insert("tenant_id", auth_ctx.user.organisation);
+        tsp_req->attributes()->insert("auth_context", std::move(auth_ctx));
+        tsp_req->attributes()->insert("session_claims", claims);
         tsp_req->attributes()->insert("admin_level", level);
         tsp_req->attributes()->insert("caller_admin_level", level);
         tsp_req->attributes()->insert("is_platform_admin", level == AdminLevel::PLATFORM);
-        tsp_req->attributes()->insert("session_json", std::move(session_claims));
         tsp_req->attributes()->insert("user_role_code", role);
 
         t_chain();
@@ -116,14 +118,15 @@ void AutomatedServiceAuthFilter::doFilter(const drogon::HttpRequestPtr& tsp_req,
     // 1. Extract Bearer token
     std::optional<std::string> token_opt = getBearerToken(tsp_req);
     if (!token_opt.has_value()) {
-        respondWithError("Unauthorized: Missing Authorization Header", drogon::k401Unauthorized, tsp_filter_callback);
+        tsp_filter_callback(
+            createTypedResponse(BackendErrorResponse{"Unauthorized: Missing Authorization Header", drogon::k401Unauthorized}));
         return;
     }
     const std::string t_token = token_opt.value();
 
     if (!isValidTokenFormat(t_token)) {
         SGRN_WARN_LOG("AutomatedServiceAuthFilter: Fast-reject invalid token format");
-        respondWithError("Unauthorized: Invalid token format", drogon::k401Unauthorized, tsp_filter_callback);
+        tsp_filter_callback(createTypedResponse(BackendErrorResponse{"Unauthorized: Invalid token format", drogon::k401Unauthorized}));
         return;
     }
 
@@ -136,7 +139,7 @@ void AutomatedServiceAuthFilter::doFilter(const drogon::HttpRequestPtr& tsp_req,
     if (!sgrn::datastore::session::SessionStore::instance().isKnownServiceToken(t_token) &&
         !sgrn::datastore::session::SessionStore::instance().hasActiveSessionToken(t_token)) {
         SGRN_WARN_LOG("AutomatedServiceAuthFilter: Fast-reject unknown token: {}", redactToken(t_token));
-        respondWithError("Unauthorized: Unknown service token", drogon::k401Unauthorized, tsp_filter_callback);
+        tsp_filter_callback(createTypedResponse(BackendErrorResponse{"Unauthorized: Unknown service token", drogon::k401Unauthorized}));
         return;
     }
 
@@ -146,22 +149,37 @@ void AutomatedServiceAuthFilter::doFilter(const drogon::HttpRequestPtr& tsp_req,
         auto session_opt = co_await sgrn::datastore::session::SessionStore::instance().getSession(t_token);
         if (!session_opt.has_value()) {
             SGRN_WARN_LOG("AutomatedServiceAuthFilter: session not found for token");
-            respondWithError("Unauthorized: Session expired or invalid", drogon::k401Unauthorized, tsp_filter_callback);
+            tsp_filter_callback(
+                createTypedResponse(BackendErrorResponse{"Unauthorized: Session expired or invalid", drogon::k401Unauthorized}));
             co_return;
         }
 
-        Json::Value session = std::move(session_opt.value());
-        const Json::Value& user_node = session["user"];
+        const auto& claims = session_opt.value();
+        const auto& user = claims.user;
 
-        if (!user_node.isMember("automated_service_id")) {
+        if (!user.automated_service_id || *user.automated_service_id == 0) {
             SGRN_WARN_LOG("AutomatedServiceAuthFilter: access denied — session is not for an automated service");
-            respondWithError("Automated Service credentials required", drogon::k403Forbidden, std::move(tsp_filter_callback));
+            tsp_filter_callback(createTypedResponse(BackendErrorResponse{"Automated Service credentials required", drogon::k403Forbidden}));
             co_return;
         }
 
-        const int32_t automated_service_id = user_node["automated_service_id"].asInt();
+        const int32_t automated_service_id = *user.automated_service_id;
 
-        tsp_req->attributes()->insert("session_json", std::move(session));
+        AuthContext auth_ctx;
+        auth_ctx.automated_service_id = automated_service_id;
+        if (!user.organisation.empty()) {
+            auth_ctx.user.organisation = user.organisation;
+        }
+        if (!user.email.empty()) {
+            auth_ctx.user.email = user.email;
+        }
+        if (claims.session_id != 0) {
+            auth_ctx.session_id = claims.session_id;
+        }
+
+        tsp_req->attributes()->insert("tenant_id", auth_ctx.user.organisation);
+        tsp_req->attributes()->insert("auth_context", std::move(auth_ctx));
+        tsp_req->attributes()->insert("session_claims", claims);
         tsp_req->attributes()->insert("automated_service_id", automated_service_id);
 
         SGRN_INFO_LOG("AutomatedServiceAuthFilter: automated service {} authenticated", automated_service_id);

@@ -44,8 +44,11 @@ public:
 private:
     inline static const std::array<sgrn::IHandler<QueryApiHandler>::RouteConfig, 4> kRoutes = {
         {{"/api/v1/query/organisations", &QueryApiHandler::handleQueryListOfOrganisations, {drogon::Get}, {}},
+
             {"/api/v1/query/statuses", &QueryApiHandler::handleQueryListOfUserStatus, {drogon::Get}, {}},
+
             {"/api/v1/query/user/info", &QueryApiHandler::handleQueryUserInfo, {drogon::Get}, {"sgrn::datastore::filters::UserAuthFilter"}},
+
             {"/api/v1/query/user/info", &QueryApiHandler::handleUpdateUserInfo, {drogon::Post},
                 {"sgrn::datastore::filters::UserAuthFilter"}}}};
 };

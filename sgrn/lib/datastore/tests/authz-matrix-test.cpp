@@ -19,6 +19,7 @@
 #include <sgrn/datastore/handlers/admin.hpp>
 #include <sgrn/datastore/handlers/storage-admin.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
+#include <sgrn/datastore/wire/auth.hpp>
 
 #include <drogon/HttpAppFramework.h>
 #include <drogon/HttpRequest.h>
@@ -91,15 +92,14 @@ HttpRequestPtr makeAuthRequest(HttpMethod t_method, const std::string& t_path, c
     req->setMethod(t_method);
     req->setPath(t_path);
     if (t_caller.user_id > 0) {
-        Json::Value session;
-        session["user"]["id"] = t_caller.user_id;
-        session["user"]["email"] = t_caller.email;
-        session["user"]["organisation"] = t_caller.org;
-        session["user"]["role"] = (t_caller.level >= AdminLevel::ORG) ? "admin" : "user";
-        session["user"]["is_platform_admin"] = t_caller.is_platform;
-        session["user"]["admin_level"] = static_cast<int>(t_caller.level);
-
-        req->attributes()->insert("session_json", session);
+        sgrn::datastore::auth::SessionClaims claims;
+        claims.user.id = t_caller.user_id;
+        claims.user.email = t_caller.email;
+        claims.user.organisation = t_caller.org;
+        claims.user.role = {(t_caller.level >= AdminLevel::ORG) ? "admin" : "user", (t_caller.level >= AdminLevel::ORG) ? 0 : 1};
+        claims.user.is_platform_admin = t_caller.is_platform;
+        claims.user.admin_level = static_cast<int32_t>(t_caller.level);
+        req->attributes()->insert("session_claims", std::move(claims));
         req->attributes()->insert("user_role_code", (t_caller.level >= AdminLevel::ORG) ? sgrn::datastore::filters::UserRoleEnum::ADMIN
                                                                                         : sgrn::datastore::filters::UserRoleEnum::USER);
     }

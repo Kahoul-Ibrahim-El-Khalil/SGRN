@@ -2,7 +2,7 @@
 
 #include <drogon/orm/DbClient.h>
 #include <drogon/utils/coroutine.h>
-#include <json/json.h>
+#include <sgrn/datastore/wire/auth.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -33,11 +33,11 @@ public:
     static SessionStore& instance();
 
     // High-performance session lookup: checks RAM cache first (~20ns), falls back to PostgreSQL
-    drogon::Task<std::optional<Json::Value>> getSession(const std::string& token);
+    drogon::Task<std::optional<::sgrn::datastore::auth::SessionClaims>> getSession(const std::string& token);
 
     // Persists session in PostgreSQL core.sessions table & populates RAM cache
-    drogon::Task<bool> storeSession(
-        const std::string& token, const Json::Value& session_claims, int32_t user_id, int64_t ttl_seconds = 86400);
+    drogon::Task<bool> storeSession(const std::string& token, const ::sgrn::datastore::auth::SessionClaims& session_claims, int32_t user_id,
+        int64_t ttl_seconds = 86400);
 
     // Revokes session in PostgreSQL, fires user.signout webhook with full claims, sends NOTIFY
     drogon::Task<void> revokeSession(const std::string& token, std::string termination_reason = "logout");
@@ -45,7 +45,7 @@ public:
     // Re-fetches session_data from PostgreSQL and hot-swaps the RAM cache entry.
     // Call after any handler that mutates user quota/permission columns so the next
     // request sees fresh values without requiring a re-login.
-    drogon::Task<std::optional<Json::Value>> refreshSession(const std::string& token);
+    drogon::Task<std::optional<::sgrn::datastore::auth::SessionClaims>> refreshSession(const std::string& token);
 
     // Evicts token from local RAM cache
     void evictLocal(const std::string& token);
@@ -87,8 +87,8 @@ private:
         std::chrono::steady_clock::time_point expires_at;
     };
 
-    // Session RAM cache: token → claims JSON
-    std::unordered_map<std::string, Json::Value> ram_cache_;
+    // Session RAM cache: token → typed claims
+    std::unordered_map<std::string, ::sgrn::datastore::auth::SessionClaims> ram_cache_;
 
     // Negative cache: tokens confirmed invalid, suppressed for 60s to block DB hammering
     std::unordered_map<std::string, NegativeEntry> negative_cache_;

@@ -116,7 +116,7 @@ std::string DatastoreShell::humanBytes(int64_t t_bytes) {
     return fmt::format("{:.1f}{}", v, units[u]);
 }
 
-sgrn::Result<std::optional<DatastoreShell::Resolved>> DatastoreShell::resolve(const std::string& t_abs) {
+Result<std::optional<DatastoreShell::Resolved>> DatastoreShell::resolve(const std::string& t_abs) {
     if (t_abs == "/")
         return std::nullopt;
     const std::string parent = dirName(t_abs);
@@ -126,32 +126,35 @@ sgrn::Result<std::optional<DatastoreShell::Resolved>> DatastoreShell::resolve(co
     auto r = storage_->tryListDrive(parent, scope_);
     RETURN_IF(r.hasError(), fmt::format("{}: {}", parent, r.error()));
     for (const auto& f : r.value().folders) {
-        if (f.name_ == name)
-            return std::optional<Resolved>(Resolved{f.id_, sgrn::datastore::client::DriveItemType::Folder, true});
+        if (f.name == name)
+            return std::optional<Resolved>(Resolved{f.id, sgrn::datastore::client::DriveItemType::Folder, true});
     }
     for (const auto& f : r.value().files) {
-        if (f.name_ == name)
+        if (f.name == name)
             return std::optional<Resolved>(
-                Resolved{f.id_ != 0 ? std::optional<int64_t>(f.id_) : std::nullopt, sgrn::datastore::client::DriveItemType::File, false});
+                Resolved{f.id != 0 ? std::optional<int64_t>(f.id) : std::nullopt, sgrn::datastore::client::DriveItemType::File, false});
     }
     return std::nullopt;
 }
 
-sgrn::Result<void> DatastoreShell::requireId(const std::string& t_path, const Resolved& t_hit) {
+Result<void> DatastoreShell::requireId(const std::string& t_path, const Resolved& t_hit) {
     RETURN_ERROR_IF(
         !t_hit.id, fmt::format("'{}': namespace entry has no id and cannot be addressed (move/delete inside it instead)", t_path));
     return {};
 }
 
-sgrn::Result<uint64_t> DatastoreShell::duRecursive(const std::string& t_abs) {
+Result<uint64_t> DatastoreShell::duRecursive(const std::string& t_abs) {
     RETURN_ERROR_IF(!storage_, "not connected");
+
     auto r = storage_->tryListDrive(t_abs, scope_);
+
     RETURN_IF(r.hasError(), fmt::format("{}: {}", t_abs, r.error()));
+
     uint64_t total = 0;
     for (const auto& f : r.value().files)
         total += static_cast<uint64_t>(f.size);
     for (const auto& d : r.value().folders) {
-        const std::string child = t_abs == "/" ? "/" + d.name_ : t_abs + "/" + d.name_;
+        const std::string child = t_abs == "/" ? "/" + d.name : t_abs + "/" + d.name;
         auto child_total = duRecursive(child);
         RETURN_IF(child_total.hasError(), child_total.error());
         total += child_total.value();
@@ -159,16 +162,20 @@ sgrn::Result<uint64_t> DatastoreShell::duRecursive(const std::string& t_abs) {
     return total;
 }
 
-sgrn::Result<void> DatastoreShell::treeRecursive(const std::string& t_abs, const std::string& t_prefix) {
+Result<void> DatastoreShell::treeRecursive(const std::string& t_abs, const std::string& t_prefix) {
     RETURN_ERROR_IF(!storage_, "not connected");
+
     auto r = storage_->tryListDrive(t_abs, scope_);
+
     RETURN_IF(r.hasError(), fmt::format("{}: {}", t_abs, r.error()));
+
     const auto& folders = r.value().folders;
+
     const auto& files = r.value().files;
     for (size_t i = 0; i < folders.size() + files.size(); ++i) {
         const bool last = (i + 1 == folders.size() + files.size());
         const bool is_dir = i < folders.size();
-        const std::string& name = is_dir ? folders[i].name_ : files[i - folders.size()].name_;
+        const std::string& name = is_dir ? folders[i].name : files[i - folders.size()].name;
         if (is_dir)
             fmt::print(styleDir(), "{}{}── {}/\n", t_prefix, last ? "└" : "├", name);
         else

@@ -12,9 +12,9 @@
 #          â””â”€ lib/           Compiled archives/shared libs (platform-specific)
 #   3. Locate the active Conda/Micromamba environment (SGRN_CONDA_PREFIX).
 #   4. Include cmake/macros.cmake (sgrn_alias, sgrn_link_dependency, â€¦).
-#   5. Include cmake/targets.cmake (sgrn_add_component_library, â€¦).
+#   5. Provide shared configuration; target helpers are included by the root.
 #
-# See BUILD_SYSTEM.md for the full sysroot layout and variable reference.
+# See documentation/BUILD.md for the build workflow and sysroot layout.
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 include_guard(GLOBAL)

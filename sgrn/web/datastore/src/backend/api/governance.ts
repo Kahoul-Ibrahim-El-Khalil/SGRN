@@ -1,6 +1,7 @@
 import { AdminBackendApiEndpoints } from "@/backend/endpoints";
-import { authenticatedFetch, processResponse } from "@/backend/api/fetcher";
-import type { SgrnResult } from "@sgrn/types";
+import { authenticatedFetch, jsonBody, processResponse } from "@/backend/api/fetcher";
+import type { QuotaUpdateRequest, UpsertFormatRequest } from "@sgrn/datastore/requests";
+import type { SgrnResult, FormatDeleteResponse } from "@sgrn/types";
 import { ErrorScope } from "@sgrn/types";
 
 export interface StorageFormat {
@@ -72,16 +73,14 @@ export function upsertFormat(t_body: {
 }): Promise<SgrnResult<StorageFormat>> {
     return request<StorageFormat>(AdminBackendApiEndpoints.STORAGE_FORMATS, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(t_body),
+        ...jsonBody<UpsertFormatRequest>(t_body),
     });
 }
 
-export function deleteFormat(t_extension: string): Promise<SgrnResult<{ success: boolean; extension: string }>> {
-    return request<{ success: boolean; extension: string }>(
-        `${AdminBackendApiEndpoints.STORAGE_FORMATS}?extension=${encodeURIComponent(t_extension)}`,
-        { method: "DELETE" },
-    );
+export function deleteFormat(t_extension: string): Promise<SgrnResult<FormatDeleteResponse>> {
+    return request<FormatDeleteResponse>(`${AdminBackendApiEndpoints.STORAGE_FORMATS}?extension=${encodeURIComponent(t_extension)}`, {
+        method: "DELETE",
+    });
 }
 
 // Unified response of GET /api/v1/admin/quotas (StorageAdminHandler::handleListQuotas):
@@ -140,7 +139,7 @@ export async function fetchQuotas(t_kind: QuotaKind, t_search = "", t_limit = 10
     // The backend returns a unified row shape for every kind (usage,
     // limits, and per-kind extras like `path` for domains). Pass the
     // rows straight through — QuotaRow is structurally compatible.
-    const rows: QuotaRow[] = rawRes.data.rows.map((r) => ({
+    const rows: QuotaRow[] = rawRes.data.rows.map((r: BackendQuotaRow) => ({
         id: r.id,
         email: r.email,
         name: r.name,
@@ -192,7 +191,7 @@ export function updateQuota(t_body: {
         endpoint = AdminBackendApiEndpoints.QUOTAS_DOMAIN(t_body.id!);
     }
 
-    const payload = {
+    const payload: QuotaUpdateRequest = {
         storage_limit: t_body.storage_limit_bytes,
         entry_count_limit: t_body.entry_count_limit,
         max_file_size_mb: t_body.max_file_size_mb,
@@ -203,8 +202,7 @@ export function updateQuota(t_body: {
 
     return request<QuotaRow & { kind: QuotaKind }>(endpoint, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        ...jsonBody<QuotaUpdateRequest>(payload),
     });
 }
 

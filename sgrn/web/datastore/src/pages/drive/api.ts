@@ -1,9 +1,10 @@
 // @/pages/drive/api.ts
 
-import { authenticatedFetch } from "@/backend/api/fetcher";
+import { authenticatedFetch, jsonBody, readBody } from "@/backend/api/fetcher";
+import type { BulkActionRequest, MoveItemRequest } from "@sgrn/datastore/requests";
 import { StorageBackendApiEndpoints } from "@/backend/endpoints";
 import { ResumableUploader, type ChunkUploadProgress, type ResumableUploadReceipt } from "@/lib/resumableUploader";
-import type { DirectoryListing, SgrnResult } from "@sgrn/types";
+import type { DirectoryListing, SgrnResult, BulkResponse, CreateDirectoryResponse, MoveItemResponse, DeleteResponse } from "@sgrn/types";
 import { ErrorScope } from "@sgrn/types";
 
 export type StorageScope = "personal" | "automated_services" | "users" | "domains";
@@ -42,7 +43,7 @@ export async function listDirectory(
             order: t_order,
         });
         const res = await authenticatedFetch(`${StorageBackendApiEndpoints.DRIVE_LIST}?${params.toString()}`);
-        const data = await res.json();
+        const data = await readBody(res);
 
         if (!res.ok) {
             return { error: data.error || `Failed to list directory: ${res.status}`, scope: data.scope || ErrorScope.Unknown };
@@ -75,7 +76,7 @@ export async function downloadDriveFile(
         const res = await authenticatedFetch(`${StorageBackendApiEndpoints.PATH_BASE}?${params.toString()}`, { headers });
 
         if (!res.ok && res.status !== 206) {
-            const err_data = await res.json().catch(() => null);
+            const err_data = await readBody(res, null);
             return { error: err_data?.error || `Download failed: ${res.status}`, scope: err_data?.scope || ErrorScope.Network };
         }
 
@@ -138,7 +139,7 @@ export async function fetchDriveFileContent(t_file_path: string, t_scope: Storag
         const res = await authenticatedFetch(`${StorageBackendApiEndpoints.PATH_BASE}?${params.toString()}`);
 
         if (!res.ok) {
-            const err_data = await res.json().catch(() => null);
+            const err_data = await readBody(res, null);
             return { error: err_data?.error || `Fetch failed: ${res.status}`, scope: err_data?.scope || ErrorScope.Network };
         }
 
@@ -398,17 +399,20 @@ export async function uploadDriveFilesBatch(
  * Create an empty directory at the given path and scope.
  * The backend resolves the path within the current storage namespace.
  */
-export async function createDirectory(t_path: string, t_scope: StorageScope = "personal"): Promise<SgrnResult<{ directory_id?: number }>> {
+export async function createDirectory(t_path: string, t_scope: StorageScope = "personal"): Promise<SgrnResult<CreateDirectoryResponse>> {
     try {
         const params = new URLSearchParams({ path: t_path, scope: t_scope });
         const res = await authenticatedFetch(`${StorageBackendApiEndpoints.DRIVE_MKDIR}?${params.toString()}`, { method: "POST" });
-        const data = await res.json();
+        const data = await readBody<CreateDirectoryResponse>(res, {});
 
-        if (!res.ok || !data.success) {
-            return { error: data.error || `Failed to create directory: ${res.status}`, scope: data.scope || ErrorScope.Unknown };
+        if (!res.ok) {
+            return {
+                error: (data as any).error || `Failed to create directory: ${res.status}`,
+                scope: (data as any).scope || ErrorScope.Unknown,
+            };
         }
 
-        return { data: { directory_id: data.directory_id } };
+        return { data };
     } catch (e) {
         return { error: `Failed to create directory: ${e instanceof Error ? e.message : String(e)}`, scope: ErrorScope.Network };
     }
@@ -424,25 +428,27 @@ export async function moveDriveItem(
     t_new_name?: string,
     t_new_parent_id?: number | null,
     t_scope: StorageScope = "personal",
-): Promise<SgrnResult<void>> {
+): Promise<SgrnResult<MoveItemResponse>> {
     try {
         const params = new URLSearchParams({ id: t_id.toString(), type: t_type, scope: t_scope });
-        const body: any = {};
+        const body: MoveItemRequest = {};
         if (t_new_name) body.name = t_new_name;
         if (t_new_parent_id !== undefined) body.parent_id = t_new_parent_id;
 
         const res = await authenticatedFetch(`${StorageBackendApiEndpoints.DRIVE_MOVE}?${params.toString()}`, {
             method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
+            ...jsonBody<MoveItemRequest>(body),
         });
 
+        const data = await readBody<MoveItemResponse>(res, {});
         if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            return { error: data.error || `Failed to move ${t_type}: ${res.status}`, scope: data.scope || ErrorScope.Unknown };
+            return {
+                error: (data as any).error || `Failed to move ${t_type}: ${res.status}`,
+                scope: (data as any).scope || ErrorScope.Unknown,
+            };
         }
 
-        return { data: undefined };
+        return { data };
     } catch (e) {
         return { error: `Failed to move: ${e instanceof Error ? e.message : String(e)}`, scope: ErrorScope.Network };
     }
@@ -455,17 +461,20 @@ export async function deleteDriveItem(
     t_id: number,
     t_type: "file" | "folder",
     t_scope: StorageScope = "personal",
-): Promise<SgrnResult<void>> {
+): Promise<SgrnResult<DeleteResponse>> {
     try {
         const params = new URLSearchParams({ id: t_id.toString(), type: t_type, scope: t_scope });
         const res = await authenticatedFetch(`${StorageBackendApiEndpoints.DRIVE_DELETE}?${params.toString()}`, { method: "DELETE" });
 
+        const data = await readBody<DeleteResponse>(res, {});
         if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            return { error: data.error || `Failed to delete ${t_type}: ${res.status}`, scope: data.scope || ErrorScope.Unknown };
+            return {
+                error: (data as any).error || `Failed to delete ${t_type}: ${res.status}`,
+                scope: (data as any).scope || ErrorScope.Unknown,
+            };
         }
 
-        return { data: undefined };
+        return { data };
     } catch (e) {
         return { error: `Failed to delete: ${e instanceof Error ? e.message : String(e)}`, scope: ErrorScope.Network };
     }
@@ -474,21 +483,23 @@ export async function deleteDriveItem(
 /**
  * Renames a file or folder.
  */
-export async function renameItem(id: number | string, type: "file" | "folder", newName: string): Promise<SgrnResult<any>> {
+export async function renameItem(id: number | string, type: "file" | "folder", newName: string): Promise<SgrnResult<MoveItemResponse>> {
     try {
         const params = new URLSearchParams({ id: id.toString(), type: type });
         const res = await authenticatedFetch(`${StorageBackendApiEndpoints.DRIVE_MOVE}?${params.toString()}`, {
             method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ new_name: newName }),
+            ...jsonBody<MoveItemRequest>({ new_name: newName }),
         });
 
+        const data = await readBody<MoveItemResponse>(res, {});
         if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            return { error: data.error || `Failed to rename ${type}: ${res.status}`, scope: data.scope || ErrorScope.Unknown };
+            return {
+                error: (data as any).error || `Failed to rename ${type}: ${res.status}`,
+                scope: (data as any).scope || ErrorScope.Unknown,
+            };
         }
 
-        return { data: await res.json().catch(() => ({})) };
+        return { data };
     } catch (e) {
         return { error: `Failed to rename: ${e instanceof Error ? e.message : String(e)}`, scope: ErrorScope.Network };
     }
@@ -505,20 +516,22 @@ export async function bulkAction(
     try {
         const res = await authenticatedFetch(`${StorageBackendApiEndpoints.DRIVE_BULK}`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+            ...jsonBody<BulkActionRequest>({
                 action,
                 items,
                 target_parent_id: targetParentId,
             }),
         });
 
+        const data = await readBody<BulkResponse>(res, {});
         if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            return { error: data.error || `Failed to perform bulk ${action}: ${res.status}`, scope: data.scope || ErrorScope.Unknown };
+            return {
+                error: (data as any).error || `Failed to perform bulk ${action}: ${res.status}`,
+                scope: (data as any).scope || ErrorScope.Unknown,
+            };
         }
 
-        return { data: await res.json().catch(() => ({})) };
+        return { data };
     } catch (e) {
         return { error: `Failed to perform bulk action: ${e instanceof Error ? e.message : String(e)}`, scope: ErrorScope.Network };
     }

@@ -8,7 +8,7 @@ namespace sgrn::datastore::shell
 sgrn::Result<void> DatastoreShell::establish(sgrn::datastore::client::DatastoreClientConfig t_cfg, const std::string& t_desc) {
     auto client = std::make_unique<sgrn::datastore::client::DatastoreClient>(std::move(t_cfg));
     RETURN_ERROR_IF(!client->signIn(), "sign-in failed");
-    url_ = client->config().backend_url_;
+    url_ = client->config().backend_url;
     storage_ = std::make_unique<sgrn::datastore::client::StorageClient>(*client);
     client_ = std::move(client);
     cwd_ = "/";
@@ -71,8 +71,8 @@ sgrn::Result<int64_t> DatastoreShell::resolveServiceId(const std::string& t_ref)
     auto res = client_->tryListServices();
     RETURN_IF(res.hasError(), res.error());
     for (const auto& s : res.value()) {
-        if (s.name_ == t_ref)
-            return s.id_;
+        if (s.name == t_ref)
+            return s.id;
     }
     return ::sgrn::Error(fmt::format("service '{}' not found", t_ref));
 }

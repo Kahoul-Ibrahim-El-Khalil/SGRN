@@ -12,8 +12,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Building2, Loader2, Plus, RefreshCw, Save } from "lucide-react";
 import { useEvent } from "@/contexts/EventContext";
 import { AdminBackendApiEndpoints } from "@/backend/endpoints";
-import { authenticatedFetch } from "@/backend/api/fetcher";
+import { authenticatedFetch, jsonBody, readBody } from "@/backend/api/fetcher";
+import type { CreateOrganisationRequest, UpdateOrganisationRequest } from "@sgrn/datastore/requests";
 import { bytesToMb, mbToBytes } from "@/backend/api/governance";
+import type { OrganisationListResponse } from "@sgrn/types";
 
 interface OrganisationRow {
     name: string;
@@ -79,7 +81,7 @@ export function OrganisationsPanel() {
             if (!res.ok) {
                 throw new Error(`Failed to load organisations (HTTP ${res.status})`);
             }
-            const data = await res.json();
+            const data = await readBody<OrganisationListResponse>(res);
             if (!Array.isArray(data.organisations)) {
                 throw new Error("Unexpected organisation list format");
             }
@@ -138,7 +140,7 @@ export function OrganisationsPanel() {
 
         setCreating(true);
         try {
-            const body: Record<string, unknown> = {
+            const body: CreateOrganisationRequest = {
                 name: newName.trim(),
                 storage_limit: storageBytes,
                 entry_count_limit: entryLimit,
@@ -155,10 +157,9 @@ export function OrganisationsPanel() {
             }
             const res = await authenticatedFetch(AdminBackendApiEndpoints.ORGANISATIONS, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body),
+                ...jsonBody<CreateOrganisationRequest>(body),
             });
-            const data = await res.json().catch(() => ({}));
+            const data = await readBody(res, {});
             if (!res.ok) {
                 throw new Error(data.message || data.error || `Failed to create organisation (HTTP ${res.status})`);
             }
@@ -199,17 +200,16 @@ export function OrganisationsPanel() {
             const draft = draftFor(t_org);
             setSavingName(t_org.name);
             try {
-                const body: Record<string, unknown> = {
+                const body: UpdateOrganisationRequest = {
                     description: draft.description.trim() ? draft.description.trim() : null,
                     domain: draft.domain.trim() ? draft.domain.trim().toLowerCase() : null,
                     status: draft.status,
                 };
                 const res = await authenticatedFetch(`${AdminBackendApiEndpoints.ORGANISATIONS}/${encodeURIComponent(t_org.name)}`, {
                     method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(body),
+                    ...jsonBody<UpdateOrganisationRequest>(body),
                 });
-                const data = await res.json().catch(() => ({}));
+                const data = await readBody(res, {});
                 if (!res.ok) {
                     throw new Error(data.message || data.error || `Failed to update organisation (HTTP ${res.status})`);
                 }

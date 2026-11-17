@@ -48,17 +48,17 @@ StorageApiHandler::StorageApiHandler()
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handleGetConstraints(HttpRequestPtr tsp_req) {
-    co_return co_await storage_service_.handleGetConstraints();
+    co_return co_await storage_service_.handleGetConstraints(tsp_req);
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handleCreateObject(HttpRequestPtr tsp_req) {
-    auto json = tsp_req->getJsonObject();
-    if (!json) {
-        co_return sgrn::createJsonErrorResponse("Invalid JSON", k400BadRequest);
+    auto req_res = parseTypedRequest<services::storage::CreateObjectRequest>(tsp_req);
+    if (req_res.hasError()) {
+        co_return sgrn::createTypedResponse(BackendErrorResponse{"Invalid JSON", k400BadRequest});
     }
-    // The filter has already validated the automated service and injected its ID into attributes.
-    (*json)["automated_service_id"] = tsp_req->getAttributes()->get<int32_t>("automated_service_id");
-    co_return co_await storage_service_.handleCreateObject(std::move(*json));
+    auto req = std::move(req_res.value());
+    req.automated_service_id = tsp_req->getAttributes()->get<int32_t>("automated_service_id");
+    co_return co_await storage_service_.handleCreateObject(req);
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handleListObjects(HttpRequestPtr tsp_req) {
@@ -68,37 +68,31 @@ Task<HttpResponsePtr> StorageApiHandler::handleListObjects(HttpRequestPtr tsp_re
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handleMoveObject(HttpRequestPtr tsp_req, std::string t_name) {
-    if (!tsp_req->attributes()->find("session_json") || !tsp_req->attributes()->find("automated_service_id")) {
-        co_return createJsonErrorResponse("No session found", k401Unauthorized);
+    if (!tsp_req->attributes()->find("session_claims") || !tsp_req->attributes()->find("automated_service_id")) {
+        co_return createTypedResponse(BackendErrorResponse{"No session found", k401Unauthorized});
     }
-    auto session = tsp_req->getAttributes()->get<Json::Value>("session_json");
-    if (!session) {
-        co_return createJsonErrorResponse("No session found", k401Unauthorized);
-    }
+    auto session = tsp_req->getAttributes()->get<sgrn::datastore::auth::SessionClaims>("session_claims");
 
     const int32_t automated_service_id = tsp_req->getAttributes()->get<int32_t>("automated_service_id");
     const std::string name = std::move(t_name);
-    auto json = tsp_req->getJsonObject();
-    if (name.empty() || !json || !json->isMember("new_name") || !(*json)["new_name"].isString()) {
-        co_return createJsonErrorResponse("name and new_name are required", k400BadRequest);
+    auto req_res = parseTypedRequest<services::storage::MoveObjectRequest>(tsp_req);
+    if (name.empty() || req_res.hasError() || req_res->new_name.empty()) {
+        co_return createTypedResponse(BackendErrorResponse{"name and new_name are required", k400BadRequest});
     }
 
-    co_return co_await storage_service_.handleMoveObject(std::move(session), automated_service_id, name, (*json)["new_name"].asString());
+    co_return co_await storage_service_.handleMoveObject(std::move(session), automated_service_id, name, req_res->new_name);
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handleDeleteObject(HttpRequestPtr tsp_req, std::string t_name) {
-    if (!tsp_req->attributes()->find("session_json") || !tsp_req->attributes()->find("automated_service_id")) {
-        co_return createJsonErrorResponse("No session found", k401Unauthorized);
+    if (!tsp_req->attributes()->find("session_claims") || !tsp_req->attributes()->find("automated_service_id")) {
+        co_return createTypedResponse(BackendErrorResponse{"No session found", k401Unauthorized});
     }
-    auto session = tsp_req->getAttributes()->get<Json::Value>("session_json");
-    if (!session) {
-        co_return createJsonErrorResponse("No session found", k401Unauthorized);
-    }
+    auto session = tsp_req->getAttributes()->get<sgrn::datastore::auth::SessionClaims>("session_claims");
 
     const int32_t automated_service_id = tsp_req->getAttributes()->get<int32_t>("automated_service_id");
     const std::string name = std::move(t_name);
     if (name.empty()) {
-        co_return createJsonErrorResponse("name is required", k400BadRequest);
+        co_return createTypedResponse(BackendErrorResponse{"name is required", k400BadRequest});
     }
 
     co_return co_await storage_service_.handleDeleteObject(std::move(session), automated_service_id, name);

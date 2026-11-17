@@ -2,13 +2,13 @@
 
 #include <sgrn/crud/CrudSpec.hpp>
 #include <sgrn/crud/CrudViewEngine.hpp>
+#include <sgrn/respond.hpp>
 
 #include <drogon/HttpController.h>
 #include <drogon/HttpRequest.h>
 #include <drogon/HttpResponse.h>
 #include <drogon/HttpTypes.h>
 #include <drogon/utils/coroutine.h>
-#include <json/json.h>
 
 #include <memory>
 #include <string>
@@ -17,15 +17,10 @@
 namespace sgrn::crud
 {
 
-inline drogon::HttpResponsePtr createJsonErrorResponse(
-    const std::string& message, drogon::HttpStatusCode code = drogon::k400BadRequest, const std::string& scope = "Client") {
-    Json::Value error_obj;
-    error_obj["error"] = message;
-    error_obj["scope"] = scope;
-    auto resp = drogon::HttpResponse::newHttpJsonResponse(error_obj);
-    resp->setStatusCode(code);
-    return resp;
-}
+struct CrudErrorResponse {
+    std::string error;
+    std::string scope;
+};
 
 template <typename Derived>
 class CrudViewHandler : public drogon::HttpController<Derived, false> {
@@ -44,63 +39,101 @@ public:
     drogon::Task<drogon::HttpResponsePtr> handleList(drogon::HttpRequestPtr req) {
         std::string tenant = tenantOf(req);
         if (tenant.empty() && Derived::kSpec.policy.read_scope == ReadScope::Org) {
-            co_return createJsonErrorResponse("Missing organisation identity in session", drogon::k401Unauthorized, "Authentication");
+            co_return ::createTypedResponse(
+                CrudErrorResponse{"Missing organisation identity in session", "Authentication"}, drogon::k401Unauthorized);
         }
-        co_return co_await CrudViewEngine::executeList(Derived::kSpec, req, std::move(tenant));
+        co_return co_await CrudViewEngine::executeList(Derived::kSpec, req, std::move(tenant), responseEncoder());
     }
 
     drogon::Task<drogon::HttpResponsePtr> handleGet(drogon::HttpRequestPtr req, std::string id) {
         std::string tenant = tenantOf(req);
         if (tenant.empty() && Derived::kSpec.policy.read_scope == ReadScope::Org) {
-            co_return createJsonErrorResponse("Missing organisation identity in session", drogon::k401Unauthorized, "Authentication");
+            co_return ::createTypedResponse(
+                CrudErrorResponse{"Missing organisation identity in session", "Authentication"}, drogon::k401Unauthorized);
         }
-        co_return co_await CrudViewEngine::executeGet(Derived::kSpec, req, std::move(tenant), std::move(id));
+        co_return co_await CrudViewEngine::executeGet(Derived::kSpec, req, std::move(tenant), std::move(id), responseEncoder());
     }
 
     drogon::Task<drogon::HttpResponsePtr> handleCreate(drogon::HttpRequestPtr req) {
         std::string tenant = tenantOf(req);
         if (tenant.empty() && Derived::kSpec.policy.write_scope == WriteScope::Org) {
-            co_return createJsonErrorResponse("Missing organisation identity in session", drogon::k401Unauthorized, "Authentication");
+            co_return ::createTypedResponse(
+                CrudErrorResponse{"Missing organisation identity in session", "Authentication"}, drogon::k401Unauthorized);
         }
-        co_return co_await CrudViewEngine::executeCreate(Derived::kSpec, req, std::move(tenant));
+        if constexpr (requires { typename Derived::CreateBody; }) {
+            auto body = parseRequestBody<typename Derived::CreateBody>(req);
+            if (!body) {
+                co_return ::createTypedResponse(CrudErrorResponse{"Missing or invalid JSON body", "Body"}, drogon::k400BadRequest);
+            }
+            std::vector<BoundField> bound;
+            if (auto error = bindBody(Derived::kSpec, *body, bound)) {
+                co_return ::createTypedResponse(CrudErrorResponse{std::move(*error), "Body"}, drogon::k400BadRequest);
+            }
+            co_return co_await CrudViewEngine::executeCreate(Derived::kSpec, req, std::move(tenant), responseEncoder(), &bound);
+        } else {
+            co_return co_await CrudViewEngine::executeCreate(Derived::kSpec, req, std::move(tenant), responseEncoder());
+        }
     }
 
     drogon::Task<drogon::HttpResponsePtr> handleUpdate(drogon::HttpRequestPtr req, std::string id) {
         std::string tenant = tenantOf(req);
         if (tenant.empty() && Derived::kSpec.policy.write_scope == WriteScope::Org) {
-            co_return createJsonErrorResponse("Missing organisation identity in session", drogon::k401Unauthorized, "Authentication");
+            co_return ::createTypedResponse(
+                CrudErrorResponse{"Missing organisation identity in session", "Authentication"}, drogon::k401Unauthorized);
         }
-        co_return co_await CrudViewEngine::executeUpdate(Derived::kSpec, req, std::move(tenant), std::move(id));
+        if constexpr (requires { typename Derived::UpdateBody; }) {
+            auto body = parseRequestBody<typename Derived::UpdateBody>(req);
+            if (!body) {
+                co_return ::createTypedResponse(CrudErrorResponse{"Missing or invalid JSON body", "Body"}, drogon::k400BadRequest);
+            }
+            std::vector<BoundField> bound;
+            if (auto error = bindBody(Derived::kSpec, *body, bound)) {
+                co_return ::createTypedResponse(CrudErrorResponse{std::move(*error), "Body"}, drogon::k400BadRequest);
+            }
+            co_return co_await CrudViewEngine::executeUpdate(
+                Derived::kSpec, req, std::move(tenant), std::move(id), responseEncoder(), &bound);
+        } else {
+            co_return co_await CrudViewEngine::executeUpdate(Derived::kSpec, req, std::move(tenant), std::move(id), responseEncoder());
+        }
     }
 
     drogon::Task<drogon::HttpResponsePtr> handleDelete(drogon::HttpRequestPtr req, std::string id) {
         std::string tenant = tenantOf(req);
         if (tenant.empty() && Derived::kSpec.policy.delete_scope == DeleteScope::Org) {
-            co_return createJsonErrorResponse("Missing organisation identity in session", drogon::k401Unauthorized, "Authentication");
+            co_return ::createTypedResponse(
+                CrudErrorResponse{"Missing organisation identity in session", "Authentication"}, drogon::k401Unauthorized);
         }
         co_return co_await CrudViewEngine::executeDelete(Derived::kSpec, req, std::move(tenant), std::move(id));
     }
 
 protected:
-    static std::string tenantOf(const drogon::HttpRequestPtr& req) {
-        try {
-            if (req->attributes()->find("session_json")) {
-                const Json::Value& session = req->attributes()->get<Json::Value>("session_json");
-                if (session.isMember("user") && session["user"].isMember("organisation")) {
-                    const Json::Value& org = session["user"]["organisation"];
-                    if (org.isString()) {
-                        return org.asString();
-                    }
-                }
-            }
-            auto tenant_hdr = req->getHeader("X-Tenant-Id");
-            if (!tenant_hdr.empty()) {
-                return tenant_hdr;
-            }
-            return {};
-        } catch (const std::exception&) {
-            return {};
+    template <typename Body>
+    static std::optional<Body> parseRequestBody(const drogon::HttpRequestPtr& req) {
+        const std::string_view raw = req->body();
+        if (raw.empty()) {
+            return std::nullopt;
         }
+        Body body{};
+        if (glz::read_json(body, raw)) {
+            return std::nullopt;
+        }
+        return body;
+    }
+
+    static const RowResponseEncoder* responseEncoder() {
+        if constexpr (requires { typename Derived::ResponseRow; }) {
+            static const TypedRowResponseEncoder<typename Derived::ResponseRow> encoder;
+            return &encoder;
+        }
+        return nullptr;
+    }
+
+    static std::string tenantOf(const drogon::HttpRequestPtr& req) {
+        if (req->attributes()->find("tenant_id")) {
+            return req->attributes()->get<std::string>("tenant_id");
+        }
+        auto tenant_hdr = req->getHeader("X-Tenant-Id");
+        return tenant_hdr.empty() ? std::string{} : tenant_hdr;
     }
 };
 

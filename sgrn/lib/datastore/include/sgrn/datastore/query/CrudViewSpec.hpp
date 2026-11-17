@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace sgrn::datastore::query
@@ -39,6 +40,14 @@ struct Field {
     uint8_t filter_ops = 0;  // 0 = not filterable; set from `sgrn: filter=...` comment
     bool insertable = false; // default false unless comment/grant says otherwise
     bool updatable = false;
+};
+
+// One column of a write, already rendered as the text bind Postgres receives
+// (all CRUD binds are text; see sgrn::datastore::core::execSqlCoroVec).
+// `name` points into the view's static field table.
+struct BoundField {
+    std::string_view name;
+    std::string value;
 };
 
 struct PrimaryKey {

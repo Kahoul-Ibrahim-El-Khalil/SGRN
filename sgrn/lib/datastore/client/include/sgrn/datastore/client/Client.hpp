@@ -12,8 +12,12 @@
 #include <vector>
 
 #include <fmt/format.h>
+#include <sgrn/Result.hpp>
 #include <sgrn/datastore/client/StorageClient.hpp>
 #include <sgrn/datastore/client/Types.hpp>
+#include <sgrn/datastore/wire/admin.hpp>
+#include <sgrn/datastore/wire/codec.hpp>
+#include <sgrn/utils/glaze.hpp>
 #include <sgrn/utils/threading.hpp>
 #include <httplib.h>
 #include <stdexcept>
@@ -30,25 +34,25 @@ enum class AuthMode {
 // ─── Configuration ───────────────────────────────────────────────────────────
 
 struct AutomatedServiceConfig {
-    std::string backend_url_;
-    AuthMode auth_mode_{AuthMode::AutomatedService};
+    std::string backend_url;
+    AuthMode auth_mode{AuthMode::AutomatedService};
 
-    std::string public_token_;
-    std::string private_token_;
-    std::string token_;
-    std::string secret_;
+    std::string public_token;
+    std::string private_token;
+    std::string token;
+    std::string secret;
 
-    std::string email_;
-    std::string password_;
-    std::string session_token_;
+    std::string email;
+    std::string password;
+    std::string session_token;
 
-    std::string user_storage_path_{"/api/v1/storage/files"};
-    std::string service_storage_path_{"/api/v1/storage/automated-service/files"};
-    std::string storage_path_{"/api/v1/storage/automated-service/files"};
-    double storage_timeout_s_{30.0};
+    std::string user_storage_path{"/api/v1/storage/files"};
+    std::string service_storage_path{"/api/v1/storage/automated-service/files"};
+    std::string storage_path{"/api/v1/storage/automated-service/files"};
+    double storage_timeout_s{30.0};
 
-    bool retry_on_unauthorized_{true};
-    uint8_t max_unauthorized_retries_{1};
+    bool retry_on_unauthorized{true};
+    uint8_t max_unauthorized_retries{1};
 };
 
 namespace detail
@@ -67,31 +71,31 @@ inline std::string authModeToString(AuthMode t_mode) {
 }
 
 inline std::string resolveDriveBase(const AutomatedServiceConfig& t_config) {
-    if (t_config.auth_mode_ == AuthMode::UserPassword)
+    if (t_config.auth_mode == AuthMode::UserPassword)
         return "/api/v1/storage/drive";
     return "/api/v1/storage/automated-service/drive";
 }
 
 inline std::string resolveStoragePath(const AutomatedServiceConfig& t_config) {
-    if (!t_config.storage_path_.empty() && t_config.storage_path_ != "/api/v1/storage/automated-service/files") {
-        return t_config.storage_path_;
+    if (!t_config.storage_path.empty() && t_config.storage_path != "/api/v1/storage/automated-service/files") {
+        return t_config.storage_path;
     }
-    switch (t_config.auth_mode_) {
+    switch (t_config.auth_mode) {
         case AuthMode::UserPassword:
-            return t_config.user_storage_path_.empty() ? "/api/v1/storage/files" : t_config.user_storage_path_;
+            return t_config.user_storage_path.empty() ? "/api/v1/storage/files" : t_config.user_storage_path;
         case AuthMode::SessionToken:
         case AuthMode::AutomatedService:
         default:
-            return t_config.service_storage_path_.empty() ? "/api/v1/storage/automated-service/files" : t_config.service_storage_path_;
+            return t_config.service_storage_path.empty() ? "/api/v1/storage/automated-service/files" : t_config.service_storage_path;
     }
 }
 
 inline std::string_view effectivePublicToken(const AutomatedServiceConfig& t_config) {
-    return !t_config.public_token_.empty() ? std::string_view{t_config.public_token_} : std::string_view{t_config.token_};
+    return !t_config.public_token.empty() ? std::string_view{t_config.public_token} : std::string_view{t_config.token};
 }
 
 inline std::string_view effectivePrivateToken(const AutomatedServiceConfig& t_config) {
-    return !t_config.private_token_.empty() ? std::string_view{t_config.private_token_} : std::string_view{t_config.secret_};
+    return !t_config.private_token.empty() ? std::string_view{t_config.private_token} : std::string_view{t_config.secret};
 }
 
 } // namespace detail
@@ -193,9 +197,13 @@ public:
 
     /// Live session listing (admin: metaprobe).
     sgrn::Result<std::string, std::string> listActiveSessionsJson();
+    /// Typed variant of listActiveSessionsJson() (shared wire type).
+    sgrn::Result<std::vector<sgrn::datastore::admin::ActiveSession>, std::string> tryListActiveSessions();
 
     /// Webhook management (admin).
     sgrn::Result<std::string, std::string> listWebhooksJson();
+    /// Typed variant of listWebhooksJson() (shared wire type).
+    sgrn::Result<std::vector<sgrn::datastore::admin::Webhook>, std::string> tryListWebhooks();
     sgrn::Result<std::string, std::string> registerWebhookJson(const std::string& t_url, const std::string& t_secret = "");
     sgrn::Result<std::string, std::string> deleteWebhookJson(int32_t t_webhook_id);
 
@@ -223,6 +231,17 @@ public:
     sgrn::json::Value makeRequest(const std::string& t_method, const std::string& t_url, const std::string& t_body = "");
     sgrn::json::Value makeRequest(
         const std::string& t_method, const std::string& t_url, const std::string& t_body, const std::string& t_content_type);
+
+    /// Typed binary request: sends Accept: application/x-beve and deserializes
+    /// the response directly into T using Glaze reflection (fastest path, no
+    /// JSON intermediary). A non-BEVE 2xx response (older server that ignored
+    /// Accept) is decoded as JSON. An HTTP >= 400 response is parsed as JSON
+    /// and reported as "HTTP <status>: <error>" (or "HTTP <status>" without a
+    /// server error message); a failed BEVE decode is returned verbatim
+    /// instead of being retried as JSON, which would mask the real error.
+    template <typename T>
+    sgrn::Result<T, std::string> makeTypedRequest(const std::string& t_method, const std::string& t_url, const std::string& t_body = "",
+        const std::string& t_content_type = "application/json");
 
     struct DownloadResult {
         bool ok{false};
@@ -282,14 +301,74 @@ using SgrnClient = DatastoreClient;
 using SpaceClient = DatastoreClient;
 using AutomatedService = DatastoreClient;
 
-} // namespace sgrn::datastore::client
+// ---------------------------------------------------------------------------
+// makeTypedRequest — inline template definition
+// Defined here (not in Client.cpp) so the linker sees the instantiation for
+// every T without explicit instantiation declarations.
+// ---------------------------------------------------------------------------
+template <typename T>
+sgrn::Result<T, std::string> DatastoreClient::makeTypedRequest(
+    const std::string& t_method, const std::string& t_url, const std::string& t_body, const std::string& t_content_type) {
+    if (!hasSessionToken())
+        signIn();
 
-template <>
-struct fmt::formatter<sgrn::datastore::client::AutomatedServiceConfig> : formatter<std::string_view> {
-    auto format(const sgrn::datastore::client::AutomatedServiceConfig& t_cfg, format_context& t_ctx) const {
-        return formatter<std::string_view>::format(
-            fmt::format("AutomatedServiceConfig{{url=\"{}\", auth_mode={}, public_token=\"{}\"}}", t_cfg.backend_url_,
-                sgrn::datastore::client::detail::authModeToString(t_cfg.auth_mode_), t_cfg.public_token_),
-            t_ctx);
+    httplib::Headers headers;
+    headers.emplace("Authorization", "Bearer " + getSessionToken());
+    // No Accept header: the server negotiates its default binary format and
+    // the response Content-Type selects the decoder. Callers that need a
+    // specific format set their own Accept header.
+
+    auto doRequest = [&]() -> httplib::Result {
+        if (t_method == "GET")
+            return http_client_->Get(t_url, headers);
+        if (t_method == "POST")
+            return http_client_->Post(t_url, headers, t_body, t_content_type);
+        if (t_method == "PATCH")
+            return http_client_->Patch(t_url, headers, t_body, t_content_type);
+        if (t_method == "DELETE")
+            return http_client_->Delete(t_url, headers);
+        return {};
+    };
+
+    httplib::Result res = doRequest();
+
+    if (res && (res->status == 401 || res->status == 403) && config_.retry_on_unauthorized) {
+        clearSessionToken();
+        if (signIn() && hasSessionToken()) {
+            headers.erase("Authorization");
+            headers.emplace("Authorization", "Bearer " + getSessionToken());
+            res = doRequest();
+        } else {
+            return sgrn::Result<T, std::string>::Error("Re-auth failed");
+        }
     }
-};
+
+    RETURN_IF(!res, Error("No response"));
+
+    // Error bodies are always JSON (the server never sends binary errors).
+    // Surface the server's "error" string so callers see why, not just a code.
+    if (res->status >= 400) {
+        std::string error_text;
+        auto parsed = sgrn::json::parseValue(res->body);
+        if (!parsed.hasError()) {
+            if (const sgrn::json::Value* err = sgrn::json::find(parsed.value(), "error"); err != nullptr && err->is_string()) {
+                error_text = err->get_string();
+            }
+        }
+
+        RETURN_IF(!error_text.empty(), Error(fmt::format("HTTP {}: {}", res->status, error_text)));
+
+        return Error(fmt::format("HTTP {}", res->status));
+    }
+
+    // The server decides the format; Content-Type decides the decoder. This is
+    // the only wire-format branch a client needs (see wire/codec.hpp).
+    const std::string& ct = res->get_header_value("Content-Type");
+    auto decoded = sgrn::wire::decode<T>(res->body, ct);
+    RETURN_IF(decoded.hasError(), Error(fmt::format("Response decode failed ({}; {} bytes): {}", ct.empty() ? "no Content-Type" : ct,
+                                      res->body.size(), decoded.error().what())));
+
+    return std::move(decoded).value();
+}
+
+} // namespace sgrn::datastore::client

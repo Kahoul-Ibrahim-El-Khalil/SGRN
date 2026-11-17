@@ -55,7 +55,7 @@ inline ::sgrn::Result<void, std::string> configDrogonApp(int t_argc, char** tp_a
 
     drogon::app().setDefaultHandler(
         [](drogon::HttpRequestPtr tsp_http_req, std::function<void(drogon::HttpResponsePtr)>&& tsp_response_callback) {
-            sgrn::respondWithError("Unkown path", drogon::k403Forbidden, tsp_response_callback);
+            tsp_response_callback(sgrn::createTypedResponse(BackendErrorResponse{"Unkown path", drogon::k403Forbidden}));
         });
     return {};
 }

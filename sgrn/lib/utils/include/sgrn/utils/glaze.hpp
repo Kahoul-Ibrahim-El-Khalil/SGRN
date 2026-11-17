@@ -58,6 +58,15 @@ inline constexpr glz::opts kReadOpts{
     .error_on_unknown_keys = false,
 };
 
+/// BEVE read options: same leniency as kReadOpts. A server may respond with a
+/// superset of the client's wire type (e.g. the drive listing carries
+/// pagination fields a C++ client ignores), and BEVE request bodies are read
+/// exactly like the JSON path (unknown keys skipped, not rejected).
+inline constexpr glz::opts kBeveReadOpts{
+    .format = glz::BEVE,
+    .error_on_unknown_keys = false,
+};
+
 /// JSONC read options. This deliberately enables comments only; trailing
 /// comma compatibility is handled by the legacy parser until its callers are
 /// migrated and its accepted input grammar can be retired deliberately.
@@ -79,10 +88,9 @@ inline constexpr glz::opts kPrettyOpts{
 namespace detail
 {
 
-[[nodiscard]] inline JsonError glazeError(const glz::error_ctx& t_ec, std::string_view t_input) {
-    // glz::format_error produces a short, position-annotated message.
-    // We never echo the raw input body — only the formatted diagnostic.
-    std::string msg = glz::format_error(t_ec, t_input);
+[[nodiscard]] inline JsonError glazeError(const glz::error_ctx& t_ec, std::string_view /*t_input*/ = {}) {
+    // glz::format_error(ec) produces a short diagnostic without invoking buffer template formatting.
+    std::string msg = glz::format_error(t_ec);
     return JsonError{std::move(msg), static_cast<uint32_t>(t_ec.ec)};
 }
 
@@ -168,6 +176,45 @@ template <class T>
         return sgrn::Result<std::string, JsonError>::Error(detail::glazeWriteError(ec));
     }
     return out;
+}
+
+// ---------------------------------------------------------------------------
+// Binary format — BEVE (Glaze-native, compile-time reflection, zero tags)
+//
+// BEVE:  glz::write_beve / glz::read_beve  — MIME: application/x-beve
+//        ~40-60% smaller than JSON, fastest encode/decode. C++/Glaze only.
+// ---------------------------------------------------------------------------
+
+/// Serialize @p t_val to BEVE binary (Glaze-native).
+template <class T>
+[[nodiscard]] inline sgrn::Result<std::string, JsonError> writeBeve(const T& t_val) {
+    std::string out;
+    const auto ec = glz::write_beve(t_val, out);
+    if (ec) {
+        return sgrn::Result<std::string, JsonError>::Error(detail::glazeWriteError(ec));
+    }
+    return out;
+}
+
+/// Deserialize BEVE bytes into a new T (lenient: unknown keys skipped, like the JSON path).
+template <class T>
+[[nodiscard]] inline sgrn::Result<T, JsonError> readBeve(std::string_view t_data) {
+    T out{};
+    const auto ec = glz::read<kBeveReadOpts>(out, t_data);
+    if (ec) {
+        return sgrn::Result<T, JsonError>::Error(detail::glazeError(ec, t_data));
+    }
+    return out;
+}
+
+/// Deserialize BEVE bytes into an existing @p t_out (in-place).
+template <class T>
+[[nodiscard]] inline sgrn::Result<void, JsonError> readBeveInto(T& t_out, std::string_view t_data) {
+    const auto ec = glz::read<kBeveReadOpts>(t_out, t_data);
+    if (ec) {
+        return sgrn::Result<void, JsonError>::Error(detail::glazeError(ec, t_data));
+    }
+    return {};
 }
 
 // ---------------------------------------------------------------------------
@@ -339,14 +386,19 @@ inline void append(Value& t_array, Value t_value) {
 
 /// Convert a dynamic Value into a typed struct via Glaze reflection (dump +
 /// re-parse, unknown keys tolerated). Missing members keep their defaults.
+/// Note: we deliberately dump to a JSON string and re-read instead of calling
+/// glz::read(Value) directly. Glaze's direct-conversion fast path for
+/// containers (std::vector<T>) has no handler for struct elements — it only
+/// forward-declares convert_from_generic for struct types, which compiles but
+/// fails to link. The dump + re-parse route is the documented behavior and
+/// works for every type.
 template <class T>
 [[nodiscard]] inline sgrn::Result<T, JsonError> readFromValue(const Value& t_val) {
-    T out{};
-    const auto ec = glz::read<kReadOpts>(out, t_val);
-    if (ec) {
-        return sgrn::Result<T, JsonError>::Error(detail::glazeError(ec, ""));
+    auto text = write(t_val);
+    if (text.hasError()) {
+        return sgrn::Result<T, JsonError>::Error(text.error());
     }
-    return out;
+    return read<T>(text.value());
 }
 
 // ---------------------------------------------------------------------------

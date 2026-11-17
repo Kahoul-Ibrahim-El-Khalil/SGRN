@@ -34,13 +34,21 @@ public:
 
     // ── Inherit all ref-qualified error() overloads from std::expected ────
     // Includes error() && for zero-copy move propagation:
-    //   co_return BackendResult<void>::Error(std::move(r).error());
+    //   co_return Result<void, SomeError>::Error(std::move(r).error());
     using base::error;
 
     // Enables `return SomeError{code, "msg"};` and `return r.error();`
     // as sugar for `return std::unexpected(e);`.
-    // Safe because E is never implicitly convertible to T in our domain.
-    template <typename Err, std::enable_if_t<std::is_constructible_v<E, Err> && !std::is_constructible_v<T, Err>, int> = 0>
+    //
+    // The guard must use is_convertible, not is_constructible: C++20 permits
+    // direct-initialisation of an aggregate from a parenthesised argument list,
+    // so `std::is_constructible_v<SomeAggregate, std::string>` is true whenever
+    // the first member is a string.  That made every error return (`return
+    // fmt::format(...)`) ambiguous for wire structs such as DriveListing.
+    // Aggregates are not convertible from a single argument, so this selects
+    // the error alternative for them while leaving genuinely converting value
+    // types to std::expected's value constructor.
+    template <typename Err, std::enable_if_t<std::is_constructible_v<E, Err> && !std::is_convertible_v<Err, T>, int> = 0>
     Result(Err&& t_e)
         : base(std::unexpect, E(std::forward<Err>(t_e))) {
     }

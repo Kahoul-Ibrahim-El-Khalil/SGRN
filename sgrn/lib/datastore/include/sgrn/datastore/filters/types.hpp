@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <functional>
-#include <json/json.h>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -78,13 +77,6 @@ struct UserRole {
                 return "unknown";
         }
     }
-
-    Json::Value jsonify() const {
-        Json::Value result;
-        result["role"] = toString();
-        result["roleCode"] = static_cast<uint8_t>(value_);
-        return result;
-    }
 };
 
 // 2. Data Structures for Payloads
@@ -101,4 +93,33 @@ struct SgrnSession {
 
     uint32_t organisation_id;
 };
+
+// 3. Strongly-Typed Native Auth Context
+struct UserClaims {
+    int32_t id{0};
+    std::string email;
+    std::string organisation;
+    std::string role{"user"};
+    std::optional<std::string> domain;
+    AdminLevel admin_level{AdminLevel::NONE};
+    std::string admin_level_name{"NONE"};
+    bool is_platform_admin{false};
+};
+
+struct AuthContext {
+    UserClaims user;
+    std::optional<int32_t> automated_service_id;
+    int64_t session_id{0};
+
+    [[nodiscard]] bool isAuthenticated() const noexcept {
+        return user.id > 0 || automated_service_id.has_value();
+    }
+    [[nodiscard]] bool isService() const noexcept {
+        return automated_service_id.has_value();
+    }
+    [[nodiscard]] bool isPlatformAdmin() const noexcept {
+        return user.is_platform_admin;
+    }
+};
+
 } // namespace sgrn::datastore::filters

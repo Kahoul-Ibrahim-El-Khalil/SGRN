@@ -29,7 +29,7 @@
 #   INTERFACE_INCLUDE_DIRECTORIES pointing at SGRN_SHARED_PREFIX/include/.
 #   This file is the sole consumer interface for Phase 2.
 #
-# See BUILD_SYSTEM.md for the complete sysroot layout.
+# See documentation/BUILD.md for the sysroot layout.
 # ─────────────────────────────────────────────────────────────────────────────
 
 if(NOT SGRN_DEPS_ONLY)

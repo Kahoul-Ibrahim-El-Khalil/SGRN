@@ -11,6 +11,7 @@
 #include <fmt/core.h>
 #include <sgrn/Result.hpp>
 #include <sgrn/datastore/bootstrap/secrets.hpp> // resolveEnvPlaceholderKey
+#include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/crypto/sqlite-key-provider.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/env.hpp>
@@ -49,6 +50,13 @@ namespace sgrn::datastore::bootstrap::backup
 
 namespace
 {
+
+struct BackupFileRow {
+    int64_t id{0};
+    std::string name;
+    std::optional<std::string> key_id;
+    bool is_encrypted{false};
+};
 
 /// psql/pg_dump live next to each other: prefer SGRN_DEPLOYMENT_ENV/bin
 /// (same precedence as executeSchemaViaPsql), otherwise fall back to PATH.
@@ -967,17 +975,19 @@ int verifyKeys(const std::string& t_base_dir) {
     int verified_encrypted_files = 0;
 
     try {
-        auto file_rows = client->execSqlSync("SELECT id, name, key_id, is_encrypted, created_at FROM storage.files "
-                                             "WHERE is_encrypted = true OR key_id IS NOT NULL");
+        static constexpr char kBackupFileRowsQuery[] = "SELECT id, name, key_id, is_encrypted, created_at FROM storage.files "
+                                                       "WHERE is_encrypted = true OR key_id IS NOT NULL";
+        auto file_rows = client->execSqlSync(kBackupFileRowsQuery);
 
         std::unordered_set<std::string> referenced_key_ids;
 
         for (const auto& row : file_rows) {
-            const int64_t fid = row["id"].as<int64_t>();
-            const std::string fname = row["name"].as<std::string>();
-            const bool is_enc = row["is_encrypted"].as<bool>();
-            const bool has_key_id = !row["key_id"].isNull();
-            const std::string kid = has_key_id ? row["key_id"].as<std::string>() : "";
+            const auto file = sgrn::orm::fromRow<BackupFileRow, kBackupFileRowsQuery>(row);
+            const int64_t fid = file.id;
+            const std::string& fname = file.name;
+            const bool is_enc = file.is_encrypted;
+            const bool has_key_id = file.key_id.has_value();
+            const std::string kid = file.key_id.value_or("");
 
             if (is_enc && !has_key_id) {
                 fmt::print(stderr, "✗ File id={} ('{}') is_encrypted=true but key_id is NULL!\n", fid, fname);

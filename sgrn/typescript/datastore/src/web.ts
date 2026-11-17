@@ -1,6 +1,9 @@
 import type { SgrnResult } from "@sgrn/types";
 import { ErrorScope } from "@sgrn/types";
 
+export { JSON_CONTENT_TYPE, jsonBody, rawJson } from "./wire";
+export type { RawJsonString } from "./wire";
+
 export interface BrowserApiOptions {
   tokenStorageKey?: string;
   credentials?: RequestCredentials;
@@ -23,6 +26,12 @@ export async function authenticatedFetch(
 
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  if (!headers.has("Accept")) {
+    // The browser client speaks JSON exclusively. The server still negotiates
+    // JSON / MessagePack / BEVE for non-browser (C++) clients.
+    headers.set("Accept", "application/json");
   }
 
   const response = await fetch(t_url, {
@@ -52,25 +61,50 @@ export async function processResponse<T>(
   }
 
   try {
-    if (!contentType.includes("application/json")) {
+    // 204/205 and any empty 2xx body carry no payload: the operation succeeded
+    // but there is nothing to decode. Treat them as success with no data.
+    if (t_response.status === 204 || t_response.status === 205) {
+      return { data: undefined as T };
+    }
+
+    if (contentType.includes("application/json")) {
       const text = await t_response.text();
+      if (!text) {
+        return t_response.ok
+          ? { data: undefined as T }
+          : {
+              error: `HTTP Error ${t_response.status}`,
+              scope: ErrorScope.Unknown,
+            };
+      }
+      const data = JSON.parse(text) as {
+        error?: string;
+        scope?: ErrorScope;
+      } & T;
+      if (t_response.ok) return { data: data as T };
+
       return {
-        error: t_response.ok
-          ? "Expected JSON but received text"
-          : text.slice(0, 100) || `HTTP Error ${t_response.status}`,
-        scope: t_response.ok ? ErrorScope.Runtime : ErrorScope.Unknown,
+        error: data?.error || `HTTP Error ${t_response.status}`,
+        scope: data?.scope || ErrorScope.Unknown,
       };
     }
 
-    const data = (await t_response.json()) as {
-      error?: string;
-      scope?: ErrorScope;
-    } & T;
-    if (t_response.ok) return { data: data as T };
-
+    // The browser client asks for JSON exclusively, so anything else is a
+    // server-side contract violation (or an empty successful body).
+    const text = await t_response.text();
+    if (!text) {
+      return t_response.ok
+        ? { data: undefined as T }
+        : {
+            error: `HTTP Error ${t_response.status}`,
+            scope: ErrorScope.Unknown,
+          };
+    }
     return {
-      error: data.error || `HTTP Error ${t_response.status}`,
-      scope: data.scope || ErrorScope.Unknown,
+      error: t_response.ok
+        ? `Expected a JSON response but received ${contentType || "an unknown format"}`
+        : text.slice(0, 100),
+      scope: t_response.ok ? ErrorScope.Runtime : ErrorScope.Unknown,
     };
   } catch (t_error) {
     return {

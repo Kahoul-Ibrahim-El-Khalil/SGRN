@@ -147,7 +147,7 @@ if(SGRN_WIN64_ASIO_INC)
     add_compile_definitions(ASIO_STANDALONE)
 endif()
 
-# fmt — resolved centrally by cmake/fmt.cmake (single source of truth).
+# fmt — resolved centrally by cmake/deps/fmt.cmake (single source of truth).
 # win64 normal builds consume the staged fmt::fmt target declared by
 # extern-config.cmake (Phase A of the deps phase). Never link the host fmt.
 include(${CMAKE_CURRENT_LIST_DIR}/fmt.cmake)

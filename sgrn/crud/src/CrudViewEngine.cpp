@@ -92,6 +92,31 @@ const CrudFieldSpec* findField(const CrudViewSpec& spec, std::string_view name) 
     return nullptr;
 }
 
+std::vector<std::string> responseColumns(const CrudViewSpec& spec) {
+    std::vector<std::string> columns;
+    if (!spec.primary_key.empty())
+        columns.push_back(spec.primary_key);
+    if (!spec.tenant_column.empty() && spec.tenant_column != spec.primary_key)
+        columns.push_back(spec.tenant_column);
+
+    for (const auto& field : spec.fields) {
+        if (field.readable && field.name != spec.primary_key && field.name != spec.tenant_column) {
+            columns.push_back(field.name);
+        }
+    }
+    return columns;
+}
+
+void appendReturningProjection(std::ostringstream& sql, const CrudViewSpec& spec) {
+    const auto columns = responseColumns(spec);
+    sql << " RETURNING ";
+    for (std::size_t i = 0; i < columns.size(); ++i) {
+        if (i > 0)
+            sql << ", ";
+        sql << "\"" << columns[i] << "\"";
+    }
+}
+
 std::string_view fieldTypeToPgCast(FieldType type) {
     switch (type) {
         case FieldType::Int:
@@ -174,18 +199,8 @@ void appendRowJson(std::string& out, const drogon::orm::Row& row, const CrudView
 } // namespace
 
 drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeList(
-    const CrudViewSpec& spec, drogon::HttpRequestPtr req, std::string tenant) {
-    std::vector<std::string> select_cols;
-    if (!spec.primary_key.empty())
-        select_cols.push_back(spec.primary_key);
-    if (!spec.tenant_column.empty())
-        select_cols.push_back(spec.tenant_column);
-
-    for (const auto& field : spec.fields) {
-        if (field.readable && field.name != spec.primary_key && field.name != spec.tenant_column) {
-            select_cols.push_back(field.name);
-        }
-    }
+    const CrudViewSpec& spec, drogon::HttpRequestPtr req, std::string tenant, const RowResponseEncoder* t_encoder) {
+    const auto select_cols = responseColumns(spec);
 
     std::ostringstream sql;
     sql << "SELECT ";
@@ -340,6 +355,9 @@ drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeList(
     try {
         auto db = drogon::app().getDbClient();
         drogon::orm::Result r = co_await db->execSqlCoro<std::string>(sql.str(), params);
+        if (t_encoder != nullptr) {
+            co_return t_encoder->encodeList(r);
+        }
 
         std::string body;
         body.reserve(r.size() * 128 + 2);
@@ -359,23 +377,16 @@ drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeList(
     } catch (const drogon::orm::DrogonDbException& e) {
         LOG_ERROR << "Database error in executeList: " << e.base().what();
         co_return makeError("Database error during list operation", drogon::k500InternalServerError, "Database");
+    } catch (const std::exception& e) {
+        LOG_ERROR << "Failed to serialize list response: " << e.what();
+        co_return makeError("Failed to serialize list response", drogon::k500InternalServerError, "Serialization");
     }
 }
 
 drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeGet(
-    const CrudViewSpec& spec, drogon::HttpRequestPtr req, std::string tenant, std::string id) {
+    const CrudViewSpec& spec, drogon::HttpRequestPtr req, std::string tenant, std::string id, const RowResponseEncoder* t_encoder) {
     (void)req;
-    std::vector<std::string> select_cols;
-    if (!spec.primary_key.empty())
-        select_cols.push_back(spec.primary_key);
-    if (!spec.tenant_column.empty())
-        select_cols.push_back(spec.tenant_column);
-
-    for (const auto& field : spec.fields) {
-        if (field.readable && field.name != spec.primary_key && field.name != spec.tenant_column) {
-            select_cols.push_back(field.name);
-        }
-    }
+    const auto select_cols = responseColumns(spec);
 
     std::ostringstream sql;
     sql << "SELECT ";
@@ -405,6 +416,9 @@ drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeGet(
         if (r.empty()) {
             co_return makeError("No matching record found", drogon::k404NotFound, "NotFound");
         }
+        if (t_encoder != nullptr) {
+            co_return t_encoder->encodeOne(r[0], drogon::k200OK);
+        }
 
         std::string body;
         body.reserve(256);
@@ -416,13 +430,19 @@ drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeGet(
     } catch (const drogon::orm::DrogonDbException& e) {
         LOG_ERROR << "Database error in executeGet: " << e.base().what();
         co_return makeError("Database error during get operation", drogon::k500InternalServerError, "Database");
+    } catch (const std::exception& e) {
+        LOG_ERROR << "Failed to serialize get response: " << e.what();
+        co_return makeError("Failed to serialize get response", drogon::k500InternalServerError, "Serialization");
     }
 }
 
-drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeCreate(
-    const CrudViewSpec& spec, drogon::HttpRequestPtr req, std::string tenant) {
-    auto json_req = req->getJsonObject();
-    if (!json_req) {
+drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeCreate(const CrudViewSpec& spec, drogon::HttpRequestPtr req,
+    std::string tenant, const RowResponseEncoder* t_encoder, const std::vector<BoundField>* t_bound_fields) {
+    std::shared_ptr<Json::Value> json_req;
+    if (t_bound_fields == nullptr) {
+        json_req = req->getJsonObject();
+    }
+    if (t_bound_fields == nullptr && !json_req) {
         co_return makeError("Missing or invalid JSON body", drogon::k400BadRequest, "Body");
     }
 
@@ -434,28 +454,35 @@ drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeCreate(
         params.push_back(tenant);
     }
 
-    for (const auto& field : spec.fields) {
-        if (!field.writable || field.name == spec.primary_key || field.name == spec.tenant_column || field.soft_delete_field) {
-            continue;
+    if (t_bound_fields != nullptr) {
+        for (const auto& field : *t_bound_fields) {
+            cols.push_back(field.name);
+            params.push_back(field.value);
         }
-
-        if (json_req->isMember(field.name)) {
-            const auto& val = (*json_req)[field.name];
-            std::string err;
-            if (!Validators::validateField(field, val, err)) {
-                co_return makeError(err, drogon::k400BadRequest, "Body");
+    } else {
+        for (const auto& field : spec.fields) {
+            if (!field.writable || field.name == spec.primary_key || field.name == spec.tenant_column || field.soft_delete_field) {
+                continue;
             }
 
-            cols.push_back(field.name);
-            if (val.isString()) {
-                params.push_back(val.asString());
-            } else if (val.isBool()) {
-                params.push_back(val.asBool() ? "true" : "false");
-            } else if (val.isObject() || val.isArray()) {
-                Json::FastWriter w;
-                params.push_back(w.write(val));
-            } else {
-                params.push_back(val.asString());
+            if (json_req->isMember(field.name)) {
+                const auto& val = (*json_req)[field.name];
+                std::string err;
+                if (!Validators::validateField(field, val, err)) {
+                    co_return makeError(err, drogon::k400BadRequest, "Body");
+                }
+
+                cols.push_back(field.name);
+                if (val.isString()) {
+                    params.push_back(val.asString());
+                } else if (val.isBool()) {
+                    params.push_back(val.asBool() ? "true" : "false");
+                } else if (val.isObject() || val.isArray()) {
+                    Json::FastWriter w;
+                    params.push_back(w.write(val));
+                } else {
+                    params.push_back(val.asString());
+                }
             }
         }
     }
@@ -473,7 +500,8 @@ drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeCreate(
             sql << ", ";
         sql << "$" << (i + 1);
     }
-    sql << ") RETURNING *";
+    sql << ")";
+    appendReturningProjection(sql, spec);
 
     try {
         auto db = drogon::app().getDbClient();
@@ -481,6 +509,12 @@ drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeCreate(
 
         if (r.empty()) {
             co_return makeError("Failed to insert record", drogon::k500InternalServerError, "Database");
+        }
+        if (t_encoder != nullptr) {
+            if (spec.policy.audit) {
+                AuditLogger::logMutation(spec.table_name, "CREATE", tenant, "");
+            }
+            co_return t_encoder->encodeOne(r[0], drogon::k201Created);
         }
 
         std::string body;
@@ -498,13 +532,19 @@ drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeCreate(
     } catch (const drogon::orm::DrogonDbException& e) {
         LOG_ERROR << "Database error in executeCreate: " << e.base().what();
         co_return makeError("Database constraint error: " + std::string(e.base().what()), drogon::k400BadRequest, "Database");
+    } catch (const std::exception& e) {
+        LOG_ERROR << "Failed to serialize create response: " << e.what();
+        co_return makeError("Failed to serialize create response", drogon::k500InternalServerError, "Serialization");
     }
 }
 
-drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeUpdate(
-    const CrudViewSpec& spec, drogon::HttpRequestPtr req, std::string tenant, std::string id) {
-    auto json_req = req->getJsonObject();
-    if (!json_req) {
+drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeUpdate(const CrudViewSpec& spec, drogon::HttpRequestPtr req,
+    std::string tenant, std::string id, const RowResponseEncoder* t_encoder, const std::vector<BoundField>* t_bound_fields) {
+    std::shared_ptr<Json::Value> json_req;
+    if (t_bound_fields == nullptr) {
+        json_req = req->getJsonObject();
+    }
+    if (t_bound_fields == nullptr && !json_req) {
         co_return makeError("Missing or invalid JSON body", drogon::k400BadRequest, "Body");
     }
 
@@ -512,30 +552,42 @@ drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeUpdate(
     std::vector<std::string> params;
     int param_idx = 1;
 
-    for (const auto& field : spec.fields) {
-        if (!field.writable || field.name == spec.primary_key || field.name == spec.tenant_column || field.soft_delete_field) {
-            continue;
+    if (t_bound_fields != nullptr) {
+        for (const auto& bound : *t_bound_fields) {
+            const CrudFieldSpec* field = findField(spec, bound.name);
+            if (field == nullptr || !field->writable || field->soft_delete_field) {
+                co_return makeError("Request contains a non-writable field", drogon::k400BadRequest, "Body");
+            }
+            std::string_view cast = fieldTypeToPgCast(field->type);
+            set_clauses.push_back("\"" + field->name + "\" = $" + std::to_string(param_idx++) + std::string(cast));
+            params.push_back(bound.value);
         }
-
-        if (json_req->isMember(field.name)) {
-            const auto& val = (*json_req)[field.name];
-            std::string err;
-            if (!Validators::validateField(field, val, err)) {
-                co_return makeError(err, drogon::k400BadRequest, "Body");
+    } else {
+        for (const auto& field : spec.fields) {
+            if (!field.writable || field.name == spec.primary_key || field.name == spec.tenant_column || field.soft_delete_field) {
+                continue;
             }
 
-            std::string_view cast = fieldTypeToPgCast(field.type);
-            set_clauses.push_back("\"" + field.name + "\" = $" + std::to_string(param_idx++) + std::string(cast));
+            if (json_req->isMember(field.name)) {
+                const auto& val = (*json_req)[field.name];
+                std::string err;
+                if (!Validators::validateField(field, val, err)) {
+                    co_return makeError(err, drogon::k400BadRequest, "Body");
+                }
 
-            if (val.isString()) {
-                params.push_back(val.asString());
-            } else if (val.isBool()) {
-                params.push_back(val.asBool() ? "true" : "false");
-            } else if (val.isObject() || val.isArray()) {
-                Json::FastWriter w;
-                params.push_back(w.write(val));
-            } else {
-                params.push_back(val.asString());
+                std::string_view cast = fieldTypeToPgCast(field.type);
+                set_clauses.push_back("\"" + field.name + "\" = $" + std::to_string(param_idx++) + std::string(cast));
+
+                if (val.isString()) {
+                    params.push_back(val.asString());
+                } else if (val.isBool()) {
+                    params.push_back(val.asBool() ? "true" : "false");
+                } else if (val.isObject() || val.isArray()) {
+                    Json::FastWriter w;
+                    params.push_back(w.write(val));
+                } else {
+                    params.push_back(val.asString());
+                }
             }
         }
     }
@@ -563,7 +615,7 @@ drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeUpdate(
         sql << " AND \"deleted_at\" IS NULL";
     }
 
-    sql << " RETURNING *";
+    appendReturningProjection(sql, spec);
 
     try {
         auto db = drogon::app().getDbClient();
@@ -571,6 +623,12 @@ drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeUpdate(
 
         if (r.empty()) {
             co_return makeError("No matching record found to update", drogon::k404NotFound, "NotFound");
+        }
+        if (t_encoder != nullptr) {
+            if (spec.policy.audit) {
+                AuditLogger::logMutation(spec.table_name, "UPDATE", tenant, id);
+            }
+            co_return t_encoder->encodeOne(r[0], drogon::k200OK);
         }
 
         std::string body;
@@ -587,6 +645,9 @@ drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeUpdate(
     } catch (const drogon::orm::DrogonDbException& e) {
         LOG_ERROR << "Database error in executeUpdate: " << e.base().what();
         co_return makeError("Database constraint error during update", drogon::k400BadRequest, "Database");
+    } catch (const std::exception& e) {
+        LOG_ERROR << "Failed to serialize update response: " << e.what();
+        co_return makeError("Failed to serialize update response", drogon::k500InternalServerError, "Serialization");
     }
 }
 

@@ -23,8 +23,12 @@
         "baseUrl": ".",
         "paths": {
             "@/*": ["src/*"],
+            "@sgrn/types": ["../../typescript/types/src/index.ts"],
             "@sgrn/datastore": ["../../typescript/datastore/src/index.ts"],
-            "@sgrn/datastore/web": ["../../typescript/datastore/src/web.ts"]
+            "@sgrn/datastore/web": ["../../typescript/datastore/src/web.ts"],
+            "@sgrn/datastore/requests": ["../../typescript/datastore/src/requests.ts"],
+            "@sgrn/datastore/crud-requests": ["../../typescript/datastore/src/crud-requests.gen.ts"],
+            "@sgrn/datastore/crud-responses": ["../../typescript/datastore/src/crud-responses.gen.ts"]
         },
         /* Linting */
         "strict": true,
@@ -34,5 +38,13 @@
         "noFallthroughCasesInSwitch": true,
         "noUncheckedSideEffectImports": true
     },
-    "include": ["src", "../../typescript/datastore/src/web.ts"]
+    "include": [
+        "src",
+        "../../typescript/datastore/src/web.ts",
+        "../../typescript/datastore/src/wire.ts",
+        "../../typescript/datastore/src/requests.ts",
+        "../../typescript/datastore/src/crud-requests.gen.ts",
+        "../../typescript/datastore/src/crud-responses.gen.ts",
+        "../../typescript/types/src/**/*"
+    ]
 }

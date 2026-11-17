@@ -4,11 +4,13 @@
 #include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/crypto/key-store.hpp>
 #include <sgrn/datastore/error/ApiErrors.hpp>
+#include <sgrn/datastore/filters/types.hpp>
 #include <sgrn/datastore/handlers/storage.hpp>
 #include <sgrn/datastore/services/helpers/magic.hpp>
 #include <sgrn/datastore/services/storage.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe-access.hpp>
+#include <sgrn/datastore/wire/storage.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/encoding.hpp>
 #include <sgrn/utils/hashing.hpp>
@@ -49,8 +51,44 @@ using sgrn::datastore::services::storage::StorageScope;
 
 namespace detail
 {
+struct MoveItemRequest {
+    std::optional<std::string> name;
+    std::optional<std::string> new_name;
+    std::optional<int64_t> parent_id;
+};
+struct BulkItem {
+    std::variant<int64_t, std::string> id{0};
+    std::string type;
+
+    int64_t numeric_id() const {
+        if (std::holds_alternative<int64_t>(id)) {
+            return std::get<int64_t>(id);
+        }
+        try {
+            return std::stoll(std::get<std::string>(id));
+        } catch (...) {
+            return -1;
+        }
+    }
+};
+struct BulkActionRequest {
+    std::string action;
+    std::vector<BulkItem> items;
+    std::optional<int64_t> target_parent_id;
+};
+struct MoveItemResponse {
+    int64_t id{0};
+    std::string type;
+    std::optional<int64_t> parent_id;
+    std::optional<std::string> name;
+};
+struct PresignedUrlResponse {
+    std::string url;
+    std::string action;
+    uint32_t expiry{0};
+    int64_t file_id{0};
+};
 struct DeleteResponse {
-    bool success{true};
     int64_t id{0};
     std::string type;
 };
@@ -61,18 +99,12 @@ struct BulkResult {
     std::optional<std::string> error;
 };
 struct BulkResponse {
-    bool success{true};
     std::string action;
     int32_t total{0};
     int32_t success_count{0};
     std::vector<BulkResult> results;
 };
-struct StorageStatsResponse {
-    int64_t file_count{0};
-    int64_t total_original_bytes{0};
-    int64_t total_compressed_bytes{0};
-    std::optional<int64_t> storage_limit;
-};
+using StorageStatsResponse = ::sgrn::datastore::storage::StorageUsage;
 
 struct TrailNode {
     std::string path;
@@ -80,6 +112,104 @@ struct TrailNode {
     std::optional<int64_t> id;
     std::optional<std::string> display_name;
 };
+
+struct VirtualRootEntry {
+    std::string name;
+    std::optional<std::string> display_name;
+};
+
+struct DirectoryTrailRow {
+    int64_t id{0};
+    std::string name;
+    std::string path;
+};
+
+struct DriveListingRow {
+    int32_t item_type{0};
+    int64_t ord{0};
+    int64_t id{0};
+    std::string name;
+    std::string path;
+    std::string created_at;
+    int64_t virtual_size{0};
+    int64_t real_size{0};
+    int64_t count_sub_files{0};
+    int64_t count_sub_directories{0};
+    std::string extension;
+    int64_t size{0};
+    int64_t original_size{0};
+    std::string upload_mode;
+    std::optional<int64_t> part_count;
+    bool is_encrypted{false};
+    std::optional<std::string> key_id;
+    int64_t total_folders{0};
+    int64_t total_files{0};
+};
+
+struct FileMoveStateRow {
+    std::optional<int32_t> user_id;
+    std::optional<int32_t> automated_service_id;
+    std::optional<int64_t> directory_id;
+};
+
+struct FolderMoveStateRow {
+    std::optional<int32_t> user_id;
+    std::optional<int32_t> automated_service_id;
+    std::optional<int64_t> parent_id;
+    std::string path;
+};
+
+struct DirectoryPathRow {
+    std::string path;
+};
+
+struct DeletePermissionRow {
+    std::optional<int32_t> user_id;
+    std::optional<std::string> domain;
+    std::optional<bool> domain_can_delete;
+    std::optional<bool> can_delete_personal;
+};
+
+struct StoredObjectRow {
+    int64_t id{0};
+    std::string bucket;
+    std::string key;
+};
+
+struct FileEncryptionRow {
+    std::optional<std::string> key_id;
+    bool is_encrypted{false};
+};
+
+struct PresignedFileRow {
+    int64_t object_id{0};
+    std::string bucket;
+    std::string key;
+    bool is_encrypted{false};
+};
+
+static constexpr char kDomainDirectoryTrailQuery[] = "SELECT d.id, d.name, d.path FROM storage.directories d "
+                                                     "WHERE d.domain = $1 AND d.path = ANY($2::text[])";
+static constexpr char kUserDirectoryTrailQuery[] = "SELECT d.id, d.name, d.path FROM storage.directories d "
+                                                   "WHERE d.user_id = $1 AND d.path = ANY($2::text[])";
+static constexpr char kServiceDirectoryTrailQuery[] = "SELECT d.id, d.name, d.path FROM storage.directories d "
+                                                      "WHERE d.automated_service_id = $1 AND d.path = ANY($2::text[])";
+static constexpr char kServiceVirtualRootQuery[] = "SELECT token::text AS name, name AS display_name FROM core.automated_services "
+                                                   "WHERE organisation = $1 AND deleted_at IS NULL ORDER BY name";
+static constexpr char kDomainVirtualRootQuery[] =
+    "SELECT name, NULL::text AS display_name FROM core.domains WHERE organisation = $1 ORDER BY name";
+static constexpr char kUserVirtualRootQuery[] = "SELECT email AS name, NULL::text AS display_name FROM core.users "
+                                                "WHERE organisation = $1 AND deleted_at IS NULL ORDER BY name";
+static constexpr char kAdminFileMoveStateQuery[] =
+    "SELECT id, user_id, automated_service_id, directory_id FROM storage.files WHERE id = $1";
+static constexpr char kUserFileMoveStateQuery[] =
+    "SELECT id, user_id, automated_service_id, directory_id FROM storage.files WHERE id = $1 AND user_id = $2";
+static constexpr char kAdminFolderMoveStateQuery[] =
+    "SELECT id, user_id, automated_service_id, parent_id, path FROM storage.directories WHERE id = $1";
+static constexpr char kUserFolderMoveStateQuery[] =
+    "SELECT id, user_id, automated_service_id, parent_id, path FROM storage.directories WHERE id = $1 AND user_id = $2";
+static constexpr char kServiceDirectoryPathQuery[] = "SELECT id, path FROM storage.directories WHERE id = $1 AND automated_service_id = $2";
+static constexpr char kUserDirectoryPathQuery[] = "SELECT id, path FROM storage.directories WHERE id = $1 AND user_id = $2";
 
 struct Capabilities {
     bool can_read{false};
@@ -109,6 +239,48 @@ using VirtualDriveListResponse = GenericDriveListResponse<VirtualFolderItem>;
 using NormalDriveListResponse = GenericDriveListResponse<FolderItem>;
 } // namespace detail
 
+namespace
+{
+struct DriveActor {
+    int32_t user_id{0};
+    std::string role{"user"};
+    bool is_admin{false};
+    int64_t session_id{0};
+    std::string organisation;
+};
+
+std::optional<DriveActor> resolveDriveActor(const drogon::HttpRequestPtr& tsp_req) {
+    if (!tsp_req) {
+        return std::nullopt;
+    }
+    if (tsp_req->attributes()->find("auth_context")) {
+        const auto& auth = tsp_req->attributes()->get<filters::AuthContext>("auth_context");
+        if (auth.user.id > 0) {
+            DriveActor a;
+            a.user_id = auth.user.id;
+            a.role = auth.user.role;
+            a.is_admin = (auth.user.role == "admin" || auth.user.is_platform_admin);
+            a.session_id = auth.session_id;
+            a.organisation = auth.user.organisation;
+            return a;
+        }
+    }
+    if (tsp_req->attributes()->find("session_claims")) {
+        const auto& claims = tsp_req->attributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims");
+        if (claims.user.id > 0) {
+            DriveActor a;
+            a.user_id = claims.user.id;
+            a.role = claims.user.role.name;
+            a.is_admin = (a.role == "admin");
+            a.session_id = claims.session_id;
+            a.organisation = claims.user.organisation;
+            return a;
+        }
+    }
+    return std::nullopt;
+}
+} // namespace
+
 // ============================================================================
 // Drive Directory Listing
 //
@@ -127,25 +299,16 @@ using NormalDriveListResponse = GenericDriveListResponse<FolderItem>;
 Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req) {
     try {
         // 1. Session Validation
-        auto session = tsp_req->getAttributes()->get<Json::Value>("session_json");
-        if (!session || !session.isMember("user")) {
-            co_return createJsonErrorResponse("No valid session found", k401Unauthorized);
+        auto actor_opt = resolveDriveActor(tsp_req);
+        if (!actor_opt) {
+            co_return createTypedResponse(BackendErrorResponse{"No valid session found", k401Unauthorized});
         }
 
-        if (!session["user"].isMember("id") || !session["user"]["id"].isInt()) {
-            co_return createJsonErrorResponse("Corrupted session: user.id missing or not an integer", k500InternalServerError);
-        }
-        if (!session["user"].isMember("role") || !session["user"]["role"].isMember("name") || !session["user"]["role"]["name"].isString()) {
-            co_return createJsonErrorResponse("Corrupted session: user.role.name missing or not a string", k500InternalServerError);
-        }
-
-        const int32_t user_id = session["user"]["id"].asInt();
-        const std::string role = session["user"]["role"]["name"].asString();
-        const bool is_admin = (role == "admin");
-
-        if (!is_admin && !session["session_id"].isInt()) {
-            co_return createJsonErrorResponse("Corrupted session: session_id missing or not an integer", k500InternalServerError);
-        }
+        const auto& actor = *actor_opt;
+        const int32_t user_id = actor.user_id;
+        const std::string& role = actor.role;
+        const bool is_admin = actor.is_admin;
+        const auto& session = tsp_req->attributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims");
 
         // 2. Scope and Path Resolution
         std::string scope_str = tsp_req->getOptionalParameter<std::string>("scope").value_or("personal");
@@ -157,11 +320,12 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
         auto scope_res = co_await storage_service_.resolveScopeSession(session, scope, req_path);
 
         if (!scope_res.has_value()) {
-            co_return sgrn::createJsonResponse(scope_res);
+            co_return createTypedResponse(BackendErrorResponse{scope_res.error()});
         }
 
         if (!scope_res->can_read) {
-            co_return createJsonErrorResponse("Access Denied: Read capability is not granted for this scope.", drogon::k403Forbidden);
+            co_return createTypedResponse(
+                BackendErrorResponse{"Access Denied: Read capability is not granted for this scope.", drogon::k403Forbidden});
         }
 
         const int32_t target_owner_id = scope_res->owner_id;
@@ -195,7 +359,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (!db_res) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db_client = db_res.value();
 
@@ -284,24 +448,21 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
             if (!trail_paths.empty()) {
                 const std::string pg_arr = make_pg_array(trail_paths);
                 // drogon::orm::Result has no default constructor — use an IIFE.
-                auto batch_res = co_await [&]() -> Task<drogon::orm::Result> {
+                auto batch_rows = co_await [&]() -> Task<std::vector<detail::DirectoryTrailRow>> {
                     if (scope == StorageScope::Domain) {
-                        co_return co_await db_client->execSqlCoro("SELECT d.id, d.name, d.path FROM storage.directories d "
-                                                                  "WHERE d.domain = $1 AND d.path = ANY($2::text[])",
-                            target_domain, pg_arr);
+                        auto batch = co_await db_client->execSqlCoro(detail::kDomainDirectoryTrailQuery, target_domain, pg_arr);
+                        co_return sgrn::orm::fromResult<detail::DirectoryTrailRow, detail::kDomainDirectoryTrailQuery>(batch);
                     }
                     if (scope == StorageScope::Personal || scope == StorageScope::Users) {
                         const int32_t trail_owner = (scope == StorageScope::Personal) ? user_id : target_owner_id;
-                        co_return co_await db_client->execSqlCoro("SELECT d.id, d.name, d.path FROM storage.directories d "
-                                                                  "WHERE d.user_id = $1 AND d.path = ANY($2::text[])",
-                            trail_owner, pg_arr);
+                        auto batch = co_await db_client->execSqlCoro(detail::kUserDirectoryTrailQuery, trail_owner, pg_arr);
+                        co_return sgrn::orm::fromResult<detail::DirectoryTrailRow, detail::kUserDirectoryTrailQuery>(batch);
                     }
-                    co_return co_await db_client->execSqlCoro("SELECT d.id, d.name, d.path FROM storage.directories d "
-                                                              "WHERE d.automated_service_id = $1 AND d.path = ANY($2::text[])",
-                        target_owner_id, pg_arr);
+                    auto batch = co_await db_client->execSqlCoro(detail::kServiceDirectoryTrailQuery, target_owner_id, pg_arr);
+                    co_return sgrn::orm::fromResult<detail::DirectoryTrailRow, detail::kServiceDirectoryTrailQuery>(batch);
                 }();
-                for (const auto& row : batch_res) {
-                    dir_map[row["path"].as<std::string>()] = {row["id"].as<int64_t>(), row["name"].as<std::string>()};
+                for (const auto& row : batch_rows) {
+                    dir_map[row.path] = {row.id, row.name};
                 }
             }
 
@@ -372,12 +533,12 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
 
         // 6. Build Content Listing (Virtual Root vs Normal Drive)
         if (is_virtual_root) {
-            const std::string& organisation = session["user"]["organisation"].asString();
+            const std::string& organisation = actor.organisation;
 
             auto vrl_res = co_await buildVirtualRootListing(namespace_prefix, scope, organisation, db_client);
             if (vrl_res.hasError()) {
-                co_return createJsonErrorResponse(
-                    std::format("Failed to list virtual root: {}", vrl_res.error().message_), drogon::k500InternalServerError);
+                co_return createTypedResponse(BackendErrorResponse{
+                    std::format("Failed to list virtual root: {}", vrl_res.error().message), drogon::k500InternalServerError});
             }
             auto v_folders = std::move(vrl_res).value();
             total_folders = static_cast<int32_t>(v_folders.size());
@@ -406,7 +567,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
                 .sort = sort_key,
                 .order = sort_order,
             };
-            co_return createTypedJsonResponse(resp, k200OK);
+            co_return createTypedResponse(tsp_req, resp, k200OK);
         } else {
             auto listing = co_await buildNormalDriveListing(
                 namespace_prefix, current_path, user_id, target_owner_id, scope, db_client, limit, page, search, sort_key, sort_desc);
@@ -436,46 +597,49 @@ Task<HttpResponsePtr> StorageApiHandler::handleDriveList(HttpRequestPtr tsp_req)
                 .sort = sort_key,
                 .order = sort_order,
             };
-            co_return createTypedJsonResponse(resp, k200OK);
+            co_return createTypedResponse(tsp_req, resp, k200OK);
         }
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Drive list DB exception: {}", e.base().what());
-        co_return createErrorResponse(GenericApiError::InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
     } catch (const std::exception& ex) {
         ERROR_LOG("Drive list handler exception: {}", ex.what());
-        co_return createErrorResponse(GenericApiError::InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
     }
 }
 
-Task<BackendResult<std::vector<detail::VirtualFolderItem>>> StorageApiHandler::buildVirtualRootListing(
+Task<Result<std::vector<detail::VirtualFolderItem>, BackendError>> StorageApiHandler::buildVirtualRootListing(
     const std::string& t_namespace_prefix, StorageScope t_scope, const std::string& t_organisation,
     const drogon::orm::DbClientPtr& tsp_db_client) {
 
     try {
-        const std::string sql = (t_scope == StorageScope::AutomatedServices)
-                                    ? "SELECT token::text AS name, name AS display_name FROM core.automated_services "
-                                      "WHERE organisation = $1 AND deleted_at IS NULL ORDER BY name"
-                                : (t_scope == StorageScope::Domain) ? "SELECT name, NULL::text AS display_name FROM core.domains "
-                                                                      "WHERE organisation = $1 ORDER BY name"
-                                                                    : "SELECT email AS name, NULL::text AS display_name FROM core.users "
-                                                                      "WHERE organisation = $1 AND deleted_at IS NULL ORDER BY name";
-
-        drogon::orm::Result res = co_await tsp_db_client->execSqlCoro(sql, t_organisation);
-        std::vector<detail::VirtualFolderItem> items;
-        items.reserve(res.size());
-        for (const auto& row : res) {
-            detail::VirtualFolderItem item;
-            item.name = row["name"].as<std::string>();
-            item.path = t_namespace_prefix + "/" + item.name;
-            if (!row["display_name"].isNull()) {
-                item.display_name = row["display_name"].as<std::string>();
+        auto res = co_await [&]() -> Task<drogon::orm::Result> {
+            if (t_scope == StorageScope::AutomatedServices) {
+                co_return co_await tsp_db_client->execSqlCoro(detail::kServiceVirtualRootQuery, t_organisation);
             }
+            if (t_scope == StorageScope::Domain) {
+                co_return co_await tsp_db_client->execSqlCoro(detail::kDomainVirtualRootQuery, t_organisation);
+            }
+            co_return co_await tsp_db_client->execSqlCoro(detail::kUserVirtualRootQuery, t_organisation);
+        }();
+        auto entries = t_scope == StorageScope::AutomatedServices
+                           ? sgrn::orm::fromResult<detail::VirtualRootEntry, detail::kServiceVirtualRootQuery>(res)
+                       : t_scope == StorageScope::Domain
+                           ? sgrn::orm::fromResult<detail::VirtualRootEntry, detail::kDomainVirtualRootQuery>(res)
+                           : sgrn::orm::fromResult<detail::VirtualRootEntry, detail::kUserVirtualRootQuery>(res);
+        std::vector<detail::VirtualFolderItem> items;
+        items.reserve(entries.size());
+        for (auto& entry : entries) {
+            detail::VirtualFolderItem item;
+            item.name = std::move(entry.name);
+            item.path = t_namespace_prefix + "/" + item.name;
+            item.display_name = std::move(entry.display_name);
             items.push_back(std::move(item));
         }
         co_return items;
 
     } catch (const std::exception& ex) {
-        co_return BackendError{"Database", std::string("buildVirtualRootListing failed: ") + ex.what()};
+        co_return BackendError(BackendErrorKind::Database, std::string("buildVirtualRootListing failed: ") + ex.what());
     }
 }
 
@@ -801,59 +965,35 @@ SELECT * FROM (
         co_return result;
     }
 
-    constexpr drogon::orm::Row::SizeType kColItemType = 0;
-    constexpr drogon::orm::Row::SizeType kColOrd = 1;
-    constexpr drogon::orm::Row::SizeType kColId = 2;
-    constexpr drogon::orm::Row::SizeType kColName = 3;
-    constexpr drogon::orm::Row::SizeType kColPath = 4;
-    constexpr drogon::orm::Row::SizeType kColCreatedAt = 5;
-    constexpr drogon::orm::Row::SizeType kColVirtualSize = 6;
-    constexpr drogon::orm::Row::SizeType kColRealSize = 7;
-    constexpr drogon::orm::Row::SizeType kColCountSubFiles = 8;
-    constexpr drogon::orm::Row::SizeType kColCountSubDirectories = 9;
-    constexpr drogon::orm::Row::SizeType kColExtension = 10;
-    constexpr drogon::orm::Row::SizeType kColSize = 11;
-    constexpr drogon::orm::Row::SizeType kColOriginalSize = 12;
-    constexpr drogon::orm::Row::SizeType kColUploadMode = 13;
-    constexpr drogon::orm::Row::SizeType kColPartCount = 14;
-    constexpr drogon::orm::Row::SizeType kColIsEncrypted = 15;
-    constexpr drogon::orm::Row::SizeType kColKeyId = 16;
-    constexpr drogon::orm::Row::SizeType kColTotalFolders = 17;
-    constexpr drogon::orm::Row::SizeType kColTotalFiles = 18;
+    const auto rows = sgrn::orm::fromResultByName<detail::DriveListingRow>(listing_res);
+    result.total_folders = static_cast<int32_t>(rows[0].total_folders);
+    result.total_files = static_cast<int32_t>(rows[0].total_files);
 
-    result.total_folders = static_cast<int32_t>(listing_res[0][kColTotalFolders].as<int64_t>());
-    result.total_files = static_cast<int32_t>(listing_res[0][kColTotalFiles].as<int64_t>());
-
-    for (const auto& row : listing_res) {
-        int item_type = row[kColItemType].as<int>();
-        if (item_type == 1) {
+    for (const auto& row : rows) {
+        if (row.item_type == 1) {
             detail::FolderItem folder;
-            folder.id = row[kColId].as<int64_t>();
-            folder.name = row[kColName].as<std::string>();
-            folder.path = row[kColPath].as<std::string>();
-            folder.created_at = row[kColCreatedAt].as<std::string>();
-            folder.virtual_size = row[kColVirtualSize].as<int64_t>();
-            folder.real_size = row[kColRealSize].as<int64_t>();
-            folder.count_sub_files = row[kColCountSubFiles].as<int64_t>();
-            folder.count_sub_directories = row[kColCountSubDirectories].as<int64_t>();
+            folder.id = row.id;
+            folder.name = row.name;
+            folder.path = row.path;
+            folder.created_at = row.created_at;
+            folder.virtual_size = row.virtual_size;
+            folder.real_size = row.real_size;
+            folder.count_sub_files = row.count_sub_files;
+            folder.count_sub_directories = row.count_sub_directories;
             result.folders.push_back(std::move(folder));
-        } else if (item_type == 2) {
+        } else if (row.item_type == 2) {
             detail::FileItem file;
-            file.id = row[kColId].as<int64_t>();
-            file.name = row[kColName].as<std::string>();
-            file.path = row[kColPath].as<std::string>();
-            file.extension = row[kColExtension].as<std::string>();
-            file.created_at = row[kColCreatedAt].as<std::string>();
-            file.size = row[kColSize].as<int64_t>();
-            file.original_size = row[kColOriginalSize].as<int64_t>();
-            file.upload_mode = row[kColUploadMode].as<std::string>();
-            if (!row[kColPartCount].isNull()) {
-                file.part_count = row[kColPartCount].as<int64_t>();
-            }
-            file.is_encrypted = row[kColIsEncrypted].as<bool>();
-            if (!row[kColKeyId].isNull()) {
-                file.key_id = row[kColKeyId].as<std::string>();
-            }
+            file.id = row.id;
+            file.name = row.name;
+            file.path = row.path;
+            file.extension = row.extension;
+            file.created_at = row.created_at;
+            file.size = row.size;
+            file.original_size = row.original_size;
+            file.upload_mode = row.upload_mode;
+            file.part_count = row.part_count;
+            file.is_encrypted = row.is_encrypted;
+            file.key_id = row.key_id;
             result.files.push_back(std::move(file));
         }
     }
@@ -864,28 +1004,28 @@ Task<HttpResponsePtr> StorageApiHandler::handleCreateDirectory(HttpRequestPtr ts
     try {
         auto path_opt = tsp_req->getOptionalParameter<std::string>("path");
         if (!path_opt.has_value()) {
-            co_return createJsonErrorResponse("Missing 'path' query parameter", k400BadRequest);
+            co_return createTypedResponse(BackendErrorResponse{"Missing 'path' query parameter", k400BadRequest});
         }
         std::string path = sgrn::utils::strings::trim(std::move(*path_opt));
         if (path.empty()) {
-            co_return createJsonErrorResponse("Path parameter cannot be empty", k400BadRequest);
+            co_return createTypedResponse(BackendErrorResponse{"Path parameter cannot be empty", k400BadRequest});
         }
 
         std::string scope = tsp_req->getOptionalParameter<std::string>("scope").value_or("personal");
 
-        auto session = tsp_req->getAttributes()->get<Json::Value>("session_json");
-        if (!session) {
-            co_return createJsonErrorResponse("No session found", k401Unauthorized);
+        if (!tsp_req->attributes()->find("session_claims")) {
+            co_return createTypedResponse(BackendErrorResponse{"No session found", k401Unauthorized});
         }
+        auto session = tsp_req->getAttributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims");
 
         co_return co_await storage_service_.handleCreateDirectoryRequest(std::move(session), std::move(scope), std::move(path));
 
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Create directory DB exception: {}", e.base().what());
-        co_return createErrorResponse(GenericApiError::InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
     } catch (const std::exception& ex) {
         ERROR_LOG("Create directory handler exception: {}", ex.what());
-        co_return createErrorResponse(GenericApiError::InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
     }
 }
 
@@ -893,15 +1033,14 @@ Task<HttpResponsePtr> StorageApiHandler::handleAutomatedServiceFileRequest(HttpR
     try {
         auto norm = normalizePath(tsp_req->getOptionalParameter<std::string>("path").value_or(""));
         if (!norm.has_value()) {
-            co_return createJsonErrorResponse("Invalid path", k400BadRequest, "StorageApi");
+            co_return createTypedResponse(BackendErrorResponse{"Invalid path", k400BadRequest, "StorageApi"});
         }
         std::string path_str = std::move(*norm);
         const HttpMethod method = tsp_req->getMethod();
 
-        // Automated services don't supply generic session_json the same way users do, but let's see.
-        const auto session = tsp_req->getAttributes()->get<Json::Value>("session_json");
-        if (!session) {
-            co_return createJsonErrorResponse("No session found", k401Unauthorized);
+        const auto session = tsp_req->getAttributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims");
+        if (session.user.id <= 0) {
+            co_return createTypedResponse(BackendErrorResponse{"No session found", k401Unauthorized});
         }
 
         if (method == Get) {
@@ -913,11 +1052,13 @@ Task<HttpResponsePtr> StorageApiHandler::handleAutomatedServiceFileRequest(HttpR
             if (parser.parse(tsp_req) == -1) {
                 const std::string& ct = tsp_req->getHeader("Content-Type");
                 ERROR_LOG("[handleAutomatedServiceFileRequest] Failed to parse multipart: Content-Type='{}'", ct);
-                co_return createJsonErrorResponse("Failed to parse automated service multipart request body", k400BadRequest);
+                co_return createTypedResponse(
+                    BackendErrorResponse{"Failed to parse automated service multipart request body", k400BadRequest});
             }
             const auto& files = parser.getFiles();
             if (files.empty()) {
-                co_return createJsonErrorResponse("No file parts found in automated service multipart request", k400BadRequest);
+                co_return createTypedResponse(
+                    BackendErrorResponse{"No file parts found in automated service multipart request", k400BadRequest});
             }
 
             DEBUG_LOG("[StorageApiHandler::handleAutomatedServiceFileRequest] POST - path: {}, count: {}", path_str, files.size());
@@ -931,14 +1072,14 @@ Task<HttpResponsePtr> StorageApiHandler::handleAutomatedServiceFileRequest(HttpR
                 // SEC: Sanitize the relative path segment before merging with the base path
                 auto safe_rel = sgrn::utils::strings::sanitizeRelativeFilename(file_rel_path);
                 if (!safe_rel.has_value()) {
-                    co_return createJsonErrorResponse("Invalid filename: path traversal detected", k400BadRequest);
+                    co_return createTypedResponse(BackendErrorResponse{"Invalid filename: path traversal detected", k400BadRequest});
                 }
                 file_rel_path = std::move(*safe_rel);
 
                 std::string path_error;
                 auto target_opt = resolveSingleUploadTarget(parser.getParameters(), path_str, file_rel_path, path_error);
                 if (!target_opt) {
-                    co_return createJsonErrorResponse(path_error, k400BadRequest, "StorageApi");
+                    co_return createTypedResponse(BackendErrorResponse{path_error, k400BadRequest, "StorageApi"});
                 }
                 std::string target_path = std::move(*target_opt);
                 co_return co_await storage_service_.handleUploadFileRequest(std::move(session), "personal", target_path, files[0]);
@@ -947,53 +1088,44 @@ Task<HttpResponsePtr> StorageApiHandler::handleAutomatedServiceFileRequest(HttpR
             }
         }
 
-        co_return createJsonErrorResponse("Method not allowed", k405MethodNotAllowed);
+        co_return createTypedResponse(BackendErrorResponse{"Method not allowed", k405MethodNotAllowed});
 
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("AutomatedServiceApiHandler::handleFileRequest DB exception: {}", e.base().what());
-        co_return createErrorResponse(GenericApiError::InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
     } catch (const std::exception& ex) {
         ERROR_LOG("AutomatedServiceApiHandler::handleFileRequest exception: {}", ex.what());
-        co_return createErrorResponse(GenericApiError::InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
     }
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handleMove(HttpRequestPtr tsp_req) {
     try {
         // 1. Session and Authorization Check
-        auto session = tsp_req->getAttributes()->get<Json::Value>("session_json");
-        if (!session) {
-            co_return createJsonErrorResponse("No session found", k401Unauthorized);
+        auto actor_opt = resolveDriveActor(tsp_req);
+        if (!actor_opt) {
+            co_return createTypedResponse(BackendErrorResponse{"No session found", k401Unauthorized});
         }
 
-        if (!session.isMember("user") || !session["user"].isMember("id") || !session["user"]["id"].isInt()) {
-            co_return createJsonErrorResponse("Corrupted session: user.id missing or not an integer", k500InternalServerError);
-        }
-        if (!session["user"].isMember("role") || !session["user"]["role"].isMember("name") || !session["user"]["role"]["name"].isString()) {
-            co_return createJsonErrorResponse("Corrupted session: user.role.name missing or not a string", k500InternalServerError);
-        }
-
-        const int32_t user_id = session["user"]["id"].asInt();
-        const bool is_admin = (session["user"]["role"]["name"].asString() == "admin");
-
-        if (!session["session_id"].isInt()) {
-            co_return createJsonErrorResponse("Corrupted session: session_id missing", k500InternalServerError);
-        }
+        const auto& actor = *actor_opt;
+        const int32_t user_id = actor.user_id;
+        const bool is_admin = actor.is_admin;
 
         // 2. Parameter Extraction
         std::string type = tsp_req->getOptionalParameter<std::string>("type").value_or("file");
         std::string id = tsp_req->getOptionalParameter<std::string>("id").value_or("");
         if (id.empty()) {
-            co_return createJsonErrorResponse("Missing 'id' parameter", k400BadRequest);
+            co_return createTypedResponse(BackendErrorResponse{"Missing 'id' parameter", k400BadRequest});
         }
         if (type != "file" && type != "folder") {
-            co_return createJsonErrorResponse("type must be 'file' or 'folder'", k400BadRequest);
+            co_return createTypedResponse(BackendErrorResponse{"type must be 'file' or 'folder'", k400BadRequest});
         }
 
-        auto json = tsp_req->getJsonObject();
-        if (!json) {
-            co_return createJsonErrorResponse("Invalid JSON body", k400BadRequest);
+        auto req_res = parseTypedRequest<detail::MoveItemRequest>(tsp_req);
+        if (req_res.hasError()) {
+            co_return createTypedResponse(BackendErrorResponse{"Invalid JSON body", k400BadRequest});
         }
+        const auto& req = req_res.value();
 
         const int64_t entity_id = [&]() -> int64_t {
             try {
@@ -1004,45 +1136,33 @@ Task<HttpResponsePtr> StorageApiHandler::handleMove(HttpRequestPtr tsp_req) {
             }
         }();
         if (entity_id < 0) {
-            co_return createJsonErrorResponse("id must be a valid integer", k400BadRequest);
+            co_return createTypedResponse(BackendErrorResponse{"id must be a valid integer", k400BadRequest});
         }
 
         // 3. Database Transaction Initiation
         auto db_res = storage_service_.getDbClient();
         if (!db_res.has_value()) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db_client = db_res.value();
         auto transaction = co_await db_client->newTransactionCoro();
         if (!transaction) {
-            co_return createJsonErrorResponse("Database transaction unavailable", k503ServiceUnavailable);
+            co_return createTypedResponse(BackendErrorResponse{"Database transaction unavailable", k503ServiceUnavailable});
         }
 
         // 4. Target Resolution (Optional parent_id and new_name)
-        auto read_optional_parent_id = [&]() -> std::optional<int64_t> {
-            if (!json->isMember("parent_id") || (*json)["parent_id"].isNull())
-                return std::nullopt;
-            if (!(*json)["parent_id"].isInt64() && !(*json)["parent_id"].isInt())
-                return std::nullopt;
-            return (*json)["parent_id"].asInt64();
-        };
+        std::optional<std::string> target_name;
+        if (req.new_name.has_value() && !req.new_name->empty()) {
+            const std::string name_value = sgrn::utils::strings::trim(*req.new_name);
+            if (!name_value.empty())
+                target_name = name_value;
+        } else if (req.name.has_value() && !req.name->empty()) {
+            const std::string name_value = sgrn::utils::strings::trim(*req.name);
+            if (!name_value.empty())
+                target_name = name_value;
+        }
 
-        auto read_optional_name = [&]() -> std::optional<std::string> {
-            if (json->isMember("new_name") && (*json)["new_name"].isString()) {
-                const std::string name_value = sgrn::utils::strings::trim((*json)["new_name"].asString());
-                if (!name_value.empty())
-                    return name_value;
-            }
-            if (json->isMember("name") && (*json)["name"].isString()) {
-                const std::string name_value = sgrn::utils::strings::trim((*json)["name"].asString());
-                if (!name_value.empty())
-                    return name_value;
-            }
-            return std::nullopt;
-        };
-
-        const std::optional<int64_t> target_parent_id = read_optional_parent_id();
-        const std::optional<std::string> target_name = read_optional_name();
+        const std::optional<int64_t> target_parent_id = req.parent_id;
 
         // SEC: Validate the new name to prevent path-traversal injection.
         // Uses sgrn::utils::strings::isValidFileName() to reject names containing
@@ -1051,7 +1171,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleMove(HttpRequestPtr tsp_req) {
         if (target_name.has_value()) {
             auto name_result = sgrn::utils::strings::isValidFileName(*target_name);
             if (name_result.hasError()) {
-                co_return createJsonErrorResponse(std::format("Invalid name: {}", name_result.error()), k400BadRequest);
+                co_return createTypedResponse(BackendErrorResponse{std::format("Invalid name: {}", name_result.error()), k400BadRequest});
             }
         }
 
@@ -1064,41 +1184,34 @@ Task<HttpResponsePtr> StorageApiHandler::handleMove(HttpRequestPtr tsp_req) {
 
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Move handler DB exception: {}", e.base().what());
-        co_return createErrorResponse(GenericApiError::InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
     } catch (const std::exception& ex) {
         ERROR_LOG("Move handler exception: {}", ex.what());
-        co_return createErrorResponse(GenericApiError::InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
     }
 }
 
 Task<HttpResponsePtr> StorageApiHandler::moveFile(const std::shared_ptr<drogon::orm::Transaction>& tsp_transaction, int64_t t_entity_id,
     int32_t t_user_id, bool t_is_admin, std::optional<int64_t> t_target_parent_id, std::optional<std::string> t_target_name) {
     // 1. Fetch current file state
-    auto file_res = t_is_admin
-                        ? co_await tsp_transaction->execSqlCoro(
-                              "SELECT id, user_id, automated_service_id, directory_id FROM storage.files WHERE id = $1", t_entity_id)
-
-                        : co_await tsp_transaction->execSqlCoro(
-                              "SELECT id, user_id, automated_service_id, directory_id FROM storage.files WHERE id = $1 AND user_id = $2",
-                              t_entity_id, t_user_id);
+    auto file_res = t_is_admin ? co_await tsp_transaction->execSqlCoro(detail::kAdminFileMoveStateQuery, t_entity_id)
+                               : co_await tsp_transaction->execSqlCoro(detail::kUserFileMoveStateQuery, t_entity_id, t_user_id);
 
     if (file_res.empty()) {
         tsp_transaction->rollback();
-        co_return createJsonErrorResponse("File not found or access denied", k404NotFound);
+        co_return createTypedResponse(BackendErrorResponse{"File not found or access denied", k404NotFound});
     }
 
-    const auto& file_row = file_res[0];
-    const std::optional<int32_t> file_user_id =
-        file_row["user_id"].isNull() ? std::nullopt : std::optional<int32_t>(file_row["user_id"].as<int32_t>());
-    const std::optional<int32_t> file_service_id =
-        file_row["automated_service_id"].isNull() ? std::nullopt : std::optional<int32_t>(file_row["automated_service_id"].as<int32_t>());
-    const std::optional<int64_t> current_directory_id =
-        file_row["directory_id"].isNull() ? std::nullopt : std::optional<int64_t>(file_row["directory_id"].as<int64_t>());
+    const auto file_row = t_is_admin ? sgrn::orm::fromRow<detail::FileMoveStateRow, detail::kAdminFileMoveStateQuery>(file_res[0])
+                                     : sgrn::orm::fromRow<detail::FileMoveStateRow, detail::kUserFileMoveStateQuery>(file_res[0]);
+    const auto& file_user_id = file_row.user_id;
+    const auto& file_service_id = file_row.automated_service_id;
+    const auto& current_directory_id = file_row.directory_id;
 
     // 2. Short-circuit if no changes
     if (current_directory_id == t_target_parent_id && !t_target_name.has_value()) {
         tsp_transaction->rollback();
-        co_return createJsonResponse(fmt::format(R"({{"success":true,"id":{},"type":"file"}})", t_entity_id));
+        co_return createTypedResponse(detail::MoveItemResponse{t_entity_id, "file", std::nullopt, std::nullopt}, k200OK);
     }
 
     // 3. Validate target directory ownership
@@ -1114,7 +1227,7 @@ Task<HttpResponsePtr> StorageApiHandler::moveFile(const std::shared_ptr<drogon::
 
         if (!dir_res.has_value() || dir_res->empty()) {
             tsp_transaction->rollback();
-            co_return createJsonErrorResponse("Target directory does not exist or access denied", k403Forbidden);
+            co_return createTypedResponse(BackendErrorResponse{"Target directory does not exist or access denied", k403Forbidden});
         }
     }
 
@@ -1148,72 +1261,64 @@ Task<HttpResponsePtr> StorageApiHandler::moveFile(const std::shared_ptr<drogon::
 
     if (update_res.affectedRows() == 0) {
         tsp_transaction->rollback();
-        co_return createJsonErrorResponse("Update failed", k500InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{"Update failed", k500InternalServerError});
     }
 
-    co_return createJsonResponse(fmt::format(R"({{"success":true,"id":{},"type":"file"{}{}}})", t_entity_id,
-        t_target_parent_id ? fmt::format(R"(,"parent_id":{})", *t_target_parent_id) : "",
-        t_target_name ? fmt::format(R"(,"name":"{}")", jsonEscape(*t_target_name)) : ""));
+    co_return createTypedResponse(detail::MoveItemResponse{t_entity_id, "file", t_target_parent_id, t_target_name}, k200OK);
 }
 
 Task<HttpResponsePtr> StorageApiHandler::moveFolder(const std::shared_ptr<drogon::orm::Transaction>& tsp_transaction, int64_t t_entity_id,
     int32_t t_user_id, bool t_is_admin, std::optional<int64_t> t_target_parent_id, std::optional<std::string> t_target_name) {
     // 1. Fetch current folder state
-    auto dir_res =
-        t_is_admin
-            ? co_await tsp_transaction->execSqlCoro(
-                  "SELECT id, user_id, automated_service_id, parent_id, path FROM storage.directories WHERE id = $1", t_entity_id)
-            : co_await tsp_transaction->execSqlCoro(
-                  "SELECT id, user_id, automated_service_id, parent_id, path FROM storage.directories WHERE id = $1 AND user_id = $2",
-                  t_entity_id, t_user_id);
+    auto dir_res = t_is_admin ? co_await tsp_transaction->execSqlCoro(detail::kAdminFolderMoveStateQuery, t_entity_id)
+                              : co_await tsp_transaction->execSqlCoro(detail::kUserFolderMoveStateQuery, t_entity_id, t_user_id);
 
     if (dir_res.empty()) {
         tsp_transaction->rollback();
-        co_return createJsonErrorResponse("Folder not found or access denied", k404NotFound);
+        co_return createTypedResponse(BackendErrorResponse{"Folder not found or access denied", k404NotFound});
     }
 
-    const auto& dir_row = dir_res[0];
-    const std::optional<int32_t> dir_user_id =
-        dir_row["user_id"].isNull() ? std::nullopt : std::optional<int32_t>(dir_row["user_id"].as<int32_t>());
-    const std::optional<int32_t> dir_service_id =
-        dir_row["automated_service_id"].isNull() ? std::nullopt : std::optional<int32_t>(dir_row["automated_service_id"].as<int32_t>());
-    const std::optional<int64_t> current_parent_id =
-        dir_row["parent_id"].isNull() ? std::nullopt : std::optional<int64_t>(dir_row["parent_id"].as<int64_t>());
-    const std::string current_path = dir_row["path"].as<std::string>();
+    const auto dir_row = t_is_admin ? sgrn::orm::fromRow<detail::FolderMoveStateRow, detail::kAdminFolderMoveStateQuery>(dir_res[0])
+                                    : sgrn::orm::fromRow<detail::FolderMoveStateRow, detail::kUserFolderMoveStateQuery>(dir_res[0]);
+    const auto& dir_user_id = dir_row.user_id;
+    const auto& dir_service_id = dir_row.automated_service_id;
+    const auto& current_parent_id = dir_row.parent_id;
+    const std::string& current_path = dir_row.path;
 
     // 2. Short-circuit if no changes
     if (current_parent_id == t_target_parent_id && !t_target_name.has_value()) {
         tsp_transaction->rollback();
-        co_return createJsonResponse(fmt::format(R"({{"success":true,"id":{},"type":"folder"}})", t_entity_id));
+        co_return createTypedResponse(detail::MoveItemResponse{t_entity_id, "folder", std::nullopt, std::nullopt}, k200OK);
     }
 
     // 3. Validate target and prevent cycles
     if (t_target_parent_id.has_value()) {
         if (*t_target_parent_id == t_entity_id) {
             tsp_transaction->rollback();
-            co_return createJsonErrorResponse("A folder cannot be moved into itself", k400BadRequest);
+            co_return createTypedResponse(BackendErrorResponse{"A folder cannot be moved into itself", k400BadRequest});
         }
 
         std::optional<drogon::orm::Result> target_res;
         if (dir_service_id.has_value()) {
-            target_res = co_await tsp_transaction->execSqlCoro(
-                "SELECT id, path FROM storage.directories WHERE id = $1 AND automated_service_id = $2", *t_target_parent_id,
-                *dir_service_id);
+            target_res = co_await tsp_transaction->execSqlCoro(detail::kServiceDirectoryPathQuery, *t_target_parent_id, *dir_service_id);
         } else {
-            target_res = co_await tsp_transaction->execSqlCoro("SELECT id, path FROM storage.directories WHERE id = $1 AND user_id = $2",
-                *t_target_parent_id, dir_user_id.value_or(t_user_id));
+            target_res = co_await tsp_transaction->execSqlCoro(
+                detail::kUserDirectoryPathQuery, *t_target_parent_id, dir_user_id.value_or(t_user_id));
         }
 
         if (!target_res.has_value() || target_res->empty()) {
             tsp_transaction->rollback();
-            co_return createJsonErrorResponse("Target directory does not exist or access denied", k403Forbidden);
+            co_return createTypedResponse(BackendErrorResponse{"Target directory does not exist or access denied", k403Forbidden});
         }
 
-        const std::string target_path = (*target_res)[0]["path"].as<std::string>();
+        const auto target = dir_service_id.has_value()
+                                ? sgrn::orm::fromRow<detail::DirectoryPathRow, detail::kServiceDirectoryPathQuery>((*target_res)[0])
+                                : sgrn::orm::fromRow<detail::DirectoryPathRow, detail::kUserDirectoryPathQuery>((*target_res)[0]);
+        const std::string& target_path = target.path;
         const std::string descendant_prefix = current_path + "/";
         if (target_path == current_path || target_path.rfind(descendant_prefix, 0) == 0) {
             tsp_transaction->rollback();
-            co_return createJsonErrorResponse("A folder cannot be moved into its own descendant", k400BadRequest);
+            co_return createTypedResponse(BackendErrorResponse{"A folder cannot be moved into its own descendant", k400BadRequest});
         }
     }
 
@@ -1232,44 +1337,43 @@ Task<HttpResponsePtr> StorageApiHandler::moveFolder(const std::shared_ptr<drogon
 
     if (update_res.affectedRows() == 0) {
         tsp_transaction->rollback();
-        co_return createJsonErrorResponse("Update failed", k500InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{"Update failed", k500InternalServerError});
     }
 
-    co_return createJsonResponse(fmt::format(R"({{"success":true,"id":{},"type":"folder"{}{}}})", t_entity_id,
-        t_target_parent_id ? fmt::format(R"(,"parent_id":{})", *t_target_parent_id) : "",
-        t_target_name ? fmt::format(R"(,"name":"{}")", jsonEscape(*t_target_name)) : ""));
+    co_return createTypedResponse(detail::MoveItemResponse{t_entity_id, "folder", t_target_parent_id, t_target_name}, k200OK);
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handleDelete(HttpRequestPtr tsp_req) {
     try {
-        auto session = tsp_req->getAttributes()->get<Json::Value>("session_json");
-        if (!session) {
-            co_return createJsonErrorResponse("No session found", k401Unauthorized);
+        auto session = tsp_req->getAttributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims");
+        if (session.user.id <= 0) {
+            co_return createTypedResponse(BackendErrorResponse{"No session found", k401Unauthorized});
         }
 
         std::string type = tsp_req->getOptionalParameter<std::string>("type").value_or("file");
         std::string id = tsp_req->getOptionalParameter<std::string>("id").value_or("");
         if (id.empty()) {
-            co_return createJsonErrorResponse("Missing 'id' parameter", k400BadRequest);
+            co_return createTypedResponse(BackendErrorResponse{"Missing 'id' parameter", k400BadRequest});
         }
         if (type != "file" && type != "folder") {
-            co_return createJsonErrorResponse("type must be 'file' or 'folder'", k400BadRequest);
+            co_return createTypedResponse(BackendErrorResponse{"type must be 'file' or 'folder'", k400BadRequest});
         }
 
-        if (!session.isMember("user") || !session["user"].isMember("role") || !session["user"]["role"].isMember("name") ||
-            !session["user"]["role"]["name"].isString()) {
-            co_return createJsonErrorResponse("Corrupted session: user.role.name missing or not a string", k500InternalServerError);
+        if (session.user.role.name.empty()) {
+            co_return createTypedResponse(
+                BackendErrorResponse{"Corrupted session: user.role.name missing or not a string", k500InternalServerError});
         }
-        if (!session.isMember("user") || !session["user"].isMember("id") || !session["user"]["id"].isInt()) {
-            co_return createJsonErrorResponse("Corrupted session: user.id missing or not an integer", k500InternalServerError);
-        }
-
-        const bool is_admin = (session["user"]["role"]["name"].asString() == "admin");
-        if (!session["session_id"].isInt()) {
-            co_return createJsonErrorResponse("Corrupted session: session_id missing", k500InternalServerError);
+        if (session.user.id <= 0) {
+            co_return createTypedResponse(
+                BackendErrorResponse{"Corrupted session: user.id missing or not an integer", k500InternalServerError});
         }
 
-        const int32_t user_id = session["user"]["id"].asInt();
+        const bool is_admin = (session.user.role.name == "admin");
+        if (session.session_id <= 0) {
+            co_return createTypedResponse(BackendErrorResponse{"Corrupted session: session_id missing", k500InternalServerError});
+        }
+
+        const int32_t user_id = session.user.id;
         const int64_t entity_id = [&]() -> int64_t {
             try {
                 return std::stoll(id);
@@ -1278,12 +1382,12 @@ Task<HttpResponsePtr> StorageApiHandler::handleDelete(HttpRequestPtr tsp_req) {
             }
         }();
         if (entity_id < 0) {
-            co_return createJsonErrorResponse("id must be a valid integer", k400BadRequest);
+            co_return createTypedResponse(BackendErrorResponse{"id must be a valid integer", k400BadRequest});
         }
 
         auto db_res = storage_service_.getDbClient();
         if (!db_res.has_value()) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db_client = db_res.value();
 
@@ -1293,14 +1397,14 @@ Task<HttpResponsePtr> StorageApiHandler::handleDelete(HttpRequestPtr tsp_req) {
             co_return co_await deleteFolder(db_client, entity_id, user_id, is_admin);
         }
 
-        co_return createTypedJsonResponse(detail::DeleteResponse{true, entity_id, type}, k200OK);
+        co_return createTypedResponse(tsp_req, detail::DeleteResponse{entity_id, type}, k200OK);
 
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Delete handler DB exception: {}", e.base().what());
-        co_return createErrorResponse(GenericApiError::InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
     } catch (const std::exception& ex) {
         ERROR_LOG("Delete handler exception: {}", ex.what());
-        co_return createErrorResponse(GenericApiError::InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
     }
 }
 
@@ -1310,125 +1414,126 @@ Task<HttpResponsePtr> StorageApiHandler::deleteFile(
     // Single query: fetch file ownership + permission in one pass.
     // LEFT JOINs return NULL columns when the user has no domain permission
     // or the file has no user_id (domain-owned), both handled below.
-    auto file_res = co_await tsp_db_client->execSqlCoro("SELECT f.id, f.user_id, f.domain, "
-                                                        "       udp.can_delete  AS domain_can_delete, "
-                                                        "       u.can_delete_personal "
-                                                        "FROM storage.files f "
-                                                        "LEFT JOIN core.user_domain_permissions udp "
-                                                        "       ON udp.user_id = $2 AND udp.domain = f.domain "
-                                                        "LEFT JOIN core.users u ON u.id = $2 "
-                                                        "WHERE f.id = $1",
-        t_entity_id, t_user_id);
+    static constexpr char kFileDeletePermissionQuery[] = "SELECT f.id, f.user_id, f.domain, "
+                                                         "       udp.can_delete  AS domain_can_delete, "
+                                                         "       u.can_delete_personal "
+                                                         "FROM storage.files f "
+                                                         "LEFT JOIN core.user_domain_permissions udp "
+                                                         "       ON udp.user_id = $2 AND udp.domain = f.domain "
+                                                         "LEFT JOIN core.users u ON u.id = $2 "
+                                                         "WHERE f.id = $1";
+    auto file_res = co_await tsp_db_client->execSqlCoro(kFileDeletePermissionQuery, t_entity_id, t_user_id);
 
     if (file_res.empty()) {
-        co_return createJsonErrorResponse("File not found or access denied", k404NotFound);
+        co_return createTypedResponse(BackendErrorResponse{"File not found or access denied", k404NotFound});
     }
 
-    const auto& fr = file_res[0];
-    const std::string domain_name = fr["domain"].isNull() ? "" : fr["domain"].as<std::string>();
+    const auto fr = sgrn::orm::fromRow<detail::DeletePermissionRow, kFileDeletePermissionQuery>(file_res[0]);
+    const std::string domain_name = fr.domain.value_or("");
 
     if (!t_is_admin) {
         if (!domain_name.empty()) {
             // Shared domain: require explicit can_delete permission
-            if (fr["domain_can_delete"].isNull() || !fr["domain_can_delete"].as<bool>()) {
-                co_return createJsonErrorResponse(
-                    "Deletion Denied: Delete capability is not granted for this operational domain.", k403Forbidden);
+            if (!fr.domain_can_delete.value_or(false)) {
+                co_return createTypedResponse(
+                    BackendErrorResponse{"Deletion Denied: Delete capability is not granted for this operational domain.", k403Forbidden});
             }
         } else {
             // Personal workspace: must be owner + can_delete_personal flag
-            if (fr["user_id"].isNull() || fr["user_id"].as<int32_t>() != t_user_id) {
-                co_return createJsonErrorResponse("File not found or access denied", k404NotFound);
+            if (!fr.user_id || *fr.user_id != t_user_id) {
+                co_return createTypedResponse(BackendErrorResponse{"File not found or access denied", k404NotFound});
             }
-            if (fr["can_delete_personal"].isNull() || !fr["can_delete_personal"].as<bool>()) {
-                co_return createJsonErrorResponse(
-                    "Deletion Denied: Deletion capability is disabled for this personal workspace.", k403Forbidden);
+            if (!fr.can_delete_personal.value_or(false)) {
+                co_return createTypedResponse(
+                    BackendErrorResponse{"Deletion Denied: Deletion capability is disabled for this personal workspace.", k403Forbidden});
             }
         }
     }
 
-    auto file_meta = co_await tsp_db_client->execSqlCoro(
+    static constexpr char kStoredObjectQuery[] =
         "SELECT o.id, o.bucket, o.key FROM storage.objects o JOIN storage.file_objects fo ON fo.object_id = o.id AND fo.part_index = 0 "
-        "WHERE fo.file_id = $1",
-        t_entity_id);
+        "WHERE fo.file_id = $1";
+    auto file_meta = co_await tsp_db_client->execSqlCoro(kStoredObjectQuery, t_entity_id);
     if (file_meta.empty()) {
-        co_return createJsonErrorResponse("File object not found", k404NotFound);
+        co_return createTypedResponse(BackendErrorResponse{"File object not found", k404NotFound});
     }
 
-    const int64_t object_id = file_meta[0]["id"].as<int64_t>();
-    const std::string bucket = file_meta[0]["bucket"].as<std::string>();
-    const std::string key = file_meta[0]["key"].as<std::string>();
+    const auto object = sgrn::orm::fromRow<detail::StoredObjectRow, kStoredObjectQuery>(file_meta[0]);
 
     // Crypto-shred if encrypted
-    auto enc_rows = co_await tsp_db_client->execSqlCoro("SELECT key_id, is_encrypted FROM storage.files WHERE id = $1", t_entity_id);
-    if (!enc_rows.empty() && enc_rows[0]["is_encrypted"].as<bool>() && !enc_rows[0]["key_id"].isNull()) {
-        std::string kid = enc_rows[0]["key_id"].as<std::string>();
-        auto ks = sgrn::datastore::crypto::getKeyStore();
-        if (ks) {
-            (void)ks->shred(kid);
+    static constexpr char kFileEncryptionQuery[] = "SELECT key_id, is_encrypted FROM storage.files WHERE id = $1";
+    auto enc_rows = co_await tsp_db_client->execSqlCoro(kFileEncryptionQuery, t_entity_id);
+    if (!enc_rows.empty()) {
+        const auto encryption = sgrn::orm::fromRow<detail::FileEncryptionRow, kFileEncryptionQuery>(enc_rows[0]);
+        if (encryption.is_encrypted && encryption.key_id) {
+            auto ks = sgrn::datastore::crypto::getKeyStore();
+            if (ks) {
+                (void)ks->shred(*encryption.key_id);
+            }
         }
     }
 
     auto delete_res = co_await tsp_db_client->execSqlCoro("DELETE FROM storage.files WHERE id = $1", t_entity_id);
     if (delete_res.affectedRows() == 0) {
-        co_return createJsonErrorResponse("File deletion failed", k404NotFound);
+        co_return createTypedResponse(BackendErrorResponse{"File deletion failed", k404NotFound});
     }
 
     // Check if the physical object is still referenced by other file records
-    auto obj_ref_res = co_await tsp_db_client->execSqlCoro("SELECT 1 FROM storage.file_objects WHERE object_id = $1 LIMIT 1", object_id);
+    auto obj_ref_res = co_await tsp_db_client->execSqlCoro("SELECT 1 FROM storage.file_objects WHERE object_id = $1 LIMIT 1", object.id);
     if (obj_ref_res.empty()) {
         // No more references — delete physical file from MinIO first, then remove the DB row.
         // Order matters: if MinIO delete fails we must not remove the DB record, otherwise
         // the object becomes unreachable and leaks in MinIO forever.
         auto s3 = drogon::app().getPlugin<sgrn::datastore::plugins::aws::S3Client>();
         if (!s3) {
-            co_return createJsonErrorResponse("Storage backend unavailable", drogon::k503ServiceUnavailable);
+            co_return createTypedResponse(BackendErrorResponse{"Storage backend unavailable", drogon::k503ServiceUnavailable});
         }
-        auto s3_res = co_await s3->deleteFile(bucket, key);
+        auto s3_res = co_await s3->deleteFile(object.bucket, object.key);
         if (!s3_res.has_value()) {
-            ERROR_LOG("Failed to delete physical object {}/{} from MinIO: {}", bucket, key, s3_res.error().message);
-            co_return createJsonErrorResponse(
-                std::format("Storage deletion failed: {}", s3_res.error().message_), drogon::k500InternalServerError);
+            ERROR_LOG("Failed to delete physical object {}/{} from MinIO: {}", object.bucket, object.key, s3_res.error().message);
+            co_return createTypedResponse(
+                BackendErrorResponse{std::format("Storage deletion failed: {}", s3_res.error().message), drogon::k500InternalServerError});
         }
-        co_await tsp_db_client->execSqlCoro("DELETE FROM storage.objects WHERE id = $1", object_id);
+        co_await tsp_db_client->execSqlCoro("DELETE FROM storage.objects WHERE id = $1", object.id);
     }
 
-    co_return createJsonResponse(fmt::format(R"({{"success":true,"id":{},"type":"file"}})", t_entity_id));
+    co_return createTypedResponse(detail::DeleteResponse{t_entity_id, "file"}, k200OK);
 }
 
 Task<HttpResponsePtr> StorageApiHandler::deleteFolder(
     const drogon::orm::DbClientPtr& tsp_db_client, int64_t t_entity_id, int32_t t_user_id, bool t_is_admin) {
 
     // Single query: ownership + permission in one pass (same pattern as deleteFile).
-    auto dir_res = co_await tsp_db_client->execSqlCoro("SELECT d.id, d.user_id, d.domain, "
-                                                       "       udp.can_delete  AS domain_can_delete, "
-                                                       "       u.can_delete_personal "
-                                                       "FROM storage.directories d "
-                                                       "LEFT JOIN core.user_domain_permissions udp "
-                                                       "       ON udp.user_id = $2 AND udp.domain = d.domain "
-                                                       "LEFT JOIN core.users u ON u.id = $2 "
-                                                       "WHERE d.id = $1",
-        t_entity_id, t_user_id);
+    static constexpr char kDirectoryDeletePermissionQuery[] = "SELECT d.id, d.user_id, d.domain, "
+                                                              "       udp.can_delete  AS domain_can_delete, "
+                                                              "       u.can_delete_personal "
+                                                              "FROM storage.directories d "
+                                                              "LEFT JOIN core.user_domain_permissions udp "
+                                                              "       ON udp.user_id = $2 AND udp.domain = d.domain "
+                                                              "LEFT JOIN core.users u ON u.id = $2 "
+                                                              "WHERE d.id = $1";
+    auto dir_res = co_await tsp_db_client->execSqlCoro(kDirectoryDeletePermissionQuery, t_entity_id, t_user_id);
 
     if (dir_res.empty()) {
-        co_return createJsonErrorResponse("Folder not found or access denied", k404NotFound);
+        co_return createTypedResponse(BackendErrorResponse{"Folder not found or access denied", k404NotFound});
     }
 
-    const auto& dr = dir_res[0];
-    const std::string domain_name = dr["domain"].isNull() ? "" : dr["domain"].as<std::string>();
+    const auto dr = sgrn::orm::fromRow<detail::DeletePermissionRow, kDirectoryDeletePermissionQuery>(dir_res[0]);
+    const std::string domain_name = dr.domain.value_or("");
 
     if (!t_is_admin) {
         if (!domain_name.empty()) {
-            if (dr["domain_can_delete"].isNull() || !dr["domain_can_delete"].as<bool>()) {
-                co_return createJsonErrorResponse(
-                    "Folder Deletion Denied: Delete capability is not granted for this operational domain.", k403Forbidden);
+            if (!dr.domain_can_delete.value_or(false)) {
+                co_return createTypedResponse(BackendErrorResponse{
+                    "Folder Deletion Denied: Delete capability is not granted for this operational domain.", k403Forbidden});
             }
         } else {
-            if (dr["user_id"].isNull() || dr["user_id"].as<int32_t>() != t_user_id) {
-                co_return createJsonErrorResponse("Folder not found or access denied", k404NotFound);
+            if (!dr.user_id || *dr.user_id != t_user_id) {
+                co_return createTypedResponse(BackendErrorResponse{"Folder not found or access denied", k404NotFound});
             }
-            if (dr["can_delete_personal"].isNull() || !dr["can_delete_personal"].as<bool>()) {
-                co_return createJsonErrorResponse(
-                    "Folder Deletion Denied: Deletion capability is disabled for this personal workspace.", k403Forbidden);
+            if (!dr.can_delete_personal.value_or(false)) {
+                co_return createTypedResponse(BackendErrorResponse{
+                    "Folder Deletion Denied: Deletion capability is disabled for this personal workspace.", k403Forbidden});
             }
         }
     }
@@ -1436,32 +1541,34 @@ Task<HttpResponsePtr> StorageApiHandler::deleteFolder(
     // NOTE: sub-files and sub-directories are removed by ON DELETE CASCADE.
     auto delete_res = co_await tsp_db_client->execSqlCoro("DELETE FROM storage.directories WHERE id = $1", t_entity_id);
     if (delete_res.affectedRows() == 0) {
-        co_return createJsonErrorResponse("Folder deletion failed", k404NotFound);
+        co_return createTypedResponse(BackendErrorResponse{"Folder deletion failed", k404NotFound});
     }
 
-    co_return createJsonResponse(fmt::format(R"({{"success":true,"id":{},"type":"folder"}})", t_entity_id));
+    co_return createTypedResponse(detail::DeleteResponse{t_entity_id, "folder"}, k200OK);
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handleBulkAction(HttpRequestPtr tsp_req) {
     try {
-        auto session = tsp_req->getAttributes()->get<Json::Value>("session_json");
-        if (!session)
-            co_return createJsonErrorResponse("No session found", k401Unauthorized);
-
-        const int32_t user_id = session["user"]["id"].asInt();
-        const bool is_admin = (session["user"]["role"]["name"].asString() == "admin");
-
-        auto json = tsp_req->getJsonObject();
-        if (!json || !json->isMember("action") || !json->isMember("items") || !(*json)["items"].isArray()) {
-            co_return createJsonErrorResponse("Invalid JSON: action and items array required", k400BadRequest);
+        auto actor_opt = resolveDriveActor(tsp_req);
+        if (!actor_opt) {
+            co_return createTypedResponse(BackendErrorResponse{"No session found", k401Unauthorized});
         }
 
-        std::string action = (*json)["action"].asString();
-        const auto& items = (*json)["items"];
+        const int32_t user_id = actor_opt->user_id;
+        const bool is_admin = actor_opt->is_admin;
+
+        auto req_res = parseTypedRequest<detail::BulkActionRequest>(tsp_req);
+        if (req_res.hasError() || req_res->action.empty() || req_res->items.empty()) {
+            co_return createTypedResponse(BackendErrorResponse{"Invalid JSON: action and items array required", k400BadRequest});
+        }
+
+        const auto& req = req_res.value();
+        const std::string& action = req.action;
+        const auto& items = req.items;
 
         auto db_res = storage_service_.getDbClient();
         if (!db_res.has_value())
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         auto db_client = db_res.value();
 
         std::vector<detail::BulkResult> results;
@@ -1470,10 +1577,10 @@ Task<HttpResponsePtr> StorageApiHandler::handleBulkAction(HttpRequestPtr tsp_req
 
         if (action == "delete") {
             for (const auto& item : items) {
-                if (!item.isMember("id") || !item.isMember("type"))
+                const int64_t id = item.numeric_id();
+                if (id < 0 || item.type.empty())
                     continue;
-                int64_t id = item["id"].isString() ? std::stoll(item["id"].asString()) : item["id"].asInt64();
-                std::string type = item["type"].asString();
+                const std::string& type = item.type;
 
                 HttpResponsePtr res;
                 if (type == "file")
@@ -1487,17 +1594,16 @@ Task<HttpResponsePtr> StorageApiHandler::handleBulkAction(HttpRequestPtr tsp_req
                     success_count++;
             }
         } else if (action == "move") {
-            if (!json->isMember("target_parent_id")) {
-                co_return createJsonErrorResponse("target_parent_id required for move action", k400BadRequest);
+            if (!req.target_parent_id.has_value()) {
+                co_return createTypedResponse(BackendErrorResponse{"target_parent_id required for move action", k400BadRequest});
             }
-            std::optional<int64_t> target_parent_id =
-                (*json)["target_parent_id"].isNull() ? std::nullopt : std::optional<int64_t>((*json)["target_parent_id"].asInt64());
+            const auto& target_parent_id = req.target_parent_id;
 
             for (const auto& item : items) {
-                if (!item.isMember("id") || !item.isMember("type"))
+                const int64_t id = item.numeric_id();
+                if (id < 0 || item.type.empty())
                     continue;
-                int64_t id = item["id"].isString() ? std::stoll(item["id"].asString()) : item["id"].asInt64();
-                std::string type = item["type"].asString();
+                const std::string& type = item.type;
 
                 auto transaction = co_await db_client->newTransactionCoro();
                 HttpResponsePtr res;
@@ -1512,37 +1618,33 @@ Task<HttpResponsePtr> StorageApiHandler::handleBulkAction(HttpRequestPtr tsp_req
                     success_count++;
             }
         } else {
-            co_return createJsonErrorResponse("Unsupported action", k400BadRequest);
+            co_return createTypedResponse(BackendErrorResponse{"Unsupported action", k400BadRequest});
         }
 
-        co_return createTypedJsonResponse(
-            detail::BulkResponse{true, action, static_cast<int32_t>(items.size()), success_count, std::move(results)}, k200OK);
+        co_return createTypedResponse(
+            tsp_req, detail::BulkResponse{action, static_cast<int32_t>(items.size()), success_count, std::move(results)}, k200OK);
 
     } catch (const drogon::orm::DrogonDbException& e) {
         ERROR_LOG("Bulk action handler DB exception: {}", e.base().what());
-        co_return createErrorResponse(GenericApiError::InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
     } catch (const std::exception& ex) {
         ERROR_LOG("Bulk action handler exception: {}", ex.what());
-        co_return createErrorResponse(GenericApiError::InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
     }
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handlePresignedUrl(HttpRequestPtr tsp_req) {
     try {
-        const auto& session = tsp_req->getAttributes()->get<Json::Value>("session_json");
-        if (session.isNull()) {
-            SGRN_WARN_LOG("handlePresignedUrl: No session found in request attributes");
-            co_return createJsonErrorResponse("Unauthorized: Session missing", k401Unauthorized);
+        auto actor_opt = resolveDriveActor(tsp_req);
+        if (!actor_opt) {
+            SGRN_WARN_LOG("handlePresignedUrl: No valid session found in request attributes");
+            co_return createTypedResponse(BackendErrorResponse{"Unauthorized: Session missing", k401Unauthorized});
         }
-        if (!session.isMember("user") || !session["user"].isMember("id") || !session["user"]["id"].isInt()) {
-            SGRN_WARN_LOG("handlePresignedUrl: Malformed session - missing or invalid user ID");
-            co_return createJsonErrorResponse("Forbidden: Malformed session payload", k403Forbidden);
-        }
-        const int32_t user_id = session["user"]["id"].asInt();
+        const int32_t user_id = actor_opt->user_id;
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (!db_res.has_value()) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db = db_res.value();
 
@@ -1552,18 +1654,19 @@ Task<HttpResponsePtr> StorageApiHandler::handlePresignedUrl(HttpRequestPtr tsp_r
         std::string expiry_str = tsp_req->getParameter("expiry"); // seconds, default 3600
 
         if (file_id_str.empty() || action.empty()) {
-            co_return createJsonErrorResponse("file_id and action parameters are required", k400BadRequest);
+            co_return createTypedResponse(BackendErrorResponse{"file_id and action parameters are required", k400BadRequest});
         }
 
         int64_t file_id;
         try {
             file_id = std::stoll(file_id_str);
         } catch (...) {
-            co_return createJsonErrorResponse("Invalid file_id", k400BadRequest);
+            co_return createTypedResponse(BackendErrorResponse{"Invalid file_id", k400BadRequest});
         }
 
         if (action != "get") {
-            co_return createJsonErrorResponse("Only presigned GET is supported for content-addressed objects", k403Forbidden);
+            co_return createTypedResponse(
+                BackendErrorResponse{"Only presigned GET is supported for content-addressed objects", k403Forbidden});
         }
 
         uint32_t expiry = 3600;
@@ -1571,7 +1674,7 @@ Task<HttpResponsePtr> StorageApiHandler::handlePresignedUrl(HttpRequestPtr tsp_r
             try {
                 expiry = static_cast<uint32_t>(std::stoul(expiry_str));
             } catch (...) {
-                co_return createJsonErrorResponse("Invalid expiry parameter", k400BadRequest);
+                co_return createTypedResponse(BackendErrorResponse{"Invalid expiry parameter", k400BadRequest});
             }
         }
         // Cap expiry at 7 days
@@ -1579,78 +1682,70 @@ Task<HttpResponsePtr> StorageApiHandler::handlePresignedUrl(HttpRequestPtr tsp_r
             expiry = 604800;
 
         // Look up the file to get object_id, bucket, key, is_encrypted
-        auto file_rows = co_await db->execSqlCoro("SELECT fo.object_id, o.bucket, o.key, f.is_encrypted FROM storage.file_objects fo "
-                                                  "JOIN storage.objects o ON o.id = fo.object_id "
-                                                  "JOIN storage.files f ON f.id = fo.file_id "
-                                                  "WHERE fo.file_id = $1 AND fo.part_index = 0",
-            file_id);
+        static constexpr char kPresignedFileQuery[] = "SELECT fo.object_id, o.bucket, o.key, f.is_encrypted FROM storage.file_objects fo "
+                                                      "JOIN storage.objects o ON o.id = fo.object_id "
+                                                      "JOIN storage.files f ON f.id = fo.file_id "
+                                                      "WHERE fo.file_id = $1 AND fo.part_index = 0";
+        auto file_rows = co_await db->execSqlCoro(kPresignedFileQuery, file_id);
         if (file_rows.empty()) {
-            co_return createJsonErrorResponse("File not found", k404NotFound);
+            co_return createTypedResponse(BackendErrorResponse{"File not found", k404NotFound});
         }
 
-        if (file_rows[0]["is_encrypted"].as<bool>()) {
-            co_return createJsonErrorResponse("Presigned URLs are not supported for encrypted files", k403Forbidden);
+        const auto file = sgrn::orm::fromRow<detail::PresignedFileRow, kPresignedFileQuery>(file_rows[0]);
+        if (file.is_encrypted) {
+            co_return createTypedResponse(BackendErrorResponse{"Presigned URLs are not supported for encrypted files", k403Forbidden});
         }
-
-        int64_t object_id = file_rows[0]["object_id"].as<int64_t>();
-        std::string bucket = file_rows[0]["bucket"].as<std::string>();
-        std::string key = file_rows[0]["key"].as<std::string>();
 
         // Check ownership
         auto own_rows = co_await db->execSqlCoro("SELECT 1 FROM storage.files WHERE id = $1 AND user_id = $2", file_id, user_id);
         if (own_rows.empty()) {
-            co_return createJsonErrorResponse("Forbidden: File not owned by user", k403Forbidden);
+            co_return createTypedResponse(BackendErrorResponse{"Forbidden: File not owned by user", k403Forbidden});
         }
 
         // Generate presigned URL via S3Client plugin
         auto s3_res = storage_service_.S3Client();
         if (!s3_res.has_value()) {
-            co_return createJsonErrorResponse(fmt::format("S3 unavailable: {}", s3_res.error().message_), k500InternalServerError);
+            co_return createTypedResponse(
+                BackendErrorResponse{fmt::format("S3 unavailable: {}", s3_res.error().message), k500InternalServerError});
         }
         auto* s3 = s3_res.value();
 
-        BackendResult<std::string> url_res;
+        Result<std::string, BackendError> url_res;
         if (action == "get") {
-            url_res = co_await s3->presignedGetUrl(bucket, key, expiry);
+            url_res = co_await s3->presignedGetUrl(file.bucket, file.key, expiry);
         } else if (action == "put") {
-            url_res = co_await s3->presignedPutUrl(bucket, key, expiry);
+            url_res = co_await s3->presignedPutUrl(file.bucket, file.key, expiry);
         } else {
-            url_res = co_await s3->presignedDeleteUrl(bucket, key, expiry);
+            url_res = co_await s3->presignedDeleteUrl(file.bucket, file.key, expiry);
         }
 
         if (url_res.hasError()) {
-            co_return createJsonErrorResponse(
-                fmt::format("Failed to generate presigned URL: {}", url_res.error().message_), k500InternalServerError);
+            co_return createTypedResponse(BackendErrorResponse{
+                fmt::format("Failed to generate presigned URL: {}", url_res.error().message), k500InternalServerError});
         }
 
-        co_return createJsonResponse(fmt::format(R"({{"success":true,"url":"{}","action":"{}","expiry":{},"file_id":{}}})",
-            jsonEscape(*url_res), jsonEscape(action), expiry, file_id));
+        co_return createTypedResponse(tsp_req, detail::PresignedUrlResponse{*url_res, std::move(action), expiry, file_id}, k200OK);
 
     } catch (const std::exception& ex) {
         ERROR_LOG("handlePresignedUrl exception: {}", ex.what());
-        co_return createErrorResponse(GenericApiError::InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
     }
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handleGetStorageStats(HttpRequestPtr tsp_req) {
     try {
-        const auto& session = tsp_req->attributes()->get<Json::Value>("session_json");
-        if (session.isNull()) {
-            SGRN_WARN_LOG("handleGetStorageStats: No session found in request attributes");
-            co_return createJsonErrorResponse("Unauthorized: Session missing", k401Unauthorized);
+        auto actor_opt = resolveDriveActor(tsp_req);
+        if (!actor_opt) {
+            SGRN_WARN_LOG("handleGetStorageStats: No valid session found in request attributes");
+            co_return createTypedResponse(BackendErrorResponse{"Unauthorized: Session missing", k401Unauthorized});
         }
 
-        if (!session.isMember("user") || !session["user"].isMember("id") || !session["user"]["id"].isInt()) {
-            SGRN_WARN_LOG("handleGetStorageStats: Malformed session - missing or invalid user ID");
-            co_return createJsonErrorResponse("Forbidden: Malformed session payload", k403Forbidden);
-        }
-
-        const int32_t user_id = session["user"]["id"].asInt();
+        const int32_t user_id = actor_opt->user_id;
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (!db_res) {
             SGRN_ERROR_LOG("handleGetStorageStats: Database client unavailable");
-            co_return createJsonErrorResponse("Service Unavailable: Database error", k503ServiceUnavailable);
+            co_return createTypedResponse(BackendErrorResponse{"Service Unavailable: Database error", k503ServiceUnavailable});
         }
         auto sp_db_client = db_res.value();
 
@@ -1667,7 +1762,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleGetStorageStats(HttpRequestPtr ts
             auto stats_opt = sgrn::orm::fromSingleResult<detail::StorageStatsResponse, kStatsQuery>(result);
             if (!stats_opt) {
                 SGRN_WARN_LOG("handleGetStorageStats: User {} not found in core.users", user_id);
-                co_return createTypedJsonResponse(detail::StorageStatsResponse{}, k200OK);
+                co_return createTypedResponse(tsp_req, detail::StorageStatsResponse{}, k200OK);
             }
 
             const auto& stats = *stats_opt;
@@ -1675,25 +1770,25 @@ Task<HttpResponsePtr> StorageApiHandler::handleGetStorageStats(HttpRequestPtr ts
                 stats.total_original_bytes, stats.total_compressed_bytes,
                 stats.storage_limit ? std::to_string(*stats.storage_limit) : "unlimited");
 
-            co_return createTypedJsonResponse(stats, k200OK);
+            co_return createTypedResponse(tsp_req, stats, k200OK);
         } catch (const drogon::orm::DrogonDbException& e) {
             SGRN_ERROR_LOG("handleGetStorageStats: SQL Execution Error: {}", e.base().what());
-            co_return createErrorResponse(GenericApiError::InternalServerError);
+            co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
         } catch (const std::exception& ex) {
             SGRN_ERROR_LOG("Storage stats handler exception: {}", ex.what());
-            co_return createErrorResponse(GenericApiError::InternalServerError);
+            co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
         }
     } catch (const drogon::orm::DrogonDbException& e) {
         SGRN_ERROR_LOG("handleGetStorageStats: DB exception: {}", e.base().what());
-        co_return createErrorResponse(GenericApiError::InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
     } catch (const std::exception& ex) {
         SGRN_ERROR_LOG("handleGetStorageStats: exception: {}", ex.what());
-        co_return createErrorResponse(GenericApiError::InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
     }
 }
 
 drogon::Task<drogon::HttpResponsePtr> StorageApiHandler::handleRecursiveDownload(drogon::HttpRequestPtr tsp_req) {
-    co_return createJsonErrorResponse("Recursive download (ZIP) is not yet implemented.", k501NotImplemented);
+    co_return createTypedResponse(BackendErrorResponse{"Recursive download (ZIP) is not yet implemented.", k501NotImplemented});
 }
 
 } // namespace sgrn::datastore::handlers::storage

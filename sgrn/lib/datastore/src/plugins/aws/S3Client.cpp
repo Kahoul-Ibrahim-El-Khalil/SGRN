@@ -52,9 +52,6 @@
 namespace sgrn::datastore::plugins::aws
 {
 using namespace drogon;
-using ::sgrn::Result;
-using sgrn::datastore::BackendError;
-using sgrn::datastore::BackendResult;
 
 void S3Client::initAndStart(const Json::Value& t_config) {
     region_ = t_config.get("region", "us-east-1").asString();
@@ -92,9 +89,9 @@ void S3Client::shutdown() {
     Aws::ShutdownAPI(sdk_options_);
 }
 
-Task<BackendResult<void>> S3Client::uploadFile(std::string t_bucket, std::string t_key, std::string t_file_path) {
+Task<Result<void, BackendError>> S3Client::uploadFile(std::string t_bucket, std::string t_key, std::string t_file_path) {
     co_return co_await execute<void>([t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_file_path = std::move(t_file_path)](
-                                         Aws::S3::S3Client& t_client) -> ::sgrn::datastore::BackendResult<void> {
+                                         Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
         Aws::S3::Model::PutObjectRequest req;
         req.SetBucket(t_bucket.c_str());
         req.SetKey(t_key.c_str());
@@ -104,7 +101,7 @@ Task<BackendResult<void>> S3Client::uploadFile(std::string t_bucket, std::string
         if (!*input_stream) {
             std::string error = "Cannot open file: " + t_file_path;
             ERROR_LOG(error);
-            return ::sgrn::datastore::BackendError(::sgrn::datastore::BackendErrorKind::Filesystem, std::move(error));
+            return BackendError(BackendErrorKind::Filesystem, std::move(error));
         }
 
         req.SetBody(input_stream);
@@ -121,36 +118,37 @@ Task<BackendResult<void>> S3Client::uploadFile(std::string t_bucket, std::string
     });
 }
 
-Task<BackendResult<void>> S3Client::uploadFromMemory(
+Task<Result<void, BackendError>> S3Client::uploadFromMemory(
     std::string t_bucket, std::string t_key, std::string t_data, std::string t_content_type) {
-    co_return co_await execute<void>([t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_data = std::move(t_data),
-                                         t_content_type = std::move(t_content_type)](Aws::S3::S3Client& t_client) -> BackendResult<void> {
-        Aws::S3::Model::PutObjectRequest req;
-        req.SetBucket(t_bucket.c_str());
-        req.SetKey(t_key.c_str());
+    co_return co_await execute<void>(
+        [t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_data = std::move(t_data), t_content_type = std::move(t_content_type)](
+            Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
+            Aws::S3::Model::PutObjectRequest req;
+            req.SetBucket(t_bucket.c_str());
+            req.SetKey(t_key.c_str());
 
-        auto stream = Aws::MakeShared<Aws::StringStream>("UploadStream", std::move(t_data));
-        req.SetBody(stream);
+            auto stream = Aws::MakeShared<Aws::StringStream>("UploadStream", std::move(t_data));
+            req.SetBody(stream);
 
-        if (!t_content_type.empty()) {
-            req.SetContentType(t_content_type.c_str());
-        }
-        auto outcome = t_client.PutObject(req);
+            if (!t_content_type.empty()) {
+                req.SetContentType(t_content_type.c_str());
+            }
+            auto outcome = t_client.PutObject(req);
 
-        if (!outcome.IsSuccess()) {
-            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-            std::string error = "Upload from memory failed: " + outcome.GetError().GetMessage();
-            ERROR_LOG(error);
-            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-        }
-        return {};
-    });
+            if (!outcome.IsSuccess()) {
+                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
+                std::string error = "Upload from memory failed: " + outcome.GetError().GetMessage();
+                ERROR_LOG(error);
+                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
+            }
+            return {};
+        });
 }
 
-Task<BackendResult<void>> S3Client::uploadWithMetadata(
+Task<Result<void, BackendError>> S3Client::uploadWithMetadata(
     std::string t_bucket, std::string t_key, std::string t_file_path, Json::Value t_metadata) {
     co_return co_await execute<void>([t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_file_path = std::move(t_file_path),
-                                         t_metadata = std::move(t_metadata)](Aws::S3::S3Client& t_client) -> BackendResult<void> {
+                                         t_metadata = std::move(t_metadata)](Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
         Aws::S3::Model::PutObjectRequest req;
         req.SetBucket(t_bucket.c_str());
         req.SetKey(t_key.c_str());
@@ -160,7 +158,7 @@ Task<BackendResult<void>> S3Client::uploadWithMetadata(
         if (!*input_stream) {
             std::string error = "Cannot open file: " + t_file_path;
             ERROR_LOG(error);
-            return BackendError(::sgrn::datastore::BackendErrorKind::Filesystem, std::move(error));
+            return BackendError(BackendErrorKind::Filesystem, std::move(error));
         }
 
         req.SetBody(input_stream);
@@ -182,37 +180,37 @@ Task<BackendResult<void>> S3Client::uploadWithMetadata(
     });
 }
 
-Task<BackendResult<void>> S3Client::downloadFile(std::string t_bucket, std::string t_key, std::string t_download_path) {
-    co_return co_await execute<void>([t_bucket = std::move(t_bucket), t_key = std::move(t_key),
-                                         t_download_path = std::move(t_download_path)](Aws::S3::S3Client& t_client) -> BackendResult<void> {
-        Aws::S3::Model::GetObjectRequest req;
-        req.SetBucket(t_bucket.c_str());
-        req.SetKey(t_key.c_str());
+Task<Result<void, BackendError>> S3Client::downloadFile(std::string t_bucket, std::string t_key, std::string t_download_path) {
+    co_return co_await execute<void>(
+        [t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_download_path = std::move(t_download_path)](
+            Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
+            Aws::S3::Model::GetObjectRequest req;
+            req.SetBucket(t_bucket.c_str());
+            req.SetKey(t_key.c_str());
 
-        auto outcome = t_client.GetObject(req);
+            auto outcome = t_client.GetObject(req);
 
-        if (!outcome.IsSuccess()) {
-            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-            std::string error = "Download failed: " + outcome.GetError().GetMessage();
-            ERROR_LOG(error);
-            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-        }
+            if (!outcome.IsSuccess()) {
+                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
+                std::string error = "Download failed: " + outcome.GetError().GetMessage();
+                ERROR_LOG(error);
+                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
+            }
 
-        std::ofstream out(t_download_path, std::ios::binary);
-        if (!out) {
-            return BackendError(
-                ::sgrn::datastore::BackendErrorKind::Filesystem, "Failed to open local file for writing: " + t_download_path);
-        }
-        out << outcome.GetResult().GetBody().rdbuf();
-        return {};
-    });
+            std::ofstream out(t_download_path, std::ios::binary);
+            if (!out) {
+                return BackendError(BackendErrorKind::Filesystem, "Failed to open local file for writing: " + t_download_path);
+            }
+            out << outcome.GetResult().GetBody().rdbuf();
+            return {};
+        });
 }
 
-Task<BackendResult<void>> S3Client::downloadFileRange(
+Task<Result<void, BackendError>> S3Client::downloadFileRange(
     std::string t_bucket, std::string t_key, std::string t_download_path, int64_t t_start, int64_t t_end) {
     co_return co_await execute<void>(
         [t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_download_path = std::move(t_download_path), t_start = t_start,
-            t_end = t_end](Aws::S3::S3Client& t_client) -> BackendResult<void> {
+            t_end = t_end](Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
             Aws::S3::Model::GetObjectRequest req;
             req.SetBucket(t_bucket.c_str());
             req.SetKey(t_key.c_str());
@@ -232,17 +230,16 @@ Task<BackendResult<void>> S3Client::downloadFileRange(
 
             std::ofstream out(t_download_path, std::ios::binary);
             if (!out) {
-                return BackendError(
-                    ::sgrn::datastore::BackendErrorKind::Filesystem, "Failed to open local file for writing: " + t_download_path);
+                return BackendError(BackendErrorKind::Filesystem, "Failed to open local file for writing: " + t_download_path);
             }
             out << outcome.GetResult().GetBody().rdbuf();
             return {};
         });
 }
 
-Task<BackendResult<std::string>> S3Client::getObjectContent(std::string t_bucket, std::string t_key, int64_t t_max_bytes) {
+Task<Result<std::string, BackendError>> S3Client::getObjectContent(std::string t_bucket, std::string t_key, int64_t t_max_bytes) {
     co_return co_await execute<std::string>([t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_max_bytes](
-                                                Aws::S3::S3Client& t_client) -> BackendResult<std::string> {
+                                                Aws::S3::S3Client& t_client) -> Result<std::string, BackendError> {
         Aws::S3::Model::GetObjectRequest req;
         req.SetBucket(t_bucket.c_str());
         req.SetKey(t_key.c_str());
@@ -284,16 +281,16 @@ Task<BackendResult<std::string>> S3Client::getObjectContent(std::string t_bucket
         if (t_max_bytes <= 0 && reported_len > 0 && content.size() != reported_len) {
             std::string error = fmt::format("[S3Client] GetObject truncated read: expected {} bytes, got {}", reported_len, content.size());
             ERROR_LOG(error);
-            return ::sgrn::datastore::BackendError{::sgrn::datastore::BackendErrorKind::Garage, "Storage", error};
+            return BackendError{BackendErrorKind::Garage, "Storage", error};
         }
         DEBUG_LOG("[S3Client] Content read - size: {}, ptr: {}", content.size(), (void*)content.data());
         return content;
     });
 }
 
-Task<BackendResult<void>> S3Client::deleteFile(std::string t_bucket, std::string t_key) {
+Task<Result<void, BackendError>> S3Client::deleteFile(std::string t_bucket, std::string t_key) {
     co_return co_await execute<void>(
-        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](Aws::S3::S3Client& t_client) -> BackendResult<void> {
+        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
             Aws::S3::Model::DeleteObjectRequest req;
             req.SetBucket(t_bucket.c_str());
             req.SetKey(t_key.c_str());
@@ -311,9 +308,9 @@ Task<BackendResult<void>> S3Client::deleteFile(std::string t_bucket, std::string
         });
 }
 
-Task<BackendResult<Json::Value>> S3Client::deleteFiles(std::string t_bucket, std::vector<std::string> t_keys) {
+Task<Result<Json::Value, BackendError>> S3Client::deleteFiles(std::string t_bucket, std::vector<std::string> t_keys) {
     co_return co_await execute<Json::Value>(
-        [t_bucket = std::move(t_bucket), t_keys = std::move(t_keys)](Aws::S3::S3Client& t_client) -> BackendResult<Json::Value> {
+        [t_bucket = std::move(t_bucket), t_keys = std::move(t_keys)](Aws::S3::S3Client& t_client) -> Result<Json::Value, BackendError> {
             Json::Value result;
             result["deleted"] = Json::Value(Json::arrayValue);
             result["errors"] = Json::Value(Json::arrayValue);
@@ -353,11 +350,11 @@ Task<BackendResult<Json::Value>> S3Client::deleteFiles(std::string t_bucket, std
         });
 }
 
-Task<BackendResult<void>> S3Client::copyFile(
+Task<Result<void, BackendError>> S3Client::copyFile(
     std::string t_src_bucket, std::string t_src_key, std::string t_dest_bucket, std::string t_dest_key) {
     co_return co_await execute<void>(
         [t_src_bucket = std::move(t_src_bucket), t_src_key = std::move(t_src_key), t_dest_bucket = std::move(t_dest_bucket),
-            t_dest_key = std::move(t_dest_key)](Aws::S3::S3Client& t_client) -> BackendResult<void> {
+            t_dest_key = std::move(t_dest_key)](Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
             Aws::S3::Model::CopyObjectRequest req;
 
             std::string copySource = t_src_bucket + "/" + t_src_key;
@@ -378,9 +375,9 @@ Task<BackendResult<void>> S3Client::copyFile(
         });
 }
 
-Task<BackendResult<bool>> S3Client::exists(std::string t_bucket, std::string t_key) {
+Task<Result<bool, BackendError>> S3Client::exists(std::string t_bucket, std::string t_key) {
     co_return co_await execute<bool>(
-        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](Aws::S3::S3Client& t_client) -> BackendResult<bool> {
+        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](Aws::S3::S3Client& t_client) -> Result<bool, BackendError> {
             Aws::S3::Model::HeadObjectRequest req;
             req.SetBucket(t_bucket.c_str());
             req.SetKey(t_key.c_str());
@@ -402,44 +399,44 @@ Task<BackendResult<bool>> S3Client::exists(std::string t_bucket, std::string t_k
         });
 }
 
-Task<BackendResult<Json::Value>> S3Client::statObject(std::string t_bucket, std::string t_key) {
-    co_return co_await execute<Json::Value>([t_bucket = std::move(t_bucket), t_key = std::move(t_key)](
-                                                Aws::S3::S3Client& t_client) -> ::sgrn::datastore::BackendResult<Json::Value> {
-        Aws::S3::Model::HeadObjectRequest req;
-        req.SetBucket(t_bucket.c_str());
-        req.SetKey(t_key.c_str());
+Task<Result<Json::Value, BackendError>> S3Client::statObject(std::string t_bucket, std::string t_key) {
+    co_return co_await execute<Json::Value>(
+        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](Aws::S3::S3Client& t_client) -> Result<Json::Value, BackendError> {
+            Aws::S3::Model::HeadObjectRequest req;
+            req.SetBucket(t_bucket.c_str());
+            req.SetKey(t_key.c_str());
 
-        auto outcome = t_client.HeadObject(req);
+            auto outcome = t_client.HeadObject(req);
 
-        if (!outcome.IsSuccess()) {
-            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-            std::string error = "[S3Client] Head failed: " + outcome.GetError().GetMessage();
-            ERROR_LOG(error);
-            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-        }
+            if (!outcome.IsSuccess()) {
+                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
+                std::string error = "[S3Client] Head failed: " + outcome.GetError().GetMessage();
+                ERROR_LOG(error);
+                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
+            }
 
-        auto& result = outcome.GetResult();
-        Json::Value meta;
-        meta["content_length"] = static_cast<Json::Int64>(result.GetContentLength());
-        meta["content_type"] = result.GetContentType().c_str();
-        meta["etag"] = result.GetETag().c_str();
-        meta["last_modified"] = result.GetLastModified().ToGmtString(Aws::Utils::DateFormat::ISO_8601).c_str();
+            auto& result = outcome.GetResult();
+            Json::Value meta;
+            meta["content_length"] = static_cast<Json::Int64>(result.GetContentLength());
+            meta["content_type"] = result.GetContentType().c_str();
+            meta["etag"] = result.GetETag().c_str();
+            meta["last_modified"] = result.GetLastModified().ToGmtString(Aws::Utils::DateFormat::ISO_8601).c_str();
 
-        Json::Value user_meta;
-        for (const auto& kv : result.GetMetadata()) {
-            user_meta[kv.first.c_str()] = kv.second.c_str();
-        }
-        meta["metadata"] = user_meta;
+            Json::Value user_meta;
+            for (const auto& kv : result.GetMetadata()) {
+                user_meta[kv.first.c_str()] = kv.second.c_str();
+            }
+            meta["metadata"] = user_meta;
 
-        return meta;
-    });
+            return meta;
+        });
 }
 
-Task<BackendResult<Json::Value>> S3Client::listObjects(
+Task<Result<Json::Value, BackendError>> S3Client::listObjects(
     std::string t_bucket, std::string t_prefix, std::string t_continuation_token, uint32_t t_max_keys) {
     co_return co_await execute<Json::Value>([t_bucket = std::move(t_bucket), t_prefix = std::move(t_prefix),
                                                 t_continuation_token = std::move(t_continuation_token),
-                                                t_max_keys = t_max_keys](Aws::S3::S3Client& t_client) -> BackendResult<Json::Value> {
+                                                t_max_keys = t_max_keys](Aws::S3::S3Client& t_client) -> Result<Json::Value, BackendError> {
         Aws::S3::Model::ListObjectsV2Request req;
         req.SetBucket(t_bucket.c_str());
 
@@ -486,8 +483,8 @@ Task<BackendResult<Json::Value>> S3Client::listObjects(
     });
 }
 
-Task<BackendResult<void>> S3Client::createBucket(std::string t_bucket) {
-    co_return co_await execute<void>([t_bucket = std::move(t_bucket)](Aws::S3::S3Client& t_client) -> BackendResult<void> {
+Task<Result<void, BackendError>> S3Client::createBucket(std::string t_bucket) {
+    co_return co_await execute<void>([t_bucket = std::move(t_bucket)](Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
         Aws::S3::Model::CreateBucketRequest req;
         req.SetBucket(t_bucket.c_str());
 
@@ -504,8 +501,8 @@ Task<BackendResult<void>> S3Client::createBucket(std::string t_bucket) {
     });
 }
 
-Task<BackendResult<void>> S3Client::deleteBucket(std::string t_bucket) {
-    co_return co_await execute<void>([t_bucket = std::move(t_bucket)](Aws::S3::S3Client& t_client) -> BackendResult<void> {
+Task<Result<void, BackendError>> S3Client::deleteBucket(std::string t_bucket) {
+    co_return co_await execute<void>([t_bucket = std::move(t_bucket)](Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
         Aws::S3::Model::DeleteBucketRequest req;
         req.SetBucket(t_bucket.c_str());
 
@@ -522,8 +519,8 @@ Task<BackendResult<void>> S3Client::deleteBucket(std::string t_bucket) {
     });
 }
 
-Task<BackendResult<bool>> S3Client::bucketExists(std::string t_bucket) {
-    co_return co_await execute<bool>([t_bucket = std::move(t_bucket)](Aws::S3::S3Client& t_client) -> BackendResult<bool> {
+Task<Result<bool, BackendError>> S3Client::bucketExists(std::string t_bucket) {
+    co_return co_await execute<bool>([t_bucket = std::move(t_bucket)](Aws::S3::S3Client& t_client) -> Result<bool, BackendError> {
         Aws::S3::Model::HeadBucketRequest req;
         req.SetBucket(t_bucket.c_str());
 
@@ -544,8 +541,8 @@ Task<BackendResult<bool>> S3Client::bucketExists(std::string t_bucket) {
     });
 }
 
-Task<BackendResult<Json::Value>> S3Client::listBuckets() {
-    co_return co_await execute<Json::Value>([](Aws::S3::S3Client& t_client) -> BackendResult<Json::Value> {
+Task<Result<Json::Value, BackendError>> S3Client::listBuckets() {
+    co_return co_await execute<Json::Value>([](Aws::S3::S3Client& t_client) -> Result<Json::Value, BackendError> {
         auto outcome = t_client.ListBuckets();
 
         if (!outcome.IsSuccess()) {
@@ -568,9 +565,9 @@ Task<BackendResult<Json::Value>> S3Client::listBuckets() {
     });
 }
 
-Task<BackendResult<Json::Value>> S3Client::getObjectTags(std::string t_bucket, std::string t_key) {
+Task<Result<Json::Value, BackendError>> S3Client::getObjectTags(std::string t_bucket, std::string t_key) {
     co_return co_await execute<Json::Value>(
-        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](Aws::S3::S3Client& t_client) -> BackendResult<Json::Value> {
+        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](Aws::S3::S3Client& t_client) -> Result<Json::Value, BackendError> {
             Json::Value result(Json::objectValue);
 
             Aws::S3::Model::GetObjectTaggingRequest req;
@@ -593,9 +590,9 @@ Task<BackendResult<Json::Value>> S3Client::getObjectTags(std::string t_bucket, s
         });
 }
 
-Task<BackendResult<void>> S3Client::putObjectTags(std::string t_bucket, std::string t_key, Json::Value t_tags) {
+Task<Result<void, BackendError>> S3Client::putObjectTags(std::string t_bucket, std::string t_key, Json::Value t_tags) {
     co_return co_await execute<void>([t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_tags = std::move(t_tags)](
-                                         Aws::S3::S3Client& t_client) -> BackendResult<void> {
+                                         Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
         Aws::S3::Model::PutObjectTaggingRequest req;
         req.SetBucket(t_bucket.c_str());
         req.SetKey(t_key.c_str());
@@ -622,9 +619,9 @@ Task<BackendResult<void>> S3Client::putObjectTags(std::string t_bucket, std::str
     });
 }
 
-Task<BackendResult<void>> S3Client::deleteObjectTags(std::string t_bucket, std::string t_key) {
+Task<Result<void, BackendError>> S3Client::deleteObjectTags(std::string t_bucket, std::string t_key) {
     co_return co_await execute<void>(
-        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](Aws::S3::S3Client& t_client) -> BackendResult<void> {
+        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
             Aws::S3::Model::DeleteObjectTaggingRequest req;
             req.SetBucket(t_bucket.c_str());
             req.SetKey(t_key.c_str());
@@ -642,10 +639,11 @@ Task<BackendResult<void>> S3Client::deleteObjectTags(std::string t_bucket, std::
         });
 }
 
-Task<BackendResult<std::string>> S3Client::createMultipartUpload(std::string t_bucket, std::string t_key, std::string t_content_type) {
+Task<Result<std::string, BackendError>> S3Client::createMultipartUpload(
+    std::string t_bucket, std::string t_key, std::string t_content_type) {
     co_return co_await execute<std::string>(
         [t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_content_type = std::move(t_content_type)](
-            Aws::S3::S3Client& t_client) -> BackendResult<std::string> {
+            Aws::S3::S3Client& t_client) -> Result<std::string, BackendError> {
             Aws::S3::Model::CreateMultipartUploadRequest req;
             req.SetBucket(t_bucket.c_str());
             req.SetKey(t_key.c_str());
@@ -667,11 +665,11 @@ Task<BackendResult<std::string>> S3Client::createMultipartUpload(std::string t_b
         });
 }
 
-Task<BackendResult<std::string>> S3Client::uploadPart(
+Task<Result<std::string, BackendError>> S3Client::uploadPart(
     std::string t_bucket, std::string t_key, std::string t_upload_id, int t_part_number, std::string t_body) {
     co_return co_await execute<std::string>(
         [t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_upload_id = std::move(t_upload_id), t_part_number = t_part_number,
-            t_data = std::move(t_body)](Aws::S3::S3Client& t_client) -> BackendResult<std::string> {
+            t_data = std::move(t_body)](Aws::S3::S3Client& t_client) -> Result<std::string, BackendError> {
             Aws::S3::Model::UploadPartRequest req;
             req.SetBucket(t_bucket.c_str());
             req.SetKey(t_key.c_str());
@@ -695,10 +693,10 @@ Task<BackendResult<std::string>> S3Client::uploadPart(
         });
 }
 
-Task<BackendResult<void>> S3Client::completeMultipartUpload(
+Task<Result<void, BackendError>> S3Client::completeMultipartUpload(
     std::string t_bucket, std::string t_key, std::string t_upload_id, Json::Value t_parts) {
     co_return co_await execute<void>([t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_upload_id = std::move(t_upload_id),
-                                         t_parts = std::move(t_parts)](Aws::S3::S3Client& t_client) -> BackendResult<void> {
+                                         t_parts = std::move(t_parts)](Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
         Aws::S3::Model::CompleteMultipartUploadRequest req;
         req.SetBucket(t_bucket.c_str());
         req.SetKey(t_key.c_str());
@@ -726,9 +724,9 @@ Task<BackendResult<void>> S3Client::completeMultipartUpload(
     });
 }
 
-Task<BackendResult<void>> S3Client::abortMultipartUpload(std::string t_bucket, std::string t_key, std::string t_upload_id) {
+Task<Result<void, BackendError>> S3Client::abortMultipartUpload(std::string t_bucket, std::string t_key, std::string t_upload_id) {
     co_return co_await execute<void>([t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_upload_id = std::move(t_upload_id)](
-                                         Aws::S3::S3Client& t_client) -> BackendResult<void> {
+                                         Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
         Aws::S3::Model::AbortMultipartUploadRequest req;
         req.SetBucket(t_bucket.c_str());
         req.SetKey(t_key.c_str());
@@ -747,11 +745,11 @@ Task<BackendResult<void>> S3Client::abortMultipartUpload(std::string t_bucket, s
     });
 }
 
-Task<BackendResult<int>> S3Client::uploadFileMultipart(
+Task<Result<int, BackendError>> S3Client::uploadFileMultipart(
     std::string t_bucket, std::string t_key, std::string t_content_type, std::filesystem::path t_file_path, size_t t_part_size_bytes) {
 
     // 1. Start the upload.
-    BackendResult<std::string> upload_id_res = co_await createMultipartUpload(t_bucket, t_key, t_content_type);
+    auto upload_id_res = co_await createMultipartUpload(t_bucket, t_key, t_content_type);
     CO_RETURN_ERROR_IF(upload_id_res.hasError(), std::move(upload_id_res).error());
     std::string upload_id = std::move(*upload_id_res);
 
@@ -761,7 +759,7 @@ Task<BackendResult<int>> S3Client::uploadFileMultipart(
     std::ifstream in(t_file_path, std::ios::binary);
     if (!in) {
         co_await abortMultipartUpload(t_bucket, t_key, upload_id);
-        co_return BackendError{"Filesystem", "Failed to open file for multipart upload"};
+        co_return BackendError(BackendErrorKind::Filesystem, "Failed to open file for multipart upload");
     }
 
     Json::Value parts = Json::arrayValue;
@@ -777,7 +775,7 @@ Task<BackendResult<int>> S3Client::uploadFileMultipart(
         }
         std::string part_body = buffer.substr(0, static_cast<size_t>(bytes_read));
 
-        BackendResult<std::string> etag_res = co_await uploadPart(t_bucket, t_key, upload_id, part_number, std::move(part_body));
+        auto etag_res = co_await uploadPart(t_bucket, t_key, upload_id, part_number, std::move(part_body));
         if (etag_res.hasError()) {
             // 3. Any part failure aborts the whole upload — never leave a
             //    half-uploaded multipart session dangling in storage.
@@ -794,55 +792,56 @@ Task<BackendResult<int>> S3Client::uploadFileMultipart(
 
     if (parts.empty()) {
         co_await abortMultipartUpload(t_bucket, t_key, upload_id);
-        co_return BackendError{"Filesystem", "Multipart upload produced zero parts (empty file?)"};
+        co_return BackendError(BackendErrorKind::Filesystem, "Multipart upload produced zero parts (empty file?)");
     }
 
     // 4. Finalize — S3 assembles the parts into one ordinary object here.
     // (Capture the count first: parts is moved into the request below.)
     const int part_count = static_cast<int>(parts.size());
-    BackendResult<void> fin_res = co_await completeMultipartUpload(t_bucket, t_key, upload_id, std::move(parts));
+    auto fin_res = co_await completeMultipartUpload(t_bucket, t_key, upload_id, std::move(parts));
     CO_RETURN_ERROR_IF(fin_res.hasError(), std::move(fin_res).error());
     co_return part_count;
 }
 
-Task<BackendResult<Json::Value>> S3Client::listParts(
+Task<Result<Json::Value, BackendError>> S3Client::listParts(
     std::string t_bucket, std::string t_key, std::string t_upload_id, uint32_t t_max_parts) {
-    co_return co_await execute<Json::Value>([t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_upload_id = std::move(t_upload_id),
-                                                t_max_parts = t_max_parts](Aws::S3::S3Client& t_client) -> BackendResult<Json::Value> {
-        Json::Value result;
-        result["parts"] = Json::Value(Json::arrayValue);
+    co_return co_await execute<Json::Value>(
+        [t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_upload_id = std::move(t_upload_id), t_max_parts = t_max_parts](
+            Aws::S3::S3Client& t_client) -> Result<Json::Value, BackendError> {
+            Json::Value result;
+            result["parts"] = Json::Value(Json::arrayValue);
 
-        Aws::S3::Model::ListPartsRequest req;
-        req.SetBucket(t_bucket.c_str());
-        req.SetKey(t_key.c_str());
-        req.SetUploadId(t_upload_id.c_str());
+            Aws::S3::Model::ListPartsRequest req;
+            req.SetBucket(t_bucket.c_str());
+            req.SetKey(t_key.c_str());
+            req.SetUploadId(t_upload_id.c_str());
 
-        if (t_max_parts > 0) {
-            req.SetMaxParts(t_max_parts);
-        }
+            if (t_max_parts > 0) {
+                req.SetMaxParts(t_max_parts);
+            }
 
-        auto outcome = t_client.ListParts(req);
+            auto outcome = t_client.ListParts(req);
 
-        if (!outcome.IsSuccess()) {
-            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-            std::string error = "List parts failed: " + outcome.GetError().GetMessage();
-            ERROR_LOG(error);
-            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-        }
+            if (!outcome.IsSuccess()) {
+                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
+                std::string error = "List parts failed: " + outcome.GetError().GetMessage();
+                ERROR_LOG(error);
+                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
+            }
 
-        for (const auto& part : outcome.GetResult().GetParts()) {
-            Json::Value p;
-            p["part_number"] = part.GetPartNumber();
-            p["etag"] = part.GetETag().c_str();
-            p["size"] = static_cast<Json::Int64>(part.GetSize());
-            p["last_modified"] = part.GetLastModified().ToGmtString(Aws::Utils::DateFormat::ISO_8601).c_str();
-            result["parts"].append(p);
-        }
-        return result;
-    });
+            for (const auto& part : outcome.GetResult().GetParts()) {
+                Json::Value p;
+                p["part_number"] = part.GetPartNumber();
+                p["etag"] = part.GetETag().c_str();
+                p["size"] = static_cast<Json::Int64>(part.GetSize());
+                p["last_modified"] = part.GetLastModified().ToGmtString(Aws::Utils::DateFormat::ISO_8601).c_str();
+                result["parts"].append(p);
+            }
+            return result;
+        });
 }
 
-Task<BackendResult<std::string>> S3Client::generatePresignedUrl(
+Task<Result<std::string, BackendError>> S3Client::generatePresignedUrl(
     std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds, Aws::Http::HttpMethod t_method) {
     std::shared_ptr<Aws::S3::S3Client> sp_pub_client;
     {
@@ -850,32 +849,32 @@ Task<BackendResult<std::string>> S3Client::generatePresignedUrl(
         sp_pub_client = public_client_;
     }
 
-    co_return co_await execute<std::string>([sp_pub_client = std::move(sp_pub_client), t_bucket = std::move(t_bucket),
-                                                t_key = std::move(t_key), t_expiry_seconds = t_expiry_seconds, t_method = t_method](
-                                                Aws::S3::S3Client& t_client) -> ::sgrn::datastore::BackendResult<std::string> {
-        try {
-            Aws::S3::S3Client* client_to_use = sp_pub_client ? sp_pub_client.get() : &t_client;
+    co_return co_await execute<std::string>(
+        [sp_pub_client = std::move(sp_pub_client), t_bucket = std::move(t_bucket), t_key = std::move(t_key),
+            t_expiry_seconds = t_expiry_seconds, t_method = t_method](Aws::S3::S3Client& t_client) -> Result<std::string, BackendError> {
+            try {
+                Aws::S3::S3Client* client_to_use = sp_pub_client ? sp_pub_client.get() : &t_client;
 
-            std::string url = client_to_use->GeneratePresignedUrl(t_bucket.c_str(), t_key.c_str(), t_method, t_expiry_seconds);
+                std::string url = client_to_use->GeneratePresignedUrl(t_bucket.c_str(), t_key.c_str(), t_method, t_expiry_seconds);
 
-            return url;
-        } catch (const std::exception& ex) {
-            std::string error = "Generate presigned URL failed: " + std::string(ex.what());
-            ERROR_LOG(error);
-            return ::sgrn::datastore::plugins::aws::toBackendError(::sgrn::datastore::plugins::aws::S3Error::RequestFailed, error);
-        }
-    });
+                return url;
+            } catch (const std::exception& ex) {
+                std::string error = "Generate presigned URL failed: " + std::string(ex.what());
+                ERROR_LOG(error);
+                return ::sgrn::datastore::plugins::aws::toBackendError(::sgrn::datastore::plugins::aws::S3Error::RequestFailed, error);
+            }
+        });
 }
 
-Task<BackendResult<std::string>> S3Client::presignedGetUrl(std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds) {
+Task<Result<std::string, BackendError>> S3Client::presignedGetUrl(std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds) {
     co_return co_await generatePresignedUrl(std::move(t_bucket), std::move(t_key), t_expiry_seconds, Aws::Http::HttpMethod::HTTP_GET);
 }
 
-Task<BackendResult<std::string>> S3Client::presignedPutUrl(std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds) {
+Task<Result<std::string, BackendError>> S3Client::presignedPutUrl(std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds) {
     co_return co_await generatePresignedUrl(std::move(t_bucket), std::move(t_key), t_expiry_seconds, Aws::Http::HttpMethod::HTTP_PUT);
 }
 
-Task<BackendResult<std::string>> S3Client::presignedDeleteUrl(std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds) {
+Task<Result<std::string, BackendError>> S3Client::presignedDeleteUrl(std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds) {
     co_return co_await generatePresignedUrl(std::move(t_bucket), std::move(t_key), t_expiry_seconds, Aws::Http::HttpMethod::HTTP_DELETE);
 }
 

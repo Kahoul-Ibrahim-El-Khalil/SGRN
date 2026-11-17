@@ -4,6 +4,9 @@
 #include <sgrn/datastore/handlers/CrudViewHandler.hpp>
 
 #include <array>
+#include <cstdint>
+#include <optional>
+#include <string>
 
 namespace sgrn::datastore::handlers::query
 {
@@ -13,8 +16,25 @@ using sgrn::datastore::query::FieldType;
 using sgrn::datastore::query::Op;
 using sgrn::datastore::query::PrimaryKey;
 
+// Request body of POST /api/v1/file-hashes — the insertable columns of core.file_hashes.
+struct FileHashesCreateBody {
+    std::optional<std::string> sha256;
+    std::optional<int64_t> hit_count;
+    std::optional<std::string> created_at;
+};
+
+// Request body of PATCH /api/v1/file-hashes/{id} — the updatable columns of core.file_hashes.
+struct FileHashesUpdateBody {
+    std::optional<std::string> sha256;
+    std::optional<int64_t> hit_count;
+    std::optional<std::string> created_at;
+};
+
 class FileHashesView : public CrudViewHandler<FileHashesView> {
 public:
+    using CreateBody = FileHashesCreateBody;
+    using UpdateBody = FileHashesUpdateBody;
+
     static constexpr std::array<Field, 3> kFields = {{
         {"sha256", FieldType::Text, Op::Eq | Op::Neq | Op::In, true, true},
         {"hit_count", FieldType::BigInt, Op::Eq | Op::Gt | Op::Lt, true, true},

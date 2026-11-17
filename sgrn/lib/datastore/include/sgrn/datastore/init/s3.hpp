@@ -33,7 +33,7 @@ inline void initS3() {
                         SGRN_INFO("SGRN-Datastore", "Bucket '{}' not found, creating...", bucket);
                         auto create_res = co_await p_s3->createBucket(bucket);
                         if (create_res.hasError()) {
-                            SGRN_ERROR("SGRN-Datastore", "Failed to create bucket '{}': {}", bucket, create_res.error().message_);
+                            SGRN_ERROR("SGRN-Datastore", "Failed to create bucket '{}': {}", bucket, create_res.error().message);
                         } else {
                             SGRN_INFO("SGRN-Datastore", "Bucket '{}' created.", bucket);
                         }
@@ -44,11 +44,11 @@ inline void initS3() {
                 }
                 if (attempt >= kAttempts) {
                     SGRN_ERROR("SGRN-Datastore", "Could not check bucket '{}' after {} attempts: {}", bucket, kAttempts,
-                        exists_res.error().message_);
+                        exists_res.error().message);
                     co_return;
                 }
                 SGRN_WARN("SGRN-Datastore", "Could not check bucket '{}' (attempt {}/{}): {} — retrying", bucket, attempt, kAttempts,
-                    exists_res.error().message_);
+                    exists_res.error().message);
                 co_await drogon::sleepCoro(drogon::app().getLoop(), std::chrono::seconds(1 << (attempt - 1)));
             }
         });

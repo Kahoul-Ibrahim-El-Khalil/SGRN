@@ -1,4 +1,5 @@
 #include <sgrn/datastore/DbError.hpp>
+#include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/crypto/key-store.hpp>
 #include <sgrn/datastore/plugins/threadpool/Threadpool.hpp>
 #include <sgrn/datastore/services/helpers/storage.hpp>
@@ -55,45 +56,91 @@ TempFileGuard& TempFileGuard::operator=(TempFileGuard&& t_other) noexcept {
 namespace helpers
 {
 
+namespace
+{
+struct IdRow {
+    std::optional<int64_t> id;
+};
+
+struct ExistingFileRow {
+    int64_t id{0};
+    std::optional<std::string> key_id;
+    bool is_encrypted{false};
+};
+
+struct DirectoryIdRow {
+    std::optional<int64_t> dir_id;
+};
+
+struct ObjectKeyRow {
+    std::string key;
+};
+
+struct FormatRow {
+    int32_t id{0};
+    std::string extension;
+    std::string mime_type;
+    std::optional<std::string> description;
+};
+
+struct DomainPermissionRow {
+    std::string allowed_subpath;
+    bool can_read{false};
+    bool can_write{false};
+    bool can_delete{false};
+};
+
+struct ServiceScopeRow {
+    int32_t owner_id{0};
+    std::optional<std::string> display_name;
+    std::optional<int64_t> session_id;
+};
+
+struct UserScopeRow {
+    int32_t owner_id{0};
+    std::optional<int64_t> session_id;
+};
+} // namespace
+
 // ============================================================================
 // Hash Computation
 // ============================================================================
 
-BackendResult<FileHash> computeHashInMemory(std::string_view t_data) {
+Result<FileHash, BackendError> computeHashInMemory(std::string_view t_data) {
     FileHash result;
-    Result<std::string> hash = utils::computeSha512Data(t_data, utils::HashEncoding::base64url);
+    auto hash = utils::computeSha512Data(t_data, utils::HashEncoding::base64url);
     RETURN_ERROR_IF(!hash.has_value(), BackendError(BackendErrorKind::Hashing, std::move(hash.error())));
     result.key = std::move(hash.value());
     result.original_size = t_data.size();
     return result;
 }
 
-BackendResult<std::string> computeSha256InMemory(std::string_view t_data) {
-    Result<std::string> hash = utils::computeSha256Data(t_data, utils::HashEncoding::hex);
+Result<std::string, BackendError> computeSha256InMemory(std::string_view t_data) {
+    auto hash = utils::computeSha256Data(t_data, utils::HashEncoding::hex);
     RETURN_ERROR_IF(!hash.has_value(), BackendError(BackendErrorKind::Hashing, std::move(hash.error())));
     return std::move(hash.value());
 }
 
-BackendResult<FileHash> computeHashFromFile(const fs::path& t_file_path) {
+Result<FileHash, BackendError> computeHashFromFile(const fs::path& t_file_path) {
     FileHash result;
-    Result<std::string> hash = utils::computeSha512File(t_file_path, utils::HashEncoding::base64url);
+    auto hash = utils::computeSha512File(t_file_path, utils::HashEncoding::base64url);
     RETURN_ERROR_IF(!hash.has_value(), BackendError(BackendErrorKind::Hashing, std::move(hash.error())));
     result.key = std::move(hash.value());
     result.original_size = fs::file_size(t_file_path);
     return result;
 }
 
-BackendResult<std::string> computeSha256FromFile(const fs::path& t_file_path) {
-    Result<std::string> hash = utils::computeSha256File(t_file_path, utils::HashEncoding::hex);
+Result<std::string, BackendError> computeSha256FromFile(const fs::path& t_file_path) {
+    auto hash = utils::computeSha256File(t_file_path, utils::HashEncoding::hex);
     RETURN_ERROR_IF(!hash.has_value(), BackendError(BackendErrorKind::Hashing, std::move(hash.error())));
     return std::move(hash.value());
 }
 
-Task<BackendResult<FileHash>> computeHashFromFileAsync(fs::path t_file_path) {
-    BackendResult<plugins::Threadpool*> tp_res = core::getPlugin<plugins::Threadpool>();
+Task<Result<FileHash, BackendError>> computeHashFromFileAsync(fs::path t_file_path) {
+    auto tp_res = core::getPlugin<plugins::Threadpool>();
     CO_RETURN_ERROR_IF(!tp_res, tp_res.error());
     plugins::Threadpool* p_tp = tp_res.value();
-    co_return co_await utils::runInPool(p_tp->getPool(), [t_path = std::move(t_file_path)]() -> BackendResult<FileHash> {
+    co_return co_await utils::runInPool(p_tp->getPool(), [t_path = std::move(t_file_path)]() -> Result<FileHash, BackendError> {
         try {
             return computeHashFromFile(t_path);
         } catch (const std::exception& ex) {
@@ -102,11 +149,11 @@ Task<BackendResult<FileHash>> computeHashFromFileAsync(fs::path t_file_path) {
     });
 }
 
-drogon::Task<::sgrn::datastore::BackendResult<std::string>> computeSha256FromFileAsync(fs::path t_file_path) {
-    BackendResult<plugins::Threadpool*> tp_res = core::getPlugin<plugins::Threadpool>();
+drogon::Task<Result<std::string, BackendError>> computeSha256FromFileAsync(fs::path t_file_path) {
+    auto tp_res = core::getPlugin<plugins::Threadpool>();
     CO_RETURN_ERROR_IF(!tp_res, tp_res.error());
     plugins::Threadpool* p_tp = tp_res.value();
-    co_return co_await utils::runInPool(p_tp->getPool(), [t_path = std::move(t_file_path)]() -> BackendResult<std::string> {
+    co_return co_await utils::runInPool(p_tp->getPool(), [t_path = std::move(t_file_path)]() -> Result<std::string, BackendError> {
         try {
             return computeSha256FromFile(t_path);
         } catch (const std::exception& ex) {
@@ -119,36 +166,36 @@ drogon::Task<::sgrn::datastore::BackendResult<std::string>> computeSha256FromFil
 // Compression Utilities
 // ============================================================================
 
-Task<BackendResult<std::string>> compressInMemory(std::string&& t_data, uint8_t t_compression_level) {
-    BackendResult<plugins::Threadpool*> tp_res = core::getPlugin<plugins::Threadpool>();
+Task<Result<std::string, BackendError>> compressInMemory(std::string&& t_data, uint8_t t_compression_level) {
+    auto tp_res = core::getPlugin<plugins::Threadpool>();
     CO_RETURN_ERROR_IF(!tp_res, tp_res.error());
     plugins::Threadpool* p_tp = tp_res.value();
     co_return co_await utils::runInPool(
-        p_tp->getPool(), [buffer = std::move(t_data), level = t_compression_level]() -> BackendResult<std::string> {
-            Result<std::string> tp_res = utils::compressStringZstd(buffer, level);
+        p_tp->getPool(), [buffer = std::move(t_data), level = t_compression_level]() -> Result<std::string, BackendError> {
+            auto tp_res = utils::compressStringZstd(buffer, level);
             RETURN_ERROR_IF(!tp_res, BackendError(BackendErrorKind::Compression, std::move(tp_res.error())));
             return std::move(tp_res.value());
         });
 }
 
-BackendResult<fs::path> compressFile(const fs::path& t_input_path, const fs::path& t_output_path, uint8_t t_compression_level) {
-    Result<size_t> tp_res = sgrn::utils::compression::compressFileStreamingZstd(t_input_path, t_output_path, t_compression_level);
+Result<fs::path, BackendError> compressFile(const fs::path& t_input_path, const fs::path& t_output_path, uint8_t t_compression_level) {
+    auto tp_res = sgrn::utils::compression::compressFileStreamingZstd(t_input_path, t_output_path, t_compression_level);
     if (!tp_res.has_value()) {
         RETURN_ERROR(BackendError(BackendErrorKind::Runtime, std::format("Compression failed: {}", tp_res.error())));
     }
     return t_output_path;
 }
 
-Task<BackendResult<fs::path>> compressFileAsync(fs::path t_input_path, fs::path t_output_path, uint8_t t_compression_level) {
-    BackendResult<plugins::Threadpool*> tp_res = core::getPlugin<plugins::Threadpool>();
+Task<Result<fs::path, BackendError>> compressFileAsync(fs::path t_input_path, fs::path t_output_path, uint8_t t_compression_level) {
+    auto tp_res = core::getPlugin<plugins::Threadpool>();
     if (!tp_res) {
         CO_RETURN_ERROR(tp_res.error());
     }
 
     plugins::Threadpool* p_tp = tp_res.value();
     co_return co_await p_tp->run(
-        [in = std::move(t_input_path), out = std::move(t_output_path), level = t_compression_level]() -> BackendResult<fs::path> {
-            Result<size_t> tp_res = utils::compression::compressFileStreamingZstd(in, out, level);
+        [in = std::move(t_input_path), out = std::move(t_output_path), level = t_compression_level]() -> Result<fs::path, BackendError> {
+            auto tp_res = utils::compression::compressFileStreamingZstd(in, out, level);
             RETURN_ERROR_IF(tp_res.hasError(), BackendError(BackendErrorKind::Runtime, std::move(tp_res.error())));
             return out;
         });
@@ -217,38 +264,42 @@ bool verifyCompressionSignature(std::string_view t_data, std::string_view t_algo
 // Database Operations
 // ============================================================================
 
-Task<BackendResult<int64_t>> insertObject(drogon::orm::DbClientPtr tsp_db_client, std::string t_bucket, std::string t_key, size_t t_size,
-    size_t t_original_size, std::string t_sha256, bool t_is_compressed, std::optional<std::string> t_compression_algorithm,
+Task<Result<int64_t, BackendError>> insertObject(drogon::orm::DbClientPtr tsp_db_client, std::string t_bucket, std::string t_key,
+    size_t t_size, size_t t_original_size, std::string t_sha256, bool t_is_compressed, std::optional<std::string> t_compression_algorithm,
     std::optional<uint8_t> t_compression_level) {
     try {
+        static constexpr char kQuery[] = "SELECT storage.upsert_object($1, $2, $3, $4, $5, 'GARAGE', $6, $7, $8) AS id";
         drogon::orm::Result result =
-            co_await tsp_db_client->execSqlCoro("SELECT storage.upsert_object($1, $2, $3, $4, $5, 'GARAGE', $6, $7, $8) AS id",
-                std::move(t_bucket), std::move(t_key), static_cast<int64_t>(t_size), static_cast<int64_t>(t_original_size),
-                std::move(t_sha256), t_is_compressed, t_compression_algorithm,
+            co_await tsp_db_client->execSqlCoro(kQuery, std::move(t_bucket), std::move(t_key), static_cast<int64_t>(t_size),
+                static_cast<int64_t>(t_original_size), std::move(t_sha256), t_is_compressed, t_compression_algorithm,
                 t_compression_level.has_value() ? std::optional<int32_t>(static_cast<int32_t>(*t_compression_level)) : std::nullopt);
 
-        if (result.empty() || result[0]["id"].isNull()) {
+        if (result.empty()) {
             CO_RETURN_ERROR(BackendError(BackendErrorKind::Database, "Failed to upsert object: no ID returned"));
         }
-        co_return result[0]["id"].as<int64_t>();
+        const auto row = sgrn::orm::fromRow<IdRow, kQuery>(result[0]);
+        if (!row.id) {
+            CO_RETURN_ERROR(BackendError(BackendErrorKind::Database, "Failed to upsert object: no ID returned"));
+        }
+        co_return *row.id;
     } catch (const std::exception& ex) {
         CO_RETURN_ERROR(BackendError(BackendErrorKind::Database, std::format("Failed to upsert object: {}", ex.what())));
     }
 }
 
-Task<BackendResult<void>> updateObjectChunking(drogon::orm::DbClientPtr tsp_db_client, int64_t t_object_id, std::string_view t_upload_mode,
-    std::optional<int64_t> t_part_count, std::optional<int64_t> t_part_size_bytes) {
+Task<Result<void, BackendError>> updateObjectChunking(drogon::orm::DbClientPtr tsp_db_client, int64_t t_object_id,
+    std::string_view t_upload_mode, std::optional<int64_t> t_part_count, std::optional<int64_t> t_part_size_bytes) {
     try {
         co_await tsp_db_client->execSqlCoro(
             "UPDATE storage.objects SET upload_mode = $2, part_count = $3, part_size_bytes = $4 WHERE id = $1", t_object_id,
             std::string(t_upload_mode), t_part_count, t_part_size_bytes);
         co_return {};
     } catch (const std::exception& ex) {
-        co_return BackendError{"Database", std::format("Failed to stamp chunking trace: {}", ex.what())};
+        co_return BackendError(BackendErrorKind::Database, std::format("Failed to stamp chunking trace: {}", ex.what()));
     }
 }
 
-Task<BackendResult<int64_t>> insertFile(drogon::orm::DbClientPtr tsp_db_client, std::string t_name, int64_t t_object_id,
+Task<Result<int64_t, BackendError>> insertFile(drogon::orm::DbClientPtr tsp_db_client, std::string t_name, int64_t t_object_id,
     std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_extension,
     std::optional<int64_t> t_directory_id, std::string t_domain, std::optional<std::string> t_key_id, bool t_is_encrypted) {
     try {
@@ -313,10 +364,10 @@ Task<BackendResult<int64_t>> insertFile(drogon::orm::DbClientPtr tsp_db_client, 
         }
 
         if (existing_res_opt && !existing_res_opt->empty()) {
-            const int64_t file_id = (*existing_res_opt)[0]["id"].as<int64_t>();
-            const bool old_is_encrypted = (*existing_res_opt)[0]["is_encrypted"].as<bool>();
-            const std::string old_key_id =
-                (*existing_res_opt)[0]["key_id"].isNull() ? "" : (*existing_res_opt)[0]["key_id"].as<std::string>();
+            const auto existing = sgrn::orm::fromRowByName<ExistingFileRow>((*existing_res_opt)[0]);
+            const int64_t file_id = existing.id;
+            const bool old_is_encrypted = existing.is_encrypted;
+            const std::string old_key_id = existing.key_id.value_or("");
 
             // Crypto-shred the previous key if it is being replaced or removed
             if (old_is_encrypted && !old_key_id.empty() && (!t_key_id.has_value() || *t_key_id != old_key_id)) {
@@ -383,7 +434,7 @@ Task<BackendResult<int64_t>> insertFile(drogon::orm::DbClientPtr tsp_db_client, 
                     *t_user_id, t_directory_id, t_name);
             }
             if (retry_res_opt && !retry_res_opt->empty()) {
-                const int64_t file_id = (*retry_res_opt)[0]["id"].as<int64_t>();
+                const int64_t file_id = sgrn::orm::fromRowByName<IdRow>((*retry_res_opt)[0]).id.value();
                 co_await tsp_db_client->execSqlCoro(
                     "UPDATE storage.files "
                     "SET session_id = $2, extension = $3, key_id = $4, is_encrypted = $5, created_at = NOW() "
@@ -403,7 +454,7 @@ Task<BackendResult<int64_t>> insertFile(drogon::orm::DbClientPtr tsp_db_client, 
         if (!tp_res_opt || tp_res_opt->empty()) {
             CO_RETURN_ERROR(BackendError(BackendErrorKind::Database, "Failed to insert file"));
         }
-        const int64_t file_id = (*tp_res_opt)[0]["id"].as<int64_t>();
+        const int64_t file_id = sgrn::orm::fromRowByName<IdRow>((*tp_res_opt)[0]).id.value();
 
         co_await tsp_db_client->execSqlCoro(
             "INSERT INTO storage.file_objects (file_id, object_id, part_index, role) VALUES ($1, $2, 0, 'primary')", file_id, t_object_id);
@@ -416,8 +467,9 @@ Task<BackendResult<int64_t>> insertFile(drogon::orm::DbClientPtr tsp_db_client, 
     }
 }
 
-Task<BackendResult<std::optional<int64_t>>> resolveDirectoryPath(drogon::orm::DbClientPtr tsp_db_client, std::optional<int32_t> t_user_id,
-    std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_virtual_path, std::string t_domain) {
+Task<Result<std::optional<int64_t>, BackendError>> resolveDirectoryPath(drogon::orm::DbClientPtr tsp_db_client,
+    std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_virtual_path,
+    std::string t_domain) {
     try {
         if (t_virtual_path.empty() || t_virtual_path == "/") {
             co_return std::optional<int64_t>(std::nullopt);
@@ -428,14 +480,14 @@ Task<BackendResult<std::optional<int64_t>>> resolveDirectoryPath(drogon::orm::Db
             co_return std::optional<int64_t>(std::nullopt);
         }
 
-        drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro(
-            "SELECT storage.ensure_directory_path($1, $2, $3, $4, $5) AS dir_id", t_user_id, t_automated_service_id, t_session_id, dir_path,
+        static constexpr char kQuery[] = "SELECT storage.ensure_directory_path($1, $2, $3, $4, $5) AS dir_id";
+        drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro(kQuery, t_user_id, t_automated_service_id, t_session_id, dir_path,
             t_domain.empty() ? std::optional<std::string>(std::nullopt) : std::optional<std::string>(t_domain));
 
-        if (tp_res.empty() || tp_res[0]["dir_id"].isNull()) {
+        if (tp_res.empty()) {
             co_return std::optional<int64_t>(std::nullopt);
         }
-        co_return tp_res[0]["dir_id"].as<int64_t>();
+        co_return sgrn::orm::fromRow<DirectoryIdRow, kQuery>(tp_res[0]).dir_id;
     } catch (const drogon::orm::DrogonDbException& ex) {
         CO_RETURN_ERROR(toBackendError(ex));
     } catch (const std::exception& ex) {
@@ -443,21 +495,22 @@ Task<BackendResult<std::optional<int64_t>>> resolveDirectoryPath(drogon::orm::Db
     }
 }
 
-Task<BackendResult<std::optional<int64_t>>> ensureDirectoryPath(drogon::orm::DbClientPtr tsp_db_client, std::optional<int32_t> t_user_id,
-    std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_virtual_path, std::string t_domain) {
+Task<Result<std::optional<int64_t>, BackendError>> ensureDirectoryPath(drogon::orm::DbClientPtr tsp_db_client,
+    std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_virtual_path,
+    std::string t_domain) {
     try {
         if (t_virtual_path.empty() || t_virtual_path == "/") {
             co_return std::optional<int64_t>(std::nullopt);
         }
 
-        drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro(
-            "SELECT storage.ensure_directory_path($1, $2, $3, $4, $5) AS dir_id", t_user_id, t_automated_service_id, t_session_id,
+        static constexpr char kQuery[] = "SELECT storage.ensure_directory_path($1, $2, $3, $4, $5) AS dir_id";
+        drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro(kQuery, t_user_id, t_automated_service_id, t_session_id,
             t_virtual_path, t_domain.empty() ? std::optional<std::string>(std::nullopt) : std::optional<std::string>(t_domain));
 
-        if (tp_res.empty() || tp_res[0]["dir_id"].isNull()) {
+        if (tp_res.empty()) {
             co_return std::optional<int64_t>(std::nullopt);
         }
-        co_return tp_res[0]["dir_id"].as<int64_t>();
+        co_return sgrn::orm::fromRow<DirectoryIdRow, kQuery>(tp_res[0]).dir_id;
     } catch (const drogon::orm::DrogonDbException& ex) {
         CO_RETURN_ERROR(toBackendError(ex));
     } catch (const std::exception& ex) {
@@ -467,40 +520,17 @@ Task<BackendResult<std::optional<int64_t>>> ensureDirectoryPath(drogon::orm::DbC
 
 Task<std::optional<UserFileRecord>> getFile(drogon::orm::DbClientPtr tsp_db_client, int64_t t_file_id) {
     try {
-        drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro(
+        static constexpr char kQuery[] =
             "SELECT f.id, f.name, f.full_path, fo.object_id, f.user_id, f.automated_service_id, f.session_id, f.extension, "
-            "f.directory_id, f.created_at, f.key_id, f.is_encrypted, so.is_compressed, so.compression_algorithm, so.compression_level "
+            "f.directory_id, f.created_at, f.key_id, f.is_encrypted, so.is_compressed AS is_compressed_, "
+            "so.compression_algorithm, so.compression_level "
             "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
-            "JOIN storage.objects so ON fo.object_id = so.id WHERE f.id = $1",
-            t_file_id);
+            "JOIN storage.objects so ON fo.object_id = so.id WHERE f.id = $1";
+        drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro(kQuery, t_file_id);
 
         if (tp_res.empty())
             co_return std::nullopt;
-        const drogon::orm::Row& row = tp_res[0];
-        UserFileRecord rec;
-        rec.id = row["id"].as<int64_t>();
-        rec.name = row["name"].as<std::string>();
-        rec.full_path = row["full_path"].as<std::string>();
-        rec.t_object_id = row["object_id"].as<int64_t>();
-        if (!row["user_id"].isNull())
-            rec.user_id = row["user_id"].as<int32_t>();
-        if (!row["automated_service_id"].isNull())
-            rec.automated_service_id = row["automated_service_id"].as<int32_t>();
-        rec.session_id = row["session_id"].as<int64_t>();
-        rec.extension = row["extension"].as<std::string>();
-        if (!row["directory_id"].isNull())
-            rec.directory_id = row["directory_id"].as<int64_t>();
-        rec.created_at = row["created_at"].as<std::string>();
-        if (!row["key_id"].isNull())
-            rec.key_id = row["key_id"].as<std::string>();
-        if (!row["is_encrypted"].isNull())
-            rec.is_encrypted = row["is_encrypted"].as<bool>();
-        rec.is_compressed_ = row["is_compressed"].as<bool>();
-        if (!row["compression_algorithm"].isNull())
-            rec.compression_algorithm = row["compression_algorithm"].as<std::string>();
-        if (!row["compression_level"].isNull())
-            rec.compression_level = static_cast<uint8_t>(row["compression_level"].as<int32_t>());
-        co_return rec;
+        co_return ::sgrn::datastore::orm::fromRow<UserFileRecord, kQuery>(tp_res[0]);
     } catch (...) {
         co_return std::nullopt;
     }
@@ -511,17 +541,20 @@ Task<std::optional<UserFileRecord>> findFileByPath(drogon::orm::DbClientPtr tsp_
         const std::string query =
             !t_ctx.domain.empty()
                 ? "SELECT f.id, f.name, f.full_path, fo.object_id, f.user_id, f.automated_service_id, f.session_id, "
-                  "f.extension, f.directory_id, f.created_at, f.key_id, f.is_encrypted, so.is_compressed, so.compression_algorithm, "
+                  "f.extension, f.directory_id, f.created_at, f.key_id, f.is_encrypted, so.is_compressed AS is_compressed_, "
+                  "so.compression_algorithm, "
                   "so.compression_level FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
                   "JOIN storage.objects so ON fo.object_id = so.id WHERE f.domain = $1 AND f.full_path = $2"
             : t_ctx.is_automated_service
                 ? "SELECT f.id, f.name, f.full_path, fo.object_id, f.user_id, f.automated_service_id, f.session_id, "
-                  "f.extension, f.directory_id, f.created_at, f.key_id, f.is_encrypted, so.is_compressed, so.compression_algorithm, "
+                  "f.extension, f.directory_id, f.created_at, f.key_id, f.is_encrypted, so.is_compressed AS is_compressed_, "
+                  "so.compression_algorithm, "
                   "so.compression_level FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
                   "JOIN storage.objects so ON fo.object_id = so.id "
                   "WHERE f.automated_service_id = $1 AND f.domain IS NULL AND f.full_path = $2"
                 : "SELECT f.id, f.name, f.full_path, fo.object_id, f.user_id, f.automated_service_id, f.session_id, "
-                  "f.extension, f.directory_id, f.created_at, f.key_id, f.is_encrypted, so.is_compressed, so.compression_algorithm, "
+                  "f.extension, f.directory_id, f.created_at, f.key_id, f.is_encrypted, so.is_compressed AS is_compressed_, "
+                  "so.compression_algorithm, "
                   "so.compression_level FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
                   "JOIN storage.objects so ON fo.object_id = so.id "
                   "WHERE f.user_id = $1 AND f.domain IS NULL AND f.full_path = $2";
@@ -530,31 +563,7 @@ Task<std::optional<UserFileRecord>> findFileByPath(drogon::orm::DbClientPtr tsp_
                                                            : co_await tsp_db_client->execSqlCoro(query, t_ctx.owner_id, t_ctx.actual_path);
         if (tp_res.empty())
             co_return std::nullopt;
-        const drogon::orm::Row& row = tp_res[0];
-        UserFileRecord rec;
-        rec.id = row["id"].as<int64_t>();
-        rec.name = row["name"].as<std::string>();
-        rec.full_path = row["full_path"].as<std::string>();
-        rec.t_object_id = row["object_id"].as<int64_t>();
-        if (!row["user_id"].isNull())
-            rec.user_id = row["user_id"].as<int32_t>();
-        if (!row["automated_service_id"].isNull())
-            rec.automated_service_id = row["automated_service_id"].as<int32_t>();
-        rec.session_id = row["session_id"].as<int64_t>();
-        rec.extension = row["extension"].as<std::string>();
-        if (!row["directory_id"].isNull())
-            rec.directory_id = row["directory_id"].as<int64_t>();
-        rec.created_at = row["created_at"].as<std::string>();
-        if (!row["key_id"].isNull())
-            rec.key_id = row["key_id"].as<std::string>();
-        if (!row["is_encrypted"].isNull())
-            rec.is_encrypted = row["is_encrypted"].as<bool>();
-        rec.is_compressed_ = row["is_compressed"].as<bool>();
-        if (!row["compression_algorithm"].isNull())
-            rec.compression_algorithm = row["compression_algorithm"].as<std::string>();
-        if (!row["compression_level"].isNull())
-            rec.compression_level = static_cast<uint8_t>(row["compression_level"].as<int32_t>());
-        co_return rec;
+        co_return ::sgrn::datastore::orm::fromRowByName<UserFileRecord>(tp_res[0]);
     } catch (...) {
         co_return std::nullopt;
     }
@@ -562,10 +571,11 @@ Task<std::optional<UserFileRecord>> findFileByPath(drogon::orm::DbClientPtr tsp_
 
 Task<std::optional<std::string>> getObjectKey(drogon::orm::DbClientPtr tsp_db_client, int64_t t_object_id) {
     try {
-        drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro("SELECT key FROM storage.objects WHERE id = $1", t_object_id);
+        static constexpr char kQuery[] = "SELECT key FROM storage.objects WHERE id = $1";
+        drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro(kQuery, t_object_id);
         if (tp_res.empty())
             co_return std::nullopt;
-        co_return tp_res[0]["key"].as<std::string>();
+        co_return sgrn::orm::fromRow<ObjectKeyRow, kQuery>(tp_res[0]).key;
     } catch (...) {
         co_return std::nullopt;
     }
@@ -577,17 +587,17 @@ Task<std::optional<Formats>> getFormat(drogon::orm::DbClientPtr tsp_db_client, s
         // pass the suffix as it appears in the file name.
         std::transform(t_extension.begin(), t_extension.end(), t_extension.begin(),
             [](unsigned char t_c) { return static_cast<char>(std::tolower(t_c)); });
-        drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro(
-            "SELECT id, extension, mime_type, description FROM storage.formats WHERE extension = $1", t_extension);
+        static constexpr char kQuery[] = "SELECT id, extension, mime_type, description FROM storage.formats WHERE extension = $1";
+        drogon::orm::Result tp_res = co_await tsp_db_client->execSqlCoro(kQuery, t_extension);
         if (tp_res.empty())
             co_return std::nullopt;
+        const auto row = sgrn::orm::fromRow<FormatRow, kQuery>(tp_res[0]);
         Formats fmt;
-        fmt.setId(tp_res[0]["id"].as<int32_t>());
-        fmt.setExtension(tp_res[0]["extension"].as<std::string>());
-        fmt.setMimeType(tp_res[0]["mime_type"].as<std::string>());
-        if (!tp_res[0]["description"].isNull()) {
-            fmt.setDescription(tp_res[0]["description"].as<std::string>());
-        }
+        fmt.setId(row.id);
+        fmt.setExtension(row.extension);
+        fmt.setMimeType(row.mime_type);
+        if (row.description)
+            fmt.setDescription(*row.description);
         co_return fmt;
     } catch (...) {
         co_return std::nullopt;
@@ -608,7 +618,7 @@ fs::path generateTempPath(std::string_view t_prefix) {
     return temp_dir / unique_name;
 }
 
-BackendResult<TempFileGuard> saveToTempFile(const drogon::HttpFile& t_file) {
+Result<TempFileGuard, BackendError> saveToTempFile(const drogon::HttpFile& t_file) {
     try {
         fs::path temp_path = generateTempPath("upload_");
         std::ofstream output(temp_path, std::ios::binary);
@@ -623,7 +633,7 @@ BackendResult<TempFileGuard> saveToTempFile(const drogon::HttpFile& t_file) {
     }
 }
 
-BackendResult<TempFileGuard> saveToTempFile(const std::string& t_data) {
+Result<TempFileGuard, BackendError> saveToTempFile(const std::string& t_data) {
     try {
         fs::path temp_path = generateTempPath("download_");
         std::ofstream output(temp_path, std::ios::binary);
@@ -642,7 +652,7 @@ BackendResult<TempFileGuard> saveToTempFile(const std::string& t_data) {
 // Sub-coroutines
 // ============================================================================
 
-Task<BackendResult<UserFileRecord>> fetchFileRecord(drogon::orm::DbClientPtr tsp_db_client, const ScopeContext& t_ctx) {
+Task<Result<UserFileRecord, BackendError>> fetchFileRecord(drogon::orm::DbClientPtr tsp_db_client, const ScopeContext& t_ctx) {
     std::optional<UserFileRecord> opt = co_await findFileByPath(tsp_db_client, t_ctx);
     if (!opt.has_value()) {
         CO_RETURN_ERROR(BackendError(BackendErrorKind::Database, "File not found or access denied"));
@@ -650,7 +660,7 @@ Task<BackendResult<UserFileRecord>> fetchFileRecord(drogon::orm::DbClientPtr tsp
     co_return std::move(*opt);
 }
 
-Task<BackendResult<std::string>> resolveObjectKey(drogon::orm::DbClientPtr tsp_db_client, int64_t t_object_id) {
+Task<Result<std::string, BackendError>> resolveObjectKey(drogon::orm::DbClientPtr tsp_db_client, int64_t t_object_id) {
     std::optional<std::string> opt_key = co_await getObjectKey(tsp_db_client, t_object_id);
     if (!opt_key.has_value()) {
         CO_RETURN_ERROR(BackendError(BackendErrorKind::Database, "Object key not found in database"));
@@ -658,16 +668,16 @@ Task<BackendResult<std::string>> resolveObjectKey(drogon::orm::DbClientPtr tsp_d
     co_return std::move(opt_key.value());
 }
 
-Task<BackendResult<ScopeContext>> resolveScopeSession(
-    drogon::orm::DbClientPtr tsp_db_client, const Json::Value& t_session, StorageScope t_scope, const std::string& t_path) {
+Task<Result<ScopeContext, BackendError>> resolveScopeSession(drogon::orm::DbClientPtr tsp_db_client,
+    const ::sgrn::datastore::auth::SessionClaims& t_session, StorageScope t_scope, const std::string& t_path) {
     ScopeContext t_ctx;
-    t_ctx.t_session_id = t_session["session_id"].asInt64();
+    t_ctx.t_session_id = t_session.session_id;
     t_ctx.actual_path = t_path;
     t_ctx.is_virtual_root = false;
 
     if (t_scope == StorageScope::Personal) {
-        if (t_session["user"].isMember("automated_service_id")) {
-            t_ctx.owner_id = t_session["user"]["automated_service_id"].asInt();
+        if (t_session.user.automated_service_id) {
+            t_ctx.owner_id = *t_session.user.automated_service_id;
             t_ctx.is_automated_service = true;
             t_ctx.t_automated_service_id = t_ctx.owner_id;
             // M2M automated services default to Write-Only (no deletion allowed) for safety!
@@ -675,13 +685,12 @@ Task<BackendResult<ScopeContext>> resolveScopeSession(
             t_ctx.can_write = true;
             t_ctx.can_delete = false;
         } else {
-            t_ctx.owner_id = t_session["user"]["id"].asInt();
+            t_ctx.owner_id = t_session.user.id;
             t_ctx.is_user = true;
             t_ctx.user_id = t_ctx.owner_id;
-            // Load personal workspace capability flags from the session JWT
-            t_ctx.can_read = t_session["user"].isMember("can_read_personal") ? t_session["user"]["can_read_personal"].asBool() : true;
-            t_ctx.can_write = t_session["user"].isMember("can_write_personal") ? t_session["user"]["can_write_personal"].asBool() : true;
-            t_ctx.can_delete = t_session["user"].isMember("can_delete_personal") ? t_session["user"]["can_delete_personal"].asBool() : true;
+            t_ctx.can_read = t_session.user.can_read_personal;
+            t_ctx.can_write = t_session.user.can_write_personal;
+            t_ctx.can_delete = t_session.user.can_delete_personal;
         }
         co_return t_ctx;
     }
@@ -720,9 +729,9 @@ Task<BackendResult<ScopeContext>> resolveScopeSession(
 
         t_ctx.domain = target_domain;
 
-        std::string actor_domain = t_session["user"].isMember("domain") ? t_session["user"]["domain"].asString() : "";
-        std::string actor_role = t_session["user"]["role"]["name"].asString();
-        const std::string session_org = t_session["user"].isMember("organisation") ? t_session["user"]["organisation"].asString() : "";
+        const std::string& actor_domain = t_session.user.domain;
+        const std::string& actor_role = t_session.user.role.name;
+        const std::string& session_org = t_session.user.organisation;
 
         // A bare domain name is only meaningful inside the caller's
         // organisation.  Never let an admin's role turn a name shared by two
@@ -741,31 +750,32 @@ Task<BackendResult<ScopeContext>> resolveScopeSession(
             }
         }
 
-        if (t_session["user"].isMember("automated_service_id")) {
-            t_ctx.owner_id = t_session["user"]["automated_service_id"].asInt();
+        if (t_session.user.automated_service_id) {
+            t_ctx.owner_id = *t_session.user.automated_service_id;
             t_ctx.is_automated_service = true;
             t_ctx.t_automated_service_id = t_ctx.owner_id;
         } else {
-            t_ctx.owner_id = t_session["user"]["id"].asInt();
+            t_ctx.owner_id = t_session.user.id;
             t_ctx.is_user = true;
             t_ctx.user_id = t_ctx.owner_id;
         }
 
         // Fetch Domain-specific capabilities for non-administrators
         if (actor_role != "global_admin" && actor_role != "admin") {
-            auto perm_res = co_await tsp_db_client->execSqlCoro(
+            static constexpr char kDomainPermissionsQuery[] =
                 "SELECT allowed_subpath, can_read, can_write, can_delete FROM core.user_domain_permissions "
-                "WHERE user_id = $1 AND organisation = $2 AND domain = $3",
-                t_ctx.user_id.value(), session_org, target_domain);
+                "WHERE user_id = $1 AND organisation = $2 AND domain = $3";
+            auto perm_res = co_await tsp_db_client->execSqlCoro(kDomainPermissionsQuery, t_ctx.user_id.value(), session_org, target_domain);
             if (perm_res.empty()) {
                 // Zero-Trust Default: access denied if no capability is registered
                 CO_RETURN_ERROR(
                     BackendError(BackendErrorKind::Auth, "Access Denied: No domain capability permissions configured for this user."));
             } else {
-                t_ctx.allowed_subpath = perm_res[0]["allowed_subpath"].as<std::string>();
-                t_ctx.can_read = perm_res[0]["can_read"].as<bool>();
-                t_ctx.can_write = perm_res[0]["can_write"].as<bool>();
-                t_ctx.can_delete = perm_res[0]["can_delete"].as<bool>();
+                const auto permissions = sgrn::orm::fromRow<DomainPermissionRow, kDomainPermissionsQuery>(perm_res[0]);
+                t_ctx.allowed_subpath = permissions.allowed_subpath;
+                t_ctx.can_read = permissions.can_read;
+                t_ctx.can_write = permissions.can_write;
+                t_ctx.can_delete = permissions.can_delete;
             }
 
             // Sandbox boundary check: ensure traverse is constrained inside the allowed subpath
@@ -788,7 +798,7 @@ Task<BackendResult<ScopeContext>> resolveScopeSession(
         co_return t_ctx;
     }
 
-    const std::string role = t_session["user"]["role"]["name"].asString();
+    const std::string& role = t_session.user.role.name;
     if (role != "admin") {
         CO_RETURN_ERROR(BackendError(BackendErrorKind::Auth, "Admin access required for this scope"));
     }
@@ -800,7 +810,7 @@ Task<BackendResult<ScopeContext>> resolveScopeSession(
         co_return t_ctx;
     }
 
-    const std::string organisation = t_session["user"]["organisation"].asString();
+    const std::string& organisation = t_session.user.organisation;
 
     std::string path_no_slash = (t_path.front() == '/') ? t_path.substr(1) : t_path;
     std::string::size_type first_slash_pos = path_no_slash.find('/');
@@ -852,9 +862,20 @@ Task<BackendResult<ScopeContext>> resolveScopeSession(
             CO_RETURN_ERROR(BackendError(BackendErrorKind::Database, "Target namespace not found"));
         }
 
-        t_ctx.owner_id = (*tp_res)[0]["owner_id"].as<int32_t>();
-        if (t_scope == StorageScope::AutomatedServices && !(*tp_res)[0]["display_name"].isNull()) {
-            t_ctx.display_name = (*tp_res)[0]["display_name"].as<std::string>();
+        std::optional<std::string> display_name;
+        std::optional<int64_t> session_id;
+        if (t_scope == StorageScope::AutomatedServices) {
+            const auto row = sgrn::orm::fromRowByName<ServiceScopeRow>((*tp_res)[0]);
+            t_ctx.owner_id = row.owner_id;
+            display_name = row.display_name;
+            session_id = row.session_id;
+        } else {
+            const auto row = sgrn::orm::fromRowByName<UserScopeRow>((*tp_res)[0]);
+            t_ctx.owner_id = row.owner_id;
+            session_id = row.session_id;
+        }
+        if (display_name) {
+            t_ctx.display_name = *display_name;
         }
         if (t_scope == StorageScope::AutomatedServices) {
             t_ctx.is_automated_service = true;
@@ -863,7 +884,7 @@ Task<BackendResult<ScopeContext>> resolveScopeSession(
             t_ctx.is_user = true;
             t_ctx.user_id = t_ctx.owner_id;
         }
-        t_ctx.t_session_id = (*tp_res)[0]["session_id"].isNull() ? 0 : (*tp_res)[0]["session_id"].as<int64_t>();
+        t_ctx.t_session_id = session_id.value_or(0);
         co_return t_ctx;
     } catch (const std::exception& e) {
         CO_RETURN_ERROR(BackendError(BackendErrorKind::Database, std::format("Database error during scope resolution: {}", e.what())));

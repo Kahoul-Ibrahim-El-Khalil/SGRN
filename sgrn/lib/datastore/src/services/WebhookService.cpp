@@ -19,6 +19,32 @@ namespace sgrn::datastore::services
 using drogon::Task;
 
 using sgrn::datastore::core::getDbClient;
+
+namespace
+{
+struct WebhookEnvelope {
+    std::string event;
+    std::string timestamp;
+    sgrn::json::RawJson data;
+};
+
+struct WebhookDispatchRow {
+    std::string url;
+    std::optional<std::string> secret;
+};
+
+struct WebhookCreatedRow {
+    int32_t id{0};
+    std::string created_at;
+};
+
+static constexpr char kDispatchWebhooksQuery[] = "SELECT url, secret FROM core.webhooks "
+                                                 "WHERE organisation = $1 AND is_active = true "
+                                                 "AND (events IS NULL OR $2 = ANY(events))";
+static constexpr char kCreateWebhookQuery[] =
+    "INSERT INTO core.webhooks (organisation, url, secret) VALUES ($1, $2, $3) RETURNING id, created_at";
+} // namespace
+
 WebhookService& WebhookService::instance() {
     static WebhookService inst;
     return inst;
@@ -65,8 +91,8 @@ void WebhookService::sendHttpRequest(
     }
 }
 
-void WebhookService::dispatchEvent(const std::string& organisation, const std::string& event_type, const Json::Value& payload) {
-    drogon::async_run([this, organisation, event_type, payload]() -> Task<void> {
+void WebhookService::dispatchSerializedEvent(const std::string& organisation, const std::string& event_type, std::string payload_json) {
+    drogon::async_run([this, organisation, event_type, payload_json = std::move(payload_json)]() -> Task<void> {
         try {
             auto db_res = getDbClient();
             if (db_res.hasError())
@@ -75,23 +101,19 @@ void WebhookService::dispatchEvent(const std::string& organisation, const std::s
 
             // Only deliver to webhooks that either have no event filter (events IS NULL)
             // or have explicitly subscribed to this event type.
-            auto rows = co_await db->execSqlCoro("SELECT url, secret FROM core.webhooks "
-                                                 "WHERE organisation = $1 AND is_active = true "
-                                                 "AND (events IS NULL OR $2 = ANY(events))",
-                organisation, event_type);
+            auto rows = co_await db->execSqlCoro(kDispatchWebhooksQuery, organisation, event_type);
 
-            Json::Value envelope;
-            envelope["event"] = event_type;
-            envelope["timestamp"] = trantor::Date::now().toFormattedString(false);
-            envelope["data"] = payload;
+            WebhookEnvelope envelope{
+                event_type, trantor::Date::now().toFormattedString(false), sgrn::json::RawJson{std::move(payload_json)}};
+            auto body_result = sgrn::json::write(envelope);
+            if (body_result.hasError()) {
+                SGRN_ERROR("WebhookService", "Failed to serialize '{}' envelope: {}", event_type, body_result.error().message);
+                co_return;
+            }
+            std::string body = std::move(body_result).value();
 
-            Json::StreamWriterBuilder writer;
-            std::string body = Json::writeString(writer, envelope);
-
-            for (const auto& row : rows) {
-                std::string url = row["url"].as<std::string>();
-                std::string secret = row["secret"].isNull() ? "" : row["secret"].as<std::string>();
-                sendHttpRequest(url, secret, event_type, body);
+            for (const auto& row : sgrn::orm::fromResult<WebhookDispatchRow, kDispatchWebhooksQuery>(rows)) {
+                sendHttpRequest(row.url, row.secret.value_or(""), event_type, body);
             }
         } catch (const std::exception& e) {
             SGRN_ERROR("WebhookService", "Error dispatching webhook event: {}", e.what());
@@ -121,19 +143,19 @@ Task<std::optional<WebhookEndpoint>> WebhookService::createWebhook(
     }
     auto db = db_res.value();
 
-    auto rows = co_await db->execSqlCoro(
-        "INSERT INTO core.webhooks (organisation, url, secret) VALUES ($1, $2, $3) RETURNING id, created_at", organisation, url, secret);
+    auto rows = co_await db->execSqlCoro(kCreateWebhookQuery, organisation, url, secret);
 
     if (rows.empty()) {
         co_return std::nullopt;
     }
-    WebhookEndpoint ep{.id = rows[0]["id"].as<int32_t>(),
+    const auto row = sgrn::orm::fromRowByName<WebhookCreatedRow>(rows[0]);
+    WebhookEndpoint ep{.id = row.id,
         .organisation = organisation,
         .url = url,
         .secret = secret,
         .events = {},
         .is_active = true,
-        .created_at = rows[0]["created_at"].as<std::string>()};
+        .created_at = row.created_at};
     co_return ep;
 }
 

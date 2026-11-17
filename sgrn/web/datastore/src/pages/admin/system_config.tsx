@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Loader2, Save, RefreshCw, TriangleAlert, Activity, Webhook, Plus, Trash2, LogOut } from "lucide-react";
 import { useEvent } from "@/contexts/EventContext";
-import { authenticatedFetch } from "@/backend/api/fetcher";
+import { authenticatedFetch, jsonBody, readBody } from "@/backend/api/fetcher";
+import type { RegisterWebhookRequest } from "@sgrn/datastore/requests";
 import { AdminBackendApiEndpoints } from "@/backend/endpoints";
+import type { ActiveSessionResponse, SessionRevokedResponse } from "@sgrn/types";
 import {
     fetchSystemConfig,
     updateSystemConfig,
@@ -14,7 +16,7 @@ import {
 } from "@/backend/api/system_config";
 
 function LiveSessionsSection() {
-    const [sessions, setSessions] = useState<any[]>([]);
+    const [sessions, setSessions] = useState<ActiveSessionResponse[]>([]);
     const [loading, setLoading] = useState(false);
     const [revoking, setRevoking] = useState<string | null>(null);
     const { showEvent } = useEvent();
@@ -24,7 +26,7 @@ function LiveSessionsSection() {
         try {
             const res = await authenticatedFetch(AdminBackendApiEndpoints.METAPROBE_SESSIONS);
             if (res.ok) {
-                const data = await res.json();
+                const data = await readBody<ActiveSessionResponse[]>(res);
                 setSessions(Array.isArray(data) ? data : []);
             }
         } catch (e) {
@@ -40,9 +42,9 @@ function LiveSessionsSection() {
             setRevoking(t_token);
             try {
                 const res = await authenticatedFetch(AdminBackendApiEndpoints.METAPROBE_SESSION_ITEM(t_token), { method: "DELETE" });
-                const data = await res.json().catch(() => ({}));
+                const data = await readBody<SessionRevokedResponse>(res, {});
                 if (!res.ok) {
-                    throw new Error(data.error || `Failed to revoke session (HTTP ${res.status})`);
+                    throw new Error((data as any).error || `Failed to revoke session (HTTP ${res.status})`);
                 }
                 showEvent("success", `Session of ${t_actor} terminated`);
                 await loadSessions();
@@ -145,7 +147,7 @@ function WebhooksSection() {
         try {
             const res = await authenticatedFetch(AdminBackendApiEndpoints.WEBHOOKS);
             if (res.ok) {
-                const data = await res.json();
+                const data = await readBody(res);
                 setWebhooks(Array.isArray(data) ? data : []);
             }
         } catch (e) {
@@ -166,8 +168,7 @@ function WebhooksSection() {
         try {
             const res = await authenticatedFetch(AdminBackendApiEndpoints.WEBHOOKS, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ url, secret }),
+                ...jsonBody<RegisterWebhookRequest>({ url, secret }),
             });
             if (res.ok) {
                 setUrl("");

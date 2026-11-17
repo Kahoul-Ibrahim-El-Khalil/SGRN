@@ -80,9 +80,9 @@ inline S3Error fromAwsError(const Aws::Client::AWSError<Aws::S3::S3Errors>& e) n
 /// Convert an S3Error (plus optional human-readable detail) into a BackendError
 /// ready for service-layer propagation.  Lives here — not in BackendError.hpp —
 /// so that BackendError.hpp remains free of AWS SDK headers.
-inline ::sgrn::datastore::BackendError toBackendError(S3Error e, std::string_view detail = "") {
+inline BackendError toBackendError(S3Error e, std::string_view detail = "") {
     std::string msg = detail.empty() ? std::string(toString(e)) : std::string(detail);
-    return ::sgrn::datastore::BackendError(::sgrn::datastore::BackendErrorKind::Garage, "Garage", std::move(msg));
+    return BackendError(BackendErrorKind::Garage, "Garage", std::move(msg));
 }
 
 } // namespace sgrn::datastore::plugins::aws

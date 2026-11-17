@@ -11,6 +11,7 @@
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe-access.hpp>
 #include <sgrn/datastore/utils/system-config.hpp>
+#include <sgrn/datastore/wire/storage.hpp>
 
 #include <drogon/HttpAppFramework.h>
 #include <drogon/utils/coroutine.h>
@@ -36,6 +37,35 @@
 
 namespace sgrn::datastore::handlers::storage_admin::detail
 {
+struct PurgeOrphansRequest {
+    std::string bucket;
+    bool dry_run{true};
+    std::size_t limit{500};
+    std::vector<std::string> keys;
+    std::optional<std::string> prefix;
+};
+
+struct UpdateSystemConfigRequest {
+    sgrn::json::RawJson values{"{}"};
+};
+
+struct UpsertFormatRequest {
+    std::string extension;
+    std::string mime_type;
+    bool is_compressed{true};
+    bool is_allowed{true};
+    std::optional<std::string> description;
+};
+
+struct StorageAdminUpdateQuotaRequest {
+    std::string kind;
+    std::optional<int32_t> id;
+    std::optional<std::string> name;
+    std::optional<std::string> domain;
+    std::optional<std::optional<int64_t>> storage_limit_bytes;
+    std::optional<std::optional<int64_t>> entry_count_limit;
+};
+
 struct StorageObjectInfo {
     int64_t id{0};
     std::string bucket;
@@ -56,6 +86,20 @@ struct StorageFileReference {
     std::optional<int64_t> automated_service_id;
     std::string created_at;
 };
+
+static constexpr char kOrganisationStorageFileReferencesQuery[] =
+    "SELECT f.id AS file_id, f.full_path, f.user_id, f.automated_service_id, f.created_at "
+    "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
+    "JOIN storage.objects o ON o.id = fo.object_id "
+    "LEFT JOIN core.users u ON u.id = f.user_id "
+    "LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
+    "WHERE o.bucket = $1 AND o.key = $2 AND COALESCE(u.organisation, s.organisation) = $3 "
+    "ORDER BY f.id LIMIT 100";
+static constexpr char kPlatformStorageFileReferencesQuery[] =
+    "SELECT f.id AS file_id, f.full_path, f.user_id, f.automated_service_id, f.created_at "
+    "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
+    "JOIN storage.objects o ON o.id = fo.object_id "
+    "WHERE o.bucket = $1 AND o.key = $2 ORDER BY f.id LIMIT 100";
 
 struct KeySearchResponse {
     std::string bucket;
@@ -80,22 +124,26 @@ struct PrefixSearchResponse {
     bool truncated{false};
 };
 
-struct PurgeSkipped {
-    std::string key;
-    std::string reason;
-};
-
-struct PurgeKey {
+struct ObjectKeyRow {
     std::string key;
 };
 
-struct PurgeDryRunResponse {
-    std::string bucket;
-    bool dry_run{true};
-    std::vector<PurgeKey> would_delete;
-    int64_t would_delete_count{0};
-    std::vector<PurgeSkipped> skipped;
+struct ObjectKeySizeRow {
+    std::string key;
+    int64_t size{0};
 };
+
+static constexpr char kObjectKeySizesQuery[] = "SELECT key, size FROM storage.objects WHERE bucket = $1 AND key LIKE $2 || '%' ESCAPE '\\'";
+static constexpr char kObjectKeysByPrefixQuery[] = "SELECT key FROM storage.objects WHERE bucket = $1 AND key LIKE $2 || '%' ESCAPE '\\'";
+static constexpr char kStorageObjectInfoQuery[] =
+    "SELECT id, bucket, key AS object_key, size, original_size, is_compressed, compression_algorithm, compression_level,"
+    " provider, created_at FROM storage.objects WHERE bucket = $1 AND key = $2";
+
+using PurgeSkipped = ::sgrn::datastore::storage::PurgeSkipped;
+
+using PurgeKey = ::sgrn::datastore::storage::PurgeKey;
+
+using PurgeDryRunResponse = ::sgrn::datastore::storage::PurgeDryRunResponse;
 
 struct PurgeResponse {
     std::string bucket;
@@ -118,6 +166,16 @@ struct QuotaUpdateWithIdResponse {
 
 struct QuotaUpdateOrganisationResponse {
     std::string kind;
+    std::string label;
+    std::optional<std::string> organisation;
+    int64_t storage_used_bytes{0};
+    std::optional<int64_t> storage_limit_bytes;
+    int64_t entries_used{0};
+    std::optional<int64_t> entry_count_limit;
+};
+
+struct QuotaUpdateRow {
+    std::optional<int64_t> id;
     std::string label;
     std::optional<std::string> organisation;
     int64_t storage_used_bytes{0};
@@ -211,6 +269,27 @@ struct AnalyticsCounts {
     int64_t permission_grants{0};
 };
 
+struct AnalyticsEntityTotalsRow {
+    int64_t count{0};
+    int64_t storage_used_bytes{0};
+    int64_t entries_used{0};
+};
+
+struct AnalyticsObjectTotalsRow {
+    int64_t count{0};
+    int64_t bytes_stored{0};
+    int64_t bytes_virtual{0};
+};
+
+struct AnalyticsFormatTotalsRow {
+    int64_t count{0};
+    int64_t allowed{0};
+};
+
+struct AnalyticsCountRow {
+    int64_t count{0};
+};
+
 struct AnalyticsBytes {
     int64_t virtual_bytes{0};
     int64_t stored{0};
@@ -243,6 +322,73 @@ struct AnalyticsRecentFile {
     std::string at;
 };
 
+static constexpr char kPlatformAnalyticsTimeseriesQuery[] =
+    "SELECT to_char(date_trunc('day', f.created_at), 'YYYY-MM-DD') AS day, COUNT(DISTINCT f.id) AS files, "
+    "COALESCE(SUM(o.original_size),0) AS bytes_virtual "
+    "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = fo.object_id "
+    "WHERE f.created_at >= now() - interval '30 days' "
+    "GROUP BY 1 ORDER BY 1";
+static constexpr char kOrganisationAnalyticsTimeseriesQuery[] =
+    "SELECT to_char(date_trunc('day', f.created_at), 'YYYY-MM-DD') AS day, COUNT(DISTINCT f.id) AS files, "
+    "COALESCE(SUM(o.original_size),0) AS bytes_virtual "
+    "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = fo.object_id "
+    "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
+    "WHERE f.created_at >= now() - interval '30 days' AND COALESCE(u.organisation, s.organisation) = $1 "
+    "GROUP BY 1 ORDER BY 1";
+static constexpr char kPlatformAnalyticsExtensionsQuery[] =
+    "SELECT COALESCE(f.extension, '(none)') AS extension, COUNT(DISTINCT f.id) AS files, "
+    "COALESCE(SUM(o.original_size),0) AS bytes_virtual "
+    "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = fo.object_id "
+    "GROUP BY 1 ORDER BY 2 DESC LIMIT 10";
+static constexpr char kOrganisationAnalyticsExtensionsQuery[] =
+    "SELECT COALESCE(f.extension, '(none)') AS extension, COUNT(DISTINCT f.id) AS files, "
+    "COALESCE(SUM(o.original_size),0) AS bytes_virtual "
+    "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = fo.object_id "
+    "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
+    "WHERE COALESCE(u.organisation, s.organisation) = $1 "
+    "GROUP BY 1 ORDER BY 2 DESC LIMIT 10";
+static constexpr char kPlatformAnalyticsUploadersQuery[] =
+    "SELECT 'user:' || u.email AS actor, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual "
+    "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = fo.object_id "
+    "JOIN core.users u ON u.id = f.user_id "
+    "GROUP BY 1 "
+    "UNION ALL "
+    "SELECT 'service:' || s.name AS actor, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual "
+    "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = fo.object_id "
+    "JOIN core.automated_services s ON s.id = f.automated_service_id "
+    "GROUP BY 1 ORDER BY 2 DESC LIMIT 10";
+static constexpr char kOrganisationAnalyticsUploadersQuery[] =
+    "SELECT 'user:' || u.email AS actor, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual "
+    "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = fo.object_id "
+    "JOIN core.users u ON u.id = f.user_id "
+    "WHERE u.organisation = $1 "
+    "GROUP BY 1 "
+    "UNION ALL "
+    "SELECT 'service:' || s.name AS actor, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS bytes_virtual "
+    "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = fo.object_id "
+    "JOIN core.automated_services s ON s.id = f.automated_service_id "
+    "WHERE s.organisation = $1 "
+    "GROUP BY 1 ORDER BY 2 DESC LIMIT 10";
+static constexpr char kPlatformAnalyticsRecentFilesQuery[] =
+    "SELECT f.name, COALESCE(f.extension, '') AS extension, "
+    "(SELECT COALESCE(SUM(so.original_size), 0) FROM storage.file_objects fo JOIN storage.objects so ON so.id = fo.object_id "
+    "WHERE fo.file_id = f.id) AS bytes_virtual, "
+    "COALESCE('user:' || u.email, 'service:' || s.name, '(unknown)') AS actor, "
+    "to_char(f.created_at, 'YYYY-MM-DD HH24:MI:SS') AS at "
+    "FROM storage.files f "
+    "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
+    "ORDER BY f.id DESC LIMIT 10";
+static constexpr char kOrganisationAnalyticsRecentFilesQuery[] =
+    "SELECT f.name, COALESCE(f.extension, '') AS extension, "
+    "(SELECT COALESCE(SUM(so.original_size), 0) FROM storage.file_objects fo JOIN storage.objects so ON so.id = fo.object_id "
+    "WHERE fo.file_id = f.id) AS bytes_virtual, "
+    "COALESCE('user:' || u.email, 'service:' || s.name, '(unknown)') AS actor, "
+    "to_char(f.created_at, 'YYYY-MM-DD HH24:MI:SS') AS at "
+    "FROM storage.files f "
+    "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
+    "WHERE COALESCE(u.organisation, s.organisation) = $1 "
+    "ORDER BY f.id DESC LIMIT 10";
+
 struct AnalyticsOverviewResponse {
     AnalyticsCounts counts;
     AnalyticsBytes bytes;
@@ -265,6 +411,14 @@ struct AnalyticsBreakdownQuotaRow {
     int64_t bytes_virtual{0};
     std::optional<int64_t> storage_limit_bytes;
     std::optional<int64_t> entry_count_limit;
+};
+
+struct AnalyticsBreakdownQuotaDbRow {
+    std::string slice;
+    int64_t files{0};
+    int64_t bytes_virtual{0};
+    int64_t storage_cap{0};
+    int64_t entry_cap{0};
 };
 
 struct AnalyticsBreakdownActorResponse {
@@ -296,21 +450,21 @@ struct S3UpstreamError : std::runtime_error {
 };
 
 using drogon::Task;
-using sgrn::datastore::BackendResult;
 
-template <typename T>
-Task<T> s3unwrap(Task<BackendResult<T>> t_task) {
-    BackendResult<T> res = co_await std::move(t_task);
+template <typename Outcome>
+Task<typename Outcome::value_type> s3unwrap(Task<Outcome> t_task) {
+    auto res = co_await std::move(t_task);
     if (res.hasError()) {
-        throw S3UpstreamError(res.error().message_);
+        throw S3UpstreamError(res.error().message);
     }
     co_return std::move(res).value();
 }
 
-[[maybe_unused]] Task<void> s3check(Task<BackendResult<void>> t_task) {
-    BackendResult<void> res = co_await std::move(t_task);
+template <typename Outcome>
+[[maybe_unused]] Task<void> s3check(Task<Outcome> t_task) {
+    auto res = co_await std::move(t_task);
     if (res.hasError()) {
-        throw S3UpstreamError(res.error().message_);
+        throw S3UpstreamError(res.error().message);
     }
     co_return;
 }
@@ -388,49 +542,17 @@ struct GarageScan {
     uint32_t pages = 0;
 };
 
-struct StorageStats {
-    int64_t objects{0};
-    int64_t bytes{0};
-    int64_t files{0};
-};
+using StorageStats = ::sgrn::datastore::storage::DbCensus;
 
-struct OverviewBucket {
-    std::string name;
-    struct {
-        int64_t objects{0};
-        int64_t bytes{0};
-        bool truncated{false};
-        uint32_t pages{0};
-    } garage;
-    StorageStats db;
-};
+using OverviewBucket = ::sgrn::datastore::storage::StorageBucketCensus;
 
-struct OverviewResponse {
-    std::vector<OverviewBucket> buckets;
-};
+using OverviewResponse = ::sgrn::datastore::storage::StorageOverview;
 
-struct OrphanObject {
-    std::string key;
-    int64_t size{0};
-    std::string etag;
-};
+using OrphanObject = ::sgrn::datastore::storage::StorageOrphanKey;
 
-struct OrphanSize {
-    std::string key;
-    int64_t size{0};
-};
+using OrphanSize = ::sgrn::datastore::storage::StorageOrphanSize;
 
-struct OrphansResponse {
-    std::string bucket;
-    std::string prefix;
-    int64_t garage_scanned{0};
-    bool garage_truncated{false};
-    std::vector<OrphanObject> garage_only;
-    int64_t garage_only_count{0};
-    int64_t garage_only_bytes{0};
-    std::vector<OrphanSize> db_missing;
-    int64_t db_missing_unchecked{0};
-};
+using OrphansResponse = ::sgrn::datastore::storage::StorageOrphansReport;
 
 struct FormatRecord {
     std::string extension;
@@ -457,7 +579,6 @@ struct FormatUpsertResponse {
 };
 
 struct FormatDeleteResponse {
-    bool success{true};
     std::string extension;
 };
 
@@ -517,7 +638,7 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOverview(HttpRequestPtr tsp_req
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db = db_res.value();
 
@@ -568,11 +689,11 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOverview(HttpRequestPtr tsp_req
             entry.db.files = fieldInt(files[0][0]);
             buckets.push_back(std::move(entry));
         }
-        co_return sgrn::createTypedJsonResponse(OverviewResponse{std::move(buckets)}, k200OK);
+        co_return sgrn::createTypedResponse(tsp_req, OverviewResponse{std::move(buckets)}, k200OK);
     } catch (const S3UpstreamError& e) {
-        co_return sgrn::createErrorResponse(e.what(), k502BadGateway, "StorageAdmin");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k502BadGateway, "StorageAdmin"});
     } catch (const std::exception& e) {
-        co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "StorageAdmin");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k500InternalServerError, "StorageAdmin"});
     }
 }
 
@@ -586,18 +707,17 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOrphans(HttpRequestPtr tsp_req)
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db = db_res.value();
 
         const GarageScan scan = co_await scanBucketKeys(s3, bucket, prefix, max_pages);
 
-        auto db_rows = co_await sgrn::datastore::core::execSqlCoroVec(
-            db, "SELECT key, size FROM storage.objects WHERE bucket = $1 AND key LIKE $2 || '%' ESCAPE '\\'", {bucket, escapeLike(prefix)});
+        auto db_rows = co_await sgrn::datastore::core::execSqlCoroVec(db, detail::kObjectKeySizesQuery, {bucket, escapeLike(prefix)});
         std::unordered_map<std::string, int64_t> db_sizes;
         db_sizes.reserve(db_rows.size() * 2);
-        for (const auto& row : db_rows) {
-            db_sizes[row["key"].as<std::string>()] = fieldInt(row["size"]);
+        for (const auto& row : sgrn::orm::fromResult<detail::ObjectKeySizeRow, detail::kObjectKeySizesQuery>(db_rows)) {
+            db_sizes[row.key] = row.size;
         }
 
         std::vector<OrphanObject> garage_only;
@@ -636,7 +756,7 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOrphans(HttpRequestPtr tsp_req)
             }
         }
 
-        co_return sgrn::createTypedJsonResponse(
+        co_return sgrn::createTypedResponse(tsp_req,
             OrphansResponse{
                 bucket,
                 prefix,
@@ -650,69 +770,57 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOrphans(HttpRequestPtr tsp_req)
             },
             k200OK);
     } catch (const S3UpstreamError& e) {
-        co_return sgrn::createErrorResponse(e.what(), k502BadGateway, "StorageAdmin");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k502BadGateway, "StorageAdmin"});
     } catch (const std::exception& e) {
-        co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "StorageAdmin");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k500InternalServerError, "StorageAdmin"});
     }
 }
 
 Task<HttpResponsePtr> StorageAdminHandler::handlePurgeOrphans(HttpRequestPtr tsp_req) {
     try {
         if (!sgrn::datastore::isPlatformAdmin(tsp_req)) {
-            co_return sgrn::createErrorResponse("Forbidden: Platform administrator privileges required", k403Forbidden, "StorageAdmin");
+            co_return sgrn::createTypedResponse(
+                BackendErrorResponse{"Forbidden: Platform administrator privileges required", k403Forbidden, "StorageAdmin"});
         }
 
-        auto json = tsp_req->getJsonObject();
-        if (!json || !json->isObject()) {
-            co_return sgrn::createErrorResponse("Expected JSON body", k400BadRequest, "StorageAdmin");
+        auto req_res = parseTypedRequest<detail::PurgeOrphansRequest>(tsp_req);
+        if (req_res.hasError()) {
+            co_return sgrn::createTypedResponse(BackendErrorResponse{"Expected JSON body", k400BadRequest, "StorageAdmin"});
         }
+        const auto& req = req_res.value();
         auto s3 = s3plugin();
-        std::string bucket = defaultBucket();
-        if (json->isMember("bucket") && (*json)["bucket"].isString() && !(*json)["bucket"].asString().empty()) {
-            bucket = (*json)["bucket"].asString();
-        }
-        // dry_run defaults true (fail closed): only an explicit JSON false
-        // arms deletion.
-        bool dry_run = true;
-        if (json->isMember("dry_run") && (*json)["dry_run"].isBool()) {
-            dry_run = (*json)["dry_run"].asBool();
-        }
-        std::size_t limit = 500;
-        if (json->isMember("limit") && (*json)["limit"].isUInt()) {
-            limit = std::min<std::size_t>((*json)["limit"].asUInt(), 5000);
-            if (limit == 0) {
-                limit = 500;
-            }
-        }
+        std::string bucket = req.bucket.empty() ? defaultBucket() : req.bucket;
+        bool dry_run = req.dry_run;
+        std::size_t limit = req.limit == 0 ? 500 : std::min<std::size_t>(req.limit, 5000);
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db = db_res.value();
 
         // Candidate set: explicit keys, or a classified prefix scan.
         std::vector<std::string> candidates;
-        if (json->isMember("keys") && (*json)["keys"].isArray() && !(*json)["keys"].empty()) {
-            for (const auto& k : (*json)["keys"]) {
-                if (!k.isString() || k.asString().empty()) {
+        if (!req.keys.empty()) {
+            for (const auto& k : req.keys) {
+                if (k.empty()) {
                     continue;
                 }
                 if (candidates.size() >= limit) {
                     break;
                 }
-                candidates.push_back(k.asString());
+                candidates.push_back(k);
             }
-        } else if (json->isMember("prefix") && (*json)["prefix"].isString()) {
+        } else if (req.prefix.has_value() && !req.prefix->empty()) {
+            const std::string& prefix_str = *req.prefix;
             const uint32_t max_pages = static_cast<uint32_t>(clampParam(queryParam(tsp_req, "max_pages", ""), 10, 100));
-            const GarageScan scan = co_await scanBucketKeys(s3, bucket, (*json)["prefix"].asString(), max_pages);
-            auto prefix_rows = co_await sgrn::datastore::core::execSqlCoroVec(db,
-                "SELECT key FROM storage.objects WHERE bucket = $1 AND key LIKE $2 || '%' ESCAPE '\\'",
-                {bucket, escapeLike((*json)["prefix"].asString())});
+            const GarageScan scan = co_await scanBucketKeys(s3, bucket, prefix_str, max_pages);
+            auto prefix_rows =
+                co_await sgrn::datastore::core::execSqlCoroVec(db, detail::kObjectKeysByPrefixQuery, {bucket, escapeLike(prefix_str)});
             std::unordered_set<std::string> db_keys;
             db_keys.reserve(prefix_rows.size() * 2);
-            for (const auto& row : prefix_rows) {
-                db_keys.insert(row["key"].as<std::string>());
+            for (const auto& row : sgrn::orm::fromResult<detail::ObjectKeyRow, detail::kObjectKeysByPrefixQuery>(prefix_rows)) {
+                db_keys.insert(row.key);
             }
             for (const auto& k : scan.keys) {
                 if (candidates.size() >= limit) {
@@ -723,8 +831,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handlePurgeOrphans(HttpRequestPtr tsp
                 }
             }
         } else {
-            co_return sgrn::createErrorResponse(
-                "Supply non-empty keys[] or a prefix (unbounded purge refused)", k400BadRequest, "StorageAdmin");
+            co_return sgrn::createTypedResponse(
+                BackendErrorResponse{"Supply non-empty keys[] or a prefix (unbounded purge refused)", k400BadRequest, "StorageAdmin"});
         }
 
         // Re-verify every candidate against the DB immediately before acting:
@@ -750,7 +858,7 @@ Task<HttpResponsePtr> StorageAdminHandler::handlePurgeOrphans(HttpRequestPtr tsp
             for (const auto& key : doomed) {
                 would_delete.push_back({key});
             }
-            co_return sgrn::createTypedJsonResponse(
+            co_return sgrn::createTypedResponse(tsp_req,
                 PurgeDryRunResponse{
                     bucket,
                     true,
@@ -778,7 +886,7 @@ Task<HttpResponsePtr> StorageAdminHandler::handlePurgeOrphans(HttpRequestPtr tsp
                 errors = sgrn::json::RawJson{jsonText(res["errors"])};
             }
         }
-        co_return sgrn::createTypedJsonResponse(
+        co_return sgrn::createTypedResponse(tsp_req,
             PurgeResponse{
                 bucket,
                 false,
@@ -788,9 +896,9 @@ Task<HttpResponsePtr> StorageAdminHandler::handlePurgeOrphans(HttpRequestPtr tsp
             },
             k200OK);
     } catch (const S3UpstreamError& e) {
-        co_return sgrn::createErrorResponse(e.what(), k502BadGateway, "StorageAdmin");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k502BadGateway, "StorageAdmin"});
     } catch (const std::exception& e) {
-        co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "StorageAdmin");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k500InternalServerError, "StorageAdmin"});
     }
 }
 
@@ -804,7 +912,7 @@ Task<HttpResponsePtr> StorageAdminHandler::handleSearch(HttpRequestPtr tsp_req) 
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db = db_res.value();
 
@@ -812,69 +920,35 @@ Task<HttpResponsePtr> StorageAdminHandler::handleSearch(HttpRequestPtr tsp_req) 
             KeySearchResponse out;
             out.bucket = bucket;
             out.key = key;
-            auto objs = co_await sgrn::datastore::core::execSqlCoroVec(db,
-                "SELECT id, bucket, key, size, original_size, is_compressed, compression_algorithm, compression_level,"
-                " provider, created_at FROM storage.objects WHERE bucket = $1 AND key = $2",
-                {bucket, key});
+            auto objs = co_await sgrn::datastore::core::execSqlCoroVec(db, detail::kStorageObjectInfoQuery, {bucket, key});
             if (objs.empty()) {
                 out.db = std::nullopt;
             } else {
-                const auto& row = objs[0];
-                out.db = StorageObjectInfo{
-                    fieldInt(row["id"]),
-                    row["bucket"].as<std::string>(),
-                    row["key"].as<std::string>(),
-                    fieldInt(row["size"]),
-                    fieldInt(row["original_size"]),
-                    row["is_compressed"].as<std::string>() == "t",
-                    row["compression_algorithm"].isNull() ? std::nullopt
-                                                          : std::optional<std::string>(row["compression_algorithm"].as<std::string>()),
-                    row["compression_level"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["compression_level"])),
-                    row["provider"].as<std::string>(),
-                    row["created_at"].as<std::string>(),
-                };
+                out.db = sgrn::orm::fromRow<StorageObjectInfo, detail::kStorageObjectInfoQuery>(objs[0]);
 
                 const std::string session_org = sgrn::datastore::getSessionOrganisation(tsp_req);
                 const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
 
-                std::string file_sql;
+                const char* file_sql = nullptr;
                 std::vector<std::string> file_binds = {bucket, key};
                 if (!is_platform) {
-                    file_sql = "SELECT f.id, f.full_path, f.user_id, f.automated_service_id, f.created_at "
-                               "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
-                               "JOIN storage.objects o ON o.id = fo.object_id "
-                               "LEFT JOIN core.users u ON u.id = f.user_id "
-                               "LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
-                               "WHERE o.bucket = $1 AND o.key = $2 AND COALESCE(u.organisation, s.organisation) = $3 "
-                               "ORDER BY f.id LIMIT 100";
+                    file_sql = detail::kOrganisationStorageFileReferencesQuery;
                     file_binds.push_back(session_org);
                 } else {
-                    file_sql = "SELECT f.id, f.full_path, f.user_id, f.automated_service_id, f.created_at "
-                               "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id AND fo.part_index = 0 "
-                               "JOIN storage.objects o ON o.id = fo.object_id "
-                               "WHERE o.bucket = $1 AND o.key = $2 ORDER BY f.id LIMIT 100";
+                    file_sql = detail::kPlatformStorageFileReferencesQuery;
                 }
 
                 auto files = co_await sgrn::datastore::core::execSqlCoroVec(db, file_sql, file_binds);
-                std::vector<StorageFileReference> refs;
-                refs.reserve(files.size());
-                for (const auto& f : files) {
-                    refs.push_back({
-                        fieldInt(f["id"]),
-                        f["full_path"].as<std::string>(),
-                        f["user_id"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(f["user_id"])),
-                        f["automated_service_id"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(f["automated_service_id"])),
-                        f["created_at"].as<std::string>(),
-                    });
-                }
-                out.files = std::move(refs);
+                out.files = is_platform
+                                ? sgrn::orm::fromResult<StorageFileReference, detail::kPlatformStorageFileReferencesQuery>(files)
+                                : sgrn::orm::fromResult<StorageFileReference, detail::kOrganisationStorageFileReferencesQuery>(files);
             }
             try {
                 out.garage = sgrn::json::RawJson{jsonText(co_await s3unwrap(s3->statObject(bucket, key)))};
             } catch (const S3UpstreamError& e) {
                 out.garage_error = e.what();
             }
-            co_return sgrn::createTypedJsonResponse(out, k200OK);
+            co_return sgrn::createTypedResponse(tsp_req, out, k200OK);
         }
 
         if (!prefix.empty()) {
@@ -884,8 +958,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleSearch(HttpRequestPtr tsp_req) 
                 {bucket, escapeLike(prefix)});
             std::unordered_set<std::string> db_keys;
             db_keys.reserve(match_rows.size() * 2);
-            for (const auto& row : match_rows) {
-                db_keys.insert(row["key"].as<std::string>());
+            for (const auto& row : sgrn::orm::fromResultByName<detail::ObjectKeyRow>(match_rows)) {
+                db_keys.insert(row.key);
             }
             std::vector<PrefixMatch> matches;
             matches.reserve(res["objects"].size());
@@ -893,16 +967,16 @@ Task<HttpResponsePtr> StorageAdminHandler::handleSearch(HttpRequestPtr tsp_req) 
                 const std::string object_key = obj["key"].asString();
                 matches.push_back({object_key, obj["size"].asInt64(), obj["etag"].asString(), db_keys.find(object_key) != db_keys.end()});
             }
-            co_return sgrn::createTypedJsonResponse(
-                PrefixSearchResponse{bucket, prefix, std::move(matches), res["is_truncated"].asBool()}, k200OK);
+            co_return sgrn::createTypedResponse(
+                tsp_req, PrefixSearchResponse{bucket, prefix, std::move(matches), res["is_truncated"].asBool()}, k200OK);
         }
 
-        co_return sgrn::createErrorResponse(
-            "Supply exactly one of key=<exact hash> or prefix=<hash prefix>", k400BadRequest, "StorageAdmin");
+        co_return sgrn::createTypedResponse(
+            BackendErrorResponse{"Supply exactly one of key=<exact hash> or prefix=<hash prefix>", k400BadRequest, "StorageAdmin"});
     } catch (const S3UpstreamError& e) {
-        co_return sgrn::createErrorResponse(e.what(), k502BadGateway, "StorageAdmin");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k502BadGateway, "StorageAdmin"});
     } catch (const std::exception& e) {
-        co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "StorageAdmin");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k500InternalServerError, "StorageAdmin"});
     }
 }
 
@@ -1069,7 +1143,6 @@ struct SystemConfigResponse {
 };
 
 struct SystemConfigUpdateResponse {
-    bool success{true};
     std::string config_path;
     std::string backup_path;
     std::vector<std::string> applied_hot;
@@ -1094,17 +1167,19 @@ std::string compactJson(const Json::Value& t_value) {
 
 Task<HttpResponsePtr> StorageAdminHandler::handleGetSystemConfig(HttpRequestPtr tsp_req) {
     if (!sgrn::datastore::isPlatformAdmin(tsp_req)) {
-        co_return sgrn::createErrorResponse("Forbidden: Platform administrator privileges required", k403Forbidden, "SystemConfig");
+        co_return sgrn::createTypedResponse(
+            BackendErrorResponse{"Forbidden: Platform administrator privileges required", k403Forbidden, "SystemConfig"});
     }
     try {
         const std::string path = sgrn::datastore::config::currentConfigPath();
         Json::Value root;
         if (const std::string err = readConfigFile(path, root); !err.empty()) {
-            co_return sgrn::createErrorResponse(err, k500InternalServerError, "SystemConfig");
+            co_return sgrn::createTypedResponse(BackendErrorResponse{err, k500InternalServerError, "SystemConfig"});
         }
         const auto live_s3 = sgrn::json::write(sgrn::datastore::services::storage::currentStorageConfig().toJsonConfig());
         if (live_s3.hasError()) {
-            co_return sgrn::createErrorResponse("Failed to serialize live storage configuration", k500InternalServerError, "SystemConfig");
+            co_return sgrn::createTypedResponse(
+                BackendErrorResponse{"Failed to serialize live storage configuration", k500InternalServerError, "SystemConfig"});
         }
         const std::string live_json = "{\"custom_config\":{\"s3\":" + live_s3.value() + "}}";
         // Effective-now values (live in-memory). Identical to `values` for
@@ -1118,36 +1193,47 @@ Task<HttpResponsePtr> StorageAdminHandler::handleGetSystemConfig(HttpRequestPtr 
         }
         const Json::Value values = systemConfigValuesJson(sgrn::datastore::sysconfig::sanitizeForAdmin(root));
         const Json::Value schema = systemConfigSchemaJson();
-        co_return sgrn::createTypedJsonResponse(
+        co_return sgrn::createTypedResponse(tsp_req,
             SystemConfigResponse{path, sgrn::json::RawJson(compactJson(values)), sgrn::json::RawJson(compactJson(schema)),
                 sgrn::json::RawJson(live_json), std::move(pending_restart)},
             k200OK);
     } catch (const std::exception& e) {
-        co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "SystemConfig");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k500InternalServerError, "SystemConfig"});
     }
 }
 
 Task<HttpResponsePtr> StorageAdminHandler::handleUpdateSystemConfig(HttpRequestPtr tsp_req) {
     if (!sgrn::datastore::isPlatformAdmin(tsp_req)) {
-        co_return sgrn::createErrorResponse("Forbidden: Platform administrator privileges required", k403Forbidden, "SystemConfig");
+        co_return sgrn::createTypedResponse(
+            BackendErrorResponse{"Forbidden: Platform administrator privileges required", k403Forbidden, "SystemConfig"});
     }
     try {
-        auto json = tsp_req->getJsonObject();
-        if (!json || !json->isObject() || !json->isMember("values") || !(*json)["values"].isObject()) {
-            co_return sgrn::createErrorResponse("Expected JSON body {\"values\": {...}}", k400BadRequest, "SystemConfig");
+        auto req_res = parseTypedRequest<detail::UpdateSystemConfigRequest>(tsp_req);
+        if (req_res.hasError() || req_res->values.str.empty()) {
+            co_return sgrn::createTypedResponse(
+                BackendErrorResponse{"Expected JSON body {\"values\": {...}}", k400BadRequest, "SystemConfig"});
+        }
+        Json::CharReaderBuilder builder;
+        Json::Value values_json;
+        std::string errs;
+        const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+        const auto& val_str = req_res->values.str;
+        if (!reader->parse(val_str.data(), val_str.data() + val_str.size(), &values_json, &errs) || !values_json.isObject()) {
+            co_return sgrn::createTypedResponse(
+                BackendErrorResponse{"Expected JSON body {\"values\": {...}}", k400BadRequest, "SystemConfig"});
         }
         const std::string path = sgrn::datastore::config::currentConfigPath();
         Json::Value root;
         if (const std::string err = readConfigFile(path, root); !err.empty()) {
-            co_return sgrn::createErrorResponse(err, k500InternalServerError, "SystemConfig");
+            co_return sgrn::createTypedResponse(BackendErrorResponse{err, k500InternalServerError, "SystemConfig"});
         }
 
         sgrn::datastore::sysconfig::ApplyReport report;
-        if (const std::string err = sgrn::datastore::sysconfig::applyAdminUpdate(root, (*json)["values"], report); !err.empty()) {
-            co_return sgrn::createErrorResponse(err, k400BadRequest, "SystemConfig");
+        if (const std::string err = sgrn::datastore::sysconfig::applyAdminUpdate(root, values_json, report); !err.empty()) {
+            co_return sgrn::createTypedResponse(BackendErrorResponse{err, k400BadRequest, "SystemConfig"});
         }
         if (const std::string err = atomicWriteConfig(path, root); !err.empty()) {
-            co_return sgrn::createErrorResponse(err, k500InternalServerError, "SystemConfig");
+            co_return sgrn::createTypedResponse(BackendErrorResponse{err, k500InternalServerError, "SystemConfig"});
         }
 
         // --- hot-apply -------------------------------------------------------
@@ -1205,22 +1291,32 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpdateSystemConfig(HttpRequestP
         {
             auto db_res = sgrn::datastore::core::getDbClient();
             if (!db_res.hasError()) {
-                const Json::Value& session = tsp_req->attributes()->get<Json::Value>("session_json");
-                const int32_t actor_id = session["user"]["id"].asInt();
-                const std::string actor_name = session["user"]["email"].asString();
-                // Platform-level config is owned by the platform organisation ("platform").
-                const std::string config_org = session["user"]["organisation"].asString();
+                std::string config_org;
+                int32_t actor_id = 0;
+                std::string actor_name;
+                if (tsp_req->attributes()->find("auth_context")) {
+                    const auto& auth = tsp_req->attributes()->get<filters::AuthContext>("auth_context");
+                    actor_id = auth.user.id;
+                    actor_name = auth.user.email;
+                    config_org = auth.user.organisation;
+                } else if (tsp_req->attributes()->find("session_claims")) {
+                    const auto& user = tsp_req->attributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims").user;
+                    actor_id = user.id;
+                    actor_name = user.email;
+                    config_org = user.organisation;
+                }
                 co_await sgrn::datastore::audit::AuditLogger::log(db_res.value(), config_org, "user", actor_id, actor_name,
                     "system.config_updated", "system_config", path, tsp_req->getPeerAddr().toIp(),
                     SystemConfigAuditDetails{applied_hot, restart_required, path}, "success");
             }
         }
 
-        co_return sgrn::createTypedJsonResponse(SystemConfigUpdateResponse{true, path, path + ".bak", std::move(applied_hot),
-                                                    std::move(restart_required), std::move(pending_restart), std::move(warnings)},
+        co_return sgrn::createTypedResponse(tsp_req,
+            SystemConfigUpdateResponse{
+                path, path + ".bak", std::move(applied_hot), std::move(restart_required), std::move(pending_restart), std::move(warnings)},
             k200OK);
     } catch (const std::exception& e) {
-        co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "SystemConfig");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k500InternalServerError, "SystemConfig"});
     }
 }
 
@@ -1235,7 +1331,7 @@ inline std::string lowerAscii(std::string t_in) {
     return sgrn::utils::strings::toLower(std::move(t_in));
 }
 
-bool jsonBool(const Json::Value& t_v, bool t_dflt) {
+[[maybe_unused]] inline bool jsonBool(const Json::Value& t_v, bool t_dflt) {
     return t_v.isBool() ? t_v.asBool() : t_dflt;
 }
 
@@ -1246,13 +1342,13 @@ Task<HttpResponsePtr> StorageAdminHandler::handleListFormats(HttpRequestPtr tsp_
         const std::string search = lowerAscii(queryParam(tsp_req, "search", ""));
         const std::string allowed = lowerAscii(queryParam(tsp_req, "allowed", ""));
         if (!allowed.empty() && allowed != "true" && allowed != "false") {
-            co_return sgrn::createErrorResponse("allowed must be true or false", k400BadRequest, "StorageAdmin");
+            co_return sgrn::createTypedResponse(BackendErrorResponse{"allowed must be true or false", k400BadRequest, "StorageAdmin"});
         }
         const std::size_t limit = clampParam(queryParam(tsp_req, "limit", ""), 500, 5000);
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db = db_res.value();
 
@@ -1268,45 +1364,46 @@ Task<HttpResponsePtr> StorageAdminHandler::handleListFormats(HttpRequestPtr tsp_
                 std::to_string(limit),
             {escapeLike(search), allowed});
 
-        co_return sgrn::createTypedJsonResponse(
+        co_return sgrn::createTypedResponse(tsp_req,
             FormatsResponse{
                 .formats = sgrn::orm::fromResult<FormatRecord, kQuery>(rows),
                 .count = static_cast<int64_t>(rows.size()),
             },
             k200OK);
     } catch (const std::exception& e) {
-        co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "StorageAdmin");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k500InternalServerError, "StorageAdmin"});
     }
 }
 
 Task<HttpResponsePtr> StorageAdminHandler::handleUpsertFormat(HttpRequestPtr tsp_req) {
     try {
-        auto json = tsp_req->getJsonObject();
-        if (!json || !json->isObject()) {
-            co_return sgrn::createErrorResponse("Expected JSON body", k400BadRequest, "StorageAdmin");
+        auto req_res = parseTypedRequest<detail::UpsertFormatRequest>(tsp_req);
+        if (req_res.hasError()) {
+            co_return sgrn::createTypedResponse(BackendErrorResponse{"Expected JSON body", k400BadRequest, "StorageAdmin"});
         }
-        if (!json->isMember("extension") || !(*json)["extension"].isString()) {
-            co_return sgrn::createErrorResponse("extension (string) is required", k400BadRequest, "StorageAdmin");
+        const auto& req = req_res.value();
+        if (req.extension.empty()) {
+            co_return sgrn::createTypedResponse(BackendErrorResponse{"extension (string) is required", k400BadRequest, "StorageAdmin"});
         }
-        if (!json->isMember("mime_type") || !(*json)["mime_type"].isString()) {
-            co_return sgrn::createErrorResponse("mime_type (string) is required", k400BadRequest, "StorageAdmin");
+        if (req.mime_type.empty()) {
+            co_return sgrn::createTypedResponse(BackendErrorResponse{"mime_type (string) is required", k400BadRequest, "StorageAdmin"});
         }
-        const std::string ext = lowerAscii((*json)["extension"].asString());
+        const std::string ext = lowerAscii(req.extension);
         if (const std::string err = sgrn::datastore::sysconfig::validateFormatExtension(ext); !err.empty()) {
-            co_return sgrn::createErrorResponse(err, k400BadRequest, "StorageAdmin");
+            co_return sgrn::createTypedResponse(BackendErrorResponse{err, k400BadRequest, "StorageAdmin"});
         }
-        const std::string mime = (*json)["mime_type"].asString();
+        const std::string mime = req.mime_type;
         if (const std::string err = sgrn::datastore::sysconfig::validateMimeType(mime); !err.empty()) {
-            co_return sgrn::createErrorResponse(err, k400BadRequest, "StorageAdmin");
+            co_return sgrn::createTypedResponse(BackendErrorResponse{err, k400BadRequest, "StorageAdmin"});
         }
-        const bool is_compressed = jsonBool((*json)["is_compressed"], true);
-        const bool is_allowed = jsonBool((*json)["is_allowed"], true);
-        const bool has_description = json->isMember("description") && (*json)["description"].isString();
-        const std::string description = has_description ? (*json)["description"].asString() : "";
+        const bool is_compressed = req.is_compressed;
+        const bool is_allowed = req.is_allowed;
+        const bool has_description = req.description.has_value();
+        const std::string description = has_description ? *req.description : "";
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db = db_res.value();
 
@@ -1335,7 +1432,7 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpsertFormat(HttpRequestPtr tsp
                     has_description ? "true" : "false"});
             row = sgrn::orm::fromRow<FormatRecord>(updated[0]);
         }
-        co_return sgrn::createTypedJsonResponse(
+        co_return sgrn::createTypedResponse(tsp_req,
             FormatUpsertResponse{
                 row.extension,
                 row.mime_type,
@@ -1347,9 +1444,10 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpsertFormat(HttpRequestPtr tsp
             },
             k200OK);
     } catch (const drogon::orm::DrogonDbException& e) {
-        co_return sgrn::createErrorResponse(std::string("Database error: ") + e.base().what(), k500InternalServerError, "StorageAdmin");
+        co_return sgrn::createTypedResponse(
+            BackendErrorResponse{std::string("Database error: ") + e.base().what(), k500InternalServerError, "StorageAdmin"});
     } catch (const std::exception& e) {
-        co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "StorageAdmin");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k500InternalServerError, "StorageAdmin"});
     }
 }
 
@@ -1357,12 +1455,12 @@ Task<HttpResponsePtr> StorageAdminHandler::handleDeleteFormat(HttpRequestPtr tsp
     try {
         const std::string ext = lowerAscii(queryParam(tsp_req, "extension", ""));
         if (const std::string err = sgrn::datastore::sysconfig::validateFormatExtension(ext); !err.empty()) {
-            co_return sgrn::createErrorResponse(err, k400BadRequest, "StorageAdmin");
+            co_return sgrn::createTypedResponse(BackendErrorResponse{err, k400BadRequest, "StorageAdmin"});
         }
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db = db_res.value();
 
@@ -1373,7 +1471,7 @@ Task<HttpResponsePtr> StorageAdminHandler::handleDeleteFormat(HttpRequestPtr tsp
         auto refs = co_await sgrn::datastore::core::execSqlCoroVec(db, "SELECT COUNT(*) FROM storage.files WHERE extension = $1", {ext});
         const long long referencing = refs.empty() ? 0 : fieldInt(refs[0][0]);
         if (referencing > 0) {
-            co_return sgrn::createTypedJsonResponse(
+            co_return sgrn::createTypedResponse(tsp_req,
                 FormatConflictResponse{
                     ext,
                     referencing,
@@ -1384,11 +1482,11 @@ Task<HttpResponsePtr> StorageAdminHandler::handleDeleteFormat(HttpRequestPtr tsp
 
         auto deleted = co_await sgrn::datastore::core::execSqlCoroVec(db, "DELETE FROM storage.formats WHERE extension = $1", {ext});
         if (deleted.affectedRows() == 0) {
-            co_return sgrn::createErrorResponse("Unknown format: " + ext, k404NotFound, "StorageAdmin");
+            co_return sgrn::createTypedResponse(BackendErrorResponse{"Unknown format: " + ext, k404NotFound, "StorageAdmin"});
         }
-        co_return sgrn::createTypedJsonResponse(FormatDeleteResponse{true, ext}, k200OK);
+        co_return sgrn::createTypedResponse(tsp_req, FormatDeleteResponse{ext}, k200OK);
     } catch (const std::exception& e) {
-        co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "StorageAdmin");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k500InternalServerError, "StorageAdmin"});
     }
 }
 
@@ -1396,7 +1494,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleListQuotas(HttpRequestPtr tsp_r
     try {
         const std::string kind = lowerAscii(queryParam(tsp_req, "kind", "user"));
         if (kind != "user" && kind != "service" && kind != "organisation" && kind != "domain") {
-            co_return sgrn::createErrorResponse("kind must be user, service, organisation or domain", k400BadRequest, "StorageAdmin");
+            co_return sgrn::createTypedResponse(
+                BackendErrorResponse{"kind must be user, service, organisation or domain", k400BadRequest, "StorageAdmin"});
         }
         const std::string search = queryParam(tsp_req, "search", "");
         const std::size_t limit = clampParam(queryParam(tsp_req, "limit", ""), 100, 1000);
@@ -1405,14 +1504,15 @@ Task<HttpResponsePtr> StorageAdminHandler::handleListQuotas(HttpRequestPtr tsp_r
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db = db_res.value();
 
         std::string quota_sql;
         std::vector<std::string> quota_binds = {escapeLike(search)};
         if (kind == "user") {
-            quota_sql = "SELECT id, email, organisation, total_virtual_size, storage_limit, total_entry_count, entry_count_limit, "
+            quota_sql = "SELECT id, email, organisation, total_virtual_size AS storage_used_bytes, "
+                        "storage_limit AS storage_limit_bytes, total_entry_count AS entries_used, entry_count_limit, "
                         "rate_limit_rpm, max_file_size_mb, preferred_chunk_size_mb, rate_limit_upload_rpm "
                         "FROM core.users WHERE deleted_at IS NULL AND (email ILIKE '%' || $1 || '%' ESCAPE '\\' "
                         "OR organisation ILIKE '%' || $1 || '%' ESCAPE '\\') ";
@@ -1422,7 +1522,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleListQuotas(HttpRequestPtr tsp_r
             }
             quota_sql += "ORDER BY id LIMIT " + std::to_string(limit);
         } else if (kind == "service") {
-            quota_sql = "SELECT id, name, organisation, total_virtual_size, storage_limit, total_entry_count, entry_count_limit, "
+            quota_sql = "SELECT id, name, organisation, total_virtual_size AS storage_used_bytes, "
+                        "storage_limit AS storage_limit_bytes, total_entry_count AS entries_used, entry_count_limit, "
                         "rate_limit_rpm, max_file_size_mb, preferred_chunk_size_mb, rate_limit_upload_rpm "
                         "FROM core.automated_services WHERE deleted_at IS NULL AND (name ILIKE '%' || $1 || '%' ESCAPE '\\' "
                         "OR organisation ILIKE '%' || $1 || '%' ESCAPE '\\') ";
@@ -1434,8 +1535,9 @@ Task<HttpResponsePtr> StorageAdminHandler::handleListQuotas(HttpRequestPtr tsp_r
         } else if (kind == "domain") {
             // Namespace caps: usage is the whole subtree, computed by
             // storage.domain_usage (files + directories, virtual bytes).
-            quota_sql = "SELECT d.id, d.name, d.path, d.organisation, d.storage_limit, d.entry_count_limit, "
-                        "coalesce(u.virtual_size, 0) AS total_virtual_size, coalesce(u.entry_count, 0) AS total_entry_count "
+            quota_sql = "SELECT d.id, d.name, d.path, d.organisation, d.storage_limit AS storage_limit_bytes, "
+                        "d.entry_count_limit, coalesce(u.virtual_size, 0) AS storage_used_bytes, "
+                        "coalesce(u.entry_count, 0) AS entries_used "
                         "FROM core.domains d LEFT JOIN LATERAL storage.domain_usage(d.id) u ON true "
                         "WHERE (d.name ILIKE '%' || $1 || '%' ESCAPE '\\' OR d.path ILIKE '%' || $1 || '%' ESCAPE '\\' "
                         "OR d.organisation ILIKE '%' || $1 || '%' ESCAPE '\\') ";
@@ -1445,7 +1547,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleListQuotas(HttpRequestPtr tsp_r
             }
             quota_sql += "ORDER BY d.organisation, d.path LIMIT " + std::to_string(limit);
         } else {
-            quota_sql = "SELECT name, total_virtual_size, storage_limit, total_entry_count, entry_count_limit, rate_limit_rpm "
+            quota_sql = "SELECT name, name AS organisation, total_virtual_size AS storage_used_bytes, "
+                        "storage_limit AS storage_limit_bytes, total_entry_count AS entries_used, entry_count_limit, rate_limit_rpm "
                         "FROM core.organisations WHERE (name ILIKE '%' || $1 || '%' ESCAPE '\\') ";
             if (!is_platform) {
                 quota_sql += "AND name = $2 ";
@@ -1459,117 +1562,79 @@ Task<HttpResponsePtr> StorageAdminHandler::handleListQuotas(HttpRequestPtr tsp_r
         std::vector<ServiceQuotaRow> services;
         std::vector<DomainQuotaRow> domains;
         std::vector<OrganisationQuotaRow> organisations;
-        users.reserve(rows.size());
-        services.reserve(rows.size());
-        domains.reserve(rows.size());
-        organisations.reserve(rows.size());
-        for (const auto& row : rows) {
-            const std::optional<std::string> organisation =
-                row["organisation"].isNull() ? std::nullopt : std::optional<std::string>(row["organisation"].as<std::string>());
-            const std::optional<int64_t> storage_limit =
-                row["storage_limit"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["storage_limit"]));
-            const std::optional<int64_t> entry_limit =
-                row["entry_count_limit"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["entry_count_limit"]));
-            if (kind == "user") {
-                users.push_back({fieldInt(row["id"]), row["email"].as<std::string>(), kind, organisation,
-                    fieldInt(row["total_virtual_size"]), storage_limit, fieldInt(row["total_entry_count"]), entry_limit,
-                    row["rate_limit_rpm"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["rate_limit_rpm"])),
-                    row["max_file_size_mb"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["max_file_size_mb"])),
-                    row["preferred_chunk_size_mb"].isNull() ? std::nullopt
-                                                            : std::optional<int64_t>(fieldInt(row["preferred_chunk_size_mb"])),
-                    row["rate_limit_upload_rpm"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["rate_limit_upload_rpm"]))});
-            } else if (kind == "service") {
-                services.push_back({fieldInt(row["id"]), row["name"].as<std::string>(), kind, organisation,
-                    fieldInt(row["total_virtual_size"]), storage_limit, fieldInt(row["total_entry_count"]), entry_limit,
-                    row["rate_limit_rpm"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["rate_limit_rpm"])),
-                    row["max_file_size_mb"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["max_file_size_mb"])),
-                    row["preferred_chunk_size_mb"].isNull() ? std::nullopt
-                                                            : std::optional<int64_t>(fieldInt(row["preferred_chunk_size_mb"])),
-                    row["rate_limit_upload_rpm"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["rate_limit_upload_rpm"]))});
-            } else if (kind == "domain") {
-                domains.push_back({fieldInt(row["id"]), row["name"].as<std::string>(), row["path"].as<std::string>(), kind, organisation,
-                    fieldInt(row["total_virtual_size"]), storage_limit, fieldInt(row["total_entry_count"]), entry_limit});
-            } else {
-                organisations.push_back({row["name"].as<std::string>(), kind, organisation, fieldInt(row["total_virtual_size"]),
-                    storage_limit, fieldInt(row["total_entry_count"]), entry_limit,
-                    row["rate_limit_rpm"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["rate_limit_rpm"]))});
+        if (kind == "user") {
+            users = sgrn::orm::fromResultByName<UserQuotaRow>(rows);
+            for (auto& row : users) {
+                row.kind = kind;
+            }
+        } else if (kind == "service") {
+            services = sgrn::orm::fromResultByName<ServiceQuotaRow>(rows);
+            for (auto& row : services) {
+                row.kind = kind;
+            }
+        } else if (kind == "domain") {
+            domains = sgrn::orm::fromResultByName<DomainQuotaRow>(rows);
+            for (auto& row : domains) {
+                row.kind = kind;
+            }
+        } else {
+            organisations = sgrn::orm::fromResultByName<OrganisationQuotaRow>(rows);
+            for (auto& row : organisations) {
+                row.kind = kind;
             }
         }
         if (kind == "user") {
-            co_return sgrn::createTypedJsonResponse(UserQuotasResponse{kind, std::move(users), static_cast<int64_t>(rows.size())}, k200OK);
+            co_return sgrn::createTypedResponse(
+                tsp_req, UserQuotasResponse{kind, std::move(users), static_cast<int64_t>(rows.size())}, k200OK);
         }
         if (kind == "service") {
-            co_return sgrn::createTypedJsonResponse(
-                ServiceQuotasResponse{kind, std::move(services), static_cast<int64_t>(rows.size())}, k200OK);
+            co_return sgrn::createTypedResponse(
+                tsp_req, ServiceQuotasResponse{kind, std::move(services), static_cast<int64_t>(rows.size())}, k200OK);
         }
         if (kind == "domain") {
-            co_return sgrn::createTypedJsonResponse(
-                DomainQuotasResponse{kind, std::move(domains), static_cast<int64_t>(rows.size())}, k200OK);
+            co_return sgrn::createTypedResponse(
+                tsp_req, DomainQuotasResponse{kind, std::move(domains), static_cast<int64_t>(rows.size())}, k200OK);
         }
-        co_return sgrn::createTypedJsonResponse(
-            OrganisationQuotasResponse{kind, std::move(organisations), static_cast<int64_t>(rows.size())}, k200OK);
+        co_return sgrn::createTypedResponse(
+            tsp_req, OrganisationQuotasResponse{kind, std::move(organisations), static_cast<int64_t>(rows.size())}, k200OK);
     } catch (const std::exception& e) {
-        co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "StorageAdmin");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k500InternalServerError, "StorageAdmin"});
     }
 }
 
 Task<HttpResponsePtr> StorageAdminHandler::handleUpdateQuota(HttpRequestPtr tsp_req) {
     try {
-        auto json = tsp_req->getJsonObject();
-        if (!json || !json->isObject()) {
-            co_return sgrn::createErrorResponse("Expected JSON body", k400BadRequest, "StorageAdmin");
+        auto req_res = parseTypedRequest<detail::StorageAdminUpdateQuotaRequest>(tsp_req);
+        if (req_res.hasError()) {
+            co_return sgrn::createTypedResponse(BackendErrorResponse{"Expected JSON body", k400BadRequest, "StorageAdmin"});
         }
-        if (!json->isMember("kind") || !(*json)["kind"].isString()) {
-            co_return sgrn::createErrorResponse("kind (user|service|organisation) is required", k400BadRequest, "StorageAdmin");
+        const auto& req = req_res.value();
+        if (req.kind.empty()) {
+            co_return sgrn::createTypedResponse(
+                BackendErrorResponse{"kind (user|service|organisation) is required", k400BadRequest, "StorageAdmin"});
         }
-        const std::string kind = lowerAscii((*json)["kind"].asString());
+        const std::string kind = lowerAscii(req.kind);
         if (kind != "user" && kind != "service" && kind != "organisation" && kind != "domain") {
-            co_return sgrn::createErrorResponse("kind must be user, service, organisation or domain", k400BadRequest, "StorageAdmin");
+            co_return sgrn::createTypedResponse(
+                BackendErrorResponse{"kind must be user, service, organisation or domain", k400BadRequest, "StorageAdmin"});
         }
-        const bool has_storage = json->isMember("storage_limit_bytes");
-        const bool has_entries = json->isMember("entry_count_limit");
+        const bool has_storage = req.storage_limit_bytes.has_value();
+        const bool has_entries = req.entry_count_limit.has_value();
         if (!has_storage && !has_entries) {
-            co_return sgrn::createErrorResponse(
-                "supply storage_limit_bytes and/or entry_count_limit (null lifts the cap)", k400BadRequest, "StorageAdmin");
+            co_return sgrn::createTypedResponse(BackendErrorResponse{
+                "supply storage_limit_bytes and/or entry_count_limit (null lifts the cap)", k400BadRequest, "StorageAdmin"});
         }
-        // Explicit null lifts the cap; otherwise a non-negative integer.
-        // storage_limit is bytes (bigint) — the dashboard edits megabytes and
-        // converts, so large-but-sane values are normal here.
-        // Returns the text bind, or "" to SET NULL; o_err set on rejection.
-        auto parseCap = [](const Json::Value& t_v, const char* t_name, std::string& o_err) -> std::string {
-            if (t_v.isNull()) {
-                return "";
-            }
-            if (!(t_v.isUInt() || t_v.isUInt64() || (t_v.isInt64() && t_v.asInt64() >= 0))) {
-                o_err = std::string(t_name) + " must be a non-negative integer or null";
-                return "";
-            }
-            return std::to_string(t_v.asUInt64());
-        };
-        std::string cap_err;
-        std::string storage_bind;
-        std::string entries_bind;
-        bool storage_is_null = false;
-        bool entries_is_null = false;
-        if (has_storage) {
-            const Json::Value& v = (*json)["storage_limit_bytes"];
-            storage_is_null = v.isNull();
-            storage_bind = parseCap(v, "storage_limit_bytes", cap_err);
-            if (!cap_err.empty()) {
-                co_return sgrn::createErrorResponse(cap_err, k400BadRequest, "StorageAdmin");
-            }
+        const bool storage_is_null = has_storage && !req.storage_limit_bytes->has_value();
+        const bool entries_is_null = has_entries && !req.entry_count_limit->has_value();
+        if (has_storage && !storage_is_null && **req.storage_limit_bytes < 0) {
+            co_return sgrn::createTypedResponse(
+                BackendErrorResponse{"storage_limit_bytes must be a non-negative integer or null", k400BadRequest, "StorageAdmin"});
         }
-        if (has_entries) {
-            const Json::Value& v = (*json)["entry_count_limit"];
-            entries_is_null = v.isNull();
-            entries_bind = parseCap(v, "entry_count_limit", cap_err);
-            if (!cap_err.empty()) {
-                co_return sgrn::createErrorResponse(cap_err, k400BadRequest, "StorageAdmin");
-            }
+        if (has_entries && !entries_is_null && **req.entry_count_limit < 0) {
+            co_return sgrn::createTypedResponse(
+                BackendErrorResponse{"entry_count_limit must be a non-negative integer or null", k400BadRequest, "StorageAdmin"});
         }
 
-        // Build SET with explicit NULLs (binds are text; NULLIF would conflate
-        // "lift the cap" with a value, so branch instead).
         std::string sets;
         std::vector<std::string> binds;
         auto push_set = [&](const char* t_col, bool t_is_null, const std::string& t_bind) {
@@ -1584,10 +1649,10 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpdateQuota(HttpRequestPtr tsp_
             }
         };
         if (has_storage) {
-            push_set("storage_limit", storage_is_null, storage_bind);
+            push_set("storage_limit", storage_is_null, storage_is_null ? "" : std::to_string(**req.storage_limit_bytes));
         }
         if (has_entries) {
-            push_set("entry_count_limit", entries_is_null, entries_bind);
+            push_set("entry_count_limit", entries_is_null, entries_is_null ? "" : std::to_string(**req.entry_count_limit));
         }
 
         // Deliberately no self-exclusion: an admin tunes their own quota
@@ -1596,29 +1661,30 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpdateQuota(HttpRequestPtr tsp_
         const bool is_platform = sgrn::datastore::isPlatformAdmin(tsp_req);
 
         if (kind == "organisation") {
-            if (!json->isMember("name") || !(*json)["name"].isString() || (*json)["name"].asString().empty()) {
-                co_return sgrn::createErrorResponse("name is required for kind organisation", k400BadRequest, "StorageAdmin");
+            if (!req.name.has_value() || req.name->empty()) {
+                co_return sgrn::createTypedResponse(
+                    BackendErrorResponse{"name is required for kind organisation", k400BadRequest, "StorageAdmin"});
             }
-            const std::string target_org = (*json)["name"].asString();
+            const std::string& target_org = *req.name;
             if (!is_platform && target_org != session_org) {
-                co_return sgrn::createErrorResponse(
-                    "Forbidden: cannot modify quota of another organisation", k403Forbidden, "StorageAdmin");
+                co_return sgrn::createTypedResponse(
+                    BackendErrorResponse{"Forbidden: cannot modify quota of another organisation", k403Forbidden, "StorageAdmin"});
             }
         }
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db = db_res.value();
 
         std::string quota_sql;
         if (kind == "user" || kind == "service") {
-            if (!json->isMember("id") || !(*json)["id"].isInt() || (*json)["id"].asInt() <= 0) {
-                co_return sgrn::createErrorResponse(
-                    "id (positive integer) is required for kind user|service", k400BadRequest, "StorageAdmin");
+            if (!req.id.has_value() || *req.id <= 0) {
+                co_return sgrn::createTypedResponse(
+                    BackendErrorResponse{"id (positive integer) is required for kind user|service", k400BadRequest, "StorageAdmin"});
             }
-            binds.push_back(std::to_string((*json)["id"].asInt()));
+            binds.push_back(std::to_string(*req.id));
             const std::string table = kind == "user" ? "core.users" : "core.automated_services";
             const std::string idcol = kind == "user" ? "email" : "name";
             quota_sql = "UPDATE " + table + " SET " + sets + " WHERE id = $" + std::to_string(binds.size()) + " AND deleted_at IS NULL ";
@@ -1627,87 +1693,100 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpdateQuota(HttpRequestPtr tsp_
                 quota_sql += "AND organisation = $" + std::to_string(binds.size()) + " ";
             }
             quota_sql += "RETURNING id, " + idcol +
-                         " AS label, organisation, total_virtual_size, storage_limit, total_entry_count, entry_count_limit";
+                         " AS label, organisation, total_virtual_size AS storage_used_bytes, "
+                         "storage_limit AS storage_limit_bytes, total_entry_count AS entries_used, entry_count_limit";
         } else if (kind == "domain") {
-            if (!json->isMember("id") || !(*json)["id"].isInt() || (*json)["id"].asInt() <= 0) {
-                co_return sgrn::createErrorResponse("id (positive integer) is required for kind domain", k400BadRequest, "StorageAdmin");
+            if (!req.id.has_value() || *req.id <= 0) {
+                co_return sgrn::createTypedResponse(
+                    BackendErrorResponse{"id (positive integer) is required for kind domain", k400BadRequest, "StorageAdmin"});
             }
-            binds.push_back(std::to_string((*json)["id"].asInt()));
+            binds.push_back(std::to_string(*req.id));
             quota_sql = "UPDATE core.domains SET " + sets + " WHERE id = $" + std::to_string(binds.size()) + " ";
             if (!is_platform) {
                 binds.push_back(session_org);
                 quota_sql += "AND organisation = $" + std::to_string(binds.size()) + " ";
             }
             quota_sql += "RETURNING id, name AS label, organisation, "
-                         "(SELECT u.virtual_size FROM storage.domain_usage(id) u) AS total_virtual_size, storage_limit, "
-                         "(SELECT u.entry_count FROM storage.domain_usage(id) u) AS total_entry_count, entry_count_limit";
+                         "(SELECT u.virtual_size FROM storage.domain_usage(id) u) AS storage_used_bytes, "
+                         "storage_limit AS storage_limit_bytes, "
+                         "(SELECT u.entry_count FROM storage.domain_usage(id) u) AS entries_used, entry_count_limit";
         } else {
-            const std::string target_org = (*json)["name"].asString();
+            const std::string target_org = *req.name;
             binds.push_back(target_org);
             quota_sql = "UPDATE core.organisations SET " + sets + " WHERE name = $" + std::to_string(binds.size()) +
-                        " RETURNING name AS label, name AS organisation, total_virtual_size, storage_limit, total_entry_count, "
-                        "entry_count_limit";
+                        " RETURNING NULL::bigint AS id, name AS label, name AS organisation, "
+                        "total_virtual_size AS storage_used_bytes, storage_limit AS storage_limit_bytes, "
+                        "total_entry_count AS entries_used, entry_count_limit";
         }
         auto rows = co_await sgrn::datastore::core::execSqlCoroVec(db, quota_sql, binds);
         if (rows.empty()) {
-            co_return sgrn::createErrorResponse("No such " + kind + " (or it is soft-deleted)", k404NotFound, "StorageAdmin");
+            co_return sgrn::createTypedResponse(
+                BackendErrorResponse{"No such " + kind + " (or it is soft-deleted)", k404NotFound, "StorageAdmin"});
         }
-        const auto& row = rows[0];
-        const std::optional<std::string> organisation =
-            row["organisation"].isNull() ? std::nullopt : std::optional<std::string>(row["organisation"].as<std::string>());
-        const std::optional<int64_t> storage_limit =
-            row["storage_limit"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["storage_limit"]));
-        const std::optional<int64_t> entry_limit =
-            row["entry_count_limit"].isNull() ? std::nullopt : std::optional<int64_t>(fieldInt(row["entry_count_limit"]));
+        const auto row = sgrn::orm::fromRowByName<QuotaUpdateRow>(rows[0]);
 
         // WP4c: this handler previously wrote no audit row at all (F7).
         // Details are the applied caps only — never request-echoed blobs.
         Json::Value applied(Json::objectValue);
         applied["storage_limit"] =
-            row["storage_limit"].isNull() ? Json::Value(Json::nullValue) : Json::Value(row["storage_limit"].as<int64_t>());
+            row.storage_limit_bytes.has_value() ? Json::Value(Json::Int64(*row.storage_limit_bytes)) : Json::Value(Json::nullValue);
         applied["entry_count_limit"] =
-            row["entry_count_limit"].isNull() ? Json::Value(Json::nullValue) : Json::Value(row["entry_count_limit"].as<int64_t>());
-        if (tsp_req->attributes()->find("session_json")) {
-            const auto& session = tsp_req->attributes()->get<Json::Value>("session_json");
-            if (session.isObject() && session.isMember("user") && session["user"].isObject()) {
-                const auto& user = session["user"];
-                std::string target_id = row["label"].as<std::string>();
-                if (kind != "organisation" && kind != "domain") {
-                    target_id = std::to_string(fieldInt(row["id"]));
-                }
-                co_await sgrn::datastore::audit::AuditLogger::log(db, user["organisation"].asString(), "user", user["id"].asInt(),
-                    user["email"].asString(), "quota.updated", kind, target_id, tsp_req->getPeerAddr().toIp(), applied, "success");
+            row.entry_count_limit.has_value() ? Json::Value(Json::Int64(*row.entry_count_limit)) : Json::Value(Json::nullValue);
+        std::string user_org;
+        int32_t user_id = 0;
+        std::string user_email;
+        bool has_user = false;
+        if (tsp_req->attributes()->find("auth_context")) {
+            const auto& auth = tsp_req->attributes()->get<filters::AuthContext>("auth_context");
+            user_org = auth.user.organisation;
+            user_id = auth.user.id;
+            user_email = auth.user.email;
+            has_user = (user_id > 0);
+        } else if (tsp_req->attributes()->find("session_claims")) {
+            const auto& user = tsp_req->attributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims").user;
+            user_org = user.organisation;
+            user_id = user.id;
+            user_email = user.email;
+            has_user = (user_id > 0);
+        }
+        if (has_user) {
+            std::string target_id = row.label;
+            if (kind != "organisation" && kind != "domain") {
+                target_id = std::to_string(row.id.value());
             }
+            co_await sgrn::datastore::audit::AuditLogger::log(db, user_org, "user", user_id, user_email, "quota.updated", kind, target_id,
+                tsp_req->getPeerAddr().toIp(), applied, "success");
         }
         if (kind == "organisation") {
-            co_return sgrn::createTypedJsonResponse(
+            co_return sgrn::createTypedResponse(tsp_req,
                 QuotaUpdateOrganisationResponse{
                     kind,
-                    row["label"].as<std::string>(),
-                    organisation,
-                    fieldInt(row["total_virtual_size"]),
-                    storage_limit,
-                    fieldInt(row["total_entry_count"]),
-                    entry_limit,
+                    row.label,
+                    row.organisation,
+                    row.storage_used_bytes,
+                    row.storage_limit_bytes,
+                    row.entries_used,
+                    row.entry_count_limit,
                 },
                 k200OK);
         }
-        co_return sgrn::createTypedJsonResponse(
+        co_return sgrn::createTypedResponse(tsp_req,
             QuotaUpdateWithIdResponse{
                 kind,
-                fieldInt(row["id"]),
-                row["label"].as<std::string>(),
-                organisation,
-                fieldInt(row["total_virtual_size"]),
-                storage_limit,
-                fieldInt(row["total_entry_count"]),
-                entry_limit,
+                row.id.value(),
+                row.label,
+                row.organisation,
+                row.storage_used_bytes,
+                row.storage_limit_bytes,
+                row.entries_used,
+                row.entry_count_limit,
             },
             k200OK);
     } catch (const drogon::orm::DrogonDbException& e) {
-        co_return sgrn::createErrorResponse(std::string("Database error: ") + e.base().what(), k500InternalServerError, "StorageAdmin");
+        co_return sgrn::createTypedResponse(
+            BackendErrorResponse{std::string("Database error: ") + e.base().what(), k500InternalServerError, "StorageAdmin"});
     } catch (const std::exception& e) {
-        co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "StorageAdmin");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k500InternalServerError, "StorageAdmin"});
     }
 }
 
@@ -1722,207 +1801,138 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsOverview(HttpRequestPt
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db = db_res.value();
 
-        auto users = is_platform
-                         ? co_await sgrn::datastore::core::execSqlCoroVec(db,
-                               "SELECT COUNT(*), COALESCE(SUM(total_virtual_size),0), COALESCE(SUM(total_entry_count),0) FROM core.users "
-                               "WHERE deleted_at IS NULL",
-                               {})
-                         : co_await sgrn::datastore::core::execSqlCoroVec(db,
-                               "SELECT COUNT(*), COALESCE(SUM(total_virtual_size),0), COALESCE(SUM(total_entry_count),0) FROM core.users "
-                               "WHERE deleted_at IS NULL AND organisation = $1",
-                               {session_org});
+        auto users = is_platform ? co_await sgrn::datastore::core::execSqlCoroVec(db,
+                                       "SELECT COUNT(*) AS count, COALESCE(SUM(total_virtual_size),0) AS storage_used_bytes, "
+                                       "COALESCE(SUM(total_entry_count),0) AS entries_used FROM core.users "
+                                       "WHERE deleted_at IS NULL",
+                                       {})
+                                 : co_await sgrn::datastore::core::execSqlCoroVec(db,
+                                       "SELECT COUNT(*) AS count, COALESCE(SUM(total_virtual_size),0) AS storage_used_bytes, "
+                                       "COALESCE(SUM(total_entry_count),0) AS entries_used FROM core.users "
+                                       "WHERE deleted_at IS NULL AND organisation = $1",
+                                       {session_org});
 
         auto services = is_platform ? co_await sgrn::datastore::core::execSqlCoroVec(db,
-                                          "SELECT COUNT(*), COALESCE(SUM(total_virtual_size),0), COALESCE(SUM(total_entry_count),0) FROM "
+                                          "SELECT COUNT(*) AS count, COALESCE(SUM(total_virtual_size),0) AS storage_used_bytes, "
+                                          "COALESCE(SUM(total_entry_count),0) AS entries_used FROM "
                                           "core.automated_services WHERE deleted_at IS NULL",
                                           {})
                                     : co_await sgrn::datastore::core::execSqlCoroVec(db,
-                                          "SELECT COUNT(*), COALESCE(SUM(total_virtual_size),0), COALESCE(SUM(total_entry_count),0) FROM "
+                                          "SELECT COUNT(*) AS count, COALESCE(SUM(total_virtual_size),0) AS storage_used_bytes, "
+                                          "COALESCE(SUM(total_entry_count),0) AS entries_used FROM "
                                           "core.automated_services WHERE deleted_at IS NULL AND organisation = $1",
                                           {session_org});
 
-        auto orgs =
-            is_platform
-                ? co_await sgrn::datastore::core::execSqlCoroVec(db,
-                      "SELECT COUNT(*), COALESCE(SUM(total_virtual_size),0), COALESCE(SUM(total_entry_count),0) FROM core.organisations",
-                      {})
-                : co_await sgrn::datastore::core::execSqlCoroVec(db,
-                      "SELECT COUNT(*), COALESCE(SUM(total_virtual_size),0), COALESCE(SUM(total_entry_count),0) FROM core.organisations "
-                      "WHERE "
-                      "name = $1",
-                      {session_org});
+        auto orgs = is_platform ? co_await sgrn::datastore::core::execSqlCoroVec(db,
+                                      "SELECT COUNT(*) AS count, COALESCE(SUM(total_virtual_size),0) AS storage_used_bytes, "
+                                      "COALESCE(SUM(total_entry_count),0) AS entries_used FROM core.organisations",
+                                      {})
+                                : co_await sgrn::datastore::core::execSqlCoroVec(db,
+                                      "SELECT COUNT(*) AS count, COALESCE(SUM(total_virtual_size),0) AS storage_used_bytes, "
+                                      "COALESCE(SUM(total_entry_count),0) AS entries_used FROM core.organisations WHERE "
+                                      "name = $1",
+                                      {session_org});
 
-        auto domains = is_platform ? co_await sgrn::datastore::core::execSqlCoroVec(db, "SELECT COUNT(*) FROM core.domains", {})
+        auto domains = is_platform ? co_await sgrn::datastore::core::execSqlCoroVec(db, "SELECT COUNT(*) AS count FROM core.domains", {})
                                    : co_await sgrn::datastore::core::execSqlCoroVec(
-                                         db, "SELECT COUNT(*) FROM core.domains WHERE organisation = $1", {session_org});
+                                         db, "SELECT COUNT(*) AS count FROM core.domains WHERE organisation = $1", {session_org});
 
         auto files =
             is_platform
-                ? co_await sgrn::datastore::core::execSqlCoroVec(db, "SELECT COUNT(*) FROM storage.files", {})
+                ? co_await sgrn::datastore::core::execSqlCoroVec(db, "SELECT COUNT(*) AS count FROM storage.files", {})
                 : co_await sgrn::datastore::core::execSqlCoroVec(db,
-                      "SELECT COUNT(*) FROM storage.files f "
+                      "SELECT COUNT(*) AS count FROM storage.files f "
                       "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
                       "WHERE COALESCE(u.organisation, s.organisation) = $1",
                       {session_org});
 
         auto objects =
             is_platform
-                ? co_await sgrn::datastore::core::execSqlCoroVec(
-                      db, "SELECT COUNT(*), COALESCE(SUM(size),0), COALESCE(SUM(original_size),0) FROM storage.objects", {})
+                ? co_await sgrn::datastore::core::execSqlCoroVec(db,
+                      "SELECT COUNT(*) AS count, COALESCE(SUM(size),0) AS bytes_stored, "
+                      "COALESCE(SUM(original_size),0) AS bytes_virtual FROM storage.objects",
+                      {})
                 : co_await sgrn::datastore::core::execSqlCoroVec(db,
-                      "SELECT COUNT(DISTINCT o.id), COALESCE(SUM(o.size),0), COALESCE(SUM(o.original_size),0) FROM storage.objects o "
+                      "SELECT COUNT(DISTINCT o.id) AS count, COALESCE(SUM(o.size),0) AS bytes_stored, "
+                      "COALESCE(SUM(o.original_size),0) AS bytes_virtual FROM storage.objects o "
                       "JOIN storage.file_objects fo ON fo.object_id = o.id JOIN storage.files f ON f.id = fo.file_id "
                       "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
                       "WHERE COALESCE(u.organisation, s.organisation) = $1",
                       {session_org});
 
         auto formats = co_await sgrn::datastore::core::execSqlCoroVec(
-            db, "SELECT COUNT(*), COALESCE(SUM(CASE WHEN is_allowed THEN 1 ELSE 0 END),0) FROM storage.formats", {});
+            db, "SELECT COUNT(*) AS count, COALESCE(SUM(CASE WHEN is_allowed THEN 1 ELSE 0 END),0) AS allowed FROM storage.formats", {});
 
-        auto grants = is_platform
-                          ? co_await sgrn::datastore::core::execSqlCoroVec(db, "SELECT COUNT(*) FROM core.user_domain_permissions", {})
-                          : co_await sgrn::datastore::core::execSqlCoroVec(
-                                db, "SELECT COUNT(*) FROM core.user_domain_permissions WHERE organisation = $1", {session_org});
+        auto grants =
+            is_platform
+                ? co_await sgrn::datastore::core::execSqlCoroVec(db, "SELECT COUNT(*) AS count FROM core.user_domain_permissions", {})
+                : co_await sgrn::datastore::core::execSqlCoroVec(
+                      db, "SELECT COUNT(*) AS count FROM core.user_domain_permissions WHERE organisation = $1", {session_org});
 
-        const int64_t bytes_stored = objects.empty() ? 0 : fieldInt(objects[0][1]);
-        const int64_t bytes_virtual = objects.empty() ? 0 : fieldInt(objects[0][2]);
+        const auto user_totals = sgrn::orm::fromSingleResultByName<AnalyticsEntityTotalsRow>(users).value_or(AnalyticsEntityTotalsRow{});
+        const auto service_totals =
+            sgrn::orm::fromSingleResultByName<AnalyticsEntityTotalsRow>(services).value_or(AnalyticsEntityTotalsRow{});
+        const auto organisation_totals =
+            sgrn::orm::fromSingleResultByName<AnalyticsEntityTotalsRow>(orgs).value_or(AnalyticsEntityTotalsRow{});
+        const auto domain_totals = sgrn::orm::fromSingleResultByName<AnalyticsCountRow>(domains).value_or(AnalyticsCountRow{});
+        const auto file_totals = sgrn::orm::fromSingleResultByName<AnalyticsCountRow>(files).value_or(AnalyticsCountRow{});
+        const auto object_totals =
+            sgrn::orm::fromSingleResultByName<AnalyticsObjectTotalsRow>(objects).value_or(AnalyticsObjectTotalsRow{});
+        const auto format_totals =
+            sgrn::orm::fromSingleResultByName<AnalyticsFormatTotalsRow>(formats).value_or(AnalyticsFormatTotalsRow{});
+        const auto grant_totals = sgrn::orm::fromSingleResultByName<AnalyticsCountRow>(grants).value_or(AnalyticsCountRow{});
 
         detail::AnalyticsOverviewResponse out;
-        out.counts.users = users.empty() ? 0 : fieldInt(users[0][0]);
-        out.counts.automated_services = services.empty() ? 0 : fieldInt(services[0][0]);
-        out.counts.organisations = orgs.empty() ? 0 : fieldInt(orgs[0][0]);
-        out.counts.domains = domains.empty() ? 0 : fieldInt(domains[0][0]);
-        out.counts.files = files.empty() ? 0 : fieldInt(files[0][0]);
-        out.counts.objects = objects.empty() ? 0 : fieldInt(objects[0][0]);
-        out.counts.formats = formats.empty() ? 0 : fieldInt(formats[0][0]);
-        out.counts.permission_grants = grants.empty() ? 0 : fieldInt(grants[0][0]);
-        out.bytes.virtual_bytes = bytes_virtual;
-        out.bytes.stored = bytes_stored;
-        out.bytes.saved_by_compression = bytes_virtual - bytes_stored;
+        out.counts.users = user_totals.count;
+        out.counts.automated_services = service_totals.count;
+        out.counts.organisations = organisation_totals.count;
+        out.counts.domains = domain_totals.count;
+        out.counts.files = file_totals.count;
+        out.counts.objects = object_totals.count;
+        out.counts.formats = format_totals.count;
+        out.counts.permission_grants = grant_totals.count;
+        out.bytes.virtual_bytes = object_totals.bytes_virtual;
+        out.bytes.stored = object_totals.bytes_stored;
+        out.bytes.saved_by_compression = object_totals.bytes_virtual - object_totals.bytes_stored;
 
         // --- 30-day upload timeseries (day, files, virtual bytes) ---
         auto series =
-            is_platform
-                ? co_await sgrn::datastore::core::execSqlCoroVec(db,
-                      "SELECT to_char(date_trunc('day', f.created_at), 'YYYY-MM-DD') AS day, COUNT(DISTINCT f.id) AS files, "
-                      "COALESCE(SUM(o.original_size),0) AS bytes_virtual "
-                      "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
-                      "fo.object_id "
-                      "WHERE f.created_at >= now() - interval '30 days' "
-                      "GROUP BY 1 ORDER BY 1",
-                      {})
-                : co_await sgrn::datastore::core::execSqlCoroVec(db,
-                      "SELECT to_char(date_trunc('day', f.created_at), 'YYYY-MM-DD') AS day, COUNT(DISTINCT f.id) AS files, "
-                      "COALESCE(SUM(o.original_size),0) AS bytes_virtual "
-                      "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
-                      "fo.object_id "
-                      "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
-                      "WHERE f.created_at >= now() - interval '30 days' AND COALESCE(u.organisation, s.organisation) = $1 "
-                      "GROUP BY 1 ORDER BY 1",
-                      {session_org});
-        for (const auto& row : series) {
-            out.timeseries_30d.push_back({row["day"].as<std::string>(), fieldInt(row["files"]), fieldInt(row["bytes_virtual"])});
-        }
+            is_platform ? co_await sgrn::datastore::core::execSqlCoroVec(db, detail::kPlatformAnalyticsTimeseriesQuery, {})
+                        : co_await sgrn::datastore::core::execSqlCoroVec(db, detail::kOrganisationAnalyticsTimeseriesQuery, {session_org});
+        out.timeseries_30d = is_platform
+                                 ? sgrn::orm::fromResult<AnalyticsTimeseriesEntry, detail::kPlatformAnalyticsTimeseriesQuery>(series)
+                                 : sgrn::orm::fromResult<AnalyticsTimeseriesEntry, detail::kOrganisationAnalyticsTimeseriesQuery>(series);
 
         // --- top extensions by file count ---
-        auto exts =
-            is_platform
-                ? co_await sgrn::datastore::core::execSqlCoroVec(db,
-                      "SELECT COALESCE(f.extension, '(none)') AS ext, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS "
-                      "bytes_virtual "
-                      "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
-                      "fo.object_id "
-                      "GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
-                      {})
-                : co_await sgrn::datastore::core::execSqlCoroVec(db,
-                      "SELECT COALESCE(f.extension, '(none)') AS ext, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS "
-                      "bytes_virtual "
-                      "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
-                      "fo.object_id "
-                      "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
-                      "WHERE COALESCE(u.organisation, s.organisation) = $1 "
-                      "GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
-                      {session_org});
-        for (const auto& row : exts) {
-            out.top_extensions.push_back({row["ext"].as<std::string>(), fieldInt(row["files"]), fieldInt(row["bytes_virtual"])});
-        }
+        auto exts = is_platform
+                        ? co_await sgrn::datastore::core::execSqlCoroVec(db, detail::kPlatformAnalyticsExtensionsQuery, {})
+                        : co_await sgrn::datastore::core::execSqlCoroVec(db, detail::kOrganisationAnalyticsExtensionsQuery, {session_org});
+        out.top_extensions = is_platform
+                                 ? sgrn::orm::fromResult<AnalyticsExtensionEntry, detail::kPlatformAnalyticsExtensionsQuery>(exts)
+                                 : sgrn::orm::fromResult<AnalyticsExtensionEntry, detail::kOrganisationAnalyticsExtensionsQuery>(exts);
 
         // --- top uploaders (users + services in one list) ---
         auto uploaders =
-            is_platform ? co_await sgrn::datastore::core::execSqlCoroVec(db,
-                              "SELECT 'user:' || u.email AS actor, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS "
-                              "bytes_virtual "
-                              "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
-                              "fo.object_id JOIN core.users u ON u.id = f.user_id "
-                              "GROUP BY 1 "
-                              "UNION ALL "
-                              "SELECT 'service:' || s.name AS actor, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS "
-                              "bytes_virtual "
-                              "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
-                              "fo.object_id JOIN core.automated_services s "
-                              "ON s.id = f.automated_service_id "
-                              "GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
-                              {})
-                        : co_await sgrn::datastore::core::execSqlCoroVec(db,
-                              "SELECT 'user:' || u.email AS actor, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS "
-                              "bytes_virtual "
-                              "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
-                              "fo.object_id JOIN core.users u ON u.id = f.user_id "
-                              "WHERE u.organisation = $1 "
-                              "GROUP BY 1 "
-                              "UNION ALL "
-                              "SELECT 'service:' || s.name AS actor, COUNT(DISTINCT f.id) AS files, COALESCE(SUM(o.original_size),0) AS "
-                              "bytes_virtual "
-                              "FROM storage.files f JOIN storage.file_objects fo ON fo.file_id = f.id JOIN storage.objects o ON o.id = "
-                              "fo.object_id JOIN core.automated_services s "
-                              "ON s.id = f.automated_service_id "
-                              "WHERE s.organisation = $1 "
-                              "GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
-                              {session_org});
-        for (const auto& row : uploaders) {
-            out.top_uploaders.push_back({row["actor"].as<std::string>(), fieldInt(row["files"]), fieldInt(row["bytes_virtual"])});
-        }
+            is_platform ? co_await sgrn::datastore::core::execSqlCoroVec(db, detail::kPlatformAnalyticsUploadersQuery, {})
+                        : co_await sgrn::datastore::core::execSqlCoroVec(db, detail::kOrganisationAnalyticsUploadersQuery, {session_org});
+        out.top_uploaders = is_platform
+                                ? sgrn::orm::fromResult<AnalyticsUploaderEntry, detail::kPlatformAnalyticsUploadersQuery>(uploaders)
+                                : sgrn::orm::fromResult<AnalyticsUploaderEntry, detail::kOrganisationAnalyticsUploadersQuery>(uploaders);
 
         // --- most recent files ---
         auto recent =
-            is_platform
-                ? co_await sgrn::datastore::core::execSqlCoroVec(db,
-                      "SELECT f.name, COALESCE(f.extension, '') AS ext, "
-                      "(SELECT COALESCE(SUM(so.original_size), 0) FROM storage.file_objects fo JOIN storage.objects so ON so.id = "
-                      "fo.object_id "
-                      "WHERE "
-                      "fo.file_id = f.id) AS original_size, "
-                      "COALESCE('user:' || u.email, 'service:' || s.name, '(unknown)') AS actor, "
-                      "to_char(f.created_at, 'YYYY-MM-DD HH24:MI:SS') AS at "
-                      "FROM storage.files f "
-                      "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
-                      "ORDER BY f.id DESC LIMIT 10",
-                      {})
-                : co_await sgrn::datastore::core::execSqlCoroVec(db,
-                      "SELECT f.name, COALESCE(f.extension, '') AS ext, "
-                      "(SELECT COALESCE(SUM(so.original_size), 0) FROM storage.file_objects fo JOIN storage.objects so ON so.id = "
-                      "fo.object_id "
-                      "WHERE "
-                      "fo.file_id = f.id) AS original_size, "
-                      "COALESCE('user:' || u.email, 'service:' || s.name, '(unknown)') AS actor, "
-                      "to_char(f.created_at, 'YYYY-MM-DD HH24:MI:SS') AS at "
-                      "FROM storage.files f "
-                      "LEFT JOIN core.users u ON u.id = f.user_id LEFT JOIN core.automated_services s ON s.id = f.automated_service_id "
-                      "WHERE COALESCE(u.organisation, s.organisation) = $1 "
-                      "ORDER BY f.id DESC LIMIT 10",
-                      {session_org});
-        for (const auto& row : recent) {
-            out.recent_files.push_back({row["name"].as<std::string>(), row["ext"].as<std::string>(), fieldInt(row["original_size"]),
-                row["actor"].as<std::string>(), row["at"].as<std::string>()});
-        }
+            is_platform ? co_await sgrn::datastore::core::execSqlCoroVec(db, detail::kPlatformAnalyticsRecentFilesQuery, {})
+                        : co_await sgrn::datastore::core::execSqlCoroVec(db, detail::kOrganisationAnalyticsRecentFilesQuery, {session_org});
+        out.recent_files = is_platform ? sgrn::orm::fromResult<AnalyticsRecentFile, detail::kPlatformAnalyticsRecentFilesQuery>(recent)
+                                       : sgrn::orm::fromResult<AnalyticsRecentFile, detail::kOrganisationAnalyticsRecentFilesQuery>(recent);
 
-        co_return sgrn::createTypedJsonResponse(out, k200OK);
+        co_return sgrn::createTypedResponse(tsp_req, out, k200OK);
     } catch (const std::exception& e) {
-        co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "StorageAdmin");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k500InternalServerError, "StorageAdmin"});
     }
 }
 
@@ -1930,7 +1940,8 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsBreakdown(HttpRequestP
     try {
         const std::string kind = queryParam(tsp_req, "kind", "domain");
         if (kind != "domain" && kind != "organisation" && kind != "user" && kind != "service") {
-            co_return sgrn::createErrorResponse("kind must be domain, organisation, user or service", k400BadRequest, "StorageAdmin");
+            co_return sgrn::createTypedResponse(
+                BackendErrorResponse{"kind must be domain, organisation, user or service", k400BadRequest, "StorageAdmin"});
         }
         const std::string search = queryParam(tsp_req, "search", "");
         const std::size_t limit = clampParam(queryParam(tsp_req, "limit", ""), 100, 1000);
@@ -1939,7 +1950,7 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsBreakdown(HttpRequestP
 
         auto db_res = sgrn::datastore::core::getDbClient();
         if (db_res.hasError()) {
-            co_return sgrn::createJsonResponse(db_res);
+            co_return createTypedResponse(BackendErrorResponse{db_res.error()});
         }
         auto db = db_res.value();
 
@@ -2003,28 +2014,23 @@ Task<HttpResponsePtr> StorageAdminHandler::handleAnalyticsBreakdown(HttpRequestP
             detail::AnalyticsBreakdownActorResponse out;
             out.kind = kind;
             out.count = static_cast<int64_t>(rows.size());
-            out.rows.reserve(rows.size());
-            for (const auto& row : rows) {
-                out.rows.push_back(
-                    {row["slice"].as<std::string>(), fieldInt(row["files"]), fieldInt(row["bytes_virtual"]), fieldInt(row["actors"])});
-            }
-            co_return sgrn::createTypedJsonResponse(out, k200OK);
+            out.rows = sgrn::orm::fromResultByName<AnalyticsBreakdownActorRow>(rows);
+            co_return sgrn::createTypedResponse(tsp_req, out, k200OK);
         }
 
         detail::AnalyticsBreakdownQuotaResponse out;
         out.kind = kind;
         out.count = static_cast<int64_t>(rows.size());
-        out.rows.reserve(rows.size());
-        for (const auto& row : rows) {
-            const int64_t storage_cap = fieldInt(row["storage_cap"]);
-            const int64_t entry_cap = fieldInt(row["entry_cap"]);
-            out.rows.push_back({row["slice"].as<std::string>(), fieldInt(row["files"]), fieldInt(row["bytes_virtual"]),
-                storage_cap < 0 ? std::nullopt : std::optional<int64_t>(storage_cap),
-                entry_cap < 0 ? std::nullopt : std::optional<int64_t>(entry_cap)});
+        const auto quota_rows = sgrn::orm::fromResultByName<AnalyticsBreakdownQuotaDbRow>(rows);
+        out.rows.reserve(quota_rows.size());
+        for (const auto& row : quota_rows) {
+            out.rows.push_back(
+                {row.slice, row.files, row.bytes_virtual, row.storage_cap < 0 ? std::nullopt : std::optional<int64_t>(row.storage_cap),
+                    row.entry_cap < 0 ? std::nullopt : std::optional<int64_t>(row.entry_cap)});
         }
-        co_return sgrn::createTypedJsonResponse(out, k200OK);
+        co_return sgrn::createTypedResponse(tsp_req, out, k200OK);
     } catch (const std::exception& e) {
-        co_return sgrn::createErrorResponse(e.what(), k500InternalServerError, "StorageAdmin");
+        co_return sgrn::createTypedResponse(BackendErrorResponse{e.what(), k500InternalServerError, "StorageAdmin"});
     }
 }
 

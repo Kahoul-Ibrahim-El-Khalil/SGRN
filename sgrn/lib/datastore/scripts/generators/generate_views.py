@@ -611,6 +611,201 @@ def build_view_spec(conn, manifest_path, schema, table, table_cfg, default_filte
     }
 
 
+# C++ member types of the generated request-body structs. They are exactly
+# what CrudViewBodyBind.hpp's bindBody() accepts for each FieldType, and what
+# Glaze decodes (and range-checks) from JSON / MessagePack / BEVE.
+CPP_TYPE_MAP = {
+    "Int": "int32_t",
+    "BigInt": "int64_t",
+    "Text": "std::string",
+    "Bool": "bool",
+    "Timestamp": "std::string",
+    "Jsonb": "glz::generic",
+}
+
+# Column names become struct member names (Glaze reflects them as the JSON /
+# MessagePack keys), so they must be valid, non-reserved C++ identifiers.
+CPP_RESERVED = {
+    "alignas", "alignof", "and", "asm", "auto", "bool", "break", "case", "catch", "char", "class", "concept", "const",
+    "constexpr", "continue", "decltype", "default", "delete", "do", "double", "else", "enum", "explicit", "export",
+    "extern", "false", "float", "for", "friend", "goto", "if", "inline", "int", "long", "mutable", "namespace", "new",
+    "noexcept", "not", "nullptr", "operator", "or", "private", "protected", "public", "register", "requires", "return",
+    "short", "signed", "sizeof", "static", "struct", "switch", "template", "this", "throw", "true", "try", "typedef",
+    "typeid", "typename", "union", "unsigned", "using", "virtual", "void", "volatile", "while", "xor",
+}
+
+WRITE_BODIES = (
+    # (op, route handler, Field flag gating the member)
+    ("create", "handleCreate", "insertable"),
+    ("update", "handleUpdate", "updatable"),
+)
+
+
+def view_base_name(spec):
+    return spec["name"][: -len("View")] if spec["name"].endswith("View") else spec["name"]
+
+
+def serves(spec, handler):
+    return any(r["handler"] == handler for r in spec["collection_routes"] + spec["item_routes"])
+
+
+def body_struct(spec, op, handler, flag):
+    """C++ request-body struct for one write route, or None when the view does
+    not serve it. Every member is a std::optional: absent / null means "not
+    provided" (column default on create, unchanged on update)."""
+    if not serves(spec, handler):
+        return None
+    name = f"{view_base_name(spec)}{op.capitalize()}Body"
+    verb, path = ("POST", spec["route"]) if op == "create" else ("PATCH", spec["route"] + "/{id}")
+    members = []
+    for f in spec["fields"]:
+        if not f[flag]:
+            continue
+        if f["name"] in CPP_RESERVED or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", f["name"]):
+            fail(f"{spec['read_relation']}.{f['name']}: column name cannot be used as a C++ struct member (reserved word or invalid identifier)")
+        members.append(f"    std::optional<{CPP_TYPE_MAP[f['type']]}> {f['name']};")
+    body = "\n".join(members)
+    return (
+        f"// Request body of {verb} {path} — the {flag} columns of {spec['write_table']}.\n"
+        f"struct {name} {{\n{body}{chr(10) if body else ''}}};\n"
+    )
+
+
+def body_structs_code(spec):
+    blocks = [body_struct(spec, *w) for w in WRITE_BODIES]
+    return "".join(b + "\n" for b in blocks if b)
+
+
+def body_aliases_code(spec):
+    lines = []
+    for op, handler, _flag in WRITE_BODIES:
+        if serves(spec, handler):
+            lines.append(f"    using {op.capitalize()}Body = {view_base_name(spec)}{op.capitalize()}Body;")
+    return "\n".join(lines) + ("\n\n" if lines else "")
+
+
+# C++ member types of the generated response-row structs. BigInt stays a
+# string to preserve 64-bit precision on the wire (JSON numbers cannot carry
+# every int64 exactly); jsonb is a dynamic Glaze value so MessagePack and
+# BEVE get a nested document instead of a stringified JSON fragment.
+CPP_ROW_TYPE_MAP = {
+    "Int": "std::int32_t",
+    "BigInt": "std::string",
+    "Text": "std::string",
+    "Bool": "bool",
+    "Timestamp": "std::string",
+    "Jsonb": "sgrn::json::Value",
+}
+
+TS_ROW_TYPE_MAP = {
+    "Int": "number",
+    "BigInt": "string",
+    "Text": "string",
+    "Bool": "boolean",
+    "Timestamp": "string",
+    "Jsonb": "unknown",
+}
+
+
+def returns_rows(spec):
+    """Routes whose response body is a row (or a list of rows)."""
+    return any(serves(spec, handler) for handler in ("handleList", "handleGet", "handleCreate", "handleUpdate"))
+
+
+def row_columns(spec):
+    """The whitelisted SELECT list (pk, tenant, then spec fields) as
+    (column name, FieldType) pairs, deduplicated."""
+    seen = set()
+    columns = []
+
+    def add(name, type_name):
+        if name in seen:
+            return
+        seen.add(name)
+        columns.append((name, type_name))
+
+    add(spec["pk"], spec["pk_type"])
+    add(spec["tenant_column"], "Text")
+    for f in spec["fields"]:
+        add(f["name"], f["type"])
+    return columns
+
+
+def row_struct_code(spec):
+    if not returns_rows(spec):
+        return ""
+    name = f"{view_base_name(spec)}Row"
+    members = []
+    for column, type_name in row_columns(spec):
+        if column in CPP_RESERVED or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", column):
+            fail(f"{spec['read_relation']}.{column}: column name cannot be used as a C++ struct member (reserved word or invalid identifier)")
+        members.append(f"    std::optional<{CPP_ROW_TYPE_MAP[type_name]}> {column};")
+    return (
+        f"// Response row of {spec['read_relation']} — the whitelisted SELECT columns.\n"
+        f"struct {name} {{\n" + "\n".join(members) + "\n};\n\n"
+    )
+
+
+def row_alias_code(spec):
+    if not returns_rows(spec):
+        return ""
+    return (
+        f"    using Row = {view_base_name(spec)}Row;\n"
+        f'    static constexpr char kPrimaryKeyName[] = "{spec["pk"]}";\n\n'
+    )
+
+
+def row_projection_code(spec):
+    if not returns_rows(spec):
+        return ""
+
+    def cpp_string_literal(value):
+        return value.replace("\\", "\\\\").replace('"', '\\"')
+
+    columns = [column for column, _ in row_columns(spec)]
+    chunks = []
+    current = "SELECT "
+    for index, column in enumerate(columns):
+        token = column if index == 0 else f", {column}"
+        if len(current) + len(token) > 84 and current != "SELECT ":
+            chunks.append(current + ", ")
+            current = column
+        else:
+            current += token
+    current += f" FROM {spec['read_relation']}"
+    chunks.append(current)
+    literals = "\n".join(f'        "{cpp_string_literal(chunk)}"' for chunk in chunks)
+    return f"    static constexpr char kRowProjection[] =\n{literals};\n\n"
+
+
+def ts_row_interface(spec):
+    if not returns_rows(spec):
+        return ""
+    lines = [
+        f"/** Row of `{spec['read_relation']}` — the whitelisted SELECT columns. */",
+        f"export interface {view_base_name(spec)}Row {{",
+    ]
+    for column, type_name in row_columns(spec):
+        lines.append(f"  {column}?: {TS_ROW_TYPE_MAP[type_name]};")
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def emit_ts_responses(specs, ts_out):
+    """Write the response DTOs that mirror the generated C++ Row structs."""
+    os.makedirs(ts_out, exist_ok=True)
+    header = (
+        "// GENERATED by generate_views.py — DO NOT EDIT.\n"
+        "// Response rows of the generated CRUD read/write routes. Every property\n"
+        "// is optional because a SQL NULL and a missing column are both possible.\n"
+        "// `bigint` columns are strings so 64-bit values survive JavaScript.\n"
+    )
+    blocks = [ts_row_interface(spec) for spec in specs]
+    body = "\n\n".join(b for b in blocks if b)
+    with open(f"{ts_out}/crud-responses.gen.ts", "w") as f:
+        f.write(header + ("\n" + body + "\n" if body else ""))
+
+
 FIELD_LINE = '        {{"{name}", FieldType::{type}, {ops}, {insertable}, {updatable}}},'
 
 
@@ -640,8 +835,12 @@ HEADER_TEMPLATE = """// GENERATED by generate_views.py — DO NOT EDIT.
 // Source: {schema}.{table}
 #pragma once
 #include <sgrn/datastore/handlers/CrudViewHandler.hpp>
+#include <sgrn/utils/json-serialization.hpp>
 
 #include <array>
+#include <cstdint>
+#include <optional>
+#include <string>
 
 namespace sgrn::datastore::handlers::query
 {{
@@ -651,9 +850,9 @@ using sgrn::datastore::query::FieldType;
 using sgrn::datastore::query::Op;
 using sgrn::datastore::query::PrimaryKey;
 
-class {name} : public CrudViewHandler<{name}> {{
+{body_structs}{row_structs}class {name} : public CrudViewHandler<{name}> {{
 public:
-    static constexpr std::array<Field, {field_count}> kFields = {{{{
+{body_aliases}{row_alias}{row_projection}    static constexpr std::array<Field, {field_count}> kFields = {{{{
 {fields}
     }}}};
 
@@ -702,6 +901,11 @@ def emit_header(spec, out_dir):
         schema=spec["read_relation"].split(".")[0],
         table=spec["table"],
         name=spec["name"],
+        body_structs=body_structs_code(spec),
+        body_aliases=body_aliases_code(spec),
+        row_structs=row_struct_code(spec),
+        row_alias=row_alias_code(spec),
+        row_projection=row_projection_code(spec),
         field_count=len(spec["fields"]),
         fields=fields_code,
         read_relation=spec["read_relation"],
@@ -788,6 +992,11 @@ def main():
         help="Restrict generation to these manifest schemas (default: all schemas listed in the manifest)",
     )
     parser.add_argument("--out", default=GEN_DIR)
+    parser.add_argument(
+        "--ts-out",
+        default=str(REPO_ROOT / "sgrn" / "typescript" / "datastore" / "src"),
+        help="Directory for the generated TypeScript response DTOs (crud-responses.gen.ts)",
+    )
     parser.add_argument("--registration", default=None)
     parser.add_argument(
         "--password",
@@ -850,6 +1059,7 @@ def main():
             f.write("#pragma once\n" + "".join(f'#include "{n}"\n' for n in names))
 
         update_registration_file(specs, reg_file)
+        emit_ts_responses(specs, args.ts_out)
         formatGeneratedViews(args.out, reg_file)
     finally:
         if build_db_name and not args.keep_db:

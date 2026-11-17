@@ -44,7 +44,7 @@ void DecompressionFilter::doFilter(const drogon::HttpRequestPtr& tsp_req, drogon
                                auto&& t_decompressed_res) mutable {
         if (t_decompressed_res.hasError()) {
             LOG_ERROR << "[DecompressionFilter] Failed to decompress body: " << t_decompressed_res.error();
-            sgrn::respondWithError(t_decompressed_res.error(), drogon::k400BadRequest, fcb);
+            fcb(sgrn::createTypedResponse(BackendErrorResponse{t_decompressed_res.error(), drogon::k400BadRequest}));
             return;
         }
 

@@ -5,6 +5,7 @@
 #include <fmt/format.h>
 #include <sgrn/datastore/BackendError.hpp>
 #include <sgrn/datastore/plugins/aws/S3Client.hpp>
+#include <sgrn/datastore/wire/auth.hpp>
 #include <sgrn/utils/hashing.hpp>
 #include <filesystem>
 #include <optional>
@@ -61,7 +62,7 @@ struct UserFileRecord {
     int64_t id;
     std::string name;
     std::string full_path;
-    int64_t t_object_id;
+    int64_t object_id;
     std::optional<int32_t> user_id;
     std::optional<int32_t> automated_service_id;
     int64_t session_id;
@@ -91,7 +92,7 @@ struct FileIdentity {
 
     // Fast path: emit JSON directly without an intermediate Json::Value tree.
     // Use this for HTTP responses; toJson() is kept for callers that need
-    // a Json::Value (e.g. audit logging, session serialisation).
+    // a dynamic JSON value for compatibility-boundary payloads.
     std::string toJsonString() const {
         std::string comp_fields;
         if (compression_algorithm.has_value()) {
@@ -148,43 +149,11 @@ struct UploadContext {
     std::optional<int64_t> directory_id = std::nullopt;
     std::optional<int64_t> object_id = std::nullopt;
     std::optional<int64_t> file_id = std::nullopt;
-
-    Json::Value toJson() const {
-        Json::Value json;
-        json["original_filename"] = original_filename;
-        json["virtual_path"] = virtual_path;
-        json["session_id"] = session_id;
-        json["domain"] = domain;
-        if (user_id.has_value())
-            json["user_id"] = *user_id;
-        if (automated_service_id.has_value())
-            json["automated_service_id"] = *automated_service_id;
-
-        json["organisation"] = organisation;
-        json["bucket"] = bucket;
-        json["identity"] = identity.toJson();
-
-        if (directory_id.has_value())
-            json["directory_id"] = Json::Int64(directory_id.value());
-        if (object_id.has_value())
-            json["object_id"] = Json::Int64(object_id.value());
-        if (file_id.has_value())
-            json["file_id"] = Json::Int64(file_id.value());
-
-        return json;
-    }
 };
 
 struct ProcessingResult {
     UploadContext context_;
     bool already_exists_ = false;
-
-    Json::Value toJson() const {
-        Json::Value json = context_.toJson();
-        json["already_exists"] = already_exists_;
-        json["deduplicated"] = already_exists_;
-        return json;
-    }
 };
 
 enum class StorageScope : uint8_t { Personal, AutomatedServices, Users, Domain };
@@ -233,21 +202,19 @@ namespace helpers
 {
 
 // Hash Computation
-::sgrn::datastore::BackendResult<FileHash> computeHashInMemory(std::string_view t_data);
-::sgrn::datastore::BackendResult<FileHash> computeHashFromFile(const fs::path& t_file_path);
-drogon::Task<::sgrn::datastore::BackendResult<FileHash>> computeHashFromFileAsync(fs::path t_file_path);
+Result<FileHash, BackendError> computeHashInMemory(std::string_view t_data);
+Result<FileHash, BackendError> computeHashFromFile(const fs::path& t_file_path);
+drogon::Task<Result<FileHash, BackendError>> computeHashFromFileAsync(fs::path t_file_path);
 
 // SHA-256 (hex) for checksum/ETag
-::sgrn::datastore::BackendResult<std::string> computeSha256InMemory(std::string_view t_data);
-::sgrn::datastore::BackendResult<std::string> computeSha256FromFile(const fs::path& t_file_path);
-drogon::Task<::sgrn::datastore::BackendResult<std::string>> computeSha256FromFileAsync(fs::path t_file_path);
+Result<std::string, BackendError> computeSha256InMemory(std::string_view t_data);
+Result<std::string, BackendError> computeSha256FromFile(const fs::path& t_file_path);
+drogon::Task<Result<std::string, BackendError>> computeSha256FromFileAsync(fs::path t_file_path);
 
 // Compression Utilities
-drogon::Task<::sgrn::datastore::BackendResult<std::string>> compressInMemory(std::string&& t_data, uint8_t t_compression_level);
-::sgrn::datastore::BackendResult<fs::path> compressFile(
-    const fs::path& t_input_path, const fs::path& t_output_path, uint8_t t_compression_level);
-drogon::Task<::sgrn::datastore::BackendResult<fs::path>> compressFileAsync(
-    fs::path t_input_path, fs::path t_output_path, uint8_t t_compression_level);
+drogon::Task<Result<std::string, BackendError>> compressInMemory(std::string&& t_data, uint8_t t_compression_level);
+Result<fs::path, BackendError> compressFile(const fs::path& t_input_path, const fs::path& t_output_path, uint8_t t_compression_level);
+drogon::Task<Result<fs::path, BackendError>> compressFileAsync(fs::path t_input_path, fs::path t_output_path, uint8_t t_compression_level);
 
 // Path and Extension Utilities
 std::string_view extractExtension(std::string_view t_filename);
@@ -258,27 +225,27 @@ bool isCompressibleMimeType(std::string_view t_mime_type);
 bool verifyCompressionSignature(std::string_view t_data, std::string_view t_algorithm);
 
 // Database Operations
-drogon::Task<::sgrn::datastore::BackendResult<int64_t>> insertObject(drogon::orm::DbClientPtr tsp_db_client, std::string t_bucket,
-    std::string t_key, size_t t_size, size_t t_original_size, std::string t_sha256, bool t_is_compressed = false,
+drogon::Task<Result<int64_t, BackendError>> insertObject(drogon::orm::DbClientPtr tsp_db_client, std::string t_bucket, std::string t_key,
+    size_t t_size, size_t t_original_size, std::string t_sha256, bool t_is_compressed = false,
     std::optional<std::string> t_compression_algorithm = std::nullopt, std::optional<uint8_t> t_compression_level = std::nullopt);
 
 // Chunking trace refresh after a successful multipart upload. The object row
 // is inserted (defaults: single/NULLs) before the S3 upload; the multipart
 // branch stamps the actual mode/part count afterwards, inside the same
 // transaction, so the row always describes the bytes in the store.
-drogon::Task<::sgrn::datastore::BackendResult<void>> updateObjectChunking(drogon::orm::DbClientPtr tsp_db_client, int64_t t_object_id,
+drogon::Task<Result<void, BackendError>> updateObjectChunking(drogon::orm::DbClientPtr tsp_db_client, int64_t t_object_id,
     std::string_view t_upload_mode, std::optional<int64_t> t_part_count, std::optional<int64_t> t_part_size_bytes);
 
-drogon::Task<::sgrn::datastore::BackendResult<int64_t>> insertFile(drogon::orm::DbClientPtr tsp_db_client, std::string t_name,
-    int64_t t_object_id, std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id,
-    std::string t_extension, std::optional<int64_t> t_directory_id = std::nullopt, std::string t_domain = "",
-    std::optional<std::string> t_key_id = std::nullopt, bool t_is_encrypted = false);
+drogon::Task<Result<int64_t, BackendError>> insertFile(drogon::orm::DbClientPtr tsp_db_client, std::string t_name, int64_t t_object_id,
+    std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_extension,
+    std::optional<int64_t> t_directory_id = std::nullopt, std::string t_domain = "", std::optional<std::string> t_key_id = std::nullopt,
+    bool t_is_encrypted = false);
 
-drogon::Task<::sgrn::datastore::BackendResult<std::optional<int64_t>>> resolveDirectoryPath(drogon::orm::DbClientPtr tsp_db_client,
+drogon::Task<Result<std::optional<int64_t>, BackendError>> resolveDirectoryPath(drogon::orm::DbClientPtr tsp_db_client,
     std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_virtual_path,
     std::string t_domain = "");
 
-drogon::Task<::sgrn::datastore::BackendResult<std::optional<int64_t>>> ensureDirectoryPath(drogon::orm::DbClientPtr tsp_db_client,
+drogon::Task<Result<std::optional<int64_t>, BackendError>> ensureDirectoryPath(drogon::orm::DbClientPtr tsp_db_client,
     std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_virtual_path,
     std::string t_domain = "");
 
@@ -290,15 +257,14 @@ drogon::Task<std::optional<drogon_model::sgrn::storage::Formats>> getFormat(
 
 // Temp File Management
 fs::path generateTempPath(std::string_view t_prefix = "temp_");
-::sgrn::datastore::BackendResult<TempFileGuard> saveToTempFile(const drogon::HttpFile& t_file);
-::sgrn::datastore::BackendResult<TempFileGuard> saveToTempFile(const std::string& t_data);
+Result<TempFileGuard, BackendError> saveToTempFile(const drogon::HttpFile& t_file);
+Result<TempFileGuard, BackendError> saveToTempFile(const std::string& t_data);
 
-drogon::Task<::sgrn::datastore::BackendResult<ScopeContext>> resolveScopeSession(
-    drogon::orm::DbClientPtr tsp_db_client, const Json::Value& t_session, StorageScope t_scope, const std::string& t_path);
+drogon::Task<Result<ScopeContext, BackendError>> resolveScopeSession(drogon::orm::DbClientPtr tsp_db_client,
+    const ::sgrn::datastore::auth::SessionClaims& t_session, StorageScope t_scope, const std::string& t_path);
 
-drogon::Task<::sgrn::datastore::BackendResult<UserFileRecord>> fetchFileRecord(
-    drogon::orm::DbClientPtr tsp_db_client, const ScopeContext& t_ctx);
-drogon::Task<::sgrn::datastore::BackendResult<std::string>> resolveObjectKey(drogon::orm::DbClientPtr tsp_db_client, int64_t t_object_id);
+drogon::Task<Result<UserFileRecord, BackendError>> fetchFileRecord(drogon::orm::DbClientPtr tsp_db_client, const ScopeContext& t_ctx);
+drogon::Task<Result<std::string, BackendError>> resolveObjectKey(drogon::orm::DbClientPtr tsp_db_client, int64_t t_object_id);
 
 } // namespace helpers
 

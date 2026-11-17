@@ -3,53 +3,53 @@
 namespace sgrn::datastore::shell
 {
 
-sgrn::Result<void> DatastoreShell::cmdOrgs() {
+Result<void> DatastoreShell::cmdOrgs() {
     RETURN_ERROR_IF(!client_, "not connected");
     auto res = client_->tryListOrganisations();
     RETURN_IF(res.hasError(), res.error());
     std::vector<std::vector<std::string>> rows;
     for (const auto& o : res.value())
-        rows.push_back({o.id_, o.name_});
+        rows.push_back({o.id, o.name});
     printTable({"ID", "NAME"}, std::move(rows), {0});
     return {};
 }
 
-sgrn::Result<void> DatastoreShell::cmdDomains(const std::vector<std::string>& t_args) {
+Result<void> DatastoreShell::cmdDomains(const std::vector<std::string>& t_args) {
     RETURN_ERROR_IF(!t_args.empty(), "takes no arguments (scope comes from your session)");
     RETURN_ERROR_IF(!client_, "not connected");
     auto res = client_->tryListDomains();
     RETURN_IF(res.hasError(), res.error());
     std::vector<std::vector<std::string>> rows;
     for (const auto& d : res.value())
-        rows.push_back({d.id_, d.name_});
+        rows.push_back({d.id, d.name});
     printTable({"ID", "NAME"}, std::move(rows), {0});
     return {};
 }
 
-sgrn::Result<void> DatastoreShell::cmdStatuses(const std::vector<std::string>& t_args) {
+Result<void> DatastoreShell::cmdStatuses(const std::vector<std::string>& t_args) {
     RETURN_ERROR_IF(t_args.empty(), "missing organisation (statuses <org>)");
     RETURN_ERROR_IF(!client_, "not connected");
     auto res = client_->tryListStatuses(t_args[0]);
     RETURN_IF(res.hasError(), res.error());
     std::vector<std::vector<std::string>> rows;
     for (const auto& s : res.value())
-        rows.push_back({s.id_, s.name_});
+        rows.push_back({s.id, s.name});
     printTable({"ID", "NAME"}, std::move(rows), {0});
     return {};
 }
 
-sgrn::Result<void> DatastoreShell::cmdUsers() {
+Result<void> DatastoreShell::cmdUsers() {
     RETURN_ERROR_IF(!client_, "not connected");
     auto res = client_->tryListUsers();
     RETURN_IF(res.hasError(), res.error());
     std::vector<std::vector<std::string>> rows;
     for (const auto& u : res.value())
-        rows.push_back({std::to_string(u.id_), u.email_, u.first_name_ + " " + u.family_name_, u.status_, u.domain_});
+        rows.push_back({std::to_string(u.id), u.email, u.first_name + " " + u.family_name, u.status, u.domain});
     printTable({"ID", "EMAIL", "NAME", "STATUS", "DOMAIN"}, std::move(rows), {0});
     return {};
 }
 
-sgrn::Result<void> DatastoreShell::cmdUseradd(const std::vector<std::string>& t_args) {
+Result<void> DatastoreShell::cmdUseradd(const std::vector<std::string>& t_args) {
     sgrn::datastore::client::NewUser u;
     for (size_t i = 0; i < t_args.size(); ++i) {
         const std::string& a = t_args[i];
@@ -70,21 +70,21 @@ sgrn::Result<void> DatastoreShell::cmdUseradd(const std::vector<std::string>& t_
                     continue;
                 const std::string key = std::string(name + 2);
                 if (key == "first")
-                    u.first_name_ = v;
+                    u.first_name = v;
                 else if (key == "family")
-                    u.family_name_ = v;
+                    u.family_name = v;
                 else if (key == "email")
-                    u.email_ = v;
+                    u.email = v;
                 else if (key == "password")
-                    u.password_ = v;
+                    u.password = v;
                 else if (key == "phone")
-                    u.phone_number_ = v;
+                    u.phone_number = v;
                 else if (key == "org" || key == "organisation")
-                    u.organisation_ = v;
+                    u.organisation = v;
                 else if (key == "status")
-                    u.status_ = v;
+                    u.status = v;
                 else if (key == "domain")
-                    u.domain_ = v;
+                    u.domain = v;
                 break;
             }
             RETURN_ERROR_IF(!known, fmt::format("unknown option '{}'", a));
@@ -92,10 +92,10 @@ sgrn::Result<void> DatastoreShell::cmdUseradd(const std::vector<std::string>& t_
         }
         return ::sgrn::Error(fmt::format("unexpected argument '{}' (all fields are --flags)", a));
     }
-    if (u.password_.empty())
-        u.password_ = promptSecretInput("password: ");
-    RETURN_ERROR_IF(u.first_name_.empty() || u.family_name_.empty() || u.email_.empty() || u.password_.empty() || u.organisation_.empty() ||
-                        u.status_.empty(),
+    if (u.password.empty())
+        u.password = promptSecretInput("password: ");
+    RETURN_ERROR_IF(u.first_name.empty() || u.family_name.empty() || u.email.empty() || u.password.empty() || u.organisation.empty() ||
+                        u.status.empty(),
         "--first/--family/--email/--password/--org/--status are required");
     RETURN_ERROR_IF(!client_, "not connected");
     auto r = client_->registerUser(u);
@@ -104,20 +104,20 @@ sgrn::Result<void> DatastoreShell::cmdUseradd(const std::vector<std::string>& t_
     return {};
 }
 
-sgrn::Result<void> DatastoreShell::cmdServices() {
+Result<void> DatastoreShell::cmdServices() {
     RETURN_ERROR_IF(!client_, "not connected");
     auto res = client_->tryListServices();
     RETURN_IF(res.hasError(), res.error());
     std::vector<std::vector<std::string>> rows;
     for (const auto& s : res.value()) {
-        std::string created = s.created_at_.size() > 10 ? s.created_at_.substr(0, 10) : s.created_at_;
-        rows.push_back({std::to_string(s.id_), s.name_, s.is_active_ ? "active" : "inactive", s.domain_, created, maskSecret(s.token_)});
+        std::string created = s.created_at.size() > 10 ? s.created_at.substr(0, 10) : s.created_at;
+        rows.push_back({std::to_string(s.id), s.name, s.is_active ? "active" : "inactive", s.domain, created, maskSecret(s.token)});
     }
     printTable({"ID", "NAME", "STATUS", "DOMAIN", "CREATED", "TOKEN"}, std::move(rows), {0});
     return {};
 }
 
-sgrn::Result<void> DatastoreShell::cmdServiceAdd(const std::vector<std::string>& t_args) {
+Result<void> DatastoreShell::cmdServiceAdd(const std::vector<std::string>& t_args) {
     sgrn::datastore::client::NewService s;
     for (size_t i = 0; i < t_args.size(); ++i) {
         const std::string& a = t_args[i];
@@ -136,44 +136,44 @@ sgrn::Result<void> DatastoreShell::cmdServiceAdd(const std::vector<std::string>&
                 continue;
             const std::string key = std::string(name).substr(2);
             if (key == "name")
-                s.name_ = v;
+                s.name = v;
             else if (key == "org" || key == "organisation")
-                s.organisation_ = v;
+                s.organisation = v;
             else if (key == "kind")
-                s.kind_ = v;
+                s.kind = v;
             else if (key == "domain")
-                s.domain_ = v;
+                s.domain = v;
             break;
         }
         if (!consumed) {
-            if (!a.empty() && a[0] != '-' && s.name_.empty()) {
-                s.name_ = a;
+            if (!a.empty() && a[0] != '-' && s.name.empty()) {
+                s.name = a;
                 consumed = true;
             }
         }
         RETURN_ERROR_IF(!consumed, fmt::format("unexpected argument '{}'", a));
     }
-    RETURN_ERROR_IF(s.name_.empty(), "--name is required");
+    RETURN_ERROR_IF(s.name.empty(), "--name is required");
     RETURN_ERROR_IF(!client_, "not connected");
     auto r = client_->registerService(s);
     RETURN_IF(r.hasError(), r.error());
-    fmt::print("{}\n", r.value().message_);
-    if (!r.value().token_.empty() || !r.value().token_secret_.empty()) {
-        printCredentialsOnce(r.value().token_, r.value().token_secret_);
+    fmt::print("{}\n", r.value().message);
+    if (!r.value().token.empty() || !r.value().token_secret.empty()) {
+        printCredentialsOnce(r.value().token, r.value().token_secret);
     }
     return {};
 }
 
-sgrn::Result<void> DatastoreShell::cmdServiceRotate(const std::vector<std::string>& t_args) {
+Result<void> DatastoreShell::cmdServiceRotate(const std::vector<std::string>& t_args) {
     RETURN_ERROR_IF(t_args.empty(), "missing service (id or name)");
     auto id = resolveServiceId(t_args[0]);
     RETURN_IF(id.hasError(), id.error());
     RETURN_ERROR_IF(!client_, "not connected");
     auto r = client_->rotateServiceToken(id.value());
     RETURN_IF(r.hasError(), r.error());
-    fmt::print("{}\n", r.value().message_);
-    if (!r.value().token_.empty() || !r.value().token_secret_.empty()) {
-        printCredentialsOnce(r.value().token_, r.value().token_secret_);
+    fmt::print("{}\n", r.value().message);
+    if (!r.value().token.empty() || !r.value().token_secret.empty()) {
+        printCredentialsOnce(r.value().token, r.value().token_secret);
     }
     return {};
 }

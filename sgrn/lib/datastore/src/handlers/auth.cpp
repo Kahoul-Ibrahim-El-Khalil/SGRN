@@ -7,7 +7,7 @@
 #include <sgrn/datastore/utils/helpers.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe-access.hpp>
-#include <sgrn/utils/jsoncpp.hpp>
+#include <sgrn/datastore/wire/auth.hpp>
 
 #ifdef DEBUG_AUTH_HANDLER
 #define DEBUG_LOG(msg, ...) SGRN_DEBUG("AuthHandler", msg __VA_OPT__(, ) __VA_ARGS__)
@@ -25,35 +25,27 @@ namespace sgrn::datastore::handlers::auth
 {
 using namespace drogon;
 
-namespace
+using namespace sgrn::datastore::auth;
+
+namespace detail
 {
+
 struct AutomatedServiceSessionResponse {
     int32_t automated_service_id{0};
-    std::optional<sgrn::json::RawJson> automated_service;
+    std::optional<SessionUserInfo> automated_service;
     std::optional<int64_t> session_id;
 };
-
-std::string compactJson(const Json::Value& t_value) {
-    Json::StreamWriterBuilder writer;
-    writer["indentation"] = "";
-    return Json::writeString(writer, t_value);
-}
-} // namespace
+} // namespace detail
+using namespace detail;
 
 Task<HttpResponsePtr> AuthApiHandler::handleSignIn(HttpRequestPtr tsp_req) {
-    const auto p_json = tsp_req->getJsonObject();
-    if (p_json == nullptr) {
-        co_return sgrn::createErrorResponse(AuthApiError::InvalidPayload);
+    auto req_res = parseTypedRequest<SignInRequest>(tsp_req);
+    if (req_res.hasError() || req_res->email.empty() || req_res->password.empty()) {
+        co_return sgrn::createTypedResponse(BackendErrorResponse{AuthApiError::InvalidPayload});
     }
 
-    std::string email = p_json->get("email", "").asString();
-    std::string password = p_json->get("password", "").asString();
-
-    if (email.empty() || password.empty()) {
-        co_return sgrn::createErrorResponse(AuthApiError::InvalidPayload);
-    }
-
-    co_return co_await performSignInProcess(tsp_req, std::move(email), std::move(password));
+    auto req = std::move(req_res.value());
+    co_return co_await performSignInProcess(tsp_req, std::move(req.email), std::move(req.password));
 }
 
 Task<HttpResponsePtr> AuthApiHandler::handleSignOut(HttpRequestPtr tsp_req) {
@@ -74,37 +66,34 @@ Task<HttpResponsePtr> AuthApiHandler::handleSignOut(HttpRequestPtr tsp_req) {
 }
 
 Task<HttpResponsePtr> AuthApiHandler::handleUpdatePassword(HttpRequestPtr tsp_req) {
-    const auto p_json = tsp_req->getJsonObject();
-    if (p_json == nullptr) {
-        co_return sgrn::createErrorResponse(AuthApiError::InvalidPayload);
+    auto req_res = parseTypedRequest<UpdatePasswordRequest>(tsp_req);
+    if (req_res.hasError() || req_res->old_password.empty() || req_res->new_password.empty()) {
+        co_return sgrn::createTypedResponse(BackendErrorResponse{AuthApiError::InvalidPayload});
     }
 
-    std::string old_password = p_json->get("old_password", "").asString();
-    std::string new_password = p_json->get("new_password", "").asString();
-
-    if (old_password.empty() || new_password.empty()) {
-        co_return sgrn::createErrorResponse(AuthApiError::InvalidPayload);
-    }
+    auto req = std::move(req_res.value());
 
     // Extract email from request attributes (set by AuthFilter)
-    std::string email = tsp_req->attributes()->get<Json::Value>("session_json")["user"]["email"].asString();
+    std::string email;
+    if (tsp_req->attributes()->find("auth_context")) {
+        email = tsp_req->attributes()->get<filters::AuthContext>("auth_context").user.email;
+    } else if (tsp_req->attributes()->find("session_claims")) {
+        email = tsp_req->attributes()->get<SessionClaims>("session_claims").user.email;
+    }
 
     co_return co_await sgrn::datastore::handlers::auth::updatePassword(
-        tsp_req, std::move(email), std::move(old_password), std::move(new_password));
+        tsp_req, std::move(email), std::move(req.old_password), std::move(req.new_password));
 }
 
 Task<HttpResponsePtr> AuthApiHandler::handleAutomatedServiceSignIn(drogon::HttpRequestPtr tsp_req) {
-    const auto* p_body = tsp_req->getJsonObject().get();
-    if (!p_body || !p_body->isMember("token") || !p_body->isMember("secret")) {
-        co_return createErrorResponse(AuthApiError::InvalidPayload);
+    auto req_res = parseTypedRequest<ServiceSignInRequest>(tsp_req);
+    if (req_res.hasError() || req_res->token.empty() || req_res->secret.empty()) {
+        co_return createTypedResponse(BackendErrorResponse{AuthApiError::InvalidPayload});
     }
 
-    const std::string token = (*p_body)["token"].asString();
-    const std::string secret = (*p_body)["secret"].asString();
-
-    if (token.empty() || secret.empty()) {
-        co_return createErrorResponse(AuthApiError::InvalidPayload);
-    }
+    const auto& req = req_res.value();
+    const std::string& token = req.token;
+    const std::string& secret = req.secret;
 
     INFO_LOG("AuthApiHandler::handleAutomatedServiceSignIn — token prefix '{:.8}'", token);
 
@@ -112,21 +101,20 @@ Task<HttpResponsePtr> AuthApiHandler::handleAutomatedServiceSignIn(drogon::HttpR
 }
 
 Task<HttpResponsePtr> AuthApiHandler::handleAutomatedServiceSignOut(HttpRequestPtr tsp_req) {
-    // AutomatedServiceAuthFilter has already validated the session and populated session_json.
-    const auto session = tsp_req->getAttributes()->get<Json::Value>("session_json");
+    // AutomatedServiceAuthFilter has already validated the typed session claims.
     const int32_t automated_service_id = tsp_req->getAttributes()->get<int32_t>("automated_service_id");
 
     INFO_LOG("AuthApiHandler::handleAutomatedServiceSignOut — automated_service_id={}", automated_service_id);
 
     auto db_res = sgrn::datastore::core::getDbClient();
     if (db_res.hasError()) {
-        co_return sgrn::createJsonResponse(db_res);
+        co_return createTypedResponse(BackendErrorResponse{db_res.error()});
     }
     auto db_client = db_res.value();
 
     std::optional<std::string> token_opt = getBearerToken(tsp_req);
     if (token_opt.has_value() == false) {
-        co_return createErrorResponse(AuthApiError::MissingSessionToken);
+        co_return createTypedResponse(BackendErrorResponse{AuthApiError::MissingSessionToken});
     }
     const std::string& token = token_opt.value();
 
@@ -143,29 +131,21 @@ Task<HttpResponsePtr> AuthApiHandler::handleAutomatedServiceSignOut(HttpRequestP
         // 2. Evict the token from the in-process RAM cache
         sgrn::datastore::session::SessionStore::instance().evictLocal(token);
 
-        co_return createJsonResponse("Session terminated successfully", k200OK);
+        co_return createTypedResponse(tsp_req, MessageResponse{"Session terminated successfully"}, k200OK);
 
     } catch (const std::exception& ex) {
         ERROR_LOG("AuthApiHandler::handleAutomatedServiceSignOut error: {}", ex.what());
-        co_return createErrorResponse(GenericApiError::InternalServerError);
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
     }
 }
 
 Task<HttpResponsePtr> AuthApiHandler::handleGetAutomatedServiceSession(HttpRequestPtr tsp_req) {
-    // AutomatedServiceAuthFilter has already validated the session and extracted attributes.
-    const auto session = tsp_req->getAttributes()->get<Json::Value>("session_json");
+    // AutomatedServiceAuthFilter has already validated the typed session claims.
     const int32_t automated_service_id = tsp_req->getAttributes()->get<int32_t>("automated_service_id");
 
-    std::optional<sgrn::json::RawJson> automated_service;
-    if (session.isMember("user")) {
-        automated_service = sgrn::json::RawJson(compactJson(session["user"]));
-    }
-    std::optional<int64_t> session_id;
-    if (session.isMember("session_id") && session["session_id"].isIntegral()) {
-        session_id = session["session_id"].asInt64();
-    }
-    co_return createTypedJsonResponse(
-        AutomatedServiceSessionResponse{automated_service_id, std::move(automated_service), session_id}, k200OK);
+    const auto& claims = tsp_req->getAttributes()->get<SessionClaims>("session_claims");
+    std::optional<int64_t> session_id = claims.session_id != 0 ? std::optional<int64_t>(claims.session_id) : std::nullopt;
+    co_return createTypedResponse(tsp_req, AutomatedServiceSessionResponse{automated_service_id, claims.user, session_id}, k200OK);
 }
 } // namespace sgrn::datastore::handlers::auth
 

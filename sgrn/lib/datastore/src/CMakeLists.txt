@@ -112,6 +112,7 @@ target_include_directories(sgrn_datastore_lib PUBLIC
 target_link_libraries(sgrn_datastore_lib PUBLIC
     sgrn_datastore_core
     sgrn_datastore_orm
+    sgrn_datastore_wire
     sgrn::drogon
     sgrn::trantor
     sgrn::postgres

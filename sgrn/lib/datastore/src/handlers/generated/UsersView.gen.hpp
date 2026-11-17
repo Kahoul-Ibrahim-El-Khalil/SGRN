@@ -2,8 +2,12 @@
 // Source: core.users
 #pragma once
 #include <sgrn/datastore/handlers/CrudViewHandler.hpp>
+#include <sgrn/utils/json-serialization.hpp>
 
 #include <array>
+#include <cstdint>
+#include <optional>
+#include <string>
 
 namespace sgrn::datastore::handlers::query
 {
@@ -13,8 +17,60 @@ using sgrn::datastore::query::FieldType;
 using sgrn::datastore::query::Op;
 using sgrn::datastore::query::PrimaryKey;
 
+// Request body of PATCH /api/v1/users/{id} — the updatable columns of core.users.
+struct UsersUpdateBody {
+    std::optional<std::string> first_name;
+    std::optional<std::string> family_name;
+    std::optional<std::string> email;
+    std::optional<std::string> phone_number;
+    std::optional<std::string> domain;
+    std::optional<bool> can_read_personal;
+    std::optional<bool> can_write_personal;
+    std::optional<bool> can_delete_personal;
+};
+
+// Response row of core.users — the whitelisted SELECT columns.
+struct UsersRow {
+    std::optional<std::int32_t> id;
+    std::optional<std::string> organisation;
+    std::optional<std::string> first_name;
+    std::optional<std::string> family_name;
+    std::optional<std::string> email;
+    std::optional<std::string> phone_number;
+    std::optional<bool> is_platform_admin;
+    std::optional<std::string> role;
+    std::optional<std::string> domain;
+    std::optional<std::string> deleted_at;
+    std::optional<std::string> status;
+    std::optional<bool> is_active;
+    std::optional<bool> can_read_personal;
+    std::optional<bool> can_write_personal;
+    std::optional<bool> can_delete_personal;
+    std::optional<std::string> total_virtual_size;
+    std::optional<std::string> total_real_size;
+    std::optional<std::string> storage_limit;
+    std::optional<std::string> total_entry_count;
+    std::optional<std::string> entry_count_limit;
+    std::optional<std::int32_t> rate_limit_rpm;
+    std::optional<std::string> max_file_size_mb;
+    std::optional<std::int32_t> preferred_chunk_size_mb;
+    std::optional<std::int32_t> rate_limit_upload_rpm;
+    std::optional<std::string> created_at;
+};
+
 class UsersView : public CrudViewHandler<UsersView> {
 public:
+    using UpdateBody = UsersUpdateBody;
+
+    using Row = UsersRow;
+    static constexpr char kPrimaryKeyName[] = "id";
+
+    static constexpr char kRowProjection[] = "SELECT id, organisation, first_name, family_name, email, phone_number, "
+                                             "is_platform_admin, role, domain, deleted_at, status, is_active, can_read_personal, "
+                                             "can_write_personal, can_delete_personal, total_virtual_size, total_real_size, "
+                                             "storage_limit, total_entry_count, entry_count_limit, rate_limit_rpm, "
+                                             "max_file_size_mb, preferred_chunk_size_mb, rate_limit_upload_rpm, created_at FROM core.users";
+
     static constexpr std::array<Field, 23> kFields = {{
         {"first_name", FieldType::Text, Op::Eq | Op::Like, true, true},
         {"family_name", FieldType::Text, Op::Eq | Op::Like, true, true},

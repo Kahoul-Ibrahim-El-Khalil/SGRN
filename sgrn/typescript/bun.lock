@@ -12,6 +12,7 @@
       "name": "@sgrn/datastore",
       "version": "0.1.0",
       "dependencies": {
+        "@msgpack/msgpack": "^3.1.3",
         "@sgrn/types": "file:../types",
       },
       "devDependencies": {
@@ -34,6 +35,8 @@
     },
   },
   "packages": {
+    "@msgpack/msgpack": ["@msgpack/msgpack@3.1.3", "", {}, "sha512-47XIizs9XZXvuJgoaJUIE2lFoID8ugvc0jzSHP+Ptfk8nTbnR8g788wv48N03Kx0UkAv559HWRQ3yzOgzlRNUA=="],
+
     "@sgrn/datastore": ["@sgrn/datastore@workspace:datastore"],
 
     "@sgrn/gateway": ["@sgrn/gateway@workspace:gateway"],

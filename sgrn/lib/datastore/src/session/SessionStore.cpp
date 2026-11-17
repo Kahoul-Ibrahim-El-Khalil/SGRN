@@ -7,6 +7,7 @@
 #include <trantor/utils/Logger.h>
 
 #include <sgrn/datastore/audit/AuditLogger.hpp>
+#include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/filters/admin.hpp>
 #include <sgrn/datastore/services/WebhookService.hpp>
 
@@ -14,6 +15,63 @@ namespace sgrn::datastore::session
 {
 
 using drogon::Task;
+
+namespace
+{
+static constexpr char kActiveSessionTokensQuery[] = "SELECT token::text AS token FROM core.sessions "
+                                                    "WHERE terminated_at IS NULL AND (expires_at IS NULL OR expires_at > NOW())";
+static constexpr char kPublicServiceTokensQuery[] = "SELECT token::text AS token FROM core.automated_services "
+                                                    "WHERE deleted_at IS NULL AND status = 'active'";
+static constexpr char kSessionDataQuery[] = "SELECT session_data FROM core.sessions WHERE token = $1::uuid AND terminated_at IS NULL "
+                                            "AND (expires_at IS NULL OR expires_at > NOW())";
+
+struct TokenRow {
+    std::optional<std::string> token;
+};
+
+struct SessionDataRow {
+    std::optional<std::string> session_data;
+};
+
+struct SessionNotificationRow {
+    std::string action;
+    std::string token;
+};
+
+struct ActiveSessionRow {
+    std::string token;
+    std::optional<int32_t> user_id;
+    std::optional<int32_t> automated_service_id;
+    std::optional<std::string> ip;
+    std::optional<std::string> created_at;
+    std::optional<std::string> expires_at;
+    std::optional<std::string> user_email;
+    std::optional<std::string> user_organisation;
+    std::optional<std::string> service_name;
+    std::optional<std::string> service_organisation;
+};
+
+struct SessionSignInEvent {
+    std::string org;
+    std::string event;
+    std::string actor_type;
+    int64_t session_id{0};
+};
+
+struct SessionRevocationEvent {
+    std::string token;
+    std::string terminated_at;
+    std::string termination_reason;
+    std::optional<int64_t> session_id;
+    std::optional<std::string> actor_type;
+    std::optional<int32_t> user_id;
+    std::optional<std::string> email;
+    std::optional<std::string> organisation;
+    std::optional<std::string> domain;
+    std::optional<int32_t> automated_service_id;
+    std::optional<std::string> ip;
+};
+} // namespace
 
 SessionStore& SessionStore::instance() {
     static SessionStore inst;
@@ -27,32 +85,30 @@ Task<void> SessionStore::loadActiveTokens() {
         // ── Query 1: active session tokens (session UUID, issued at sign-in) ──────
         // These live in core.sessions and are the short-lived bearer tokens used
         // by both users and automated services after authentication.
-        auto session_res = co_await db->execSqlCoro("SELECT token::text FROM core.sessions "
-                                                    "WHERE terminated_at IS NULL AND (expires_at IS NULL OR expires_at > NOW())");
+        auto session_res = co_await db->execSqlCoro(kActiveSessionTokensQuery);
 
         // ── Query 2: public service identity tokens (UUID in automated_services) ──
         // These are the *permanent public identity* of each automated service, NOT
         // session tokens. They are used as the service's credential UUID and are
         // loaded into a sorted vector for O(log n) binary-search rejection of any
         // request claiming to be a service that doesn't exist in our registry.
-        auto service_res = co_await db->execSqlCoro("SELECT token::text FROM core.automated_services "
-                                                    "WHERE deleted_at IS NULL AND status = 'active'");
+        auto service_res = co_await db->execSqlCoro(kPublicServiceTokensQuery);
 
         std::unique_lock lock(cache_mutex_);
 
         // Populate session active token set (unordered: O(1) lookup)
         active_tokens_.clear();
-        for (const auto& row : session_res) {
-            if (!row[0].isNull())
-                active_tokens_.insert(row[0].as<std::string>());
+        for (const auto& row : sgrn::orm::fromResult<TokenRow, kActiveSessionTokensQuery>(session_res)) {
+            if (row.token)
+                active_tokens_.insert(*row.token);
         }
 
         // Populate public service token sorted vector (sorted: O(log n) binary search)
         public_service_tokens_.clear();
         public_service_tokens_.reserve(service_res.size());
-        for (const auto& row : service_res) {
-            if (!row[0].isNull())
-                public_service_tokens_.push_back(row[0].as<std::string>());
+        for (const auto& row : sgrn::orm::fromResult<TokenRow, kPublicServiceTokensQuery>(service_res)) {
+            if (row.token)
+                public_service_tokens_.push_back(*row.token);
         }
         std::sort(public_service_tokens_.begin(), public_service_tokens_.end());
 
@@ -64,7 +120,7 @@ Task<void> SessionStore::loadActiveTokens() {
     }
 }
 
-Task<std::optional<Json::Value>> SessionStore::getSession(const std::string& token) {
+Task<std::optional<::sgrn::datastore::auth::SessionClaims>> SessionStore::getSession(const std::string& token) {
     // 1. Check RAM Cache & Active Token Set (~15ns fast path)
     {
         std::shared_lock lock(cache_mutex_);
@@ -87,31 +143,38 @@ Task<std::optional<Json::Value>> SessionStore::getSession(const std::string& tok
     // 2. Cache miss: Query PostgreSQL core.sessions table
     try {
         auto db = drogon::app().getDbClient();
-        auto result = co_await db->execSqlCoro("SELECT session_data FROM core.sessions WHERE token = $1::uuid AND terminated_at IS NULL "
-                                               "AND (expires_at IS NULL OR expires_at > NOW())",
-            token);
+        auto result = co_await db->execSqlCoro(kSessionDataQuery, token);
 
-        if (result.empty() || result[0]["session_data"].isNull()) {
+        if (result.empty()) {
             // Negative caching: record failed token for 60 seconds to prevent DB hammering
             std::unique_lock lock(cache_mutex_);
             negative_cache_[token] = {std::chrono::steady_clock::now() + std::chrono::seconds(60)};
             co_return std::nullopt;
         }
 
-        std::string raw_json = result[0]["session_data"].as<std::string>();
-        Json::Value claims;
-        Json::CharReaderBuilder builder;
-        std::string errors;
-        const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
-
-        if (reader->parse(raw_json.data(), raw_json.data() + raw_json.size(), &claims, &errors)) {
-            // Populate local RAM Cache
+        const auto row = sgrn::orm::fromRow<SessionDataRow, kSessionDataQuery>(result[0]);
+        if (!row.session_data) {
             std::unique_lock lock(cache_mutex_);
-            negative_cache_.erase(token);
-            active_tokens_.insert(token);
-            ram_cache_[token] = claims;
-            co_return claims;
+            negative_cache_[token] = {std::chrono::steady_clock::now() + std::chrono::seconds(60)};
+            co_return std::nullopt;
         }
+
+        const std::string& raw_json = *row.session_data;
+        auto claims_result = ::sgrn::json::read<::sgrn::datastore::auth::SessionClaims>(raw_json);
+        if (claims_result.hasError()) {
+            LOG_ERROR << "SessionStore: failed to parse session_data JSONB into SessionClaims: " << claims_result.error().message;
+            // Negative cache it so we don't keep retrying the same bad data
+            std::unique_lock lock(cache_mutex_);
+            negative_cache_[token] = {std::chrono::steady_clock::now() + std::chrono::seconds(60)};
+            co_return std::nullopt;
+        }
+
+        // Populate local RAM Cache
+        std::unique_lock lock(cache_mutex_);
+        negative_cache_.erase(token);
+        active_tokens_.insert(token);
+        ram_cache_[token] = claims_result.value();
+        co_return claims_result.value();
     } catch (const std::exception& e) {
         LOG_ERROR << "SessionStore database error: " << e.what();
     }
@@ -150,9 +213,15 @@ void SessionStore::deregisterServiceToken(const std::string& token) {
     }
 }
 
-Task<bool> SessionStore::storeSession(const std::string& token, const Json::Value& session_claims, int32_t user_id, int64_t ttl_seconds) {
-    Json::FastWriter writer;
-    std::string raw_json = writer.write(session_claims);
+Task<bool> SessionStore::storeSession(
+    const std::string& token, const ::sgrn::datastore::auth::SessionClaims& session_claims, int32_t user_id, int64_t ttl_seconds) {
+    // Serialize SessionClaims to JSON text via Glaze for PostgreSQL jsonb column.
+    auto json_result = ::sgrn::json::write(session_claims);
+    if (json_result.hasError()) {
+        LOG_ERROR << "SessionStore: failed to serialize SessionClaims to JSON: " << json_result.error().message;
+        co_return false;
+    }
+    std::string raw_json = json_result.value();
 
     try {
         auto db = drogon::app().getDbClient();
@@ -174,15 +243,14 @@ Task<bool> SessionStore::storeSession(const std::string& token, const Json::Valu
             ram_cache_[token] = session_claims;
         }
 
-        // Trigger Webhook Notification for Session Login
-        std::string org = session_claims.isMember("user") && session_claims["user"].isMember("organisation")
-                              ? session_claims["user"]["organisation"].asString()
-                              : "default";
-        std::string event = session_claims.isMember("actor_type") && session_claims["actor_type"].asString() == "automated_service"
-                                ? "service.signin"
-                                : "user.signin";
+        // Determine event type from actor_type
+        std::string org = session_claims.user.organisation.empty() ? "default" : session_claims.user.organisation;
+        const bool is_service = session_claims.actor_type == "automated_service" || session_claims.user.automated_service_id.has_value();
+        const std::string actor_type = is_service ? "automated_service" : "user";
+        const std::string event = is_service ? "service.signin" : "user.signin";
 
-        services::WebhookService::instance().dispatchEvent(org, event, session_claims);
+        services::WebhookService::instance().dispatchEvent(
+            org, event, SessionSignInEvent{org, event, actor_type, session_claims.session_id});
 
         co_return true;
     } catch (const std::exception& e) {
@@ -194,14 +262,12 @@ Task<bool> SessionStore::storeSession(const std::string& token, const Json::Valu
 Task<void> SessionStore::revokeSession(const std::string& token, std::string termination_reason) {
     // 1. Snapshot the session claims from RAM cache BEFORE eviction so the webhook
     //    payload is rich (user_id, email, org, actor_type, ip, domain…).
-    Json::Value cached_claims;
-    bool had_claims = false;
+    std::optional<::sgrn::datastore::auth::SessionClaims> cached_claims;
     {
         std::shared_lock lock(cache_mutex_);
         auto it = ram_cache_.find(token);
         if (it != ram_cache_.end()) {
             cached_claims = it->second;
-            had_claims = true;
         }
     }
 
@@ -216,40 +282,55 @@ Task<void> SessionStore::revokeSession(const std::string& token, std::string ter
             "UPDATE core.sessions SET terminated_at = NOW(), termination_reason = $2 WHERE token = $1::uuid", token, termination_reason);
 
         // 4. Build rich webhook payload from cached claims
-        Json::Value payload;
-        payload["token"] = token;
-        payload["terminated_at"] = trantor::Date::now().toFormattedString(false);
-        payload["termination_reason"] = termination_reason;
-
         std::string org = "default";
         std::string event = "user.signout";
+        std::string actor_type = "user";
+        SessionRevocationEvent payload{.token = token,
+            .terminated_at = trantor::Date::now().toFormattedString(false),
+            .termination_reason = termination_reason,
+            .session_id = std::nullopt,
+            .actor_type = std::nullopt,
+            .user_id = std::nullopt,
+            .email = std::nullopt,
+            .organisation = std::nullopt,
+            .domain = std::nullopt,
+            .automated_service_id = std::nullopt,
+            .ip = std::nullopt};
+        std::optional<int32_t> act_id;
+        std::string act_name = "unknown";
+        std::string client_ip = "127.0.0.1";
 
-        if (had_claims) {
-            // Propagate all known identity fields so consumers don't need a follow-up query
-            if (cached_claims.isMember("session_id"))
-                payload["session_id"] = cached_claims["session_id"];
-            if (cached_claims.isMember("actor_type")) {
-                payload["actor_type"] = cached_claims["actor_type"];
-                if (cached_claims["actor_type"].asString() == "automated_service")
-                    event = "service.signout";
+        if (cached_claims) {
+            const auto& claims = *cached_claims;
+            const bool is_service = claims.actor_type == "automated_service" || claims.user.automated_service_id.has_value();
+            actor_type = is_service ? "automated_service" : "user";
+            payload.session_id = claims.session_id != 0 ? std::optional<int64_t>(claims.session_id) : std::nullopt;
+            payload.actor_type = actor_type;
+            if (is_service) {
+                event = "service.signout";
             }
-            if (cached_claims.isMember("user")) {
-                const Json::Value& u = cached_claims["user"];
-                if (u.isMember("id"))
-                    payload["user_id"] = u["id"];
-                if (u.isMember("email"))
-                    payload["email"] = u["email"];
-                if (u.isMember("organisation")) {
-                    payload["organisation"] = u["organisation"];
-                    org = u["organisation"].asString();
-                }
-                if (u.isMember("domain"))
-                    payload["domain"] = u["domain"];
-                if (u.isMember("automated_service_id"))
-                    payload["automated_service_id"] = u["automated_service_id"];
+            if (!is_service && claims.user.id != 0) {
+                payload.user_id = claims.user.id;
+                act_id = claims.user.id;
             }
-            if (cached_claims.isMember("ip"))
-                payload["ip"] = cached_claims["ip"];
+            if (!claims.user.email.empty()) {
+                payload.email = claims.user.email;
+                act_name = claims.user.email;
+            }
+            if (!claims.user.organisation.empty()) {
+                payload.organisation = claims.user.organisation;
+                org = claims.user.organisation;
+            }
+            if (!claims.user.domain.empty()) {
+                payload.domain = claims.user.domain;
+            }
+            if (claims.user.automated_service_id) {
+                payload.automated_service_id = claims.user.automated_service_id;
+            }
+            if (!claims.ip.empty()) {
+                payload.ip = claims.ip;
+                client_ip = claims.ip;
+            }
         }
 
         // 5. Send NOTIFY so other instances evict this token from their RAM caches
@@ -259,17 +340,8 @@ Task<void> SessionStore::revokeSession(const std::string& token, std::string ter
         services::WebhookService::instance().dispatchEvent(org, event, payload);
 
         // 7. Record immutable audit log
-        std::optional<int32_t> act_id;
-        std::string act_name = "unknown";
-        if (payload.isMember("user_id") && payload["user_id"].isInt()) {
-            act_id = payload["user_id"].asInt();
-        }
-        if (payload.isMember("email") && payload["email"].isString()) {
-            act_name = payload["email"].asString();
-        }
-        std::string client_ip = payload.isMember("ip") && payload["ip"].isString() ? payload["ip"].asString() : "127.0.0.1";
         co_await sgrn::datastore::audit::AuditLogger::log(
-            db, org, "user", act_id, act_name, "session.revoked", "session", token, client_ip, payload, "success");
+            db, org, actor_type, act_id, act_name, "session.revoked", "session", token, client_ip, payload, "success");
 
     } catch (const std::exception& e) {
         LOG_ERROR << "SessionStore revoke error: " << e.what();
@@ -278,29 +350,29 @@ Task<void> SessionStore::revokeSession(const std::string& token, std::string ter
     co_return;
 }
 
-Task<std::optional<Json::Value>> SessionStore::refreshSession(const std::string& token) {
+Task<std::optional<::sgrn::datastore::auth::SessionClaims>> SessionStore::refreshSession(const std::string& token) {
     try {
         auto db = drogon::app().getDbClient();
 
         // Re-fetch the authoritative session_data from PostgreSQL
-        auto result = co_await db->execSqlCoro("SELECT session_data FROM core.sessions WHERE token = $1::uuid AND terminated_at IS NULL "
-                                               "AND (expires_at IS NULL OR expires_at > NOW())",
-            token);
+        auto result = co_await db->execSqlCoro(kSessionDataQuery, token);
 
-        if (result.empty() || result[0]["session_data"].isNull()) {
+        if (result.empty()) {
             // Session no longer valid — evict stale RAM entry
             evictLocal(token);
             co_return std::nullopt;
         }
 
-        std::string raw_json = result[0]["session_data"].as<std::string>();
-        Json::Value claims;
-        Json::CharReaderBuilder builder;
-        std::string errors;
-        const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+        const auto row = sgrn::orm::fromRow<SessionDataRow, kSessionDataQuery>(result[0]);
+        if (!row.session_data) {
+            evictLocal(token);
+            co_return std::nullopt;
+        }
 
-        if (!reader->parse(raw_json.data(), raw_json.data() + raw_json.size(), &claims, &errors)) {
-            LOG_ERROR << "SessionStore::refreshSession: failed to parse session_data: " << errors;
+        const std::string& raw_json = *row.session_data;
+        auto claims_result = ::sgrn::json::read<::sgrn::datastore::auth::SessionClaims>(raw_json);
+        if (claims_result.hasError()) {
+            LOG_ERROR << "SessionStore::refreshSession: failed to parse session_data into SessionClaims: " << claims_result.error().message;
             co_return std::nullopt;
         }
 
@@ -309,13 +381,13 @@ Task<std::optional<Json::Value>> SessionStore::refreshSession(const std::string&
             std::unique_lock lock(cache_mutex_);
             negative_cache_.erase(token);
             active_tokens_.insert(token);
-            ram_cache_[token] = claims;
+            ram_cache_[token] = claims_result.value();
         }
 
         // Notify other instances to also refresh their copy
         co_await pgNotify("refresh", token);
 
-        co_return claims;
+        co_return claims_result.value();
     } catch (const std::exception& e) {
         LOG_ERROR << "SessionStore::refreshSession error: " << e.what();
         co_return std::nullopt;
@@ -384,9 +456,9 @@ void SessionStore::startPgListener() {
                                                                   "  SELECT id FROM core.session_notify_queue ORDER BY id LIMIT 50"
                                                                   ") RETURNING action, token");
 
-                    for (const auto& row : events) {
-                        std::string action = row["action"].as<std::string>();
-                        std::string tok = row["token"].as<std::string>();
+                    for (const auto& row : sgrn::orm::fromResultByName<SessionNotificationRow>(events)) {
+                        const std::string& action = row.action;
+                        const std::string& tok = row.token;
 
                         if (action == "revoke") {
                             // Invalidate the admin-level cache for this token's user before
@@ -395,10 +467,9 @@ void SessionStore::startPgListener() {
                                 std::shared_lock rlock(cache_mutex_);
                                 auto it = ram_cache_.find(tok);
                                 if (it != ram_cache_.end()) {
-                                    const Json::Value& c = it->second;
-                                    if (c.isMember("user") && c["user"].isMember("id") && c["user"]["id"].isInt()) {
-                                        int32_t uid = c["user"]["id"].asInt();
-                                        sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(uid);
+                                    const ::sgrn::datastore::auth::SessionClaims& c = it->second;
+                                    if (c.actor_type == "user" && c.user.id != 0) {
+                                        sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(c.user.id);
                                     }
                                 }
                             }
@@ -409,31 +480,42 @@ void SessionStore::startPgListener() {
                             // Also invalidate the admin-level cache so the next request
                             // re-resolves the user's level from the DB.
                             try {
-                                auto res = co_await listen_db->execSqlCoro(
-                                    "SELECT session_data FROM core.sessions WHERE token = $1::uuid "
-                                    "AND terminated_at IS NULL AND (expires_at IS NULL OR expires_at > NOW())",
-                                    tok);
-                                if (!res.empty() && !res[0]["session_data"].isNull()) {
-                                    std::string raw = res[0]["session_data"].as<std::string>();
-                                    Json::Value claims;
-                                    Json::CharReaderBuilder b;
-                                    std::string err;
-                                    auto reader = std::unique_ptr<Json::CharReader>(b.newCharReader());
-                                    if (reader->parse(raw.data(), raw.data() + raw.size(), &claims, &err)) {
+                                auto res = co_await listen_db->execSqlCoro(kSessionDataQuery, tok);
+                                if (!res.empty()) {
+                                    const auto session_row = sgrn::orm::fromRow<SessionDataRow, kSessionDataQuery>(res[0]);
+                                    if (!session_row.session_data) {
+                                        evictLocal(tok);
+                                        continue;
+                                    }
+                                    const std::string& raw = *session_row.session_data;
+                                    auto claims_result = ::sgrn::json::read<::sgrn::datastore::auth::SessionClaims>(raw);
+                                    if (claims_result.hasError()) {
+                                        LOG_ERROR << "SessionStore: failed to parse session_data into SessionClaims: "
+                                                  << claims_result.error().message;
+                                        evictLocal(tok);
+                                    } else {
                                         // Invalidate admin-level cache before updating RAM cache
-                                        if (claims.isMember("user") && claims["user"].isMember("id") && claims["user"]["id"].isInt()) {
-                                            int32_t uid = claims["user"]["id"].asInt();
-                                            sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(uid);
+                                        {
+                                            std::shared_lock lock(cache_mutex_);
+                                            auto it = ram_cache_.find(tok);
+                                            if (it != ram_cache_.end() && it->second.actor_type == "user" && it->second.user.id != 0) {
+                                                sgrn::datastore::filters::AdminLevelCache::instance().invalidateUser(it->second.user.id);
+                                            }
                                         }
-                                        std::unique_lock lock(cache_mutex_);
-                                        ram_cache_[tok] = claims;
-                                        active_tokens_.insert(tok);
+                                        // Update RAM cache
+                                        {
+                                            std::unique_lock wlock(cache_mutex_);
+                                            ram_cache_[tok] = claims_result.value();
+                                            active_tokens_.insert(tok);
+                                        }
                                         LOG_INFO << "SessionStore: NOTIFY refresh token " << tok.substr(0, 8) << "...";
                                     }
                                 } else {
                                     evictLocal(tok);
                                 }
-                            } catch (...) {
+                            } catch (const std::exception& e) {
+                                LOG_ERROR << "SessionStore: NOTIFY refresh error: " << e.what();
+                                evictLocal(tok);
                             }
                         }
                     }
@@ -449,28 +531,23 @@ Task<std::vector<ActiveSession>> SessionStore::getActiveSessions() {
     std::vector<ActiveSession> sessions;
     try {
         auto db = drogon::app().getDbClient();
-        auto res = co_await db->execSqlCoro(
-            "SELECT s.token::text, s.user_id, s.automated_service_id, s.ip::text, s.created_at::text, s.expires_at::text, "
-            "u.email as user_email, u.first_name, u.family_name, u.organisation as user_organisation, "
-            "a.name as service_name, a.organisation as service_organisation, s.session_data "
-            "FROM core.sessions s "
-            "LEFT JOIN core.users u ON u.id = s.user_id "
-            "LEFT JOIN core.automated_services a ON a.id = s.automated_service_id "
-            "WHERE s.terminated_at IS NULL AND (s.expires_at IS NULL OR s.expires_at > NOW()) "
-            "ORDER BY s.created_at DESC");
+        static constexpr char kQuery[] = "SELECT s.token::text AS token, s.user_id, s.automated_service_id, s.ip::text AS ip, "
+                                         "s.created_at::text AS created_at, s.expires_at::text AS expires_at, "
+                                         "u.email AS user_email, u.organisation AS user_organisation, "
+                                         "a.name AS service_name, a.organisation AS service_organisation "
+                                         "FROM core.sessions s "
+                                         "LEFT JOIN core.users u ON u.id = s.user_id "
+                                         "LEFT JOIN core.automated_services a ON a.id = s.automated_service_id "
+                                         "WHERE s.terminated_at IS NULL AND (s.expires_at IS NULL OR s.expires_at > NOW()) "
+                                         "ORDER BY s.created_at DESC";
+        auto res = co_await db->execSqlCoro(kQuery);
 
-        for (const auto& row : res) {
-            const bool is_service = row["user_id"].isNull();
-            sessions.push_back({row["token"].as<std::string>(),
-                row["user_id"].isNull() ? std::nullopt : std::optional<int32_t>(row["user_id"].as<int32_t>()),
-                row["automated_service_id"].isNull() ? std::nullopt : std::optional<int32_t>(row["automated_service_id"].as<int32_t>()),
-                row["ip"].isNull() ? "127.0.0.1" : row["ip"].as<std::string>(),
-                row["created_at"].isNull() ? "" : row["created_at"].as<std::string>(),
-                row["expires_at"].isNull() ? "" : row["expires_at"].as<std::string>(), is_service ? "automated_service" : "user",
-                is_service ? (row["service_name"].isNull() ? "Automated Service" : row["service_name"].as<std::string>())
-                           : (row["user_email"].isNull() ? "User" : row["user_email"].as<std::string>()),
-                is_service ? (row["service_organisation"].isNull() ? "" : row["service_organisation"].as<std::string>())
-                           : (row["user_organisation"].isNull() ? "" : row["user_organisation"].as<std::string>())});
+        for (const auto& row : sgrn::orm::fromResult<ActiveSessionRow, kQuery>(res)) {
+            const bool is_service = !row.user_id;
+            sessions.push_back({row.token, row.user_id, row.automated_service_id, row.ip.value_or("127.0.0.1"), row.created_at.value_or(""),
+                row.expires_at.value_or(""), is_service ? "automated_service" : "user",
+                is_service ? row.service_name.value_or("Automated Service") : row.user_email.value_or("User"),
+                is_service ? row.service_organisation.value_or("") : row.user_organisation.value_or("")});
         }
     } catch (const std::exception& e) {
         LOG_ERROR << "Failed fetching active sessions: " << e.what();
