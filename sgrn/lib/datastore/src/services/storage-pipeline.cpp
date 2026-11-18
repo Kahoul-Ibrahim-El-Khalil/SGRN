@@ -3,12 +3,13 @@
 #include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/crypto/key-store.hpp>
 #include <sgrn/datastore/plugins/aws/S3Client.hpp>
-#include <sgrn/datastore/services/helpers/magic.hpp>
 #include <sgrn/datastore/services/helpers/storage.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe-access.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/compression.hpp>
+#include <sgrn/utils/file-signature.hpp>
+#include <sgrn/utils/filesystem.hpp>
 #include <sgrn/utils/hashing.hpp>
 #include <sgrn/utils/mime.hpp>
 #include <sgrn/utils/strings.hpp>
@@ -32,8 +33,8 @@ struct FormatAllowanceRow {
 };
 
 struct BatchUploadResponse {
-    int32_t success_count{0};
-    int32_t fail_count{0};
+    uint16_t success_count{0};
+    uint16_t fail_count{0};
     std::vector<sgrn::json::RawJson> results;
 };
 
@@ -67,10 +68,14 @@ Task<Result<void, BackendError>> StorageService::deleteFile(drogon::orm::DbClien
 
 Task<HttpResponsePtr> StorageService::handleUploadFilesBatchRequest(::sgrn::datastore::auth::SessionClaims t_session, std::string t_scope,
     std::string t_base_path, const std::vector<drogon::HttpFile>& t_files) {
+
     std::vector<sgrn::json::RawJson> results;
+
     results.reserve(t_files.size());
-    int success_count = 0;
-    int fail_count = 0;
+
+    uint16_t success_count = 0;
+
+    uint16_t fail_count = 0;
 
     for (const auto& t_file : t_files) {
         std::string decoded_name = drogon::utils::urlDecode(t_file.getFileName());
@@ -106,17 +111,21 @@ Task<HttpResponsePtr> StorageService::handleUploadFilesBatchRequest(::sgrn::data
 Task<Result<UploadResponse, BackendError>> StorageService::uploadFile(UploadContext t_context, drogon::HttpFile t_file) {
     try {
         auto db_res = getDbClient();
-        CO_RETURN_ERROR_IF(db_res.hasError(), db_res.error());
+
+        CO_IF_ERROR_PROPAGATE(db_res);
+
         drogon::orm::DbClientPtr sp_db_client = db_res.value();
 
         auto validation = co_await validateUpload(t_context, t_file.fileLength());
-        CO_RETURN_ERROR_IF(validation.hasError(), validation.error());
+
+        CO_IF_ERROR_PROPAGATE(validation);
 
         // Formats-registry veto (admin-toggleable per extension).
         auto format_ok = co_await enforceFormatAllowed(sp_db_client, t_context.original_filename);
-        CO_RETURN_ERROR_IF(format_ok.hasError(), format_ok.error());
 
-        std::string t_mime_type = helpers::inferMimeType(t_file.getFileName());
+        CO_IF_ERROR_PROPAGATE(format_ok);
+
+        std::string t_mime_type = sgrn::utils::mime::inferMimeType(t_file.getFileName());
         const StorageConfig live_cfg = currentStorageConfig();
         UploadThresholds t_thresholds{.compress_ram_bytes = live_cfg.thresholdCompressRamBytes(),
             .compression_size_threshold = live_cfg.compression_size_threshold_kb * 1024};
@@ -133,7 +142,7 @@ Task<Result<UploadResponse, BackendError>> StorageService::uploadFile(UploadCont
         } else {
             auto temp_result = helpers::saveToTempFile(t_file);
             CO_RETURN_ERROR_IF(temp_result.hasError(), temp_result.error());
-            TempFileGuard temp_guard = std::move(*temp_result);
+            sgrn::utils::filesystem::TempFileGuard temp_guard = std::move(*temp_result);
             auto r = co_await helpers::computeHashFromFileAsync(temp_guard.path);
             CO_RETURN_ERROR_IF(r.hasError(), r.error());
             t_original_hash = std::move(r.value());
@@ -184,7 +193,7 @@ Result<bool, BackendError> StorageService::validateFileSize(size_t t_size) {
 
 Result<bool, BackendError> StorageService::validateExtension(std::string_view t_filename) {
     // SEC: Use lowercase comparison to prevent bypass via ".PHP", ".JSP", etc.
-    if (!currentStorageConfig().isExtensionAllowed(helpers::extractExtensionLower(t_filename)))
+    if (!currentStorageConfig().isExtensionAllowed(sgrn::utils::strings::extractExtensionLower(t_filename)))
         return BackendError(BackendErrorKind::Filesystem, "Extension not allowed");
     return true;
 }
@@ -203,7 +212,7 @@ Task<Result<bool, BackendError>> StorageService::validateUpload(const UploadCont
 
 Task<Result<void, BackendError>> StorageService::enforceFormatAllowed(drogon::orm::DbClientPtr tsp_db_client, std::string_view t_filename) {
     try {
-        const std::string ext = helpers::extractExtensionLower(t_filename);
+        const std::string ext = sgrn::utils::strings::extractExtensionLower(t_filename);
         if (ext.empty()) {
             co_return {};
         }
@@ -224,7 +233,7 @@ Task<Result<std::pair<FileIdentity, std::string>, BackendError>> StorageService:
     FileIdentity identity;
     identity.hash = std::move(t_original_hash);
 
-    auto [base_ext, comp_ext] = helpers::splitExtension(t_http_file.getFileName());
+    auto [base_ext, comp_ext] = sgrn::utils::strings::splitExtension(t_http_file.getFileName());
     identity.extension = std::string(base_ext);
     identity.mime_type = std::move(t_mime_type);
     identity.original_size = t_file_data.size();
@@ -235,7 +244,8 @@ Task<Result<std::pair<FileIdentity, std::string>, BackendError>> StorageService:
         identity.final_size = t_file_data.size();
     }
 
-    if (!identity.is_compressed && t_thresholds.shouldCompress(t_file_data.size(), helpers::isCompressibleMimeType(identity.mime_type))) {
+    if (!identity.is_compressed &&
+        t_thresholds.shouldCompress(t_file_data.size(), sgrn::utils::mime::isCompressibleMimeType(identity.mime_type))) {
         auto comp_res = co_await helpers::compressInMemory(std::move(t_file_data), t_compression_level);
         if (comp_res.has_value()) {
             identity.is_compressed = true;
@@ -261,12 +271,12 @@ Task<Result<std::pair<FileIdentity, std::filesystem::path>, BackendError>> Stora
 
     auto temp_res = helpers::saveToTempFile(t_http_file);
     CO_RETURN_ERROR_IF(temp_res.hasError(), temp_res.error());
-    TempFileGuard input_guard = std::move(temp_res.value());
+    sgrn::utils::filesystem::TempFileGuard input_guard = std::move(temp_res.value());
 
     FileIdentity identity;
     identity.hash = std::move(t_original_hash);
 
-    auto [base_ext, comp_ext] = helpers::splitExtension(t_http_file.getFileName());
+    auto [base_ext, comp_ext] = sgrn::utils::strings::splitExtension(t_http_file.getFileName());
     identity.extension = std::string(base_ext);
     identity.mime_type = std::move(t_mime_type);
     identity.original_size = fs::file_size(input_guard.path);
@@ -278,8 +288,8 @@ Task<Result<std::pair<FileIdentity, std::filesystem::path>, BackendError>> Stora
     }
 
     if (!identity.is_compressed &&
-        t_thresholds.shouldCompress(identity.original_size, helpers::isCompressibleMimeType(identity.mime_type))) {
-        fs::path out_path = helpers::generateTempPath("comp_");
+        t_thresholds.shouldCompress(identity.original_size, sgrn::utils::mime::isCompressibleMimeType(identity.mime_type))) {
+        fs::path out_path = sgrn::utils::filesystem::generateTempPath("comp_");
         auto comp_res = co_await helpers::compressFileAsync(input_guard.path, out_path, t_compression_level);
         if (comp_res.has_value()) {
             identity.is_compressed = true;
@@ -312,12 +322,12 @@ Task<Result<void, BackendError>> StorageService::executeInMemoryUpload(drogon::o
     t_context.identity = std::move(proc_res->first);
     std::string final_data = std::move(proc_res->second);
 
-    auto sha256_res = helpers::computeSha256InMemory(final_data);
-    CO_RETURN_ERROR_IF(sha256_res.hasError(), std::move(sha256_res).error());
-    std::string sha256 = *sha256_res;
+    auto sha512_res = helpers::computeSha512InMemory(final_data);
+    CO_RETURN_ERROR_IF(sha512_res.hasError(), std::move(sha512_res).error());
+    std::string sha512 = *sha512_res;
 
     auto obj_res = co_await helpers::insertObject(tsp_transaction, t_context.bucket, t_context.identity.hash.key,
-        t_context.identity.final_size, t_context.identity.original_size, std::move(sha256), t_context.identity.is_compressed,
+        t_context.identity.final_size, t_context.identity.original_size, std::move(sha512), t_context.identity.is_compressed,
         t_context.identity.compression_algorithm, t_context.identity.compression_level);
     CO_RETURN_ERROR_IF(obj_res.hasError(), obj_res.error());
     t_context.object_id = *obj_res;
@@ -336,7 +346,7 @@ Task<Result<void, BackendError>> StorageService::executeInMemoryUpload(drogon::o
     if (t_context.identity.original_size >= live_cfg.chunkingThresholdBytes()) {
         auto spill_res = helpers::saveToTempFile(final_data);
         CO_RETURN_ERROR_IF(spill_res.hasError(), spill_res.error());
-        TempFileGuard spill_guard = std::move(*spill_res);
+        sgrn::utils::filesystem::TempFileGuard spill_guard = std::move(*spill_res);
         t_context.upload_mode = "multipart";
         t_context.part_size_bytes = static_cast<int64_t>(live_cfg.chunkPartSizeBytes());
         auto mp_res = co_await s3_res.value()->uploadFileMultipart(
@@ -361,14 +371,14 @@ Task<Result<void, BackendError>> StorageService::executeStreamingUpload(drogon::
 
     t_context.identity = std::move(proc_res->first);
     fs::path upload_path = std::move(proc_res->second);
-    TempFileGuard guard(upload_path);
+    sgrn::utils::filesystem::TempFileGuard guard(upload_path);
 
-    auto sha256_res = helpers::computeSha256FromFile(guard.path);
-    CO_RETURN_ERROR_IF(sha256_res.hasError(), std::move(sha256_res).error());
-    std::string sha256 = *sha256_res;
+    auto sha512_res = helpers::computeSha512FromFile(guard.path);
+    CO_RETURN_ERROR_IF(sha512_res.hasError(), std::move(sha512_res).error());
+    std::string sha512 = *sha512_res;
 
     auto obj_res = co_await helpers::insertObject(tsp_transaction, t_context.bucket, t_context.identity.hash.key,
-        t_context.identity.final_size, t_context.identity.original_size, std::move(sha256), t_context.identity.is_compressed,
+        t_context.identity.final_size, t_context.identity.original_size, std::move(sha512), t_context.identity.is_compressed,
         t_context.identity.compression_algorithm, t_context.identity.compression_level);
     CO_RETURN_ERROR_IF(obj_res.hasError(), std::move(obj_res).error());
     t_context.object_id = *obj_res;
@@ -417,7 +427,7 @@ Task<Result<void, BackendError>> StorageService::finalizeUpload(drogon::orm::DbC
             if (content_res.has_value()) {
                 std::string_view data(*content_res);
                 std::string preview(data.substr(0, std::min<size_t>(data.size(), 4096)));
-                auto sniff_res = ::sgrn::datastore::services::helpers::sniffExtension(preview);
+                auto sniff_res = sgrn::utils::file_signature::sniffExtension(preview);
                 if (sniff_res.has_value()) {
                     std::string sniffed_ext = *sniff_res;
                     // Normalize both to lowercase for comparison
@@ -427,7 +437,7 @@ Task<Result<void, BackendError>> StorageService::finalizeUpload(drogon::orm::DbC
                     std::string sniffed_lower = sniffed_ext;
                     std::transform(sniffed_lower.begin(), sniffed_lower.end(), sniffed_lower.begin(),
                         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                    if (!::sgrn::datastore::services::helpers::isCompatibleSniffedFormat(declared_lower, sniffed_lower)) {
+                    if (!sgrn::utils::file_signature::isCompatibleSniffedFormat(declared_lower, sniffed_lower)) {
                         // Check if sniffed extension is a known format in registry
                         auto format_res = co_await helpers::getFormat(tsp_transaction, sniffed_lower);
                         if (format_res.has_value()) {
@@ -443,10 +453,25 @@ Task<Result<void, BackendError>> StorageService::finalizeUpload(drogon::orm::DbC
         }
     }
 
+    const StorageConfig version_cfg = currentStorageConfig();
     auto file_res = co_await helpers::insertFile(tsp_transaction, t_context.original_filename, *t_context.object_id, t_context.user_id,
-        t_context.automated_service_id, t_context.session_id, declared_ext, t_context.directory_id, t_context.domain);
+        t_context.automated_service_id, t_context.session_id, declared_ext, t_context.directory_id, t_context.domain, std::nullopt, false,
+        version_cfg.versioning_enabled);
     CO_RETURN_ERROR_IF(file_res.hasError(), std::move(file_res).error());
     t_context.file_id = *file_res;
+    if (version_cfg.versioning_enabled) {
+        // commit_new_version stores this in file_versions.content_sha512 (char(128)):
+        // it must be the SHA-512 hex of the ORIGINAL logical bytes, not the
+        // SHA-512 base64url object key in identity.hash.key.
+        CO_RETURN_ERROR_IF(t_context.identity.hash.sha512_hex.empty(),
+            BackendError(BackendErrorKind::Hashing, "Missing SHA-512 of original content for version registration"));
+
+        auto version_res = co_await commitFileVersion(tsp_transaction, *t_context.file_id, t_context.identity.hash.sha512_hex,
+            static_cast<int64_t>(t_context.identity.original_size), false, std::nullopt, t_context.user_id, t_context.automated_service_id,
+            version_cfg.versioning_snapshot_interval);
+
+        CO_RETURN_ERROR_IF(version_res.hasError(), std::move(version_res).error());
+    }
     co_return {};
 }
 

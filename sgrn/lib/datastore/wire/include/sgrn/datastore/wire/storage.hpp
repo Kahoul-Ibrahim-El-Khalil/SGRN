@@ -36,7 +36,7 @@ struct DriveFileInfo {
     int64_t size{};
     int64_t original_size{};
     std::string created_at{};
-    std::string sha256{};
+    std::string sha512{};
     std::string etag{};
     bool is_encrypted{false};
     std::string key_id{};
@@ -62,6 +62,7 @@ struct StorageConstraints {
     uint64_t max_file_size_mb{0};
     uint64_t max_file_size_bytes{0};
     bool encryption_supported{false};
+    bool versioning_enabled{false};
 };
 
 // ─── Storage administration reports (shapes emitted by StorageAdminHandler) ─

@@ -36,6 +36,9 @@ StorageConfig normalize(StorageConfig cfg) {
         WARN_LOG("s3.chunking_threshold_mb ({} MB) is at/above max_file_size_mb ({} MB) — multipart is unreachable.",
             cfg.chunking_threshold_mb, cfg.max_file_size_mb);
     }
+    cfg.delta_zstd_level = std::clamp(cfg.delta_zstd_level, 1, 19);
+    cfg.delta_min_saving_pct = std::min(cfg.delta_min_saving_pct, 95U);
+    cfg.versioning_snapshot_interval = std::max(cfg.versioning_snapshot_interval, 1U);
     INFO_LOG("Loaded storage config: bucket={}, compress_ram={}MB, max_size={}MB, compression_level={}, allowed_exts={}, "
              "chunking_threshold={}MB, chunk_part_size={}MB",
         cfg.default_bucket, cfg.threshold_compress_ram_mb, cfg.max_file_size_mb, static_cast<int>(cfg.compression_level),

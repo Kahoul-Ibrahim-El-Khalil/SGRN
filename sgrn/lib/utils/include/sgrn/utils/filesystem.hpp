@@ -1,10 +1,14 @@
 #pragma once
 #include "strings.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <random>
+#include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 #if !defined(_WIN32)
 #include <unistd.h>
@@ -210,6 +214,57 @@ inline std::filesystem::path findLatestFile(const std::filesystem::path& t_dir, 
         }
     }
     return latest;
+}
+
+// ---------------------------------------------------------------------------
+// Temp files
+// ---------------------------------------------------------------------------
+
+/// RAII guard that removes a temporary file on destruction.
+///
+/// The path is treated as owned: moving clears the source, and the destructor
+/// silently ignores a missing file. Used by upload/download paths that spill
+/// payloads to disk and must clean up on every exit path (including errors).
+struct TempFileGuard {
+    std::filesystem::path path;
+
+    explicit TempFileGuard(std::filesystem::path t_path)
+        : path(std::move(t_path)) {
+    }
+
+    ~TempFileGuard() {
+        if (!path.empty()) {
+            std::error_code ec;
+            std::filesystem::remove(path, ec);
+        }
+    }
+
+    TempFileGuard(const TempFileGuard&) = delete;
+    TempFileGuard& operator=(const TempFileGuard&) = delete;
+
+    TempFileGuard(TempFileGuard&& t_other) noexcept
+        : path(std::move(t_other.path)) {
+        t_other.path.clear();
+    }
+
+    TempFileGuard& operator=(TempFileGuard&& t_other) noexcept {
+        if (this != &t_other) {
+            path = std::move(t_other.path);
+            t_other.path.clear();
+        }
+        return *this;
+    }
+};
+
+/// Build a unique path under the system temp directory with the given prefix.
+inline std::filesystem::path generateTempPath(std::string_view t_prefix = "temp_") {
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    static std::uniform_int_distribution<> dis(100000, 999999);
+
+    std::filesystem::path temp_dir = std::filesystem::temp_directory_path();
+    std::string unique_name = fmt::format("{}{}_{}", t_prefix, std::chrono::system_clock::now().time_since_epoch().count(), dis(gen));
+    return temp_dir / unique_name;
 }
 
 } // namespace sgrn::utils::filesystem

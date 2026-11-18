@@ -29,9 +29,9 @@ int main() {
 
     // Set dummy weights checksum
     std::string mock_weights = "dummy_pytorch_model_weights_buffer_12345";
-    auto hash_res = sgrn::utils::computeSha256Data(mock_weights, sgrn::utils::HashEncoding::hex);
+    auto hash_res = sgrn::utils::computeSha512Data(mock_weights, sgrn::utils::HashEncoding::hex);
     CHECK(!hash_res.hasError());
-    manifest.weights_sha256 = hash_res.value();
+    manifest.weights_sha512 = hash_res.value();
 
     manifest.mlp.use_batch_norm = true;
     manifest.mlp.layers.push_back({64, "relu", 0.1f});
@@ -59,7 +59,7 @@ int main() {
     CHECK(m2.version == "2.1.0");
     CHECK(m2.backend == "torch");
     CHECK(m2.weights_file == "model.pt");
-    CHECK(m2.weights_sha256 == manifest.weights_sha256);
+    CHECK(m2.weights_sha512 == manifest.weights_sha512);
     CHECK(m2.mlp.use_batch_norm == true);
     CHECK(m2.mlp.layers.size() == 3);
     CHECK(m2.mlp.layers[0].units == 64);

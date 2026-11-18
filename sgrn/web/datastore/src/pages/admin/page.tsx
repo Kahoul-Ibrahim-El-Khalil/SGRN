@@ -33,7 +33,7 @@ import type { IdNamePair } from "@/types/IdNamePair";
 import { AdminBackendApiEndpoints } from "@/backend/endpoints";
 import { mbToBytes, updateQuota } from "@/backend/api/governance";
 import { useEvent } from "@/contexts/EventContext";
-import { authenticatedFetch, jsonBody, rawJson, readBody } from "@/backend/api/fetcher";
+import { authenticatedFetch, jsonBody, rawJson, readBody, type ApiErrorBody } from "@/backend/api/fetcher";
 import type {
     PurgeOrphansRequest,
     RegisterAutomatedServiceRequest,
@@ -42,7 +42,8 @@ import type {
     SetStatusRequest,
     UpdateAutomatedServiceMetadataRequest,
 } from "@sgrn/datastore/requests";
-import type { ServiceRotationResponse, ServiceRegistrationResponse, OverviewResponse, OrphansResponse } from "@sgrn/types";
+import type { ServiceRotationResponse, ServiceRegistrationResponse, OverviewResponse, OrphansResponse, OverviewBucket } from "@sgrn/types";
+import { errorMessage } from "@/lib/errors";
 import { useAuth } from "@/contexts/AuthContext";
 
 // Utility hook for fetching dependencies
@@ -122,20 +123,20 @@ export default function AdminTab() {
     // Query Builder State
     const [queryTable, setQueryTable] = useState<string>("automated-services");
     const [queryParams, setQueryParams] = useState<string>("");
-    const [queryResult, setQueryResult] = useState<any>(null);
+    const [queryResult, setQueryResult] = useState<unknown>(null);
     const [queryLoading, setQueryLoading] = useState(false);
 
     // Storage Admin State (Garage object-layer management)
-    const [storageBuckets, setStorageBuckets] = useState<any[]>([]);
+    const [storageBuckets, setStorageBuckets] = useState<OverviewBucket[]>([]);
     const [loadingStorageOverview, setLoadingStorageOverview] = useState(false);
     const [storageSearchInput, setStorageSearchInput] = useState<string>("");
-    const [storageSearchResult, setStorageSearchResult] = useState<any>(null);
+    const [storageSearchResult, setStorageSearchResult] = useState<unknown>(null);
     const [searchingStorage, setSearchingStorage] = useState(false);
     const [orphanBucket, setOrphanBucket] = useState<string>("");
     const [orphanPrefix, setOrphanPrefix] = useState<string>("");
-    const [orphanReport, setOrphanReport] = useState<any>(null);
+    const [orphanReport, setOrphanReport] = useState<OrphansResponse | null>(null);
     const [scanningOrphans, setScanningOrphans] = useState(false);
-    const [purgeResult, setPurgeResult] = useState<any>(null);
+    const [purgeResult, setPurgeResult] = useState<unknown>(null);
     const [purgingOrphans, setPurgingOrphans] = useState(false);
     const [storageView, setStorageView] = useState<"census" | "formats" | "quotas" | "encryption">("census");
 
@@ -283,15 +284,15 @@ export default function AdminTab() {
                         description: draft.description,
                     }),
                 });
-                const payload = await readBody(response, {});
+                const payload = await readBody<ApiErrorBody>(response, {});
                 if (!response.ok) {
                     throw new Error(payload.error || `Failed to update metadata (HTTP ${response.status})`);
                 }
                 showEvent("success", `Configuration updated for ${t_svc.name}`);
                 await fetchAutomatedServices();
-            } catch (error: any) {
+            } catch (error: unknown) {
                 console.error("Metadata update failed:", error);
-                showEvent("error", error?.message || "Unable to update service metadata");
+                showEvent("error", errorMessage(error, "Unable to update service metadata"));
             } finally {
                 setSavingServiceMetaId(null);
             }
@@ -307,15 +308,15 @@ export default function AdminTab() {
                     method: "PATCH",
                     ...jsonBody<SetStatusRequest>({ status: t_status }),
                 });
-                const payload = await readBody(response, {});
+                const payload = await readBody<ApiErrorBody>(response, {});
                 if (!response.ok) {
                     throw new Error(payload.error || `Failed to set status (HTTP ${response.status})`);
                 }
                 showEvent("success", `${t_svc.name} is now ${t_status.toUpperCase()}`);
                 await fetchAutomatedServices();
-            } catch (error: any) {
+            } catch (error: unknown) {
                 console.error("Status update failed:", error);
-                showEvent("error", error?.message || "Unable to set service status");
+                showEvent("error", errorMessage(error, "Unable to set service status"));
             } finally {
                 setSavingServiceStatusId(null);
             }
@@ -380,9 +381,9 @@ export default function AdminTab() {
                 }
                 showEvent("success", `Quota updated for ${t_svc.name}`);
                 setServiceQuotaDrafts((prev) => ({ ...prev, [t_svc.id]: { storageMb: "", entries: "" } }));
-            } catch (error: any) {
+            } catch (error: unknown) {
                 console.error("Service quota update failed:", error);
-                showEvent("error", error?.message || "Unable to update service quota");
+                showEvent("error", errorMessage(error, "Unable to update service quota"));
             } finally {
                 setSavingServiceQuotaId(null);
             }
@@ -400,15 +401,15 @@ export default function AdminTab() {
                 const response = await authenticatedFetch(AdminBackendApiEndpoints.AUTOMATED_SERVICE_ITEM(t_svc.id), {
                     method: "DELETE",
                 });
-                const payload = await readBody(response, {});
+                const payload = await readBody<ApiErrorBody>(response, {});
                 if (!response.ok) {
                     throw new Error(payload.error || `Failed to delete service (HTTP ${response.status})`);
                 }
                 showEvent("success", `Service ${t_svc.name} deleted`);
                 await fetchAutomatedServices();
-            } catch (error: any) {
+            } catch (error: unknown) {
                 console.error("Service delete failed:", error);
-                showEvent("error", error?.message || "Unable to delete service");
+                showEvent("error", errorMessage(error, "Unable to delete service"));
             } finally {
                 setDeletingServiceId(null);
             }
@@ -459,7 +460,7 @@ export default function AdminTab() {
                     setSelectedOrg(null);
                     setUserRefreshKey((k) => k + 1);
                 } else {
-                    showEvent("error", result.message || "Registration failed");
+                    showEvent("error", errorMessage(result, "Registration failed"));
                 }
             } catch {
                 showEvent("error", "Server error");
@@ -547,7 +548,7 @@ export default function AdminTab() {
             const url = queryParams ? `${endpoint}?${queryParams.startsWith("?") ? queryParams.slice(1) : queryParams}` : endpoint;
 
             const response = await authenticatedFetch(url);
-            const data = await readBody(response);
+            const data = await readBody<{ message?: string }>(response);
             setQueryResult(data);
             if (!response.ok) {
                 showEvent("error", `Query failed: ${data.message || response.statusText}`);
@@ -571,9 +572,9 @@ export default function AdminTab() {
         setLoadingStorageOverview(true);
         try {
             const response = await authenticatedFetch(AdminBackendApiEndpoints.STORAGE_OVERVIEW);
-            const payload = await readBody<OverviewResponse>(response);
+            const payload = await readBody<OverviewResponse & { error?: string }>(response);
             if (!response.ok) {
-                throw new Error((payload as any).error || "Failed to load storage census");
+                throw new Error(payload.error || "Failed to load storage census");
             }
             setStorageBuckets(Array.isArray(payload.buckets) ? payload.buckets : []);
         } catch (error) {
@@ -593,7 +594,7 @@ export default function AdminTab() {
         setSearchingStorage(true);
         try {
             const response = await authenticatedFetch(`${AdminBackendApiEndpoints.STORAGE_SEARCH}?key=${encodeURIComponent(hash)}`);
-            const payload = await readBody(response);
+            const payload = await readBody<Record<string, unknown> & { error?: string }>(response);
             if (!response.ok) {
                 throw new Error(payload.error || "Storage search failed");
             }
@@ -615,9 +616,9 @@ export default function AdminTab() {
             if (orphanPrefix.trim()) params.set("prefix", orphanPrefix.trim());
             const query = params.toString() ? `?${params.toString()}` : "";
             const response = await authenticatedFetch(`${AdminBackendApiEndpoints.STORAGE_ORPHANS}${query}`);
-            const payload = await readBody<OrphansResponse>(response);
+            const payload = await readBody<OrphansResponse & { error?: string }>(response);
             if (!response.ok) {
-                throw new Error((payload as any).error || "Orphan scan failed");
+                throw new Error(payload.error || "Orphan scan failed");
             }
             setOrphanReport(payload);
         } catch (error) {
@@ -641,7 +642,7 @@ export default function AdminTab() {
                         dry_run: dryRun,
                     }),
                 });
-                const payload = await readBody(response);
+                const payload = await readBody<{ error?: string; deleted?: unknown[] }>(response);
                 if (!response.ok) {
                     throw new Error(payload.error || "Purge failed");
                 }
@@ -947,8 +948,7 @@ export default function AdminTab() {
                                                         <div className="flex items-start gap-2">
                                                             <div className="flex flex-col gap-1">
                                                                 <input
-                                                                    className="input-desktop"
-                                                                    style={{ width: 220 }}
+                                                                    className="input-desktop admin-input-fixed-220"
                                                                     placeholder="DESCRIPTION"
                                                                     maxLength={256}
                                                                     value={serviceMetaDraftFor(svc).description}
@@ -957,9 +957,8 @@ export default function AdminTab() {
                                                                     }
                                                                 />
                                                                 <textarea
-                                                                    className="input-desktop font-mono"
+                                                                    className="input-desktop font-mono admin-input-wide"
                                                                     rows={2}
-                                                                    style={{ minWidth: 220 }}
                                                                     value={serviceMetaDraftFor(svc).meta}
                                                                     onChange={(e) => setServiceMetaDraft(svc, { meta: e.target.value })}
                                                                     spellCheck={false}
@@ -1088,7 +1087,7 @@ export default function AdminTab() {
                                         <Terminal size={14} className="admin-cell-primary" />
                                         <span className="explorer-label">DATA PLANE SNAPSHOT</span>
                                     </div>
-                                    {queryResult && (
+                                    {queryResult != null && (
                                         <button
                                             className="btn-desktop h-7 px-3"
                                             onClick={() => copyToClipboard(JSON.stringify(queryResult, null, 2))}
@@ -1178,7 +1177,7 @@ export default function AdminTab() {
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        {storageBuckets.map((b: any) => (
+                                                        {storageBuckets.map((b) => (
                                                             <tr key={b.name}>
                                                                 <td className="admin-cell-primary">{b.name}</td>
                                                                 <td>
@@ -1218,7 +1217,7 @@ export default function AdminTab() {
                                         </div>
                                     </div>
 
-                                    {storageSearchResult && (
+                                    {storageSearchResult != null && (
                                         <div className="json-explorer">
                                             <div className="explorer-header">
                                                 <div className="explorer-header-left">
@@ -1272,7 +1271,7 @@ export default function AdminTab() {
                                                             </tr>
                                                         </thead>
                                                         <tbody>
-                                                            {orphanReport.garage_only.map((k: any) => (
+                                                            {orphanReport.garage_only.map((k) => (
                                                                 <tr key={k.key}>
                                                                     <td className="admin-cell-primary">{k.key}</td>
                                                                     <td>{k.size}</td>
@@ -1293,7 +1292,7 @@ export default function AdminTab() {
                                                             </tr>
                                                         </thead>
                                                         <tbody>
-                                                            {orphanReport.db_missing.map((k: any) => (
+                                                            {orphanReport.db_missing.map((k) => (
                                                                 <tr key={k.key}>
                                                                     <td className="admin-cell-primary">{k.key}</td>
                                                                     <td>{k.size}</td>
@@ -1332,7 +1331,7 @@ export default function AdminTab() {
                                                     </em>
                                                 </div>
                                             )}
-                                            {purgeResult && (
+                                            {purgeResult != null && (
                                                 <div className="explorer-body">
                                                     <pre>{JSON.stringify(purgeResult, null, 2)}</pre>
                                                 </div>

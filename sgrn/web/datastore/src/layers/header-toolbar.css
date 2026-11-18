@@ -242,3 +242,8 @@
         padding: 2rem;
     }
 }
+
+/* Sign-in top bar (replaces inline display:flex) */
+.signin-topbar-actions {
+    display: flex;
+}

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "strings.hpp"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -965,6 +966,27 @@ constexpr bool isBinary(MimeType t_type) noexcept {
     return cat == MimeCategory::Binary || cat == MimeCategory::Archive || cat == MimeCategory::Executable ||
            (cat == MimeCategory::Image && !isCompressible(t_type)) || (cat == MimeCategory::Audio && !isCompressible(t_type)) ||
            (cat == MimeCategory::Video);
+}
+
+// =====================================================================
+// PUBLIC API - FILENAME / HEADER HELPERS
+// =====================================================================
+
+/// Infer an HTTP MIME type string from a filename's extension.
+///
+/// Uses the primary (non-compression) extension, so "data.json.zst" resolves
+/// as JSON. Falls back to "application/octet-stream" for unknown suffixes.
+inline std::string inferMimeType(std::string_view t_filename) {
+    std::string_view ext = sgrn::utils::strings::extractExtension(t_filename);
+    std::optional<MimeType> parsed = fromExtension(ext);
+    return parsed ? std::string(toMimeStringOrDefault(*parsed)) : "application/octet-stream";
+}
+
+/// True when content of the given MIME type should be compressed
+/// (text/json/xml/...). Unknown types are treated as non-compressible.
+inline bool isCompressibleMimeType(std::string_view t_mime_type) {
+    std::optional<MimeType> parsed = fromMimeString(t_mime_type);
+    return parsed ? isCompressible(*parsed) : false;
 }
 
 } // namespace sgrn::utils::mime

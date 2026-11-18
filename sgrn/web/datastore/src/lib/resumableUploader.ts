@@ -1,7 +1,8 @@
 import { StorageBackendApiEndpoints } from "../backend/endpoints";
-import { jsonBody, readBody } from "@/backend/api/fetcher";
+import { jsonBody, readBody, type ApiErrorBody } from "@/backend/api/fetcher";
 import type { UploadCompleteRequest, UploadInitRequest } from "@sgrn/datastore/requests";
 import type { UploadInitResponse, UploadCompleteResponse } from "@sgrn/types";
+import { errorMessage } from "@/lib/errors";
 
 export interface ChunkUploadProgress {
     uploadId: string;
@@ -97,8 +98,8 @@ export class ResumableUploader {
 
             // 409 = duplicate — propagate immediately, no retry.
             if (resp.status === 409) {
-                const body = await readBody(resp, {});
-                throw new Error(body.message || "A file with that name already exists.");
+                const body = await readBody<ApiErrorBody>(resp, {});
+                throw new Error(errorMessage(body, "A file with that name already exists."));
             }
 
             // 429 = rate-limited — respect Retry-After header or use exponential backoff.
@@ -115,7 +116,7 @@ export class ResumableUploader {
                 continue;
             }
 
-            const body = await readBody(resp, {});
+            const body = await readBody<ApiErrorBody>(resp, {});
             throw new Error(body.message || `Chunk ${chunkIdx + 1}/${totalChunks} failed (HTTP ${resp.status})`);
         }
         throw new Error(`Chunk ${chunkIdx + 1}/${totalChunks} failed after retries`);
@@ -146,7 +147,7 @@ export class ResumableUploader {
             // the `error` key so the real reason reaches the UI (not just the
             // generic HTTP-status line).
             if (!initResp.ok) {
-                const errData = await readBody(initResp, {});
+                const errData = await readBody<ApiErrorBody>(initResp, {});
                 throw new Error(errData.error || errData.message || `Failed to initialize upload session (HTTP ${initResp.status})`);
             }
 
@@ -185,7 +186,7 @@ export class ResumableUploader {
             });
 
             if (!completeResp.ok) {
-                const errData = await readBody(completeResp, {});
+                const errData = await readBody<ApiErrorBody>(completeResp, {});
                 throw new Error(errData.error || errData.message || `Failed to finalize upload (HTTP ${completeResp.status})`);
             }
 
@@ -202,9 +203,9 @@ export class ResumableUploader {
             this.status = "completed";
             this.emitProgress(totalChunks, totalChunks);
             return true;
-        } catch (err: any) {
+        } catch (err: unknown) {
             this.status = "error";
-            this.emitProgress(0, totalChunks, err.message || "Upload error");
+            this.emitProgress(0, totalChunks, errorMessage(err, "Upload error"));
             return false;
         }
     }

@@ -25,33 +25,6 @@ using namespace sgrn::datastore;
 using namespace sgrn::utils;
 using namespace drogon;
 using Formats = drogon_model::sgrn::storage::Formats;
-// ============================================================================
-// RAII Temp File Guard
-// ============================================================================
-
-TempFileGuard::TempFileGuard(fs::path t_path)
-    : path(std::move(t_path)) {
-}
-
-TempFileGuard::~TempFileGuard() {
-    if (!path.empty()) {
-        std::error_code error_code;
-        fs::remove(path, error_code);
-    }
-}
-
-TempFileGuard::TempFileGuard(TempFileGuard&& t_other) noexcept
-    : path(std::move(t_other.path)) {
-    t_other.path.clear();
-}
-
-TempFileGuard& TempFileGuard::operator=(TempFileGuard&& t_other) noexcept {
-    if (this != &t_other) {
-        path = std::move(t_other.path);
-        t_other.path.clear();
-    }
-    return *this;
-}
 
 namespace helpers
 {
@@ -111,12 +84,17 @@ Result<FileHash, BackendError> computeHashInMemory(std::string_view t_data) {
     auto hash = utils::computeSha512Data(t_data, utils::HashEncoding::base64url);
     RETURN_ERROR_IF(!hash.has_value(), BackendError(BackendErrorKind::Hashing, std::move(hash.error())));
     result.key = std::move(hash.value());
+
+    auto sha512 = utils::computeSha512Data(t_data, utils::HashEncoding::base64url);
+    RETURN_ERROR_IF(!sha512.has_value(), BackendError(BackendErrorKind::Hashing, std::move(sha512.error())));
+    result.sha512_hex = std::move(sha512.value());
+
     result.original_size = t_data.size();
     return result;
 }
 
-Result<std::string, BackendError> computeSha256InMemory(std::string_view t_data) {
-    auto hash = utils::computeSha256Data(t_data, utils::HashEncoding::hex);
+Result<std::string, BackendError> computeSha512InMemory(std::string_view t_data) {
+    auto hash = utils::computeSha512Data(t_data, utils::HashEncoding::base64url);
     RETURN_ERROR_IF(!hash.has_value(), BackendError(BackendErrorKind::Hashing, std::move(hash.error())));
     return std::move(hash.value());
 }
@@ -126,12 +104,17 @@ Result<FileHash, BackendError> computeHashFromFile(const fs::path& t_file_path) 
     auto hash = utils::computeSha512File(t_file_path, utils::HashEncoding::base64url);
     RETURN_ERROR_IF(!hash.has_value(), BackendError(BackendErrorKind::Hashing, std::move(hash.error())));
     result.key = std::move(hash.value());
+
+    auto sha512 = utils::computeSha512File(t_file_path, utils::HashEncoding::base64url);
+    RETURN_ERROR_IF(!sha512.has_value(), BackendError(BackendErrorKind::Hashing, std::move(sha512.error())));
+    result.sha512_hex = std::move(sha512.value());
+
     result.original_size = fs::file_size(t_file_path);
     return result;
 }
 
-Result<std::string, BackendError> computeSha256FromFile(const fs::path& t_file_path) {
-    auto hash = utils::computeSha256File(t_file_path, utils::HashEncoding::hex);
+Result<std::string, BackendError> computeSha512FromFile(const fs::path& t_file_path) {
+    auto hash = utils::computeSha512File(t_file_path, utils::HashEncoding::base64url);
     RETURN_ERROR_IF(!hash.has_value(), BackendError(BackendErrorKind::Hashing, std::move(hash.error())));
     return std::move(hash.value());
 }
@@ -149,15 +132,15 @@ Task<Result<FileHash, BackendError>> computeHashFromFileAsync(fs::path t_file_pa
     });
 }
 
-drogon::Task<Result<std::string, BackendError>> computeSha256FromFileAsync(fs::path t_file_path) {
+drogon::Task<Result<std::string, BackendError>> computeSha512FromFileAsync(fs::path t_file_path) {
     auto tp_res = core::getPlugin<plugins::Threadpool>();
     CO_RETURN_ERROR_IF(!tp_res, tp_res.error());
     plugins::Threadpool* p_tp = tp_res.value();
     co_return co_await utils::runInPool(p_tp->getPool(), [t_path = std::move(t_file_path)]() -> Result<std::string, BackendError> {
         try {
-            return computeSha256FromFile(t_path);
+            return computeSha512FromFile(t_path);
         } catch (const std::exception& ex) {
-            RETURN_ERROR(BackendError(BackendErrorKind::Hashing, std::format("SHA256 computation failed: {}", ex.what())));
+            RETURN_ERROR(BackendError(BackendErrorKind::Hashing, std::format("SHA512 computation failed: {}", ex.what())));
         }
     });
 }
@@ -202,76 +185,17 @@ Task<Result<fs::path, BackendError>> compressFileAsync(fs::path t_input_path, fs
 }
 
 // ============================================================================
-// Path and Extension Utilities
-// ============================================================================
-
-std::string_view extractExtension(std::string_view t_filename) {
-    return splitExtension(t_filename).first;
-}
-
-// SEC: Returns the extension in lowercase for case-insensitive allowlist/blocklist comparison.
-// Prevents bypass via mixed-case extensions like ".PHP" or ".JSP".
-std::string extractExtensionLower(std::string_view t_filename) {
-    std::string_view ext = extractExtension(t_filename);
-    std::string lower(ext);
-    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char t_c) { return std::tolower(t_c); });
-    return lower;
-}
-
-std::pair<std::string_view, std::string_view> splitExtension(std::string_view t_filename) {
-    size_t last_dot = t_filename.rfind('.');
-    if (last_dot == std::string_view::npos || last_dot == t_filename.length() - 1) {
-        return {"", ""};
-    }
-
-    std::string_view last_ext = t_filename.substr(last_dot + 1);
-
-    if (last_ext == "zst" || last_ext == "gz" || last_ext == "br" || last_ext == "bz2" || last_ext == "xz" || last_ext == "zip" ||
-        last_ext == "7z") {
-        size_t second_last_dot = t_filename.substr(0, last_dot).rfind('.');
-        if (second_last_dot != std::string_view::npos) {
-            std::string_view base_ext = t_filename.substr(second_last_dot + 1, last_dot - second_last_dot - 1);
-            return {base_ext, last_ext};
-        }
-        return {"", last_ext};
-    }
-
-    return {last_ext, ""};
-}
-
-std::string inferMimeType(std::string_view t_filename) {
-    std::string_view ext = extractExtension(t_filename);
-    std::optional<sgrn::utils::mime::MimeType> t_mime_type = sgrn::utils::mime::fromExtension(ext);
-    return t_mime_type ? std::string(sgrn::utils::mime::toMimeStringOrDefault(*t_mime_type)) : "application/octet-stream";
-}
-
-bool isCompressibleMimeType(std::string_view t_mime_type) {
-    std::optional<sgrn::utils::mime::MimeType> parsed_mime_type = sgrn::utils::mime::fromMimeString(t_mime_type);
-    return parsed_mime_type ? sgrn::utils::mime::isCompressible(*parsed_mime_type) : false;
-}
-
-bool verifyCompressionSignature(std::string_view t_data, std::string_view t_algorithm) {
-    if (t_algorithm == "zstd") {
-        if (t_data.size() < 4)
-            return false;
-        // Zstd magic number: 0xFD2FB528 (little endian)
-        return (uint8_t)t_data[0] == 0x28 && (uint8_t)t_data[1] == 0xB5 && (uint8_t)t_data[2] == 0x2F && (uint8_t)t_data[3] == 0xFD;
-    }
-    return false;
-}
-
-// ============================================================================
 // Database Operations
 // ============================================================================
 
 Task<Result<int64_t, BackendError>> insertObject(drogon::orm::DbClientPtr tsp_db_client, std::string t_bucket, std::string t_key,
-    size_t t_size, size_t t_original_size, std::string t_sha256, bool t_is_compressed, std::optional<std::string> t_compression_algorithm,
+    size_t t_size, size_t t_original_size, std::string t_sha512, bool t_is_compressed, std::optional<std::string> t_compression_algorithm,
     std::optional<uint8_t> t_compression_level) {
     try {
         static constexpr char kQuery[] = "SELECT storage.upsert_object($1, $2, $3, $4, $5, 'GARAGE', $6, $7, $8) AS id";
         drogon::orm::Result result =
             co_await tsp_db_client->execSqlCoro(kQuery, std::move(t_bucket), std::move(t_key), static_cast<int64_t>(t_size),
-                static_cast<int64_t>(t_original_size), std::move(t_sha256), t_is_compressed, t_compression_algorithm,
+                static_cast<int64_t>(t_original_size), std::move(t_sha512), t_is_compressed, t_compression_algorithm,
                 t_compression_level.has_value() ? std::optional<int32_t>(static_cast<int32_t>(*t_compression_level)) : std::nullopt);
 
         if (result.empty()) {
@@ -301,7 +225,8 @@ Task<Result<void, BackendError>> updateObjectChunking(drogon::orm::DbClientPtr t
 
 Task<Result<int64_t, BackendError>> insertFile(drogon::orm::DbClientPtr tsp_db_client, std::string t_name, int64_t t_object_id,
     std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_extension,
-    std::optional<int64_t> t_directory_id, std::string t_domain, std::optional<std::string> t_key_id, bool t_is_encrypted) {
+    std::optional<int64_t> t_directory_id, std::string t_domain, std::optional<std::string> t_key_id, bool t_is_encrypted,
+    bool t_versioning_enabled) {
     try {
         // A domain file belongs to the domain namespace, never to the
         // uploader's personal/service namespace.  Keeping the actor id here
@@ -369,8 +294,10 @@ Task<Result<int64_t, BackendError>> insertFile(drogon::orm::DbClientPtr tsp_db_c
             const bool old_is_encrypted = existing.is_encrypted;
             const std::string old_key_id = existing.key_id.value_or("");
 
-            // Crypto-shred the previous key if it is being replaced or removed
-            if (old_is_encrypted && !old_key_id.empty() && (!t_key_id.has_value() || *t_key_id != old_key_id)) {
+            if (t_versioning_enabled) {
+                co_await tsp_db_client->execSqlCoro(
+                    "SELECT storage.snapshot_head_as_version($1, $2, $3)", file_id, t_user_id, t_automated_service_id);
+            } else if (old_is_encrypted && !old_key_id.empty() && (!t_key_id.has_value() || *t_key_id != old_key_id)) {
                 if (auto ks = sgrn::datastore::crypto::getKeyStore()) {
                     (void)ks->shred(old_key_id);
                 }
@@ -435,6 +362,10 @@ Task<Result<int64_t, BackendError>> insertFile(drogon::orm::DbClientPtr tsp_db_c
             }
             if (retry_res_opt && !retry_res_opt->empty()) {
                 const int64_t file_id = sgrn::orm::fromRowByName<IdRow>((*retry_res_opt)[0]).id.value();
+                if (t_versioning_enabled) {
+                    co_await tsp_db_client->execSqlCoro(
+                        "SELECT storage.snapshot_head_as_version($1, $2, $3)", file_id, t_user_id, t_automated_service_id);
+                }
                 co_await tsp_db_client->execSqlCoro(
                     "UPDATE storage.files "
                     "SET session_id = $2, extension = $3, key_id = $4, is_encrypted = $5, created_at = NOW() "
@@ -608,41 +539,31 @@ Task<std::optional<Formats>> getFormat(drogon::orm::DbClientPtr tsp_db_client, s
 // Temp File Management
 // ============================================================================
 
-fs::path generateTempPath(std::string_view t_prefix) {
-    static std::random_device rd;
-    static std::mt19937 gen(rd());
-    static std::uniform_int_distribution<> dis(100000, 999999);
-
-    fs::path temp_dir = fs::temp_directory_path();
-    std::string unique_name = std::format("{}{}_{}", t_prefix, std::chrono::system_clock::now().time_since_epoch().count(), dis(gen));
-    return temp_dir / unique_name;
-}
-
-Result<TempFileGuard, BackendError> saveToTempFile(const drogon::HttpFile& t_file) {
+Result<sgrn::utils::filesystem::TempFileGuard, BackendError> saveToTempFile(const drogon::HttpFile& t_file) {
     try {
-        fs::path temp_path = generateTempPath("upload_");
+        fs::path temp_path = sgrn::utils::filesystem::generateTempPath("upload_");
         std::ofstream output(temp_path, std::ios::binary);
         if (!output) {
             RETURN_ERROR(BackendError(BackendErrorKind::Filesystem, std::format("Failed to create temp file: {}", temp_path.string())));
         }
         output.write(t_file.fileData(), t_file.fileLength());
         output.close();
-        return TempFileGuard(temp_path);
+        return sgrn::utils::filesystem::TempFileGuard(temp_path);
     } catch (const std::exception& ex) {
         RETURN_ERROR(BackendError(BackendErrorKind::Filesystem, std::format("Failed to save temp file: {}", ex.what())));
     }
 }
 
-Result<TempFileGuard, BackendError> saveToTempFile(const std::string& t_data) {
+Result<sgrn::utils::filesystem::TempFileGuard, BackendError> saveToTempFile(const std::string& t_data) {
     try {
-        fs::path temp_path = generateTempPath("download_");
+        fs::path temp_path = sgrn::utils::filesystem::generateTempPath("download_");
         std::ofstream output(temp_path, std::ios::binary);
         if (!output) {
             RETURN_ERROR(BackendError(BackendErrorKind::Filesystem, std::format("Failed to create temp file: {}", temp_path.string())));
         }
         output.write(t_data.data(), t_data.size());
         output.close();
-        return TempFileGuard(temp_path);
+        return sgrn::utils::filesystem::TempFileGuard(temp_path);
     } catch (const std::exception& ex) {
         RETURN_ERROR(BackendError(BackendErrorKind::Filesystem, std::format("Failed to save temp file: {}", ex.what())));
     }

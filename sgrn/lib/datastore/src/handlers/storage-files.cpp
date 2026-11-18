@@ -5,7 +5,6 @@
 #include <sgrn/datastore/error/ApiErrors.hpp>
 #include <sgrn/datastore/filters/types.hpp>
 #include <sgrn/datastore/handlers/storage.hpp>
-#include <sgrn/datastore/services/helpers/magic.hpp>
 #include <sgrn/datastore/services/storage.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe-access.hpp>
@@ -87,8 +86,8 @@ struct FileMetadataItem {
     std::string upload_mode;
     std::optional<int64_t> part_count;
     std::optional<int64_t> part_size_bytes;
-    std::optional<std::string> sha256;
-    std::optional<std::string> etag; // Computed post-hydration (S3-compatible: "sha256-<hex>")
+    std::optional<std::string> sha512;
+    std::optional<std::string> etag; // Computed post-hydration (S3-compatible: "sha512-<hex>")
 };
 
 // Columns exposed by the metadata endpoints, aliased to the historical
@@ -97,7 +96,7 @@ constexpr std::string_view kFileMetadataColumns =
     "file_id AS id, file_name AS name, file_path AS full_path, directory_path, directory_id, extension, created_at, "
     "is_compressed, compression_algorithm, compression_level, session_id, user_id, automated_service_id, "
     "domain_name AS domain, organisation_name AS organisation, object_id, bucket, key, object_size AS size, "
-    "object_created_at, mime_type, upload_mode, part_count, part_size_bytes, sha256";
+    "object_created_at, mime_type, upload_mode, part_count, part_size_bytes, sha512";
 
 // Applies one whitelisted `?col=op.value` filter onto t_sql/t_binds.
 // Operators mirror the generated CRUD grammar; `*` in like/ilike patterns
@@ -248,8 +247,8 @@ Task<HttpResponsePtr> runFileMetadataQuery(HttpRequestPtr tsp_req, std::string t
 
         auto files = sgrn::orm::fromResultByName<FileMetadataItem>(res);
         for (auto& f : files) {
-            if (f.sha256.has_value() && !f.sha256->empty()) {
-                f.etag = '"' + *f.sha256 + '"';
+            if (f.sha512.has_value() && !f.sha512->empty()) {
+                f.etag = '"' + *f.sha512 + '"';
             }
         }
         co_return createTypedResponse(tsp_req, files, k200OK);
@@ -400,6 +399,14 @@ Task<HttpResponsePtr> StorageApiHandler::handleFileRequest(HttpRequestPtr tsp_re
                 co_return createTypedResponse(BackendErrorResponse{"Invalid path", k400BadRequest, "StorageApi"});
             }
             path_str = std::move(*norm);
+            if (const auto version_param = tsp_req->getOptionalParameter<std::string>("version")) {
+                int32_t version_no = 0;
+                const auto [end, error] = std::from_chars(version_param->data(), version_param->data() + version_param->size(), version_no);
+                if (error != std::errc{} || end != version_param->data() + version_param->size() || version_no <= 0) {
+                    co_return createTypedResponse(BackendErrorResponse{"Invalid version number", k400BadRequest, "StorageApi"});
+                }
+                co_return co_await handleDownloadVersion(std::move(session), std::move(scope), std::move(path_str), version_no);
+            }
             std::string range_hdr = tsp_req->getHeader("Range");
             co_return co_await storage_service_.handleDownloadFileRequest(
                 std::move(session), std::move(scope), std::move(path_str), std::move(range_hdr));

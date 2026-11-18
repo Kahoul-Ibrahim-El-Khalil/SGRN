@@ -1,6 +1,7 @@
 #pragma once
 #include <fmt/core.h>
 #include <sgrn/Result.hpp>
+#include <sgrn/utils/bytes.hpp>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -8,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 #include <zstd.h>
 
@@ -24,6 +26,55 @@ namespace sgrn::utils::compression
     const std::string_view& t_data, const std::filesystem::path& t_dest, uint8_t t_compression_level);
 
 ::sgrn::Result<std::string> decompressStringZstd(const std::string_view& t_data);
+
+/// Same as above, but rejects a payload whose logical size does not match
+/// t_expected_size (e.g. storage.file_versions.original_size).
+::sgrn::Result<std::string> decompressStringZstd(const std::string_view& t_data, size_t t_expected_size);
+
+// ── Generic byte-range overloads ─────────────────────────────────────────────
+// Inputs may be any contiguous range of 1-byte trivially-copyable values
+// (std::string, std::string_view, std::vector<char>, std::vector<std::byte>,
+// std::array<char, N>, ...). The std::string_view overloads above remain the
+// non-template core.
+
+template <bytes::ByteRange Data>
+::sgrn::Result<std::string> compressStringZstd(const Data& t_data, uint8_t t_compression_level) {
+    return compressStringZstd(bytes::view(t_data), t_compression_level);
+}
+
+template <bytes::ByteRange Data>
+::sgrn::Result<size_t> compressStringToFileZstd(const Data& t_data, const std::filesystem::path& t_dest, uint8_t t_compression_level) {
+    return compressStringToFileZstd(bytes::view(t_data), t_dest, t_compression_level);
+}
+
+template <bytes::ByteRange Data>
+::sgrn::Result<std::string> decompressStringZstd(const Data& t_data) {
+    return decompressStringZstd(bytes::view(t_data));
+}
+
+template <bytes::ByteRange Data>
+::sgrn::Result<std::string> decompressStringZstd(const Data& t_data, size_t t_expected_size) {
+    return decompressStringZstd(bytes::view(t_data), t_expected_size);
+}
+
+/// True when t_data starts with the magic bytes of the named compression
+/// format. Currently recognises "zstd" (0xFD2FB528, little-endian); used to
+/// validate that a stored blob really is compressed before finalising it.
+inline bool verifyCompressionSignature(std::string_view t_data, std::string_view t_algorithm) {
+    if (t_algorithm == "zstd") {
+        if (t_data.size() < 4) {
+            return false;
+        }
+        return static_cast<uint8_t>(t_data[0]) == 0x28 && static_cast<uint8_t>(t_data[1]) == 0xB5 &&
+               static_cast<uint8_t>(t_data[2]) == 0x2F && static_cast<uint8_t>(t_data[3]) == 0xFD;
+    }
+    return false;
+}
+
+template <bytes::ByteRange Data>
+bool verifyCompressionSignature(const Data& t_data, std::string_view t_algorithm) {
+    return verifyCompressionSignature(bytes::view(t_data), t_algorithm);
+}
 
 // -----------------------------------------------------------------------------
 // Long-lived streaming line I/O over Zstd frames.

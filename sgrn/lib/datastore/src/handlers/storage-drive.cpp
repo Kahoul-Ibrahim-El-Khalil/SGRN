@@ -6,7 +6,6 @@
 #include <sgrn/datastore/error/ApiErrors.hpp>
 #include <sgrn/datastore/filters/types.hpp>
 #include <sgrn/datastore/handlers/storage.hpp>
-#include <sgrn/datastore/services/helpers/magic.hpp>
 #include <sgrn/datastore/services/storage.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe-access.hpp>
@@ -1236,7 +1235,7 @@ Task<HttpResponsePtr> StorageApiHandler::moveFile(const std::shared_ptr<drogon::
     // other suffix is stored as NULL and remains part of the name.
     std::optional<std::string> renamed_extension;
     if (t_target_name.has_value()) {
-        const std::string raw_ext(services::storage::helpers::extractExtension(*t_target_name));
+        const std::string raw_ext(sgrn::utils::strings::extractExtension(*t_target_name));
         if (!raw_ext.empty()) {
             auto format_res = co_await services::storage::helpers::getFormat(tsp_transaction, raw_ext);
             if (format_res.has_value() && format_res->getExtension())

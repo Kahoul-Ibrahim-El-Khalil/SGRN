@@ -86,7 +86,12 @@
       "allowed_extensions": ["*"],
       "prohibited_extensions": ["exe", "dll", "so", "sh", "bat"],
       "chunking_threshold_mb": 64,
-      "chunk_part_size_mb": 12
+      "chunk_part_size_mb": 12,
+      "versioning_enabled": true,
+      "delta_max_bytes": 67108864,
+      "delta_zstd_level": 3,
+      "delta_min_saving_pct": 15,
+      "versioning_snapshot_interval": 10
     }
   }
 }

@@ -1,3 +1,4 @@
+
 /**
  *
  *  AuditLogs.cc
@@ -6,7 +7,9 @@
  */
 
 #include "AuditLogs.h"
+
 #include <drogon/utils/Utilities.h>
+
 #include <string>
 
 using namespace drogon;
@@ -14,22 +17,39 @@ using namespace drogon::orm;
 using namespace drogon_model::sgrn::core;
 
 const std::string AuditLogs::Cols::_id = "\"id\"";
+
 const std::string AuditLogs::Cols::_organisation = "\"organisation\"";
+
 const std::string AuditLogs::Cols::_actor_type = "\"actor_type\"";
+
 const std::string AuditLogs::Cols::_actor_id = "\"actor_id\"";
+
 const std::string AuditLogs::Cols::_actor_name = "\"actor_name\"";
+
 const std::string AuditLogs::Cols::_action = "\"action\"";
+
 const std::string AuditLogs::Cols::_target_type = "\"target_type\"";
+
 const std::string AuditLogs::Cols::_target_id = "\"target_id\"";
+
 const std::string AuditLogs::Cols::_ip = "\"ip\"";
+
 const std::string AuditLogs::Cols::_details = "\"details\"";
+
 const std::string AuditLogs::Cols::_status = "\"status\"";
+
 const std::string AuditLogs::Cols::_created_at = "\"created_at\"";
+
 const std::string AuditLogs::Cols::_seq = "\"seq\"";
+
 const std::string AuditLogs::Cols::_prev_hash = "\"prev_hash\"";
+
 const std::string AuditLogs::Cols::_row_hash = "\"row_hash\"";
+
 const std::string AuditLogs::primaryKeyName = "id";
+
 const bool AuditLogs::hasPrimaryKey = true;
+
 const std::string AuditLogs::tableName = "core.\"audit_logs\"";
 
 const std::vector<typename AuditLogs::MetaData> AuditLogs::metaData_ = {{"id", "int64_t", "bigint", 8, 1, 1, 1},
@@ -39,50 +59,76 @@ const std::vector<typename AuditLogs::MetaData> AuditLogs::metaData_ = {{"id", "
     {"target_id", "std::string", "text", 0, 0, 0, 0}, {"ip", "std::string", "inet", 0, 0, 0, 0},
     {"details", "std::string", "jsonb", 0, 0, 0, 0}, {"status", "std::string", "text", 0, 0, 0, 1},
     {"created_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1}, {"seq", "int64_t", "bigint", 8, 0, 0, 1},
-    {"prev_hash", "std::string", "text", 0, 0, 0, 1}, {"row_hash", "std::string", "text", 0, 0, 0, 1}};
+    {"prev_hash", "std::string", "text", 0, 0, 0, 1}, {"row_hash", "std::string", "text", 0, 0, 0, 1}
+
+};
 const std::string& AuditLogs::getColumnName(size_t index) noexcept(false) {
     assert(index < metaData_.size());
     return metaData_[index].colName_;
 }
 AuditLogs::AuditLogs(const Row& r, const ssize_t indexOffset) noexcept {
     if (indexOffset < 0) {
+
         if (!r["id"].isNull()) {
+
             id_ = std::make_shared<int64_t>(r["id"].as<int64_t>());
         }
+
         if (!r["organisation"].isNull()) {
+
             organisation_ = std::make_shared<std::string>(r["organisation"].as<std::string>());
         }
+
         if (!r["actor_type"].isNull()) {
+
             actorType_ = std::make_shared<std::string>(r["actor_type"].as<std::string>());
         }
+
         if (!r["actor_id"].isNull()) {
+
             actorId_ = std::make_shared<int32_t>(r["actor_id"].as<int32_t>());
         }
+
         if (!r["actor_name"].isNull()) {
+
             actorName_ = std::make_shared<std::string>(r["actor_name"].as<std::string>());
         }
+
         if (!r["action"].isNull()) {
+
             action_ = std::make_shared<std::string>(r["action"].as<std::string>());
         }
+
         if (!r["target_type"].isNull()) {
+
             targetType_ = std::make_shared<std::string>(r["target_type"].as<std::string>());
         }
+
         if (!r["target_id"].isNull()) {
+
             targetId_ = std::make_shared<std::string>(r["target_id"].as<std::string>());
         }
+
         if (!r["ip"].isNull()) {
+
             ip_ = std::make_shared<std::string>(r["ip"].as<std::string>());
         }
+
         if (!r["details"].isNull()) {
+
             details_ = std::make_shared<std::string>(r["details"].as<std::string>());
         }
+
         if (!r["status"].isNull()) {
+
             status_ = std::make_shared<std::string>(r["status"].as<std::string>());
         }
+
         if (!r["created_at"].isNull()) {
             auto timeStr = r["created_at"].as<std::string>();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -97,15 +143,22 @@ AuditLogs::AuditLogs(const Row& r, const ssize_t indexOffset) noexcept {
                 createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
+
         if (!r["seq"].isNull()) {
+
             seq_ = std::make_shared<int64_t>(r["seq"].as<int64_t>());
         }
+
         if (!r["prev_hash"].isNull()) {
+
             prevHash_ = std::make_shared<std::string>(r["prev_hash"].as<std::string>());
         }
+
         if (!r["row_hash"].isNull()) {
+
             rowHash_ = std::make_shared<std::string>(r["row_hash"].as<std::string>());
         }
+
     } else {
         size_t offset = (size_t)indexOffset;
         if (offset + 15 > r.size()) {
@@ -113,55 +166,79 @@ AuditLogs::AuditLogs(const Row& r, const ssize_t indexOffset) noexcept {
             return;
         }
         size_t index;
+
         index = offset + 0;
         if (!r[index].isNull()) {
+
             id_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
+
         index = offset + 1;
         if (!r[index].isNull()) {
+
             organisation_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 2;
         if (!r[index].isNull()) {
+
             actorType_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 3;
         if (!r[index].isNull()) {
+
             actorId_ = std::make_shared<int32_t>(r[index].as<int32_t>());
         }
+
         index = offset + 4;
         if (!r[index].isNull()) {
+
             actorName_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 5;
         if (!r[index].isNull()) {
+
             action_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 6;
         if (!r[index].isNull()) {
+
             targetType_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 7;
         if (!r[index].isNull()) {
+
             targetId_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 8;
         if (!r[index].isNull()) {
+
             ip_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 9;
         if (!r[index].isNull()) {
+
             details_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 10;
         if (!r[index].isNull()) {
+
             status_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 11;
         if (!r[index].isNull()) {
             auto timeStr = r[index].as<std::string>();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -176,16 +253,22 @@ AuditLogs::AuditLogs(const Row& r, const ssize_t indexOffset) noexcept {
                 createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
+
         index = offset + 12;
         if (!r[index].isNull()) {
+
             seq_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
+
         index = offset + 13;
         if (!r[index].isNull()) {
+
             prevHash_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 14;
         if (!r[index].isNull()) {
+
             rowHash_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
     }
@@ -196,78 +279,91 @@ AuditLogs::AuditLogs(const Json::Value& pJson, const std::vector<std::string>& p
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
+
     if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         dirtyFlag_[0] = true;
         if (!pJson[pMasqueradingVector[0]].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
         if (!pJson[pMasqueradingVector[1]].isNull()) {
             organisation_ = std::make_shared<std::string>(pJson[pMasqueradingVector[1]].asString());
         }
     }
+
     if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
         if (!pJson[pMasqueradingVector[2]].isNull()) {
             actorType_ = std::make_shared<std::string>(pJson[pMasqueradingVector[2]].asString());
         }
     }
+
     if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
         if (!pJson[pMasqueradingVector[3]].isNull()) {
             actorId_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[3]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
         dirtyFlag_[4] = true;
         if (!pJson[pMasqueradingVector[4]].isNull()) {
             actorName_ = std::make_shared<std::string>(pJson[pMasqueradingVector[4]].asString());
         }
     }
+
     if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
         dirtyFlag_[5] = true;
         if (!pJson[pMasqueradingVector[5]].isNull()) {
             action_ = std::make_shared<std::string>(pJson[pMasqueradingVector[5]].asString());
         }
     }
+
     if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
         dirtyFlag_[6] = true;
         if (!pJson[pMasqueradingVector[6]].isNull()) {
             targetType_ = std::make_shared<std::string>(pJson[pMasqueradingVector[6]].asString());
         }
     }
+
     if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
         dirtyFlag_[7] = true;
         if (!pJson[pMasqueradingVector[7]].isNull()) {
             targetId_ = std::make_shared<std::string>(pJson[pMasqueradingVector[7]].asString());
         }
     }
+
     if (!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8])) {
         dirtyFlag_[8] = true;
         if (!pJson[pMasqueradingVector[8]].isNull()) {
             ip_ = std::make_shared<std::string>(pJson[pMasqueradingVector[8]].asString());
         }
     }
+
     if (!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9])) {
         dirtyFlag_[9] = true;
         if (!pJson[pMasqueradingVector[9]].isNull()) {
             details_ = std::make_shared<std::string>(pJson[pMasqueradingVector[9]].asString());
         }
     }
+
     if (!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10])) {
         dirtyFlag_[10] = true;
         if (!pJson[pMasqueradingVector[10]].isNull()) {
             status_ = std::make_shared<std::string>(pJson[pMasqueradingVector[10]].asString());
         }
     }
+
     if (!pMasqueradingVector[11].empty() && pJson.isMember(pMasqueradingVector[11])) {
         dirtyFlag_[11] = true;
         if (!pJson[pMasqueradingVector[11]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[11]].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -283,18 +379,21 @@ AuditLogs::AuditLogs(const Json::Value& pJson, const std::vector<std::string>& p
             }
         }
     }
+
     if (!pMasqueradingVector[12].empty() && pJson.isMember(pMasqueradingVector[12])) {
         dirtyFlag_[12] = true;
         if (!pJson[pMasqueradingVector[12]].isNull()) {
             seq_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[12]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[13].empty() && pJson.isMember(pMasqueradingVector[13])) {
         dirtyFlag_[13] = true;
         if (!pJson[pMasqueradingVector[13]].isNull()) {
             prevHash_ = std::make_shared<std::string>(pJson[pMasqueradingVector[13]].asString());
         }
     }
+
     if (!pMasqueradingVector[14].empty() && pJson.isMember(pMasqueradingVector[14])) {
         dirtyFlag_[14] = true;
         if (!pJson[pMasqueradingVector[14]].isNull()) {
@@ -304,78 +403,91 @@ AuditLogs::AuditLogs(const Json::Value& pJson, const std::vector<std::string>& p
 }
 
 AuditLogs::AuditLogs(const Json::Value& pJson) noexcept(false) {
+
     if (pJson.isMember("id")) {
         dirtyFlag_[0] = true;
         if (!pJson["id"].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson["id"].asInt64());
         }
     }
+
     if (pJson.isMember("organisation")) {
         dirtyFlag_[1] = true;
         if (!pJson["organisation"].isNull()) {
             organisation_ = std::make_shared<std::string>(pJson["organisation"].asString());
         }
     }
+
     if (pJson.isMember("actor_type")) {
         dirtyFlag_[2] = true;
         if (!pJson["actor_type"].isNull()) {
             actorType_ = std::make_shared<std::string>(pJson["actor_type"].asString());
         }
     }
+
     if (pJson.isMember("actor_id")) {
         dirtyFlag_[3] = true;
         if (!pJson["actor_id"].isNull()) {
             actorId_ = std::make_shared<int32_t>((int32_t)pJson["actor_id"].asInt64());
         }
     }
+
     if (pJson.isMember("actor_name")) {
         dirtyFlag_[4] = true;
         if (!pJson["actor_name"].isNull()) {
             actorName_ = std::make_shared<std::string>(pJson["actor_name"].asString());
         }
     }
+
     if (pJson.isMember("action")) {
         dirtyFlag_[5] = true;
         if (!pJson["action"].isNull()) {
             action_ = std::make_shared<std::string>(pJson["action"].asString());
         }
     }
+
     if (pJson.isMember("target_type")) {
         dirtyFlag_[6] = true;
         if (!pJson["target_type"].isNull()) {
             targetType_ = std::make_shared<std::string>(pJson["target_type"].asString());
         }
     }
+
     if (pJson.isMember("target_id")) {
         dirtyFlag_[7] = true;
         if (!pJson["target_id"].isNull()) {
             targetId_ = std::make_shared<std::string>(pJson["target_id"].asString());
         }
     }
+
     if (pJson.isMember("ip")) {
         dirtyFlag_[8] = true;
         if (!pJson["ip"].isNull()) {
             ip_ = std::make_shared<std::string>(pJson["ip"].asString());
         }
     }
+
     if (pJson.isMember("details")) {
         dirtyFlag_[9] = true;
         if (!pJson["details"].isNull()) {
             details_ = std::make_shared<std::string>(pJson["details"].asString());
         }
     }
+
     if (pJson.isMember("status")) {
         dirtyFlag_[10] = true;
         if (!pJson["status"].isNull()) {
             status_ = std::make_shared<std::string>(pJson["status"].asString());
         }
     }
+
     if (pJson.isMember("created_at")) {
         dirtyFlag_[11] = true;
         if (!pJson["created_at"].isNull()) {
             auto timeStr = pJson["created_at"].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -391,18 +503,21 @@ AuditLogs::AuditLogs(const Json::Value& pJson) noexcept(false) {
             }
         }
     }
+
     if (pJson.isMember("seq")) {
         dirtyFlag_[12] = true;
         if (!pJson["seq"].isNull()) {
             seq_ = std::make_shared<int64_t>((int64_t)pJson["seq"].asInt64());
         }
     }
+
     if (pJson.isMember("prev_hash")) {
         dirtyFlag_[13] = true;
         if (!pJson["prev_hash"].isNull()) {
             prevHash_ = std::make_shared<std::string>(pJson["prev_hash"].asString());
         }
     }
+
     if (pJson.isMember("row_hash")) {
         dirtyFlag_[14] = true;
         if (!pJson["row_hash"].isNull()) {
@@ -416,77 +531,90 @@ void AuditLogs::updateByMasqueradedJson(const Json::Value& pJson, const std::vec
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
+
     if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         if (!pJson[pMasqueradingVector[0]].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
         if (!pJson[pMasqueradingVector[1]].isNull()) {
             organisation_ = std::make_shared<std::string>(pJson[pMasqueradingVector[1]].asString());
         }
     }
+
     if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
         if (!pJson[pMasqueradingVector[2]].isNull()) {
             actorType_ = std::make_shared<std::string>(pJson[pMasqueradingVector[2]].asString());
         }
     }
+
     if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
         if (!pJson[pMasqueradingVector[3]].isNull()) {
             actorId_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[3]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
         dirtyFlag_[4] = true;
         if (!pJson[pMasqueradingVector[4]].isNull()) {
             actorName_ = std::make_shared<std::string>(pJson[pMasqueradingVector[4]].asString());
         }
     }
+
     if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
         dirtyFlag_[5] = true;
         if (!pJson[pMasqueradingVector[5]].isNull()) {
             action_ = std::make_shared<std::string>(pJson[pMasqueradingVector[5]].asString());
         }
     }
+
     if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
         dirtyFlag_[6] = true;
         if (!pJson[pMasqueradingVector[6]].isNull()) {
             targetType_ = std::make_shared<std::string>(pJson[pMasqueradingVector[6]].asString());
         }
     }
+
     if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
         dirtyFlag_[7] = true;
         if (!pJson[pMasqueradingVector[7]].isNull()) {
             targetId_ = std::make_shared<std::string>(pJson[pMasqueradingVector[7]].asString());
         }
     }
+
     if (!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8])) {
         dirtyFlag_[8] = true;
         if (!pJson[pMasqueradingVector[8]].isNull()) {
             ip_ = std::make_shared<std::string>(pJson[pMasqueradingVector[8]].asString());
         }
     }
+
     if (!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9])) {
         dirtyFlag_[9] = true;
         if (!pJson[pMasqueradingVector[9]].isNull()) {
             details_ = std::make_shared<std::string>(pJson[pMasqueradingVector[9]].asString());
         }
     }
+
     if (!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10])) {
         dirtyFlag_[10] = true;
         if (!pJson[pMasqueradingVector[10]].isNull()) {
             status_ = std::make_shared<std::string>(pJson[pMasqueradingVector[10]].asString());
         }
     }
+
     if (!pMasqueradingVector[11].empty() && pJson.isMember(pMasqueradingVector[11])) {
         dirtyFlag_[11] = true;
         if (!pJson[pMasqueradingVector[11]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[11]].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -502,18 +630,21 @@ void AuditLogs::updateByMasqueradedJson(const Json::Value& pJson, const std::vec
             }
         }
     }
+
     if (!pMasqueradingVector[12].empty() && pJson.isMember(pMasqueradingVector[12])) {
         dirtyFlag_[12] = true;
         if (!pJson[pMasqueradingVector[12]].isNull()) {
             seq_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[12]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[13].empty() && pJson.isMember(pMasqueradingVector[13])) {
         dirtyFlag_[13] = true;
         if (!pJson[pMasqueradingVector[13]].isNull()) {
             prevHash_ = std::make_shared<std::string>(pJson[pMasqueradingVector[13]].asString());
         }
     }
+
     if (!pMasqueradingVector[14].empty() && pJson.isMember(pMasqueradingVector[14])) {
         dirtyFlag_[14] = true;
         if (!pJson[pMasqueradingVector[14]].isNull()) {
@@ -523,77 +654,90 @@ void AuditLogs::updateByMasqueradedJson(const Json::Value& pJson, const std::vec
 }
 
 void AuditLogs::updateByJson(const Json::Value& pJson) noexcept(false) {
+
     if (pJson.isMember("id")) {
         if (!pJson["id"].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson["id"].asInt64());
         }
     }
+
     if (pJson.isMember("organisation")) {
         dirtyFlag_[1] = true;
         if (!pJson["organisation"].isNull()) {
             organisation_ = std::make_shared<std::string>(pJson["organisation"].asString());
         }
     }
+
     if (pJson.isMember("actor_type")) {
         dirtyFlag_[2] = true;
         if (!pJson["actor_type"].isNull()) {
             actorType_ = std::make_shared<std::string>(pJson["actor_type"].asString());
         }
     }
+
     if (pJson.isMember("actor_id")) {
         dirtyFlag_[3] = true;
         if (!pJson["actor_id"].isNull()) {
             actorId_ = std::make_shared<int32_t>((int32_t)pJson["actor_id"].asInt64());
         }
     }
+
     if (pJson.isMember("actor_name")) {
         dirtyFlag_[4] = true;
         if (!pJson["actor_name"].isNull()) {
             actorName_ = std::make_shared<std::string>(pJson["actor_name"].asString());
         }
     }
+
     if (pJson.isMember("action")) {
         dirtyFlag_[5] = true;
         if (!pJson["action"].isNull()) {
             action_ = std::make_shared<std::string>(pJson["action"].asString());
         }
     }
+
     if (pJson.isMember("target_type")) {
         dirtyFlag_[6] = true;
         if (!pJson["target_type"].isNull()) {
             targetType_ = std::make_shared<std::string>(pJson["target_type"].asString());
         }
     }
+
     if (pJson.isMember("target_id")) {
         dirtyFlag_[7] = true;
         if (!pJson["target_id"].isNull()) {
             targetId_ = std::make_shared<std::string>(pJson["target_id"].asString());
         }
     }
+
     if (pJson.isMember("ip")) {
         dirtyFlag_[8] = true;
         if (!pJson["ip"].isNull()) {
             ip_ = std::make_shared<std::string>(pJson["ip"].asString());
         }
     }
+
     if (pJson.isMember("details")) {
         dirtyFlag_[9] = true;
         if (!pJson["details"].isNull()) {
             details_ = std::make_shared<std::string>(pJson["details"].asString());
         }
     }
+
     if (pJson.isMember("status")) {
         dirtyFlag_[10] = true;
         if (!pJson["status"].isNull()) {
             status_ = std::make_shared<std::string>(pJson["status"].asString());
         }
     }
+
     if (pJson.isMember("created_at")) {
         dirtyFlag_[11] = true;
         if (!pJson["created_at"].isNull()) {
             auto timeStr = pJson["created_at"].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -609,18 +753,21 @@ void AuditLogs::updateByJson(const Json::Value& pJson) noexcept(false) {
             }
         }
     }
+
     if (pJson.isMember("seq")) {
         dirtyFlag_[12] = true;
         if (!pJson["seq"].isNull()) {
             seq_ = std::make_shared<int64_t>((int64_t)pJson["seq"].asInt64());
         }
     }
+
     if (pJson.isMember("prev_hash")) {
         dirtyFlag_[13] = true;
         if (!pJson["prev_hash"].isNull()) {
             prevHash_ = std::make_shared<std::string>(pJson["prev_hash"].asString());
         }
     }
+
     if (pJson.isMember("row_hash")) {
         dirtyFlag_[14] = true;
         if (!pJson["row_hash"].isNull()) {
@@ -912,11 +1059,14 @@ void AuditLogs::updateId(const uint64_t id) {
 
 const std::vector<std::string>& AuditLogs::insertColumns() noexcept {
     static const std::vector<std::string> inCols = {"organisation", "actor_type", "actor_id", "actor_name", "action", "target_type",
-        "target_id", "ip", "details", "status", "created_at", "seq", "prev_hash", "row_hash"};
+        "target_id", "ip", "details", "status", "created_at", "seq", "prev_hash", "row_hash"
+
+    };
     return inCols;
 }
 
 void AuditLogs::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
+
     if (dirtyFlag_[1]) {
         if (getOrganisation()) {
             binder << getValueOfOrganisation();
@@ -924,6 +1074,7 @@ void AuditLogs::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[2]) {
         if (getActorType()) {
             binder << getValueOfActorType();
@@ -931,6 +1082,7 @@ void AuditLogs::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[3]) {
         if (getActorId()) {
             binder << getValueOfActorId();
@@ -938,6 +1090,7 @@ void AuditLogs::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[4]) {
         if (getActorName()) {
             binder << getValueOfActorName();
@@ -945,6 +1098,7 @@ void AuditLogs::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[5]) {
         if (getAction()) {
             binder << getValueOfAction();
@@ -952,6 +1106,7 @@ void AuditLogs::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[6]) {
         if (getTargetType()) {
             binder << getValueOfTargetType();
@@ -959,6 +1114,7 @@ void AuditLogs::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[7]) {
         if (getTargetId()) {
             binder << getValueOfTargetId();
@@ -966,6 +1122,7 @@ void AuditLogs::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[8]) {
         if (getIp()) {
             binder << getValueOfIp();
@@ -973,6 +1130,7 @@ void AuditLogs::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[9]) {
         if (getDetails()) {
             binder << getValueOfDetails();
@@ -980,6 +1138,7 @@ void AuditLogs::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[10]) {
         if (getStatus()) {
             binder << getValueOfStatus();
@@ -987,6 +1146,7 @@ void AuditLogs::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[11]) {
         if (getCreatedAt()) {
             binder << getValueOfCreatedAt();
@@ -994,6 +1154,7 @@ void AuditLogs::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[12]) {
         if (getSeq()) {
             binder << getValueOfSeq();
@@ -1001,6 +1162,7 @@ void AuditLogs::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[13]) {
         if (getPrevHash()) {
             binder << getValueOfPrevHash();
@@ -1008,6 +1170,7 @@ void AuditLogs::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[14]) {
         if (getRowHash()) {
             binder << getValueOfRowHash();
@@ -1019,52 +1182,68 @@ void AuditLogs::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
 
 const std::vector<std::string> AuditLogs::updateColumns() const {
     std::vector<std::string> ret;
+
     if (dirtyFlag_[1]) {
         ret.push_back(getColumnName(1));
     }
+
     if (dirtyFlag_[2]) {
         ret.push_back(getColumnName(2));
     }
+
     if (dirtyFlag_[3]) {
         ret.push_back(getColumnName(3));
     }
+
     if (dirtyFlag_[4]) {
         ret.push_back(getColumnName(4));
     }
+
     if (dirtyFlag_[5]) {
         ret.push_back(getColumnName(5));
     }
+
     if (dirtyFlag_[6]) {
         ret.push_back(getColumnName(6));
     }
+
     if (dirtyFlag_[7]) {
         ret.push_back(getColumnName(7));
     }
+
     if (dirtyFlag_[8]) {
         ret.push_back(getColumnName(8));
     }
+
     if (dirtyFlag_[9]) {
         ret.push_back(getColumnName(9));
     }
+
     if (dirtyFlag_[10]) {
         ret.push_back(getColumnName(10));
     }
+
     if (dirtyFlag_[11]) {
         ret.push_back(getColumnName(11));
     }
+
     if (dirtyFlag_[12]) {
         ret.push_back(getColumnName(12));
     }
+
     if (dirtyFlag_[13]) {
         ret.push_back(getColumnName(13));
     }
+
     if (dirtyFlag_[14]) {
         ret.push_back(getColumnName(14));
     }
+
     return ret;
 }
 
 void AuditLogs::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
+
     if (dirtyFlag_[1]) {
         if (getOrganisation()) {
             binder << getValueOfOrganisation();
@@ -1072,6 +1251,7 @@ void AuditLogs::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[2]) {
         if (getActorType()) {
             binder << getValueOfActorType();
@@ -1079,6 +1259,7 @@ void AuditLogs::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[3]) {
         if (getActorId()) {
             binder << getValueOfActorId();
@@ -1086,6 +1267,7 @@ void AuditLogs::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[4]) {
         if (getActorName()) {
             binder << getValueOfActorName();
@@ -1093,6 +1275,7 @@ void AuditLogs::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[5]) {
         if (getAction()) {
             binder << getValueOfAction();
@@ -1100,6 +1283,7 @@ void AuditLogs::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[6]) {
         if (getTargetType()) {
             binder << getValueOfTargetType();
@@ -1107,6 +1291,7 @@ void AuditLogs::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[7]) {
         if (getTargetId()) {
             binder << getValueOfTargetId();
@@ -1114,6 +1299,7 @@ void AuditLogs::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[8]) {
         if (getIp()) {
             binder << getValueOfIp();
@@ -1121,6 +1307,7 @@ void AuditLogs::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[9]) {
         if (getDetails()) {
             binder << getValueOfDetails();
@@ -1128,6 +1315,7 @@ void AuditLogs::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[10]) {
         if (getStatus()) {
             binder << getValueOfStatus();
@@ -1135,6 +1323,7 @@ void AuditLogs::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[11]) {
         if (getCreatedAt()) {
             binder << getValueOfCreatedAt();
@@ -1142,6 +1331,7 @@ void AuditLogs::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[12]) {
         if (getSeq()) {
             binder << getValueOfSeq();
@@ -1149,6 +1339,7 @@ void AuditLogs::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[13]) {
         if (getPrevHash()) {
             binder << getValueOfPrevHash();
@@ -1156,6 +1347,7 @@ void AuditLogs::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[14]) {
         if (getRowHash()) {
             binder << getValueOfRowHash();
@@ -1166,81 +1358,127 @@ void AuditLogs::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
 }
 Json::Value AuditLogs::toJson() const {
     Json::Value ret;
+
     if (getId()) {
+
         ret["id"] = (Json::Int64)getValueOfId();
+
     } else {
         ret["id"] = Json::Value();
     }
+
     if (getOrganisation()) {
+
         ret["organisation"] = getValueOfOrganisation();
+
     } else {
         ret["organisation"] = Json::Value();
     }
+
     if (getActorType()) {
+
         ret["actor_type"] = getValueOfActorType();
+
     } else {
         ret["actor_type"] = Json::Value();
     }
+
     if (getActorId()) {
+
         ret["actor_id"] = getValueOfActorId();
+
     } else {
         ret["actor_id"] = Json::Value();
     }
+
     if (getActorName()) {
+
         ret["actor_name"] = getValueOfActorName();
+
     } else {
         ret["actor_name"] = Json::Value();
     }
+
     if (getAction()) {
+
         ret["action"] = getValueOfAction();
+
     } else {
         ret["action"] = Json::Value();
     }
+
     if (getTargetType()) {
+
         ret["target_type"] = getValueOfTargetType();
+
     } else {
         ret["target_type"] = Json::Value();
     }
+
     if (getTargetId()) {
+
         ret["target_id"] = getValueOfTargetId();
+
     } else {
         ret["target_id"] = Json::Value();
     }
+
     if (getIp()) {
+
         ret["ip"] = getValueOfIp();
+
     } else {
         ret["ip"] = Json::Value();
     }
+
     if (getDetails()) {
+
         ret["details"] = getValueOfDetails();
+
     } else {
         ret["details"] = Json::Value();
     }
+
     if (getStatus()) {
+
         ret["status"] = getValueOfStatus();
+
     } else {
         ret["status"] = Json::Value();
     }
+
     if (getCreatedAt()) {
+
         ret["created_at"] = getCreatedAt()->toDbStringLocal();
+
     } else {
         ret["created_at"] = Json::Value();
     }
+
     if (getSeq()) {
+
         ret["seq"] = (Json::Int64)getValueOfSeq();
+
     } else {
         ret["seq"] = Json::Value();
     }
+
     if (getPrevHash()) {
+
         ret["prev_hash"] = getValueOfPrevHash();
+
     } else {
         ret["prev_hash"] = Json::Value();
     }
+
     if (getRowHash()) {
+
         ret["row_hash"] = getValueOfRowHash();
+
     } else {
         ret["row_hash"] = Json::Value();
     }
+
     return ret;
 }
 
@@ -1251,277 +1489,401 @@ std::string AuditLogs::toString() const {
 Json::Value AuditLogs::toMasqueradedJson(const std::vector<std::string>& pMasqueradingVector) const {
     Json::Value ret;
     if (pMasqueradingVector.size() == 15) {
+
         if (!pMasqueradingVector[0].empty()) {
             if (getId()) {
+
                 ret[pMasqueradingVector[0]] = (Json::Int64)getValueOfId();
+
             } else {
                 ret[pMasqueradingVector[0]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[1].empty()) {
             if (getOrganisation()) {
+
                 ret[pMasqueradingVector[1]] = getValueOfOrganisation();
+
             } else {
                 ret[pMasqueradingVector[1]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[2].empty()) {
             if (getActorType()) {
+
                 ret[pMasqueradingVector[2]] = getValueOfActorType();
+
             } else {
                 ret[pMasqueradingVector[2]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[3].empty()) {
             if (getActorId()) {
+
                 ret[pMasqueradingVector[3]] = getValueOfActorId();
+
             } else {
                 ret[pMasqueradingVector[3]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[4].empty()) {
             if (getActorName()) {
+
                 ret[pMasqueradingVector[4]] = getValueOfActorName();
+
             } else {
                 ret[pMasqueradingVector[4]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[5].empty()) {
             if (getAction()) {
+
                 ret[pMasqueradingVector[5]] = getValueOfAction();
+
             } else {
                 ret[pMasqueradingVector[5]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[6].empty()) {
             if (getTargetType()) {
+
                 ret[pMasqueradingVector[6]] = getValueOfTargetType();
+
             } else {
                 ret[pMasqueradingVector[6]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[7].empty()) {
             if (getTargetId()) {
+
                 ret[pMasqueradingVector[7]] = getValueOfTargetId();
+
             } else {
                 ret[pMasqueradingVector[7]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[8].empty()) {
             if (getIp()) {
+
                 ret[pMasqueradingVector[8]] = getValueOfIp();
+
             } else {
                 ret[pMasqueradingVector[8]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[9].empty()) {
             if (getDetails()) {
+
                 ret[pMasqueradingVector[9]] = getValueOfDetails();
+
             } else {
                 ret[pMasqueradingVector[9]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[10].empty()) {
             if (getStatus()) {
+
                 ret[pMasqueradingVector[10]] = getValueOfStatus();
+
             } else {
                 ret[pMasqueradingVector[10]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[11].empty()) {
             if (getCreatedAt()) {
+
                 ret[pMasqueradingVector[11]] = getCreatedAt()->toDbStringLocal();
+
             } else {
                 ret[pMasqueradingVector[11]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[12].empty()) {
             if (getSeq()) {
+
                 ret[pMasqueradingVector[12]] = (Json::Int64)getValueOfSeq();
+
             } else {
                 ret[pMasqueradingVector[12]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[13].empty()) {
             if (getPrevHash()) {
+
                 ret[pMasqueradingVector[13]] = getValueOfPrevHash();
+
             } else {
                 ret[pMasqueradingVector[13]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[14].empty()) {
             if (getRowHash()) {
+
                 ret[pMasqueradingVector[14]] = getValueOfRowHash();
+
             } else {
                 ret[pMasqueradingVector[14]] = Json::Value();
             }
         }
+
         return ret;
     }
     LOG_ERROR << "Masquerade failed";
+
     if (getId()) {
+
         ret["id"] = (Json::Int64)getValueOfId();
+
     } else {
         ret["id"] = Json::Value();
     }
+
     if (getOrganisation()) {
+
         ret["organisation"] = getValueOfOrganisation();
+
     } else {
         ret["organisation"] = Json::Value();
     }
+
     if (getActorType()) {
+
         ret["actor_type"] = getValueOfActorType();
+
     } else {
         ret["actor_type"] = Json::Value();
     }
+
     if (getActorId()) {
+
         ret["actor_id"] = getValueOfActorId();
+
     } else {
         ret["actor_id"] = Json::Value();
     }
+
     if (getActorName()) {
+
         ret["actor_name"] = getValueOfActorName();
+
     } else {
         ret["actor_name"] = Json::Value();
     }
+
     if (getAction()) {
+
         ret["action"] = getValueOfAction();
+
     } else {
         ret["action"] = Json::Value();
     }
+
     if (getTargetType()) {
+
         ret["target_type"] = getValueOfTargetType();
+
     } else {
         ret["target_type"] = Json::Value();
     }
+
     if (getTargetId()) {
+
         ret["target_id"] = getValueOfTargetId();
+
     } else {
         ret["target_id"] = Json::Value();
     }
+
     if (getIp()) {
+
         ret["ip"] = getValueOfIp();
+
     } else {
         ret["ip"] = Json::Value();
     }
+
     if (getDetails()) {
+
         ret["details"] = getValueOfDetails();
+
     } else {
         ret["details"] = Json::Value();
     }
+
     if (getStatus()) {
+
         ret["status"] = getValueOfStatus();
+
     } else {
         ret["status"] = Json::Value();
     }
+
     if (getCreatedAt()) {
+
         ret["created_at"] = getCreatedAt()->toDbStringLocal();
+
     } else {
         ret["created_at"] = Json::Value();
     }
+
     if (getSeq()) {
+
         ret["seq"] = (Json::Int64)getValueOfSeq();
+
     } else {
         ret["seq"] = Json::Value();
     }
+
     if (getPrevHash()) {
+
         ret["prev_hash"] = getValueOfPrevHash();
+
     } else {
         ret["prev_hash"] = Json::Value();
     }
+
     if (getRowHash()) {
+
         ret["row_hash"] = getValueOfRowHash();
+
     } else {
         ret["row_hash"] = Json::Value();
     }
+
     return ret;
 }
 
 bool AuditLogs::validateJsonForCreation(const Json::Value& pJson, std::string& err) {
+
     if (pJson.isMember("id")) {
         if (!validJsonOfField(0, "id", pJson["id"], err, true))
             return false;
     }
+
     if (pJson.isMember("organisation")) {
         if (!validJsonOfField(1, "organisation", pJson["organisation"], err, true))
             return false;
-    } else {
+    }
+
+    else {
         err = "The organisation column cannot be null";
         return false;
     }
+
     if (pJson.isMember("actor_type")) {
         if (!validJsonOfField(2, "actor_type", pJson["actor_type"], err, true))
             return false;
-    } else {
+    }
+
+    else {
         err = "The actor_type column cannot be null";
         return false;
     }
+
     if (pJson.isMember("actor_id")) {
         if (!validJsonOfField(3, "actor_id", pJson["actor_id"], err, true))
             return false;
     }
+
     if (pJson.isMember("actor_name")) {
         if (!validJsonOfField(4, "actor_name", pJson["actor_name"], err, true))
             return false;
-    } else {
+    }
+
+    else {
         err = "The actor_name column cannot be null";
         return false;
     }
+
     if (pJson.isMember("action")) {
         if (!validJsonOfField(5, "action", pJson["action"], err, true))
             return false;
-    } else {
+    }
+
+    else {
         err = "The action column cannot be null";
         return false;
     }
+
     if (pJson.isMember("target_type")) {
         if (!validJsonOfField(6, "target_type", pJson["target_type"], err, true))
             return false;
     }
+
     if (pJson.isMember("target_id")) {
         if (!validJsonOfField(7, "target_id", pJson["target_id"], err, true))
             return false;
     }
+
     if (pJson.isMember("ip")) {
         if (!validJsonOfField(8, "ip", pJson["ip"], err, true))
             return false;
     }
+
     if (pJson.isMember("details")) {
         if (!validJsonOfField(9, "details", pJson["details"], err, true))
             return false;
     }
+
     if (pJson.isMember("status")) {
         if (!validJsonOfField(10, "status", pJson["status"], err, true))
             return false;
-    } else {
+    }
+
+    else {
         err = "The status column cannot be null";
         return false;
     }
+
     if (pJson.isMember("created_at")) {
         if (!validJsonOfField(11, "created_at", pJson["created_at"], err, true))
             return false;
     }
+
     if (pJson.isMember("seq")) {
         if (!validJsonOfField(12, "seq", pJson["seq"], err, true))
             return false;
-    } else {
+    }
+
+    else {
         err = "The seq column cannot be null";
         return false;
     }
+
     if (pJson.isMember("prev_hash")) {
         if (!validJsonOfField(13, "prev_hash", pJson["prev_hash"], err, true))
             return false;
-    } else {
+    }
+
+    else {
         err = "The prev_hash column cannot be null";
         return false;
     }
+
     if (pJson.isMember("row_hash")) {
         if (!validJsonOfField(14, "row_hash", pJson["row_hash"], err, true))
             return false;
-    } else {
+    }
+
+    else {
         err = "The row_hash column cannot be null";
         return false;
     }
+
     return true;
 }
 bool AuditLogs::validateMasqueradedJsonForCreation(
@@ -1531,120 +1893,152 @@ bool AuditLogs::validateMasqueradedJsonForCreation(
         return false;
     }
     try {
+
         if (!pMasqueradingVector[0].empty()) {
             if (pJson.isMember(pMasqueradingVector[0])) {
                 if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[1].empty()) {
             if (pJson.isMember(pMasqueradingVector[1])) {
                 if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, true))
                     return false;
-            } else {
+            }
+
+            else {
                 err = "The " + pMasqueradingVector[1] + " column cannot be null";
                 return false;
             }
         }
+
         if (!pMasqueradingVector[2].empty()) {
             if (pJson.isMember(pMasqueradingVector[2])) {
                 if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, true))
                     return false;
-            } else {
+            }
+
+            else {
                 err = "The " + pMasqueradingVector[2] + " column cannot be null";
                 return false;
             }
         }
+
         if (!pMasqueradingVector[3].empty()) {
             if (pJson.isMember(pMasqueradingVector[3])) {
                 if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[4].empty()) {
             if (pJson.isMember(pMasqueradingVector[4])) {
                 if (!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, true))
                     return false;
-            } else {
+            }
+
+            else {
                 err = "The " + pMasqueradingVector[4] + " column cannot be null";
                 return false;
             }
         }
+
         if (!pMasqueradingVector[5].empty()) {
             if (pJson.isMember(pMasqueradingVector[5])) {
                 if (!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, true))
                     return false;
-            } else {
+            }
+
+            else {
                 err = "The " + pMasqueradingVector[5] + " column cannot be null";
                 return false;
             }
         }
+
         if (!pMasqueradingVector[6].empty()) {
             if (pJson.isMember(pMasqueradingVector[6])) {
                 if (!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[7].empty()) {
             if (pJson.isMember(pMasqueradingVector[7])) {
                 if (!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[8].empty()) {
             if (pJson.isMember(pMasqueradingVector[8])) {
                 if (!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[9].empty()) {
             if (pJson.isMember(pMasqueradingVector[9])) {
                 if (!validJsonOfField(9, pMasqueradingVector[9], pJson[pMasqueradingVector[9]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[10].empty()) {
             if (pJson.isMember(pMasqueradingVector[10])) {
                 if (!validJsonOfField(10, pMasqueradingVector[10], pJson[pMasqueradingVector[10]], err, true))
                     return false;
-            } else {
+            }
+
+            else {
                 err = "The " + pMasqueradingVector[10] + " column cannot be null";
                 return false;
             }
         }
+
         if (!pMasqueradingVector[11].empty()) {
             if (pJson.isMember(pMasqueradingVector[11])) {
                 if (!validJsonOfField(11, pMasqueradingVector[11], pJson[pMasqueradingVector[11]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[12].empty()) {
             if (pJson.isMember(pMasqueradingVector[12])) {
                 if (!validJsonOfField(12, pMasqueradingVector[12], pJson[pMasqueradingVector[12]], err, true))
                     return false;
-            } else {
+            }
+
+            else {
                 err = "The " + pMasqueradingVector[12] + " column cannot be null";
                 return false;
             }
         }
+
         if (!pMasqueradingVector[13].empty()) {
             if (pJson.isMember(pMasqueradingVector[13])) {
                 if (!validJsonOfField(13, pMasqueradingVector[13], pJson[pMasqueradingVector[13]], err, true))
                     return false;
-            } else {
+            }
+
+            else {
                 err = "The " + pMasqueradingVector[13] + " column cannot be null";
                 return false;
             }
         }
+
         if (!pMasqueradingVector[14].empty()) {
             if (pJson.isMember(pMasqueradingVector[14])) {
                 if (!validJsonOfField(14, pMasqueradingVector[14], pJson[pMasqueradingVector[14]], err, true))
                     return false;
-            } else {
+            }
+
+            else {
                 err = "The " + pMasqueradingVector[14] + " column cannot be null";
                 return false;
             }
         }
+
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -1652,69 +2046,87 @@ bool AuditLogs::validateMasqueradedJsonForCreation(
     return true;
 }
 bool AuditLogs::validateJsonForUpdate(const Json::Value& pJson, std::string& err) {
+
     if (pJson.isMember("id")) {
         if (!validJsonOfField(0, "id", pJson["id"], err, false))
             return false;
-    } else {
+    }
+
+    else {
         err = "The value of primary key must be set in the json object for update";
         return false;
     }
+
     if (pJson.isMember("organisation")) {
         if (!validJsonOfField(1, "organisation", pJson["organisation"], err, false))
             return false;
     }
+
     if (pJson.isMember("actor_type")) {
         if (!validJsonOfField(2, "actor_type", pJson["actor_type"], err, false))
             return false;
     }
+
     if (pJson.isMember("actor_id")) {
         if (!validJsonOfField(3, "actor_id", pJson["actor_id"], err, false))
             return false;
     }
+
     if (pJson.isMember("actor_name")) {
         if (!validJsonOfField(4, "actor_name", pJson["actor_name"], err, false))
             return false;
     }
+
     if (pJson.isMember("action")) {
         if (!validJsonOfField(5, "action", pJson["action"], err, false))
             return false;
     }
+
     if (pJson.isMember("target_type")) {
         if (!validJsonOfField(6, "target_type", pJson["target_type"], err, false))
             return false;
     }
+
     if (pJson.isMember("target_id")) {
         if (!validJsonOfField(7, "target_id", pJson["target_id"], err, false))
             return false;
     }
+
     if (pJson.isMember("ip")) {
         if (!validJsonOfField(8, "ip", pJson["ip"], err, false))
             return false;
     }
+
     if (pJson.isMember("details")) {
         if (!validJsonOfField(9, "details", pJson["details"], err, false))
             return false;
     }
+
     if (pJson.isMember("status")) {
         if (!validJsonOfField(10, "status", pJson["status"], err, false))
             return false;
     }
+
     if (pJson.isMember("created_at")) {
         if (!validJsonOfField(11, "created_at", pJson["created_at"], err, false))
             return false;
     }
+
     if (pJson.isMember("seq")) {
         if (!validJsonOfField(12, "seq", pJson["seq"], err, false))
             return false;
     }
+
     if (pJson.isMember("prev_hash")) {
         if (!validJsonOfField(13, "prev_hash", pJson["prev_hash"], err, false))
             return false;
     }
+
     if (pJson.isMember("row_hash")) {
         if (!validJsonOfField(14, "row_hash", pJson["row_hash"], err, false))
             return false;
     }
+
     return true;
 }
 bool AuditLogs::validateMasqueradedJsonForUpdate(
@@ -1724,69 +2136,87 @@ bool AuditLogs::validateMasqueradedJsonForUpdate(
         return false;
     }
     try {
+
         if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
             if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, false))
                 return false;
-        } else {
+        }
+
+        else {
             err = "The value of primary key must be set in the json object for update";
             return false;
         }
+
         if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
             if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
             if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
             if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
             if (!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
             if (!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
             if (!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
             if (!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8])) {
             if (!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9])) {
             if (!validJsonOfField(9, pMasqueradingVector[9], pJson[pMasqueradingVector[9]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10])) {
             if (!validJsonOfField(10, pMasqueradingVector[10], pJson[pMasqueradingVector[10]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[11].empty() && pJson.isMember(pMasqueradingVector[11])) {
             if (!validJsonOfField(11, pMasqueradingVector[11], pJson[pMasqueradingVector[11]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[12].empty() && pJson.isMember(pMasqueradingVector[12])) {
             if (!validJsonOfField(12, pMasqueradingVector[12], pJson[pMasqueradingVector[12]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[13].empty() && pJson.isMember(pMasqueradingVector[13])) {
             if (!validJsonOfField(13, pMasqueradingVector[13], pJson[pMasqueradingVector[13]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[14].empty() && pJson.isMember(pMasqueradingVector[14])) {
             if (!validJsonOfField(14, pMasqueradingVector[14], pJson[pMasqueradingVector[14]], err, false))
                 return false;
         }
+
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -1796,165 +2226,227 @@ bool AuditLogs::validateMasqueradedJsonForUpdate(
 bool AuditLogs::validJsonOfField(
     size_t index, const std::string& fieldName, const Json::Value& pJson, std::string& err, bool isForCreation) {
     switch (index) {
+
         case 0:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (isForCreation) {
                 err = "The automatic primary key cannot be set";
                 return false;
             }
+
             if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 1:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 2:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 3:
+
             if (pJson.isNull()) {
                 return true;
             }
+
             if (!pJson.isInt()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 4:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 5:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-            if (pJson.isString() &&
-                std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>, wchar_t>{}.from_bytes(pJson.asCString()).size() > 128) {
+
+            if (pJson.isString() && drogon::utils::utf8Length(pJson.asCString()) > 128) {
                 err = "String length exceeds limit for the " + fieldName + " field (the maximum value is 128)";
                 return false;
             }
+
             break;
+
         case 6:
+
             if (pJson.isNull()) {
                 return true;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-            if (pJson.isString() &&
-                std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>, wchar_t>{}.from_bytes(pJson.asCString()).size() > 64) {
+
+            if (pJson.isString() && drogon::utils::utf8Length(pJson.asCString()) > 64) {
                 err = "String length exceeds limit for the " + fieldName + " field (the maximum value is 64)";
                 return false;
             }
+
             break;
+
         case 7:
+
             if (pJson.isNull()) {
                 return true;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 8:
+
             if (pJson.isNull()) {
                 return true;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 9:
+
             if (pJson.isNull()) {
                 return true;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 10:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 11:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 12:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 13:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 14:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         default:
             err = "Internal error in the server";
             return false;

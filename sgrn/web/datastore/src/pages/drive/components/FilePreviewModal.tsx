@@ -87,6 +87,10 @@ const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ic
 const VIDEO_EXTENSIONS = ["mp4", "webm", "ogg", "mov", "avi", "mkv"];
 const AUDIO_EXTENSIONS = ["mp3", "wav", "ogg", "flac", "aac", "m4a", "opus"];
 
+// Syntax-highlighting very large files freezes the main thread. Beyond this
+// size we show a plain, truncated <pre> instead of tokenising the whole file.
+const MAX_PREVIEW_CHARS = 500_000;
+
 function getExtension(filename: string): string {
     return filename.split(".").pop()?.toLowerCase() || "";
 }
@@ -167,15 +171,20 @@ function getLanguage(filename: string): string {
 
 type PreviewMedia = { url: string; kind: "image" | "pdf" | "video" | "audio" };
 
+// Minimal shape of the lazily-loaded `jsonpath` module (it ships no types).
+interface JsonPathEngine {
+    query(t_object: unknown, t_path: string): unknown;
+}
+
 export function FilePreviewModal({ isOpen, file, currentScope, onClose, onDownload }: FilePreviewModalProps) {
     const [loading, setLoading] = useState(false);
     const [content, setContent] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [media, setMedia] = useState<PreviewMedia | null>(null);
-    const [parsedJson, setParsedJson] = useState<any | null>(null);
+    const [parsedJson, setParsedJson] = useState<unknown | null>(null);
     const [jsonQuery, setJsonQuery] = useState<string>("");
     const [wasDecompressed, setWasDecompressed] = useState(false);
-    const [jpLoader, setJpLoader] = useState<any>(null);
+    const [jpLoader, setJpLoader] = useState<JsonPathEngine | null>(null);
     const objectUrlRef = useRef<string | null>(null);
 
     const releaseObjectUrl = useCallback(() => {
@@ -188,7 +197,9 @@ export function FilePreviewModal({ isOpen, file, currentScope, onClose, onDownlo
     // Lazily load jsonpath only when the user starts typing a query
     useEffect(() => {
         if (jsonQuery && !jpLoader) {
-            import("jsonpath").then((m) => setJpLoader(() => m.default ?? m)).catch(() => console.error("Failed to load jsonpath"));
+            import("jsonpath")
+                .then((m) => setJpLoader(() => (m.default ?? m) as unknown as JsonPathEngine))
+                .catch(() => console.error("Failed to load jsonpath"));
         }
     }, [jsonQuery, jpLoader]);
 
@@ -276,7 +287,7 @@ export function FilePreviewModal({ isOpen, file, currentScope, onClose, onDownlo
             }
 
             let text = new TextDecoder("utf-8").decode(bytes);
-            let json: any = null;
+            let json: unknown = null;
             if (file.name.endsWith(".json") || file.name.endsWith(".json.zst")) {
                 try {
                     json = JSON.parse(text);
@@ -307,6 +318,9 @@ export function FilePreviewModal({ isOpen, file, currentScope, onClose, onDownlo
             return `// Invalid JSONPath query: ${e}\n\n${content}`;
         }
     }, [content, parsedJson, jsonQuery, jpLoader]);
+
+    const isTruncated = displayContent != null && displayContent.length > MAX_PREVIEW_CHARS;
+    const previewText = isTruncated ? displayContent!.slice(0, MAX_PREVIEW_CHARS) : displayContent;
 
     const handleDownloadDecompressed = () => {
         if (!content || !file) return;
@@ -341,7 +355,7 @@ export function FilePreviewModal({ isOpen, file, currentScope, onClose, onDownlo
                     </div>
 
                     <div className="preview-modal-actions">
-                        {parsedJson && (
+                        {parsedJson != null && (
                             <label className="preview-modal-search">
                                 <Search size={14} />
                                 <input
@@ -416,50 +430,44 @@ export function FilePreviewModal({ isOpen, file, currentScope, onClose, onDownlo
                         </div>
                     ) : content !== null ? (
                         <div className="preview-modal-scroll">
-                            <HighlightBoundary
-                                fallback={
-                                    <pre
-                                        style={{
+                            {isTruncated ? (
+                                <>
+                                    <div className="preview-modal-truncated">
+                                        Preview truncated to {MAX_PREVIEW_CHARS.toLocaleString()} characters. Download the file to view it
+                                        in full.
+                                    </div>
+                                    <pre className="preview-modal-plain">{previewText}</pre>
+                                </>
+                            ) : (
+                                <HighlightBoundary fallback={<pre className="preview-modal-plain">{previewText}</pre>}>
+                                    <SyntaxHighlighter
+                                        language={lang}
+                                        style={vs2015}
+                                        showLineNumbers={true}
+                                        wrapLines={true}
+                                        wrapLongLines={false}
+                                        customStyle={{
                                             margin: 0,
-                                            padding: "1.5rem",
+                                            padding: "1rem 1.25rem",
                                             fontSize: "13px",
-                                            fontFamily: "monospace",
-                                            color: "#d4d4d4",
-                                            whiteSpace: "pre-wrap",
-                                            wordBreak: "break-all",
+                                            fontFamily:
+                                                'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                                            background: "transparent",
+                                            minHeight: "100%",
+                                        }}
+                                        lineNumberStyle={{
+                                            minWidth: "3.5em",
+                                            paddingRight: "1em",
+                                            color: "#858585",
+                                            textAlign: "right",
+                                            borderRight: "1px solid #404040",
+                                            marginRight: "1.5em",
                                         }}
                                     >
-                                        {displayContent}
-                                    </pre>
-                                }
-                            >
-                                <SyntaxHighlighter
-                                    language={lang}
-                                    style={vs2015}
-                                    showLineNumbers={true}
-                                    wrapLines={true}
-                                    wrapLongLines={false}
-                                    customStyle={{
-                                        margin: 0,
-                                        padding: "1rem 1.25rem",
-                                        fontSize: "13px",
-                                        fontFamily:
-                                            'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                                        background: "transparent",
-                                        minHeight: "100%",
-                                    }}
-                                    lineNumberStyle={{
-                                        minWidth: "3.5em",
-                                        paddingRight: "1em",
-                                        color: "#858585",
-                                        textAlign: "right",
-                                        borderRight: "1px solid #404040",
-                                        marginRight: "1.5em",
-                                    }}
-                                >
-                                    {displayContent!}
-                                </SyntaxHighlighter>
-                            </HighlightBoundary>
+                                        {previewText!}
+                                    </SyntaxHighlighter>
+                                </HighlightBoundary>
+                            )}
                         </div>
                     ) : null}
                 </div>

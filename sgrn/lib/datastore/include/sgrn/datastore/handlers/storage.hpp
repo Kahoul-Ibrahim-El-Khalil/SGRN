@@ -78,6 +78,11 @@ public:
     // File upload / download (supports HTTP Range headers for Resumable Downloads)
     // =========================================================================
     drogon::Task<drogon::HttpResponsePtr> handleFileRequest(drogon::HttpRequestPtr tsp_req);
+    drogon::Task<drogon::HttpResponsePtr> handleListVersions(drogon::HttpRequestPtr tsp_req);
+    drogon::Task<drogon::HttpResponsePtr> handleDownloadVersion(
+        ::sgrn::datastore::auth::SessionClaims t_session, std::string t_scope, std::string t_path, int32_t t_version_no);
+    drogon::Task<drogon::HttpResponsePtr> handleRestoreVersion(drogon::HttpRequestPtr tsp_req);
+    drogon::Task<drogon::HttpResponsePtr> handleTrimVersions(drogon::HttpRequestPtr tsp_req);
     drogon::Task<drogon::HttpResponsePtr> handleAutomatedServiceFileRequest(drogon::HttpRequestPtr tsp_req);
     drogon::Task<drogon::HttpResponsePtr> handleAutomatedServiceGetFilesMetadata(drogon::HttpRequestPtr tsp_req);
 
@@ -196,10 +201,16 @@ private:
     drogon::Task<drogon::HttpResponsePtr> deleteFolder(
         const drogon::orm::DbClientPtr& tsp_db_client, int64_t t_entity_id, int32_t t_user_id, bool t_is_admin);
 
-    inline static const std::array<IHandler<StorageApiHandler>::RouteConfig, 20> kRoutes = {
+    inline static const std::array<IHandler<StorageApiHandler>::RouteConfig, 22> kRoutes = {
         {{"/api/v1/storage/stats", &StorageApiHandler::handleGetStorageStats, {drogon::Get}, {"sgrn::datastore::filters::UserAuthFilter"}},
 
             {"/api/v1/storage/files/metadata", &StorageApiHandler::handleGetFilesMetadata, {drogon::Get},
+                {"sgrn::datastore::filters::UserAuthFilter"}},
+
+            {"/api/v1/storage/files/versions", &StorageApiHandler::handleListVersions, {drogon::Get, drogon::Delete},
+                {"sgrn::datastore::filters::UserAuthFilter"}},
+
+            {"/api/v1/storage/files/versions/restore", &StorageApiHandler::handleRestoreVersion, {drogon::Post},
                 {"sgrn::datastore::filters::UserAuthFilter"}},
 
             {"/api/v1/storage/info", &StorageApiHandler::handleGetConstraints, {drogon::Get}, {}},

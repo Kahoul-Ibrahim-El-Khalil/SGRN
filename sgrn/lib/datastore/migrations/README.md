@@ -18,10 +18,18 @@ psql -h /tmp -U <superuser> -d sgrn -v ON_ERROR_STOP=1 \
 ```
 
 Then boot the new binary. New code and schema move together: the current
-upload path passes a SHA-256 checksum to `upsert_object`, so deployments that
-install that binary must apply `002` first. Otherwise PostgreSQL interprets
-the literal provider (`'GARAGE'`) as the old function's boolean compression
-argument and rejects uploads.
+upload path passes a SHA-512 checksum to `upsert_object`, so deployments that
+install that binary must apply `002` (which introduced the checksum parameter)
+and `010` (which switches it to SHA-512) first. Otherwise PostgreSQL
+interprets the literal provider (`'GARAGE'`) as an older function argument and
+rejects uploads.
+
+`010_sha512_content_hashes.sql` moves content/identity hashes from SHA-256 to
+SHA-512. A SHA-512 digest cannot be derived from a stored SHA-256 digest, so
+the legacy SHA-256 columns stay in place but are no longer written; existing
+objects/versions keep an empty new hash until they are re-uploaded or
+re-indexed. Protocol-defined SHA-256 stays unchanged: JWT HS256, webhook HMAC,
+AWS SigV4 and the tamper-evident audit chain.
 
 The `007_lowercase_domain_namespace.sql` migration normalizes existing domain
 labels and paths to lower-case, then prevents future mixed-case domain labels

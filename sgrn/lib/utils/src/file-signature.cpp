@@ -1,9 +1,9 @@
-#include <sgrn/datastore/services/helpers/magic.hpp>
+#include <sgrn/utils/file-signature.hpp>
+
 #include <algorithm>
-#include <cctype>
 #include <unordered_set>
 
-namespace sgrn::datastore::services::helpers
+namespace sgrn::utils::file_signature
 {
 
 static constexpr uint8_t PNG[] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
@@ -56,7 +56,7 @@ static constexpr uint8_t SHELL[] = {0x23, 0x21};
 static constexpr uint8_t JAR_CLASS[] = {0xCA, 0xFE, 0xBA, 0xBE};
 static constexpr uint8_t RTF[] = {0x7B, 0x5C, 0x72, 0x74, 0x66};
 
-static const MagicSignature signatures[] = {
+static const FileSignature signatures[] = {
     {"png", PNG, sizeof(PNG), 0},
     {"jpg", JPEG, sizeof(JPEG), 0},
     {"jpeg", JPEG, sizeof(JPEG), 0},
@@ -120,8 +120,8 @@ static const MagicSignature signatures[] = {
     {"rtf", RTF, sizeof(RTF), 0},
 };
 
-const std::vector<MagicSignature>& getMagicSignatures() {
-    static const std::vector<MagicSignature> vec(std::begin(signatures), std::end(signatures));
+const std::vector<FileSignature>& getSignatures() {
+    static const std::vector<FileSignature> vec(std::begin(signatures), std::end(signatures));
     return vec;
 }
 
@@ -132,7 +132,7 @@ static bool matchPattern(const std::string& data, const uint8_t* pattern, size_t
 }
 
 std::optional<std::string> sniffExtension(const std::string& t_data) {
-    for (const auto& sig : getMagicSignatures()) {
+    for (const auto& sig : getSignatures()) {
         if (matchPattern(t_data, sig.pattern, sig.pattern_len, sig.offset)) {
             return std::string(sig.extension);
         }
@@ -144,6 +144,9 @@ bool isCompatibleSniffedFormat(const std::string& t_declared, const std::string&
     if (t_declared.empty())
         return true; // No declared extension in filename: accept sniffed format
     if (t_declared == t_sniffed)
+        return true;
+    // JPEG: both "jpg" and "jpeg" refer to the same format
+    if ((t_declared == "jpg" && t_sniffed == "jpeg") || (t_declared == "jpeg" && t_sniffed == "jpg"))
         return true;
     if (t_sniffed == "zip") {
         static const std::unordered_set<std::string> zip_formats = {
@@ -158,4 +161,4 @@ bool isCompatibleSniffedFormat(const std::string& t_declared, const std::string&
     return false;
 }
 
-} // namespace sgrn::datastore::services::helpers
+} // namespace sgrn::utils::file_signature

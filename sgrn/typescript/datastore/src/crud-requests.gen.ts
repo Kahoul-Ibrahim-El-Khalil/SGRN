@@ -26,14 +26,14 @@ export interface DomainsUpdateRequest {
 
 /** Body of `POST /api/v1/file-hashes` (core.file_hashes). */
 export interface FileHashesCreateRequest {
-  sha256?: string;
+  sha512?: string;
   hit_count?: number;
   created_at?: string;
 }
 
 /** Body of `PATCH /api/v1/file-hashes/{id}` (core.file_hashes). */
 export interface FileHashesUpdateRequest {
-  sha256?: string;
+  sha512?: string;
   hit_count?: number;
   created_at?: string;
 }

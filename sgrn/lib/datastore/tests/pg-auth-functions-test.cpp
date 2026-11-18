@@ -187,7 +187,7 @@ static const char* kFileMetadataColumns =
     "file_id AS id, file_name AS name, file_path AS full_path, directory_path, directory_id, extension, created_at, "
     "is_compressed, compression_algorithm, compression_level, session_id, user_id, automated_service_id, "
     "domain_name AS domain, organisation_name AS organisation, object_id, bucket, key, object_size AS size, "
-    "object_created_at, mime_type, upload_mode, part_count, part_size_bytes, sha256";
+    "object_created_at, mime_type, upload_mode, part_count, part_size_bytes, sha512";
 
 static const char* kMetadataEnvelope = "SELECT COALESCE(jsonb_agg("
                                        "jsonb_build_object("
@@ -199,9 +199,9 @@ static const char* kMetadataEnvelope = "SELECT COALESCE(jsonb_agg("
                                        "'organisation', s.organisation, 'object_id', s.object_id, 'bucket', s.bucket, "
                                        "'key', s.key, 'size', s.size, 'object_created_at', s.object_created_at::text, "
                                        "'mime_type', s.mime_type, 'upload_mode', s.upload_mode, 'part_count', s.part_count, "
-                                       "'part_size_bytes', s.part_size_bytes, 'sha256', s.sha256) "
-                                       "|| CASE WHEN s.sha256 IS NULL THEN '{}'::jsonb "
-                                       "ELSE jsonb_build_object('etag', '\"' || s.sha256 || '\"') END "
+                                       "'part_size_bytes', s.part_size_bytes, 'sha512', s.sha512) "
+                                       "|| CASE WHEN s.sha512 IS NULL THEN '{}'::jsonb "
+                                       "ELSE jsonb_build_object('etag', '\"' || s.sha512 || '\"') END "
                                        "ORDER BY id ASC), '[]'::jsonb) AS envelope "
                                        "FROM ({inner}) s";
 
@@ -333,7 +333,7 @@ int main() {
     }
     {
         const Query q = query(admin,
-            "INSERT INTO storage.objects (bucket, key, sha256, size, original_size, part_count, part_size_bytes) "
+            "INSERT INTO storage.objects (bucket, key, sha512, size, original_size, part_count, part_size_bytes) "
             "VALUES ('test-bucket', 'test/dolly.csv', $1, 11, 11, 1, 11) RETURNING id, created_at::text",
             {sha});
         CHECK(q.ok && nrows(q) == 1);

@@ -47,8 +47,11 @@ export default function ThemeToggle() {
                         className={`theme-toggle-item ${currentTheme === theme.id ? "theme-toggle-item-active" : ""}`}
                     >
                         <div className="theme-toggle-preview-group" aria-hidden="true">
-                            <div className="theme-toggle-preview-block" style={{ backgroundColor: theme.preview.bg }} />
-                            <div className="theme-toggle-preview-block" style={{ backgroundColor: theme.preview.accent }} />
+                            <div className="theme-toggle-preview-block" style={{ "--swatch": theme.preview.bg } as React.CSSProperties} />
+                            <div
+                                className="theme-toggle-preview-block"
+                                style={{ "--swatch": theme.preview.accent } as React.CSSProperties}
+                            />
                         </div>
                         <span className="theme-toggle-name">{theme.name}</span>
                         {currentTheme === theme.id && <Check size={16} className="text-primary shrink-0" />}

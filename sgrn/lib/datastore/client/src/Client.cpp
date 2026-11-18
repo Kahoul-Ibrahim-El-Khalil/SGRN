@@ -278,7 +278,7 @@ sgrn::Result<std::string, std::string> DatastoreClient::registerUser(const NewUs
     body.status = t_user.status;
     body.domain = t_user.domain;
     auto r = postJson(*this, "/api/v1/admin/users/register", sgrn::json::write(body).value_or(std::string{}));
-    PROPAGATE_ERROR_IF(r);
+    IF_ERROR_PROPAGATE(r);
     RETURN_ERROR_IF(!responseOk(r.value()), responseMessage(r.value(), "registration failed"));
     return responseMessage(r.value(), "registered");
 }
@@ -315,7 +315,7 @@ sgrn::Result<ServiceCredentials, std::string> DatastoreClient::registerService(c
         body.metadata.kind = t_service.kind;
     }
     auto r = postJson(*this, "/api/v1/admin/automated-services/register", sgrn::json::writeOmitNull(body).value_or(std::string{}));
-    PROPAGATE_ERROR_IF(r);
+    IF_ERROR_PROPAGATE(r);
     RETURN_ERROR_IF(!responseOk(r.value()), responseMessage(r.value(), "registration failed"));
     ServiceCredentials creds;
     creds.message = responseMessage(r.value(), "registered");
@@ -328,7 +328,7 @@ sgrn::Result<ServiceCredentials, std::string> DatastoreClient::rotateServiceToke
     detail::RotateServiceTokenJson body;
     body.automated_service_id = t_service_id;
     auto r = postJson(*this, "/api/v1/admin/automated-services/rotate-token", sgrn::json::write(body).value_or(std::string{}));
-    PROPAGATE_ERROR_IF(r);
+    IF_ERROR_PROPAGATE(r);
     RETURN_ERROR_IF(!responseOk(r.value()), responseMessage(r.value(), "rotation failed"));
     ServiceCredentials creds;
     creds.message = responseMessage(r.value(), "rotated");
@@ -353,7 +353,7 @@ sgrn::Result<std::string, std::string> DatastoreClient::updatePassword(
     body.old_password = t_old_password;
     body.new_password = t_new_password;
     auto r = postJson(*this, "/api/v1/auth/user/password", sgrn::json::write(body).value_or(std::string{}));
-    PROPAGATE_ERROR_IF(r);
+    IF_ERROR_PROPAGATE(r);
     RETURN_ERROR_IF(!responseOk(r.value()), responseMessage(r.value(), "password update failed"));
     return responseMessage(r.value(), "password updated");
 }
@@ -431,7 +431,7 @@ namespace
 
 // Parse a raw admin-storage JSON body into a dynamic value.
 sgrn::Result<sgrn::json::Value, std::string> parseAdminStorageJson(sgrn::Result<std::string, std::string> t_raw, const char* t_what) {
-    PROPAGATE_ERROR_IF(t_raw);
+    IF_ERROR_PROPAGATE(t_raw);
     auto parsed = sgrn::json::parseValue(t_raw.value());
     RETURN_ERROR_IF(parsed.hasError(), std::string(t_what) + ": invalid JSON response");
     return parsed.value();
@@ -442,7 +442,7 @@ sgrn::Result<sgrn::json::Value, std::string> parseAdminStorageJson(sgrn::Result<
 sgrn::Result<std::vector<StorageBucketCensus>, std::string> DatastoreClient::tryStorageAdminOverview(uint32_t t_max_pages) {
     auto w_res = makeTypedRequest<sgrn::datastore::storage::StorageOverview>(
         "GET", "/api/v1/admin/storage/overview?max_pages=" + std::to_string(t_max_pages));
-    PROPAGATE_ERROR_IF(w_res);
+    IF_ERROR_PROPAGATE(w_res);
     return std::move(w_res).value().buckets;
 }
 
@@ -464,7 +464,7 @@ sgrn::Result<StorageOrphansReport, std::string> DatastoreClient::tryStorageAdmin
 sgrn::Result<StoragePurgeResult, std::string> DatastoreClient::tryStorageAdminPurge(
     const std::string& t_bucket, const std::vector<std::string>& t_keys, const std::string& t_prefix, bool t_dry_run, uint32_t t_limit) {
     auto doc_res = parseAdminStorageJson(storageAdminPurgeOrphansJson(t_bucket, t_keys, t_prefix, t_dry_run, t_limit), "storage purge");
-    PROPAGATE_ERROR_IF(doc_res);
+    IF_ERROR_PROPAGATE(doc_res);
     const sgrn::json::Value& doc = doc_res.value();
 
     const bool is_dry_run_shape = doc.is_object() && doc.contains("would_delete");
@@ -975,13 +975,13 @@ sgrn::Result<std::string, std::string> DatastoreClient::listWebhooksJson() {
 
 sgrn::Result<std::vector<sgrn::datastore::admin::ActiveSession>, std::string> DatastoreClient::tryListActiveSessions() {
     auto decoded = makeTypedRequest<std::vector<sgrn::datastore::admin::ActiveSession>>("GET", "/api/v1/admin/metaprobe/sessions");
-    PROPAGATE_ERROR_IF(decoded);
+    IF_ERROR_PROPAGATE(decoded);
     return std::move(decoded).value();
 }
 
 sgrn::Result<std::vector<sgrn::datastore::admin::Webhook>, std::string> DatastoreClient::tryListWebhooks() {
     auto decoded = makeTypedRequest<std::vector<sgrn::datastore::admin::Webhook>>("GET", "/api/v1/admin/webhooks");
-    PROPAGATE_ERROR_IF(decoded);
+    IF_ERROR_PROPAGATE(decoded);
     return std::move(decoded).value();
 }
 

@@ -111,7 +111,7 @@ fields:
       maxlen: 512
     nullable: false
 
-  checksum_sha256:
+  checksum_sha512:
     type: text
     readable: true
     writable: true
@@ -119,7 +119,7 @@ fields:
     operators:
       - eq
     validation:
-      maxlen: 64
+      maxlen: 128
     nullable: true
 
   deleted_at:

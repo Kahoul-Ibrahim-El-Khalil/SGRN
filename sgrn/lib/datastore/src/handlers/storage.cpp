@@ -3,7 +3,6 @@
 #include <sgrn/datastore/core/db.hpp>
 #include <sgrn/datastore/error/ApiErrors.hpp>
 #include <sgrn/datastore/handlers/storage.hpp>
-#include <sgrn/datastore/services/helpers/magic.hpp>
 #include <sgrn/datastore/services/storage.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
 #include <sgrn/datastore/utils/safe-access.hpp>
@@ -45,6 +44,7 @@ using sgrn::datastore::services::storage::StorageScope;
 StorageApiHandler::StorageApiHandler()
     : IHandler<StorageApiHandler>(this, kRoutes, kItemRoutes)
     , storage_service_() {
+    services::storage::startVersionCompactor(storage_service_);
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handleGetConstraints(HttpRequestPtr tsp_req) {

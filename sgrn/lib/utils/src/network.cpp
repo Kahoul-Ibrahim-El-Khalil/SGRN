@@ -132,7 +132,7 @@ NetworkResult<uint32_t> parseIpv4OrResolve(const std::string& t_str) {
 
 NetworkResult<CidrMatcher> parseIp(const std::string& t_ip) {
     auto host = parseIpv4OrResolve(t_ip);
-    PROPAGATE_ERROR_IF(host);
+    IF_ERROR_PROPAGATE(host);
     return CidrMatcher{host.value(), 0xFFFFFFFF};
 }
 
@@ -145,7 +145,7 @@ NetworkResult<CidrMatcher> parseCidr(const std::string& t_cidr) {
     std::string len_part = t_cidr.substr(slash + 1);
 
     auto host = parseIpv4OrResolve(ip_part);
-    PROPAGATE_ERROR_IF(host);
+    IF_ERROR_PROPAGATE(host);
 
     int prefix_len = 0;
     try {
@@ -165,25 +165,25 @@ NetworkResult<CidrMatcher> parseCidr(const std::string& t_cidr) {
 
 NetworkResult<std::string> getClientIp(int t_fd) {
     auto addr = getPeerAddress(t_fd);
-    PROPAGATE_ERROR_IF(addr);
+    IF_ERROR_PROPAGATE(addr);
     return addressToString(addr.value());
 }
 
 NetworkResult<uint16_t> getClientPort(int t_fd) {
     auto addr = getPeerAddress(t_fd);
-    PROPAGATE_ERROR_IF(addr);
+    IF_ERROR_PROPAGATE(addr);
     uint16_t port = 0;
     auto str = addressToString(addr.value(), &port);
-    PROPAGATE_ERROR_IF(str);
+    IF_ERROR_PROPAGATE(str);
     return port;
 }
 
 NetworkResult<std::string> getLocalAddress(int t_fd) {
     auto addr = getSockName(t_fd);
-    PROPAGATE_ERROR_IF(addr);
+    IF_ERROR_PROPAGATE(addr);
     uint16_t port = 0;
     auto str = addressToString(addr.value(), &port);
-    PROPAGATE_ERROR_IF(str);
+    IF_ERROR_PROPAGATE(str);
     return str.value() + ":" + std::to_string(port);
 }
 

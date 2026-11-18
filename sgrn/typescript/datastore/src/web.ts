@@ -191,6 +191,7 @@ export const StorageBackendApiEndpoints = {
   CONSTRAINTS: "/api/v1/storage/info",
   GET_STATS: "/api/v1/storage/stats",
   FILES_METADATA: "/api/v1/storage/files/metadata",
+  VERSIONS: "/api/v1/storage/files/versions",
   DRIVE_LIST: "/api/v1/storage/drive/list",
   DRIVE_MKDIR: "/api/v1/storage/drive/mkdir",
   DRIVE_MOVE: "/api/v1/storage/drive/move",

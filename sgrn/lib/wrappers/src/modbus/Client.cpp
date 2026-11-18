@@ -88,22 +88,22 @@ sgrn::Result<modbus_t*> Client::createContext(const ClientConfig& t_cfg) {
 
 sgrn::Result<Client> Client::connect(ClientConfig t_cfg) {
     auto ctx_res = createContext(t_cfg);
-    PROPAGATE_ERROR_IF(ctx_res);
+    IF_ERROR_PROPAGATE(ctx_res);
 
     Client client(ctx_res.value(), std::move(t_cfg));
-    PROPAGATE_ERROR_IF(client.connectLocked());
+    IF_ERROR_PROPAGATE(client.connectLocked());
     return client;
 }
 
 sgrn::Result<std::shared_ptr<Client>> Client::createShared(ClientConfig t_cfg) {
     auto ctx_res = createContext(t_cfg);
-    PROPAGATE_ERROR_IF(ctx_res);
+    IF_ERROR_PROPAGATE(ctx_res);
     return std::shared_ptr<Client>(new Client(ctx_res.value(), std::move(t_cfg)));
 }
 
 sgrn::Result<std::shared_ptr<Client>> Client::connectShared(ClientConfig t_cfg) {
     auto res = connect(std::move(t_cfg));
-    PROPAGATE_ERROR_IF(res);
+    IF_ERROR_PROPAGATE(res);
     return std::shared_ptr<Client>(new Client(std::move(res.value())));
 }
 

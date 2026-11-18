@@ -191,7 +191,12 @@ export default function AnalyticsPanel() {
                                     <div key={p.day} className="bar-row">
                                         <span className="bar-label">{p.day}</span>
                                         <div className="bar-track">
-                                            <div className="bar-fill" style={{ width: `${Math.round((p.files / maxDayFiles) * 100)}%` }} />
+                                            <div
+                                                className="bar-fill"
+                                                style={
+                                                    { "--progress": `${Math.round((p.files / maxDayFiles) * 100)}%` } as React.CSSProperties
+                                                }
+                                            />
                                         </div>
                                         <span className="bar-value">
                                             {p.files} · {formatBytes(p.bytes_virtual)}
@@ -371,7 +376,7 @@ export default function AnalyticsPanel() {
                 </div>
 
                 {auditLogs.length > 0 ? (
-                    <div className="datagrid-wrapper" style={{ marginTop: "1rem" }}>
+                    <div className="datagrid-wrapper admin-mt-1">
                         <table className="datagrid-industrial">
                             <thead>
                                 <tr>
@@ -386,32 +391,17 @@ export default function AnalyticsPanel() {
                             <tbody>
                                 {auditLogs.map((log) => (
                                     <tr key={log.id}>
-                                        <td className="admin-cell-muted" style={{ fontSize: "0.8rem" }}>
-                                            {log.created_at}
-                                        </td>
+                                        <td className="admin-cell-muted admin-cell-small">{log.created_at}</td>
                                         <td>
                                             <span
-                                                style={{
-                                                    padding: "2px 6px",
-                                                    borderRadius: "4px",
-                                                    fontSize: "0.75rem",
-                                                    fontFamily: "monospace",
-                                                    fontWeight: 600,
-                                                    backgroundColor: log.action.startsWith("audit.")
-                                                        ? "rgba(245, 158, 11, 0.15)"
-                                                        : "rgba(59, 130, 246, 0.15)",
-                                                    color: log.action.startsWith("audit.") ? "#fbbf24" : "#60a5fa",
-                                                    border: `1px solid ${log.action.startsWith("audit.") ? "rgba(245, 158, 11, 0.3)" : "rgba(59, 130, 246, 0.3)"}`,
-                                                }}
+                                                className={`audit-action ${log.action.startsWith("audit.") ? "audit-action--audit" : "audit-action--default"}`}
                                             >
                                                 {log.action}
                                             </span>
                                         </td>
                                         <td>
                                             <div className="admin-cell-bold">{log.actor_name}</div>
-                                            <div className="admin-cell-muted" style={{ fontSize: "0.75rem" }}>
-                                                {log.actor_type}
-                                            </div>
+                                            <div className="admin-cell-muted admin-cell-smaller">{log.actor_type}</div>
                                         </td>
                                         <td>
                                             {log.target_type ? (
@@ -422,21 +412,10 @@ export default function AnalyticsPanel() {
                                                 "-"
                                             )}
                                         </td>
-                                        <td className="admin-cell-muted" style={{ fontSize: "0.8rem" }}>
-                                            {log.ip}
-                                        </td>
+                                        <td className="admin-cell-muted admin-cell-small">{log.ip}</td>
                                         <td>
                                             <span
-                                                style={{
-                                                    padding: "2px 8px",
-                                                    borderRadius: "4px",
-                                                    fontSize: "0.7rem",
-                                                    fontWeight: 700,
-                                                    backgroundColor:
-                                                        log.status === "success" ? "rgba(16, 185, 129, 0.15)" : "rgba(239, 68, 68, 0.15)",
-                                                    color: log.status === "success" ? "#10b981" : "#ef4444",
-                                                    border: `1px solid ${log.status === "success" ? "rgba(16, 185, 129, 0.3)" : "rgba(239, 68, 68, 0.3)"}`,
-                                                }}
+                                                className={`status-badge ${log.status === "success" ? "status-badge--success" : "status-badge--error"}`}
                                             >
                                                 {log.status.toUpperCase()}
                                             </span>
@@ -447,20 +426,15 @@ export default function AnalyticsPanel() {
                         </table>
                     </div>
                 ) : (
-                    <div className="query-help" style={{ marginTop: "1rem" }}>
-                        No audit records matched the filter criteria.
-                    </div>
+                    <div className="query-help admin-mt-1">No audit records matched the filter criteria.</div>
                 )}
             </div>
 
-            <div
-                className="roster-card"
-                style={{ marginTop: "2rem", border: "1px solid rgba(239, 68, 68, 0.3)", backgroundColor: "rgba(239, 68, 68, 0.03)" }}
-            >
+            <div className="roster-card admin-danger-zone">
                 <div className="roster-title flex items-center gap-2 text-rose-400">
-                    <ShieldAlert size={18} style={{ color: "#ef4444" }} /> AUDITABLE MASTER CLEARANCE (DANGER ZONE)
+                    <ShieldAlert size={18} className="admin-danger-icon" /> AUDITABLE MASTER CLEARANCE (DANGER ZONE)
                 </div>
-                <div className="query-help" style={{ marginBottom: "1rem" }}>
+                <div className="query-help admin-mb-1">
                     Purging audit logs removes historical compliance entries older than the selected threshold. Every purge action
                     automatically logs an immutable <strong>audit.purged</strong> event capturing who executed the clearance and how many
                     rows were purged.
@@ -484,24 +458,14 @@ export default function AnalyticsPanel() {
                         {verifying ? <Loader2 className="animate-spin" size={18} /> : <ShieldCheck size={18} />}
                         <span>&nbsp;VERIFY CHAIN</span>
                     </button>
-                    <button
-                        className="btn-desktop-primary"
-                        style={{ backgroundColor: "#dc2626", borderColor: "#b91c1c" }}
-                        onClick={handlePurgeAudit}
-                        disabled={purging}
-                    >
+                    <button className="btn-desktop-primary btn-desktop--danger" onClick={handlePurgeAudit} disabled={purging}>
                         {purging ? <Loader2 className="animate-spin" size={18} /> : <Trash2 size={18} />}
                         <span>&nbsp;EXECUTE AUDIT CLEARANCE</span>
                     </button>
                 </div>
                 {verifyResult && (
                     <div
-                        className="query-help"
-                        style={{
-                            marginTop: "1rem",
-                            border: `1px solid ${verifyResult.is_valid ? "rgba(34, 197, 94, 0.4)" : "rgba(239, 68, 68, 0.5)"}`,
-                            color: verifyResult.is_valid ? "#4ade80" : "#f87171",
-                        }}
+                        className={`query-help admin-verify-result ${verifyResult.is_valid ? "admin-verify-result--valid" : "admin-verify-result--invalid"}`}
                     >
                         {verifyResult.is_valid ? "✔ " : "✘ "}
                         {verifyResult.is_valid

@@ -6,6 +6,7 @@
 #include <sgrn/datastore/BackendError.hpp>
 #include <sgrn/datastore/plugins/aws/S3Client.hpp>
 #include <sgrn/datastore/wire/auth.hpp>
+#include <sgrn/utils/filesystem.hpp>
 #include <sgrn/utils/hashing.hpp>
 #include <filesystem>
 #include <optional>
@@ -38,6 +39,10 @@ constexpr size_t kMinPartSizeMb = 5; // S3 hard minimum, all parts but the last
 
 struct FileHash {
     std::string key;
+    // SHA-512 (lowercase hex) of the ORIGINAL bytes (plaintext, uncompressed).
+    // `key` is a SHA-512/base64url storage key and must never be used as a
+    // version content hash: storage.file_versions.content_sha512 is char(128).
+    std::string sha512_hex;
     size_t original_size = 0;
 
     [[nodiscard]] const std::string& hex() const {
@@ -178,23 +183,6 @@ struct ScopeContext {
 };
 
 // ============================================================================
-// RAII Temp File Guard
-// ============================================================================
-
-struct TempFileGuard {
-    std::filesystem::path path;
-
-    explicit TempFileGuard(std::filesystem::path t_path);
-    ~TempFileGuard();
-
-    TempFileGuard(const TempFileGuard&) = delete;
-    TempFileGuard& operator=(const TempFileGuard&) = delete;
-
-    TempFileGuard(TempFileGuard&& t_other) noexcept;
-    TempFileGuard& operator=(TempFileGuard&& t_other) noexcept;
-};
-
-// ============================================================================
 // Helper Functions (Namespace: helpers)
 // ============================================================================
 
@@ -206,27 +194,19 @@ Result<FileHash, BackendError> computeHashInMemory(std::string_view t_data);
 Result<FileHash, BackendError> computeHashFromFile(const fs::path& t_file_path);
 drogon::Task<Result<FileHash, BackendError>> computeHashFromFileAsync(fs::path t_file_path);
 
-// SHA-256 (hex) for checksum/ETag
-Result<std::string, BackendError> computeSha256InMemory(std::string_view t_data);
-Result<std::string, BackendError> computeSha256FromFile(const fs::path& t_file_path);
-drogon::Task<Result<std::string, BackendError>> computeSha256FromFileAsync(fs::path t_file_path);
+// SHA-512 (hex) for checksum/ETag
+Result<std::string, BackendError> computeSha512InMemory(std::string_view t_data);
+Result<std::string, BackendError> computeSha512FromFile(const fs::path& t_file_path);
+drogon::Task<Result<std::string, BackendError>> computeSha512FromFileAsync(fs::path t_file_path);
 
 // Compression Utilities
 drogon::Task<Result<std::string, BackendError>> compressInMemory(std::string&& t_data, uint8_t t_compression_level);
 Result<fs::path, BackendError> compressFile(const fs::path& t_input_path, const fs::path& t_output_path, uint8_t t_compression_level);
 drogon::Task<Result<fs::path, BackendError>> compressFileAsync(fs::path t_input_path, fs::path t_output_path, uint8_t t_compression_level);
 
-// Path and Extension Utilities
-std::string_view extractExtension(std::string_view t_filename);
-std::string extractExtensionLower(std::string_view t_filename); // SEC: lowercase, for case-insensitive allowlist comparison
-std::pair<std::string_view, std::string_view> splitExtension(std::string_view t_filename);
-std::string inferMimeType(std::string_view t_filename);
-bool isCompressibleMimeType(std::string_view t_mime_type);
-bool verifyCompressionSignature(std::string_view t_data, std::string_view t_algorithm);
-
 // Database Operations
 drogon::Task<Result<int64_t, BackendError>> insertObject(drogon::orm::DbClientPtr tsp_db_client, std::string t_bucket, std::string t_key,
-    size_t t_size, size_t t_original_size, std::string t_sha256, bool t_is_compressed = false,
+    size_t t_size, size_t t_original_size, std::string t_sha512, bool t_is_compressed = false,
     std::optional<std::string> t_compression_algorithm = std::nullopt, std::optional<uint8_t> t_compression_level = std::nullopt);
 
 // Chunking trace refresh after a successful multipart upload. The object row
@@ -239,7 +219,7 @@ drogon::Task<Result<void, BackendError>> updateObjectChunking(drogon::orm::DbCli
 drogon::Task<Result<int64_t, BackendError>> insertFile(drogon::orm::DbClientPtr tsp_db_client, std::string t_name, int64_t t_object_id,
     std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_extension,
     std::optional<int64_t> t_directory_id = std::nullopt, std::string t_domain = "", std::optional<std::string> t_key_id = std::nullopt,
-    bool t_is_encrypted = false);
+    bool t_is_encrypted = false, bool t_versioning_enabled = true);
 
 drogon::Task<Result<std::optional<int64_t>, BackendError>> resolveDirectoryPath(drogon::orm::DbClientPtr tsp_db_client,
     std::optional<int32_t> t_user_id, std::optional<int32_t> t_automated_service_id, int64_t t_session_id, std::string t_virtual_path,
@@ -256,9 +236,8 @@ drogon::Task<std::optional<drogon_model::sgrn::storage::Formats>> getFormat(
     drogon::orm::DbClientPtr tsp_db_client, std::string t_extension);
 
 // Temp File Management
-fs::path generateTempPath(std::string_view t_prefix = "temp_");
-Result<TempFileGuard, BackendError> saveToTempFile(const drogon::HttpFile& t_file);
-Result<TempFileGuard, BackendError> saveToTempFile(const std::string& t_data);
+Result<sgrn::utils::filesystem::TempFileGuard, BackendError> saveToTempFile(const drogon::HttpFile& t_file);
+Result<sgrn::utils::filesystem::TempFileGuard, BackendError> saveToTempFile(const std::string& t_data);
 
 drogon::Task<Result<ScopeContext, BackendError>> resolveScopeSession(drogon::orm::DbClientPtr tsp_db_client,
     const ::sgrn::datastore::auth::SessionClaims& t_session, StorageScope t_scope, const std::string& t_path);

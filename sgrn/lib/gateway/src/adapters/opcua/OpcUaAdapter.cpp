@@ -77,7 +77,7 @@ sgrn::Result<void> OpcUaAdapter::start(const std::string& /*ip*/, uint16_t t_por
     impl_->server = std::make_unique<wrappers::opcua::Server>(t_port);
     impl_->server->suppressInfoLogs();
 
-    PROPAGATE_ERROR_IF(populateTypeRegistryFromSchema(t_registry, impl_->type_registry));
+    IF_ERROR_PROPAGATE(populateTypeRegistryFromSchema(t_registry, impl_->type_registry));
     impl_->server->installTypeRegistry(impl_->type_registry);
 
     impl_->session_registry.installAccessControl(impl_->server->raw());

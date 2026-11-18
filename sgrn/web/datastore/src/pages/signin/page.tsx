@@ -54,7 +54,7 @@ export default function SignInPage() {
     return (
         <div className="signin-root">
             {/* Top logos bar */}
-            <div style={{ display: "flex" }}>
+            <div className="signin-topbar-actions">
                 <ThemeToggle />
             </div>
             {/* Split body */}

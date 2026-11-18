@@ -6,7 +6,6 @@
 #include <sgrn/datastore/error/ApiErrors.hpp>
 #include <sgrn/datastore/filters/types.hpp>
 #include <sgrn/datastore/handlers/storage.hpp>
-#include <sgrn/datastore/services/helpers/magic.hpp>
 #include <sgrn/datastore/services/storage.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
 #include <sgrn/datastore/utils/respond.hpp>
@@ -14,7 +13,9 @@
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/crypto/stream.hpp>
 #include <sgrn/utils/encoding.hpp>
+#include <sgrn/utils/file-signature.hpp>
 #include <sgrn/utils/hashing.hpp>
+#include <sgrn/utils/mime.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <algorithm>
 #include <cctype>
@@ -433,16 +434,16 @@ std::shared_ptr<StorageApiHandler::UploadSessionState> StorageApiHandler::getOrC
 
     auto state = std::make_shared<UploadSessionState>();
 
-    // SHA-256 context
+    // SHA-512 context
     state->hash_ctx = EVP_MD_CTX_new();
     if (!state->hash_ctx)
         return nullptr;
-    if (EVP_DigestInit_ex(state->hash_ctx, EVP_sha256(), nullptr) != 1)
+    if (EVP_DigestInit_ex(state->hash_ctx, EVP_sha512(), nullptr) != 1)
         return nullptr;
 
     // Only compress if the MIME type is compressible (e.g. text/json/xml).
     // For already-compressed or binary formats, store verbatim.
-    if (services::storage::helpers::isCompressibleMimeType(t_mime_type)) {
+    if (sgrn::utils::mime::isCompressibleMimeType(t_mime_type)) {
         state->cstream = ZSTD_createCStream();
         if (!state->cstream)
             return nullptr;
@@ -479,12 +480,12 @@ static Task<Result<int64_t, BackendError>> flushSegment(sgrn::datastore::plugins
     // original_size for a provisional segment is not known yet (we only know
     // total original_size at complete time). We store compressed_size as a
     // placeholder; it is corrected after the rename in handleCompleteUploadSession.
-    // Compute SHA-256 of the compressed segment data as a placeholder.
-    auto sha256_res = helpers::computeSha256InMemory(seg_data);
-    CO_RETURN_ERROR_IF(sha256_res.hasError(), sha256_res.error());
+    // Compute SHA-512 of the compressed segment data as a placeholder.
+    auto sha512_res = helpers::computeSha512InMemory(seg_data);
+    CO_RETURN_ERROR_IF(sha512_res.hasError(), sha512_res.error());
     auto obj_res =
         co_await helpers::insertObject(db, bucket, seg_key, static_cast<size_t>(compressed_size), static_cast<size_t>(compressed_size),
-            *sha256_res, /*is_compressed=*/true, std::string{"zstd"}, static_cast<std::optional<uint8_t>>(kCompressionLevel));
+            *sha512_res, /*is_compressed=*/true, std::string{"zstd"}, static_cast<std::optional<uint8_t>>(kCompressionLevel));
     co_return obj_res;
 }
 
@@ -646,9 +647,8 @@ Task<HttpResponsePtr> StorageApiHandler::handleUploadChunk(HttpRequestPtr tsp_re
 Task<HttpResponsePtr> StorageApiHandler::handleGetUploadStatus(HttpRequestPtr tsp_req) {
     DEBUG_HTTP_REQUEST(tsp_req, "handleGetUploadStatus");
     std::string upload_id = uploadIdFromRequest(tsp_req);
-    if (upload_id.empty()) {
-        co_return createTypedResponse(BackendErrorResponse{"upload_id is required", k400BadRequest});
-    }
+
+    CO_RETURN_IF(upload_id.empty(), createTypedResponse(BackendErrorResponse{"upload_id is required", k400BadRequest}));
 
     try {
         auto db_res = sgrn::datastore::core::getDbClient();
@@ -658,15 +658,17 @@ Task<HttpResponsePtr> StorageApiHandler::handleGetUploadStatus(HttpRequestPtr ts
         const SessionActor actor = sessionActor(tsp_req);
         auto s_rows = co_await db->execSqlCoro(kUploadStatusQuery, upload_id, actor.user_id, actor.service_id);
 
-        if (s_rows.empty()) {
-            co_return createTypedResponse(BackendErrorResponse{"Upload session not found", k404NotFound});
-        }
+        CO_RETURN_IF(s_rows.empty(), createTypedResponse(BackendErrorResponse{"Upload session not found", k404NotFound}));
 
         static constexpr char kChunkIndexQuery[] =
             "SELECT chunk_index FROM storage.upload_chunks WHERE upload_id = $1 ORDER BY chunk_index ASC";
+
         auto idx_rows = co_await db->execSqlCoro(kChunkIndexQuery, upload_id);
+
         std::vector<int32_t> uploaded_chunk_indices;
+
         uploaded_chunk_indices.reserve(idx_rows.size());
+
         for (const auto& idx_row : sgrn::orm::fromResult<ChunkIndexRow, kChunkIndexQuery>(idx_rows)) {
             uploaded_chunk_indices.push_back(idx_row.chunk_index);
         }
@@ -704,8 +706,8 @@ static Task<void> rollbackEncryptedUpload(sgrn::datastore::plugins::aws::S3Clien
 Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequestPtr tsp_req) {
     DEBUG_HTTP_REQUEST(tsp_req, "handleCompleteUploadSession");
     const std::string upload_id = uploadIdFromRequest(tsp_req, UploadIdSource::JsonBody);
-    if (upload_id.empty())
-        co_return createTypedResponse(BackendErrorResponse{"upload_id is required", k400BadRequest});
+
+    CO_RETURN_IF(upload_id.empty(), createTypedResponse(BackendErrorResponse{"upload_id is required", k400BadRequest}));
 
     try {
         auto db_res = sgrn::datastore::core::getDbClient();
@@ -721,16 +723,17 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
         const SessionActor actor = sessionActor(tsp_req);
         const bool is_uploader = (s.user_id && actor.user_id && *s.user_id == *actor.user_id) ||
                                  (s.automated_service_id && actor.service_id && *s.automated_service_id == *actor.service_id);
-        if (!is_uploader)
-            co_return createTypedResponse(BackendErrorResponse{"Upload session not found", k404NotFound});
-        if (s.status != "active")
-            co_return createTypedResponse(BackendErrorResponse{"Upload session is not active", k409Conflict});
-        if (s.expired)
-            co_return createTypedResponse(BackendErrorResponse{"Upload session expired", k410Gone});
+
+        CO_RETURN_IF(!is_uploader, createTypedResponse(BackendErrorResponse{"Upload session not found", k404NotFound}));
+
+        CO_RETURN_IF(s.status != "active", createTypedResponse(BackendErrorResponse{"Upload session is not active", k409Conflict}));
+
+        CO_RETURN_IF(s.expired, createTypedResponse(BackendErrorResponse{"Upload session expired", k410Gone}));
 
         const int32_t total_chunks = s.total_chunks;
-        if (s.uploaded_chunks_count < total_chunks)
-            co_return createTypedResponse(BackendErrorResponse{"Cannot complete: not all chunks have been uploaded", k400BadRequest});
+
+        CO_RETURN_IF(s.uploaded_chunks_count < total_chunks,
+            createTypedResponse(BackendErrorResponse{"Cannot complete: not all chunks have been uploaded", k400BadRequest}));
 
         const std::string& filename = s.filename;
         const std::string& target_path = s.target_path;
@@ -760,10 +763,11 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
 
         // -- 2. Recover streaming pipeline state
         auto state = getOrCreateUploadState(upload_id, mime_type, kCompressionLevel);
-        if (!state)
-            co_return createTypedResponse(BackendErrorResponse{"Failed to recover upload stream state", k500InternalServerError});
+
+        CO_RETURN_IF(!state, createTypedResponse(BackendErrorResponse{"Failed to recover upload stream state", k500InternalServerError}));
 
         auto s3_res = storage_service_.S3Client();
+
         CO_RETURN_IF(s3_res.hasError(),
             createTypedResponse(BackendErrorResponse{fmt::format("S3 unavailable: {}", s3_res.error().message), k500InternalServerError}));
         auto* s3 = s3_res.value();
@@ -825,20 +829,14 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
             co_return createTypedResponse(BackendErrorResponse{"No segments produced", k500InternalServerError});
         }
 
-        // -- 5. Finalize SHA-256 hash over original bytes
+        // -- 5. Finalize SHA-512 hash over original bytes
         std::array<unsigned char, EVP_MAX_MD_SIZE> hash_bytes{};
         unsigned int hash_len = 0;
         if (EVP_DigestFinal_ex(state->hash_ctx, hash_bytes.data(), &hash_len) != 1) {
             removeUploadState(upload_id);
             co_return createTypedResponse(BackendErrorResponse{"Failed to finalize file hash", k500InternalServerError});
         }
-        static constexpr char kHexChars[] = "0123456789abcdef";
-        std::string file_hash;
-        file_hash.reserve(hash_len * 2);
-        for (unsigned int i = 0; i < hash_len; ++i) {
-            file_hash.push_back(kHexChars[hash_bytes[i] >> 4]);
-            file_hash.push_back(kHexChars[hash_bytes[i] & 0x0F]);
-        }
+        std::string file_hash = sgrn::utils::encoding::toBase64Url(hash_bytes.data(), hash_len);
         const int64_t original_bytes = state->original_bytes;
         const bool server_compressed = state->server_compressed;
         removeUploadState(upload_id);
@@ -850,7 +848,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
                 fmt::format("Size mismatch: received {} bytes, declared {}", original_bytes, declared_size), k422UnprocessableEntity});
         }
 
-        std::string ext(services::storage::helpers::extractExtension(filename));
+        std::string ext(sgrn::utils::strings::extractExtension(filename));
 
         // -- 5b. Content sniffing (skipped when the server compressed the payload)
         std::string sniffed_ext;
@@ -864,7 +862,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
                     if (content_res.has_value()) {
                         std::string_view data(*content_res);
                         std::string preview(data.substr(0, std::min<size_t>(data.size(), 4096)));
-                        auto sniff_res = ::sgrn::datastore::services::helpers::sniffExtension(preview);
+                        auto sniff_res = sgrn::utils::file_signature::sniffExtension(preview);
                         if (sniff_res.has_value()) {
                             sniffed_ext = *sniff_res;
                         }
@@ -881,7 +879,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
             std::string sniffed_lower = sniffed_ext;
             std::transform(sniffed_lower.begin(), sniffed_lower.end(), sniffed_lower.begin(),
                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (!::sgrn::datastore::services::helpers::isCompatibleSniffedFormat(declared_lower, sniffed_lower)) {
+            if (!sgrn::utils::file_signature::isCompatibleSniffedFormat(declared_lower, sniffed_lower)) {
                 auto format_res = co_await services::storage::helpers::getFormat(db, sniffed_lower);
                 if (format_res.has_value()) {
                     co_return createTypedResponse(
@@ -946,8 +944,9 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
             }
 
             std::string ct_sha;
-            auto sha_res = sgrn::utils::computeSha256Data(
-                std::string_view(reinterpret_cast<const char*>(ciphertext.data()), ciphertext.size()), sgrn::utils::HashEncoding::hex);
+            auto sha_res =
+                sgrn::utils::computeSha512Data(std::string_view(reinterpret_cast<const char*>(ciphertext.data()), ciphertext.size()),
+                    sgrn::utils::HashEncoding::base64url);
             if (sha_res.hasValue()) {
                 ct_sha = sha_res.value();
             }
@@ -955,7 +954,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
             std::optional<std::string> comp_alg = server_compressed ? std::optional<std::string>("zstd") : std::nullopt;
             std::optional<int32_t> comp_lvl = server_compressed ? std::optional<int32_t>(kCompressionLevel) : std::nullopt;
             auto obj_res = co_await db->execSqlCoro(
-                "INSERT INTO storage.objects (bucket, key, size, original_size, sha256, is_compressed, compression_algorithm, "
+                "INSERT INTO storage.objects (bucket, key, size, original_size, sha512, is_compressed, compression_algorithm, "
                 "compression_level, upload_mode) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'single') RETURNING id",
                 bucket, final_obj_key, static_cast<int64_t>(ciphertext.size()), original_bytes, ct_sha, server_compressed, comp_alg,
                 comp_lvl);
@@ -981,10 +980,10 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
                             fmt::format("Failed to rename segment {}: {}", part_idx, copy_res.error().message), k500InternalServerError}));
                     co_await s3->deleteFile(bucket, prov_key);
                     co_await db->execSqlCoro(
-                        "UPDATE storage.objects SET key = $1, sha256 = $2 WHERE id = $3", final_key, file_hash, old_obj_id);
+                        "UPDATE storage.objects SET key = $1, sha512 = $2 WHERE id = $3", final_key, file_hash, old_obj_id);
                     final_obj_id = old_obj_id;
                 }
-                co_await db->execSqlCoro("UPDATE storage.objects SET sha256 = $1 WHERE id = $2", file_hash, final_obj_id);
+                co_await db->execSqlCoro("UPDATE storage.objects SET sha512 = $1 WHERE id = $2", file_hash, final_obj_id);
                 final_segments.emplace_back(part_idx, final_obj_id);
                 ++part_idx;
             }
@@ -1007,7 +1006,7 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
 
         auto file_res = co_await services::storage::helpers::insertFile(db, filename, final_segments[0].second, owner_user, owner_service,
             owner_session, ext, directory_id, domain_str, is_encrypted ? std::optional<std::string>(final_key_id) : std::nullopt,
-            is_encrypted);
+            is_encrypted, services::storage::currentStorageConfig().versioning_enabled);
         if (file_res.hasError()) {
             if (is_encrypted)
                 co_await rollbackEncryptedUpload(s3, db, bucket, final_obj_key, final_key_id, final_segments[0].second, std::nullopt);
@@ -1042,6 +1041,15 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
                 file_id, obj_id, pidx, seg_role);
         }
 
+        const auto version_cfg = services::storage::currentStorageConfig();
+        if (version_cfg.versioning_enabled) {
+            auto version_res = co_await services::storage::commitFileVersion(db, file_id, file_hash, original_bytes, is_encrypted,
+                is_encrypted ? std::optional<std::string>(final_key_id) : std::nullopt, owner_user, owner_service,
+                version_cfg.versioning_snapshot_interval);
+
+            CO_RETURN_IF(version_res.hasError(), createTypedResponse(BackendErrorResponse{version_res.error()}));
+        }
+
         // -- 8. Mark session completed
         co_await db->execSqlCoro("UPDATE storage.upload_sessions "
                                  "SET status = 'completed', file_hash = $2, "
@@ -1063,7 +1071,6 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
                 .message = "Upload completed successfully",
             },
             k200OK);
-
     } catch (const std::exception& e) {
         removeUploadState(upload_id);
         ERROR_LOG("Complete upload error: {}", e.what());
@@ -1072,23 +1079,27 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
 }
 
 Task<HttpResponsePtr> StorageApiHandler::handleAbortUploadSession(HttpRequestPtr tsp_req) {
+
     DEBUG_HTTP_REQUEST(tsp_req, "handleAbortUploadSession");
+
     std::string upload_id = uploadIdFromRequest(tsp_req, UploadIdSource::QueryOrJsonBody);
-    if (upload_id.empty()) {
-        co_return createTypedResponse(BackendErrorResponse{"upload_id is required", k400BadRequest});
-    }
+
+    CO_RETURN_IF(upload_id.empty(), createTypedResponse(BackendErrorResponse{"upload_id is required", k400BadRequest}));
 
     try {
         auto db_res = sgrn::datastore::core::getDbClient();
+
         CO_RETURN_IF(db_res.hasError(), createTypedResponse(BackendErrorResponse{db_res.error()}));
+
         auto db = db_res.value();
 
         const SessionActor actor = sessionActor(tsp_req);
+
         auto res = co_await db->execSqlCoro("UPDATE storage.upload_sessions SET status = 'aborted', updated_at = NOW() WHERE id = $1 "
                                             "AND (user_id = $2 OR automated_service_id = $3)",
             upload_id, actor.user_id, actor.service_id);
-        if (res.affectedRows() == 0)
-            co_return createTypedResponse(BackendErrorResponse{"Upload session not found", k404NotFound});
+
+        CO_RETURN_IF(res.affectedRows() == 0, createTypedResponse(BackendErrorResponse{"Upload session not found", k404NotFound}));
 
         co_return createTypedResponse(tsp_req, UploadAbortResponse{"Upload session aborted"}, k200OK);
 

@@ -136,6 +136,28 @@
     min-width: 0;
     overflow: auto;
 }
+.preview-modal-plain {
+    margin: 0;
+    padding: 1.5rem;
+    font-size: 13px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    color: inherit;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+.preview-modal-truncated {
+    padding: 10px 16px;
+    border-bottom: 1px solid rgb(255 255 255 / 0.08);
+    background: rgb(255 180 0 / 0.08);
+    color: #f2c078;
+    font:
+        11px ui-monospace,
+        SFMono-Regular,
+        Menlo,
+        Consolas,
+        monospace;
+    letter-spacing: 0.04em;
+}
 .preview-modal-loading,
 .preview-modal-error {
     flex: 1;

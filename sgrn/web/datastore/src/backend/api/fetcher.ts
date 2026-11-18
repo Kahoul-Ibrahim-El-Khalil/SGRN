@@ -14,10 +14,19 @@ export async function authenticatedFetch(t_url: string, t_http_options: RequestI
 }
 
 /**
+ * Shape of a non-2xx JSON body returned by the API. Both `error` and
+ * `message` are used across handlers, so callers read whichever is present.
+ */
+export interface ApiErrorBody {
+    error?: string;
+    message?: string;
+}
+
+/**
  * Read the JSON body of a Response. Drop-in replacement for `res.json()`.
  * Falls back to `{}` on parse failure (matching `.catch(() => ({}))` patterns).
  */
-export async function readBody<T = any>(t_res: Response, t_fallback?: any): Promise<T> {
+export async function readBody<T = unknown>(t_res: Response, t_fallback?: unknown): Promise<T> {
     try {
         return (await t_res.json()) as T;
     } catch {

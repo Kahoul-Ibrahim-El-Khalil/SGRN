@@ -1,3 +1,4 @@
+
 /**
  *
  *  Files.h
@@ -38,6 +39,7 @@ namespace drogon_model
 {
 namespace sgrn
 {
+
 namespace storage
 {
 
@@ -56,14 +58,18 @@ public:
         static const std::string _full_path;
         static const std::string _key_id;
         static const std::string _is_encrypted;
-        static const std::string _content_sha256;
+        static const std::string _content_sha512;
         static const std::string _created_at;
+        static const std::string _current_version_id;
+        static const std::string _version_count;
     };
 
     static const int primaryKeyNumber;
     static const std::string tableName;
     static const bool hasPrimaryKey;
+
     static const std::string primaryKeyName;
+
     using PrimaryKeyType = int64_t;
     const PrimaryKeyType& getPrimaryKey() const;
 
@@ -210,15 +216,15 @@ public:
     /// Set the value of the column is_encrypted
     void setIsEncrypted(const bool& pIsEncrypted) noexcept;
 
-    /**  For column content_sha256  */
-    /// Get the value of the column content_sha256, returns the default value if the column is null
-    const std::string& getValueOfContentSha256() const noexcept;
+    /**  For column content_sha512  */
+    /// Get the value of the column content_sha512, returns the default value if the column is null
+    const std::string& getValueOfContentSha512() const noexcept;
     /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
-    const std::shared_ptr<std::string>& getContentSha256() const noexcept;
-    /// Set the value of the column content_sha256
-    void setContentSha256(const std::string& pContentSha256) noexcept;
-    void setContentSha256(std::string&& pContentSha256) noexcept;
-    void setContentSha256ToNull() noexcept;
+    const std::shared_ptr<std::string>& getContentSha512() const noexcept;
+    /// Set the value of the column content_sha512
+    void setContentSha512(const std::string& pContentSha512) noexcept;
+    void setContentSha512(std::string&& pContentSha512) noexcept;
+    void setContentSha512ToNull() noexcept;
 
     /**  For column created_at  */
     /// Get the value of the column created_at, returns the default value if the column is null
@@ -228,8 +234,25 @@ public:
     /// Set the value of the column created_at
     void setCreatedAt(const ::trantor::Date& pCreatedAt) noexcept;
 
+    /**  For column current_version_id  */
+    /// Get the value of the column current_version_id, returns the default value if the column is null
+    const int64_t& getValueOfCurrentVersionId() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<int64_t>& getCurrentVersionId() const noexcept;
+    /// Set the value of the column current_version_id
+    void setCurrentVersionId(const int64_t& pCurrentVersionId) noexcept;
+    void setCurrentVersionIdToNull() noexcept;
+
+    /**  For column version_count  */
+    /// Get the value of the column version_count, returns the default value if the column is null
+    const int32_t& getValueOfVersionCount() const noexcept;
+    /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
+    const std::shared_ptr<int32_t>& getVersionCount() const noexcept;
+    /// Set the value of the column version_count
+    void setVersionCount(const int32_t& pVersionCount) noexcept;
+
     static size_t getColumnNumber() noexcept {
-        return 14;
+        return 16;
     }
     static const std::string& getColumnName(size_t index) noexcept(false);
 
@@ -237,6 +260,7 @@ public:
     std::string toString() const;
     Json::Value toMasqueradedJson(const std::vector<std::string>& pMasqueradingVector) const;
     /// Relationship interfaces
+
 private:
     friend drogon::orm::Mapper<Files>;
     friend drogon::orm::BaseBuilder<Files, true, true>;
@@ -264,8 +288,11 @@ private:
     std::shared_ptr<std::string> fullPath_;
     std::shared_ptr<std::string> keyId_;
     std::shared_ptr<bool> isEncrypted_;
-    std::shared_ptr<std::string> contentSha256_;
+    std::shared_ptr<std::string> contentSha512_;
     std::shared_ptr<::trantor::Date> createdAt_;
+    std::shared_ptr<int64_t> currentVersionId_;
+    std::shared_ptr<int32_t> versionCount_;
+
     struct MetaData {
         const std::string colName_;
         const std::string colType_;
@@ -276,16 +303,20 @@ private:
         const bool notNull_;
     };
     static const std::vector<MetaData> metaData_;
-    bool dirtyFlag_[14] = {false};
+    bool dirtyFlag_[16] = {false};
 
 public:
     static const std::string& sqlForFindingByPrimaryKey() {
+
         static const std::string sql = "select * from " + tableName + " where id = $1";
+
         return sql;
     }
 
     static const std::string& sqlForDeletingByPrimaryKey() {
+
         static const std::string sql = "delete from " + tableName + " where id = $1";
+
         return sql;
     }
     std::string sqlForInserting(bool& needSelection) const {
@@ -294,61 +325,86 @@ public:
         needSelection = false;
         sql += "id,";
         ++parametersCount;
+
         if (dirtyFlag_[1]) {
             sql += "name,";
             ++parametersCount;
         }
+
         if (dirtyFlag_[2]) {
             sql += "user_id,";
             ++parametersCount;
         }
+
         if (dirtyFlag_[3]) {
             sql += "automated_service_id,";
             ++parametersCount;
         }
+
         if (dirtyFlag_[4]) {
             sql += "session_id,";
             ++parametersCount;
         }
+
         if (dirtyFlag_[5]) {
             sql += "domain,";
             ++parametersCount;
         }
+
         if (dirtyFlag_[6]) {
             sql += "domain_id,";
             ++parametersCount;
         }
+
         if (dirtyFlag_[7]) {
             sql += "directory_id,";
             ++parametersCount;
         }
+
         if (dirtyFlag_[8]) {
             sql += "extension,";
             ++parametersCount;
         }
+
         if (dirtyFlag_[9]) {
             sql += "full_path,";
             ++parametersCount;
         }
+
         if (dirtyFlag_[10]) {
             sql += "key_id,";
             ++parametersCount;
         }
         sql += "is_encrypted,";
         ++parametersCount;
+
         if (!dirtyFlag_[11]) {
             needSelection = true;
         }
+
         if (dirtyFlag_[12]) {
-            sql += "content_sha256,";
+            sql += "content_sha512,";
             ++parametersCount;
         }
         sql += "created_at,";
         ++parametersCount;
+
         if (!dirtyFlag_[13]) {
             needSelection = true;
         }
+
+        if (dirtyFlag_[14]) {
+            sql += "current_version_id,";
+            ++parametersCount;
+        }
+        sql += "version_count,";
+        ++parametersCount;
+
+        if (!dirtyFlag_[15]) {
+            needSelection = true;
+        }
         needSelection = true;
+
         if (parametersCount > 0) {
             sql[sql.length() - 1] = ')';
             sql += " values (";
@@ -358,75 +414,129 @@ public:
         int placeholder = 1;
         char placeholderStr[64];
         size_t n = 0;
+
         sql += "default,";
+
         if (dirtyFlag_[1]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[2]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[3]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[4]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[5]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[6]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[7]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[8]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[9]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[10]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[11]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-        } else {
+
+        }
+
+        else {
             sql += "default,";
         }
+
         if (dirtyFlag_[12]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[13]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-        } else {
+
+        }
+
+        else {
             sql += "default,";
         }
+
+        if (dirtyFlag_[14]) {
+
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+        }
+
+        if (dirtyFlag_[15]) {
+
+            n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
+            sql.append(placeholderStr, n);
+
+        }
+
+        else {
+            sql += "default,";
+        }
+
         if (parametersCount > 0) {
             sql.resize(sql.length() - 1);
         }
+
         if (needSelection) {
             sql.append(") returning *");
         } else {
             sql.append(1, ')');
         }
+
         LOG_TRACE << sql;
         return sql;
     }
 };
 } // namespace storage
 } // namespace sgrn
+
 } // namespace drogon_model

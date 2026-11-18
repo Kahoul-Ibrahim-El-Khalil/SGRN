@@ -7,8 +7,11 @@ interface HighlightProps {
 
 /**
  * Highlights the occurrences of a query string within a text.
+ *
+ * Uses a theme-aware CSS class instead of hard-coded colours so it stays
+ * readable in both light and dark themes.
  */
-export const Highlight: React.FC<HighlightProps> = ({ text, query }) => {
+export const Highlight = React.memo(function Highlight({ text, query }: HighlightProps) {
     if (!query.trim()) {
         return <>{text}</>;
     }
@@ -16,27 +19,19 @@ export const Highlight: React.FC<HighlightProps> = ({ text, query }) => {
     // Escape regex special characters
     const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const parts = text.split(new RegExp(`(${escapedQuery})`, "gi"));
+    const lowerQuery = query.toLowerCase();
 
     return (
         <>
             {parts.map((part, i) =>
-                part.toLowerCase() === query.toLowerCase() ? (
-                    <span
-                        key={i}
-                        style={{
-                            backgroundColor: "rgba(255, 193, 7, 0.4)",
-                            color: "#fff",
-                            borderRadius: "2px",
-                            padding: "0 2px",
-                            fontWeight: 600,
-                        }}
-                    >
+                part.toLowerCase() === lowerQuery ? (
+                    <mark key={i} className="drive-highlight">
                         {part}
-                    </span>
+                    </mark>
                 ) : (
                     part
                 ),
             )}
         </>
     );
-};
+});

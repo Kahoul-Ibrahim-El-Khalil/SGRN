@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdio> // FILE, fopen, fclose, fread, fwrite
+#include <cstring>
 #include <filesystem>
 #include <string>
 #include <sys/stat.h>
@@ -26,10 +27,11 @@ Result<std::string> compressStringZstd(const std::string_view& t_data, uint8_t t
     out_string.resize(max_dest_size);
 
     size_t const compressed_size = ZSTD_compress(out_string.data(), max_dest_size, t_data.data(), t_data.size(), t_compression_level);
-    if (ZSTD_isError(compressed_size)) {
-        return Error(fmt::format("Zstd error: {}", ZSTD_getErrorName(compressed_size)));
-    }
+
+    RETURN_ERROR_IF(ZSTD_isError(compressed_size), fmt::format("Zstd error: {}", ZSTD_getErrorName(compressed_size)));
+
     out_string.resize(compressed_size);
+
     return out_string;
 }
 
@@ -42,28 +44,24 @@ namespace
 // Thread‑local buffer reused by the streaming decompressor
 static thread_local std::vector<char> tls_out_buffer;
 
-Result<std::string> decompressKnownSize(std::string_view t_data, size_t t_expected_size) {
-    if (t_expected_size > kMaxDecompressedSize) {
-        return Error(fmt::format("Decompressed size exceeds maximum allowed size ({})", kMaxDecompressedSize));
-    }
+Result<std::string> decompressKnownSize(std::string_view t_data, size_t t_expected_size, size_t t_max_size) {
+    RETURN_ERROR_IF(t_expected_size > t_max_size, fmt::format("Decompressed size exceeds maximum allowed size ({})", t_max_size));
 
     std::string out;
     out.resize(t_expected_size);
 
     size_t const actual = ZSTD_decompress(out.data(), out.size(), t_data.data(), t_data.size());
-    if (ZSTD_isError(actual)) {
-        return Error(fmt::format("Zstd decompression error: {}", ZSTD_getErrorName(actual)));
-    }
+
+    RETURN_ERROR_IF(ZSTD_isError(actual), fmt::format("Zstd decompression error: {}", ZSTD_getErrorName(actual)));
 
     out.resize(actual);
     return out;
 }
 
-Result<std::string> decompressStreaming(std::string_view t_data) {
+Result<std::string> decompressStreaming(std::string_view t_data, size_t t_max_size) {
     ZSTD_DStream* dstream = ZSTD_createDStream();
-    if (!dstream) {
-        return Error("Zstd: failed to create decompression stream");
-    }
+
+    RETURN_ERROR_IF(!dstream, "Zstd: failed to create decompression stream");
 
     auto free_dstream = [&] { ZSTD_freeDStream(dstream); };
 
@@ -97,9 +95,9 @@ Result<std::string> decompressStreaming(std::string_view t_data) {
 
             result.append(static_cast<const char*>(out.dst), out.pos);
 
-            if (result.size() > kMaxDecompressedSize) {
+            if (result.size() > t_max_size) {
                 free_dstream();
-                return Error(fmt::format("Decompressed output exceeds maximum allowed size ({})", kMaxDecompressedSize));
+                return Error(fmt::format("Decompressed output exceeds maximum allowed size ({})", t_max_size));
             }
 
             if (ret == 0) {
@@ -124,15 +122,36 @@ Result<std::string> decompressStreaming(std::string_view t_data) {
 Result<std::string> decompressStringZstd(const std::string_view& t_data) {
     unsigned long long const decompressed_size = ZSTD_getFrameContentSize(t_data.data(), t_data.size());
 
-    if (decompressed_size == ZSTD_CONTENTSIZE_ERROR) {
-        return Error("Zstd error: input is not a valid zstd frame");
-    }
+    RETURN_ERROR_IF(decompressed_size == ZSTD_CONTENTSIZE_ERROR, "Zstd error: input is not a valid zstd frame");
 
     if (decompressed_size != ZSTD_CONTENTSIZE_UNKNOWN) {
-        return decompressKnownSize(t_data, decompressed_size);
+        return decompressKnownSize(t_data, decompressed_size, kMaxDecompressedSize);
     }
 
-    return decompressStreaming(t_data);
+    return decompressStreaming(t_data, kMaxDecompressedSize);
+}
+
+Result<std::string> decompressStringZstd(const std::string_view& t_data, size_t t_expected_size) {
+    unsigned long long const frame_size = ZSTD_getFrameContentSize(t_data.data(), t_data.size());
+
+    RETURN_ERROR_IF(frame_size == ZSTD_CONTENTSIZE_ERROR, "Zstd error: input is not a valid zstd frame");
+
+    // When the frame records its size, reject a mismatch before allocating.
+    RETURN_ERROR_IF(frame_size != ZSTD_CONTENTSIZE_UNKNOWN && frame_size != t_expected_size,
+        fmt::format("Zstd: decompressed size {} does not match expected {}", frame_size, t_expected_size));
+
+    // The caller's recorded size is the bound here (stored versions can be
+    // larger than the generic one-shot limit), and any extra output is an
+    // error rather than an allocation.
+    Result<std::string> result = frame_size != ZSTD_CONTENTSIZE_UNKNOWN ? decompressKnownSize(t_data, t_expected_size, t_expected_size)
+                                                                        : decompressStreaming(t_data, t_expected_size);
+
+    IF_ERROR_PROPAGATE(result);
+
+    RETURN_ERROR_IF(result->size() != t_expected_size,
+        fmt::format("Zstd: decompressed size {} does not match expected {}", result->size(), t_expected_size));
+
+    return result;
 }
 
 // -----------------------------------------------------------------------------
@@ -148,11 +167,11 @@ struct FilePair {
 
 Result<FilePair> openFiles(const fs::path& t_src, const fs::path& t_dest) {
     FILE* p_in_file = fopen(t_src.string().c_str(), "rb");
-    if (!p_in_file) {
-        return Error("Failed to open source file for reading");
-    }
+
+    RETURN_ERROR_IF(!p_in_file, "Failed to open source file for reading");
 
     struct stat sb;
+
     if (fstat(fileno(p_in_file), &sb) == -1) {
         fclose(p_in_file);
         return Error("Failed to stat source file");
@@ -310,6 +329,71 @@ Result<size_t> compressFileStreamingZstd(const fs::path& t_src, const fs::path& 
     fclose(files.p_output);
 
     // 7) Return final compressed size
+    return fs::file_size(t_dest);
+}
+
+Result<size_t> compressStringToFileZstd(const std::string_view& t_data, const fs::path& t_dest, uint8_t t_compression_level) {
+    FILE* p_output = fopen(t_dest.string().c_str(), "wb");
+    if (!p_output) {
+        return Error("Failed to open destination file for writing");
+    }
+
+    auto buf_res = allocateZstdBuffers();
+    if (!buf_res) {
+        fclose(p_output);
+        return Error(buf_res.error());
+    }
+    ZstdBuffers bufs = *buf_res;
+
+    auto cstream_res = createAndInitCStream(t_compression_level);
+    if (!cstream_res) {
+        free(bufs.in_buf);
+        free(bufs.out_buf);
+        fclose(p_output);
+        return Error(cstream_res.error());
+    }
+    ZSTD_CStream* cstream = *cstream_res;
+
+    Result<void> status;
+    size_t offset = 0;
+
+    while (offset < t_data.size() && !status.hasError()) {
+        const size_t chunk = std::min(bufs.in_size, t_data.size() - offset);
+        std::memcpy(bufs.in_buf, t_data.data() + offset, chunk);
+        offset += chunk;
+
+        ZSTD_inBuffer input{bufs.in_buf, chunk, 0};
+        while (input.pos < input.size) {
+            ZSTD_outBuffer output{bufs.out_buf, bufs.out_size, 0};
+            const size_t ret = ZSTD_compressStream(cstream, &output, &input);
+
+            if (ZSTD_isError(ret)) {
+                status = Error(fmt::format("Zstd error: {}", ZSTD_getErrorName(ret)));
+                break;
+            }
+            if (fwrite(bufs.out_buf, 1, output.pos, p_output) != output.pos) {
+                status = Error("Failed to write compressed data");
+                break;
+            }
+        }
+    }
+
+    if (!status.hasError()) {
+        status = flushAndFinish(cstream, p_output, bufs.out_buf, bufs.out_size);
+    }
+
+    ZSTD_freeCStream(cstream);
+    free(bufs.in_buf);
+    free(bufs.out_buf);
+
+    if (fclose(p_output) != 0 && !status.hasError()) {
+        status = Error("Failed to close destination file");
+    }
+
+    if (status.hasError()) {
+        return Error(std::move(status).error());
+    }
+
     return fs::file_size(t_dest);
 }
 
@@ -596,8 +680,7 @@ bool ZstdLineReader::refill() {
 }
 
 bool ZstdLineReader::readLine(std::string& t_out) {
-    if (error_)
-        return false;
+    RETURN_IF(error_, false);
 
     while (true) {
         const size_t nl = pending_.find('\n');

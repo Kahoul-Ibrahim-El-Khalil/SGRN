@@ -4,7 +4,7 @@
 // It is collapsed by default (a thin strip at the top edge) and slides open
 // on hover — see .desktop-topbar-zone in layers/shell.css.
 import { useNavigate, useLocation } from "react-router-dom";
-import { LayoutDashboard, LogOut, Bell } from "lucide-react";
+import { LayoutDashboard, LogOut } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { APP_NAV_ITEMS } from "@/config/navigation";
 import { handleSignOut } from "@/pages/signin/backend";
@@ -52,9 +52,6 @@ export const TopBar = () => {
 
                 <div className="header-actions">
                     <div className="header-utility-group">
-                        <button type="button" className="header-icon-btn" aria-label="Notifications">
-                            <Bell size={15} />
-                        </button>
                         <ThemeToggle />
                     </div>
                     <div className="header-toolbar-sep" aria-hidden="true" />

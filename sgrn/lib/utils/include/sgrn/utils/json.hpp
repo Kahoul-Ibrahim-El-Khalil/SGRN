@@ -354,7 +354,7 @@ inline sgrn::Result<Document, std::string> mergeWithSchemaCheck(
             const char* p_ey = it->name.getString();
             if (result.hasMember(p_ey)) {
                 auto merged = mergeWithSchemaCheck(result[p_ey], it->value, t_alloc, t_path + "." + p_ey);
-                PROPAGATE_ERROR_IF(merged);
+                IF_ERROR_PROPAGATE(merged);
                 result[p_ey].copyFrom(merged.value(), t_alloc);
             } else {
                 ::sgrn::json::dom::Value k(it->name, t_alloc);
@@ -382,13 +382,13 @@ inline sgrn::Result<Document, std::string> mergeJsonDeltas(const fs::path& t_bas
     }
 
     auto baseline_res = deserializeFromFile(t_base_tree_path);
-    PROPAGATE_ERROR_IF(baseline_res);
+    IF_ERROR_PROPAGATE(baseline_res);
 
     Document result = std::move(baseline_res.value());
 
     for (const auto& t_path : t_deltas_paths) {
         auto delta_res = deserializeFromFile(t_path);
-        PROPAGATE_ERROR_IF(delta_res);
+        IF_ERROR_PROPAGATE(delta_res);
         applyDelta(result, delta_res.value());
     }
 
@@ -639,13 +639,13 @@ inline sgrn::Result<Value, std::string> requireMember(const Value& t_parent, con
 
 inline sgrn::Result<std::string, std::string> requireString(const Value& t_parent, const std::string& t_key) {
     auto res = requireMember(t_parent, t_key, "string");
-    PROPAGATE_ERROR_IF(res);
+    IF_ERROR_PROPAGATE(res);
     return std::string(res.value().getString(), res.value().getStringLength());
 }
 
 inline sgrn::Result<int, std::string> requireInt(const Value& t_parent, const std::string& t_key) {
     auto res = requireMember(t_parent, t_key, "integer");
-    PROPAGATE_ERROR_IF(res);
+    IF_ERROR_PROPAGATE(res);
     if (res.value().isInt()) {
         return res.value().getInt();
     }
@@ -666,7 +666,7 @@ inline sgrn::Result<int, std::string> requireInt(const Value& t_parent, const st
 
 inline sgrn::Result<bool, std::string> requireBool(const Value& t_parent, const std::string& t_key) {
     auto res = requireMember(t_parent, t_key, "boolean");
-    PROPAGATE_ERROR_IF(res);
+    IF_ERROR_PROPAGATE(res);
     return res.value().getBool();
 }
 

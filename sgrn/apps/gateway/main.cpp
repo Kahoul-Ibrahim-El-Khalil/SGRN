@@ -96,7 +96,7 @@ Result<void, std::string> start(int t_argc, char** tp_argv) {
 
         // Load config from file (or minimal headless config)
         if (!headless) {
-            PROPAGATE_ERROR_IF(app.loadConfig(t_argc, tp_argv));
+            IF_ERROR_PROPAGATE(app.loadConfig(t_argc, tp_argv));
 
             if (!schema_override.empty()) {
                 app.setSchemaOverride(schema_override);
@@ -111,13 +111,13 @@ Result<void, std::string> start(int t_argc, char** tp_argv) {
             app.enableGuiMode();
         }
 
-        PROPAGATE_ERROR_IF(app.loadSchema());
-        PROPAGATE_ERROR_IF(app.initSecurity());
-        PROPAGATE_ERROR_IF(app.initTwin());
-        PROPAGATE_ERROR_IF(app.initThreading());
-        PROPAGATE_ERROR_IF(app.wireTelemetry());
-        PROPAGATE_ERROR_IF(app.initInfrastructure());
-        PROPAGATE_ERROR_IF(app.startAdapters());
+        IF_ERROR_PROPAGATE(app.loadSchema());
+        IF_ERROR_PROPAGATE(app.initSecurity());
+        IF_ERROR_PROPAGATE(app.initTwin());
+        IF_ERROR_PROPAGATE(app.initThreading());
+        IF_ERROR_PROPAGATE(app.wireTelemetry());
+        IF_ERROR_PROPAGATE(app.initInfrastructure());
+        IF_ERROR_PROPAGATE(app.startAdapters());
 
         app.feedInitialAnchor();
         app.run();

@@ -33,7 +33,7 @@ export interface DriveFile {
   created_at: string;
   upload_mode?: string;
   part_count?: number | null;
-  sha256?: string;
+  sha512?: string;
   etag?: string;
   is_encrypted?: boolean;
   key_id?: string | null;

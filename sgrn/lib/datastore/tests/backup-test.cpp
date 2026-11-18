@@ -1,8 +1,8 @@
-// Unit tests for backup primitives (TarWriter, Sha256Stream, directory hygiene, permissions).
+// Unit tests for backup primitives (TarWriter, Sha512Stream, directory hygiene, permissions).
 //
 // Ensures that backup archives generated for PostgreSQL and Garage conform
 // to POSIX ustar specifications, have exact padding and zero blocks, stream
-// SHA-256 digests accurately, and clean stale tmp files.
+// SHA-512 digests accurately, and clean stale tmp files.
 
 #include <fmt/core.h>
 #include <sgrn/datastore/bootstrap/backup.hpp>
@@ -36,7 +36,7 @@ using sgrn::datastore::bootstrap::backup::formatDuration;
 using sgrn::datastore::bootstrap::backup::prepareBackupDir;
 using sgrn::datastore::bootstrap::backup::ProgressMeter;
 using sgrn::datastore::bootstrap::backup::publishArtifact;
-using sgrn::datastore::bootstrap::backup::Sha256Stream;
+using sgrn::datastore::bootstrap::backup::Sha512Stream;
 using sgrn::datastore::bootstrap::backup::TarWriter;
 
 void testFormattingAndProgress() {
@@ -57,28 +57,31 @@ void testFormattingAndProgress() {
     meter.finish(10, 1000);
 }
 
-void testSha256Stream() {
+void testSha512Stream() {
     // 1. Empty string digest
     {
-        Sha256Stream s;
-        CHECK(s.hex() == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        Sha512Stream s;
+        CHECK(s.hex() == "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce"
+                         "47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e");
     }
 
     // 2. Known test vector: "The quick brown fox jumps over the lazy dog"
     {
-        Sha256Stream s;
+        Sha512Stream s;
         const std::string text = "The quick brown fox jumps over the lazy dog";
         s.update(text.data(), text.size());
-        CHECK(s.hex() == "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592");
+        CHECK(s.hex() == "07e547d9586f6a73f73fbac0435ed76951218fb7d0c8d788a309d785436bbb64"
+                         "2e93a252a954f23912547d1e8a3b5ed6e1bfd7097821233fa0538f3db854fee6");
     }
 
     // 3. Piecewise streaming
     {
-        Sha256Stream s;
+        Sha512Stream s;
         s.update("The quick ", 10);
         s.update("brown fox ", 10);
         s.update("jumps over the lazy dog", 23);
-        CHECK(s.hex() == "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592");
+        CHECK(s.hex() == "07e547d9586f6a73f73fbac0435ed76951218fb7d0c8d788a309d785436bbb64"
+                         "2e93a252a954f23912547d1e8a3b5ed6e1bfd7097821233fa0538f3db854fee6");
     }
 }
 
@@ -121,7 +124,7 @@ void testTarWriterAndHygiene() {
     const fs::path tar_tmp = backup_dir / ".test_archive.tmp";
     const fs::path tar_final = backup_dir / "test_archive.tar";
 
-    Sha256Stream tar_digest;
+    Sha512Stream tar_digest;
     {
         TarWriter writer(tar_tmp);
         CHECK(writer.ok());
@@ -153,7 +156,7 @@ void testTarWriterAndHygiene() {
     CHECK(tar_size % 512 == 0);
 
     // Verify streamed digest against independent file hash
-    auto file_digest = sgrn::utils::computeSha256File(tar_tmp, sgrn::utils::HashEncoding::hex);
+    auto file_digest = sgrn::utils::computeSha512File(tar_tmp, sgrn::utils::HashEncoding::base64url);
     CHECK(file_digest.hasValue());
     CHECK(file_digest.value() == computed_hash);
 
@@ -183,7 +186,7 @@ void testTarWriterAndHygiene() {
 
 int main() {
     testFormattingAndProgress();
-    testSha256Stream();
+    testSha512Stream();
     testTarWriterAndHygiene();
 
     if (g_failures == 0) {

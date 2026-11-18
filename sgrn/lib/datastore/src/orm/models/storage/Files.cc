@@ -1,3 +1,4 @@
+
 /**
  *
  *  Files.cc
@@ -6,7 +7,9 @@
  */
 
 #include "Files.h"
+
 #include <drogon/utils/Utilities.h>
+
 #include <string>
 
 using namespace drogon;
@@ -14,80 +17,131 @@ using namespace drogon::orm;
 using namespace drogon_model::sgrn::storage;
 
 const std::string Files::Cols::_id = "\"id\"";
+
 const std::string Files::Cols::_name = "\"name\"";
+
 const std::string Files::Cols::_user_id = "\"user_id\"";
+
 const std::string Files::Cols::_automated_service_id = "\"automated_service_id\"";
+
 const std::string Files::Cols::_session_id = "\"session_id\"";
+
 const std::string Files::Cols::_domain = "\"domain\"";
+
 const std::string Files::Cols::_domain_id = "\"domain_id\"";
+
 const std::string Files::Cols::_directory_id = "\"directory_id\"";
+
 const std::string Files::Cols::_extension = "\"extension\"";
+
 const std::string Files::Cols::_full_path = "\"full_path\"";
+
 const std::string Files::Cols::_key_id = "\"key_id\"";
+
 const std::string Files::Cols::_is_encrypted = "\"is_encrypted\"";
-const std::string Files::Cols::_content_sha256 = "\"content_sha256\"";
+
+const std::string Files::Cols::_content_sha512 = "\"content_sha512\"";
+
 const std::string Files::Cols::_created_at = "\"created_at\"";
+
+const std::string Files::Cols::_current_version_id = "\"current_version_id\"";
+
+const std::string Files::Cols::_version_count = "\"version_count\"";
+
 const std::string Files::primaryKeyName = "id";
+
 const bool Files::hasPrimaryKey = true;
+
 const std::string Files::tableName = "storage.\"files\"";
 
-const std::vector<typename Files::MetaData> Files::metaData_ = {{"id", "int64_t", "bigint", 8, 1, 1, 1},
-    {"name", "std::string", "text", 0, 0, 0, 1}, {"user_id", "int32_t", "integer", 4, 0, 0, 0},
+const std::vector<typename Files::MetaData> Files::metaData_ = {
+    {"id", "int64_t", "bigint", 8, 1, 1, 1}, {"name", "std::string", "text", 0, 0, 0, 1}, {"user_id", "int32_t", "integer", 4, 0, 0, 0},
     {"automated_service_id", "int32_t", "integer", 4, 0, 0, 0}, {"session_id", "int64_t", "bigint", 8, 0, 0, 1},
     {"domain", "std::string", "text", 0, 0, 0, 0}, {"domain_id", "int32_t", "integer", 4, 0, 0, 0},
     {"directory_id", "int64_t", "bigint", 8, 0, 0, 0}, {"extension", "std::string", "character varying", 15, 0, 0, 0},
     {"full_path", "std::string", "text", 0, 0, 0, 1}, {"key_id", "std::string", "text", 0, 0, 0, 0},
-    {"is_encrypted", "bool", "boolean", 1, 0, 0, 1}, {"content_sha256", "std::string", "text", 0, 0, 0, 0},
-    {"created_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1}};
+    {"is_encrypted", "bool", "boolean", 1, 0, 0, 1}, {"content_sha512", "std::string", "text", 0, 0, 0, 0},
+    {"created_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1}, {"current_version_id", "int64_t", "bigint", 8, 0, 0, 0},
+    {"version_count", "int32_t", "integer", 4, 0, 0, 1}
+
+};
 const std::string& Files::getColumnName(size_t index) noexcept(false) {
     assert(index < metaData_.size());
     return metaData_[index].colName_;
 }
 Files::Files(const Row& r, const ssize_t indexOffset) noexcept {
     if (indexOffset < 0) {
+
         if (!r["id"].isNull()) {
+
             id_ = std::make_shared<int64_t>(r["id"].as<int64_t>());
         }
+
         if (!r["name"].isNull()) {
+
             name_ = std::make_shared<std::string>(r["name"].as<std::string>());
         }
+
         if (!r["user_id"].isNull()) {
+
             userId_ = std::make_shared<int32_t>(r["user_id"].as<int32_t>());
         }
+
         if (!r["automated_service_id"].isNull()) {
+
             automatedServiceId_ = std::make_shared<int32_t>(r["automated_service_id"].as<int32_t>());
         }
+
         if (!r["session_id"].isNull()) {
+
             sessionId_ = std::make_shared<int64_t>(r["session_id"].as<int64_t>());
         }
+
         if (!r["domain"].isNull()) {
+
             domain_ = std::make_shared<std::string>(r["domain"].as<std::string>());
         }
+
         if (!r["domain_id"].isNull()) {
+
             domainId_ = std::make_shared<int32_t>(r["domain_id"].as<int32_t>());
         }
+
         if (!r["directory_id"].isNull()) {
+
             directoryId_ = std::make_shared<int64_t>(r["directory_id"].as<int64_t>());
         }
+
         if (!r["extension"].isNull()) {
+
             extension_ = std::make_shared<std::string>(r["extension"].as<std::string>());
         }
+
         if (!r["full_path"].isNull()) {
+
             fullPath_ = std::make_shared<std::string>(r["full_path"].as<std::string>());
         }
+
         if (!r["key_id"].isNull()) {
+
             keyId_ = std::make_shared<std::string>(r["key_id"].as<std::string>());
         }
+
         if (!r["is_encrypted"].isNull()) {
+
             isEncrypted_ = std::make_shared<bool>(r["is_encrypted"].as<bool>());
         }
-        if (!r["content_sha256"].isNull()) {
-            contentSha256_ = std::make_shared<std::string>(r["content_sha256"].as<std::string>());
+
+        if (!r["content_sha512"].isNull()) {
+
+            contentSha512_ = std::make_shared<std::string>(r["content_sha512"].as<std::string>());
         }
+
         if (!r["created_at"].isNull()) {
             auto timeStr = r["created_at"].as<std::string>();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -102,70 +156,109 @@ Files::Files(const Row& r, const ssize_t indexOffset) noexcept {
                 createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
+
+        if (!r["current_version_id"].isNull()) {
+
+            currentVersionId_ = std::make_shared<int64_t>(r["current_version_id"].as<int64_t>());
+        }
+
+        if (!r["version_count"].isNull()) {
+
+            versionCount_ = std::make_shared<int32_t>(r["version_count"].as<int32_t>());
+        }
+
     } else {
         size_t offset = (size_t)indexOffset;
-        if (offset + 14 > r.size()) {
+        if (offset + 16 > r.size()) {
             LOG_FATAL << "Invalid SQL result for this model";
             return;
         }
         size_t index;
+
         index = offset + 0;
         if (!r[index].isNull()) {
+
             id_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
+
         index = offset + 1;
         if (!r[index].isNull()) {
+
             name_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 2;
         if (!r[index].isNull()) {
+
             userId_ = std::make_shared<int32_t>(r[index].as<int32_t>());
         }
+
         index = offset + 3;
         if (!r[index].isNull()) {
+
             automatedServiceId_ = std::make_shared<int32_t>(r[index].as<int32_t>());
         }
+
         index = offset + 4;
         if (!r[index].isNull()) {
+
             sessionId_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
+
         index = offset + 5;
         if (!r[index].isNull()) {
+
             domain_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 6;
         if (!r[index].isNull()) {
+
             domainId_ = std::make_shared<int32_t>(r[index].as<int32_t>());
         }
+
         index = offset + 7;
         if (!r[index].isNull()) {
+
             directoryId_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
+
         index = offset + 8;
         if (!r[index].isNull()) {
+
             extension_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 9;
         if (!r[index].isNull()) {
+
             fullPath_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 10;
         if (!r[index].isNull()) {
+
             keyId_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 11;
         if (!r[index].isNull()) {
+
             isEncrypted_ = std::make_shared<bool>(r[index].as<bool>());
         }
+
         index = offset + 12;
         if (!r[index].isNull()) {
-            contentSha256_ = std::make_shared<std::string>(r[index].as<std::string>());
+
+            contentSha512_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 13;
         if (!r[index].isNull()) {
             auto timeStr = r[index].as<std::string>();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -179,99 +272,126 @@ Files::Files(const Row& r, const ssize_t indexOffset) noexcept {
                 }
                 createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
+        }
+
+        index = offset + 14;
+        if (!r[index].isNull()) {
+
+            currentVersionId_ = std::make_shared<int64_t>(r[index].as<int64_t>());
+        }
+
+        index = offset + 15;
+        if (!r[index].isNull()) {
+
+            versionCount_ = std::make_shared<int32_t>(r[index].as<int32_t>());
         }
     }
 }
 
 Files::Files(const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector) noexcept(false) {
-    if (pMasqueradingVector.size() != 14) {
+    if (pMasqueradingVector.size() != 16) {
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
+
     if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         dirtyFlag_[0] = true;
         if (!pJson[pMasqueradingVector[0]].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
         if (!pJson[pMasqueradingVector[1]].isNull()) {
             name_ = std::make_shared<std::string>(pJson[pMasqueradingVector[1]].asString());
         }
     }
+
     if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
         if (!pJson[pMasqueradingVector[2]].isNull()) {
             userId_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[2]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
         if (!pJson[pMasqueradingVector[3]].isNull()) {
             automatedServiceId_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[3]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
         dirtyFlag_[4] = true;
         if (!pJson[pMasqueradingVector[4]].isNull()) {
             sessionId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[4]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
         dirtyFlag_[5] = true;
         if (!pJson[pMasqueradingVector[5]].isNull()) {
             domain_ = std::make_shared<std::string>(pJson[pMasqueradingVector[5]].asString());
         }
     }
+
     if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
         dirtyFlag_[6] = true;
         if (!pJson[pMasqueradingVector[6]].isNull()) {
             domainId_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[6]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
         dirtyFlag_[7] = true;
         if (!pJson[pMasqueradingVector[7]].isNull()) {
             directoryId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[7]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8])) {
         dirtyFlag_[8] = true;
         if (!pJson[pMasqueradingVector[8]].isNull()) {
             extension_ = std::make_shared<std::string>(pJson[pMasqueradingVector[8]].asString());
         }
     }
+
     if (!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9])) {
         dirtyFlag_[9] = true;
         if (!pJson[pMasqueradingVector[9]].isNull()) {
             fullPath_ = std::make_shared<std::string>(pJson[pMasqueradingVector[9]].asString());
         }
     }
+
     if (!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10])) {
         dirtyFlag_[10] = true;
         if (!pJson[pMasqueradingVector[10]].isNull()) {
             keyId_ = std::make_shared<std::string>(pJson[pMasqueradingVector[10]].asString());
         }
     }
+
     if (!pMasqueradingVector[11].empty() && pJson.isMember(pMasqueradingVector[11])) {
         dirtyFlag_[11] = true;
         if (!pJson[pMasqueradingVector[11]].isNull()) {
             isEncrypted_ = std::make_shared<bool>(pJson[pMasqueradingVector[11]].asBool());
         }
     }
+
     if (!pMasqueradingVector[12].empty() && pJson.isMember(pMasqueradingVector[12])) {
         dirtyFlag_[12] = true;
         if (!pJson[pMasqueradingVector[12]].isNull()) {
-            contentSha256_ = std::make_shared<std::string>(pJson[pMasqueradingVector[12]].asString());
+            contentSha512_ = std::make_shared<std::string>(pJson[pMasqueradingVector[12]].asString());
         }
     }
+
     if (!pMasqueradingVector[13].empty() && pJson.isMember(pMasqueradingVector[13])) {
         dirtyFlag_[13] = true;
         if (!pJson[pMasqueradingVector[13]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[13]].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -285,95 +405,124 @@ Files::Files(const Json::Value& pJson, const std::vector<std::string>& pMasquera
                 }
                 createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
+        }
+    }
+
+    if (!pMasqueradingVector[14].empty() && pJson.isMember(pMasqueradingVector[14])) {
+        dirtyFlag_[14] = true;
+        if (!pJson[pMasqueradingVector[14]].isNull()) {
+            currentVersionId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[14]].asInt64());
+        }
+    }
+
+    if (!pMasqueradingVector[15].empty() && pJson.isMember(pMasqueradingVector[15])) {
+        dirtyFlag_[15] = true;
+        if (!pJson[pMasqueradingVector[15]].isNull()) {
+            versionCount_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[15]].asInt64());
         }
     }
 }
 
 Files::Files(const Json::Value& pJson) noexcept(false) {
+
     if (pJson.isMember("id")) {
         dirtyFlag_[0] = true;
         if (!pJson["id"].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson["id"].asInt64());
         }
     }
+
     if (pJson.isMember("name")) {
         dirtyFlag_[1] = true;
         if (!pJson["name"].isNull()) {
             name_ = std::make_shared<std::string>(pJson["name"].asString());
         }
     }
+
     if (pJson.isMember("user_id")) {
         dirtyFlag_[2] = true;
         if (!pJson["user_id"].isNull()) {
             userId_ = std::make_shared<int32_t>((int32_t)pJson["user_id"].asInt64());
         }
     }
+
     if (pJson.isMember("automated_service_id")) {
         dirtyFlag_[3] = true;
         if (!pJson["automated_service_id"].isNull()) {
             automatedServiceId_ = std::make_shared<int32_t>((int32_t)pJson["automated_service_id"].asInt64());
         }
     }
+
     if (pJson.isMember("session_id")) {
         dirtyFlag_[4] = true;
         if (!pJson["session_id"].isNull()) {
             sessionId_ = std::make_shared<int64_t>((int64_t)pJson["session_id"].asInt64());
         }
     }
+
     if (pJson.isMember("domain")) {
         dirtyFlag_[5] = true;
         if (!pJson["domain"].isNull()) {
             domain_ = std::make_shared<std::string>(pJson["domain"].asString());
         }
     }
+
     if (pJson.isMember("domain_id")) {
         dirtyFlag_[6] = true;
         if (!pJson["domain_id"].isNull()) {
             domainId_ = std::make_shared<int32_t>((int32_t)pJson["domain_id"].asInt64());
         }
     }
+
     if (pJson.isMember("directory_id")) {
         dirtyFlag_[7] = true;
         if (!pJson["directory_id"].isNull()) {
             directoryId_ = std::make_shared<int64_t>((int64_t)pJson["directory_id"].asInt64());
         }
     }
+
     if (pJson.isMember("extension")) {
         dirtyFlag_[8] = true;
         if (!pJson["extension"].isNull()) {
             extension_ = std::make_shared<std::string>(pJson["extension"].asString());
         }
     }
+
     if (pJson.isMember("full_path")) {
         dirtyFlag_[9] = true;
         if (!pJson["full_path"].isNull()) {
             fullPath_ = std::make_shared<std::string>(pJson["full_path"].asString());
         }
     }
+
     if (pJson.isMember("key_id")) {
         dirtyFlag_[10] = true;
         if (!pJson["key_id"].isNull()) {
             keyId_ = std::make_shared<std::string>(pJson["key_id"].asString());
         }
     }
+
     if (pJson.isMember("is_encrypted")) {
         dirtyFlag_[11] = true;
         if (!pJson["is_encrypted"].isNull()) {
             isEncrypted_ = std::make_shared<bool>(pJson["is_encrypted"].asBool());
         }
     }
-    if (pJson.isMember("content_sha256")) {
+
+    if (pJson.isMember("content_sha512")) {
         dirtyFlag_[12] = true;
-        if (!pJson["content_sha256"].isNull()) {
-            contentSha256_ = std::make_shared<std::string>(pJson["content_sha256"].asString());
+        if (!pJson["content_sha512"].isNull()) {
+            contentSha512_ = std::make_shared<std::string>(pJson["content_sha512"].asString());
         }
     }
+
     if (pJson.isMember("created_at")) {
         dirtyFlag_[13] = true;
         if (!pJson["created_at"].isNull()) {
             auto timeStr = pJson["created_at"].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -389,96 +538,125 @@ Files::Files(const Json::Value& pJson) noexcept(false) {
             }
         }
     }
+
+    if (pJson.isMember("current_version_id")) {
+        dirtyFlag_[14] = true;
+        if (!pJson["current_version_id"].isNull()) {
+            currentVersionId_ = std::make_shared<int64_t>((int64_t)pJson["current_version_id"].asInt64());
+        }
+    }
+
+    if (pJson.isMember("version_count")) {
+        dirtyFlag_[15] = true;
+        if (!pJson["version_count"].isNull()) {
+            versionCount_ = std::make_shared<int32_t>((int32_t)pJson["version_count"].asInt64());
+        }
+    }
 }
 
 void Files::updateByMasqueradedJson(const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector) noexcept(false) {
-    if (pMasqueradingVector.size() != 14) {
+    if (pMasqueradingVector.size() != 16) {
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
+
     if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         if (!pJson[pMasqueradingVector[0]].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
         if (!pJson[pMasqueradingVector[1]].isNull()) {
             name_ = std::make_shared<std::string>(pJson[pMasqueradingVector[1]].asString());
         }
     }
+
     if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
         if (!pJson[pMasqueradingVector[2]].isNull()) {
             userId_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[2]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
         if (!pJson[pMasqueradingVector[3]].isNull()) {
             automatedServiceId_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[3]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
         dirtyFlag_[4] = true;
         if (!pJson[pMasqueradingVector[4]].isNull()) {
             sessionId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[4]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
         dirtyFlag_[5] = true;
         if (!pJson[pMasqueradingVector[5]].isNull()) {
             domain_ = std::make_shared<std::string>(pJson[pMasqueradingVector[5]].asString());
         }
     }
+
     if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
         dirtyFlag_[6] = true;
         if (!pJson[pMasqueradingVector[6]].isNull()) {
             domainId_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[6]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
         dirtyFlag_[7] = true;
         if (!pJson[pMasqueradingVector[7]].isNull()) {
             directoryId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[7]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8])) {
         dirtyFlag_[8] = true;
         if (!pJson[pMasqueradingVector[8]].isNull()) {
             extension_ = std::make_shared<std::string>(pJson[pMasqueradingVector[8]].asString());
         }
     }
+
     if (!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9])) {
         dirtyFlag_[9] = true;
         if (!pJson[pMasqueradingVector[9]].isNull()) {
             fullPath_ = std::make_shared<std::string>(pJson[pMasqueradingVector[9]].asString());
         }
     }
+
     if (!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10])) {
         dirtyFlag_[10] = true;
         if (!pJson[pMasqueradingVector[10]].isNull()) {
             keyId_ = std::make_shared<std::string>(pJson[pMasqueradingVector[10]].asString());
         }
     }
+
     if (!pMasqueradingVector[11].empty() && pJson.isMember(pMasqueradingVector[11])) {
         dirtyFlag_[11] = true;
         if (!pJson[pMasqueradingVector[11]].isNull()) {
             isEncrypted_ = std::make_shared<bool>(pJson[pMasqueradingVector[11]].asBool());
         }
     }
+
     if (!pMasqueradingVector[12].empty() && pJson.isMember(pMasqueradingVector[12])) {
         dirtyFlag_[12] = true;
         if (!pJson[pMasqueradingVector[12]].isNull()) {
-            contentSha256_ = std::make_shared<std::string>(pJson[pMasqueradingVector[12]].asString());
+            contentSha512_ = std::make_shared<std::string>(pJson[pMasqueradingVector[12]].asString());
         }
     }
+
     if (!pMasqueradingVector[13].empty() && pJson.isMember(pMasqueradingVector[13])) {
         dirtyFlag_[13] = true;
         if (!pJson[pMasqueradingVector[13]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[13]].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -494,92 +672,121 @@ void Files::updateByMasqueradedJson(const Json::Value& pJson, const std::vector<
             }
         }
     }
+
+    if (!pMasqueradingVector[14].empty() && pJson.isMember(pMasqueradingVector[14])) {
+        dirtyFlag_[14] = true;
+        if (!pJson[pMasqueradingVector[14]].isNull()) {
+            currentVersionId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[14]].asInt64());
+        }
+    }
+
+    if (!pMasqueradingVector[15].empty() && pJson.isMember(pMasqueradingVector[15])) {
+        dirtyFlag_[15] = true;
+        if (!pJson[pMasqueradingVector[15]].isNull()) {
+            versionCount_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[15]].asInt64());
+        }
+    }
 }
 
 void Files::updateByJson(const Json::Value& pJson) noexcept(false) {
+
     if (pJson.isMember("id")) {
         if (!pJson["id"].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson["id"].asInt64());
         }
     }
+
     if (pJson.isMember("name")) {
         dirtyFlag_[1] = true;
         if (!pJson["name"].isNull()) {
             name_ = std::make_shared<std::string>(pJson["name"].asString());
         }
     }
+
     if (pJson.isMember("user_id")) {
         dirtyFlag_[2] = true;
         if (!pJson["user_id"].isNull()) {
             userId_ = std::make_shared<int32_t>((int32_t)pJson["user_id"].asInt64());
         }
     }
+
     if (pJson.isMember("automated_service_id")) {
         dirtyFlag_[3] = true;
         if (!pJson["automated_service_id"].isNull()) {
             automatedServiceId_ = std::make_shared<int32_t>((int32_t)pJson["automated_service_id"].asInt64());
         }
     }
+
     if (pJson.isMember("session_id")) {
         dirtyFlag_[4] = true;
         if (!pJson["session_id"].isNull()) {
             sessionId_ = std::make_shared<int64_t>((int64_t)pJson["session_id"].asInt64());
         }
     }
+
     if (pJson.isMember("domain")) {
         dirtyFlag_[5] = true;
         if (!pJson["domain"].isNull()) {
             domain_ = std::make_shared<std::string>(pJson["domain"].asString());
         }
     }
+
     if (pJson.isMember("domain_id")) {
         dirtyFlag_[6] = true;
         if (!pJson["domain_id"].isNull()) {
             domainId_ = std::make_shared<int32_t>((int32_t)pJson["domain_id"].asInt64());
         }
     }
+
     if (pJson.isMember("directory_id")) {
         dirtyFlag_[7] = true;
         if (!pJson["directory_id"].isNull()) {
             directoryId_ = std::make_shared<int64_t>((int64_t)pJson["directory_id"].asInt64());
         }
     }
+
     if (pJson.isMember("extension")) {
         dirtyFlag_[8] = true;
         if (!pJson["extension"].isNull()) {
             extension_ = std::make_shared<std::string>(pJson["extension"].asString());
         }
     }
+
     if (pJson.isMember("full_path")) {
         dirtyFlag_[9] = true;
         if (!pJson["full_path"].isNull()) {
             fullPath_ = std::make_shared<std::string>(pJson["full_path"].asString());
         }
     }
+
     if (pJson.isMember("key_id")) {
         dirtyFlag_[10] = true;
         if (!pJson["key_id"].isNull()) {
             keyId_ = std::make_shared<std::string>(pJson["key_id"].asString());
         }
     }
+
     if (pJson.isMember("is_encrypted")) {
         dirtyFlag_[11] = true;
         if (!pJson["is_encrypted"].isNull()) {
             isEncrypted_ = std::make_shared<bool>(pJson["is_encrypted"].asBool());
         }
     }
-    if (pJson.isMember("content_sha256")) {
+
+    if (pJson.isMember("content_sha512")) {
         dirtyFlag_[12] = true;
-        if (!pJson["content_sha256"].isNull()) {
-            contentSha256_ = std::make_shared<std::string>(pJson["content_sha256"].asString());
+        if (!pJson["content_sha512"].isNull()) {
+            contentSha512_ = std::make_shared<std::string>(pJson["content_sha512"].asString());
         }
     }
+
     if (pJson.isMember("created_at")) {
         dirtyFlag_[13] = true;
         if (!pJson["created_at"].isNull()) {
             auto timeStr = pJson["created_at"].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -593,6 +800,20 @@ void Files::updateByJson(const Json::Value& pJson) noexcept(false) {
                 }
                 createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
+        }
+    }
+
+    if (pJson.isMember("current_version_id")) {
+        dirtyFlag_[14] = true;
+        if (!pJson["current_version_id"].isNull()) {
+            currentVersionId_ = std::make_shared<int64_t>((int64_t)pJson["current_version_id"].asInt64());
+        }
+    }
+
+    if (pJson.isMember("version_count")) {
+        dirtyFlag_[15] = true;
+        if (!pJson["version_count"].isNull()) {
+            versionCount_ = std::make_shared<int32_t>((int32_t)pJson["version_count"].asInt64());
         }
     }
 }
@@ -817,25 +1038,25 @@ void Files::setIsEncrypted(const bool& pIsEncrypted) noexcept {
     dirtyFlag_[11] = true;
 }
 
-const std::string& Files::getValueOfContentSha256() const noexcept {
+const std::string& Files::getValueOfContentSha512() const noexcept {
     static const std::string defaultValue = std::string();
-    if (contentSha256_)
-        return *contentSha256_;
+    if (contentSha512_)
+        return *contentSha512_;
     return defaultValue;
 }
-const std::shared_ptr<std::string>& Files::getContentSha256() const noexcept {
-    return contentSha256_;
+const std::shared_ptr<std::string>& Files::getContentSha512() const noexcept {
+    return contentSha512_;
 }
-void Files::setContentSha256(const std::string& pContentSha256) noexcept {
-    contentSha256_ = std::make_shared<std::string>(pContentSha256);
+void Files::setContentSha512(const std::string& pContentSha512) noexcept {
+    contentSha512_ = std::make_shared<std::string>(pContentSha512);
     dirtyFlag_[12] = true;
 }
-void Files::setContentSha256(std::string&& pContentSha256) noexcept {
-    contentSha256_ = std::make_shared<std::string>(std::move(pContentSha256));
+void Files::setContentSha512(std::string&& pContentSha512) noexcept {
+    contentSha512_ = std::make_shared<std::string>(std::move(pContentSha512));
     dirtyFlag_[12] = true;
 }
-void Files::setContentSha256ToNull() noexcept {
-    contentSha256_.reset();
+void Files::setContentSha512ToNull() noexcept {
+    contentSha512_.reset();
     dirtyFlag_[12] = true;
 }
 
@@ -853,16 +1074,52 @@ void Files::setCreatedAt(const ::trantor::Date& pCreatedAt) noexcept {
     dirtyFlag_[13] = true;
 }
 
+const int64_t& Files::getValueOfCurrentVersionId() const noexcept {
+    static const int64_t defaultValue = int64_t();
+    if (currentVersionId_)
+        return *currentVersionId_;
+    return defaultValue;
+}
+const std::shared_ptr<int64_t>& Files::getCurrentVersionId() const noexcept {
+    return currentVersionId_;
+}
+void Files::setCurrentVersionId(const int64_t& pCurrentVersionId) noexcept {
+    currentVersionId_ = std::make_shared<int64_t>(pCurrentVersionId);
+    dirtyFlag_[14] = true;
+}
+void Files::setCurrentVersionIdToNull() noexcept {
+    currentVersionId_.reset();
+    dirtyFlag_[14] = true;
+}
+
+const int32_t& Files::getValueOfVersionCount() const noexcept {
+    static const int32_t defaultValue = int32_t();
+    if (versionCount_)
+        return *versionCount_;
+    return defaultValue;
+}
+const std::shared_ptr<int32_t>& Files::getVersionCount() const noexcept {
+    return versionCount_;
+}
+void Files::setVersionCount(const int32_t& pVersionCount) noexcept {
+    versionCount_ = std::make_shared<int32_t>(pVersionCount);
+    dirtyFlag_[15] = true;
+}
+
 void Files::updateId(const uint64_t id) {
 }
 
 const std::vector<std::string>& Files::insertColumns() noexcept {
-    static const std::vector<std::string> inCols = {"name", "user_id", "automated_service_id", "session_id", "domain", "domain_id",
-        "directory_id", "extension", "full_path", "key_id", "is_encrypted", "content_sha256", "created_at"};
+    static const std::vector<std::string> inCols = {
+        "name", "user_id", "automated_service_id", "session_id", "domain", "domain_id", "directory_id", "extension", "full_path", "key_id",
+        "is_encrypted", "content_sha512", "created_at", "current_version_id", "version_count"
+
+    };
     return inCols;
 }
 
 void Files::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
+
     if (dirtyFlag_[1]) {
         if (getName()) {
             binder << getValueOfName();
@@ -870,6 +1127,7 @@ void Files::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[2]) {
         if (getUserId()) {
             binder << getValueOfUserId();
@@ -877,6 +1135,7 @@ void Files::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[3]) {
         if (getAutomatedServiceId()) {
             binder << getValueOfAutomatedServiceId();
@@ -884,6 +1143,7 @@ void Files::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[4]) {
         if (getSessionId()) {
             binder << getValueOfSessionId();
@@ -891,6 +1151,7 @@ void Files::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[5]) {
         if (getDomain()) {
             binder << getValueOfDomain();
@@ -898,6 +1159,7 @@ void Files::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[6]) {
         if (getDomainId()) {
             binder << getValueOfDomainId();
@@ -905,6 +1167,7 @@ void Files::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[7]) {
         if (getDirectoryId()) {
             binder << getValueOfDirectoryId();
@@ -912,6 +1175,7 @@ void Files::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[8]) {
         if (getExtension()) {
             binder << getValueOfExtension();
@@ -919,6 +1183,7 @@ void Files::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[9]) {
         if (getFullPath()) {
             binder << getValueOfFullPath();
@@ -926,6 +1191,7 @@ void Files::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[10]) {
         if (getKeyId()) {
             binder << getValueOfKeyId();
@@ -933,6 +1199,7 @@ void Files::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[11]) {
         if (getIsEncrypted()) {
             binder << getValueOfIsEncrypted();
@@ -940,16 +1207,34 @@ void Files::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[12]) {
-        if (getContentSha256()) {
-            binder << getValueOfContentSha256();
+        if (getContentSha512()) {
+            binder << getValueOfContentSha512();
         } else {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[13]) {
         if (getCreatedAt()) {
             binder << getValueOfCreatedAt();
+        } else {
+            binder << nullptr;
+        }
+    }
+
+    if (dirtyFlag_[14]) {
+        if (getCurrentVersionId()) {
+            binder << getValueOfCurrentVersionId();
+        } else {
+            binder << nullptr;
+        }
+    }
+
+    if (dirtyFlag_[15]) {
+        if (getVersionCount()) {
+            binder << getValueOfVersionCount();
         } else {
             binder << nullptr;
         }
@@ -958,49 +1243,72 @@ void Files::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
 
 const std::vector<std::string> Files::updateColumns() const {
     std::vector<std::string> ret;
+
     if (dirtyFlag_[1]) {
         ret.push_back(getColumnName(1));
     }
+
     if (dirtyFlag_[2]) {
         ret.push_back(getColumnName(2));
     }
+
     if (dirtyFlag_[3]) {
         ret.push_back(getColumnName(3));
     }
+
     if (dirtyFlag_[4]) {
         ret.push_back(getColumnName(4));
     }
+
     if (dirtyFlag_[5]) {
         ret.push_back(getColumnName(5));
     }
+
     if (dirtyFlag_[6]) {
         ret.push_back(getColumnName(6));
     }
+
     if (dirtyFlag_[7]) {
         ret.push_back(getColumnName(7));
     }
+
     if (dirtyFlag_[8]) {
         ret.push_back(getColumnName(8));
     }
+
     if (dirtyFlag_[9]) {
         ret.push_back(getColumnName(9));
     }
+
     if (dirtyFlag_[10]) {
         ret.push_back(getColumnName(10));
     }
+
     if (dirtyFlag_[11]) {
         ret.push_back(getColumnName(11));
     }
+
     if (dirtyFlag_[12]) {
         ret.push_back(getColumnName(12));
     }
+
     if (dirtyFlag_[13]) {
         ret.push_back(getColumnName(13));
     }
+
+    if (dirtyFlag_[14]) {
+        ret.push_back(getColumnName(14));
+    }
+
+    if (dirtyFlag_[15]) {
+        ret.push_back(getColumnName(15));
+    }
+
     return ret;
 }
 
 void Files::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
+
     if (dirtyFlag_[1]) {
         if (getName()) {
             binder << getValueOfName();
@@ -1008,6 +1316,7 @@ void Files::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[2]) {
         if (getUserId()) {
             binder << getValueOfUserId();
@@ -1015,6 +1324,7 @@ void Files::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[3]) {
         if (getAutomatedServiceId()) {
             binder << getValueOfAutomatedServiceId();
@@ -1022,6 +1332,7 @@ void Files::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[4]) {
         if (getSessionId()) {
             binder << getValueOfSessionId();
@@ -1029,6 +1340,7 @@ void Files::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[5]) {
         if (getDomain()) {
             binder << getValueOfDomain();
@@ -1036,6 +1348,7 @@ void Files::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[6]) {
         if (getDomainId()) {
             binder << getValueOfDomainId();
@@ -1043,6 +1356,7 @@ void Files::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[7]) {
         if (getDirectoryId()) {
             binder << getValueOfDirectoryId();
@@ -1050,6 +1364,7 @@ void Files::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[8]) {
         if (getExtension()) {
             binder << getValueOfExtension();
@@ -1057,6 +1372,7 @@ void Files::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[9]) {
         if (getFullPath()) {
             binder << getValueOfFullPath();
@@ -1064,6 +1380,7 @@ void Files::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[10]) {
         if (getKeyId()) {
             binder << getValueOfKeyId();
@@ -1071,6 +1388,7 @@ void Files::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[11]) {
         if (getIsEncrypted()) {
             binder << getValueOfIsEncrypted();
@@ -1078,13 +1396,15 @@ void Files::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[12]) {
-        if (getContentSha256()) {
-            binder << getValueOfContentSha256();
+        if (getContentSha512()) {
+            binder << getValueOfContentSha512();
         } else {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[13]) {
         if (getCreatedAt()) {
             binder << getValueOfCreatedAt();
@@ -1092,79 +1412,154 @@ void Files::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
+    if (dirtyFlag_[14]) {
+        if (getCurrentVersionId()) {
+            binder << getValueOfCurrentVersionId();
+        } else {
+            binder << nullptr;
+        }
+    }
+
+    if (dirtyFlag_[15]) {
+        if (getVersionCount()) {
+            binder << getValueOfVersionCount();
+        } else {
+            binder << nullptr;
+        }
+    }
 }
 Json::Value Files::toJson() const {
     Json::Value ret;
+
     if (getId()) {
+
         ret["id"] = (Json::Int64)getValueOfId();
+
     } else {
         ret["id"] = Json::Value();
     }
+
     if (getName()) {
+
         ret["name"] = getValueOfName();
+
     } else {
         ret["name"] = Json::Value();
     }
+
     if (getUserId()) {
+
         ret["user_id"] = getValueOfUserId();
+
     } else {
         ret["user_id"] = Json::Value();
     }
+
     if (getAutomatedServiceId()) {
+
         ret["automated_service_id"] = getValueOfAutomatedServiceId();
+
     } else {
         ret["automated_service_id"] = Json::Value();
     }
+
     if (getSessionId()) {
+
         ret["session_id"] = (Json::Int64)getValueOfSessionId();
+
     } else {
         ret["session_id"] = Json::Value();
     }
+
     if (getDomain()) {
+
         ret["domain"] = getValueOfDomain();
+
     } else {
         ret["domain"] = Json::Value();
     }
+
     if (getDomainId()) {
+
         ret["domain_id"] = getValueOfDomainId();
+
     } else {
         ret["domain_id"] = Json::Value();
     }
+
     if (getDirectoryId()) {
+
         ret["directory_id"] = (Json::Int64)getValueOfDirectoryId();
+
     } else {
         ret["directory_id"] = Json::Value();
     }
+
     if (getExtension()) {
+
         ret["extension"] = getValueOfExtension();
+
     } else {
         ret["extension"] = Json::Value();
     }
+
     if (getFullPath()) {
+
         ret["full_path"] = getValueOfFullPath();
+
     } else {
         ret["full_path"] = Json::Value();
     }
+
     if (getKeyId()) {
+
         ret["key_id"] = getValueOfKeyId();
+
     } else {
         ret["key_id"] = Json::Value();
     }
+
     if (getIsEncrypted()) {
+
         ret["is_encrypted"] = getValueOfIsEncrypted();
+
     } else {
         ret["is_encrypted"] = Json::Value();
     }
-    if (getContentSha256()) {
-        ret["content_sha256"] = getValueOfContentSha256();
+
+    if (getContentSha512()) {
+
+        ret["content_sha512"] = getValueOfContentSha512();
+
     } else {
-        ret["content_sha256"] = Json::Value();
+        ret["content_sha512"] = Json::Value();
     }
+
     if (getCreatedAt()) {
+
         ret["created_at"] = getCreatedAt()->toDbStringLocal();
+
     } else {
         ret["created_at"] = Json::Value();
     }
+
+    if (getCurrentVersionId()) {
+
+        ret["current_version_id"] = (Json::Int64)getValueOfCurrentVersionId();
+
+    } else {
+        ret["current_version_id"] = Json::Value();
+    }
+
+    if (getVersionCount()) {
+
+        ret["version_count"] = getValueOfVersionCount();
+
+    } else {
+        ret["version_count"] = Json::Value();
+    }
+
     return ret;
 }
 
@@ -1174,349 +1569,537 @@ std::string Files::toString() const {
 
 Json::Value Files::toMasqueradedJson(const std::vector<std::string>& pMasqueradingVector) const {
     Json::Value ret;
-    if (pMasqueradingVector.size() == 14) {
+    if (pMasqueradingVector.size() == 16) {
+
         if (!pMasqueradingVector[0].empty()) {
             if (getId()) {
+
                 ret[pMasqueradingVector[0]] = (Json::Int64)getValueOfId();
+
             } else {
                 ret[pMasqueradingVector[0]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[1].empty()) {
             if (getName()) {
+
                 ret[pMasqueradingVector[1]] = getValueOfName();
+
             } else {
                 ret[pMasqueradingVector[1]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[2].empty()) {
             if (getUserId()) {
+
                 ret[pMasqueradingVector[2]] = getValueOfUserId();
+
             } else {
                 ret[pMasqueradingVector[2]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[3].empty()) {
             if (getAutomatedServiceId()) {
+
                 ret[pMasqueradingVector[3]] = getValueOfAutomatedServiceId();
+
             } else {
                 ret[pMasqueradingVector[3]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[4].empty()) {
             if (getSessionId()) {
+
                 ret[pMasqueradingVector[4]] = (Json::Int64)getValueOfSessionId();
+
             } else {
                 ret[pMasqueradingVector[4]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[5].empty()) {
             if (getDomain()) {
+
                 ret[pMasqueradingVector[5]] = getValueOfDomain();
+
             } else {
                 ret[pMasqueradingVector[5]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[6].empty()) {
             if (getDomainId()) {
+
                 ret[pMasqueradingVector[6]] = getValueOfDomainId();
+
             } else {
                 ret[pMasqueradingVector[6]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[7].empty()) {
             if (getDirectoryId()) {
+
                 ret[pMasqueradingVector[7]] = (Json::Int64)getValueOfDirectoryId();
+
             } else {
                 ret[pMasqueradingVector[7]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[8].empty()) {
             if (getExtension()) {
+
                 ret[pMasqueradingVector[8]] = getValueOfExtension();
+
             } else {
                 ret[pMasqueradingVector[8]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[9].empty()) {
             if (getFullPath()) {
+
                 ret[pMasqueradingVector[9]] = getValueOfFullPath();
+
             } else {
                 ret[pMasqueradingVector[9]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[10].empty()) {
             if (getKeyId()) {
+
                 ret[pMasqueradingVector[10]] = getValueOfKeyId();
+
             } else {
                 ret[pMasqueradingVector[10]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[11].empty()) {
             if (getIsEncrypted()) {
+
                 ret[pMasqueradingVector[11]] = getValueOfIsEncrypted();
+
             } else {
                 ret[pMasqueradingVector[11]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[12].empty()) {
-            if (getContentSha256()) {
-                ret[pMasqueradingVector[12]] = getValueOfContentSha256();
+            if (getContentSha512()) {
+
+                ret[pMasqueradingVector[12]] = getValueOfContentSha512();
+
             } else {
                 ret[pMasqueradingVector[12]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[13].empty()) {
             if (getCreatedAt()) {
+
                 ret[pMasqueradingVector[13]] = getCreatedAt()->toDbStringLocal();
+
             } else {
                 ret[pMasqueradingVector[13]] = Json::Value();
             }
         }
+
+        if (!pMasqueradingVector[14].empty()) {
+            if (getCurrentVersionId()) {
+
+                ret[pMasqueradingVector[14]] = (Json::Int64)getValueOfCurrentVersionId();
+
+            } else {
+                ret[pMasqueradingVector[14]] = Json::Value();
+            }
+        }
+
+        if (!pMasqueradingVector[15].empty()) {
+            if (getVersionCount()) {
+
+                ret[pMasqueradingVector[15]] = getValueOfVersionCount();
+
+            } else {
+                ret[pMasqueradingVector[15]] = Json::Value();
+            }
+        }
+
         return ret;
     }
     LOG_ERROR << "Masquerade failed";
+
     if (getId()) {
+
         ret["id"] = (Json::Int64)getValueOfId();
+
     } else {
         ret["id"] = Json::Value();
     }
+
     if (getName()) {
+
         ret["name"] = getValueOfName();
+
     } else {
         ret["name"] = Json::Value();
     }
+
     if (getUserId()) {
+
         ret["user_id"] = getValueOfUserId();
+
     } else {
         ret["user_id"] = Json::Value();
     }
+
     if (getAutomatedServiceId()) {
+
         ret["automated_service_id"] = getValueOfAutomatedServiceId();
+
     } else {
         ret["automated_service_id"] = Json::Value();
     }
+
     if (getSessionId()) {
+
         ret["session_id"] = (Json::Int64)getValueOfSessionId();
+
     } else {
         ret["session_id"] = Json::Value();
     }
+
     if (getDomain()) {
+
         ret["domain"] = getValueOfDomain();
+
     } else {
         ret["domain"] = Json::Value();
     }
+
     if (getDomainId()) {
+
         ret["domain_id"] = getValueOfDomainId();
+
     } else {
         ret["domain_id"] = Json::Value();
     }
+
     if (getDirectoryId()) {
+
         ret["directory_id"] = (Json::Int64)getValueOfDirectoryId();
+
     } else {
         ret["directory_id"] = Json::Value();
     }
+
     if (getExtension()) {
+
         ret["extension"] = getValueOfExtension();
+
     } else {
         ret["extension"] = Json::Value();
     }
+
     if (getFullPath()) {
+
         ret["full_path"] = getValueOfFullPath();
+
     } else {
         ret["full_path"] = Json::Value();
     }
+
     if (getKeyId()) {
+
         ret["key_id"] = getValueOfKeyId();
+
     } else {
         ret["key_id"] = Json::Value();
     }
+
     if (getIsEncrypted()) {
+
         ret["is_encrypted"] = getValueOfIsEncrypted();
+
     } else {
         ret["is_encrypted"] = Json::Value();
     }
-    if (getContentSha256()) {
-        ret["content_sha256"] = getValueOfContentSha256();
+
+    if (getContentSha512()) {
+
+        ret["content_sha512"] = getValueOfContentSha512();
+
     } else {
-        ret["content_sha256"] = Json::Value();
+        ret["content_sha512"] = Json::Value();
     }
+
     if (getCreatedAt()) {
+
         ret["created_at"] = getCreatedAt()->toDbStringLocal();
+
     } else {
         ret["created_at"] = Json::Value();
     }
+
+    if (getCurrentVersionId()) {
+
+        ret["current_version_id"] = (Json::Int64)getValueOfCurrentVersionId();
+
+    } else {
+        ret["current_version_id"] = Json::Value();
+    }
+
+    if (getVersionCount()) {
+
+        ret["version_count"] = getValueOfVersionCount();
+
+    } else {
+        ret["version_count"] = Json::Value();
+    }
+
     return ret;
 }
 
 bool Files::validateJsonForCreation(const Json::Value& pJson, std::string& err) {
+
     if (pJson.isMember("id")) {
         if (!validJsonOfField(0, "id", pJson["id"], err, true))
             return false;
     }
+
     if (pJson.isMember("name")) {
         if (!validJsonOfField(1, "name", pJson["name"], err, true))
             return false;
-    } else {
+    }
+
+    else {
         err = "The name column cannot be null";
         return false;
     }
+
     if (pJson.isMember("user_id")) {
         if (!validJsonOfField(2, "user_id", pJson["user_id"], err, true))
             return false;
     }
+
     if (pJson.isMember("automated_service_id")) {
         if (!validJsonOfField(3, "automated_service_id", pJson["automated_service_id"], err, true))
             return false;
     }
+
     if (pJson.isMember("session_id")) {
         if (!validJsonOfField(4, "session_id", pJson["session_id"], err, true))
             return false;
-    } else {
+    }
+
+    else {
         err = "The session_id column cannot be null";
         return false;
     }
+
     if (pJson.isMember("domain")) {
         if (!validJsonOfField(5, "domain", pJson["domain"], err, true))
             return false;
     }
+
     if (pJson.isMember("domain_id")) {
         if (!validJsonOfField(6, "domain_id", pJson["domain_id"], err, true))
             return false;
     }
+
     if (pJson.isMember("directory_id")) {
         if (!validJsonOfField(7, "directory_id", pJson["directory_id"], err, true))
             return false;
     }
+
     if (pJson.isMember("extension")) {
         if (!validJsonOfField(8, "extension", pJson["extension"], err, true))
             return false;
     }
+
     if (pJson.isMember("full_path")) {
         if (!validJsonOfField(9, "full_path", pJson["full_path"], err, true))
             return false;
-    } else {
+    }
+
+    else {
         err = "The full_path column cannot be null";
         return false;
     }
+
     if (pJson.isMember("key_id")) {
         if (!validJsonOfField(10, "key_id", pJson["key_id"], err, true))
             return false;
     }
+
     if (pJson.isMember("is_encrypted")) {
         if (!validJsonOfField(11, "is_encrypted", pJson["is_encrypted"], err, true))
             return false;
     }
-    if (pJson.isMember("content_sha256")) {
-        if (!validJsonOfField(12, "content_sha256", pJson["content_sha256"], err, true))
+
+    if (pJson.isMember("content_sha512")) {
+        if (!validJsonOfField(12, "content_sha512", pJson["content_sha512"], err, true))
             return false;
     }
+
     if (pJson.isMember("created_at")) {
         if (!validJsonOfField(13, "created_at", pJson["created_at"], err, true))
             return false;
     }
+
+    if (pJson.isMember("current_version_id")) {
+        if (!validJsonOfField(14, "current_version_id", pJson["current_version_id"], err, true))
+            return false;
+    }
+
+    if (pJson.isMember("version_count")) {
+        if (!validJsonOfField(15, "version_count", pJson["version_count"], err, true))
+            return false;
+    }
+
     return true;
 }
 bool Files::validateMasqueradedJsonForCreation(
     const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector, std::string& err) {
-    if (pMasqueradingVector.size() != 14) {
+    if (pMasqueradingVector.size() != 16) {
         err = "Bad masquerading vector";
         return false;
     }
     try {
+
         if (!pMasqueradingVector[0].empty()) {
             if (pJson.isMember(pMasqueradingVector[0])) {
                 if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[1].empty()) {
             if (pJson.isMember(pMasqueradingVector[1])) {
                 if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, true))
                     return false;
-            } else {
+            }
+
+            else {
                 err = "The " + pMasqueradingVector[1] + " column cannot be null";
                 return false;
             }
         }
+
         if (!pMasqueradingVector[2].empty()) {
             if (pJson.isMember(pMasqueradingVector[2])) {
                 if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[3].empty()) {
             if (pJson.isMember(pMasqueradingVector[3])) {
                 if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[4].empty()) {
             if (pJson.isMember(pMasqueradingVector[4])) {
                 if (!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, true))
                     return false;
-            } else {
+            }
+
+            else {
                 err = "The " + pMasqueradingVector[4] + " column cannot be null";
                 return false;
             }
         }
+
         if (!pMasqueradingVector[5].empty()) {
             if (pJson.isMember(pMasqueradingVector[5])) {
                 if (!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[6].empty()) {
             if (pJson.isMember(pMasqueradingVector[6])) {
                 if (!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[7].empty()) {
             if (pJson.isMember(pMasqueradingVector[7])) {
                 if (!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[8].empty()) {
             if (pJson.isMember(pMasqueradingVector[8])) {
                 if (!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[9].empty()) {
             if (pJson.isMember(pMasqueradingVector[9])) {
                 if (!validJsonOfField(9, pMasqueradingVector[9], pJson[pMasqueradingVector[9]], err, true))
                     return false;
-            } else {
+            }
+
+            else {
                 err = "The " + pMasqueradingVector[9] + " column cannot be null";
                 return false;
             }
         }
+
         if (!pMasqueradingVector[10].empty()) {
             if (pJson.isMember(pMasqueradingVector[10])) {
                 if (!validJsonOfField(10, pMasqueradingVector[10], pJson[pMasqueradingVector[10]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[11].empty()) {
             if (pJson.isMember(pMasqueradingVector[11])) {
                 if (!validJsonOfField(11, pMasqueradingVector[11], pJson[pMasqueradingVector[11]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[12].empty()) {
             if (pJson.isMember(pMasqueradingVector[12])) {
                 if (!validJsonOfField(12, pMasqueradingVector[12], pJson[pMasqueradingVector[12]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[13].empty()) {
             if (pJson.isMember(pMasqueradingVector[13])) {
                 if (!validJsonOfField(13, pMasqueradingVector[13], pJson[pMasqueradingVector[13]], err, true))
                     return false;
             }
         }
+
+        if (!pMasqueradingVector[14].empty()) {
+            if (pJson.isMember(pMasqueradingVector[14])) {
+                if (!validJsonOfField(14, pMasqueradingVector[14], pJson[pMasqueradingVector[14]], err, true))
+                    return false;
+            }
+        }
+
+        if (!pMasqueradingVector[15].empty()) {
+            if (pJson.isMember(pMasqueradingVector[15])) {
+                if (!validJsonOfField(15, pMasqueradingVector[15], pJson[pMasqueradingVector[15]], err, true))
+                    return false;
+            }
+        }
+
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -1524,133 +2107,187 @@ bool Files::validateMasqueradedJsonForCreation(
     return true;
 }
 bool Files::validateJsonForUpdate(const Json::Value& pJson, std::string& err) {
+
     if (pJson.isMember("id")) {
         if (!validJsonOfField(0, "id", pJson["id"], err, false))
             return false;
-    } else {
+    }
+
+    else {
         err = "The value of primary key must be set in the json object for update";
         return false;
     }
+
     if (pJson.isMember("name")) {
         if (!validJsonOfField(1, "name", pJson["name"], err, false))
             return false;
     }
+
     if (pJson.isMember("user_id")) {
         if (!validJsonOfField(2, "user_id", pJson["user_id"], err, false))
             return false;
     }
+
     if (pJson.isMember("automated_service_id")) {
         if (!validJsonOfField(3, "automated_service_id", pJson["automated_service_id"], err, false))
             return false;
     }
+
     if (pJson.isMember("session_id")) {
         if (!validJsonOfField(4, "session_id", pJson["session_id"], err, false))
             return false;
     }
+
     if (pJson.isMember("domain")) {
         if (!validJsonOfField(5, "domain", pJson["domain"], err, false))
             return false;
     }
+
     if (pJson.isMember("domain_id")) {
         if (!validJsonOfField(6, "domain_id", pJson["domain_id"], err, false))
             return false;
     }
+
     if (pJson.isMember("directory_id")) {
         if (!validJsonOfField(7, "directory_id", pJson["directory_id"], err, false))
             return false;
     }
+
     if (pJson.isMember("extension")) {
         if (!validJsonOfField(8, "extension", pJson["extension"], err, false))
             return false;
     }
+
     if (pJson.isMember("full_path")) {
         if (!validJsonOfField(9, "full_path", pJson["full_path"], err, false))
             return false;
     }
+
     if (pJson.isMember("key_id")) {
         if (!validJsonOfField(10, "key_id", pJson["key_id"], err, false))
             return false;
     }
+
     if (pJson.isMember("is_encrypted")) {
         if (!validJsonOfField(11, "is_encrypted", pJson["is_encrypted"], err, false))
             return false;
     }
-    if (pJson.isMember("content_sha256")) {
-        if (!validJsonOfField(12, "content_sha256", pJson["content_sha256"], err, false))
+
+    if (pJson.isMember("content_sha512")) {
+        if (!validJsonOfField(12, "content_sha512", pJson["content_sha512"], err, false))
             return false;
     }
+
     if (pJson.isMember("created_at")) {
         if (!validJsonOfField(13, "created_at", pJson["created_at"], err, false))
             return false;
     }
+
+    if (pJson.isMember("current_version_id")) {
+        if (!validJsonOfField(14, "current_version_id", pJson["current_version_id"], err, false))
+            return false;
+    }
+
+    if (pJson.isMember("version_count")) {
+        if (!validJsonOfField(15, "version_count", pJson["version_count"], err, false))
+            return false;
+    }
+
     return true;
 }
 bool Files::validateMasqueradedJsonForUpdate(
     const Json::Value& pJson, const std::vector<std::string>& pMasqueradingVector, std::string& err) {
-    if (pMasqueradingVector.size() != 14) {
+    if (pMasqueradingVector.size() != 16) {
         err = "Bad masquerading vector";
         return false;
     }
     try {
+
         if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
             if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, false))
                 return false;
-        } else {
+        }
+
+        else {
             err = "The value of primary key must be set in the json object for update";
             return false;
         }
+
         if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
             if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
             if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
             if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
             if (!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
             if (!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
             if (!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
             if (!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8])) {
             if (!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9])) {
             if (!validJsonOfField(9, pMasqueradingVector[9], pJson[pMasqueradingVector[9]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[10].empty() && pJson.isMember(pMasqueradingVector[10])) {
             if (!validJsonOfField(10, pMasqueradingVector[10], pJson[pMasqueradingVector[10]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[11].empty() && pJson.isMember(pMasqueradingVector[11])) {
             if (!validJsonOfField(11, pMasqueradingVector[11], pJson[pMasqueradingVector[11]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[12].empty() && pJson.isMember(pMasqueradingVector[12])) {
             if (!validJsonOfField(12, pMasqueradingVector[12], pJson[pMasqueradingVector[12]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[13].empty() && pJson.isMember(pMasqueradingVector[13])) {
             if (!validJsonOfField(13, pMasqueradingVector[13], pJson[pMasqueradingVector[13]], err, false))
                 return false;
         }
+
+        if (!pMasqueradingVector[14].empty() && pJson.isMember(pMasqueradingVector[14])) {
+            if (!validJsonOfField(14, pMasqueradingVector[14], pJson[pMasqueradingVector[14]], err, false))
+                return false;
+        }
+
+        if (!pMasqueradingVector[15].empty() && pJson.isMember(pMasqueradingVector[15])) {
+            if (!validJsonOfField(15, pMasqueradingVector[15], pJson[pMasqueradingVector[15]], err, false))
+                return false;
+        }
+
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -1659,147 +2296,232 @@ bool Files::validateMasqueradedJsonForUpdate(
 }
 bool Files::validJsonOfField(size_t index, const std::string& fieldName, const Json::Value& pJson, std::string& err, bool isForCreation) {
     switch (index) {
+
         case 0:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (isForCreation) {
                 err = "The automatic primary key cannot be set";
                 return false;
             }
+
             if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 1:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 2:
+
             if (pJson.isNull()) {
                 return true;
             }
+
             if (!pJson.isInt()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 3:
+
             if (pJson.isNull()) {
                 return true;
             }
+
             if (!pJson.isInt()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 4:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 5:
+
             if (pJson.isNull()) {
                 return true;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 6:
+
             if (pJson.isNull()) {
                 return true;
             }
+
             if (!pJson.isInt()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 7:
+
             if (pJson.isNull()) {
                 return true;
             }
+
             if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 8:
+
             if (pJson.isNull()) {
                 return true;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-            if (pJson.isString() &&
-                std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>, wchar_t>{}.from_bytes(pJson.asCString()).size() > 15) {
+
+            if (pJson.isString() && drogon::utils::utf8Length(pJson.asCString()) > 15) {
                 err = "String length exceeds limit for the " + fieldName + " field (the maximum value is 15)";
                 return false;
             }
+
             break;
+
         case 9:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 10:
+
             if (pJson.isNull()) {
                 return true;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 11:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isBool()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 12:
+
             if (pJson.isNull()) {
                 return true;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 13:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
+        case 14:
+
+            if (pJson.isNull()) {
+                return true;
+            }
+
+            if (!pJson.isInt64()) {
+                err = "Type error in the " + fieldName + " field";
+                return false;
+            }
+
+            break;
+
+        case 15:
+
+            if (pJson.isNull()) {
+                err = "The " + fieldName + " column cannot be null";
+                return false;
+            }
+
+            if (!pJson.isInt()) {
+                err = "Type error in the " + fieldName + " field";
+                return false;
+            }
+
+            break;
+
         default:
             err = "Internal error in the server";
             return false;

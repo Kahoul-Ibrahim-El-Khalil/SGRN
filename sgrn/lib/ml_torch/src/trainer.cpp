@@ -128,11 +128,11 @@ Result<TrainResult> Trainer::trainAndSave(Mlp& t_model, torch::Tensor t_x, torch
     auto save_res = saveWeights(t_model, t_weights_path);
     RETURN_IF(save_res.hasError(), save_res.error());
 
-    auto hash_res = sgrn::utils::computeSha256File(t_weights_path, sgrn::utils::HashEncoding::hex);
+    auto hash_res = sgrn::utils::computeSha512File(t_weights_path, sgrn::utils::HashEncoding::hex);
     RETURN_ERROR_IF(hash_res.hasError(), "Failed to hash weights file: " + hash_res.error());
 
     t_manifest.weights_file = t_weights_path;
-    t_manifest.weights_sha256 = hash_res.value();
+    t_manifest.weights_sha512 = hash_res.value();
     t_manifest.train.epochs_trained = static_cast<uint32_t>(train_res.value().epochs_completed);
     t_manifest.train.final_loss = train_res.value().final_train_loss;
     t_manifest.train.timestamp_ns = static_cast<uint64_t>(sgrn::utils::time::nowMilliseconds()) * 1'000'000ULL;

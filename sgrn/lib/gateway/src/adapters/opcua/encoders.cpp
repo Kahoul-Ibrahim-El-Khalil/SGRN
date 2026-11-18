@@ -352,7 +352,7 @@ Result<void, OpcUaAdapterError> encodeStructOpcUaToMemory(const OpcUaEncodingCon
                             .p_destination = tp_ctx.p_memory + child.offset_,
                             .destination_size = required_bytes};
 
-                        PROPAGATE_ERROR_IF(encodeArrayOfBoolsToMemory(ctx));
+                        IF_ERROR_PROPAGATE(encodeArrayOfBoolsToMemory(ctx));
                         break;
                     }
 
@@ -361,10 +361,10 @@ Result<void, OpcUaAdapterError> encodeStructOpcUaToMemory(const OpcUaEncodingCon
                     elem_ctx.depth = tp_ctx.depth + 1;
 
                     if (m.memberType->typeKind == UA_DATATYPEKIND_STRUCTURE) {
-                        PROPAGATE_ERROR_IF(encodeStructOpcUaToMemory(elem_ctx));
+                        IF_ERROR_PROPAGATE(encodeStructOpcUaToMemory(elem_ctx));
                     } else {
                         elem_ctx.override_size = static_cast<uint32_t>(elem_stride);
-                        PROPAGATE_ERROR_IF(encodeScalarOpcUaToMemory(elem_ctx));
+                        IF_ERROR_PROPAGATE(encodeScalarOpcUaToMemory(elem_ctx));
                     }
                 }
             }
@@ -376,9 +376,9 @@ Result<void, OpcUaAdapterError> encodeStructOpcUaToMemory(const OpcUaEncodingCon
             elem_ctx.depth = tp_ctx.depth + 1;
 
             if (m.memberType->typeKind == UA_DATATYPEKIND_STRUCTURE) {
-                PROPAGATE_ERROR_IF(encodeStructOpcUaToMemory(elem_ctx));
+                IF_ERROR_PROPAGATE(encodeStructOpcUaToMemory(elem_ctx));
             } else {
-                PROPAGATE_ERROR_IF(encodeScalarOpcUaToMemory(elem_ctx));
+                IF_ERROR_PROPAGATE(encodeScalarOpcUaToMemory(elem_ctx));
             }
             ua_offset += m.memberType->memSize;
         }

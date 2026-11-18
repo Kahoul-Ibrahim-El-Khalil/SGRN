@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <sgrn/Result.hpp>
@@ -383,6 +384,51 @@ inline std::optional<std::string> sanitizeRelativeFilename(std::string t_path) {
     while (!t_path.empty() && t_path.front() == '/')
         t_path = t_path.substr(1);
     return t_path;
+}
+
+/**
+ * @brief Split a filename into its primary extension and optional compression
+ *        extension.
+ *
+ * Compression suffixes (zst, gz, br, bz2, xz, zip, 7z) are separated from the
+ * logical extension so callers can recover the real content type:
+ *   "photo.jpg"       -> {"jpg", ""}
+ *   "archive.tar.gz"  -> {"tar", "gz"}
+ *   "data.json.zst"   -> {"json", "zst"}
+ *   "README"          -> {"", ""}
+ */
+inline std::pair<std::string_view, std::string_view> splitExtension(std::string_view t_filename) {
+    size_t last_dot = t_filename.rfind('.');
+    if (last_dot == std::string_view::npos || last_dot == t_filename.length() - 1) {
+        return {"", ""};
+    }
+
+    std::string_view last_ext = t_filename.substr(last_dot + 1);
+
+    if (last_ext == "zst" || last_ext == "gz" || last_ext == "br" || last_ext == "bz2" || last_ext == "xz" || last_ext == "zip" ||
+        last_ext == "7z") {
+        size_t second_last_dot = t_filename.substr(0, last_dot).rfind('.');
+        if (second_last_dot != std::string_view::npos) {
+            std::string_view base_ext = t_filename.substr(second_last_dot + 1, last_dot - second_last_dot - 1);
+            return {base_ext, last_ext};
+        }
+        return {"", last_ext};
+    }
+
+    return {last_ext, ""};
+}
+
+/// Primary (non-compression) extension of a filename, or "" when none.
+inline std::string_view extractExtension(std::string_view t_filename) {
+    return splitExtension(t_filename).first;
+}
+
+/// SEC: lowercase primary extension for case-insensitive allow/blocklist
+/// comparison. Prevents bypass via mixed-case suffixes like ".PHP" or ".JSP".
+inline std::string extractExtensionLower(std::string_view t_filename) {
+    std::string lower(extractExtension(t_filename));
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char t_c) { return static_cast<char>(std::tolower(t_c)); });
+    return lower;
 }
 
 /// Replace all occurrences of t_from with t_to in t_str (in-place).

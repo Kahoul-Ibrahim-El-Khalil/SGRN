@@ -376,7 +376,7 @@ Result<void, OpcUaAdapterError> decodeToOpcUa(
             if (child.type_ == DataType::Bool) {
                 UA_Boolean* p_bool_arr = nullptr;
 
-                PROPAGATE_ERROR_IF(decodeArrayOfBooleansFromMemory(tp_memory_buf + child.offset_, t_count, p_bool_arr));
+                IF_ERROR_PROPAGATE(decodeArrayOfBooleansFromMemory(tp_memory_buf + child.offset_, t_count, p_bool_arr));
 
                 *reinterpret_cast<size_t*>(tp_ua_ptr + ua_offset) = t_count;
 
@@ -396,7 +396,7 @@ Result<void, OpcUaAdapterError> decodeToOpcUa(
 
                     if (m.memberType->typeKind == UA_DATATYPEKIND_STRUCTURE) {
 
-                        PROPAGATE_ERROR_IF(decodeToOpcUa(*m.memberType, p_s7_elem, p_ua_elem, child));
+                        IF_ERROR_PROPAGATE(decodeToOpcUa(*m.memberType, p_s7_elem, p_ua_elem, child));
 
                     } else {
                         // Shallow POD projection instead of deep-copying the
@@ -407,7 +407,7 @@ Result<void, OpcUaAdapterError> decodeToOpcUa(
                         elem_view.size = static_cast<uint32_t>(elem_stride);
                         elem_view.bit_index = 0;
 
-                        PROPAGATE_ERROR_IF(decodeScalarToUa(p_s7_elem, elem_view, m.memberType, p_ua_elem));
+                        IF_ERROR_PROPAGATE(decodeScalarToUa(p_s7_elem, elem_view, m.memberType, p_ua_elem));
                     }
                 }
 
@@ -425,10 +425,10 @@ Result<void, OpcUaAdapterError> decodeToOpcUa(
 
             if (m.memberType->typeKind == UA_DATATYPEKIND_STRUCTURE) {
 
-                PROPAGATE_ERROR_IF(decodeToOpcUa(*m.memberType, p_s7_member, p_ua_member, child));
+                IF_ERROR_PROPAGATE(decodeToOpcUa(*m.memberType, p_s7_member, p_ua_member, child));
 
             } else {
-                PROPAGATE_ERROR_IF(decodeScalarToUa(p_s7_member, makeScalarView(child), m.memberType, p_ua_member));
+                IF_ERROR_PROPAGATE(decodeScalarToUa(p_s7_member, makeScalarView(child), m.memberType, p_ua_member));
             }
 
             ua_offset += m.memberType->memSize;
@@ -511,7 +511,7 @@ Result<UA_Variant, OpcUaAdapterError> decodeStructObjectToExtensionObjectVariant
     // transferred to the ExtensionObject before the guard leaves scope.
 
     UaMemoryGuard buf_guard{p_buf};
-    PROPAGATE_ERROR_IF(decodeToOpcUa(t_type, p_s7_base, static_cast<uint8_t*>(buf_guard.p), t_node));
+    IF_ERROR_PROPAGATE(decodeToOpcUa(t_type, p_s7_base, static_cast<uint8_t*>(buf_guard.p), t_node));
 
     // Adopt p_buf directly instead of wrapping it in a stack
     // UA_ExtensionObject and deep-copying through UA_Variant_setScalarCopy.

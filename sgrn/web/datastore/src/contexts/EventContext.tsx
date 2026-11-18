@@ -1,5 +1,5 @@
 // @/contexts/EventContext.tsx
-import React, { createContext, useContext, useState, useCallback } from "react";
+import React, { createContext, useContext, useState, useCallback, useMemo, useRef, useEffect } from "react";
 
 export type EventType = "success" | "error" | "info" | "warning";
 
@@ -20,8 +20,20 @@ interface EventContextType {
 
 const EventContext = createContext<EventContextType | undefined>(undefined);
 
+const AUTO_DISMISS_MS = 5000;
+
 export function EventProvider({ children }: { children: React.ReactNode }) {
     const [events, setEvents] = useState<Event[]>([]);
+    // Track pending auto-dismiss timers so they can be cleared on unmount.
+    const timers = useRef<Set<number>>(new Set());
+
+    useEffect(() => {
+        const pending = timers.current;
+        return () => {
+            pending.forEach((timer) => window.clearTimeout(timer));
+            pending.clear();
+        };
+    }, []);
 
     const showEvent = useCallback((t_type: EventType, t_message: string, t_scope?: string) => {
         const id = `${Date.now()}-${Math.random()}`;
@@ -35,10 +47,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
         setEvents((prev) => [...prev, newEvent]);
 
-        // Auto-dismiss after 5 seconds
-        setTimeout(() => {
+        const timer = window.setTimeout(() => {
             setEvents((prev) => prev.filter((e) => e.id !== id));
-        }, 5000);
+            timers.current.delete(timer);
+        }, AUTO_DISMISS_MS);
+        timers.current.add(timer);
     }, []);
 
     const clearEvent = useCallback((t_id: string) => {
@@ -49,7 +62,13 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         setEvents([]);
     }, []);
 
-    return <EventContext.Provider value={{ events, showEvent, clearEvent, clearAllEvents }}>{children}</EventContext.Provider>;
+    // Memoized so consumers don't re-render when unrelated state changes.
+    const value = useMemo<EventContextType>(
+        () => ({ events, showEvent, clearEvent, clearAllEvents }),
+        [events, showEvent, clearEvent, clearAllEvents],
+    );
+
+    return <EventContext.Provider value={value}>{children}</EventContext.Provider>;
 }
 
 export function useEvent() {

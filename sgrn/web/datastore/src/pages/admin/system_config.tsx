@@ -14,6 +14,7 @@ import {
     type SystemConfigFieldSpec,
     type SystemConfigSaveResult,
 } from "@/backend/api/system_config";
+import { errorMessage } from "@/lib/errors";
 
 function LiveSessionsSection() {
     const [sessions, setSessions] = useState<ActiveSessionResponse[]>([]);
@@ -42,15 +43,15 @@ function LiveSessionsSection() {
             setRevoking(t_token);
             try {
                 const res = await authenticatedFetch(AdminBackendApiEndpoints.METAPROBE_SESSION_ITEM(t_token), { method: "DELETE" });
-                const data = await readBody<SessionRevokedResponse>(res, {});
+                const data = await readBody<SessionRevokedResponse & { error?: string }>(res, {});
                 if (!res.ok) {
-                    throw new Error((data as any).error || `Failed to revoke session (HTTP ${res.status})`);
+                    throw new Error(data.error || `Failed to revoke session (HTTP ${res.status})`);
                 }
                 showEvent("success", `Session of ${t_actor} terminated`);
                 await loadSessions();
-            } catch (e: any) {
+            } catch (e: unknown) {
                 console.error(e);
-                showEvent("error", e?.message || "Failed to revoke session");
+                showEvent("error", errorMessage(e, "Failed to revoke session"));
             } finally {
                 setRevoking(null);
             }
@@ -136,7 +137,7 @@ function LiveSessionsSection() {
 }
 
 function WebhooksSection() {
-    const [webhooks, setWebhooks] = useState<any[]>([]);
+    const [webhooks, setWebhooks] = useState<WebhookRecord[]>([]);
     const [url, setUrl] = useState("");
     const [secret, setSecret] = useState("");
     const [loading, setLoading] = useState(false);
@@ -148,7 +149,7 @@ function WebhooksSection() {
             const res = await authenticatedFetch(AdminBackendApiEndpoints.WEBHOOKS);
             if (res.ok) {
                 const data = await readBody(res);
-                setWebhooks(Array.isArray(data) ? data : []);
+                setWebhooks(Array.isArray(data) ? (data as WebhookRecord[]) : []);
             }
         } catch (e) {
             console.error(e);
@@ -268,7 +269,14 @@ function WebhooksSection() {
     );
 }
 
-function isDirty(t_original: any, t_current: any): boolean {
+interface WebhookRecord {
+    id: number;
+    url: string;
+    is_active: boolean;
+    created_at?: string;
+}
+
+function isDirty(t_original: unknown, t_current: unknown): boolean {
     return JSON.stringify(t_original ?? null) !== JSON.stringify(t_current ?? null);
 }
 
@@ -278,8 +286,8 @@ function FieldEditor({
     t_on_change,
 }: {
     t_spec: SystemConfigFieldSpec;
-    t_value: any;
-    t_on_change: (t_next: any) => void;
+    t_value: unknown;
+    t_on_change: (t_next: unknown) => void;
 }) {
     if (t_spec.type === "bool") {
         return (
@@ -314,7 +322,7 @@ function FieldEditor({
                 step={t_spec.type === "double" ? "0.1" : "1"}
                 min={t_spec.min}
                 max={t_spec.max}
-                value={t_value ?? ""}
+                value={typeof t_value === "number" || typeof t_value === "string" ? t_value : ""}
                 placeholder={t_value !== undefined ? "" : "—"}
                 onChange={(e) => {
                     if (e.target.value === "") {
@@ -330,7 +338,7 @@ function FieldEditor({
         <input
             className="input-desktop flex-1"
             type="text"
-            value={t_value ?? ""}
+            value={typeof t_value === "number" || typeof t_value === "string" ? t_value : ""}
             placeholder={t_value !== undefined ? "" : "—"}
             onChange={(e) => t_on_change(e.target.value)}
         />
@@ -340,7 +348,7 @@ function FieldEditor({
 export default function SystemConfigPanel() {
     const { showEvent } = useEvent();
     const [doc, setDoc] = useState<SystemConfigDocument | null>(null);
-    const [draft, setDraft] = useState<Record<string, any>>({});
+    const [draft, setDraft] = useState<Record<string, unknown>>({});
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [lastResult, setLastResult] = useState<SystemConfigSaveResult | null>(null);
@@ -354,7 +362,7 @@ export default function SystemConfigPanel() {
                 throw new Error(result.error || "Failed to load system config");
             }
             setDoc(result.data);
-            setDraft(JSON.parse(JSON.stringify(result.data.values ?? {})));
+            setDraft(JSON.parse(JSON.stringify(result.data.values ?? {})) as Record<string, unknown>);
         } catch (error) {
             console.error("Failed to fetch system config:", error);
             showEvent("error", "Unable to load system config");
@@ -392,7 +400,7 @@ export default function SystemConfigPanel() {
         setSaving(true);
         try {
             // Send only changed leaves: smaller blast radius, clearer report.
-            let diff: Record<string, any> = {};
+            let diff: Record<string, unknown> = {};
             for (const path of dirtyPaths) {
                 diff = setFieldValue(diff, path, getFieldValue(draft, path));
             }
@@ -452,11 +460,11 @@ export default function SystemConfigPanel() {
                 <div className="query-controls-row">
                     <span className="admin-cell-muted">EFFECTIVE NOW</span>
                     <span className="admin-cell-bold">
-                        multipart ≥ {getFieldValue(doc.live, "custom_config.s3.chunking_threshold_mb") ?? "?"} MB (original size)
+                        multipart ≥ {String(getFieldValue(doc.live, "custom_config.s3.chunking_threshold_mb") ?? "?")} MB (original size)
                     </span>
                     <span className="admin-cell-muted">
-                        max {getFieldValue(doc.live, "custom_config.s3.max_file_size_mb") ?? "?"} MB · part{" "}
-                        {getFieldValue(doc.live, "custom_config.s3.chunk_part_size_mb") ?? "?"} MB
+                        max {String(getFieldValue(doc.live, "custom_config.s3.max_file_size_mb") ?? "?")} MB · part{" "}
+                        {String(getFieldValue(doc.live, "custom_config.s3.chunk_part_size_mb") ?? "?")} MB
                     </span>
                 </div>
             </div>

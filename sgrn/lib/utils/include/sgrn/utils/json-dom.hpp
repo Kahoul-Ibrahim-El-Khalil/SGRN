@@ -844,7 +844,7 @@ class Document : public Value {
     SizeType error_offset_{0};
     uint32_t error_code_{0};
 
-    static std::string stripJsonCommentsAndTrailingCommas(std::string_view input) {
+    static std::string stripJsonCommentsAndTrailingCommas(std::string_view input, SizeType& unterminated_comment_offset) {
         std::string clean(input);
         bool in_string = false;
         bool escaped = false;
@@ -870,10 +870,10 @@ class Document : public Value {
                     clean[++i] = ' ';
             } else if (c == '/' && i + 1 < clean.size() && clean[i + 1] == '*') {
                 const SizeType comment_end = clean.find("*/", i + 2);
-                // Leave an unterminated block comment untouched so the strict
-                // Glaze reader rejects it instead of accepting a truncated file.
-                if (comment_end == std::string::npos)
-                    return std::string(input);
+                if (comment_end == std::string::npos) {
+                    unterminated_comment_offset = i;
+                    return clean;
+                }
                 for (SizeType pos = i; pos < comment_end + 2; ++pos) {
                     if (clean[pos] != '\n' && clean[pos] != '\r')
                         clean[pos] = ' ';
@@ -913,7 +913,16 @@ class Document : public Value {
         parse_error_.clear();
         error_offset_ = 0;
         error_code_ = 0;
-        const std::string normalized = relaxed ? stripJsonCommentsAndTrailingCommas(input) : std::string(input);
+        SizeType unterminated_comment_offset = std::string_view::npos;
+        const std::string normalized =
+            relaxed ? stripJsonCommentsAndTrailingCommas(input, unterminated_comment_offset) : std::string(input);
+        if (unterminated_comment_offset != std::string_view::npos) {
+            parse_error_ = "unterminated block comment";
+            error_offset_ = unterminated_comment_offset;
+            error_code_ = static_cast<uint32_t>(glz::error_code::expected_end_comment);
+            setNull();
+            return *this;
+        }
         Generic parsed{};
         const auto ec = glz::read<kReadOpts>(parsed, normalized);
         if (ec) {

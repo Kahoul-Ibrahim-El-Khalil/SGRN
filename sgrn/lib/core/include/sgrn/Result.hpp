@@ -91,7 +91,7 @@ template <typename E>
     return std::unexpected<std::decay_t<E>>(std::forward<E>(e));
 }
 
-#define PROPAGATE_ERROR_IF(expr)                                                                                                           \
+#define IF_ERROR_PROPAGATE(expr)                                                                                                           \
     do {                                                                                                                                   \
         auto&& _sgrn_result = (expr);                                                                                                      \
         if (!_sgrn_result.has_value())                                                                                                     \
@@ -125,7 +125,7 @@ template <typename E>
     } while (false)
 
 #define RETURN_ERROR(...) return ::sgrn::Error(__VA_ARGS__)
-#define CO_PROPAGATE_ERROR_IF(expr)                                                                                                        \
+#define CO_IF_ERROR_PROPAGATE(expr)                                                                                                        \
     do {                                                                                                                                   \
         auto&& _sgrn_result = (expr);                                                                                                      \
         if (!_sgrn_result.has_value())                                                                                                     \

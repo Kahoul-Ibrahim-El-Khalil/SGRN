@@ -56,7 +56,7 @@ constexpr const char help_message[] =
     --backup-garage     Atomic Garage S3 backup: drains catalog-referenced
                         objects (storage.objects) into an uncompressed ustar
                         tar archive with live ETA, progress and per-object
-                        sha256 verification against the PostgreSQL catalog.
+                        sha512 verification against the PostgreSQL catalog.
     --verify-backup [F] Cross-verify backup archive(s) against PostgreSQL:
                         reads member hashes and compares 100% against the
                         storage.objects catalog; checks pg_dump TOC.

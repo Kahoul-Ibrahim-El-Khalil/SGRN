@@ -5,7 +5,7 @@
 // artifacts (see help.hpp). Each command:
 //
 //   1. writes its artifact to a .tmp file inside <base_dir>/backup/
-//   2. verifies/finalizes it (pg_restore --list, per-object sha256)
+//   2. verifies/finalizes it (pg_restore --list, per-object sha512)
 //   3. renames the .tmp to its final name in ONE atomic step
 //   4. writes a manifest.json next to it (digests, counts, provenance)
 //
@@ -18,11 +18,11 @@
 //
 // Placement rules (decided):
 //   - artifacts are CATALOG-DRIVEN: --backup-garage enumerates
-//     storage.objects and fetches exactly those (bucket, sha256) pairs.
+//     storage.objects and fetches exactly those (bucket, sha512) pairs.
 //     Objects in Garage without a catalog row (orphans, e.g. an upload
 //     that committed bytes before dying) are NOT carried; that is the
 //     safe asymmetry (missing bytes are loud, extra bytes are harmless).
-//   - sha256 of stored bytes must match the catalog row; discrepancies
+//   - sha512 of stored bytes must match the catalog row; discrepancies
 //     are skipped, counted and recorded in the manifest (failures stay
 //     visible without destroying an otherwise-complete archive).
 //   - consistency: run with the datastore STOPPED (plain best-effort
@@ -55,7 +55,7 @@ namespace fs = std::filesystem;
 // ---------------------------------------------------------------------------
 
 using sgrn::utils::ProgressMeter;
-using sgrn::utils::Sha256Stream;
+using sgrn::utils::Sha512Stream;
 using sgrn::utils::filesystem::ensureOwnerOnlyPerms;
 using sgrn::utils::process::machineName;
 using sgrn::utils::strings::formatBytes;

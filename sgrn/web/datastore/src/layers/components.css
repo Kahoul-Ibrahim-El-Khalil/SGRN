@@ -255,6 +255,7 @@
     .theme-toggle-preview-block {
         width: 0.75rem;
         height: 0.75rem;
+        background: var(--swatch, transparent);
     }
     .theme-toggle-name {
         flex: 1;
@@ -278,6 +279,7 @@
     }
     .storage-progress-bar {
         height: 100%;
+        width: var(--progress, 0%);
         background-color: hsl(var(--primary));
         transition: width 1s ease-out;
     }
@@ -2712,6 +2714,7 @@ table tbody tr:hover td {
 
 .transfer-panel-progress-fill {
     height: 100%;
+    width: var(--progress, 0%);
     border-radius: 0;
     transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }

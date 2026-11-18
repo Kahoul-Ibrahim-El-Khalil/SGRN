@@ -730,11 +730,11 @@ Result<void> PersistenceService::writeBinaryControlLine(const std::string& t_jso
     uint64_t ts = static_cast<uint64_t>(t_ts);
     uint16_t db_num = kControlFrameDbNum;
     uint32_t len = static_cast<uint32_t>(t_json.size());
-    PROPAGATE_ERROR_IF(current_archive_->writeRaw(&ts, sizeof(ts)));
-    PROPAGATE_ERROR_IF(current_archive_->writeRaw(&db_num, sizeof(db_num)));
-    PROPAGATE_ERROR_IF(current_archive_->writeRaw(&len, sizeof(len)));
+    IF_ERROR_PROPAGATE(current_archive_->writeRaw(&ts, sizeof(ts)));
+    IF_ERROR_PROPAGATE(current_archive_->writeRaw(&db_num, sizeof(db_num)));
+    IF_ERROR_PROPAGATE(current_archive_->writeRaw(&len, sizeof(len)));
     if (len > 0) {
-        PROPAGATE_ERROR_IF(current_archive_->writeRaw(t_json.data(), len));
+        IF_ERROR_PROPAGATE(current_archive_->writeRaw(t_json.data(), len));
     }
     return {};
 }

@@ -334,7 +334,7 @@ int main() {
                           const std::string& t_obj_bytes) {
         clear(admin, "BEGIN");
         const Query obj = query(admin,
-            "INSERT INTO storage.objects (bucket, key, sha256, size, original_size, provider)"
+            "INSERT INTO storage.objects (bucket, key, sha512, size, original_size, provider)"
             " VALUES ('w2-bucket','w2-key-' || md5(random()::text), repeat('a',64), $1::bigint, $1::bigint, 'GARAGE')"
             " RETURNING id::text",
             {t_obj_bytes});

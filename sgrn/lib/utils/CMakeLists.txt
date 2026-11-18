@@ -11,11 +11,13 @@ set(SOURCES
     src/crypto/key-provider.cpp
     src/crypto/aead.cpp
     src/crypto/stream.cpp
+    src/file-signature.cpp
     src/jwt.cpp
     src/xml.cpp
     src/xml_impl.c
     src/encoding.cpp
     src/network.cpp
+    src/delta.cpp
 )
 set(HEADERS
     include/sgrn/utils/app.hpp
@@ -31,6 +33,7 @@ set(HEADERS
     include/sgrn/utils/env.hpp
     include/sgrn/utils/event-broker.hpp
     include/sgrn/utils/filesystem.hpp
+    include/sgrn/utils/file-signature.hpp
     include/sgrn/utils/glaze.hpp
     include/sgrn/utils/json-dom.hpp
     include/sgrn/utils/json-ops.hpp
@@ -49,7 +52,8 @@ set(HEADERS
     include/sgrn/utils/threading.hpp
     include/sgrn/utils/time.hpp
     include/sgrn/utils/xml.hpp
-)
+    include/sgrn/utils/delta.hpp
+  )
 
 # Disable PCH for C files which cannot use the CXX PCH
 set_source_files_properties(src/xml_impl.c PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
@@ -126,6 +130,18 @@ if(SGRN_BUILD_TESTS)
     )
     add_test(NAME compression_test COMMAND compression_test)
     target_compile_features(compression_test PRIVATE cxx_std_23)
+
+    sgrn_add_component_executable(
+        TARGET delta_test
+        SOURCES tests/delta-test.cpp
+        ENABLE_ORIGIN_RPATH
+        PRIVATE_LIBS
+            sgrn_utils
+            fmt::fmt
+            sgrn::zstd
+    )
+    add_test(NAME delta_test COMMAND delta_test)
+    target_compile_features(delta_test PRIVATE cxx_std_23)
 
     sgrn_add_component_executable(
         TARGET crypto_test

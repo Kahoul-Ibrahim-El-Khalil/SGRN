@@ -12,10 +12,11 @@ import { useCallback, useEffect, useState } from "react";
 import { Building2, Loader2, Plus, RefreshCw, Save } from "lucide-react";
 import { useEvent } from "@/contexts/EventContext";
 import { AdminBackendApiEndpoints } from "@/backend/endpoints";
-import { authenticatedFetch, jsonBody, readBody } from "@/backend/api/fetcher";
+import { authenticatedFetch, jsonBody, readBody, type ApiErrorBody } from "@/backend/api/fetcher";
 import type { CreateOrganisationRequest, UpdateOrganisationRequest } from "@sgrn/datastore/requests";
 import { bytesToMb, mbToBytes } from "@/backend/api/governance";
 import type { OrganisationListResponse } from "@sgrn/types";
+import { errorMessage } from "@/lib/errors";
 
 interface OrganisationRow {
     name: string;
@@ -86,9 +87,9 @@ export function OrganisationsPanel() {
                 throw new Error("Unexpected organisation list format");
             }
             setOrgs(data.organisations as OrganisationRow[]);
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error("Failed to load organisations:", err);
-            showEvent("error", err?.message || "Unable to load organisations");
+            showEvent("error", errorMessage(err, "Unable to load organisations"));
         } finally {
             setLoading(false);
         }
@@ -159,7 +160,7 @@ export function OrganisationsPanel() {
                 method: "POST",
                 ...jsonBody<CreateOrganisationRequest>(body),
             });
-            const data = await readBody(res, {});
+            const data = await readBody<ApiErrorBody>(res, {});
             if (!res.ok) {
                 throw new Error(data.message || data.error || `Failed to create organisation (HTTP ${res.status})`);
             }
@@ -175,8 +176,8 @@ export function OrganisationsPanel() {
             setAdminFamilyName("");
             setAdminPassword("");
             await load();
-        } catch (err: any) {
-            showEvent("error", err?.message || "Failed to create organisation");
+        } catch (err: unknown) {
+            showEvent("error", errorMessage(err, "Failed to create organisation"));
         } finally {
             setCreating(false);
         }
@@ -209,14 +210,14 @@ export function OrganisationsPanel() {
                     method: "PATCH",
                     ...jsonBody<UpdateOrganisationRequest>(body),
                 });
-                const data = await readBody(res, {});
+                const data = await readBody<ApiErrorBody>(res, {});
                 if (!res.ok) {
                     throw new Error(data.message || data.error || `Failed to update organisation (HTTP ${res.status})`);
                 }
                 showEvent("success", `Organisation "${t_org.name}" updated`);
                 await load();
-            } catch (err: any) {
-                showEvent("error", err?.message || "Failed to update organisation");
+            } catch (err: unknown) {
+                showEvent("error", errorMessage(err, "Failed to update organisation"));
             } finally {
                 setSavingName(null);
             }

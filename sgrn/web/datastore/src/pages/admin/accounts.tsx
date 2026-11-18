@@ -8,11 +8,12 @@ import { useState, useCallback, useEffect } from "react";
 import { Loader2, Plus, Trash2, Save, Lock, ShieldCheck, RefreshCw, ChevronDown, ChevronUp, ShieldAlert } from "lucide-react";
 import { UserStatus } from "@/types";
 import { useEvent } from "@/contexts/EventContext";
-import { authenticatedFetch, jsonBody, readBody } from "@/backend/api/fetcher";
+import { authenticatedFetch, jsonBody, readBody, type ApiErrorBody } from "@/backend/api/fetcher";
 import type { DomainsCreateRequest, DomainsUpdateRequest, UsersUpdateRequest } from "@sgrn/datastore/crud-requests";
 import type { MoveDomainRequest, RegisterUserRequest, RenameDomainRequest } from "@sgrn/datastore/requests";
 import { AdminBackendApiEndpoints } from "@/backend/endpoints";
 import { resetUserPassword, setUserStatus, deleteUser } from "@/backend/api/accountAdmin";
+import { errorMessage } from "@/lib/errors";
 
 // ============================================================================
 // SHARED
@@ -112,9 +113,9 @@ export function UserConfigPanel() {
                     setDomains(domData as DomainRecord[]);
                 }
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error("Failed to load users:", err);
-            showEvent("error", err?.message || "Unable to load user roster");
+            showEvent("error", errorMessage(err, "Unable to load user roster"));
         } finally {
             setLoading(false);
         }
@@ -206,7 +207,7 @@ export function UserConfigPanel() {
                         ...jsonBody<UsersUpdateRequest>(body),
                     });
                     if (!res.ok) {
-                        const err = await readBody(res, {});
+                        const err = await readBody<ApiErrorBody>(res, {});
                         throw new Error(err.message || err.error || `Failed to update user (HTTP ${res.status})`);
                     }
                 }
@@ -218,8 +219,8 @@ export function UserConfigPanel() {
                 }
                 showEvent("success", `User ${first} ${family} updated${statusChanged ? " (sessions revoked if suspended)" : ""}`);
                 await load();
-            } catch (err: any) {
-                showEvent("error", err?.message || "Failed to update user");
+            } catch (err: unknown) {
+                showEvent("error", errorMessage(err, "Failed to update user"));
             } finally {
                 setSavingId(null);
             }
@@ -240,8 +241,8 @@ export function UserConfigPanel() {
                 const res = await resetUserPassword(t_user.id, pw);
                 if (res.error) throw new Error(res.error);
                 showEvent("success", `Password reset for ${t_user.email} — all their sessions were revoked`);
-            } catch (err: any) {
-                showEvent("error", err?.message || "Failed to reset password");
+            } catch (err: unknown) {
+                showEvent("error", errorMessage(err, "Failed to reset password"));
             } finally {
                 setSavingId(null);
             }
@@ -258,8 +259,8 @@ export function UserConfigPanel() {
                 if (res.error) throw new Error(res.error);
                 showEvent("success", `User ${t_user.email} deleted`);
                 await load();
-            } catch (err: any) {
-                showEvent("error", err?.message || "Failed to delete user");
+            } catch (err: unknown) {
+                showEvent("error", errorMessage(err, "Failed to delete user"));
             } finally {
                 setSavingId(null);
             }
@@ -562,7 +563,7 @@ export function RegisterUserForm() {
                 method: "POST",
                 ...jsonBody<RegisterUserRequest>({ email, password, organisation, first_name: firstName, family_name: familyName }),
             });
-            const data = await readBody(res, {});
+            const data = await readBody<ApiErrorBody>(res, {});
             if (res.ok) {
                 showEvent("success", "User registered successfully");
                 setEmail("");
@@ -573,8 +574,8 @@ export function RegisterUserForm() {
             } else {
                 showEvent("error", data.error || "Failed to register user");
             }
-        } catch (err: any) {
-            showEvent("error", err?.message || "Network error during registration");
+        } catch (err: unknown) {
+            showEvent("error", errorMessage(err, "Network error during registration"));
         } finally {
             setCreating(false);
         }
@@ -660,9 +661,9 @@ export function DomainConfigPanel() {
                 throw new Error("Unexpected domain list format");
             }
             setDomains(data as DomainRecord[]);
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error("Failed to load domains:", err);
-            showEvent("error", err?.message || "Unable to load domain registry");
+            showEvent("error", errorMessage(err, "Unable to load domain registry"));
         } finally {
             setLoading(false);
         }
@@ -692,7 +693,7 @@ export function DomainConfigPanel() {
                 ...jsonBody<DomainsCreateRequest>(body),
             });
             if (!res.ok) {
-                const err = await readBody(res, {});
+                const err = await readBody<ApiErrorBody>(res, {});
                 throw new Error(err.message || err.error || `Failed to create domain (HTTP ${res.status})`);
             }
             showEvent("success", `Domain "${newName.trim()}" registered with encryption policy: ${newPolicy}`);
@@ -700,8 +701,8 @@ export function DomainConfigPanel() {
             setNewParent("");
             setNewPolicy("optional");
             await load();
-        } catch (err: any) {
-            showEvent("error", err?.message || "Failed to create domain");
+        } catch (err: unknown) {
+            showEvent("error", errorMessage(err, "Failed to create domain"));
         } finally {
             setCreating(false);
         }
@@ -735,7 +736,7 @@ export function DomainConfigPanel() {
                         ...jsonBody<RenameDomainRequest>({ name: draft.name.trim() }),
                     });
                     if (!rres.ok) {
-                        const err = await readBody(rres, {});
+                        const err = await readBody<ApiErrorBody>(rres, {});
                         throw new Error(err.message || err.error || `Failed to rename domain (HTTP ${rres.status})`);
                     }
                 }
@@ -745,7 +746,7 @@ export function DomainConfigPanel() {
                         ...jsonBody<MoveDomainRequest>({ parent_id: draft.parent_id }),
                     });
                     if (!mres.ok) {
-                        const err = await readBody(mres, {});
+                        const err = await readBody<ApiErrorBody>(mres, {});
                         throw new Error(err.message || err.error || `Failed to move domain (HTTP ${mres.status})`);
                     }
                 }
@@ -755,14 +756,14 @@ export function DomainConfigPanel() {
                         ...jsonBody<DomainsUpdateRequest>({ encryption_policy: draft.encryption_policy }),
                     });
                     if (!res.ok) {
-                        const err = await readBody(res, {});
+                        const err = await readBody<ApiErrorBody>(res, {});
                         throw new Error(err.message || err.error || `Failed to update domain (HTTP ${res.status})`);
                     }
                 }
                 showEvent("success", `Domain "${draft.name.trim()}" updated${nameChanged ? " (authorities re-labelled)" : ""}`);
                 await load();
-            } catch (err: any) {
-                showEvent("error", err?.message || "Failed to update domain");
+            } catch (err: unknown) {
+                showEvent("error", errorMessage(err, "Failed to update domain"));
             } finally {
                 setSavingId(null);
             }
@@ -780,13 +781,13 @@ export function DomainConfigPanel() {
             try {
                 const res = await authenticatedFetch(`/api/v1/domains/${t_domain.id}`, { method: "DELETE" });
                 if (!res.ok && res.status !== 204) {
-                    const err = await readBody(res, {});
+                    const err = await readBody<ApiErrorBody>(res, {});
                     throw new Error(err.message || err.error || `Failed to delete domain (HTTP ${res.status})`);
                 }
                 showEvent("success", `Domain "${t_domain.name}" deleted`);
                 await load();
-            } catch (err: any) {
-                showEvent("error", err?.message || "Failed to delete domain");
+            } catch (err: unknown) {
+                showEvent("error", errorMessage(err, "Failed to delete domain"));
             }
         },
         [armingDelete, load, showEvent],

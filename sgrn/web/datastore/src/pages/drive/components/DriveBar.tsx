@@ -4,6 +4,7 @@
 // One .drive-toolbar-row bar (scope tabs, view toggle, stretch search,
 // actions) with the breadcrumb on its own line underneath.
 
+import type { InputHTMLAttributes } from "react";
 import {
     Shield,
     LayoutGrid,
@@ -21,8 +22,13 @@ import {
 } from "lucide-react";
 import type { StorageScope, DriveSortKey, DriveSortOrder } from "@/pages/drive/api";
 import type { DirectoryListing } from "@sgrn/types";
+import type { DriveCapabilities } from "@/pages/drive/types";
 import { Breadcrumb } from "@/pages/drive/components/Breadcrumb";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+
+const DIRECTORY_INPUT_ATTRIBUTES: InputHTMLAttributes<HTMLInputElement> & { webkitdirectory: string } = {
+    webkitdirectory: "",
+};
 
 const SORT_LABELS: Record<DriveSortKey, string> = {
     name: "Name",
@@ -52,7 +58,7 @@ interface DriveBarProps {
     sortBy: DriveSortKey;
     sortOrder: DriveSortOrder;
     onSort: (key: DriveSortKey) => void;
-    capabilities?: any;
+    capabilities?: DriveCapabilities;
     encryptUploads?: boolean;
     onToggleEncrypt?: () => void;
 }
@@ -196,8 +202,8 @@ export function DriveBar({
                     <input
                         ref={folderInputRef}
                         type="file"
-                        {...({ webkitdirectory: "" } as any)}
-                        style={{ display: "none" }}
+                        {...DIRECTORY_INPUT_ATTRIBUTES}
+                        className="drive-hidden-input"
                         onChange={onFolderChange}
                     />
 
@@ -211,7 +217,7 @@ export function DriveBar({
                         <Upload size={16} />
                         <span>Upload files</span>
                     </button>
-                    <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={onFileChange} />
+                    <input ref={fileInputRef} type="file" multiple className="drive-hidden-input" onChange={onFileChange} />
 
                     {onToggleEncrypt && (
                         <button

@@ -352,7 +352,7 @@ int main(int t_argc, char** tp_argv) {
         fmt::print("  Final Val Loss  : {:.6f}\n", res.final_val_loss);
     }
     fmt::print("  Model Weights   : {}\n", weights_path);
-    fmt::print("  Weights SHA256  : {}\n", manifest.weights_sha256);
+    fmt::print("  Weights SHA512  : {}\n", manifest.weights_sha512);
     fmt::print("  Manifest JSON   : {}\n", manifest_path);
 
     return 0;

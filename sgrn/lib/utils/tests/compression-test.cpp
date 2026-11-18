@@ -2,14 +2,25 @@
 // back the WAL (incremental writer, bounded-memory reader, line index).
 #include <sgrn/utils/compression.hpp>
 
+#include <array>
 #include <cassert>
+#include <cstddef>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
+
+static void check(bool t_cond, const char* t_msg) {
+    if (!t_cond) {
+        std::cerr << "FAIL: " << t_msg << '\n';
+        std::exit(1);
+    }
+}
 
 // Round-trip test for the streaming JSONL zstd primitives that back the WAL:
 //   - ZstdLineWriter writes N '\n'-terminated lines incrementally
@@ -91,6 +102,73 @@ int main() {
             expect += '\n';
         }
         assert(decompressed_res.value() == expect);
+    }
+
+    // One-shot decompression with an explicit logical size: exact match
+    // succeeds; mismatched, truncated and garbage inputs are rejected.
+    {
+        const std::string payload = "expected-size payload: " + std::string(1000, 'x');
+        auto compressed_res = sgrn::utils::compression::compressStringZstd(payload, 3);
+        check(compressed_res.has_value(), "compressStringZstd should succeed");
+        const std::string& compressed = compressed_res.value();
+
+        auto exact = sgrn::utils::compression::decompressStringZstd(compressed, payload.size());
+        check(exact.has_value(), "exact expected size should decompress");
+        check(exact.value() == payload, "exact expected size must round-trip");
+
+        check(sgrn::utils::compression::decompressStringZstd(compressed, payload.size() - 1).hasError(),
+            "too-small expected size must be rejected");
+        check(sgrn::utils::compression::decompressStringZstd(compressed, payload.size() + 1).hasError(),
+            "too-large expected size must be rejected");
+        check(sgrn::utils::compression::decompressStringZstd(compressed.substr(0, compressed.size() / 2)).hasError(),
+            "truncated input must be rejected");
+        check(sgrn::utils::compression::decompressStringZstd(std::string(64, '\x7F')).hasError(), "garbage input must be rejected");
+
+        auto empty_compressed = sgrn::utils::compression::compressStringZstd("", 3);
+        check(empty_compressed.has_value(), "empty payload should compress");
+        auto empty_out = sgrn::utils::compression::decompressStringZstd(empty_compressed.value(), 0);
+        check(empty_out.has_value(), "empty payload should decompress");
+        check(empty_out->empty(), "empty payload must stay empty");
+    }
+
+    // The zstd helpers accept any contiguous 1-byte range, not just
+    // std::string / std::string_view.
+    {
+        namespace comp = sgrn::utils::compression;
+
+        const std::string payload = "generic byte container payload: " + std::string(512, 'g');
+        const std::vector<char> payload_chars(payload.begin(), payload.end());
+
+        auto compressed_res = comp::compressStringZstd(payload_chars, 3);
+        check(compressed_res.has_value(), "vector<char> compression should succeed");
+
+        const std::string& compressed = compressed_res.value();
+        const std::vector<unsigned char> compressed_uchars(compressed.begin(), compressed.end());
+        check(comp::verifyCompressionSignature(compressed_uchars, "zstd"), "vector<unsigned char> should be recognised as zstd");
+
+        auto restored = comp::decompressStringZstd(compressed_uchars, payload.size());
+        check(restored.has_value(), "vector<unsigned char> decompression should succeed");
+        check(restored.value() == payload, "vector<unsigned char> round-trip must be byte-exact");
+
+        std::vector<std::byte> compressed_raw(compressed.size());
+        std::memcpy(compressed_raw.data(), compressed.data(), compressed.size());
+
+        auto restored_raw = comp::decompressStringZstd(compressed_raw);
+        check(restored_raw.has_value(), "vector<std::byte> decompression should succeed");
+        check(restored_raw.value() == payload, "vector<std::byte> round-trip must be byte-exact");
+
+        // A fixed-size std::array is a valid input too.
+        const std::array<char, 5> magic{
+            {static_cast<char>(0x28), static_cast<char>(0xB5), static_cast<char>(0x2F), static_cast<char>(0xFD)}};
+        check(comp::verifyCompressionSignature(magic, "zstd"), "std::array magic bytes should be recognised");
+        check(!comp::verifyCompressionSignature(magic, "gzip"), "std::array must still be checked against the algorithm");
+
+        const std::filesystem::path generic_file = std::filesystem::temp_directory_path() / "sgrn_compression_generic.zst";
+        std::filesystem::remove(generic_file, ec);
+        auto written = comp::compressStringToFileZstd(payload_chars, generic_file, 3);
+        check(written.has_value(), "vector<char> streaming-to-file compression should succeed");
+        check(std::filesystem::exists(generic_file), "streaming-to-file compression should create the file");
+        std::filesystem::remove(generic_file, ec);
     }
 
     // POISONED writer: once a write fails the writer must refuse further use.

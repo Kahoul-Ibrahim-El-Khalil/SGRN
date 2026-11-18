@@ -37,7 +37,7 @@ export interface FileMetadata {
   size: number;
   object_created_at?: string;
   mime_type?: string | null;
-  sha256?: string;
+  sha512?: string;
   etag?: string;
   object?: StorageObject;
 }
@@ -154,9 +154,9 @@ export interface OverviewBucket {
     pages: number;
   };
   db: {
-    file_count: number;
-    total_original_bytes: number;
-    total_compressed_bytes: number;
+    objects: number;
+    bytes: number;
+    files: number;
   };
 }
 

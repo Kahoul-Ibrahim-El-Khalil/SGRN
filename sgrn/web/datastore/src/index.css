@@ -162,3 +162,21 @@
         border-radius: 0 !important;
     }
 }
+
+/* =====================================================================
+   UTILITIES
+   Visually hidden but still accessible. Tailwind's `sr-only` utility is
+   not emitted by this build, so define the pattern locally: a missing
+   rule made hidden file inputs render visibly and broke the drive cards.
+   ===================================================================== */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}

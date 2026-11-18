@@ -68,6 +68,6 @@ LD_LIBRARY_PATH=/home/odahim/micromamba/envs/SGRN/lib \
 Upon completion, `sgrn_train` generates two files in the output directory:
 
 1. `<model_name>.pt`: Serialized PyTorch TorchScript weights.
-2. `<model_name>_manifest.json`: Standardized SGRN `ModelManifest` capturing input feature normalization stats (min/max/mean), output targets, training epoch loss, and weights SHA256 checksum.
+2. `<model_name>_manifest.json`: Standardized SGRN `ModelManifest` capturing input feature normalization stats (min/max/mean), output targets, training epoch loss, and weights SHA-512 checksum.
 
 This manifest and weights file can be directly hot-loaded into `TwinBridge` inside the running gateway process with zero downtime.

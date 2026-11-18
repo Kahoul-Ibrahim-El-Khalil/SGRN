@@ -102,8 +102,8 @@ static int runModelEvaluation(const std::string& t_manifest_path, const std::str
         auto check_res = manifest.validateWeightsFile(weights_path);
         if (check_res.hasError()) {
             fmt::print(stderr, fmt::fg(fmt::color::yellow), "Warning: Weights validation: {}\n", check_res.error());
-        } else if (!manifest.weights_sha256.empty()) {
-            fmt::print(fmt::fg(fmt::color::green), "Weights SHA256 integrity check verified.\n");
+        } else if (!manifest.weights_sha512.empty()) {
+            fmt::print(fmt::fg(fmt::color::green), "Weights SHA512 integrity check verified.\n");
         }
     }
 

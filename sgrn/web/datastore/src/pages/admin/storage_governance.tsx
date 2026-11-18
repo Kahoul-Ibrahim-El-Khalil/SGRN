@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { Loader2, Search, Plus, Trash2, Save, Lock, ShieldCheck, RefreshCw } from "lucide-react";
 import { useEvent } from "@/contexts/EventContext";
 import { QueryListBackendApiEndpoints } from "@/backend/endpoints";
-import { authenticatedFetch, jsonBody, readBody } from "@/backend/api/fetcher";
+import { authenticatedFetch, jsonBody, readBody, type ApiErrorBody } from "@/backend/api/fetcher";
 import type { DomainsUpdateRequest } from "@sgrn/datastore/crud-requests";
 import {
     fetchFormats,
@@ -16,6 +16,7 @@ import {
     type QuotaKind,
     type QuotaRow,
 } from "@/backend/api/governance";
+import { errorMessage } from "@/lib/errors";
 
 export function FormatsPanel() {
     const { showEvent } = useEvent();
@@ -629,9 +630,9 @@ export function EncryptionPoliciesPanel() {
                 }
                 setPolicies(map);
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error("Failed to load domain encryption policies:", err);
-            showEvent("error", err?.message || "Unable to load domain encryption policies");
+            showEvent("error", errorMessage(err, "Unable to load domain encryption policies"));
         } finally {
             setLoading(false);
         }
@@ -651,13 +652,13 @@ export function EncryptionPoliciesPanel() {
                     ...jsonBody<DomainsUpdateRequest>({ encryption_policy: newPolicy }),
                 });
                 if (!res.ok) {
-                    const err = await readBody(res, {});
+                    const err = await readBody<ApiErrorBody>(res, {});
                     throw new Error(err.message || `Failed to update policy (HTTP ${res.status})`);
                 }
                 showEvent("success", `Domain "${domain.name}" encryption policy set to: ${newPolicy}`);
                 await load();
-            } catch (err: any) {
-                showEvent("error", err?.message || "Failed to update encryption policy");
+            } catch (err: unknown) {
+                showEvent("error", errorMessage(err, "Failed to update encryption policy"));
             } finally {
                 setSavingId(null);
             }

@@ -4,10 +4,91 @@ import { authenticatedFetch, jsonBody, readBody } from "@/backend/api/fetcher";
 import type { BulkActionRequest, MoveItemRequest } from "@sgrn/datastore/requests";
 import { StorageBackendApiEndpoints } from "@/backend/endpoints";
 import { ResumableUploader, type ChunkUploadProgress, type ResumableUploadReceipt } from "@/lib/resumableUploader";
-import type { DirectoryListing, SgrnResult, BulkResponse, CreateDirectoryResponse, MoveItemResponse, DeleteResponse } from "@sgrn/types";
+import type { SgrnResult, CreateDirectoryResponse, MoveItemResponse, DeleteResponse } from "@sgrn/types";
+import type { DriveListing } from "@/pages/drive/types";
 import { ErrorScope } from "@sgrn/types";
 
 export type StorageScope = "personal" | "automated_services" | "users" | "domains";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readApiFailure<T>(value: unknown, fallback: string, defaultScope: ErrorScope = ErrorScope.Unknown): SgrnResult<T> {
+    const payload = isRecord(value) ? value : {};
+    const message = typeof payload.error === "string" && payload.error.trim() ? payload.error : fallback;
+    const scope =
+        typeof payload.scope === "string" && Object.values(ErrorScope).includes(payload.scope as ErrorScope)
+            ? (payload.scope as ErrorScope)
+            : defaultScope;
+    return { error: message, scope };
+}
+
+function isDriveListing(value: unknown): value is DriveListing {
+    if (!isRecord(value)) return false;
+
+    return (
+        typeof value.path === "string" &&
+        Array.isArray(value.folders) &&
+        Array.isArray(value.files) &&
+        typeof value.total_items === "number" &&
+        typeof value.total_folders === "number" &&
+        typeof value.total_files === "number" &&
+        typeof value.page === "number" &&
+        typeof value.page_size === "number" &&
+        typeof value.total_pages === "number"
+    );
+}
+
+function relativeUploadName(file: File): string {
+    const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+    return relativePath?.trim() || file.name;
+}
+
+export interface DriveBatchUploadItemReceipt extends DriveUploadReceipt {
+    success?: boolean;
+    error?: string;
+}
+
+export interface DriveBatchUploadReceipt {
+    success_count: number;
+    fail_count: number;
+    /** Results retain the order of the submitted files. */
+    results: DriveBatchUploadItemReceipt[];
+}
+
+function decodeBatchUploadReceipt(value: unknown): DriveBatchUploadReceipt | null {
+    if (!isRecord(value)) return null;
+    const successCount = value.success_count;
+    const failCount = value.fail_count;
+    const rawResults = value.results;
+    if (
+        typeof successCount !== "number" ||
+        !Number.isSafeInteger(successCount) ||
+        successCount < 0 ||
+        typeof failCount !== "number" ||
+        !Number.isSafeInteger(failCount) ||
+        failCount < 0 ||
+        !Array.isArray(rawResults) ||
+        !rawResults.every(isRecord)
+    )
+        return null;
+
+    const results = rawResults.map((item) => ({
+        ...(typeof item.success === "boolean" ? { success: item.success } : {}),
+        ...(typeof item.error === "string" ? { error: item.error } : {}),
+        ...(typeof item.upload_mode === "string" ? { upload_mode: item.upload_mode } : {}),
+        ...(typeof item.part_count === "number" || item.part_count === null ? { part_count: item.part_count as number | null } : {}),
+        ...(typeof item.part_size_bytes === "number" || item.part_size_bytes === null
+            ? { part_size_bytes: item.part_size_bytes as number | null }
+            : {}),
+        ...(typeof item.file_id === "number" ? { file_id: item.file_id } : {}),
+        ...(typeof item.object_id === "number" ? { object_id: item.object_id } : {}),
+        ...(typeof item.key === "string" ? { key: item.key } : {}),
+    }));
+
+    return { success_count: successCount, fail_count: failCount, results };
+}
 
 /** Columns the backend whitelists for ordering the drive listing. */
 export type DriveSortKey = "name" | "size" | "modified";
@@ -31,7 +112,7 @@ export async function listDirectory(
     t_search: string = "",
     t_sort: DriveSortKey = "name",
     t_order: DriveSortOrder = "asc",
-): Promise<SgrnResult<DirectoryListing>> {
+): Promise<SgrnResult<DriveListing>> {
     try {
         const params = new URLSearchParams({
             path: t_path,
@@ -43,13 +124,14 @@ export async function listDirectory(
             order: t_order,
         });
         const res = await authenticatedFetch(`${StorageBackendApiEndpoints.DRIVE_LIST}?${params.toString()}`);
-        const data = await readBody(res);
+        const data = await readBody<unknown>(res, null);
 
-        if (!res.ok) {
-            return { error: data.error || `Failed to list directory: ${res.status}`, scope: data.scope || ErrorScope.Unknown };
+        if (!res.ok) return readApiFailure(data, `Failed to list directory: ${res.status}`);
+        if (!isDriveListing(data)) {
+            return { error: "The datastore returned an invalid directory listing.", scope: ErrorScope.Unknown };
         }
 
-        return { data: data as DirectoryListing };
+        return { data };
     } catch (e) {
         return { error: `Failed to list directory: ${e instanceof Error ? e.message : String(e)}`, scope: ErrorScope.Network };
     }
@@ -76,8 +158,8 @@ export async function downloadDriveFile(
         const res = await authenticatedFetch(`${StorageBackendApiEndpoints.PATH_BASE}?${params.toString()}`, { headers });
 
         if (!res.ok && res.status !== 206) {
-            const err_data = await readBody(res, null);
-            return { error: err_data?.error || `Download failed: ${res.status}`, scope: err_data?.scope || ErrorScope.Network };
+            const err_data = await readBody<unknown>(res, null);
+            return readApiFailure(err_data, `Download failed: ${res.status}`, ErrorScope.Network);
         }
 
         const disposition = res.headers.get("Content-Disposition") ?? "";
@@ -120,7 +202,7 @@ export async function downloadDriveFile(
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        URL.revokeObjectURL(object_url);
+        window.setTimeout(() => URL.revokeObjectURL(object_url), 1000);
 
         return { data: undefined };
     } catch (e) {
@@ -139,8 +221,8 @@ export async function fetchDriveFileContent(t_file_path: string, t_scope: Storag
         const res = await authenticatedFetch(`${StorageBackendApiEndpoints.PATH_BASE}?${params.toString()}`);
 
         if (!res.ok) {
-            const err_data = await readBody(res, null);
-            return { error: err_data?.error || `Fetch failed: ${res.status}`, scope: err_data?.scope || ErrorScope.Network };
+            const err_data = await readBody<unknown>(res, null);
+            return readApiFailure(err_data, `Fetch failed: ${res.status}`, ErrorScope.Network);
         }
 
         const buffer = await res.arrayBuffer();
@@ -180,7 +262,7 @@ export function describeStorageTrace(t_upload_mode?: string, t_part_count?: numb
 }
 
 /** Batch summary suffix: how many results went multipart + total parts. */
-export function summarizeBatchTrace(t_results: any[]): string {
+export function summarizeBatchTrace(t_results: readonly DriveBatchUploadItemReceipt[]): string {
     const multi = t_results.filter((r) => r?.upload_mode === "multipart");
     if (multi.length === 0) return "";
     const parts = multi.reduce((n, r) => n + (typeof r?.part_count === "number" ? r.part_count : 0), 0);
@@ -223,7 +305,7 @@ export async function uploadDriveFile(
             // Use the webkitRelativePath as the filename to preserve directory
             // hierarchy. The backend reads this from the Content-Disposition
             // header and joins it with the base path when it contains slashes.
-            const raw_name = (t_file as any).webkitRelativePath || t_file.name;
+            const raw_name = relativeUploadName(t_file);
             const upload_name = encodeURIComponent(raw_name);
             form_data.append("file", t_file, upload_name);
 
@@ -237,22 +319,33 @@ export async function uploadDriveFile(
                 if (xhr.status >= 200 && xhr.status < 300) {
                     let receipt: DriveUploadReceipt = {};
                     try {
-                        receipt = (JSON.parse(xhr.responseText) as DriveUploadReceipt) ?? {};
+                        const parsed: unknown = JSON.parse(xhr.responseText);
+                        if (isRecord(parsed)) {
+                            receipt = {
+                                ...(typeof parsed.upload_mode === "string" ? { upload_mode: parsed.upload_mode } : {}),
+                                ...(typeof parsed.part_count === "number" || parsed.part_count === null
+                                    ? { part_count: parsed.part_count as number | null }
+                                    : {}),
+                                ...(typeof parsed.part_size_bytes === "number" || parsed.part_size_bytes === null
+                                    ? { part_size_bytes: parsed.part_size_bytes as number | null }
+                                    : {}),
+                                ...(typeof parsed.file_id === "number" ? { file_id: parsed.file_id } : {}),
+                                ...(typeof parsed.object_id === "number" ? { object_id: parsed.object_id } : {}),
+                                ...(typeof parsed.key === "string" ? { key: parsed.key } : {}),
+                            };
+                        }
                     } catch {
-                        receipt = {};
+                        // A successful empty receipt is tolerated for legacy datastore builds.
                     }
                     resolve({ data: receipt });
                 } else {
-                    let error_msg = `Upload failed: ${xhr.status}`;
-                    let scope = ErrorScope.Network;
+                    let body: unknown = null;
                     try {
-                        const resp = JSON.parse(xhr.responseText);
-                        if (resp.error) error_msg = resp.error;
-                        if (resp.scope) scope = resp.scope;
+                        body = JSON.parse(xhr.responseText) as unknown;
                     } catch {
-                        scope = ErrorScope.Network;
+                        /* use status fallback */
                     }
-                    resolve({ error: error_msg, scope });
+                    resolve(readApiFailure(body, `Upload failed: ${xhr.status}`, ErrorScope.Network));
                 }
             };
 
@@ -292,7 +385,7 @@ export async function uploadDriveFilesBatch(
     t_files: File[],
     t_scope: StorageScope = "personal",
     t_on_progress?: (percent: number) => void,
-): Promise<SgrnResult<{ success_count: number; fail_count: number; results: any[] }>> {
+): Promise<SgrnResult<DriveBatchUploadReceipt>> {
     try {
         const token = sessionStorage.getItem("SGRN-TOKEN");
         if (!token) {
@@ -301,6 +394,7 @@ export async function uploadDriveFilesBatch(
 
         const encoded_path = t_directory_path || "/";
         const total_files = t_files.length;
+        if (total_files === 0) return { data: { success_count: 0, fail_count: 0, results: [] } };
 
         // Chunking parameters for scale
         const MAX_CHUNK_SIZE_BYTES = 50 * 1024 * 1024; // 50MB max per request to stay under 100MB backend limit
@@ -308,7 +402,7 @@ export async function uploadDriveFilesBatch(
 
         let success_count = 0;
         let fail_count = 0;
-        const all_results: any[] = [];
+        const resultsByChunk: DriveBatchUploadItemReceipt[][] = [];
         let completed_files = 0;
 
         // Split files into chunks based on size
@@ -331,7 +425,7 @@ export async function uploadDriveFilesBatch(
         }
 
         // Helper to upload a single chunk
-        const uploadChunk = async (chunk: File[]) => {
+        const uploadChunk = async (chunk: File[], chunkIndex: number): Promise<void> => {
             return new Promise<void>((resolve) => {
                 const xhr = new XMLHttpRequest();
                 const params = new URLSearchParams({ path: encoded_path, scope: t_scope });
@@ -340,7 +434,7 @@ export async function uploadDriveFilesBatch(
 
                 const form_data = new FormData();
                 for (const file of chunk) {
-                    const raw_name = (file as any).webkitRelativePath || file.name;
+                    const raw_name = relativeUploadName(file);
                     const name = encodeURIComponent(raw_name);
                     form_data.append("files", file, name);
                 }
@@ -352,16 +446,35 @@ export async function uploadDriveFilesBatch(
                     }
 
                     if (xhr.status >= 200 && xhr.status < 300) {
+                        let parsed: unknown = null;
                         try {
-                            const resp = JSON.parse(xhr.responseText);
-                            success_count += resp.success_count || 0;
-                            fail_count += resp.fail_count || 0;
-                            if (resp.results) all_results.push(...resp.results);
-                        } catch (_) {
+                            parsed = JSON.parse(xhr.responseText) as unknown;
+                        } catch {
+                            /* invalid batch body */
+                        }
+                        const receipt = decodeBatchUploadReceipt(parsed);
+                        if (
+                            receipt &&
+                            receipt.results.length === chunk.length &&
+                            receipt.success_count + receipt.fail_count === chunk.length
+                        ) {
+                            success_count += receipt.success_count;
+                            fail_count += receipt.fail_count;
+                            resultsByChunk[chunkIndex] = receipt.results;
+                        } else {
                             fail_count += chunk.length;
+                            resultsByChunk[chunkIndex] = chunk.map(() => ({ success: false, error: "Invalid batch upload response" }));
                         }
                     } else {
                         fail_count += chunk.length;
+                        let body: unknown = null;
+                        try {
+                            body = JSON.parse(xhr.responseText) as unknown;
+                        } catch {
+                            /* status fallback */
+                        }
+                        const failure = readApiFailure<never>(body, `Batch request failed: ${xhr.status}`, ErrorScope.Network);
+                        resultsByChunk[chunkIndex] = chunk.map(() => ({ success: false, error: failure.error }));
                     }
                     resolve();
                 };
@@ -369,6 +482,14 @@ export async function uploadDriveFilesBatch(
                 xhr.onerror = () => {
                     completed_files += chunk.length;
                     fail_count += chunk.length;
+                    resultsByChunk[chunkIndex] = chunk.map(() => ({ success: false, error: "Network error" }));
+                    if (t_on_progress) t_on_progress(Math.floor((completed_files / total_files) * 100));
+                    resolve();
+                };
+                xhr.onabort = () => {
+                    completed_files += chunk.length;
+                    fail_count += chunk.length;
+                    resultsByChunk[chunkIndex] = chunk.map(() => ({ success: false, error: "Upload aborted" }));
                     if (t_on_progress) t_on_progress(Math.floor((completed_files / total_files) * 100));
                     resolve();
                 };
@@ -381,15 +502,16 @@ export async function uploadDriveFilesBatch(
         let current_chunk_idx = 0;
         const executeNext = async (): Promise<void> => {
             if (current_chunk_idx >= chunks.length) return;
-            const chunk = chunks[current_chunk_idx++];
-            await uploadChunk(chunk);
+            const chunkIndex = current_chunk_idx++;
+            const chunk = chunks[chunkIndex];
+            await uploadChunk(chunk, chunkIndex);
             return executeNext();
         };
 
         const workers = Array.from({ length: Math.min(CONCURRENT_UPLOADS, chunks.length) }, () => executeNext());
         await Promise.all(workers);
 
-        return { data: { success_count, fail_count, results: all_results } };
+        return { data: { success_count, fail_count, results: resultsByChunk.flat() } };
     } catch (e) {
         return { error: `Batch upload failed: ${e instanceof Error ? e.message : String(e)}`, scope: ErrorScope.Network };
     }
@@ -403,16 +525,13 @@ export async function createDirectory(t_path: string, t_scope: StorageScope = "p
     try {
         const params = new URLSearchParams({ path: t_path, scope: t_scope });
         const res = await authenticatedFetch(`${StorageBackendApiEndpoints.DRIVE_MKDIR}?${params.toString()}`, { method: "POST" });
-        const data = await readBody<CreateDirectoryResponse>(res, {});
+        const data = await readBody<unknown>(res, {});
 
         if (!res.ok) {
-            return {
-                error: (data as any).error || `Failed to create directory: ${res.status}`,
-                scope: (data as any).scope || ErrorScope.Unknown,
-            };
+            return readApiFailure(data, `Failed to create directory: ${res.status}`);
         }
 
-        return { data };
+        return { data: data as CreateDirectoryResponse };
     } catch (e) {
         return { error: `Failed to create directory: ${e instanceof Error ? e.message : String(e)}`, scope: ErrorScope.Network };
     }
@@ -440,15 +559,12 @@ export async function moveDriveItem(
             ...jsonBody<MoveItemRequest>(body),
         });
 
-        const data = await readBody<MoveItemResponse>(res, {});
+        const data = await readBody<unknown>(res, {});
         if (!res.ok) {
-            return {
-                error: (data as any).error || `Failed to move ${t_type}: ${res.status}`,
-                scope: (data as any).scope || ErrorScope.Unknown,
-            };
+            return readApiFailure(data, `Failed to move ${t_type}: ${res.status}`);
         }
 
-        return { data };
+        return { data: data as MoveItemResponse };
     } catch (e) {
         return { error: `Failed to move: ${e instanceof Error ? e.message : String(e)}`, scope: ErrorScope.Network };
     }
@@ -466,15 +582,12 @@ export async function deleteDriveItem(
         const params = new URLSearchParams({ id: t_id.toString(), type: t_type, scope: t_scope });
         const res = await authenticatedFetch(`${StorageBackendApiEndpoints.DRIVE_DELETE}?${params.toString()}`, { method: "DELETE" });
 
-        const data = await readBody<DeleteResponse>(res, {});
+        const data = await readBody<unknown>(res, {});
         if (!res.ok) {
-            return {
-                error: (data as any).error || `Failed to delete ${t_type}: ${res.status}`,
-                scope: (data as any).scope || ErrorScope.Unknown,
-            };
+            return readApiFailure(data, `Failed to delete ${t_type}: ${res.status}`);
         }
 
-        return { data };
+        return { data: data as DeleteResponse };
     } catch (e) {
         return { error: `Failed to delete: ${e instanceof Error ? e.message : String(e)}`, scope: ErrorScope.Network };
     }
@@ -491,18 +604,36 @@ export async function renameItem(id: number | string, type: "file" | "folder", n
             ...jsonBody<MoveItemRequest>({ new_name: newName }),
         });
 
-        const data = await readBody<MoveItemResponse>(res, {});
+        const data = await readBody<unknown>(res, {});
         if (!res.ok) {
-            return {
-                error: (data as any).error || `Failed to rename ${type}: ${res.status}`,
-                scope: (data as any).scope || ErrorScope.Unknown,
-            };
+            return readApiFailure(data, `Failed to rename ${type}: ${res.status}`);
         }
 
-        return { data };
+        return { data: data as MoveItemResponse };
     } catch (e) {
         return { error: `Failed to rename: ${e instanceof Error ? e.message : String(e)}`, scope: ErrorScope.Network };
     }
+}
+
+export interface DriveBulkActionReceipt {
+    success_count: number;
+    total: number;
+}
+
+function decodeBulkActionReceipt(value: unknown): DriveBulkActionReceipt | null {
+    if (!isRecord(value)) return null;
+    const successCount = value.success_count;
+    const total = value.total;
+    if (
+        typeof successCount !== "number" ||
+        !Number.isSafeInteger(successCount) ||
+        successCount < 0 ||
+        typeof total !== "number" ||
+        !Number.isSafeInteger(total) ||
+        total < successCount
+    )
+        return null;
+    return { success_count: successCount, total };
 }
 
 /**
@@ -512,7 +643,7 @@ export async function bulkAction(
     action: "move" | "delete",
     items: { id: number | string; type: "file" | "folder" }[],
     targetParentId?: number | null,
-): Promise<SgrnResult<any>> {
+): Promise<SgrnResult<DriveBulkActionReceipt>> {
     try {
         const res = await authenticatedFetch(`${StorageBackendApiEndpoints.DRIVE_BULK}`, {
             method: "POST",
@@ -523,15 +654,16 @@ export async function bulkAction(
             }),
         });
 
-        const data = await readBody<BulkResponse>(res, {});
+        const data = await readBody<unknown>(res, {});
         if (!res.ok) {
-            return {
-                error: (data as any).error || `Failed to perform bulk ${action}: ${res.status}`,
-                scope: (data as any).scope || ErrorScope.Unknown,
-            };
+            return readApiFailure(data, `Failed to perform bulk ${action}: ${res.status}`);
         }
 
-        return { data };
+        const receipt = decodeBulkActionReceipt(data);
+        if (!receipt) {
+            return { error: "The datastore returned an invalid bulk-action receipt.", scope: ErrorScope.Unknown };
+        }
+        return { data: receipt };
     } catch (e) {
         return { error: `Failed to perform bulk action: ${e instanceof Error ? e.message : String(e)}`, scope: ErrorScope.Network };
     }

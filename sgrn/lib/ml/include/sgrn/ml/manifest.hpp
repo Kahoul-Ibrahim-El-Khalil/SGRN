@@ -28,7 +28,7 @@ struct TrainInfo {
     uint32_t epochs_trained = 0;
     float final_loss = 0.0f;
     std::map<std::string, float> metrics;
-    std::string dataset_sha256;
+    std::string dataset_sha512;
 };
 
 struct ThresholdsConfig {
@@ -45,7 +45,7 @@ public:
     std::string version = "1.0.0";
     std::string backend = "torch"; // "torch", "linear", etc.
     std::string weights_file;
-    std::string weights_sha256;
+    std::string weights_sha512;
 
     FeatureSpec spec;
     MlpConfig mlp;

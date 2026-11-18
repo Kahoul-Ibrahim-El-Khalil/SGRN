@@ -174,7 +174,7 @@ interface UserInfoCardProps {
 }
 
 function UserInfoCard({ user, isAdmin }: UserInfoCardProps) {
-    const orgName = typeof user.organisation === "string" ? user.organisation : (user.organisation as any)?.name || "N/A";
+    const orgName = typeof user.organisation === "string" ? user.organisation : (user.organisation?.name ?? "N/A");
 
     return (
         <div className="profile-card profile-card-widget">
@@ -229,7 +229,10 @@ function StorageStatRow({ label, value, usedBytes, limitBytes, subLeft, subRight
                 <span className="stats-value">{value}</span>
             </div>
             <div className="storage-progress-container">
-                <div className={`storage-progress-bar ${warning ? "storage-progress-bar-warning" : ""}`} style={{ width: `${pct}%` }} />
+                <div
+                    className={`storage-progress-bar ${warning ? "storage-progress-bar-warning" : ""}`}
+                    style={{ "--progress": `${pct}%` } as React.CSSProperties}
+                />
             </div>
             <div className="stats-sub">
                 <span>{subLeft}</span>
@@ -259,7 +262,7 @@ function StorageStatsCard({ stats, loading, user }: StorageStatsCardProps) {
             </div>
             <div className="stats-body">
                 {loading ? (
-                    <div style={{ display: "flex", justifyContent: "center", padding: "1rem" }}>
+                    <div className="admin-center-pad">
                         <Loader2 size={24} className="drive-spin text-muted-foreground" />
                     </div>
                 ) : stats ? (
@@ -293,9 +296,7 @@ function StorageStatsCard({ stats, loading, user }: StorageStatsCardProps) {
                         </div>
                     </>
                 ) : (
-                    <div style={{ fontSize: "11px", color: "hsl(var(--muted-foreground))", fontStyle: "italic" }}>
-                        TELEMETRY UNAVAILABLE
-                    </div>
+                    <div className="profile-muted-italic">TELEMETRY UNAVAILABLE</div>
                 )}
             </div>
         </div>
@@ -344,23 +345,13 @@ function ProfileForm({ fields, loading, onChange, onSubmit }: ProfileFormProps) 
                     </div>
                 </div>
 
-                <div className="credential-field" style={{ maxWidth: "300px" }}>
+                <div className="credential-field credential-field--narrow">
                     <label>Terminal Number</label>
-                    <div style={{ position: "relative" }}>
-                        <Phone
-                            size={14}
-                            style={{
-                                position: "absolute",
-                                left: "0.75rem",
-                                top: "50%",
-                                transform: "translateY(-50%)",
-                                color: "hsl(var(--muted-foreground))",
-                            }}
-                        />
+                    <div className="credential-input-wrap">
+                        <Phone size={14} className="credential-input-icon" />
                         <input
                             name="phone_number"
-                            className="input-desktop"
-                            style={{ paddingLeft: "2.5rem" }}
+                            className="input-desktop credential-input-padded"
                             value={fields.phone_number}
                             onChange={onChange}
                             placeholder="+CC 000 000 000"
@@ -369,8 +360,8 @@ function ProfileForm({ fields, loading, onChange, onSubmit }: ProfileFormProps) 
                     </div>
                 </div>
 
-                <div className="admin-actions-right" style={{ marginTop: "1rem" }}>
-                    <button type="submit" className="btn-desktop-primary" style={{ padding: "0.5rem 2rem" }} disabled={loading}>
+                <div className="admin-actions-right admin-mt-1">
+                    <button type="submit" className="btn-desktop-primary btn-desktop--wide" disabled={loading}>
                         {loading ? "PROCESSING..." : "COMMIT CHANGES"}
                     </button>
                 </div>
@@ -394,7 +385,7 @@ function PasswordForm({ fields, loading, onChange, onSubmit }: PasswordFormProps
                 <h3 className="reg-title">Security Credentials</h3>
             </div>
             <form onSubmit={onSubmit} className="reg-form">
-                <div className="credential-field" style={{ maxWidth: "300px" }}>
+                <div className="credential-field credential-field--narrow">
                     <label>Current Password</label>
                     <input
                         name="old_password"
@@ -440,8 +431,8 @@ function PasswordForm({ fields, loading, onChange, onSubmit }: PasswordFormProps
                     </div>
                 </div>
 
-                <div className="admin-actions-right" style={{ marginTop: "1rem" }}>
-                    <button type="submit" className="btn-desktop-secondary" style={{ padding: "0.5rem 2rem" }} disabled={loading}>
+                <div className="admin-actions-right admin-mt-1">
+                    <button type="submit" className="btn-desktop-secondary btn-desktop--wide" disabled={loading}>
                         {loading ? "UPDATING..." : "ROTATE PASSWORD"}
                     </button>
                 </div>

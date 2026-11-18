@@ -15,11 +15,12 @@
 //     PaginationControls   – prev/next page row
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Loader2, Upload, FolderPlus, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, Upload } from "lucide-react";
 import { PageLayout } from "@/components/PageLayout";
 import { DriveBar } from "@/pages/drive/components/DriveBar";
-import { FileGrid } from "@/pages/drive/components/FileGrid";
-import { FileList } from "@/pages/drive/components/FileList";
+import type { UploadNewVersionHandler } from "@/pages/drive/components/FileGrid";
+import { DriveContent } from "@/pages/drive/components/DriveContent";
+import { NewFolderPrompt } from "@/pages/drive/components/NewFolderPrompt";
 import {
     listDirectory,
     downloadDriveFile,
@@ -44,9 +45,10 @@ import { FilePreviewModal } from "@/pages/drive/components/FilePreviewModal";
 import { UploadProgressPanel, type UploadProgressItem } from "@/pages/drive/components/UploadProgressPanel";
 import { useEvent } from "@/contexts/EventContext";
 import { useAuth } from "@/contexts/AuthContext";
-import type { DirectoryListing, DriveFolder, DriveFile } from "@sgrn/types";
+import type { DriveFolder, DriveFile } from "@sgrn/types";
 import { isError } from "@sgrn/types";
-import type { DriveMoveItem } from "@/pages/drive/types";
+import type { DriveListing, DriveMoveItem } from "@/pages/drive/types";
+import { uploadDriveFileVersion } from "@/pages/drive/versioning";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -55,6 +57,26 @@ function getDriveItemKey(item: DriveMoveItem) {
 }
 
 const PAGE_SIZE = 20;
+
+let transferSequence = 0;
+function createTransferId(): string {
+    transferSequence += 1;
+    return `transfer-${Date.now()}-${transferSequence}`;
+}
+
+function createEmptyListing(path: string): DriveListing {
+    return {
+        path,
+        folders: [],
+        files: [],
+        total_items: 0,
+        total_folders: 0,
+        total_files: 0,
+        page: 1,
+        page_size: PAGE_SIZE,
+        total_pages: 1,
+    };
+}
 
 // ─── custom hooks ────────────────────────────────────────────────────────────
 
@@ -79,7 +101,7 @@ function useDriveScope(isAdmin: boolean) {
 
 /** Handles fetching the directory listing with search and pagination. */
 function useDriveListing(currentPath: string, currentScope: StorageScope, showEvent: ReturnType<typeof useEvent>["showEvent"]) {
-    const [listing, setListing] = useState<DirectoryListing | null>(null);
+    const [listing, setListing] = useState<DriveListing | null>(null);
     const [loading, setLoading] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
     const [searchQuery, setSearchQuery] = useState("");
@@ -87,6 +109,7 @@ function useDriveListing(currentPath: string, currentScope: StorageScope, showEv
     const [sortBy, setSortBy] = useState<DriveSortKey>("name");
     const [sortOrder, setSortOrder] = useState<DriveSortOrder>("asc");
     const [initialized, setInitialized] = useState(false);
+    const requestGeneration = useRef(0);
 
     // reset page when path / scope / ordering change
     useEffect(() => {
@@ -111,29 +134,43 @@ function useDriveListing(currentPath: string, currentScope: StorageScope, showEv
             sort = sortBy,
             order = sortOrder,
         ) => {
+            const generation = ++requestGeneration.current;
             setLoading(true);
-            setListing(null);
-            const result = await listDirectory(path, scope, page, PAGE_SIZE, search, sort, order);
-            if (isError(result)) {
-                showEvent("error", result.error);
-                setListing({
-                    path,
-                    folders: [],
-                    files: [],
-                    total_items: 0,
-                    total_folders: 0,
-                    total_files: 0,
-                    page: 1,
-                    page_size: PAGE_SIZE,
-                    total_pages: 1,
-                });
-            } else {
+
+            try {
+                const result = await listDirectory(path, scope, page, PAGE_SIZE, search, sort, order);
+                // Navigation/search can start another request before this one finishes.
+                // Ignore stale responses so an older directory never replaces the active one.
+                if (generation !== requestGeneration.current) return null;
+
+                if (isError(result)) {
+                    showEvent("error", result.error);
+                    setListing(createEmptyListing(path));
+                    return null;
+                }
+
                 setListing(result.data);
+                return result.data;
+            } catch (error: unknown) {
+                if (generation === requestGeneration.current) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    showEvent("error", `Failed to load directory: ${message}`);
+                    setListing(createEmptyListing(path));
+                }
+                return null;
+            } finally {
+                if (generation === requestGeneration.current) setLoading(false);
             }
-            setLoading(false);
-            return isError(result) ? null : result.data;
         },
         [currentPath, currentScope, currentPage, debouncedSearch, sortBy, sortOrder, showEvent],
+    );
+
+    // Invalidate outstanding requests when the Drive page unmounts.
+    useEffect(
+        () => () => {
+            requestGeneration.current += 1;
+        },
+        [],
     );
 
     // initial + reactive fetch
@@ -143,16 +180,20 @@ function useDriveListing(currentPath: string, currentScope: StorageScope, showEv
     }, [initialized, currentPath, currentScope, currentPage, debouncedSearch, sortBy, sortOrder, fetchListing]);
 
     /** Clicking an active column flips direction; a new column starts ascending. */
-    const toggleSort = useCallback((key: DriveSortKey) => {
-        setSortBy((prevKey) => {
-            if (prevKey === key) {
+    const toggleSort = useCallback(
+        (key: DriveSortKey) => {
+            // Keep the updater pure: never call setSortOrder from inside the
+            // setSortBy updater (StrictMode double-invokes updaters, which would
+            // flip the direction twice and cancel the toggle out).
+            if (key === sortBy) {
                 setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
-                return prevKey;
+            } else {
+                setSortBy(key);
+                setSortOrder("asc");
             }
-            setSortOrder("asc");
-            return key;
-        });
-    }, []);
+        },
+        [sortBy],
+    );
 
     return {
         listing,
@@ -234,7 +275,7 @@ function useDriveUpload(
 
     const processSingleFile = useCallback(
         async (file: File) => {
-            const id = Math.random().toString(36).substring(2, 9);
+            const id = createTransferId();
             const newItem: UploadProgressItem = {
                 id,
                 fileName: file.name,
@@ -247,159 +288,177 @@ function useDriveUpload(
 
             setUploadItems((prev) => [newItem, ...prev]);
 
-            if (file.size >= 5 * 1024 * 1024 || encryptUploads || currentScope === "domains") {
-                showEvent("info", `Initiating ${encryptUploads ? "encrypted " : ""}chunked upload for ${file.name}...`);
-                const result = await uploadResumableDriveFile(
-                    currentPath,
-                    file,
-                    currentScope,
-                    (p) => {
-                        updateItem(id, {
-                            percent: p.percent,
-                            uploadedChunks: p.uploadedChunks,
-                            totalChunks: p.totalChunks,
-                            uploadedBytes: Math.round((file.size * p.percent) / 100),
-                        });
-                    },
-                    encryptUploads,
-                );
-                if (isError(result)) {
-                    updateItem(id, { status: "error", errorMessage: result.error });
-                    showEvent("error", `${file.name}: ${result.error}`);
-                } else {
+            try {
+                if (file.size >= 5 * 1024 * 1024 || encryptUploads || currentScope === "domains") {
+                    showEvent("info", `Initiating ${encryptUploads ? "encrypted " : ""}chunked upload for ${file.name}...`);
+                    const result = await uploadResumableDriveFile(
+                        currentPath,
+                        file,
+                        currentScope,
+                        (progress) => {
+                            updateItem(id, {
+                                percent: progress.percent,
+                                uploadedChunks: progress.uploadedChunks,
+                                totalChunks: progress.totalChunks,
+                                uploadedBytes: Math.round((file.size * progress.percent) / 100),
+                            });
+                        },
+                        encryptUploads,
+                    );
+                    if (isError(result)) {
+                        updateItem(id, { status: "error", errorMessage: result.error });
+                        showEvent("error", `${file.name}: ${result.error}`);
+                        return;
+                    }
+
                     updateItem(id, { status: "completed", percent: 100, uploadedBytes: file.size });
-                    // The server has the final say: a domain with policy 'none'
-                    // disregards encryption requests and stores plaintext.
-                    const stored_encrypted = result.data?.is_encrypted ?? encryptUploads;
-                    if (encryptUploads && !stored_encrypted) {
+                    // The datastore policy is authoritative: a domain may reject encryption.
+                    const storedEncrypted = result.data?.is_encrypted ?? encryptUploads;
+                    if (encryptUploads && !storedEncrypted) {
                         showEvent("info", `${file.name} uploaded (stored in plaintext: encryption is not allowed for this domain).`);
                     } else {
-                        showEvent("success", `${file.name} uploaded successfully${stored_encrypted ? " (AES-256-GCM encrypted)" : ""}.`);
+                        showEvent("success", `${file.name} uploaded successfully${storedEncrypted ? " (AES-256-GCM encrypted)" : ""}.`);
                     }
+                    return;
                 }
-            } else {
-                updateItem(id, { percent: 50 });
-                const result = await uploadDriveFile(currentPath, file, currentScope, () => {});
+
+                const result = await uploadDriveFile(currentPath, file, currentScope);
                 if (isError(result)) {
                     updateItem(id, { status: "error", errorMessage: result.error });
                     showEvent("error", `${file.name}: ${result.error}`);
-                } else {
-                    updateItem(id, { status: "completed", percent: 100, uploadedBytes: file.size });
-                    showEvent(
-                        "success",
-                        `${file.name} uploaded successfully${describeStorageTrace(result.data.upload_mode, result.data.part_count)}`,
-                    );
+                    return;
                 }
+
+                updateItem(id, { status: "completed", percent: 100, uploadedBytes: file.size });
+                showEvent(
+                    "success",
+                    `${file.name} uploaded successfully${describeStorageTrace(result.data.upload_mode, result.data.part_count)}`,
+                );
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : String(error);
+                updateItem(id, { status: "error", errorMessage: message });
+                showEvent("error", `${file.name}: ${message}`);
             }
         },
         [currentPath, currentScope, showEvent, updateItem, encryptUploads],
     );
 
-    const handleFileSelect = useCallback(
-        async (e: React.ChangeEvent<HTMLInputElement>) => {
-            const files = e.target.files;
-            if (!files?.length) return;
+    const processBatch = useCallback(
+        async (files: File[], announceFolder = false): Promise<void> => {
+            if (files.length === 0) return;
+            const items: UploadProgressItem[] = files.map((file) => ({
+                id: createTransferId(),
+                fileName: file.name,
+                fileSize: file.size,
+                status: "uploading",
+                percent: 0,
+                uploadedChunks: 0,
+                totalChunks: 1,
+            }));
+            setUploadItems((prev) => [...items, ...prev]);
 
-            const list = Array.from(files);
-            setUploading(true);
+            if (announceFolder) showEvent("info", `Uploading folder structure (${files.length} files)...`);
 
-            if (list.length > 1) {
-                const batchItems: UploadProgressItem[] = list.map((f) => ({
-                    id: Math.random().toString(36).substring(2, 9),
-                    fileName: f.name,
-                    fileSize: f.size,
-                    status: "uploading",
-                    percent: 0,
-                    uploadedChunks: 0,
-                    totalChunks: 1,
-                }));
-                setUploadItems((prev) => [...batchItems, ...prev]);
-
-                const result = await uploadDriveFilesBatch(currentPath, list, currentScope, () => {});
+            try {
+                const result = await uploadDriveFilesBatch(currentPath, files, currentScope);
                 if (isError(result)) {
-                    batchItems.forEach((it) => updateItem(it.id, { status: "error", errorMessage: result.error }));
+                    items.forEach((item) => updateItem(item.id, { status: "error", errorMessage: result.error }));
                     showEvent("error", result.error);
-                } else {
-                    const { success_count, fail_count, results } = result.data;
-                    batchItems.forEach((it) => updateItem(it.id, { status: "completed", percent: 100 }));
-                    showEvent(
-                        success_count > 0 ? "success" : "error",
-                        success_count > 0
-                            ? `${success_count} file${success_count > 1 ? "s" : ""} uploaded${fail_count > 0 ? `, ${fail_count} failed` : ""}${summarizeBatchTrace(results ?? [])}`
-                            : `Failed to upload ${fail_count} files`,
-                    );
+                    return;
                 }
-            } else {
-                await processSingleFile(list[0]);
-            }
 
-            setUploading(false);
-            if (fileInputRef.current) fileInputRef.current.value = "";
-            onComplete();
-        },
-        [currentPath, currentScope, showEvent, onComplete, processSingleFile, updateItem],
-    );
-
-    const handleFolderSelect = useCallback(
-        async (e: React.ChangeEvent<HTMLInputElement>) => {
-            const files = e.target.files;
-            if (!files?.length) return;
-
-            const list = Array.from(files);
-            setUploading(true);
-            showEvent("info", `Uploading folder structure (${list.length} files)...`);
-
-            const result = await uploadDriveFilesBatch(currentPath, list, currentScope, () => {});
-            if (isError(result)) {
-                showEvent("error", result.error);
-            } else {
                 const { success_count, fail_count, results } = result.data;
+                items.forEach((item, index) => {
+                    const outcome = results[index];
+                    if (!outcome || outcome.success === false || outcome.error) {
+                        updateItem(item.id, {
+                            status: "error",
+                            errorMessage: outcome?.error || "The datastore did not confirm this upload.",
+                        });
+                    } else {
+                        updateItem(item.id, { status: "completed", percent: 100, uploadedBytes: item.fileSize });
+                    }
+                });
+
+                const summary = announceFolder ? "Folder uploaded" : `${success_count} file${success_count === 1 ? "" : "s"} uploaded`;
                 showEvent(
                     success_count > 0 ? "success" : "error",
                     success_count > 0
-                        ? `Folder uploaded: ${success_count} files preserved${fail_count > 0 ? `, ${fail_count} failed` : ""}${summarizeBatchTrace(results ?? [])}`
-                        : "Folder upload failed",
+                        ? `${summary}${fail_count > 0 ? `, ${fail_count} failed` : ""}${summarizeBatchTrace(results)}`
+                        : announceFolder
+                          ? "Folder upload failed"
+                          : `Failed to upload ${fail_count} files`,
                 );
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : String(error);
+                items.forEach((item) => updateItem(item.id, { status: "error", errorMessage: message }));
+                showEvent("error", message);
+            }
+        },
+        [currentPath, currentScope, showEvent, updateItem],
+    );
+
+    const handleFileSelect = useCallback(
+        async (event: React.ChangeEvent<HTMLInputElement>) => {
+            const input = event.currentTarget;
+            const files = Array.from(input.files ?? []);
+            if (files.length === 0) {
+                input.value = "";
+                return;
             }
 
-            setUploading(false);
-            if (folderInputRef.current) folderInputRef.current.value = "";
-            onComplete();
+            setUploading(true);
+            try {
+                if (files.length > 1) await processBatch(files);
+                else await processSingleFile(files[0]);
+            } finally {
+                input.value = "";
+                setUploading(false);
+                onComplete();
+            }
         },
-        [currentPath, currentScope, showEvent, onComplete],
+        [onComplete, processBatch, processSingleFile],
+    );
+
+    const handleFolderSelect = useCallback(
+        async (event: React.ChangeEvent<HTMLInputElement>) => {
+            const input = event.currentTarget;
+            const files = Array.from(input.files ?? []);
+            if (files.length === 0) {
+                input.value = "";
+                return;
+            }
+
+            setUploading(true);
+            try {
+                await processBatch(files, true);
+            } finally {
+                input.value = "";
+                setUploading(false);
+                onComplete();
+            }
+        },
+        [onComplete, processBatch],
     );
 
     const uploadFilesDirect = useCallback(
-        async (list: File[]) => {
-            if (!list.length) return;
+        async (files: File[]) => {
+            if (files.length === 0) return;
             setUploading(true);
-
-            if (list.length > 1) {
-                const result = await uploadDriveFilesBatch(currentPath, list, currentScope, () => {});
-                if (isError(result)) {
-                    showEvent("error", result.error);
-                } else {
-                    const { success_count, fail_count, results } = result.data;
-                    showEvent(
-                        success_count > 0 ? "success" : "error",
-                        success_count > 0
-                            ? `${success_count} file${success_count > 1 ? "s" : ""} uploaded${fail_count > 0 ? `, ${fail_count} failed` : ""}${summarizeBatchTrace(results ?? [])}`
-                            : `Failed to upload ${fail_count} files`,
-                    );
-                }
-            } else {
-                await processSingleFile(list[0]);
+            try {
+                if (files.length > 1) await processBatch(files);
+                else await processSingleFile(files[0]);
+            } finally {
+                setUploading(false);
+                onComplete();
             }
-
-            setUploading(false);
-            onComplete();
         },
-        [currentPath, currentScope, showEvent, onComplete, processSingleFile],
+        [onComplete, processBatch, processSingleFile],
     );
 
     const registerDownload = useCallback(
         async (file: DriveFile) => {
-            const id = Math.random().toString(36).substring(2, 9);
+            const id = createTransferId();
             const newItem: UploadProgressItem = {
                 id,
                 fileName: file.name,
@@ -412,24 +471,27 @@ function useDriveUpload(
             };
 
             setUploadItems((prev) => [newItem, ...prev]);
-
             showEvent("info", `Downloading ${file.name}...`);
-            const result = await downloadDriveFile(file.path, file.name, currentScope, 0, (receivedBytes, totalBytes) => {
-                const total = totalBytes || file.size || receivedBytes || 1;
-                const percent = Math.min(100, Math.round((receivedBytes / total) * 100));
-                updateItem(id, {
-                    percent,
-                    uploadedBytes: receivedBytes,
-                    fileSize: total,
-                });
-            });
 
-            if (isError(result)) {
-                updateItem(id, { status: "error", errorMessage: result.error });
-                showEvent("error", result.error);
-            } else {
+            try {
+                const result = await downloadDriveFile(file.path, file.name, currentScope, 0, (receivedBytes, totalBytes) => {
+                    const total = totalBytes || file.size || receivedBytes || 1;
+                    const percent = Math.min(100, Math.max(0, Math.round((receivedBytes / total) * 100)));
+                    updateItem(id, { percent, uploadedBytes: receivedBytes, fileSize: total });
+                });
+
+                if (isError(result)) {
+                    updateItem(id, { status: "error", errorMessage: result.error });
+                    showEvent("error", result.error);
+                    return;
+                }
+
                 updateItem(id, { status: "completed", percent: 100, uploadedBytes: file.size });
                 showEvent("success", `${file.name} downloaded successfully`);
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : String(error);
+                updateItem(id, { status: "error", errorMessage: message });
+                showEvent("error", message);
             }
         },
         [currentScope, showEvent, updateItem],
@@ -456,8 +518,9 @@ function useDriveActions(
     onRefresh: () => void,
     onClearSelection: () => void,
     showEvent: ReturnType<typeof useEvent>["showEvent"],
-    listing?: any,
-    onDownloadFile?: (file: DriveFile) => void,
+    listing?: DriveListing | null,
+    onDownloadFile?: (file: DriveFile) => void | Promise<void>,
+    encryptUploads: boolean = false,
 ) {
     const [showNewFolder, setShowNewFolder] = useState(false);
     const [newFolderName, setNewFolderName] = useState("");
@@ -466,9 +529,11 @@ function useDriveActions(
     const [infoItem, setInfoItem] = useState<DriveFolder | DriveFile | null>(null);
     const newFolderInputRef = useRef<HTMLInputElement>(null);
 
-    // auto-focus new-folder input
+    // Auto-focus the field without leaving a timer alive after the prompt closes.
     useEffect(() => {
-        if (showNewFolder) setTimeout(() => newFolderInputRef.current?.focus(), 50);
+        if (!showNewFolder) return;
+        const timer = window.setTimeout(() => newFolderInputRef.current?.focus(), 50);
+        return () => window.clearTimeout(timer);
     }, [showNewFolder]);
 
     const openNewFolder = useCallback(() => {
@@ -497,17 +562,23 @@ function useDriveActions(
 
         const fullPath = currentPath === "/" ? `/${name}` : `${currentPath}/${name}`;
         setCreatingFolder(true);
-        const result = await createDirectory(fullPath, currentScope);
-        if (isError(result)) {
-            showEvent("error", result.error);
-        } else {
+        try {
+            const result = await createDirectory(fullPath, currentScope);
+            if (isError(result)) {
+                showEvent("error", result.error);
+                return;
+            }
+
             showEvent("success", `Folder "${name}" created`);
             setShowNewFolder(false);
             setNewFolderName("");
             onRefresh();
             onClearSelection();
+        } catch (error: unknown) {
+            showEvent("error", `Failed to create folder: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            setCreatingFolder(false);
         }
-        setCreatingFolder(false);
     }, [newFolderName, currentPath, currentScope, showEvent, onRefresh, onClearSelection, listing]);
 
     const handleDelete = useCallback(
@@ -518,15 +589,15 @@ function useDriveActions(
                 return;
             }
 
-            const id = (item as any).id;
-            if (!id) {
+            const id = item.id;
+            if (id == null) {
                 showEvent("error", "Cannot delete virtual folders");
                 return;
             }
             if (!confirm(`Are you sure you want to delete this ${type}?`)) return;
 
             showEvent("info", `Deleting ${item.name}...`);
-            const result = await deleteDriveItem(id, type as any, currentScope);
+            const result = await deleteDriveItem(id, type, currentScope);
             if (isError(result)) showEvent("error", result.error);
             else {
                 showEvent("success", `${item.name} deleted`);
@@ -554,8 +625,7 @@ function useDriveActions(
             if (isError(result)) {
                 showEvent("error", result.error);
             } else {
-                const data = result.data as any;
-                showEvent("success", `Processed ${data.success_count} of ${data.total} items`);
+                showEvent("success", `Processed ${result.data.success_count} of ${result.data.total} items`);
                 onClearSelection();
                 onRefresh();
             }
@@ -586,13 +656,18 @@ function useDriveActions(
 
     const handleFileClick = useCallback(
         async (file: DriveFile) => {
-            if (onDownloadFile) {
-                onDownloadFile(file);
-            } else {
+            try {
+                if (onDownloadFile) {
+                    await onDownloadFile(file);
+                    return;
+                }
+
                 showEvent("info", `Downloading ${file.name}...`);
                 const result = await downloadDriveFile(file.path, file.name, currentScope);
                 if (isError(result)) showEvent("error", result.error);
                 else showEvent("success", `${file.name} downloaded successfully`);
+            } catch (error: unknown) {
+                showEvent("error", `Download failed: ${error instanceof Error ? error.message : String(error)}`);
             }
         },
         [showEvent, currentScope, onDownloadFile],
@@ -601,30 +676,30 @@ function useDriveActions(
     const handleFileDownloadDecompressed = useCallback(
         async (file: DriveFile) => {
             showEvent("info", `Decompressing & downloading ${file.name}...`);
-            const { fetchDriveFileContent } = await import("@/pages/drive/api");
-            const result = await fetchDriveFileContent(file.path, currentScope);
-            if (isError(result)) {
-                showEvent("error", result.error);
-                return;
-            }
-
             try {
-                const view = new Uint8Array(result.data as ArrayBuffer);
+                const { fetchDriveFileContent } = await import("@/pages/drive/api");
+                const result = await fetchDriveFileContent(file.path, currentScope);
+                if (isError(result)) {
+                    showEvent("error", result.error);
+                    return;
+                }
+
+                const view = new Uint8Array(result.data);
                 const { decompress } = await import("fzstd");
-                const decompressed = decompress(view) as any;
-                const blob = new Blob([decompressed], { type: "application/octet-stream" });
+                const decompressed = decompress(view).slice();
+                const blob = new Blob([decompressed.buffer as ArrayBuffer], { type: "application/octet-stream" });
                 const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                const newName = file.name.endsWith(".zst") ? file.name.slice(0, -4) : file.name;
-                a.download = newName;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
+                const anchor = document.createElement("a");
+                anchor.href = url;
+                const newName = file.name.toLowerCase().endsWith(".zst") ? file.name.slice(0, -4) : file.name;
+                anchor.download = newName;
+                document.body.appendChild(anchor);
+                anchor.click();
+                document.body.removeChild(anchor);
+                window.setTimeout(() => URL.revokeObjectURL(url), 1000);
                 showEvent("success", `${newName} decompressed successfully`);
-            } catch (e) {
-                showEvent("error", "Failed to decompress file.");
+            } catch (error: unknown) {
+                showEvent("error", `Failed to decompress ${file.name}: ${error instanceof Error ? error.message : String(error)}`);
             }
         },
         [showEvent, currentScope],
@@ -641,27 +716,26 @@ function useDriveActions(
                 const zip = new JSZip();
                 let downloadedFiles = 0;
 
-                const processFolder = async (path: string, currentZipFolder: any) => {
+                type ZipFolder = InstanceType<typeof import("jszip")>;
+                const processFolder = async (path: string, currentZipFolder: ZipFolder): Promise<void> => {
                     let page = 1;
                     let hasMore = true;
                     while (hasMore) {
                         const result = await listDirectory(path, currentScope, page, 100);
-                        if (isError(result)) {
-                            console.error(`Failed to list ${path}: ${result.error}`);
-                            return;
-                        }
-                        const listing = result.data as DirectoryListing;
+                        if (isError(result)) throw new Error(`Failed to list ${path}: ${result.error}`);
+                        const directoryListing = result.data;
 
                         // Process files
-                        for (const file of listing.files) {
+                        for (const file of directoryListing.files) {
                             showEvent("info", `Downloading ${file.name}...`);
 
                             const fileRes = await fetchDriveFileContent(file.path, currentScope);
-                            if (!isError(fileRes)) {
-                                const buffer = fileRes.data as ArrayBuffer;
+                            if (isError(fileRes)) throw new Error(`Failed to download ${file.path}: ${fileRes.error}`);
+                            {
+                                const buffer = fileRes.data;
                                 const view = new Uint8Array(buffer);
 
-                                let isZstd = file.name.endsWith(".zst");
+                                let isZstd = file.name.toLowerCase().endsWith(".zst");
                                 if (
                                     !isZstd &&
                                     view.length >= 4 &&
@@ -679,12 +753,17 @@ function useDriveActions(
                                 if (isZstd) {
                                     try {
                                         const { decompress } = await import("fzstd");
-                                        dataToSave = decompress(view) as any;
-                                        if (fileName.endsWith(".zst")) {
+                                        const decompressed = decompress(view).slice();
+                                        dataToSave = decompressed;
+                                        if (fileName.toLowerCase().endsWith(".zst")) {
                                             fileName = fileName.slice(0, -4);
                                         }
-                                    } catch (e) {
-                                        console.error("Failed to decompress", file.name);
+                                    } catch (error: unknown) {
+                                        // Preserve the original compressed file rather than writing corrupt bytes under an uncompressed name.
+                                        showEvent(
+                                            "info",
+                                            `Could not decompress ${file.name}; adding the original .zst file to the archive.`,
+                                        );
                                     }
                                 }
 
@@ -694,18 +773,20 @@ function useDriveActions(
                         }
 
                         // Process subfolders sequentially to avoid swamping the server
-                        for (const sub of listing.folders) {
+                        for (const sub of directoryListing.folders) {
                             if (sub.token) continue; // Skip virtual infrastructure folders if they exist
                             const subFolderZip = currentZipFolder.folder(sub.name);
-                            await processFolder(sub.path, subFolderZip);
+                            if (subFolderZip) await processFolder(sub.path, subFolderZip);
                         }
 
-                        hasMore = page < listing.total_pages;
+                        hasMore = page < directoryListing.total_pages;
                         page++;
                     }
                 };
 
-                await processFolder(folder.path, zip.folder(folder.name));
+                const rootZipFolder = zip.folder(folder.name);
+                if (!rootZipFolder) throw new Error("Unable to create the ZIP root folder.");
+                await processFolder(folder.path, rootZipFolder);
 
                 if (downloadedFiles === 0) {
                     showEvent("info", "Folder is empty.");
@@ -722,9 +803,9 @@ function useDriveActions(
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
-                URL.revokeObjectURL(url);
+                window.setTimeout(() => URL.revokeObjectURL(url), 1000);
                 showEvent("success", `Downloaded ${folder.name}.zip`);
-            } catch (err) {
+            } catch (err: unknown) {
                 showEvent("error", `Error creating zip: ${err instanceof Error ? err.message : String(err)}`);
             }
         },
@@ -734,6 +815,14 @@ function useDriveActions(
     const handleMoveItems = useCallback(
         async (items: DriveMoveItem[], targetId: number) => {
             if (!items.length) return;
+            if (listing?.capabilities?.can_write === false) {
+                showEvent("error", "Write permission denied in this workspace");
+                return;
+            }
+            if (!Number.isSafeInteger(targetId) || targetId <= 0) {
+                showEvent("error", "The target folder is invalid");
+                return;
+            }
             showEvent("info", `Moving ${items.length} item${items.length > 1 ? "s" : ""}...`);
 
             const result = await bulkAction(
@@ -745,13 +834,38 @@ function useDriveActions(
             if (isError(result)) {
                 showEvent("error", result.error);
             } else {
-                const data = result.data as any;
-                showEvent("success", `Moved ${data.success_count} of ${data.total} items`);
+                showEvent("success", `Moved ${result.data.success_count} of ${result.data.total} items`);
                 onRefresh();
                 onClearSelection();
             }
         },
-        [showEvent, onRefresh, onClearSelection],
+        [showEvent, onRefresh, onClearSelection, listing],
+    );
+
+    const handleUploadNewVersion = useCallback<UploadNewVersionHandler>(
+        async (existingFile, replacementFile, onProgress) => {
+            const canWrite = listing?.capabilities?.can_write !== false;
+            if (!canWrite) {
+                const message = "Write permission denied in this workspace";
+                showEvent("error", message);
+                throw new Error(message);
+            }
+
+            showEvent("info", `Uploading a new version of ${existingFile.name}...`);
+            const result = await uploadDriveFileVersion(existingFile, replacementFile, currentScope, onProgress, encryptUploads);
+            if (isError(result)) {
+                showEvent("error", result.error);
+                throw new Error(result.error);
+            }
+
+            const encrypted = result.data.is_encrypted ?? (encryptUploads || existingFile.is_encrypted);
+            showEvent(
+                "success",
+                `New version of ${existingFile.name} uploaded successfully${encrypted ? " (AES-256-GCM encrypted)" : ""}.`,
+            );
+            onRefresh();
+        },
+        [currentScope, encryptUploads, listing, onRefresh, showEvent],
     );
 
     return {
@@ -774,145 +888,11 @@ function useDriveActions(
         handleFileDownloadDecompressed,
         handleFolderDownload,
         handleMoveItems,
+        handleUploadNewVersion,
     };
 }
 
 // ─── local components ────────────────────────────────────────────────────────
-
-interface NewFolderPromptProps {
-    inputRef: React.RefObject<HTMLInputElement | null>;
-    name: string;
-    creating: boolean;
-    onChange: (name: string) => void;
-    onSubmit: () => void;
-    onCancel: () => void;
-}
-
-function NewFolderPrompt({ inputRef, name, creating, onChange, onSubmit, onCancel }: NewFolderPromptProps) {
-    return (
-        <div className="drive-new-folder-prompt">
-            <FolderPlus size={16} />
-            <input
-                ref={inputRef}
-                type="text"
-                className="input-desktop"
-                placeholder="New folder name..."
-                value={name}
-                onChange={(e) => onChange(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && onSubmit()}
-                disabled={creating}
-            />
-            <button type="button" className="btn-desktop-primary" onClick={onSubmit} disabled={creating || !name.trim()}>
-                {creating ? <Loader2 size={14} className="drive-spin" /> : "Create"}
-            </button>
-            <button type="button" className="btn-desktop-secondary" onClick={onCancel}>
-                Cancel
-            </button>
-        </div>
-    );
-}
-
-interface PaginationControlsProps {
-    currentPage: number;
-    totalPages: number;
-    onPrev: () => void;
-    onNext: () => void;
-}
-
-function PaginationControls({ currentPage, totalPages, onPrev, onNext }: PaginationControlsProps) {
-    return (
-        <div className="drive-pagination">
-            <button onClick={onPrev} disabled={currentPage === 1} className="btn-desktop px-3">
-                <ChevronLeft size={16} />
-            </button>
-            <div className="drive-pagination-info">
-                Page <span className="text-foreground">{currentPage}</span> of <span className="text-foreground">{totalPages}</span>
-            </div>
-            <button onClick={onNext} disabled={currentPage === totalPages} className="btn-desktop px-3">
-                <ChevronRight size={16} />
-            </button>
-        </div>
-    );
-}
-
-interface DriveContentProps {
-    listing: DirectoryListing;
-    viewMode: "grid" | "list";
-    currentPage: number;
-    debouncedSearch: string;
-    sortBy: DriveSortKey;
-    sortOrder: DriveSortOrder;
-    onSort: (key: DriveSortKey) => void;
-    isSelected: (item: DriveMoveItem) => boolean;
-    onToggleSelect: (item: DriveMoveItem) => void;
-    onFolderClick: (folder: DriveFolder) => void;
-    onFolderDownload?: (folder: DriveFolder) => void;
-    onFileClick: (file: DriveFile) => void;
-    onDownloadDecompressed?: (file: DriveFile) => void;
-    onPreview?: (file: DriveFile) => void;
-    onDelete: (item: DriveFolder | DriveFile, type: "file" | "folder") => void;
-    onRename: (item: DriveFolder | DriveFile, type: "file" | "folder") => void;
-    onInfo: (item: DriveFolder | DriveFile) => void;
-    onPageChange: (page: number) => void;
-    onMoveItems: (items: DriveMoveItem[], targetId: number) => void;
-}
-
-function DriveContent({
-    listing,
-    viewMode,
-    currentPage,
-    debouncedSearch,
-    sortBy,
-    sortOrder,
-    onSort,
-    isSelected,
-    onToggleSelect,
-    onFolderClick,
-    onFolderDownload,
-    onFileClick,
-    onDownloadDecompressed,
-    onPreview,
-    onDelete,
-    onRename,
-    onInfo,
-    onPageChange,
-    onMoveItems,
-}: DriveContentProps) {
-    const sharedProps = {
-        folders: listing.folders,
-        files: listing.files,
-        onFolderClick,
-        onFolderDownload,
-        onFileClick,
-        onDownloadDecompressed,
-        onPreview,
-        onDelete,
-        onRename: (item: DriveFolder | DriveFile, type: "file" | "folder") => onRename(item, type),
-        onInfo,
-        isSelected,
-        onToggleSelection: onToggleSelect,
-        onMoveItems,
-        searchQuery: debouncedSearch,
-        sortBy,
-        sortOrder,
-        onSort,
-    };
-
-    return (
-        <>
-            {viewMode === "grid" ? <FileGrid {...sharedProps} /> : <FileList {...sharedProps} />}
-
-            {listing.total_pages > 1 && (
-                <PaginationControls
-                    currentPage={currentPage}
-                    totalPages={listing.total_pages}
-                    onPrev={() => onPageChange(Math.max(1, currentPage - 1))}
-                    onNext={() => onPageChange(Math.min(listing.total_pages, currentPage + 1))}
-                />
-            )}
-        </>
-    );
-}
 
 // ─── page ────────────────────────────────────────────────────────────────────
 
@@ -922,7 +902,8 @@ export default function DrivePage() {
 
     const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
-    const checkAdmin = user?.role === "admin" || (user?.role as any)?.name === "admin";
+    const role = user?.role;
+    const checkAdmin = role === "admin" || (typeof role === "object" && role !== null && "name" in role && role.name === "admin");
     const [previewFile, setPreviewFile] = useState<DriveFile | null>(null);
 
     // hooks
@@ -931,8 +912,8 @@ export default function DrivePage() {
     const selection = useDriveSelection();
 
     const refresh = useCallback(() => {
-        listing.fetchListing(scope.currentPath, scope.currentScope, listing.currentPage, listing.debouncedSearch);
-    }, [listing, scope.currentPath, scope.currentScope]);
+        void listing.fetchListing(scope.currentPath, scope.currentScope, listing.currentPage, listing.debouncedSearch);
+    }, [listing.fetchListing, listing.currentPage, listing.debouncedSearch, scope.currentPath, scope.currentScope]);
 
     const upload = useDriveUpload(
         scope.currentPath,
@@ -952,6 +933,7 @@ export default function DrivePage() {
         showEvent,
         listing.listing,
         upload.registerDownload,
+        upload.encryptUploads,
     );
 
     // initialize on first mount
@@ -1002,7 +984,7 @@ export default function DrivePage() {
                 }
             }
         },
-        [upload],
+        [upload.uploadFilesDirect],
     );
 
     const handleNavigate = useCallback(
@@ -1014,10 +996,20 @@ export default function DrivePage() {
         [scope.navigate, selection.clear, actions.setInfoItem],
     );
 
+    // Stable identities so the memoized DriveContent/FileList can skip
+    // re-rendering when only transient state (e.g. upload progress) changes.
+    const handleFolderClick = useCallback((folder: DriveFolder) => scope.navigate(folder.path), [scope.navigate]);
+    const handlePreview = useCallback((file: DriveFile) => setPreviewFile(file), []);
+
     const handleRenameOpen = useCallback(
-        (item: DriveFolder | DriveFile, type: "file" | "folder") =>
-            actions.setRenamingItem({ id: item.id as number, type, name: item.name }),
-        [actions],
+        (item: DriveFolder | DriveFile, type: "file" | "folder") => {
+            if (item.id == null) {
+                showEvent("error", "This virtual item cannot be renamed.");
+                return;
+            }
+            actions.setRenamingItem({ id: item.id, type, name: item.name });
+        },
+        [actions.setRenamingItem, showEvent],
     );
 
     return (
@@ -1058,7 +1050,7 @@ export default function DrivePage() {
                     sortBy={listing.sortBy}
                     sortOrder={listing.sortOrder}
                     onSort={listing.toggleSort}
-                    capabilities={(listing.listing as any)?.capabilities}
+                    capabilities={listing.listing?.capabilities}
                     encryptUploads={upload.encryptUploads}
                     onToggleEncrypt={upload.toggleEncrypt}
                 />
@@ -1092,21 +1084,31 @@ export default function DrivePage() {
                                 onSort={listing.toggleSort}
                                 isSelected={selection.isSelected}
                                 onToggleSelect={selection.toggle}
-                                onFolderClick={(folder) => scope.navigate(folder.path)}
+                                onFolderClick={handleFolderClick}
                                 onFolderDownload={actions.handleFolderDownload}
                                 onFileClick={actions.handleFileClick}
                                 onDownloadDecompressed={actions.handleFileDownloadDecompressed}
-                                onPreview={(file) => setPreviewFile(file)}
+                                onPreview={handlePreview}
                                 onDelete={actions.handleDelete}
                                 onRename={handleRenameOpen}
                                 onInfo={actions.setInfoItem}
                                 onPageChange={listing.setCurrentPage}
                                 onMoveItems={actions.handleMoveItems}
+                                onUploadNewVersion={actions.handleUploadNewVersion}
                             />
                         ) : null}
                     </div>
 
-                    {actions.infoItem && <DetailsPanel item={actions.infoItem} onClose={() => actions.setInfoItem(null)} />}
+                    {actions.infoItem && (
+                        <DetailsPanel
+                            item={actions.infoItem}
+                            scope={scope.currentScope}
+                            canWrite={listing.listing?.capabilities?.can_write !== false}
+                            canDelete={listing.listing?.capabilities?.can_delete !== false}
+                            onClose={() => actions.setInfoItem(null)}
+                            onChanged={() => listing.fetchListing()}
+                        />
+                    )}
                 </div>
 
                 <SelectionBar

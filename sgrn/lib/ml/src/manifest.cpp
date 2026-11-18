@@ -14,7 +14,7 @@
 //
 // Member declaration order matches the historical key order byte-for-byte —
 // that is why MlpConfigJson declares use_batch_norm before layers and
-// TrainInfoJson puts dataset_sha256 before metrics, unlike the domain structs.
+// TrainInfoJson puts dataset_sha512 before metrics, unlike the domain structs.
 // Where a domain struct's member names, types and order already match the
 // keys (MlpLayerConfig, ThresholdsConfig), it is reused directly. Absent keys
 // keep the domain defaults on read.
@@ -32,7 +32,7 @@ struct TrainInfoJson {
     uint64_t timestamp_ns = 0;
     uint32_t epochs_trained = 0;
     float final_loss = 0.0f;
-    std::string dataset_sha256;
+    std::string dataset_sha512;
     std::map<std::string, float> metrics;
 };
 
@@ -41,7 +41,7 @@ struct ModelManifestJson {
     std::string version = "1.0.0";
     std::string backend = "torch";
     std::string weights_file;
-    std::string weights_sha256;
+    std::string weights_sha512;
     FeatureSpecJson spec;
     MlpConfigJson mlp;
     TrainInfoJson train;
@@ -59,14 +59,14 @@ std::string ModelManifest::toJson(bool t_pretty) const {
     w.version = version;
     w.backend = backend;
     w.weights_file = weights_file;
-    w.weights_sha256 = weights_sha256;
+    w.weights_sha512 = weights_sha512;
     w.spec = detail::specToJson(spec);
     w.mlp.use_batch_norm = mlp.use_batch_norm;
     w.mlp.layers = mlp.layers;
     w.train.timestamp_ns = train.timestamp_ns;
     w.train.epochs_trained = train.epochs_trained;
     w.train.final_loss = train.final_loss;
-    w.train.dataset_sha256 = train.dataset_sha256;
+    w.train.dataset_sha512 = train.dataset_sha512;
     w.train.metrics = train.metrics;
     w.thresholds = thresholds;
 
@@ -85,14 +85,14 @@ Result<ModelManifest> ModelManifest::fromJson(std::string_view t_json_str) {
     manifest.version = w.version;
     manifest.backend = w.backend;
     manifest.weights_file = w.weights_file;
-    manifest.weights_sha256 = w.weights_sha256;
+    manifest.weights_sha512 = w.weights_sha512;
     manifest.spec = detail::specFromJson(w.spec);
     manifest.mlp.use_batch_norm = w.mlp.use_batch_norm;
     manifest.mlp.layers = std::move(w.mlp.layers);
     manifest.train.timestamp_ns = w.train.timestamp_ns;
     manifest.train.epochs_trained = w.train.epochs_trained;
     manifest.train.final_loss = w.train.final_loss;
-    manifest.train.dataset_sha256 = std::move(w.train.dataset_sha256);
+    manifest.train.dataset_sha512 = std::move(w.train.dataset_sha512);
     manifest.train.metrics = std::move(w.train.metrics);
     manifest.thresholds = w.thresholds;
     return manifest;
@@ -105,24 +105,24 @@ Result<ModelManifest> ModelManifest::fromFile(const std::filesystem::path& t_fil
 }
 
 Result<void> ModelManifest::validateWeights(std::string_view t_bytes) const {
-    if (weights_sha256.empty()) {
+    if (weights_sha512.empty()) {
         return {}; // No checksum specified
     }
-    auto hash_res = sgrn::utils::computeSha256Data(t_bytes, sgrn::utils::HashEncoding::hex);
-    RETURN_ERROR_IF(hash_res.hasError(), "Failed to compute SHA256 of weights: " + hash_res.error());
+    auto hash_res = sgrn::utils::computeSha512Data(t_bytes, sgrn::utils::HashEncoding::hex);
+    RETURN_ERROR_IF(hash_res.hasError(), "Failed to compute SHA512 of weights: " + hash_res.error());
     RETURN_ERROR_IF(
-        hash_res.value() != weights_sha256, "Weights SHA256 mismatch: expected " + weights_sha256 + ", got " + hash_res.value());
+        hash_res.value() != weights_sha512, "Weights SHA512 mismatch: expected " + weights_sha512 + ", got " + hash_res.value());
     return {};
 }
 
 Result<void> ModelManifest::validateWeightsFile(const std::filesystem::path& t_file_path) const {
-    if (weights_sha256.empty()) {
+    if (weights_sha512.empty()) {
         return {};
     }
-    auto hash_res = sgrn::utils::computeSha256File(t_file_path, sgrn::utils::HashEncoding::hex);
-    RETURN_ERROR_IF(hash_res.hasError(), "Failed to compute SHA256 of file " + t_file_path.string() + ": " + hash_res.error());
-    RETURN_ERROR_IF(hash_res.value() != weights_sha256,
-        "Weights file SHA256 mismatch for " + t_file_path.string() + ": expected " + weights_sha256 + ", got " + hash_res.value());
+    auto hash_res = sgrn::utils::computeSha512File(t_file_path, sgrn::utils::HashEncoding::hex);
+    RETURN_ERROR_IF(hash_res.hasError(), "Failed to compute SHA512 of file " + t_file_path.string() + ": " + hash_res.error());
+    RETURN_ERROR_IF(hash_res.value() != weights_sha512,
+        "Weights file SHA512 mismatch for " + t_file_path.string() + ": expected " + weights_sha512 + ", got " + hash_res.value());
     return {};
 }
 

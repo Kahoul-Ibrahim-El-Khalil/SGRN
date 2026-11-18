@@ -1,197 +1,150 @@
 import React from "react";
-import { X, File, Folder, Calendar, HardDrive, User, Info, Lock } from "lucide-react";
+import { X, File, Folder, Calendar, HardDrive, Info, Lock } from "lucide-react";
 import type { DriveFolder, DriveFile } from "@sgrn/types";
 import { toDisplayDrivePath } from "@/pages/drive/pathDisplay";
+import { VersionHistory } from "@/pages/drive/components/VersionHistory";
+import type { StorageScope } from "@/pages/drive/api";
+
+type DetailsItem = DriveFolder | DriveFile;
 
 interface DetailsPanelProps {
-    item: DriveFolder | DriveFile | null;
+    item: DetailsItem | null;
     onClose: () => void;
+    scope?: StorageScope;
+    onChanged?: () => void;
+    canWrite?: boolean;
+    canDelete?: boolean;
 }
 
-// Module-level constants: initialized once.
-const SIZE_UNITS: readonly string[] = ["Bytes", "KB", "MB", "GB", "TB"];
+const SIZE_UNITS = ["Bytes", "KB", "MB", "GB", "TB"] as const;
 
-const SIZE_BASE = 1024;
-
-// Module-level formatter: reused across renders.
-const formatSize = (bytes: number): string => {
-    if (bytes <= 0) return "0 Bytes";
-
+function formatSize(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 Bytes";
     let value = bytes;
     let unitIndex = 0;
-
-    while (value >= SIZE_BASE && unitIndex < SIZE_UNITS.length - 1) {
-        value /= SIZE_BASE;
-        unitIndex++;
+    while (value >= 1024 && unitIndex < SIZE_UNITS.length - 1) {
+        value /= 1024;
+        unitIndex += 1;
     }
+    return `${Number(value.toFixed(2))} ${SIZE_UNITS[unitIndex]}`;
+}
 
-    return `${parseFloat(value.toFixed(2))} ${SIZE_UNITS[unitIndex]}`;
-};
+function isDriveFolder(item: DetailsItem): item is DriveFolder {
+    return "count_sub_files" in item;
+}
 
-export const DetailsPanel: React.FC<DetailsPanelProps> = ({ item, onClose }) => {
+export const DetailsPanel: React.FC<DetailsPanelProps> = ({
+    item,
+    onClose,
+    scope = "personal",
+    onChanged,
+    canWrite = true,
+    canDelete = true,
+}) => {
     if (!item) return null;
 
-    const isFolder = "count_sub_files" in item;
-
     return (
-        <div
-            className="drive-details-panel"
-            style={{
-                width: "300px",
-                backgroundColor: "hsl(var(--card) / 0.95)",
-                borderLeft: "1px solid hsl(var(--border))",
-                display: "flex",
-                flexDirection: "column",
-                height: "100%",
-                position: "absolute",
-                right: 0,
-                top: 0,
-                zIndex: 100,
-                backdropFilter: "blur(10px)",
-                boxShadow: "var(--shadow-lg)",
-                color: "hsl(var(--foreground))",
-            }}
-        >
-            <div
-                style={{
-                    padding: "1rem",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    borderBottom: "1px solid hsl(var(--border))",
-                }}
-            >
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontWeight: 600 }}>
+        <aside aria-label="Selected item details" className="drive-details-panel">
+            <div className="drive-details-header">
+                <div className="drive-details-title">
                     <Info size={18} className="text-primary" />
                     <span>Details</span>
                 </div>
-                <button
-                    onClick={onClose}
-                    style={{
-                        background: "none",
-                        border: "none",
-                        color: "hsl(var(--muted-foreground))",
-                        cursor: "pointer",
-                        padding: "0.25rem",
-                    }}
-                >
+                <button type="button" onClick={onClose} aria-label="Close details" className="drive-details-close">
                     <X size={20} />
                 </button>
             </div>
-            <div style={{ padding: "1.5rem", overflowY: "auto", flex: 1 }}>
-                <div
-                    style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        textAlign: "center",
-                        marginBottom: "2rem",
-                    }}
-                >
-                    <div
-                        style={{
-                            width: "80px",
-                            height: "80px",
-                            borderRadius: "0", // Enforce industrial hard corners
-                            backgroundColor: "hsl(var(--primary) / 0.1)",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            marginBottom: "1rem",
-                            color: "hsl(var(--primary))",
-                        }}
-                    >
-                        {isFolder ? <Folder size={40} /> : <File size={40} />}
-                    </div>
-                    <h3 style={{ fontSize: "1.1rem", marginBottom: "0.25rem", wordBreak: "break-all", color: "hsl(var(--foreground))" }}>
-                        {item.name}
-                    </h3>
-                    <span style={{ fontSize: "0.8rem", color: "hsl(var(--muted-foreground))" }}>
-                        {isFolder ? "Folder" : (item as DriveFile).extension ? `.${(item as DriveFile).extension} file` : "File"}
-                    </span>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-                    <DetailItem
-                        icon={<HardDrive size={16} />}
-                        label="Size"
-                        value={isFolder ? formatSize((item as DriveFolder).virtual_size || 0) : formatSize((item as DriveFile).size || 0)}
-                    />
-                    {!isFolder && (item as DriveFile).original_size !== (item as DriveFile).size && (
-                        <DetailItem
-                            icon={<HardDrive size={16} />}
-                            label="Uncompressed Size"
-                            value={formatSize((item as DriveFile).original_size || 0)}
-                        />
-                    )}
-                    {!isFolder && (
-                        <DetailItem
-                            icon={<HardDrive size={16} />}
-                            label="Storage"
-                            value={
-                                (item as DriveFile).upload_mode === "multipart"
-                                    ? `Multipart · ${(item as DriveFile).part_count ?? "?"} parts`
-                                    : "Single PUT"
-                            }
-                        />
-                    )}
-                    {!isFolder && (
-                        <DetailItem
-                            icon={<Lock size={16} />}
-                            label="Encryption"
-                            value={
-                                (item as DriveFile).is_encrypted
-                                    ? `AES-256-GCM (Protected${(item as DriveFile).key_id ? ` · ${(item as DriveFile).key_id?.slice(0, 8)}...` : ""})`
-                                    : "Plaintext"
-                            }
-                        />
-                    )}
-                    <DetailItem
-                        icon={<Calendar size={16} />}
-                        label="Created At"
-                        value={item.created_at ? new Date(item.created_at).toLocaleString() : "Unknown"}
-                    />
-                    <DetailItem icon={<User size={16} />} label="Owner" value="Personal" />
-                    <DetailItem
-                        icon={<Info size={16} />}
-                        label="Path"
-                        value={toDisplayDrivePath(item.path)}
-                        style={{ wordBreak: "break-all" }}
-                    />
-                    {isFolder && (
-                        <>
-                            <DetailItem
-                                icon={<File size={14} />}
-                                label="Sub-files"
-                                value={((item as DriveFolder).count_sub_files ?? 0).toString()}
-                            />
-                            <DetailItem
-                                icon={<Folder size={14} />}
-                                label="Sub-folders"
-                                value={((item as DriveFolder).count_sub_directories ?? 0).toString()}
-                            />
-                        </>
-                    )}
-                </div>
+            <div className="drive-details-body">
+                {isDriveFolder(item) ? (
+                    <FolderDetails folder={item} />
+                ) : (
+                    <FileDetails file={item} scope={scope} canWrite={canWrite} canDelete={canDelete} onChanged={onChanged} />
+                )}
             </div>
-        </div>
+        </aside>
     );
 };
 
-const DetailItem: React.FC<{ icon: React.ReactNode; label: string; value: string; style?: React.CSSProperties }> = ({
-    icon,
-    label,
-    value,
-    style,
-}) => (
-    <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
-        <div style={{ color: "hsl(var(--muted-foreground) / 0.5)", marginTop: "0.15rem" }}>{icon}</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.1rem" }}>
-            <span
-                style={{ fontSize: "0.75rem", color: "hsl(var(--muted-foreground))", textTransform: "uppercase", letterSpacing: "0.05em" }}
-            >
-                {label}
-            </span>
-            <span style={{ fontSize: "0.9rem", color: "hsl(var(--foreground))", ...style }}>{value}</span>
+function DetailsHeading({ name, kind }: { name: string; kind: string }) {
+    return (
+        <div className="drive-details-heading">
+            <div className="drive-details-heading-icon">{kind === "Folder" ? <Folder size={40} /> : <File size={40} />}</div>
+            <h3 className="drive-details-heading-name">{name}</h3>
+            <span className="drive-details-heading-kind">{kind}</span>
         </div>
-    </div>
-);
+    );
+}
+
+function FolderDetails({ folder }: { folder: DriveFolder }) {
+    return (
+        <>
+            <DetailsHeading name={folder.name} kind="Folder" />
+            <div className="drive-details-list">
+                <DetailItem icon={<HardDrive size={16} />} label="Size" value={formatSize(folder.virtual_size ?? 0)} />
+                <DetailItem icon={<Calendar size={16} />} label="Created At" value={formatDate(folder.created_at)} />
+                <DetailItem icon={<Info size={16} />} label="Path" value={toDisplayDrivePath(folder.path)} wrap />
+                <DetailItem icon={<File size={14} />} label="Sub-files" value={String(folder.count_sub_files ?? 0)} />
+                <DetailItem icon={<Folder size={14} />} label="Sub-folders" value={String(folder.count_sub_directories ?? 0)} />
+            </div>
+        </>
+    );
+}
+
+function FileDetails({
+    file,
+    scope,
+    canWrite,
+    canDelete,
+    onChanged,
+}: {
+    file: DriveFile;
+    scope: StorageScope;
+    canWrite: boolean;
+    canDelete: boolean;
+    onChanged?: () => void;
+}) {
+    return (
+        <>
+            <DetailsHeading name={file.name} kind={file.extension ? `.${file.extension} file` : "File"} />
+            <div className="drive-details-list">
+                <DetailItem icon={<HardDrive size={16} />} label="Size" value={formatSize(file.size ?? 0)} />
+                {file.original_size !== file.size && (
+                    <DetailItem icon={<HardDrive size={16} />} label="Uncompressed Size" value={formatSize(file.original_size ?? 0)} />
+                )}
+                <DetailItem
+                    icon={<HardDrive size={16} />}
+                    label="Storage"
+                    value={file.upload_mode === "multipart" ? `Multipart · ${file.part_count ?? "?"} parts` : "Single PUT"}
+                />
+                <DetailItem
+                    icon={<Lock size={16} />}
+                    label="Encryption"
+                    value={
+                        file.is_encrypted ? `AES-256-GCM (Protected${file.key_id ? ` · ${file.key_id.slice(0, 8)}...` : ""})` : "Plaintext"
+                    }
+                />
+                <DetailItem icon={<Calendar size={16} />} label="Created At" value={formatDate(file.created_at)} />
+                <DetailItem icon={<Info size={16} />} label="Path" value={toDisplayDrivePath(file.path)} wrap />
+            </div>
+            <VersionHistory file={file} scope={scope} canWrite={canWrite} canDelete={canDelete} onChanged={onChanged} />
+        </>
+    );
+}
+
+function formatDate(value: string | null | undefined): string {
+    if (!value) return "Unknown";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "Unknown" : date.toLocaleString();
+}
+
+function DetailItem({ icon, label, value, wrap = false }: { icon: React.ReactNode; label: string; value: string; wrap?: boolean }) {
+    return (
+        <div className="drive-detail-item">
+            <div className="drive-detail-item-icon">{icon}</div>
+            <div className="drive-detail-item-text">
+                <span className="drive-detail-item-label">{label}</span>
+                <span className={`drive-detail-item-value${wrap ? " drive-detail-item-value--wrap" : ""}`}>{value}</span>
+            </div>
+        </div>
+    );
+}

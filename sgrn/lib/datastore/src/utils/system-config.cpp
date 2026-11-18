@@ -183,6 +183,12 @@ const std::vector<FieldSpec>& systemConfigSchema() {
         {"custom_config.s3.chunking_threshold_mb", FieldType::UInt, true, "Storage / S3", "Multipart threshold (MB of original size)", 1,
             8192},
         {"custom_config.s3.chunk_part_size_mb", FieldType::UInt, true, "Storage / S3", "Multipart part size (MB, min 5)", 5, 512},
+        {"custom_config.s3.versioning_enabled", FieldType::Bool, true, "Storage / S3", "File versioning enabled"},
+        {"custom_config.s3.delta_max_bytes", FieldType::UInt, true, "Storage / S3", "Maximum file size compacted to a delta", 1,
+            1073741824},
+        {"custom_config.s3.delta_zstd_level", FieldType::UInt, true, "Storage / S3", "Delta compression level", 1, 19},
+        {"custom_config.s3.delta_min_saving_pct", FieldType::UInt, true, "Storage / S3", "Minimum delta size reduction (%)", 0, 95},
+        {"custom_config.s3.versioning_snapshot_interval", FieldType::UInt, true, "Storage / S3", "Full snapshot interval", 1, 1000},
         // --- Rate limiting (custom_config.rate_limiting): hot via holder swap ---
         {"custom_config.rate_limiting.enabled", FieldType::Bool, false, "Rate limiting", "Enabled (toggle needs restart)"},
         {"custom_config.rate_limiting.auth_endpoint_limit", FieldType::UInt, true, "Rate limiting", "Auth limit", 1, 100000},

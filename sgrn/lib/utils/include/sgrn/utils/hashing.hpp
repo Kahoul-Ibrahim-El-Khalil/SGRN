@@ -189,8 +189,11 @@ inline ::sgrn::Result<std::string> computeSha512File(const std::filesystem::path
 }
 
 // =======================================================
-//  SHA256 Convenience Wrappers (Hex - Standard for ETag/Checksum)
+//  SHA256 Convenience Wrappers (legacy / protocol-mandated only)
 // =======================================================
+// SGRN content hashes use SHA-512 (see computeSha512* above). SHA-256 is kept
+// only for protocols that define it (JWT HS256, webhook HMAC, AWS SigV4) and
+// for verifying the tamper-evident audit chain, which cannot be rehashed.
 
 inline ::sgrn::Result<std::string> computeSha256Data(std::string_view t_data, HashEncoding t_enc) {
     DigestContext ctx_;
@@ -261,24 +264,24 @@ inline ::sgrn::Result<std::string> computeSha256File(const std::filesystem::path
 }
 
 // =======================================================
-//  Streaming SHA-256 Hasher
+//  Streaming SHA-512 Hasher
 // =======================================================
 
-class Sha256Stream {
+class Sha512Stream {
 public:
-    Sha256Stream() {
+    Sha512Stream() {
         ctx_ = EVP_MD_CTX_new();
-        EVP_DigestInit_ex(ctx_, EVP_sha256(), nullptr);
+        EVP_DigestInit_ex(ctx_, EVP_sha512(), nullptr);
     }
 
-    ~Sha256Stream() {
+    ~Sha512Stream() {
         if (ctx_ != nullptr) {
             EVP_MD_CTX_free(ctx_);
         }
     }
 
-    Sha256Stream(const Sha256Stream&) = delete;
-    Sha256Stream& operator=(const Sha256Stream&) = delete;
+    Sha512Stream(const Sha512Stream&) = delete;
+    Sha512Stream& operator=(const Sha512Stream&) = delete;
 
     void update(const char* t_data, size_t t_len) {
         EVP_DigestUpdate(ctx_, t_data, t_len);

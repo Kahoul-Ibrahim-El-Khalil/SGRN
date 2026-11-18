@@ -1,3 +1,4 @@
+
 /**
  *
  *  Formats.cc
@@ -6,7 +7,9 @@
  */
 
 #include "Formats.h"
+
 #include <drogon/utils/Utilities.h>
+
 #include <string>
 
 using namespace drogon;
@@ -14,48 +17,73 @@ using namespace drogon::orm;
 using namespace drogon_model::sgrn::storage;
 
 const std::string Formats::Cols::_id = "\"id\"";
+
 const std::string Formats::Cols::_extension = "\"extension\"";
+
 const std::string Formats::Cols::_mime_type = "\"mime_type\"";
+
 const std::string Formats::Cols::_is_compressed = "\"is_compressed\"";
+
 const std::string Formats::Cols::_is_allowed = "\"is_allowed\"";
+
 const std::string Formats::Cols::_description = "\"description\"";
+
 const std::string Formats::Cols::_created_at = "\"created_at\"";
+
 const std::string Formats::primaryKeyName = "id";
+
 const bool Formats::hasPrimaryKey = true;
+
 const std::string Formats::tableName = "storage.\"formats\"";
 
 const std::vector<typename Formats::MetaData> Formats::metaData_ = {{"id", "int32_t", "integer", 4, 1, 1, 1},
     {"extension", "std::string", "character varying", 15, 0, 0, 1}, {"mime_type", "std::string", "character varying", 128, 0, 0, 1},
     {"is_compressed", "bool", "boolean", 1, 0, 0, 1}, {"is_allowed", "bool", "boolean", 1, 0, 0, 1},
-    {"description", "std::string", "text", 0, 0, 0, 0}, {"created_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1}};
+    {"description", "std::string", "text", 0, 0, 0, 0}, {"created_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1}
+
+};
 const std::string& Formats::getColumnName(size_t index) noexcept(false) {
     assert(index < metaData_.size());
     return metaData_[index].colName_;
 }
 Formats::Formats(const Row& r, const ssize_t indexOffset) noexcept {
     if (indexOffset < 0) {
+
         if (!r["id"].isNull()) {
+
             id_ = std::make_shared<int32_t>(r["id"].as<int32_t>());
         }
+
         if (!r["extension"].isNull()) {
+
             extension_ = std::make_shared<std::string>(r["extension"].as<std::string>());
         }
+
         if (!r["mime_type"].isNull()) {
+
             mimeType_ = std::make_shared<std::string>(r["mime_type"].as<std::string>());
         }
+
         if (!r["is_compressed"].isNull()) {
+
             isCompressed_ = std::make_shared<bool>(r["is_compressed"].as<bool>());
         }
+
         if (!r["is_allowed"].isNull()) {
+
             isAllowed_ = std::make_shared<bool>(r["is_allowed"].as<bool>());
         }
+
         if (!r["description"].isNull()) {
+
             description_ = std::make_shared<std::string>(r["description"].as<std::string>());
         }
+
         if (!r["created_at"].isNull()) {
             auto timeStr = r["created_at"].as<std::string>();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -70,6 +98,7 @@ Formats::Formats(const Row& r, const ssize_t indexOffset) noexcept {
                 createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
+
     } else {
         size_t offset = (size_t)indexOffset;
         if (offset + 7 > r.size()) {
@@ -77,35 +106,49 @@ Formats::Formats(const Row& r, const ssize_t indexOffset) noexcept {
             return;
         }
         size_t index;
+
         index = offset + 0;
         if (!r[index].isNull()) {
+
             id_ = std::make_shared<int32_t>(r[index].as<int32_t>());
         }
+
         index = offset + 1;
         if (!r[index].isNull()) {
+
             extension_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 2;
         if (!r[index].isNull()) {
+
             mimeType_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 3;
         if (!r[index].isNull()) {
+
             isCompressed_ = std::make_shared<bool>(r[index].as<bool>());
         }
+
         index = offset + 4;
         if (!r[index].isNull()) {
+
             isAllowed_ = std::make_shared<bool>(r[index].as<bool>());
         }
+
         index = offset + 5;
         if (!r[index].isNull()) {
+
             description_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 6;
         if (!r[index].isNull()) {
             auto timeStr = r[index].as<std::string>();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -128,48 +171,56 @@ Formats::Formats(const Json::Value& pJson, const std::vector<std::string>& pMasq
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
+
     if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         dirtyFlag_[0] = true;
         if (!pJson[pMasqueradingVector[0]].isNull()) {
             id_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
         if (!pJson[pMasqueradingVector[1]].isNull()) {
             extension_ = std::make_shared<std::string>(pJson[pMasqueradingVector[1]].asString());
         }
     }
+
     if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
         if (!pJson[pMasqueradingVector[2]].isNull()) {
             mimeType_ = std::make_shared<std::string>(pJson[pMasqueradingVector[2]].asString());
         }
     }
+
     if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
         if (!pJson[pMasqueradingVector[3]].isNull()) {
             isCompressed_ = std::make_shared<bool>(pJson[pMasqueradingVector[3]].asBool());
         }
     }
+
     if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
         dirtyFlag_[4] = true;
         if (!pJson[pMasqueradingVector[4]].isNull()) {
             isAllowed_ = std::make_shared<bool>(pJson[pMasqueradingVector[4]].asBool());
         }
     }
+
     if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
         dirtyFlag_[5] = true;
         if (!pJson[pMasqueradingVector[5]].isNull()) {
             description_ = std::make_shared<std::string>(pJson[pMasqueradingVector[5]].asString());
         }
     }
+
     if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
         dirtyFlag_[6] = true;
         if (!pJson[pMasqueradingVector[6]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[6]].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -188,48 +239,56 @@ Formats::Formats(const Json::Value& pJson, const std::vector<std::string>& pMasq
 }
 
 Formats::Formats(const Json::Value& pJson) noexcept(false) {
+
     if (pJson.isMember("id")) {
         dirtyFlag_[0] = true;
         if (!pJson["id"].isNull()) {
             id_ = std::make_shared<int32_t>((int32_t)pJson["id"].asInt64());
         }
     }
+
     if (pJson.isMember("extension")) {
         dirtyFlag_[1] = true;
         if (!pJson["extension"].isNull()) {
             extension_ = std::make_shared<std::string>(pJson["extension"].asString());
         }
     }
+
     if (pJson.isMember("mime_type")) {
         dirtyFlag_[2] = true;
         if (!pJson["mime_type"].isNull()) {
             mimeType_ = std::make_shared<std::string>(pJson["mime_type"].asString());
         }
     }
+
     if (pJson.isMember("is_compressed")) {
         dirtyFlag_[3] = true;
         if (!pJson["is_compressed"].isNull()) {
             isCompressed_ = std::make_shared<bool>(pJson["is_compressed"].asBool());
         }
     }
+
     if (pJson.isMember("is_allowed")) {
         dirtyFlag_[4] = true;
         if (!pJson["is_allowed"].isNull()) {
             isAllowed_ = std::make_shared<bool>(pJson["is_allowed"].asBool());
         }
     }
+
     if (pJson.isMember("description")) {
         dirtyFlag_[5] = true;
         if (!pJson["description"].isNull()) {
             description_ = std::make_shared<std::string>(pJson["description"].asString());
         }
     }
+
     if (pJson.isMember("created_at")) {
         dirtyFlag_[6] = true;
         if (!pJson["created_at"].isNull()) {
             auto timeStr = pJson["created_at"].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -252,47 +311,55 @@ void Formats::updateByMasqueradedJson(const Json::Value& pJson, const std::vecto
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
+
     if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         if (!pJson[pMasqueradingVector[0]].isNull()) {
             id_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
         if (!pJson[pMasqueradingVector[1]].isNull()) {
             extension_ = std::make_shared<std::string>(pJson[pMasqueradingVector[1]].asString());
         }
     }
+
     if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
         if (!pJson[pMasqueradingVector[2]].isNull()) {
             mimeType_ = std::make_shared<std::string>(pJson[pMasqueradingVector[2]].asString());
         }
     }
+
     if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
         if (!pJson[pMasqueradingVector[3]].isNull()) {
             isCompressed_ = std::make_shared<bool>(pJson[pMasqueradingVector[3]].asBool());
         }
     }
+
     if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
         dirtyFlag_[4] = true;
         if (!pJson[pMasqueradingVector[4]].isNull()) {
             isAllowed_ = std::make_shared<bool>(pJson[pMasqueradingVector[4]].asBool());
         }
     }
+
     if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
         dirtyFlag_[5] = true;
         if (!pJson[pMasqueradingVector[5]].isNull()) {
             description_ = std::make_shared<std::string>(pJson[pMasqueradingVector[5]].asString());
         }
     }
+
     if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
         dirtyFlag_[6] = true;
         if (!pJson[pMasqueradingVector[6]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[6]].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -311,47 +378,55 @@ void Formats::updateByMasqueradedJson(const Json::Value& pJson, const std::vecto
 }
 
 void Formats::updateByJson(const Json::Value& pJson) noexcept(false) {
+
     if (pJson.isMember("id")) {
         if (!pJson["id"].isNull()) {
             id_ = std::make_shared<int32_t>((int32_t)pJson["id"].asInt64());
         }
     }
+
     if (pJson.isMember("extension")) {
         dirtyFlag_[1] = true;
         if (!pJson["extension"].isNull()) {
             extension_ = std::make_shared<std::string>(pJson["extension"].asString());
         }
     }
+
     if (pJson.isMember("mime_type")) {
         dirtyFlag_[2] = true;
         if (!pJson["mime_type"].isNull()) {
             mimeType_ = std::make_shared<std::string>(pJson["mime_type"].asString());
         }
     }
+
     if (pJson.isMember("is_compressed")) {
         dirtyFlag_[3] = true;
         if (!pJson["is_compressed"].isNull()) {
             isCompressed_ = std::make_shared<bool>(pJson["is_compressed"].asBool());
         }
     }
+
     if (pJson.isMember("is_allowed")) {
         dirtyFlag_[4] = true;
         if (!pJson["is_allowed"].isNull()) {
             isAllowed_ = std::make_shared<bool>(pJson["is_allowed"].asBool());
         }
     }
+
     if (pJson.isMember("description")) {
         dirtyFlag_[5] = true;
         if (!pJson["description"].isNull()) {
             description_ = std::make_shared<std::string>(pJson["description"].asString());
         }
     }
+
     if (pJson.isMember("created_at")) {
         dirtyFlag_[6] = true;
         if (!pJson["created_at"].isNull()) {
             auto timeStr = pJson["created_at"].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -491,11 +566,14 @@ void Formats::updateId(const uint64_t id) {
 }
 
 const std::vector<std::string>& Formats::insertColumns() noexcept {
-    static const std::vector<std::string> inCols = {"extension", "mime_type", "is_compressed", "is_allowed", "description", "created_at"};
+    static const std::vector<std::string> inCols = {"extension", "mime_type", "is_compressed", "is_allowed", "description", "created_at"
+
+    };
     return inCols;
 }
 
 void Formats::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
+
     if (dirtyFlag_[1]) {
         if (getExtension()) {
             binder << getValueOfExtension();
@@ -503,6 +581,7 @@ void Formats::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[2]) {
         if (getMimeType()) {
             binder << getValueOfMimeType();
@@ -510,6 +589,7 @@ void Formats::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[3]) {
         if (getIsCompressed()) {
             binder << getValueOfIsCompressed();
@@ -517,6 +597,7 @@ void Formats::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[4]) {
         if (getIsAllowed()) {
             binder << getValueOfIsAllowed();
@@ -524,6 +605,7 @@ void Formats::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[5]) {
         if (getDescription()) {
             binder << getValueOfDescription();
@@ -531,6 +613,7 @@ void Formats::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[6]) {
         if (getCreatedAt()) {
             binder << getValueOfCreatedAt();
@@ -542,28 +625,36 @@ void Formats::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
 
 const std::vector<std::string> Formats::updateColumns() const {
     std::vector<std::string> ret;
+
     if (dirtyFlag_[1]) {
         ret.push_back(getColumnName(1));
     }
+
     if (dirtyFlag_[2]) {
         ret.push_back(getColumnName(2));
     }
+
     if (dirtyFlag_[3]) {
         ret.push_back(getColumnName(3));
     }
+
     if (dirtyFlag_[4]) {
         ret.push_back(getColumnName(4));
     }
+
     if (dirtyFlag_[5]) {
         ret.push_back(getColumnName(5));
     }
+
     if (dirtyFlag_[6]) {
         ret.push_back(getColumnName(6));
     }
+
     return ret;
 }
 
 void Formats::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
+
     if (dirtyFlag_[1]) {
         if (getExtension()) {
             binder << getValueOfExtension();
@@ -571,6 +662,7 @@ void Formats::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[2]) {
         if (getMimeType()) {
             binder << getValueOfMimeType();
@@ -578,6 +670,7 @@ void Formats::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[3]) {
         if (getIsCompressed()) {
             binder << getValueOfIsCompressed();
@@ -585,6 +678,7 @@ void Formats::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[4]) {
         if (getIsAllowed()) {
             binder << getValueOfIsAllowed();
@@ -592,6 +686,7 @@ void Formats::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[5]) {
         if (getDescription()) {
             binder << getValueOfDescription();
@@ -599,6 +694,7 @@ void Formats::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[6]) {
         if (getCreatedAt()) {
             binder << getValueOfCreatedAt();
@@ -609,41 +705,63 @@ void Formats::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
 }
 Json::Value Formats::toJson() const {
     Json::Value ret;
+
     if (getId()) {
+
         ret["id"] = getValueOfId();
+
     } else {
         ret["id"] = Json::Value();
     }
+
     if (getExtension()) {
+
         ret["extension"] = getValueOfExtension();
+
     } else {
         ret["extension"] = Json::Value();
     }
+
     if (getMimeType()) {
+
         ret["mime_type"] = getValueOfMimeType();
+
     } else {
         ret["mime_type"] = Json::Value();
     }
+
     if (getIsCompressed()) {
+
         ret["is_compressed"] = getValueOfIsCompressed();
+
     } else {
         ret["is_compressed"] = Json::Value();
     }
+
     if (getIsAllowed()) {
+
         ret["is_allowed"] = getValueOfIsAllowed();
+
     } else {
         ret["is_allowed"] = Json::Value();
     }
+
     if (getDescription()) {
+
         ret["description"] = getValueOfDescription();
+
     } else {
         ret["description"] = Json::Value();
     }
+
     if (getCreatedAt()) {
+
         ret["created_at"] = getCreatedAt()->toDbStringLocal();
+
     } else {
         ret["created_at"] = Json::Value();
     }
+
     return ret;
 }
 
@@ -654,131 +772,187 @@ std::string Formats::toString() const {
 Json::Value Formats::toMasqueradedJson(const std::vector<std::string>& pMasqueradingVector) const {
     Json::Value ret;
     if (pMasqueradingVector.size() == 7) {
+
         if (!pMasqueradingVector[0].empty()) {
             if (getId()) {
+
                 ret[pMasqueradingVector[0]] = getValueOfId();
+
             } else {
                 ret[pMasqueradingVector[0]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[1].empty()) {
             if (getExtension()) {
+
                 ret[pMasqueradingVector[1]] = getValueOfExtension();
+
             } else {
                 ret[pMasqueradingVector[1]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[2].empty()) {
             if (getMimeType()) {
+
                 ret[pMasqueradingVector[2]] = getValueOfMimeType();
+
             } else {
                 ret[pMasqueradingVector[2]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[3].empty()) {
             if (getIsCompressed()) {
+
                 ret[pMasqueradingVector[3]] = getValueOfIsCompressed();
+
             } else {
                 ret[pMasqueradingVector[3]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[4].empty()) {
             if (getIsAllowed()) {
+
                 ret[pMasqueradingVector[4]] = getValueOfIsAllowed();
+
             } else {
                 ret[pMasqueradingVector[4]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[5].empty()) {
             if (getDescription()) {
+
                 ret[pMasqueradingVector[5]] = getValueOfDescription();
+
             } else {
                 ret[pMasqueradingVector[5]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[6].empty()) {
             if (getCreatedAt()) {
+
                 ret[pMasqueradingVector[6]] = getCreatedAt()->toDbStringLocal();
+
             } else {
                 ret[pMasqueradingVector[6]] = Json::Value();
             }
         }
+
         return ret;
     }
     LOG_ERROR << "Masquerade failed";
+
     if (getId()) {
+
         ret["id"] = getValueOfId();
+
     } else {
         ret["id"] = Json::Value();
     }
+
     if (getExtension()) {
+
         ret["extension"] = getValueOfExtension();
+
     } else {
         ret["extension"] = Json::Value();
     }
+
     if (getMimeType()) {
+
         ret["mime_type"] = getValueOfMimeType();
+
     } else {
         ret["mime_type"] = Json::Value();
     }
+
     if (getIsCompressed()) {
+
         ret["is_compressed"] = getValueOfIsCompressed();
+
     } else {
         ret["is_compressed"] = Json::Value();
     }
+
     if (getIsAllowed()) {
+
         ret["is_allowed"] = getValueOfIsAllowed();
+
     } else {
         ret["is_allowed"] = Json::Value();
     }
+
     if (getDescription()) {
+
         ret["description"] = getValueOfDescription();
+
     } else {
         ret["description"] = Json::Value();
     }
+
     if (getCreatedAt()) {
+
         ret["created_at"] = getCreatedAt()->toDbStringLocal();
+
     } else {
         ret["created_at"] = Json::Value();
     }
+
     return ret;
 }
 
 bool Formats::validateJsonForCreation(const Json::Value& pJson, std::string& err) {
+
     if (pJson.isMember("id")) {
         if (!validJsonOfField(0, "id", pJson["id"], err, true))
             return false;
     }
+
     if (pJson.isMember("extension")) {
         if (!validJsonOfField(1, "extension", pJson["extension"], err, true))
             return false;
-    } else {
+    }
+
+    else {
         err = "The extension column cannot be null";
         return false;
     }
+
     if (pJson.isMember("mime_type")) {
         if (!validJsonOfField(2, "mime_type", pJson["mime_type"], err, true))
             return false;
-    } else {
+    }
+
+    else {
         err = "The mime_type column cannot be null";
         return false;
     }
+
     if (pJson.isMember("is_compressed")) {
         if (!validJsonOfField(3, "is_compressed", pJson["is_compressed"], err, true))
             return false;
     }
+
     if (pJson.isMember("is_allowed")) {
         if (!validJsonOfField(4, "is_allowed", pJson["is_allowed"], err, true))
             return false;
     }
+
     if (pJson.isMember("description")) {
         if (!validJsonOfField(5, "description", pJson["description"], err, true))
             return false;
     }
+
     if (pJson.isMember("created_at")) {
         if (!validJsonOfField(6, "created_at", pJson["created_at"], err, true))
             return false;
     }
+
     return true;
 }
 bool Formats::validateMasqueradedJsonForCreation(
@@ -788,54 +962,66 @@ bool Formats::validateMasqueradedJsonForCreation(
         return false;
     }
     try {
+
         if (!pMasqueradingVector[0].empty()) {
             if (pJson.isMember(pMasqueradingVector[0])) {
                 if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[1].empty()) {
             if (pJson.isMember(pMasqueradingVector[1])) {
                 if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, true))
                     return false;
-            } else {
+            }
+
+            else {
                 err = "The " + pMasqueradingVector[1] + " column cannot be null";
                 return false;
             }
         }
+
         if (!pMasqueradingVector[2].empty()) {
             if (pJson.isMember(pMasqueradingVector[2])) {
                 if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, true))
                     return false;
-            } else {
+            }
+
+            else {
                 err = "The " + pMasqueradingVector[2] + " column cannot be null";
                 return false;
             }
         }
+
         if (!pMasqueradingVector[3].empty()) {
             if (pJson.isMember(pMasqueradingVector[3])) {
                 if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[4].empty()) {
             if (pJson.isMember(pMasqueradingVector[4])) {
                 if (!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[5].empty()) {
             if (pJson.isMember(pMasqueradingVector[5])) {
                 if (!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[6].empty()) {
             if (pJson.isMember(pMasqueradingVector[6])) {
                 if (!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, true))
                     return false;
             }
         }
+
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -843,37 +1029,47 @@ bool Formats::validateMasqueradedJsonForCreation(
     return true;
 }
 bool Formats::validateJsonForUpdate(const Json::Value& pJson, std::string& err) {
+
     if (pJson.isMember("id")) {
         if (!validJsonOfField(0, "id", pJson["id"], err, false))
             return false;
-    } else {
+    }
+
+    else {
         err = "The value of primary key must be set in the json object for update";
         return false;
     }
+
     if (pJson.isMember("extension")) {
         if (!validJsonOfField(1, "extension", pJson["extension"], err, false))
             return false;
     }
+
     if (pJson.isMember("mime_type")) {
         if (!validJsonOfField(2, "mime_type", pJson["mime_type"], err, false))
             return false;
     }
+
     if (pJson.isMember("is_compressed")) {
         if (!validJsonOfField(3, "is_compressed", pJson["is_compressed"], err, false))
             return false;
     }
+
     if (pJson.isMember("is_allowed")) {
         if (!validJsonOfField(4, "is_allowed", pJson["is_allowed"], err, false))
             return false;
     }
+
     if (pJson.isMember("description")) {
         if (!validJsonOfField(5, "description", pJson["description"], err, false))
             return false;
     }
+
     if (pJson.isMember("created_at")) {
         if (!validJsonOfField(6, "created_at", pJson["created_at"], err, false))
             return false;
     }
+
     return true;
 }
 bool Formats::validateMasqueradedJsonForUpdate(
@@ -883,37 +1079,47 @@ bool Formats::validateMasqueradedJsonForUpdate(
         return false;
     }
     try {
+
         if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
             if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, false))
                 return false;
-        } else {
+        }
+
+        else {
             err = "The value of primary key must be set in the json object for update";
             return false;
         }
+
         if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
             if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
             if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
             if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
             if (!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
             if (!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
             if (!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, false))
                 return false;
         }
+
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -922,89 +1128,119 @@ bool Formats::validateMasqueradedJsonForUpdate(
 }
 bool Formats::validJsonOfField(size_t index, const std::string& fieldName, const Json::Value& pJson, std::string& err, bool isForCreation) {
     switch (index) {
+
         case 0:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (isForCreation) {
                 err = "The automatic primary key cannot be set";
                 return false;
             }
+
             if (!pJson.isInt()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 1:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-            if (pJson.isString() &&
-                std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>, wchar_t>{}.from_bytes(pJson.asCString()).size() > 15) {
+
+            if (pJson.isString() && drogon::utils::utf8Length(pJson.asCString()) > 15) {
                 err = "String length exceeds limit for the " + fieldName + " field (the maximum value is 15)";
                 return false;
             }
+
             break;
+
         case 2:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-            if (pJson.isString() &&
-                std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>, wchar_t>{}.from_bytes(pJson.asCString()).size() > 128) {
+
+            if (pJson.isString() && drogon::utils::utf8Length(pJson.asCString()) > 128) {
                 err = "String length exceeds limit for the " + fieldName + " field (the maximum value is 128)";
                 return false;
             }
+
             break;
+
         case 3:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isBool()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 4:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isBool()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 5:
+
             if (pJson.isNull()) {
                 return true;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 6:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         default:
             err = "Internal error in the server";
             return false;

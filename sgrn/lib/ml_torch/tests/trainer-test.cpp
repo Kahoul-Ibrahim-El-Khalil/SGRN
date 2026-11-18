@@ -73,7 +73,7 @@ int main() {
     CHECK(res.value().epoch_losses.front() > res.value().epoch_losses.back()); // loss decreased
 
     // 4. Verify manifest weights integrity
-    CHECK(!manifest.weights_sha256.empty());
+    CHECK(!manifest.weights_sha512.empty());
     CHECK(!manifest.validateWeightsFile(tmp_weights).hasError());
 
     // 5. Reload into TorchBackend and verify inference

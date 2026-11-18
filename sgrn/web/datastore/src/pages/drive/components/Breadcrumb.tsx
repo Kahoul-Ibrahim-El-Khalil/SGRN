@@ -1,5 +1,6 @@
 // @/pages/drive/components/Breadcrumb.tsx
 import { ChevronRight } from "lucide-react";
+import type { DragEvent } from "react";
 import type { DrivePathNode } from "@sgrn/types";
 import { toDisplayDrivePath, domainDisplaySegment, DOMAIN_PATH_PREFIX } from "@/pages/drive/pathDisplay";
 
@@ -7,7 +8,7 @@ interface BreadcrumbProps {
     path: string;
     onNavigate: (path: string) => void;
     trail?: DrivePathNode[];
-    onDropToPath?: (target: DrivePathNode | null, e: React.DragEvent) => void;
+    onDropToPath?: (target: DrivePathNode | null, e: DragEvent) => void;
 }
 
 function getBreadcrumbLabel(segment: DrivePathNode): string {
@@ -47,7 +48,9 @@ export function Breadcrumb({ path, onNavigate, trail, onDropToPath }: Breadcrumb
     return (
         <nav className="drive-breadcrumb" aria-label="Breadcrumb">
             <button
+                type="button"
                 className="drive-breadcrumb-item drive-breadcrumb-root"
+                aria-label="Navigate to Drive root"
                 onClick={() => onNavigate("/")}
                 onDragOver={(e) => {
                     if (!onDropToPath) return;
@@ -65,7 +68,7 @@ export function Breadcrumb({ path, onNavigate, trail, onDropToPath }: Breadcrumb
                     onDropToPath(null, e);
                 }}
                 title="Go to root"
-            ></button>
+            />
 
             {rendered.map((segment, index) => {
                 const segmentPath = segment.path;
@@ -76,7 +79,9 @@ export function Breadcrumb({ path, onNavigate, trail, onDropToPath }: Breadcrumb
                     <span key={segmentPath} className="drive-breadcrumb-segment">
                         <ChevronRight size={14} className="drive-breadcrumb-separator" />
                         <button
+                            type="button"
                             className={`drive-breadcrumb-item ${isLast ? "drive-breadcrumb-current" : ""}`}
+                            aria-current={isLast ? "page" : undefined}
                             onClick={() => onNavigate(segmentPath)}
                             disabled={isLast}
                             onDragOver={(e) => {

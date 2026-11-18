@@ -64,7 +64,7 @@ export interface WindowProps {
 // -----------------------------------------------------------------------
 // API Response Types
 // -----------------------------------------------------------------------
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = unknown> {
     success?: boolean;
     result?: string;
     data?: T;

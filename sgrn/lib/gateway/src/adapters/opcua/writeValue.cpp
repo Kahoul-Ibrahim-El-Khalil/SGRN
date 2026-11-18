@@ -154,7 +154,7 @@ Result<std::vector<uint8_t>, OpcUaAdapterError> encodeBinaryWrite(NodeContext* p
                 .p_destination = cannonical_memory_buf.data() + header_offset,
                 .destination_size = (size_t)(cannonical_memory_buf.size() - header_offset)};
 
-            PROPAGATE_ERROR_IF(encodeArrayOfBoolsToMemory(ctx));
+            IF_ERROR_PROPAGATE(encodeArrayOfBoolsToMemory(ctx));
         } else {
             const bool is_eo_arr = UA_Variant_hasArrayType(&t_v, &UA_TYPES[UA_TYPES_EXTENSIONOBJECT]);
             for (size_t j = 0; j < input_count; ++j) {
@@ -183,7 +183,7 @@ Result<std::vector<uint8_t>, OpcUaAdapterError> encodeBinaryWrite(NodeContext* p
                 if (p_current_udt_type->typeKind == UA_DATATYPEKIND_STRUCTURE) {
                     OpcUaEncodingContext elem_ctx{p_current_udt_type, p_current_ua_data, p_s7_elem_ptr, p_node};
                     elem_ctx.depth = 0;
-                    PROPAGATE_ERROR_IF(encodeStructOpcUaToMemory(elem_ctx));
+                    IF_ERROR_PROPAGATE(encodeStructOpcUaToMemory(elem_ctx));
                 } else {
                     PlcScalarView elem_view = makeScalarView(*p_node);
                     elem_view.size = static_cast<uint32_t>(element_span);
@@ -198,13 +198,13 @@ Result<std::vector<uint8_t>, OpcUaAdapterError> encodeBinaryWrite(NodeContext* p
                         elem_view.count = 1;
                     }
                     OpcUaEncodingContext elem_ctx{p_current_udt_type, p_current_ua_data, p_s7_elem_ptr, elem_view};
-                    PROPAGATE_ERROR_IF(encodeScalarOpcUaToMemory(elem_ctx));
+                    IF_ERROR_PROPAGATE(encodeScalarOpcUaToMemory(elem_ctx));
                 }
             }
         }
     } else if (p_udt_type->typeKind == UA_DATATYPEKIND_STRUCTURE) {
         OpcUaEncodingContext elem_ctx{p_udt_type, p_udt_data, cannonical_memory_buf.data() + header_offset, p_node};
-        PROPAGATE_ERROR_IF(encodeStructOpcUaToMemory(elem_ctx));
+        IF_ERROR_PROPAGATE(encodeStructOpcUaToMemory(elem_ctx));
     } else if (is_bool_array) {
         const auto* p_bools = static_cast<const UA_Boolean*>(t_v.data);
 
@@ -213,11 +213,11 @@ Result<std::vector<uint8_t>, OpcUaAdapterError> encodeBinaryWrite(NodeContext* p
             .p_destination = cannonical_memory_buf.data() + header_offset,
             .destination_size = (size_t)(cannonical_memory_buf.data() - header_offset)};
 
-        PROPAGATE_ERROR_IF(encodeArrayOfBoolsToMemory(ctx));
+        IF_ERROR_PROPAGATE(encodeArrayOfBoolsToMemory(ctx));
 
     } else {
         OpcUaEncodingContext elem_ctx{p_udt_type, p_udt_data, cannonical_memory_buf.data() + header_offset, p_node};
-        PROPAGATE_ERROR_IF(encodeScalarOpcUaToMemory(elem_ctx));
+        IF_ERROR_PROPAGATE(encodeScalarOpcUaToMemory(elem_ctx));
     }
 
     return cannonical_memory_buf;

@@ -238,3 +238,189 @@
 .admin-shell .datagrid-industrial td {
     text-align: left;
 }
+
+/* =====================================================================
+   INLINE-STYLE EXTRACTION — admin / profile / access / analytics
+   Every rule that used to live in a JSX style={{...}} lives here so it
+   can be inspected and tweaked in one place.
+   ===================================================================== */
+
+/* Layout helpers */
+.admin-inline-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.admin-inline-row--top {
+    align-items: flex-start;
+}
+.admin-mt-1 {
+    margin-top: 1rem;
+}
+.admin-mt-1-5 {
+    margin-top: 1.5rem;
+}
+.admin-mt-2 {
+    margin-top: 2rem;
+}
+.admin-mb-1 {
+    margin-bottom: 1rem;
+}
+.admin-input-wide {
+    min-width: 220px;
+}
+.admin-input-fixed-220 {
+    width: 220px;
+}
+.admin-th-left {
+    text-align: left;
+}
+.admin-center-pad {
+    display: flex;
+    justify-content: center;
+    padding: 1rem;
+}
+.admin-cell-small {
+    font-size: 0.8rem;
+}
+.admin-cell-smaller {
+    font-size: 0.75rem;
+}
+
+/* Permission badges (access.tsx) */
+.perm-badge {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    border: 1px solid var(--perm-border);
+    color: var(--perm-fg);
+    background-color: var(--perm-bg);
+}
+.perm-badge--read {
+    --perm-fg: #10b981;
+    --perm-bg: rgb(16 185 129 / 0.15);
+    --perm-border: rgb(16 185 129 / 0.3);
+}
+.perm-badge--write {
+    --perm-fg: #60a5fa;
+    --perm-bg: rgb(59 130 246 / 0.15);
+    --perm-border: rgb(59 130 246 / 0.3);
+}
+.perm-badge--delete {
+    --perm-fg: #fb7185;
+    --perm-bg: rgb(244 63 94 / 0.15);
+    --perm-border: rgb(244 63 94 / 0.3);
+}
+.perm-badge--off {
+    --perm-fg: #6b7280;
+    --perm-bg: rgb(107 114 128 / 0.15);
+    --perm-border: rgb(107 114 128 / 0.2);
+}
+
+/* Role type badge (access.tsx) */
+.role-badge {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+.role-badge--system {
+    background-color: rgb(147 51 234 / 0.15);
+    color: #c084fc;
+    border: 1px solid rgb(147 51 234 / 0.3);
+}
+.role-badge--custom {
+    background-color: rgb(6 182 212 / 0.15);
+    color: #22d3ee;
+    border: 1px solid rgb(6 182 212 / 0.3);
+}
+
+/* Audit action badge (analytics.tsx) */
+.audit-action {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-family: monospace;
+    font-weight: 600;
+}
+.audit-action--audit {
+    background-color: rgb(245 158 11 / 0.15);
+    color: #fbbf24;
+    border: 1px solid rgb(245 158 11 / 0.3);
+}
+.audit-action--default {
+    background-color: rgb(59 130 246 / 0.15);
+    color: #60a5fa;
+    border: 1px solid rgb(59 130 246 / 0.3);
+}
+
+/* Audit status badge */
+.status-badge {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+.status-badge--success {
+    background-color: rgb(16 185 129 / 0.15);
+    color: #10b981;
+    border: 1px solid rgb(16 185 129 / 0.3);
+}
+.status-badge--error {
+    background-color: rgb(239 68 68 / 0.15);
+    color: #ef4444;
+    border: 1px solid rgb(239 68 68 / 0.3);
+}
+
+/* Danger zone */
+.admin-danger-zone {
+    margin-top: 2rem;
+    border: 1px solid rgb(239 68 68 / 0.3);
+    background-color: rgb(239 68 68 / 0.03);
+}
+.admin-danger-icon {
+    color: #ef4444;
+}
+.btn-desktop--danger {
+    background-color: #dc2626;
+    border-color: #b91c1c;
+    color: #fff;
+}
+.admin-verify-result {
+    margin-top: 1rem;
+}
+.admin-verify-result--valid {
+    border: 1px solid rgb(34 197 94 / 0.4);
+    color: #4ade80;
+}
+.admin-verify-result--invalid {
+    border: 1px solid rgb(239 68 68 / 0.5);
+    color: #f87171;
+}
+
+/* Profile widgets */
+.profile-muted-italic {
+    font-size: 11px;
+    color: hsl(var(--muted-foreground));
+    font-style: italic;
+}
+.credential-field--narrow {
+    max-width: 300px;
+}
+.credential-input-wrap {
+    position: relative;
+}
+.credential-input-icon {
+    position: absolute;
+    left: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: hsl(var(--muted-foreground));
+}
+.credential-input-padded {
+    padding-left: 2.5rem;
+}
+.btn-desktop--wide {
+    padding: 0.5rem 2rem;
+}

@@ -105,7 +105,7 @@ Result<void> DatastoreShell::cmdMv(const std::vector<std::string>& t_args) {
     RETURN_IF(hit.hasError(), hit.error());
     RETURN_ERROR_IF(!hit.value(), fmt::format("{}: No such file or directory", src));
     const Resolved& src_hit = *hit.value();
-    PROPAGATE_ERROR_IF(requireId(src, src_hit));
+    IF_ERROR_PROPAGATE(requireId(src, src_hit));
     std::string parent;
     std::string new_name;
     auto dst_hit = resolve(dst);

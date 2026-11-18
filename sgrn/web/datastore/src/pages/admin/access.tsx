@@ -408,50 +408,14 @@ export default function PermissionsPanel() {
                                             <code>{r.allowed_subpath}</code>
                                         </td>
                                         <td>
-                                            <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
-                                                <span
-                                                    style={{
-                                                        padding: "2px 8px",
-                                                        borderRadius: "4px",
-                                                        fontSize: "0.7rem",
-                                                        fontWeight: 600,
-                                                        backgroundColor: r.can_read
-                                                            ? "rgba(16, 185, 129, 0.15)"
-                                                            : "rgba(107, 114, 128, 0.15)",
-                                                        color: r.can_read ? "#10b981" : "#6b7280",
-                                                        border: `1px solid ${r.can_read ? "rgba(16, 185, 129, 0.3)" : "rgba(107, 114, 128, 0.2)"}`,
-                                                    }}
-                                                >
+                                            <div className="admin-inline-row">
+                                                <span className={`perm-badge perm-badge--read ${r.can_read ? "" : "perm-badge--off"}`}>
                                                     READ
                                                 </span>
-                                                <span
-                                                    style={{
-                                                        padding: "2px 8px",
-                                                        borderRadius: "4px",
-                                                        fontSize: "0.7rem",
-                                                        fontWeight: 600,
-                                                        backgroundColor: r.can_write
-                                                            ? "rgba(59, 130, 246, 0.15)"
-                                                            : "rgba(107, 114, 128, 0.15)",
-                                                        color: r.can_write ? "#60a5fa" : "#6b7280",
-                                                        border: `1px solid ${r.can_write ? "rgba(59, 130, 246, 0.3)" : "rgba(107, 114, 128, 0.2)"}`,
-                                                    }}
-                                                >
+                                                <span className={`perm-badge perm-badge--write ${r.can_write ? "" : "perm-badge--off"}`}>
                                                     WRITE
                                                 </span>
-                                                <span
-                                                    style={{
-                                                        padding: "2px 8px",
-                                                        borderRadius: "4px",
-                                                        fontSize: "0.7rem",
-                                                        fontWeight: 600,
-                                                        backgroundColor: r.can_delete
-                                                            ? "rgba(244, 63, 94, 0.15)"
-                                                            : "rgba(107, 114, 128, 0.15)",
-                                                        color: r.can_delete ? "#fb7185" : "#6b7280",
-                                                        border: `1px solid ${r.can_delete ? "rgba(244, 63, 94, 0.3)" : "rgba(107, 114, 128, 0.2)"}`,
-                                                    }}
-                                                >
+                                                <span className={`perm-badge perm-badge--delete ${r.can_delete ? "" : "perm-badge--off"}`}>
                                                     DELETE
                                                 </span>
                                             </div>
@@ -459,10 +423,7 @@ export default function PermissionsPanel() {
                                         <td>
                                             <div className="admin-actions-right">
                                                 <button
-                                                    className={`btn-desktop h-7 px-3 ${armingDelete === r.id ? "btn-desktop-primary" : ""}`}
-                                                    style={
-                                                        armingDelete === r.id ? { backgroundColor: "#dc2626", borderColor: "#b91c1c" } : {}
-                                                    }
+                                                    className={`btn-desktop h-7 px-3 ${armingDelete === r.id ? "btn-desktop-primary btn-desktop--danger" : ""}`}
                                                     onClick={() => handleRevoke(r)}
                                                 >
                                                     {armingDelete === r.id ? "CONFIRM REVOKE" : <Trash2 size={14} />}
@@ -525,7 +486,7 @@ export default function PermissionsPanel() {
                 exist in the user's organisation.
             </div>
 
-            <div className="roster-card" style={{ marginTop: "2rem" }}>
+            <div className="roster-card admin-mt-2">
                 <div className="roster-title flex items-center justify-between">
                     <span className="flex items-center gap-2">
                         <Shield size={16} /> DYNAMIC RBAC ROLES & PERMISSIONS MATRIX
@@ -537,7 +498,7 @@ export default function PermissionsPanel() {
                 </div>
 
                 {roles.length > 0 && (
-                    <div className="datagrid-wrapper" style={{ marginTop: "1rem" }}>
+                    <div className="datagrid-wrapper admin-mt-1">
                         <table className="datagrid-industrial">
                             <thead>
                                 <tr>
@@ -562,25 +523,14 @@ export default function PermissionsPanel() {
                                             />
                                         </td>
                                         <td>
-                                            <span
-                                                style={{
-                                                    padding: "2px 8px",
-                                                    borderRadius: "4px",
-                                                    fontSize: "0.7rem",
-                                                    fontWeight: 700,
-                                                    backgroundColor: r.is_system ? "rgba(147, 51, 234, 0.15)" : "rgba(6, 182, 212, 0.15)",
-                                                    color: r.is_system ? "#c084fc" : "#22d3ee",
-                                                    border: `1px solid ${r.is_system ? "rgba(147, 51, 234, 0.3)" : "rgba(6, 182, 212, 0.3)"}`,
-                                                }}
-                                            >
+                                            <span className={`role-badge ${r.is_system ? "role-badge--system" : "role-badge--custom"}`}>
                                                 {r.is_system ? "SYSTEM" : "CUSTOM"}
                                             </span>
                                         </td>
                                         <td>
-                                            <div style={{ display: "flex", alignItems: "flex-start", gap: "0.4rem" }}>
+                                            <div className="admin-inline-row admin-inline-row--top">
                                                 <input
-                                                    className="input-desktop font-mono"
-                                                    style={{ minWidth: 220 }}
+                                                    className="input-desktop font-mono admin-input-wide"
                                                     value={roleEditFor(r).perms}
                                                     placeholder="storage:read, storage:write"
                                                     onChange={(e) => setRoleEdit(r, { perms: e.target.value })}
@@ -615,11 +565,11 @@ export default function PermissionsPanel() {
                 )}
 
                 {assignments.length > 0 && (
-                    <div className="datagrid-wrapper" style={{ marginTop: "1rem" }}>
+                    <div className="datagrid-wrapper admin-mt-1">
                         <table className="datagrid-industrial">
                             <thead>
                                 <tr>
-                                    <th colSpan={3} style={{ textAlign: "left" }}>
+                                    <th colSpan={3} className="admin-th-left">
                                         CURRENT ROLE ASSIGNMENTS — {assignments.length}
                                     </th>
                                 </tr>
@@ -646,7 +596,7 @@ export default function PermissionsPanel() {
                     </div>
                 )}
 
-                <div className="query-controls-row" style={{ marginTop: "1.5rem" }}>
+                <div className="query-controls-row admin-mt-1-5">
                     <select
                         className="input-desktop w-32"
                         value={assignTargetKind}
@@ -695,7 +645,7 @@ export default function PermissionsPanel() {
                     </button>
                 </div>
 
-                <div className="query-controls-row" style={{ marginTop: "1.5rem" }}>
+                <div className="query-controls-row admin-mt-1-5">
                     <input
                         className="input-desktop w-48"
                         placeholder="ROLE NAME"

@@ -182,7 +182,7 @@ Result<void> DatastoreShell::treeRecursive(const std::string& t_abs, const std::
             fmt::print("{}{}── {}\n", t_prefix, last ? "└" : "├", name);
         if (is_dir) {
             const std::string child = t_abs == "/" ? "/" + name : t_abs + "/" + name;
-            PROPAGATE_ERROR_IF(treeRecursive(child, t_prefix + (last ? "    " : "│   ")));
+            IF_ERROR_PROPAGATE(treeRecursive(child, t_prefix + (last ? "    " : "│   ")));
         }
     }
     return {};

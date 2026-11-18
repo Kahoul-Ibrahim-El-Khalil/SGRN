@@ -1,3 +1,4 @@
+
 /**
  *
  *  Objects.h
@@ -38,6 +39,7 @@ namespace drogon_model
 {
 namespace sgrn
 {
+
 namespace storage
 {
 
@@ -47,7 +49,7 @@ public:
         static const std::string _id;
         static const std::string _bucket;
         static const std::string _key;
-        static const std::string _sha256;
+        static const std::string _sha512;
         static const std::string _size;
         static const std::string _original_size;
         static const std::string _is_compressed;
@@ -64,7 +66,9 @@ public:
     static const int primaryKeyNumber;
     static const std::string tableName;
     static const bool hasPrimaryKey;
+
     static const std::string primaryKeyName;
+
     using PrimaryKeyType = int64_t;
     const PrimaryKeyType& getPrimaryKey() const;
 
@@ -129,14 +133,14 @@ public:
     void setKey(const std::string& pKey) noexcept;
     void setKey(std::string&& pKey) noexcept;
 
-    /**  For column sha256  */
-    /// Get the value of the column sha256, returns the default value if the column is null
-    const std::string& getValueOfSha256() const noexcept;
+    /**  For column sha512  */
+    /// Get the value of the column sha512, returns the default value if the column is null
+    const std::string& getValueOfSha512() const noexcept;
     /// Return a shared_ptr object pointing to the column const value, or an empty shared_ptr object if the column is null
-    const std::shared_ptr<std::string>& getSha256() const noexcept;
-    /// Set the value of the column sha256
-    void setSha256(const std::string& pSha256) noexcept;
-    void setSha256(std::string&& pSha256) noexcept;
+    const std::shared_ptr<std::string>& getSha512() const noexcept;
+    /// Set the value of the column sha512
+    void setSha512(const std::string& pSha512) noexcept;
+    void setSha512(std::string&& pSha512) noexcept;
 
     /**  For column size  */
     /// Get the value of the column size, returns the default value if the column is null
@@ -243,6 +247,7 @@ public:
     std::string toString() const;
     Json::Value toMasqueradedJson(const std::vector<std::string>& pMasqueradingVector) const;
     /// Relationship interfaces
+
 private:
     friend drogon::orm::Mapper<Objects>;
     friend drogon::orm::BaseBuilder<Objects, true, true>;
@@ -261,7 +266,7 @@ private:
     std::shared_ptr<int64_t> id_;
     std::shared_ptr<std::string> bucket_;
     std::shared_ptr<std::string> key_;
-    std::shared_ptr<std::string> sha256_;
+    std::shared_ptr<std::string> sha512_;
     std::shared_ptr<int64_t> size_;
     std::shared_ptr<int64_t> originalSize_;
     std::shared_ptr<bool> isCompressed_;
@@ -273,6 +278,7 @@ private:
     std::shared_ptr<int64_t> partSizeBytes_;
     std::shared_ptr<::trantor::Date> deletedAt_;
     std::shared_ptr<::trantor::Date> createdAt_;
+
     struct MetaData {
         const std::string colName_;
         const std::string colType_;
@@ -287,12 +293,16 @@ private:
 
 public:
     static const std::string& sqlForFindingByPrimaryKey() {
+
         static const std::string sql = "select * from " + tableName + " where id = $1";
+
         return sql;
     }
 
     static const std::string& sqlForDeletingByPrimaryKey() {
+
         static const std::string sql = "delete from " + tableName + " where id = $1";
+
         return sql;
     }
     std::string sqlForInserting(bool& needSelection) const {
@@ -301,67 +311,82 @@ public:
         needSelection = false;
         sql += "id,";
         ++parametersCount;
+
         if (dirtyFlag_[1]) {
             sql += "bucket,";
             ++parametersCount;
         }
+
         if (dirtyFlag_[2]) {
             sql += "key,";
             ++parametersCount;
         }
+
         if (dirtyFlag_[3]) {
-            sql += "sha256,";
+            sql += "sha512,";
             ++parametersCount;
         }
+
         if (dirtyFlag_[4]) {
             sql += "size,";
             ++parametersCount;
         }
+
         if (dirtyFlag_[5]) {
             sql += "original_size,";
             ++parametersCount;
         }
         sql += "is_compressed,";
         ++parametersCount;
+
         if (!dirtyFlag_[6]) {
             needSelection = true;
         }
+
         if (dirtyFlag_[7]) {
             sql += "compression_algorithm,";
             ++parametersCount;
         }
+
         if (dirtyFlag_[8]) {
             sql += "compression_level,";
             ++parametersCount;
         }
         sql += "provider,";
         ++parametersCount;
+
         if (!dirtyFlag_[9]) {
             needSelection = true;
         }
         sql += "upload_mode,";
         ++parametersCount;
+
         if (!dirtyFlag_[10]) {
             needSelection = true;
         }
+
         if (dirtyFlag_[11]) {
             sql += "part_count,";
             ++parametersCount;
         }
+
         if (dirtyFlag_[12]) {
             sql += "part_size_bytes,";
             ++parametersCount;
         }
+
         if (dirtyFlag_[13]) {
             sql += "deleted_at,";
             ++parametersCount;
         }
         sql += "created_at,";
         ++parametersCount;
+
         if (!dirtyFlag_[14]) {
             needSelection = true;
         }
         needSelection = true;
+
         if (parametersCount > 0) {
             sql[sql.length() - 1] = ')';
             sql += " values (";
@@ -371,83 +396,128 @@ public:
         int placeholder = 1;
         char placeholderStr[64];
         size_t n = 0;
+
         sql += "default,";
+
         if (dirtyFlag_[1]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[2]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[3]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[4]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[5]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[6]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-        } else {
+
+        }
+
+        else {
             sql += "default,";
         }
+
         if (dirtyFlag_[7]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[8]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[9]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-        } else {
+
+        }
+
+        else {
             sql += "default,";
         }
+
         if (dirtyFlag_[10]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-        } else {
+
+        }
+
+        else {
             sql += "default,";
         }
+
         if (dirtyFlag_[11]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[12]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[13]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
+
         if (dirtyFlag_[14]) {
+
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-        } else {
+
+        }
+
+        else {
             sql += "default,";
         }
+
         if (parametersCount > 0) {
             sql.resize(sql.length() - 1);
         }
+
         if (needSelection) {
             sql.append(") returning *");
         } else {
             sql.append(1, ')');
         }
+
         LOG_TRACE << sql;
         return sql;
     }
 };
 } // namespace storage
 } // namespace sgrn
+
 } // namespace drogon_model

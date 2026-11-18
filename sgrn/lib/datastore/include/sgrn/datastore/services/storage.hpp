@@ -29,6 +29,11 @@ struct StorageConfig {
     size_t compression_size_threshold_kb = defaults::kMinCompressSize;
     size_t chunking_threshold_mb = defaults::kChunkingThresholdMb;
     size_t chunk_part_size_mb = defaults::kChunkPartSizeMb;
+    bool versioning_enabled{true};
+    size_t delta_max_bytes{64 * defaults::kBytesPerMb};
+    int32_t delta_zstd_level{3};
+    uint32_t delta_min_saving_pct{15};
+    uint32_t versioning_snapshot_interval{10};
     std::set<std::string> allowed_extensions = {"*"};
     std::set<std::string> prohibited_extensions;
 
@@ -53,6 +58,9 @@ struct StorageConfig {
         // clamp defensively even though loadFromConfig() also validates this
         return std::max(chunk_part_size_mb, defaults::kMinPartSizeMb) * defaults::kBytesPerMb;
     }
+    [[nodiscard]] size_t deltaMaxBytes() const {
+        return delta_max_bytes;
+    }
 
     struct StorageConfigJson {
         std::string default_bucket = "sgrn-uploads";
@@ -62,13 +70,19 @@ struct StorageConfig {
         uint64_t compression_size_threshold_kb = defaults::kMinCompressSize;
         uint64_t chunking_threshold_mb = defaults::kChunkingThresholdMb;
         uint64_t chunk_part_size_mb = defaults::kChunkPartSizeMb;
+        bool versioning_enabled{true};
+        uint64_t delta_max_bytes{64 * defaults::kBytesPerMb};
+        int32_t delta_zstd_level{3};
+        uint32_t delta_min_saving_pct{15};
+        uint32_t versioning_snapshot_interval{10};
         std::vector<std::string> allowed_extensions{"*"};
         std::vector<std::string> prohibited_extensions;
     };
 
     [[nodiscard]] StorageConfigJson toJsonConfig() const {
         return {default_bucket, threshold_compress_ram_mb, max_file_size_mb, compression_level, compression_size_threshold_kb,
-            chunking_threshold_mb, chunk_part_size_mb, {allowed_extensions.begin(), allowed_extensions.end()},
+            chunking_threshold_mb, chunk_part_size_mb, versioning_enabled, delta_max_bytes, delta_zstd_level, delta_min_saving_pct,
+            versioning_snapshot_interval, {allowed_extensions.begin(), allowed_extensions.end()},
             {prohibited_extensions.begin(), prohibited_extensions.end()}};
     }
 
@@ -81,6 +95,11 @@ struct StorageConfig {
         cfg.compression_size_threshold_kb = t_wire.compression_size_threshold_kb;
         cfg.chunking_threshold_mb = t_wire.chunking_threshold_mb;
         cfg.chunk_part_size_mb = t_wire.chunk_part_size_mb;
+        cfg.versioning_enabled = t_wire.versioning_enabled;
+        cfg.delta_max_bytes = t_wire.delta_max_bytes;
+        cfg.delta_zstd_level = t_wire.delta_zstd_level;
+        cfg.delta_min_saving_pct = t_wire.delta_min_saving_pct;
+        cfg.versioning_snapshot_interval = t_wire.versioning_snapshot_interval;
         cfg.allowed_extensions = {t_wire.allowed_extensions.begin(), t_wire.allowed_extensions.end()};
         cfg.prohibited_extensions = {t_wire.prohibited_extensions.begin(), t_wire.prohibited_extensions.end()};
         return cfg;
@@ -113,7 +132,7 @@ struct CreateObjectRequest {
     std::string key;
     int64_t size{0};
     int64_t original_size{0};
-    std::string sha256;
+    std::string sha512;
     bool is_compressed{false};
     std::optional<std::string> compression_algorithm;
     int32_t automated_service_id{0};
@@ -189,4 +208,21 @@ private:
         FileHash t_original_hash);
     drogon::Task<Result<void, BackendError>> finalizeUpload(drogon::orm::DbClientPtr tsp_transaction, UploadContext& t_context);
 };
+
+struct RestoreResult {
+    int64_t version_id{0};
+    int32_t version_no{0};
+    bool created{false};
+};
+
+void startVersionCompactor(StorageService& t_svc);
+drogon::Task<Result<std::string, BackendError>> loadVersionContent(
+    drogon::orm::DbClientPtr t_db, plugins::aws::S3Client* t_s3, const std::string& t_bucket, int64_t t_version_id);
+drogon::Task<Result<void, BackendError>> commitFileVersion(drogon::orm::DbClientPtr t_db, int64_t t_file_id,
+    const std::string& t_content_sha512, int64_t t_original_size, bool t_is_encrypted, std::optional<std::string> t_key_id,
+    std::optional<int32_t> t_user_id, std::optional<int32_t> t_service_id, uint32_t t_snapshot_interval);
+drogon::Task<Result<RestoreResult, BackendError>> restoreVersion(StorageService& t_svc, int64_t t_file_id, int32_t t_version_no,
+    bool t_file_encrypted, std::optional<int32_t> t_user_id, std::optional<int32_t> t_service_id, std::optional<std::string> t_comment);
+drogon::Task<Result<int, BackendError>> trimVersions(
+    StorageService& t_svc, int64_t t_file_id, int t_keep, std::optional<int> t_older_than_days);
 } // namespace sgrn::datastore::services::storage

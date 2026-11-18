@@ -25,26 +25,15 @@
         top: 0;
         z-index: 100;
         flex-shrink: 0;
-        height: 18px;
+        height: 52px;
     }
 
-    /* Invisible extended trigger band so the hover target is generous */
     .desktop-topbar-zone::after {
         content: "";
         position: absolute;
         left: 0;
         right: 0;
-        top: 18px;
-        height: 26px;
-    }
-
-    .desktop-topbar-zone:hover,
-    .desktop-topbar-zone:focus-within {
-        height: 52px;
-    }
-
-    .desktop-topbar-zone:hover::after,
-    .desktop-topbar-zone:focus-within::after {
+        top: 52px;
         height: 0;
     }
 
@@ -64,7 +53,7 @@
         box-shadow: none;
     }
 
-    /* Grabber hint — small centered handle on the collapsed strip */
+    /* Grabber hint — small centered handle on the expanded bar */
     .desktop-topbar-zone::before {
         content: "";
         position: absolute;
@@ -76,11 +65,6 @@
         background: hsl(var(--muted-foreground) / 0.55);
         z-index: 1;
         pointer-events: none;
-    }
-
-    .desktop-topbar-zone:hover::before,
-    .desktop-topbar-zone:focus-within::before {
-        display: none;
     }
 
     .topbar-nav {

@@ -15,7 +15,7 @@
 #include <sgrn/datastore/crypto/sqlite-key-provider.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/env.hpp>
-#include <sgrn/utils/hashing.hpp> // computeSha256File
+#include <sgrn/utils/hashing.hpp> // computeSha512File
 #include <algorithm>
 #include <array>
 #include <aws/core/Aws.h>
@@ -45,7 +45,7 @@ namespace sgrn::datastore::bootstrap::backup
 {
 
 // The sgrn::utils re-exports used below (utcStamp, formatBytes,
-// jsonEscapeInto, machineName, ProgressMeter, Sha256Stream, TarWriter,
+// jsonEscapeInto, machineName, ProgressMeter, Sha512Stream, TarWriter,
 // ensureOwnerOnlyPerms, …) come from the header.
 
 namespace
@@ -146,7 +146,7 @@ fs::path findLatestArchive(const fs::path& t_dir, const std::string& t_suffix) {
 struct S3FetchResult {
     bool ok = false;
     int http_status = 0;
-    std::string sha256_hex;
+    std::string sha512_hex;
     std::uint64_t bytes = 0;
     std::string error;
 };
@@ -194,7 +194,7 @@ public:
         return error_;
     }
 
-    /// GET (bucket,key) streaming into t_out + inline sha256.
+    /// GET (bucket,key) streaming into t_out + inline sha512.
     S3FetchResult get(const std::string& t_bucket, const std::string& t_key, std::ofstream& t_out) {
         S3FetchResult res;
         if (!ready()) {
@@ -212,7 +212,7 @@ public:
         }
         res.http_status = 200;
         auto& body = outcome.GetResult().GetBody();
-        Sha256Stream hasher;
+        Sha512Stream hasher;
         std::array<char, 256 * 1024> buf{};
         while (body.good()) {
             body.read(buf.data(), static_cast<std::streamsize>(buf.size()));
@@ -228,7 +228,7 @@ public:
                 return res;
             }
         }
-        res.sha256_hex = hasher.hex();
+        res.sha512_hex = hasher.hex();
         res.ok = true;
         return res;
     }
@@ -252,17 +252,17 @@ int verifyTarArchiveAgainstDb(const std::string& t_base_dir, const fs::path& t_t
     auto client = drogon::orm::DbClient::newPgClient(ctx.conn, 1, loop_thread.getLoop());
 
     struct CatalogEntry {
-        std::string sha256;
+        std::string sha512;
         std::int64_t size = 0;
     };
     std::unordered_map<std::string, CatalogEntry> db_objects;
     std::uintmax_t db_total_bytes = 0;
     try {
-        auto result = client->execSqlSync("SELECT bucket, key, sha256, size FROM storage.objects");
+        auto result = client->execSqlSync("SELECT bucket, key, sha512, size FROM storage.objects");
         for (const auto& row : result) {
             const std::string b = row["bucket"].template as<std::string>();
             const std::string k = row["key"].template as<std::string>();
-            std::string s = row["sha256"].template as<std::string>();
+            std::string s = row["sha512"].template as<std::string>();
             while (!s.empty() && s.back() == ' ') {
                 s.pop_back();
             }
@@ -340,7 +340,7 @@ int verifyTarArchiveAgainstDb(const std::string& t_base_dir, const fs::path& t_t
                 member = prefix.empty() ? name : prefix + "/" + name;
             }
 
-            Sha256Stream hasher;
+            Sha512Stream hasher;
             std::uintmax_t remain = fsize;
             std::array<char, 64 * 1024> chunk{};
             while (remain > 0) {
@@ -365,13 +365,13 @@ int verifyTarArchiveAgainstDb(const std::string& t_base_dir, const fs::path& t_t
             if (it == db_objects.end()) {
                 ++uncataloged;
             } else {
-                if (it->second.sha256 == hex && it->second.size == static_cast<std::int64_t>(fsize)) {
+                if (it->second.sha512 == hex && it->second.size == static_cast<std::int64_t>(fsize)) {
                     ++matched;
                 } else {
                     ++mismatched;
                     if (mismatch_details.size() < 10) {
                         mismatch_details.push_back(
-                            fmt::format("{} (tar sha: {}..., db sha: {}...)", member, hex.substr(0, 10), it->second.sha256.substr(0, 10)));
+                            fmt::format("{} (tar sha: {}..., db sha: {}...)", member, hex.substr(0, 10), it->second.sha512.substr(0, 10)));
                     }
                 }
             }
@@ -398,7 +398,7 @@ int verifyTarArchiveAgainstDb(const std::string& t_base_dir, const fs::path& t_t
         fmt::print("  ✓ ARCHIVE & DATABASE CONSISTENCY 100% VERIFIED\n");
         fmt::print("    • Database catalog objects  : {}\n", db_objects.size());
         fmt::print("    • Tar archive objects       : {} ({})\n", tar_count, formatBytes(tar_bytes));
-        fmt::print("    • Verified SHA-256 matches  : {} / {} (100%)\n", matched, db_objects.size());
+        fmt::print("    • Verified SHA-512 matches  : {} / {} (100%)\n", matched, db_objects.size());
         fmt::print("    • Missing in archive        : 0\n");
         fmt::print("    • Corrupt / mismatched      : 0\n");
         if (uncataloged > 0) {
@@ -416,7 +416,7 @@ int verifyTarArchiveAgainstDb(const std::string& t_base_dir, const fs::path& t_t
             }
         }
         if (mismatched > 0) {
-            fmt::print("    • SHA-256 mismatches        : {}\n", mismatched);
+            fmt::print("    • SHA-512 mismatches        : {}\n", mismatched);
             for (const auto& m : mismatch_details) {
                 fmt::print(stderr, "        - {}\n", m);
             }
@@ -509,7 +509,7 @@ int backupDatabase(const std::string& t_base_dir) {
     }
 
     std::string arch = "n/a";
-    if (auto digest = sgrn::utils::computeSha256File(tmp, sgrn::utils::HashEncoding::hex); digest.hasValue()) {
+    if (auto digest = sgrn::utils::computeSha512File(tmp, sgrn::utils::HashEncoding::base64url); digest.hasValue()) {
         arch = digest.value();
     }
     const std::string artifact = fmt::format("sgrn-bck-{}.pg", stamp);
@@ -543,7 +543,7 @@ int backupDatabase(const std::string& t_base_dir) {
     field("postgres_db", ctx.db);
     field("pg_dump", "-Fc -Z9 (pg_restore --clean to restore)");
     field("bytes", std::to_string(bytes), false, false);
-    field("sha256", arch);
+    field("sha512", arch);
     field("users", std::to_string(users), false, false);
     field("files", std::to_string(files), false, false);
     field("objects", std::to_string(objects), false, false);
@@ -557,7 +557,7 @@ int backupDatabase(const std::string& t_base_dir) {
     }
     ensureOwnerOnlyPerms(manifest_path);
 
-    fmt::print("  artifact: {}\n  sha256: {}\n  manifest: {}\n\n", final_path.string(), arch, manifest_path.string());
+    fmt::print("  artifact: {}\n  sha512: {}\n  manifest: {}\n\n", final_path.string(), arch, manifest_path.string());
     SGRN_INFO("DatastoreBackup", "Database backup complete.");
     return 0;
 }
@@ -571,29 +571,29 @@ int backupGarage(const std::string& t_base_dir) {
     const fs::path backup_dir = prepareBackupDir(t_base_dir);
     const std::string stamp = utcStamp("%Y%m%dT%H%M%SZ");
 
-    // 1. The DB row for every object: (bucket, key, sha256, size = stored size)
+    // 1. The DB row for every object: (bucket, key, sha512, size = stored size)
     trantor::EventLoopThread loop_thread;
     loop_thread.run();
     auto client = drogon::orm::DbClient::newPgClient(ctx.conn, 1, loop_thread.getLoop());
     struct Row {
         std::string bucket;
         std::string key;
-        std::string sha256;
+        std::string sha512;
         std::int64_t size = 0;
     };
     std::vector<Row> rows;
     try {
-        auto result = client->execSqlSync("SELECT bucket, key, sha256, size FROM storage.objects ORDER BY bucket, key");
+        auto result = client->execSqlSync("SELECT bucket, key, sha512, size FROM storage.objects ORDER BY bucket, key");
         rows.reserve(result.size());
         for (const auto& row : result) {
             Row r;
             r.bucket = row["bucket"].template as<std::string>();
             r.key = row["key"].template as<std::string>();
-            r.sha256 = row["sha256"].template as<std::string>();
+            r.sha512 = row["sha512"].template as<std::string>();
             r.size = row["size"].template as<std::int64_t>();
             // shar256 is bpchar: right-padded, trim trailing spaces defensively
-            while (!r.sha256.empty() && r.sha256.back() == ' ') {
-                r.sha256.pop_back();
+            while (!r.sha512.empty() && r.sha512.back() == ' ') {
+                r.sha512.pop_back();
             }
             rows.push_back(std::move(r));
         }
@@ -618,7 +618,7 @@ int backupGarage(const std::string& t_base_dir) {
         return 1;
     }
 
-    // 3. stream into a plain tar; per-object sha256 must match the catalog.
+    // 3. stream into a plain tar; per-object sha512 must match the catalog.
     const std::string tmp_name = fmt::format(".sgrn-garage-{}.{}.tmp", stamp, ::getpid());
     const fs::path tmp = backup_dir / tmp_name;
     TarWriter tar(tmp);
@@ -626,7 +626,7 @@ int backupGarage(const std::string& t_base_dir) {
         fmt::print(stderr, "error: cannot create {}\n", tmp.string());
         return 1;
     }
-    Sha256Stream tar_digest;
+    Sha512Stream tar_digest;
 
     size_t fetched = 0, skipped_missing = 0, skipped_mismatch = 0;
     std::uintmax_t carried_bytes = 0;
@@ -635,16 +635,16 @@ int backupGarage(const std::string& t_base_dir) {
     size_t current_idx = 0;
     for (const auto& row : rows) {
         ++current_idx;
-        if (row.sha256.size() != 64) {
+        if (row.sha512.size() != 128) {
             ++skipped_mismatch;
             if (mismatch_sample.size() < 5) {
-                mismatch_sample.push_back(fmt::format("{}/{} (bad sha256 column)", row.bucket, row.key));
+                mismatch_sample.push_back(fmt::format("{}/{} (bad sha512 column)", row.bucket, row.key));
             }
             meter.update(current_idx, carried_bytes);
             continue;
         }
         // Per object: fetch to a small scratch file (bounded disk extra =
-        // the largest single object), verify sha256 + size against the
+        // the largest single object), verify sha512 + size against the
         // catalog row, then append into the tar. A missing object (not in
         // Garage) or a sha/size mismatch is skipped, counted and disclosed
         // in the manifest — one bad row never destroys the rest of the
@@ -666,20 +666,20 @@ int backupGarage(const std::string& t_base_dir) {
             meter.update(current_idx, carried_bytes);
             continue;
         }
-        // fetched sha256/size already computed during the stream; the
-        // catalog row (bpchar sha256, possibly padded) is the expectation.
-        std::string expected = row.sha256;
+        // fetched sha512/size already computed during the stream; the
+        // catalog row (bpchar sha512, possibly padded) is the expectation.
+        std::string expected = row.sha512;
         while (!expected.empty() && expected.back() == ' ') {
             expected.pop_back();
         }
-        if (expected.size() > 64) {
-            expected = expected.substr(expected.size() - 64);
+        if (expected.size() > 128) {
+            expected = expected.substr(expected.size() - 128);
         }
-        if (res.sha256_hex != expected || res.bytes != static_cast<std::uintmax_t>(row.size)) {
+        if (res.sha512_hex != expected || res.bytes != static_cast<std::uintmax_t>(row.size)) {
             ++skipped_mismatch;
             if (mismatch_sample.size() < 5) {
                 mismatch_sample.push_back(fmt::format("{}/{} (got {} bytes, sha {}... vs {}...)", row.bucket, row.key, res.bytes,
-                    res.sha256_hex.substr(0, 12), expected.substr(0, 12)));
+                    res.sha512_hex.substr(0, 12), expected.substr(0, 12)));
             }
             std::error_code ec;
             fs::remove(scratch, ec);
@@ -704,7 +704,7 @@ int backupGarage(const std::string& t_base_dir) {
     }
 
     std::string arch = "n/a";
-    if (auto digest = sgrn::utils::computeSha256File(tmp, sgrn::utils::HashEncoding::hex); digest.hasValue()) {
+    if (auto digest = sgrn::utils::computeSha512File(tmp, sgrn::utils::HashEncoding::base64url); digest.hasValue()) {
         arch = digest.value();
     }
     const std::string artifact = fmt::format("sgrn-bck-{}.garage.tar", stamp);
@@ -750,7 +750,7 @@ int backupGarage(const std::string& t_base_dir) {
     field("objects_carried", std::to_string(fetched), false, false);
     field("bytes", std::to_string(bytes), false, false);
     field("carried_object_bytes", std::to_string(carried_bytes), false, false);
-    field("sha256", arch);
+    field("sha512", arch);
     field("missing_objects", std::to_string(skipped_missing), false, false);
     field("sha_mismatches", std::to_string(skipped_mismatch), true, false);
     if (!missing_sample.empty()) {
@@ -774,7 +774,7 @@ int backupGarage(const std::string& t_base_dir) {
     if (is_consistent) {
         fmt::print("  ✓ CONSISTENCY VERIFIED: 100% of cataloged objects accounted for\n");
         fmt::print("    • Database catalog    : {} objects ({})\n", rows.size(), formatBytes(total_bytes));
-        fmt::print("    • Verified in Garage  : {} / {} (SHA-256 match)\n", fetched, rows.size());
+        fmt::print("    • Verified in Garage  : {} / {} (SHA-512 match)\n", fetched, rows.size());
         fmt::print("    • Missing objects     : 0\n");
         fmt::print("    • Corrupt / mismatch  : 0\n");
     } else {
@@ -788,14 +788,14 @@ int backupGarage(const std::string& t_base_dir) {
             }
         }
         if (skipped_mismatch > 0) {
-            fmt::print("    • SHA-256 mismatches  : {} (listed in manifest)\n", skipped_mismatch);
+            fmt::print("    • SHA-512 mismatches  : {} (listed in manifest)\n", skipped_mismatch);
             for (const auto& m : mismatch_sample) {
                 fmt::print(stderr, "        - {}\n", m);
             }
         }
     }
     fmt::print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-    fmt::print("  artifact: {}\n  sha256: {}\n  manifest: {}\n\n", final_path.string(), arch, manifest_path.string());
+    fmt::print("  artifact: {}\n  sha512: {}\n  manifest: {}\n\n", final_path.string(), arch, manifest_path.string());
     SGRN_INFO("DatastoreBackup", "Garage backup complete.");
     return is_consistent ? 0 : 1;
 }

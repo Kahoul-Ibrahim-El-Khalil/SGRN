@@ -1,3 +1,4 @@
+
 /**
  *
  *  FileObjects.cc
@@ -6,7 +7,9 @@
  */
 
 #include "FileObjects.h"
+
 #include <drogon/utils/Utilities.h>
+
 #include <string>
 
 using namespace drogon;
@@ -14,38 +17,58 @@ using namespace drogon::orm;
 using namespace drogon_model::sgrn::storage;
 
 const std::string FileObjects::Cols::_id = "\"id\"";
+
 const std::string FileObjects::Cols::_file_id = "\"file_id\"";
+
 const std::string FileObjects::Cols::_object_id = "\"object_id\"";
+
 const std::string FileObjects::Cols::_part_index = "\"part_index\"";
+
 const std::string FileObjects::Cols::_role = "\"role\"";
+
 const std::string FileObjects::primaryKeyName = "id";
+
 const bool FileObjects::hasPrimaryKey = true;
+
 const std::string FileObjects::tableName = "storage.\"file_objects\"";
 
-const std::vector<typename FileObjects::MetaData> FileObjects::metaData_ = {{"id", "int64_t", "bigint", 8, 1, 1, 1},
-    {"file_id", "int64_t", "bigint", 8, 0, 0, 1}, {"object_id", "int64_t", "bigint", 8, 0, 0, 1},
-    {"part_index", "int32_t", "integer", 4, 0, 0, 1}, {"role", "std::string", "text", 0, 0, 0, 1}};
+const std::vector<typename FileObjects::MetaData> FileObjects::metaData_ = {
+    {"id", "int64_t", "bigint", 8, 1, 1, 1}, {"file_id", "int64_t", "bigint", 8, 0, 0, 1}, {"object_id", "int64_t", "bigint", 8, 0, 0, 1},
+    {"part_index", "int32_t", "integer", 4, 0, 0, 1}, {"role", "std::string", "text", 0, 0, 0, 1}
+
+};
 const std::string& FileObjects::getColumnName(size_t index) noexcept(false) {
     assert(index < metaData_.size());
     return metaData_[index].colName_;
 }
 FileObjects::FileObjects(const Row& r, const ssize_t indexOffset) noexcept {
     if (indexOffset < 0) {
+
         if (!r["id"].isNull()) {
+
             id_ = std::make_shared<int64_t>(r["id"].as<int64_t>());
         }
+
         if (!r["file_id"].isNull()) {
+
             fileId_ = std::make_shared<int64_t>(r["file_id"].as<int64_t>());
         }
+
         if (!r["object_id"].isNull()) {
+
             objectId_ = std::make_shared<int64_t>(r["object_id"].as<int64_t>());
         }
+
         if (!r["part_index"].isNull()) {
+
             partIndex_ = std::make_shared<int32_t>(r["part_index"].as<int32_t>());
         }
+
         if (!r["role"].isNull()) {
+
             role_ = std::make_shared<std::string>(r["role"].as<std::string>());
         }
+
     } else {
         size_t offset = (size_t)indexOffset;
         if (offset + 5 > r.size()) {
@@ -53,24 +76,34 @@ FileObjects::FileObjects(const Row& r, const ssize_t indexOffset) noexcept {
             return;
         }
         size_t index;
+
         index = offset + 0;
         if (!r[index].isNull()) {
+
             id_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
+
         index = offset + 1;
         if (!r[index].isNull()) {
+
             fileId_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
+
         index = offset + 2;
         if (!r[index].isNull()) {
+
             objectId_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
+
         index = offset + 3;
         if (!r[index].isNull()) {
+
             partIndex_ = std::make_shared<int32_t>(r[index].as<int32_t>());
         }
+
         index = offset + 4;
         if (!r[index].isNull()) {
+
             role_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
     }
@@ -81,30 +114,35 @@ FileObjects::FileObjects(const Json::Value& pJson, const std::vector<std::string
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
+
     if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         dirtyFlag_[0] = true;
         if (!pJson[pMasqueradingVector[0]].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
         if (!pJson[pMasqueradingVector[1]].isNull()) {
             fileId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[1]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
         if (!pJson[pMasqueradingVector[2]].isNull()) {
             objectId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[2]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
         if (!pJson[pMasqueradingVector[3]].isNull()) {
             partIndex_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[3]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
         dirtyFlag_[4] = true;
         if (!pJson[pMasqueradingVector[4]].isNull()) {
@@ -114,30 +152,35 @@ FileObjects::FileObjects(const Json::Value& pJson, const std::vector<std::string
 }
 
 FileObjects::FileObjects(const Json::Value& pJson) noexcept(false) {
+
     if (pJson.isMember("id")) {
         dirtyFlag_[0] = true;
         if (!pJson["id"].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson["id"].asInt64());
         }
     }
+
     if (pJson.isMember("file_id")) {
         dirtyFlag_[1] = true;
         if (!pJson["file_id"].isNull()) {
             fileId_ = std::make_shared<int64_t>((int64_t)pJson["file_id"].asInt64());
         }
     }
+
     if (pJson.isMember("object_id")) {
         dirtyFlag_[2] = true;
         if (!pJson["object_id"].isNull()) {
             objectId_ = std::make_shared<int64_t>((int64_t)pJson["object_id"].asInt64());
         }
     }
+
     if (pJson.isMember("part_index")) {
         dirtyFlag_[3] = true;
         if (!pJson["part_index"].isNull()) {
             partIndex_ = std::make_shared<int32_t>((int32_t)pJson["part_index"].asInt64());
         }
     }
+
     if (pJson.isMember("role")) {
         dirtyFlag_[4] = true;
         if (!pJson["role"].isNull()) {
@@ -151,29 +194,34 @@ void FileObjects::updateByMasqueradedJson(const Json::Value& pJson, const std::v
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
+
     if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         if (!pJson[pMasqueradingVector[0]].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
         if (!pJson[pMasqueradingVector[1]].isNull()) {
             fileId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[1]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
         if (!pJson[pMasqueradingVector[2]].isNull()) {
             objectId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[2]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
         if (!pJson[pMasqueradingVector[3]].isNull()) {
             partIndex_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[3]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
         dirtyFlag_[4] = true;
         if (!pJson[pMasqueradingVector[4]].isNull()) {
@@ -183,29 +231,34 @@ void FileObjects::updateByMasqueradedJson(const Json::Value& pJson, const std::v
 }
 
 void FileObjects::updateByJson(const Json::Value& pJson) noexcept(false) {
+
     if (pJson.isMember("id")) {
         if (!pJson["id"].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson["id"].asInt64());
         }
     }
+
     if (pJson.isMember("file_id")) {
         dirtyFlag_[1] = true;
         if (!pJson["file_id"].isNull()) {
             fileId_ = std::make_shared<int64_t>((int64_t)pJson["file_id"].asInt64());
         }
     }
+
     if (pJson.isMember("object_id")) {
         dirtyFlag_[2] = true;
         if (!pJson["object_id"].isNull()) {
             objectId_ = std::make_shared<int64_t>((int64_t)pJson["object_id"].asInt64());
         }
     }
+
     if (pJson.isMember("part_index")) {
         dirtyFlag_[3] = true;
         if (!pJson["part_index"].isNull()) {
             partIndex_ = std::make_shared<int32_t>((int32_t)pJson["part_index"].asInt64());
         }
     }
+
     if (pJson.isMember("role")) {
         dirtyFlag_[4] = true;
         if (!pJson["role"].isNull()) {
@@ -296,11 +349,14 @@ void FileObjects::updateId(const uint64_t id) {
 }
 
 const std::vector<std::string>& FileObjects::insertColumns() noexcept {
-    static const std::vector<std::string> inCols = {"file_id", "object_id", "part_index", "role"};
+    static const std::vector<std::string> inCols = {"file_id", "object_id", "part_index", "role"
+
+    };
     return inCols;
 }
 
 void FileObjects::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
+
     if (dirtyFlag_[1]) {
         if (getFileId()) {
             binder << getValueOfFileId();
@@ -308,6 +364,7 @@ void FileObjects::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[2]) {
         if (getObjectId()) {
             binder << getValueOfObjectId();
@@ -315,6 +372,7 @@ void FileObjects::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[3]) {
         if (getPartIndex()) {
             binder << getValueOfPartIndex();
@@ -322,6 +380,7 @@ void FileObjects::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[4]) {
         if (getRole()) {
             binder << getValueOfRole();
@@ -333,22 +392,28 @@ void FileObjects::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
 
 const std::vector<std::string> FileObjects::updateColumns() const {
     std::vector<std::string> ret;
+
     if (dirtyFlag_[1]) {
         ret.push_back(getColumnName(1));
     }
+
     if (dirtyFlag_[2]) {
         ret.push_back(getColumnName(2));
     }
+
     if (dirtyFlag_[3]) {
         ret.push_back(getColumnName(3));
     }
+
     if (dirtyFlag_[4]) {
         ret.push_back(getColumnName(4));
     }
+
     return ret;
 }
 
 void FileObjects::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
+
     if (dirtyFlag_[1]) {
         if (getFileId()) {
             binder << getValueOfFileId();
@@ -356,6 +421,7 @@ void FileObjects::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[2]) {
         if (getObjectId()) {
             binder << getValueOfObjectId();
@@ -363,6 +429,7 @@ void FileObjects::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[3]) {
         if (getPartIndex()) {
             binder << getValueOfPartIndex();
@@ -370,6 +437,7 @@ void FileObjects::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[4]) {
         if (getRole()) {
             binder << getValueOfRole();
@@ -380,31 +448,47 @@ void FileObjects::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
 }
 Json::Value FileObjects::toJson() const {
     Json::Value ret;
+
     if (getId()) {
+
         ret["id"] = (Json::Int64)getValueOfId();
+
     } else {
         ret["id"] = Json::Value();
     }
+
     if (getFileId()) {
+
         ret["file_id"] = (Json::Int64)getValueOfFileId();
+
     } else {
         ret["file_id"] = Json::Value();
     }
+
     if (getObjectId()) {
+
         ret["object_id"] = (Json::Int64)getValueOfObjectId();
+
     } else {
         ret["object_id"] = Json::Value();
     }
+
     if (getPartIndex()) {
+
         ret["part_index"] = getValueOfPartIndex();
+
     } else {
         ret["part_index"] = Json::Value();
     }
+
     if (getRole()) {
+
         ret["role"] = getValueOfRole();
+
     } else {
         ret["role"] = Json::Value();
     }
+
     return ret;
 }
 
@@ -415,99 +499,141 @@ std::string FileObjects::toString() const {
 Json::Value FileObjects::toMasqueradedJson(const std::vector<std::string>& pMasqueradingVector) const {
     Json::Value ret;
     if (pMasqueradingVector.size() == 5) {
+
         if (!pMasqueradingVector[0].empty()) {
             if (getId()) {
+
                 ret[pMasqueradingVector[0]] = (Json::Int64)getValueOfId();
+
             } else {
                 ret[pMasqueradingVector[0]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[1].empty()) {
             if (getFileId()) {
+
                 ret[pMasqueradingVector[1]] = (Json::Int64)getValueOfFileId();
+
             } else {
                 ret[pMasqueradingVector[1]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[2].empty()) {
             if (getObjectId()) {
+
                 ret[pMasqueradingVector[2]] = (Json::Int64)getValueOfObjectId();
+
             } else {
                 ret[pMasqueradingVector[2]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[3].empty()) {
             if (getPartIndex()) {
+
                 ret[pMasqueradingVector[3]] = getValueOfPartIndex();
+
             } else {
                 ret[pMasqueradingVector[3]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[4].empty()) {
             if (getRole()) {
+
                 ret[pMasqueradingVector[4]] = getValueOfRole();
+
             } else {
                 ret[pMasqueradingVector[4]] = Json::Value();
             }
         }
+
         return ret;
     }
     LOG_ERROR << "Masquerade failed";
+
     if (getId()) {
+
         ret["id"] = (Json::Int64)getValueOfId();
+
     } else {
         ret["id"] = Json::Value();
     }
+
     if (getFileId()) {
+
         ret["file_id"] = (Json::Int64)getValueOfFileId();
+
     } else {
         ret["file_id"] = Json::Value();
     }
+
     if (getObjectId()) {
+
         ret["object_id"] = (Json::Int64)getValueOfObjectId();
+
     } else {
         ret["object_id"] = Json::Value();
     }
+
     if (getPartIndex()) {
+
         ret["part_index"] = getValueOfPartIndex();
+
     } else {
         ret["part_index"] = Json::Value();
     }
+
     if (getRole()) {
+
         ret["role"] = getValueOfRole();
+
     } else {
         ret["role"] = Json::Value();
     }
+
     return ret;
 }
 
 bool FileObjects::validateJsonForCreation(const Json::Value& pJson, std::string& err) {
+
     if (pJson.isMember("id")) {
         if (!validJsonOfField(0, "id", pJson["id"], err, true))
             return false;
     }
+
     if (pJson.isMember("file_id")) {
         if (!validJsonOfField(1, "file_id", pJson["file_id"], err, true))
             return false;
-    } else {
+    }
+
+    else {
         err = "The file_id column cannot be null";
         return false;
     }
+
     if (pJson.isMember("object_id")) {
         if (!validJsonOfField(2, "object_id", pJson["object_id"], err, true))
             return false;
-    } else {
+    }
+
+    else {
         err = "The object_id column cannot be null";
         return false;
     }
+
     if (pJson.isMember("part_index")) {
         if (!validJsonOfField(3, "part_index", pJson["part_index"], err, true))
             return false;
     }
+
     if (pJson.isMember("role")) {
         if (!validJsonOfField(4, "role", pJson["role"], err, true))
             return false;
     }
+
     return true;
 }
 bool FileObjects::validateMasqueradedJsonForCreation(
@@ -517,42 +643,52 @@ bool FileObjects::validateMasqueradedJsonForCreation(
         return false;
     }
     try {
+
         if (!pMasqueradingVector[0].empty()) {
             if (pJson.isMember(pMasqueradingVector[0])) {
                 if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[1].empty()) {
             if (pJson.isMember(pMasqueradingVector[1])) {
                 if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, true))
                     return false;
-            } else {
+            }
+
+            else {
                 err = "The " + pMasqueradingVector[1] + " column cannot be null";
                 return false;
             }
         }
+
         if (!pMasqueradingVector[2].empty()) {
             if (pJson.isMember(pMasqueradingVector[2])) {
                 if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, true))
                     return false;
-            } else {
+            }
+
+            else {
                 err = "The " + pMasqueradingVector[2] + " column cannot be null";
                 return false;
             }
         }
+
         if (!pMasqueradingVector[3].empty()) {
             if (pJson.isMember(pMasqueradingVector[3])) {
                 if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[4].empty()) {
             if (pJson.isMember(pMasqueradingVector[4])) {
                 if (!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, true))
                     return false;
             }
         }
+
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -560,29 +696,37 @@ bool FileObjects::validateMasqueradedJsonForCreation(
     return true;
 }
 bool FileObjects::validateJsonForUpdate(const Json::Value& pJson, std::string& err) {
+
     if (pJson.isMember("id")) {
         if (!validJsonOfField(0, "id", pJson["id"], err, false))
             return false;
-    } else {
+    }
+
+    else {
         err = "The value of primary key must be set in the json object for update";
         return false;
     }
+
     if (pJson.isMember("file_id")) {
         if (!validJsonOfField(1, "file_id", pJson["file_id"], err, false))
             return false;
     }
+
     if (pJson.isMember("object_id")) {
         if (!validJsonOfField(2, "object_id", pJson["object_id"], err, false))
             return false;
     }
+
     if (pJson.isMember("part_index")) {
         if (!validJsonOfField(3, "part_index", pJson["part_index"], err, false))
             return false;
     }
+
     if (pJson.isMember("role")) {
         if (!validJsonOfField(4, "role", pJson["role"], err, false))
             return false;
     }
+
     return true;
 }
 bool FileObjects::validateMasqueradedJsonForUpdate(
@@ -592,29 +736,37 @@ bool FileObjects::validateMasqueradedJsonForUpdate(
         return false;
     }
     try {
+
         if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
             if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, false))
                 return false;
-        } else {
+        }
+
+        else {
             err = "The value of primary key must be set in the json object for update";
             return false;
         }
+
         if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
             if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
             if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
             if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
             if (!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, false))
                 return false;
         }
+
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -624,60 +776,82 @@ bool FileObjects::validateMasqueradedJsonForUpdate(
 bool FileObjects::validJsonOfField(
     size_t index, const std::string& fieldName, const Json::Value& pJson, std::string& err, bool isForCreation) {
     switch (index) {
+
         case 0:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (isForCreation) {
                 err = "The automatic primary key cannot be set";
                 return false;
             }
+
             if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 1:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 2:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 3:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isInt()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 4:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         default:
             err = "Internal error in the server";
             return false;

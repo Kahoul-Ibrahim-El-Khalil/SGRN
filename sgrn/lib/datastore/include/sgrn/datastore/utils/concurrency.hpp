@@ -110,4 +110,35 @@ private:
     sgrn::utils::DynamicThreadPool pool_;
 };
 
+// ----------------------------------------------------------------------------
+// Shared process-wide pool
+//
+// Replaces the former Drogon "Threadpool" plugin: any translation unit can
+// offload blocking work with `co_await runInPool(&sharedThreadPool(), ...)` and
+// the coroutine resumes on the caller's trantor::EventLoop (queueInLoop).
+// ----------------------------------------------------------------------------
+
+/// Lazily-created worker pool for datastore offloads (S3, hashing, compression).
+/// Thread count comes from SGRN_THREADPOOL_THREADS, defaulting to 4.
+DynamicThreadPool& sharedThreadPool();
+
+/// Offload a blocking task to `tp_pool` and invoke `t_callback` with the result
+/// on the caller's event loop (or the current thread if there is no loop).
+template <typename F, typename Callback>
+void dispatchToPool(DynamicThreadPool* tp_pool, F&& t_task, Callback&& t_callback, trantor::EventLoop* tp_resume_loop = nullptr) {
+    if (tp_resume_loop == nullptr) {
+        tp_resume_loop = trantor::EventLoop::getEventLoopOfCurrentThread();
+    }
+
+    tp_pool->post([task = std::forward<F>(t_task), callback = std::forward<Callback>(t_callback), tp_resume_loop]() mutable {
+        auto result = task();
+
+        if (tp_resume_loop != nullptr) {
+            tp_resume_loop->queueInLoop([res = std::move(result), cb = std::move(callback)]() mutable { cb(std::move(res)); });
+        } else {
+            callback(std::move(result));
+        }
+    });
+}
+
 } // namespace sgrn::utils

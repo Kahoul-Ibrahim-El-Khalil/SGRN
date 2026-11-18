@@ -1,7 +1,6 @@
 // src/sgrn/services/storage/service.cpp
 #include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/crypto/key-store.hpp>
-#include <sgrn/datastore/services/helpers/magic.hpp>
 #include <sgrn/datastore/services/helpers/storage.hpp>
 #include <sgrn/datastore/services/storage.hpp>
 #include <sgrn/datastore/wire/storage.hpp>
@@ -283,7 +282,7 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(
                         sp_resp->setContentTypeString("application/zstd");
                         sp_resp->addHeader("X-Compressed", "true");
                     } else {
-                        sp_resp->setContentTypeString(helpers::inferMimeType(record_res->name));
+                        sp_resp->setContentTypeString(sgrn::utils::mime::inferMimeType(record_res->name));
                     }
                     sp_resp->addHeader("Content-Disposition", fmt::format("attachment; filename=\"{}\"", download_name));
                     sp_resp->addHeader("X-Original-Size", std::to_string(total_plain_size));
@@ -338,7 +337,7 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(
                 sp_resp->setContentTypeString("application/zstd");
                 sp_resp->addHeader("X-Compressed", "true");
             } else {
-                sp_resp->setContentTypeString(helpers::inferMimeType(record_res->name));
+                sp_resp->setContentTypeString(sgrn::utils::mime::inferMimeType(record_res->name));
             }
             sp_resp->addHeader("Content-Disposition", fmt::format("attachment; filename=\"{}\"", download_name));
             sp_resp->addHeader("X-Original-Size", std::to_string(total_size));
@@ -352,7 +351,7 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(
         sp_resp->setContentTypeString("application/zstd");
         sp_resp->addHeader("X-Compressed", "true");
     } else {
-        sp_resp->setContentTypeString(helpers::inferMimeType(record_res->name));
+        sp_resp->setContentTypeString(sgrn::utils::mime::inferMimeType(record_res->name));
     }
     sp_resp->addHeader("Content-Disposition", fmt::format("attachment; filename=\"{}\"", download_name));
     // Total size of the entity after decryption (i.e. the file's stored bytes).
@@ -420,6 +419,7 @@ Task<HttpResponsePtr> StorageService::handleGetConstraints(HttpRequestPtr tsp_re
             cfg.max_file_size_mb,
             cfg.maxFileSizeBytes(),
             sgrn::datastore::crypto::isKeyStoreInitialized(),
+            cfg.versioning_enabled,
         },
         k200OK);
 }
@@ -460,7 +460,7 @@ Task<HttpResponsePtr> StorageService::handleCreateObject(const CreateObjectReque
     }
     drogon::orm::DbClientPtr sp_db_client = db_res.value();
 
-    auto r = co_await helpers::insertObject(sp_db_client, t_req.bucket, t_req.key, t_req.size, t_req.original_size, t_req.sha256,
+    auto r = co_await helpers::insertObject(sp_db_client, t_req.bucket, t_req.key, t_req.size, t_req.original_size, t_req.sha512,
         t_req.is_compressed, t_req.compression_algorithm);
 
     if (!r.has_value())

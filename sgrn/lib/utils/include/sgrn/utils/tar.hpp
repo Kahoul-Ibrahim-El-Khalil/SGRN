@@ -4,7 +4,7 @@
  * @brief Lightweight POSIX ustar tar archive writer.
  *
  * Implements POSIX ustar tar header generation with GNU 'L' longname
- * extension for paths exceeding ustar limits. Integrates with Sha256Stream
+ * extension for paths exceeding ustar limits. Integrates with Sha512Stream
  * for simultaneous digest calculation during archive writing.
  */
 
@@ -42,7 +42,7 @@ public:
 
     /// Append one regular file (source stays on disk; we stream chunks).
     bool addFile(const std::string& t_member_path, const std::filesystem::path& t_source_file, std::uintmax_t t_size,
-        sgrn::utils::Sha256Stream& t_tar_digest) {
+        sgrn::utils::Sha512Stream& t_tar_digest) {
         if (t_member_path.size() > kUstarMaxPath) {
             if (!appendLongNameEntry(t_member_path, t_tar_digest)) {
                 return false;
@@ -61,7 +61,7 @@ public:
     }
 
     /// Two zero blocks close the archive.
-    bool finalize(sgrn::utils::Sha256Stream& t_tar_digest) {
+    bool finalize(sgrn::utils::Sha512Stream& t_tar_digest) {
         static const std::array<char, kTarBlockSize * 2> kZeros{};
         if (!out_.write(kZeros.data(), kZeros.size())) {
             return false;
@@ -134,7 +134,7 @@ private:
         return h;
     }
 
-    bool writeBlock(const std::array<char, kTarBlockSize>& t_block, sgrn::utils::Sha256Stream& t_digest) {
+    bool writeBlock(const std::array<char, kTarBlockSize>& t_block, sgrn::utils::Sha512Stream& t_digest) {
         if (!out_.write(t_block.data(), t_block.size())) {
             return false;
         }
@@ -142,7 +142,7 @@ private:
         return true;
     }
 
-    bool appendLongNameEntry(const std::string& t_path, sgrn::utils::Sha256Stream& t_digest) {
+    bool appendLongNameEntry(const std::string& t_path, sgrn::utils::Sha512Stream& t_digest) {
         std::string payload = t_path;
         payload.push_back('\0');
         const std::array<char, kTarBlockSize> header = buildHeader("././@LongLink", payload.size(), 'L');
@@ -163,7 +163,7 @@ private:
     }
 
     bool appendBody(const std::string& t_name, const std::filesystem::path& t_source, std::uintmax_t t_size,
-        sgrn::utils::Sha256Stream& t_digest, const std::string& t_prefix = {}, const std::string& t_split_name = {}) {
+        sgrn::utils::Sha512Stream& t_digest, const std::string& t_prefix = {}, const std::string& t_split_name = {}) {
         std::ifstream in(t_source, std::ios::binary);
         if (!in) {
             return false;

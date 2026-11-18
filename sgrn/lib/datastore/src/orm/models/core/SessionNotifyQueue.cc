@@ -1,3 +1,4 @@
+
 /**
  *
  *  SessionNotifyQueue.cc
@@ -6,7 +7,9 @@
  */
 
 #include "SessionNotifyQueue.h"
+
 #include <drogon/utils/Utilities.h>
+
 #include <string>
 
 using namespace drogon;
@@ -14,35 +17,51 @@ using namespace drogon::orm;
 using namespace drogon_model::sgrn::core;
 
 const std::string SessionNotifyQueue::Cols::_id = "\"id\"";
+
 const std::string SessionNotifyQueue::Cols::_action = "\"action\"";
+
 const std::string SessionNotifyQueue::Cols::_token = "\"token\"";
+
 const std::string SessionNotifyQueue::Cols::_created_at = "\"created_at\"";
+
 const std::string SessionNotifyQueue::primaryKeyName = "id";
+
 const bool SessionNotifyQueue::hasPrimaryKey = true;
+
 const std::string SessionNotifyQueue::tableName = "core.\"session_notify_queue\"";
 
-const std::vector<typename SessionNotifyQueue::MetaData> SessionNotifyQueue::metaData_ = {{"id", "int64_t", "bigint", 8, 1, 1, 1},
-    {"action", "std::string", "text", 0, 0, 0, 1}, {"token", "std::string", "text", 0, 0, 0, 1},
-    {"created_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1}};
+const std::vector<typename SessionNotifyQueue::MetaData> SessionNotifyQueue::metaData_ = {
+    {"id", "int64_t", "bigint", 8, 1, 1, 1}, {"action", "std::string", "text", 0, 0, 0, 1}, {"token", "std::string", "text", 0, 0, 0, 1},
+    {"created_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1}
+
+};
 const std::string& SessionNotifyQueue::getColumnName(size_t index) noexcept(false) {
     assert(index < metaData_.size());
     return metaData_[index].colName_;
 }
 SessionNotifyQueue::SessionNotifyQueue(const Row& r, const ssize_t indexOffset) noexcept {
     if (indexOffset < 0) {
+
         if (!r["id"].isNull()) {
+
             id_ = std::make_shared<int64_t>(r["id"].as<int64_t>());
         }
+
         if (!r["action"].isNull()) {
+
             action_ = std::make_shared<std::string>(r["action"].as<std::string>());
         }
+
         if (!r["token"].isNull()) {
+
             token_ = std::make_shared<std::string>(r["token"].as<std::string>());
         }
+
         if (!r["created_at"].isNull()) {
             auto timeStr = r["created_at"].as<std::string>();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -57,6 +76,7 @@ SessionNotifyQueue::SessionNotifyQueue(const Row& r, const ssize_t indexOffset) 
                 createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
+
     } else {
         size_t offset = (size_t)indexOffset;
         if (offset + 4 > r.size()) {
@@ -64,23 +84,31 @@ SessionNotifyQueue::SessionNotifyQueue(const Row& r, const ssize_t indexOffset) 
             return;
         }
         size_t index;
+
         index = offset + 0;
         if (!r[index].isNull()) {
+
             id_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
+
         index = offset + 1;
         if (!r[index].isNull()) {
+
             action_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 2;
         if (!r[index].isNull()) {
+
             token_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
+
         index = offset + 3;
         if (!r[index].isNull()) {
             auto timeStr = r[index].as<std::string>();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -103,30 +131,35 @@ SessionNotifyQueue::SessionNotifyQueue(const Json::Value& pJson, const std::vect
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
+
     if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         dirtyFlag_[0] = true;
         if (!pJson[pMasqueradingVector[0]].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
         if (!pJson[pMasqueradingVector[1]].isNull()) {
             action_ = std::make_shared<std::string>(pJson[pMasqueradingVector[1]].asString());
         }
     }
+
     if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
         if (!pJson[pMasqueradingVector[2]].isNull()) {
             token_ = std::make_shared<std::string>(pJson[pMasqueradingVector[2]].asString());
         }
     }
+
     if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
         if (!pJson[pMasqueradingVector[3]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[3]].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -145,30 +178,35 @@ SessionNotifyQueue::SessionNotifyQueue(const Json::Value& pJson, const std::vect
 }
 
 SessionNotifyQueue::SessionNotifyQueue(const Json::Value& pJson) noexcept(false) {
+
     if (pJson.isMember("id")) {
         dirtyFlag_[0] = true;
         if (!pJson["id"].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson["id"].asInt64());
         }
     }
+
     if (pJson.isMember("action")) {
         dirtyFlag_[1] = true;
         if (!pJson["action"].isNull()) {
             action_ = std::make_shared<std::string>(pJson["action"].asString());
         }
     }
+
     if (pJson.isMember("token")) {
         dirtyFlag_[2] = true;
         if (!pJson["token"].isNull()) {
             token_ = std::make_shared<std::string>(pJson["token"].asString());
         }
     }
+
     if (pJson.isMember("created_at")) {
         dirtyFlag_[3] = true;
         if (!pJson["created_at"].isNull()) {
             auto timeStr = pJson["created_at"].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -192,29 +230,34 @@ void SessionNotifyQueue::updateByMasqueradedJson(const Json::Value& pJson, const
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
+
     if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         if (!pJson[pMasqueradingVector[0]].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
+
     if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
         if (!pJson[pMasqueradingVector[1]].isNull()) {
             action_ = std::make_shared<std::string>(pJson[pMasqueradingVector[1]].asString());
         }
     }
+
     if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
         if (!pJson[pMasqueradingVector[2]].isNull()) {
             token_ = std::make_shared<std::string>(pJson[pMasqueradingVector[2]].asString());
         }
     }
+
     if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
         if (!pJson[pMasqueradingVector[3]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[3]].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -233,29 +276,34 @@ void SessionNotifyQueue::updateByMasqueradedJson(const Json::Value& pJson, const
 }
 
 void SessionNotifyQueue::updateByJson(const Json::Value& pJson) noexcept(false) {
+
     if (pJson.isMember("id")) {
         if (!pJson["id"].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson["id"].asInt64());
         }
     }
+
     if (pJson.isMember("action")) {
         dirtyFlag_[1] = true;
         if (!pJson["action"].isNull()) {
             action_ = std::make_shared<std::string>(pJson["action"].asString());
         }
     }
+
     if (pJson.isMember("token")) {
         dirtyFlag_[2] = true;
         if (!pJson["token"].isNull()) {
             token_ = std::make_shared<std::string>(pJson["token"].asString());
         }
     }
+
     if (pJson.isMember("created_at")) {
         dirtyFlag_[3] = true;
         if (!pJson["created_at"].isNull()) {
             auto timeStr = pJson["created_at"].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
+            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -345,11 +393,14 @@ void SessionNotifyQueue::updateId(const uint64_t id) {
 }
 
 const std::vector<std::string>& SessionNotifyQueue::insertColumns() noexcept {
-    static const std::vector<std::string> inCols = {"action", "token", "created_at"};
+    static const std::vector<std::string> inCols = {"action", "token", "created_at"
+
+    };
     return inCols;
 }
 
 void SessionNotifyQueue::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
+
     if (dirtyFlag_[1]) {
         if (getAction()) {
             binder << getValueOfAction();
@@ -357,6 +408,7 @@ void SessionNotifyQueue::outputArgs(drogon::orm::internal::SqlBinder& binder) co
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[2]) {
         if (getToken()) {
             binder << getValueOfToken();
@@ -364,6 +416,7 @@ void SessionNotifyQueue::outputArgs(drogon::orm::internal::SqlBinder& binder) co
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[3]) {
         if (getCreatedAt()) {
             binder << getValueOfCreatedAt();
@@ -375,19 +428,24 @@ void SessionNotifyQueue::outputArgs(drogon::orm::internal::SqlBinder& binder) co
 
 const std::vector<std::string> SessionNotifyQueue::updateColumns() const {
     std::vector<std::string> ret;
+
     if (dirtyFlag_[1]) {
         ret.push_back(getColumnName(1));
     }
+
     if (dirtyFlag_[2]) {
         ret.push_back(getColumnName(2));
     }
+
     if (dirtyFlag_[3]) {
         ret.push_back(getColumnName(3));
     }
+
     return ret;
 }
 
 void SessionNotifyQueue::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
+
     if (dirtyFlag_[1]) {
         if (getAction()) {
             binder << getValueOfAction();
@@ -395,6 +453,7 @@ void SessionNotifyQueue::updateArgs(drogon::orm::internal::SqlBinder& binder) co
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[2]) {
         if (getToken()) {
             binder << getValueOfToken();
@@ -402,6 +461,7 @@ void SessionNotifyQueue::updateArgs(drogon::orm::internal::SqlBinder& binder) co
             binder << nullptr;
         }
     }
+
     if (dirtyFlag_[3]) {
         if (getCreatedAt()) {
             binder << getValueOfCreatedAt();
@@ -412,26 +472,39 @@ void SessionNotifyQueue::updateArgs(drogon::orm::internal::SqlBinder& binder) co
 }
 Json::Value SessionNotifyQueue::toJson() const {
     Json::Value ret;
+
     if (getId()) {
+
         ret["id"] = (Json::Int64)getValueOfId();
+
     } else {
         ret["id"] = Json::Value();
     }
+
     if (getAction()) {
+
         ret["action"] = getValueOfAction();
+
     } else {
         ret["action"] = Json::Value();
     }
+
     if (getToken()) {
+
         ret["token"] = getValueOfToken();
+
     } else {
         ret["token"] = Json::Value();
     }
+
     if (getCreatedAt()) {
+
         ret["created_at"] = getCreatedAt()->toDbStringLocal();
+
     } else {
         ret["created_at"] = Json::Value();
     }
+
     return ret;
 }
 
@@ -442,83 +515,118 @@ std::string SessionNotifyQueue::toString() const {
 Json::Value SessionNotifyQueue::toMasqueradedJson(const std::vector<std::string>& pMasqueradingVector) const {
     Json::Value ret;
     if (pMasqueradingVector.size() == 4) {
+
         if (!pMasqueradingVector[0].empty()) {
             if (getId()) {
+
                 ret[pMasqueradingVector[0]] = (Json::Int64)getValueOfId();
+
             } else {
                 ret[pMasqueradingVector[0]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[1].empty()) {
             if (getAction()) {
+
                 ret[pMasqueradingVector[1]] = getValueOfAction();
+
             } else {
                 ret[pMasqueradingVector[1]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[2].empty()) {
             if (getToken()) {
+
                 ret[pMasqueradingVector[2]] = getValueOfToken();
+
             } else {
                 ret[pMasqueradingVector[2]] = Json::Value();
             }
         }
+
         if (!pMasqueradingVector[3].empty()) {
             if (getCreatedAt()) {
+
                 ret[pMasqueradingVector[3]] = getCreatedAt()->toDbStringLocal();
+
             } else {
                 ret[pMasqueradingVector[3]] = Json::Value();
             }
         }
+
         return ret;
     }
     LOG_ERROR << "Masquerade failed";
+
     if (getId()) {
+
         ret["id"] = (Json::Int64)getValueOfId();
+
     } else {
         ret["id"] = Json::Value();
     }
+
     if (getAction()) {
+
         ret["action"] = getValueOfAction();
+
     } else {
         ret["action"] = Json::Value();
     }
+
     if (getToken()) {
+
         ret["token"] = getValueOfToken();
+
     } else {
         ret["token"] = Json::Value();
     }
+
     if (getCreatedAt()) {
+
         ret["created_at"] = getCreatedAt()->toDbStringLocal();
+
     } else {
         ret["created_at"] = Json::Value();
     }
+
     return ret;
 }
 
 bool SessionNotifyQueue::validateJsonForCreation(const Json::Value& pJson, std::string& err) {
+
     if (pJson.isMember("id")) {
         if (!validJsonOfField(0, "id", pJson["id"], err, true))
             return false;
     }
+
     if (pJson.isMember("action")) {
         if (!validJsonOfField(1, "action", pJson["action"], err, true))
             return false;
-    } else {
+    }
+
+    else {
         err = "The action column cannot be null";
         return false;
     }
+
     if (pJson.isMember("token")) {
         if (!validJsonOfField(2, "token", pJson["token"], err, true))
             return false;
-    } else {
+    }
+
+    else {
         err = "The token column cannot be null";
         return false;
     }
+
     if (pJson.isMember("created_at")) {
         if (!validJsonOfField(3, "created_at", pJson["created_at"], err, true))
             return false;
     }
+
     return true;
 }
 bool SessionNotifyQueue::validateMasqueradedJsonForCreation(
@@ -528,36 +636,45 @@ bool SessionNotifyQueue::validateMasqueradedJsonForCreation(
         return false;
     }
     try {
+
         if (!pMasqueradingVector[0].empty()) {
             if (pJson.isMember(pMasqueradingVector[0])) {
                 if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, true))
                     return false;
             }
         }
+
         if (!pMasqueradingVector[1].empty()) {
             if (pJson.isMember(pMasqueradingVector[1])) {
                 if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, true))
                     return false;
-            } else {
+            }
+
+            else {
                 err = "The " + pMasqueradingVector[1] + " column cannot be null";
                 return false;
             }
         }
+
         if (!pMasqueradingVector[2].empty()) {
             if (pJson.isMember(pMasqueradingVector[2])) {
                 if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, true))
                     return false;
-            } else {
+            }
+
+            else {
                 err = "The " + pMasqueradingVector[2] + " column cannot be null";
                 return false;
             }
         }
+
         if (!pMasqueradingVector[3].empty()) {
             if (pJson.isMember(pMasqueradingVector[3])) {
                 if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, true))
                     return false;
             }
         }
+
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -565,25 +682,32 @@ bool SessionNotifyQueue::validateMasqueradedJsonForCreation(
     return true;
 }
 bool SessionNotifyQueue::validateJsonForUpdate(const Json::Value& pJson, std::string& err) {
+
     if (pJson.isMember("id")) {
         if (!validJsonOfField(0, "id", pJson["id"], err, false))
             return false;
-    } else {
+    }
+
+    else {
         err = "The value of primary key must be set in the json object for update";
         return false;
     }
+
     if (pJson.isMember("action")) {
         if (!validJsonOfField(1, "action", pJson["action"], err, false))
             return false;
     }
+
     if (pJson.isMember("token")) {
         if (!validJsonOfField(2, "token", pJson["token"], err, false))
             return false;
     }
+
     if (pJson.isMember("created_at")) {
         if (!validJsonOfField(3, "created_at", pJson["created_at"], err, false))
             return false;
     }
+
     return true;
 }
 bool SessionNotifyQueue::validateMasqueradedJsonForUpdate(
@@ -593,25 +717,32 @@ bool SessionNotifyQueue::validateMasqueradedJsonForUpdate(
         return false;
     }
     try {
+
         if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
             if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, false))
                 return false;
-        } else {
+        }
+
+        else {
             err = "The value of primary key must be set in the json object for update";
             return false;
         }
+
         if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
             if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
             if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, false))
                 return false;
         }
+
         if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
             if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, false))
                 return false;
         }
+
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -621,50 +752,68 @@ bool SessionNotifyQueue::validateMasqueradedJsonForUpdate(
 bool SessionNotifyQueue::validJsonOfField(
     size_t index, const std::string& fieldName, const Json::Value& pJson, std::string& err, bool isForCreation) {
     switch (index) {
+
         case 0:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (isForCreation) {
                 err = "The automatic primary key cannot be set";
                 return false;
             }
+
             if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 1:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 2:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         case 3:
+
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
+
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
+
             break;
+
         default:
             err = "Internal error in the server";
             return false;
