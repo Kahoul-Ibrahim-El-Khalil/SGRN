@@ -430,7 +430,7 @@ void GatewaySync::onRuntimeDirty(uint16_t t_db, uint32_t, uint32_t) {
     requestPublish();
 }
 
-void GatewaySync::onTagDirty(const std::string& t_name) {
+void GatewaySync::onTagDirty(const std::string& /*t_name*/) {
     // Tags live outside the DB subscription model and always publish (when
     // enabled) — discrete control values must reach the gateway.
     if (suppress_publish_ || !publish_on_dirty_ || !connected_)

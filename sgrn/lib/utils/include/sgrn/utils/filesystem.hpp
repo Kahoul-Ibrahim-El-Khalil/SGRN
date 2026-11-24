@@ -88,6 +88,18 @@ inline bool readBinaryFile(const std::filesystem::path& t_path, std::vector<uint
     return true;
 }
 
+inline bool readBinaryFile(const std::filesystem::path& t_path, std::string& t_data) {
+    std::ifstream in(t_path, std::ios::in | std::ios::binary | std::ios::ate);
+    RETURN_IF(!in, false);
+    const auto size = in.tellg();
+    RETURN_IF(size < 0, false);
+    t_data.resize(static_cast<size_t>(size));
+    in.seekg(0, std::ios::beg);
+    if (size > 0)
+        in.read(t_data.data(), size);
+    return static_cast<bool>(in);
+}
+
 inline bool writeBinaryFile(const std::filesystem::path& t_path, const uint8_t* tp_data, size_t t_size) {
     std::ofstream ofs(t_path, std::ios::binary);
     RETURN_IF(!ofs.is_open(), false);

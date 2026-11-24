@@ -16,7 +16,7 @@
  * calls to the gateway on port 8001.
  *
  * Env var overrides:
- *   SGRN_BUILD_DIR   path to CMake build dir           (default: <root>/.build/linux-static-release)
+ *   SGRN_BUILD_DIR   path to build output dir          (default: <root>/.build/linux/x86_64/{release,debug})
  *   SGRN_GW_CONFIG   gateway.json path                 (default: dev/gateway.json)
  *   SGRN_SCHEMA      schema.scl path                   (default: dev/schema.scl)
  *   SGRN_DEV_PORT    gateway HTTP port                 (display/info only — the listen port comes
@@ -37,13 +37,37 @@
 import path from "path";
 import { rm } from "fs/promises";
 
-const PRESET_BUILD_DIR: string = ".build/linux-static-release";
 // ── Paths ─────────────────────────────────────────────────────────────────────
 const ROOT = path.resolve(import.meta.dir, "../../..");
-const BUILD_DIR =
-  process.env.SGRN_BUILD_DIR ?? path.join(ROOT, PRESET_BUILD_DIR);
 const DEV_PORT = process.env.SGRN_DEV_PORT ?? "8001";
-const BINARY = path.join(BUILD_DIR, "sgrn/apps/gateway/gateway");
+
+async function resolveGatewayBinary(): Promise<string> {
+  const exe = process.platform === "win32" ? "gateway.exe" : "gateway";
+  const candidates: string[] = [];
+  if (process.env.SGRN_BUILD_DIR) {
+    candidates.push(
+      path.join(process.env.SGRN_BUILD_DIR, exe),
+      path.join(process.env.SGRN_BUILD_DIR, "sgrn/apps/gateway", exe),
+    );
+  }
+  const arch = process.arch === "arm64" ? "arm64" : "x86_64";
+  const plat =
+    process.platform === "darwin"
+      ? "macosx"
+      : process.platform === "win32"
+        ? "windows"
+        : "linux";
+  candidates.push(
+    path.join(ROOT, `.build/${plat}/${arch}/release/${exe}`),
+    path.join(ROOT, `.build/${plat}/${arch}/debug/${exe}`),
+    path.join(ROOT, `.build/linux-static-release/sgrn/apps/gateway/${exe}`),
+  );
+  for (const c of candidates) {
+    if (await Bun.file(c).exists()) return c;
+  }
+  return candidates[0];
+}
+const BINARY = await resolveGatewayBinary();
 
 const DEV_DIR = path.join(import.meta.dir, "dev");
 const GW_CONFIG =
@@ -79,9 +103,7 @@ if (FRESH) {
 // ── Validate binary ───────────────────────────────────────────────────────────
 if (!(await Bun.file(BINARY).exists())) {
   console.error(`\n  Binary not found: ${BINARY}`);
-  console.error(
-    `    Build it first:  cmake --build ${BUILD_DIR} --target gateway\n`,
-  );
+  console.error(`    Build it first:  xmake build gateway\n`);
   process.exit(1);
 }
 

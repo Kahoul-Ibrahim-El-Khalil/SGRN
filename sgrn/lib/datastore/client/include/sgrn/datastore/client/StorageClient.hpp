@@ -1,6 +1,8 @@
 #pragma once
 #include <sgrn/Result.hpp>
+#include <cstdint>
 #include <string>
+#include <vector>
 
 #include <sgrn/datastore/client/Types.hpp>
 
@@ -50,6 +52,18 @@ public:
         std::optional<int64_t> t_target_parent_id = std::nullopt, StorageScope t_scope = StorageScope::Auto);
     bool deleteItem(int64_t t_id, DriveItemType t_type, StorageScope t_scope = StorageScope::Auto);
     TransferOutcome downloadZip(const std::string& t_path, const std::string& t_local_path, StorageScope t_scope = StorageScope::Auto);
+
+    // File version history (user sessions only; see DatastoreClient::tryListFileVersions).
+    /// Versions of one file, newest first. Files that predate versioning come back as a single current version.
+    sgrn::Result<std::vector<FileVersionInfo>, std::string> listVersions(
+        const std::string& t_path, StorageScope t_scope = StorageScope::Auto);
+    /// Writes the logical bytes of version `t_version_no` to `t_local_path`.
+    TransferOutcome downloadVersion(
+        const std::string& t_remote_path, int32_t t_version_no, const std::string& t_local_path, StorageScope t_scope = StorageScope::Auto);
+    sgrn::Result<FileVersionRestoreReceipt, std::string> restoreVersion(
+        const std::string& t_path, int32_t t_version_no, StorageScope t_scope = StorageScope::Auto, const std::string& t_comment = "");
+    sgrn::Result<FileVersionTrimReceipt, std::string> trimVersions(
+        const std::string& t_path, int32_t t_keep, StorageScope t_scope = StorageScope::Auto);
 
 private:
     DatastoreClient& client_;

@@ -65,7 +65,7 @@ struct alignas(2) DTL {
     }
 
     std::string toString() const {
-        char buf[32];
+        char buf[48];
         std::snprintf(buf, sizeof(buf), "%04u-%02u-%02u %02u:%02u:%02u.%09u", static_cast<uint16_t>(year), static_cast<uint8_t>(month),
             static_cast<uint8_t>(day), static_cast<uint8_t>(hour), static_cast<uint8_t>(minute), static_cast<uint8_t>(second),
             static_cast<uint32_t>(nanosecond));
@@ -190,7 +190,7 @@ struct alignas(2) Date : BigEndian<uint16_t> {
 
     std::string toString() const {
         struct tm ti = toTm();
-        char buf[16];
+        char buf[48];
         std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d", ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday);
         return std::string(buf);
     }

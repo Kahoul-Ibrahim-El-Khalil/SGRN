@@ -671,7 +671,7 @@ ScriptS7Memory* ScriptS7Client::memory_() {
     return new ScriptS7Memory(conn_.get());
 }
 
-static void registerSchemaFactories_(asIScriptEngine* tp_engine) {
+static void registerSchemaFactories_(asIScriptEngine* /*tp_engine*/) {
     // No-op: casting via opCast is used instead to avoid return type overloading conflicts
 }
 

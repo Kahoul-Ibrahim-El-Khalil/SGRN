@@ -579,12 +579,11 @@ _TOWER_N = 3
 
 
 def findGatewayBinary() -> Path:
-    for c in [BASE_DIR / ".dist" / "linux-static-release" / "gateway",
-              BASE_DIR / ".prefix" / "bin" / "gateway",
-              BASE_DIR / ".build" / "linux-static-release" / "gateway"]:
-        if c.exists():
-            return c
-    raise FileNotFoundError("gateway binary not found — build first (cmake --build ... --target install)")
+    import sys as _sys
+    if str(BASE_DIR) not in _sys.path:
+        _sys.path.insert(0, str(BASE_DIR))
+    from scripts.find_bin import require_binary
+    return require_binary("gateway", root=BASE_DIR, check_path=False)
 
 
 def bindings():

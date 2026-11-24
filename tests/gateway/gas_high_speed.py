@@ -58,17 +58,10 @@ CHILD_ENV["TZ"] = "UTC"
 
 
 def find_binary(name: str) -> Path:
-    app = {"s7shell": "s7shell", "gateway": "gateway"}.get(name, name)
-    for cand in (
-        # Fresh incremental builds first (validate C++ changes without install).
-        ROOT / ".build" / "linux-static" / "sgrn" / "apps" / app / name,
-        ROOT / ".prefix" / "linux-static" / "bin" / name,
-        ROOT / ".dist" / "linux-static" / name,
-        ROOT / ".dist" / "linux-static-release" / name,
-    ):
-        if cand.is_file() and os.access(cand, os.X_OK):
-            return cand
-    raise FileNotFoundError(f"cannot find binary {name}")
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from scripts.find_bin import require_binary
+    return require_binary(name, root=ROOT, check_path=False)
 
 
 def wait_http(url: str, proc: subprocess.Popen, timeout: float = 30.0) -> None:

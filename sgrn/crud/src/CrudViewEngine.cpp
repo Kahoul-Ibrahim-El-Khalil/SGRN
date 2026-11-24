@@ -19,6 +19,10 @@ namespace sgrn::crud
 namespace
 {
 
+drogon::orm::DbClientPtr tryGetDbClient() {
+    return drogon::app().hasDbClient("default") ? drogon::app().getDbClient() : nullptr;
+}
+
 void appendJsonEscapedString(std::string& out, std::string_view raw) {
     out += '"';
     for (unsigned char c : raw) {
@@ -353,7 +357,10 @@ drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeList(
     }
 
     try {
-        auto db = drogon::app().getDbClient();
+        auto db = tryGetDbClient();
+        if (!db) {
+            co_return makeError("Database client is not initialized", drogon::k500InternalServerError, "Database");
+        }
         drogon::orm::Result r = co_await db->execSqlCoro<std::string>(sql.str(), params);
         if (t_encoder != nullptr) {
             co_return t_encoder->encodeList(r);
@@ -410,7 +417,10 @@ drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeGet(
     }
 
     try {
-        auto db = drogon::app().getDbClient();
+        auto db = tryGetDbClient();
+        if (!db) {
+            co_return makeError("Database client is not initialized", drogon::k500InternalServerError, "Database");
+        }
         drogon::orm::Result r = co_await db->execSqlCoro<std::string>(sql.str(), params);
 
         if (r.empty()) {
@@ -504,7 +514,10 @@ drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeCreate(const CrudVi
     appendReturningProjection(sql, spec);
 
     try {
-        auto db = drogon::app().getDbClient();
+        auto db = tryGetDbClient();
+        if (!db) {
+            co_return makeError("Database client is not initialized", drogon::k500InternalServerError, "Database");
+        }
         drogon::orm::Result r = co_await db->execSqlCoro<std::string>(sql.str(), params);
 
         if (r.empty()) {
@@ -618,7 +631,10 @@ drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeUpdate(const CrudVi
     appendReturningProjection(sql, spec);
 
     try {
-        auto db = drogon::app().getDbClient();
+        auto db = tryGetDbClient();
+        if (!db) {
+            co_return makeError("Database client is not initialized", drogon::k500InternalServerError, "Database");
+        }
         drogon::orm::Result r = co_await db->execSqlCoro<std::string>(sql.str(), params);
 
         if (r.empty()) {
@@ -671,7 +687,10 @@ drogon::Task<drogon::HttpResponsePtr> CrudViewEngine::executeDelete(
     }
 
     try {
-        auto db = drogon::app().getDbClient();
+        auto db = tryGetDbClient();
+        if (!db) {
+            co_return makeError("Database client is not initialized", drogon::k500InternalServerError, "Database");
+        }
         co_await db->execSqlCoro<std::string>(sql.str(), params);
 
         if (spec.policy.audit) {

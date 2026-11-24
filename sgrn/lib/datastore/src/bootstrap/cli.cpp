@@ -10,10 +10,14 @@
 #include <sgrn/datastore/bootstrap/backup.hpp>
 #include <sgrn/datastore/bootstrap/bootstrap.hpp>
 #include <sgrn/utils/filesystem.hpp>
+#include <sgrn/utils/process.hpp>
 #include <cstdlib>
 #include <optional>
 #include <string>
 #include <string_view>
+#if !defined(_WIN32)
+#include <pwd.h>
+#endif
 
 namespace sgrn::datastore::bootstrap::cli
 {
@@ -61,8 +65,22 @@ std::optional<int> dispatch(int t_argc, char** tp_argv) {
         return EXIT_FAILURE;
     const GlobalFlags& flags = *maybe_flags;
 
-    // Helper: expand the well-known operation directory once.
-    auto base_dir = [&]() { return sgrn::utils::filesystem::expandUserPath(std::string(bootstrap::kDefaultOperationDir)); };
+    // Helper: expand the well-known operation directory, respecting SUDO_USER
+    // so commands like --init and --init-db work correctly when invoked via sudo
+    // (they should operate on the real user's ~/.local/share/sgrn, not root's).
+    auto base_dir = [&]() {
+#if !defined(_WIN32)
+        // If running under sudo, use the invoking user's home directory.
+        std::string sudo_user = sgrn::utils::process::resolveSudoUser();
+        if (!sudo_user.empty() && sudo_user != "root") {
+            struct passwd* p_pw = ::getpwnam(sudo_user.c_str());
+            if (p_pw && p_pw->pw_dir && *p_pw->pw_dir != '\0') {
+                return std::string(p_pw->pw_dir) + "/.local/share/sgrn";
+            }
+        }
+#endif
+        return sgrn::utils::filesystem::expandUserPath(std::string(bootstrap::kDefaultOperationDir));
+    };
 
     // --rotate (or any --rotate flag in the full argv)
     if (first_arg == "--rotate" || !flags.rotate_requests.empty()) {
@@ -70,7 +88,7 @@ std::optional<int> dispatch(int t_argc, char** tp_argv) {
     }
 
     if (first_arg == "--init") {
-        bootstrap::bootstrapDatabase(flags.non_interactive, flags.allow_insecure, flags.force);
+        bootstrap::bootstrapDatabase(base_dir(), flags.non_interactive, flags.allow_insecure, flags.force);
         return EXIT_SUCCESS;
     }
 

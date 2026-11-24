@@ -109,7 +109,8 @@ sgrn::scl::DbField fromJson(const sgrn::json::dom::Value& t_node) {
     if (t_node.hasMember("is_timestamp") && t_node["is_timestamp"].is_boolean())
         t_field.is_timestamp = t_node["is_timestamp"].getBool();
     if (t_node.hasMember("timestamp_for") && t_node["timestamp_for"].is_array()) {
-        for (const auto& item : t_node["timestamp_for"].elements()) {
+        const auto ts_for = t_node["timestamp_for"];
+        for (const auto& item : ts_for.elements()) {
             if (item.is_string())
                 t_field.timestamp_for.emplace_back(item.getString());
         }
@@ -127,7 +128,8 @@ sgrn::scl::DbField fromJson(const sgrn::json::dom::Value& t_node) {
         }
     }
     if (t_node.hasMember("children") && t_node["children"].is_array()) {
-        for (const auto& child : t_node["children"].elements()) {
+        const auto children = t_node["children"];
+        for (const auto& child : children.elements()) {
             t_field.children.push_back(fromJson(child));
         }
     }

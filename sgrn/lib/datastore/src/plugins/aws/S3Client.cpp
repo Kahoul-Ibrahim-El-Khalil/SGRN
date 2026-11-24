@@ -4,32 +4,19 @@
 #include <sgrn/datastore/plugins/aws/S3Error.hpp>
 #include <sgrn/datastore/utils/helpers.hpp>
 #include <sgrn/debug.hpp>
-#include <aws/core/auth/AWSCredentials.h>
-#include <aws/core/http/HttpTypes.h>
-#include <aws/s3/model/AbortMultipartUploadRequest.h>
-#include <aws/s3/model/CompleteMultipartUploadRequest.h>
-#include <aws/s3/model/CopyObjectRequest.h>
-#include <aws/s3/model/CreateBucketRequest.h>
-#include <aws/s3/model/CreateMultipartUploadRequest.h>
-#include <aws/s3/model/DeleteBucketRequest.h>
-#include <aws/s3/model/DeleteObjectRequest.h>
-#include <aws/s3/model/DeleteObjectTaggingRequest.h>
-#include <aws/s3/model/DeleteObjectsRequest.h>
-#include <aws/s3/model/GetObjectAclRequest.h>
-#include <aws/s3/model/GetObjectRequest.h>
-#include <aws/s3/model/GetObjectTaggingRequest.h>
-#include <aws/s3/model/HeadBucketRequest.h>
-#include <aws/s3/model/HeadObjectRequest.h>
-#include <aws/s3/model/ListBucketsRequest.h>
-#include <aws/s3/model/ListObjectsV2Request.h>
-#include <aws/s3/model/ListPartsRequest.h>
-#include <aws/s3/model/PutObjectAclRequest.h>
-#include <aws/s3/model/PutObjectRequest.h>
-#include <aws/s3/model/PutObjectTaggingRequest.h>
-#include <aws/s3/model/UploadPartRequest.h>
+#include <sgrn/utils/encoding.hpp>
+#include <sgrn/utils/filesystem.hpp>
+#include <sgrn/utils/hashing.hpp>
+#include <sgrn/utils/strings.hpp>
+#include <sgrn/utils/xml.hpp>
+#include <algorithm>
+#include <atomic>
 #include <fstream>
+#include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 #ifdef DEBUG_PLUGIN_AWS_S3
 #define DEBUG_LOG(msg, ...) SGRN_DEBUG("S3Client", msg __VA_OPT__(, ) __VA_ARGS__)
@@ -41,79 +28,160 @@
 #define WARN_LOG(msg, ...) SGRN_WARN("S3Client", msg __VA_OPT__(, ) __VA_ARGS__)
 #define ERROR_LOG(msg, ...) SGRN_ERROR("S3Client", msg __VA_OPT__(, ) __VA_ARGS__)
 
-// Undefine Windows macros that conflict with AWS SDK
-#ifdef GetObject
-#undef GetObject
-#endif
-#ifdef GetMessage
-#undef GetMessage
-#endif
-
 namespace sgrn::datastore::plugins::aws
 {
 using namespace drogon;
+
+namespace
+{
+
+constexpr size_t kMaxDeleteBatchSize = 1000;
+constexpr size_t kMaxMultipartParts = 10000;
+
+BackendError makeS3Error(const S3Response& resp, std::string_view prefix) {
+    auto [xml_code, _] = NativeS3Client::extractXmlError(resp.body);
+    auto s3e = fromHttpStatus(resp.status, xml_code, resp.is_timeout);
+    std::string msg = std::string(prefix) + resp.error_message;
+    ERROR_LOG("{}", msg);
+    return toBackendError(s3e, msg);
+}
+
+std::string md5Base64OrThrow(std::string_view data) {
+    auto res = sgrn::utils::computeMd5Data(data, sgrn::utils::HashEncoding::base64);
+    if (res.hasError())
+        throw std::runtime_error(res.error());
+    return std::move(*res);
+}
+
+bool isValidHeaderToken(std::string_view s) {
+    if (s.empty())
+        return false;
+    for (unsigned char c : s) {
+        if (c <= 0x20 || c >= 0x7F || c == ':')
+            return false;
+    }
+    return true;
+}
+
+void abortMultipartQuietly(NativeS3Client& client, const std::string& bucket, const std::string& key, const std::string& upload_id) {
+    auto resp =
+        client.performRequest(drogon::Delete, bucket, key, {{"uploadId", upload_id}}, {}, "", NativeS3Client::kDefaultMetaTimeoutSeconds);
+    if (!resp.isSuccess()) {
+        WARN_LOG("Abort multipart upload failed for {}/{}: {}", bucket, key, resp.error_message);
+    }
+}
+
+Result<void, BackendError> completeMultipartSync(NativeS3Client& client, const std::string& bucket, const std::string& key,
+    const std::string& upload_id, const std::vector<S3CompletedPart>& parts) {
+    std::string xml;
+    xml.reserve(96 + parts.size() * 96);
+    xml += "<?xml version=\"1.0\" encoding=\"UTF-8\"?><CompleteMultipartUpload>";
+    for (const auto& part : parts) {
+        xml += "<Part><PartNumber>";
+        xml += std::to_string(part.part_number);
+        xml += "</PartNumber><ETag>";
+        xml += sgrn::utils::xml::xmlEscape(part.etag);
+        xml += "</ETag></Part>";
+    }
+    xml += "</CompleteMultipartUpload>";
+
+    std::map<std::string, std::string> headers;
+    headers["content-type"] = "application/xml";
+
+    auto resp = client.performRequest(
+        drogon::Post, bucket, key, {{"uploadId", upload_id}}, headers, std::move(xml), NativeS3Client::kDefaultMetaTimeoutSeconds);
+    if (!resp.isSuccess())
+        return makeS3Error(resp, "Complete multipart upload failed: ");
+    return {};
+}
+
+// Shared fetch helper used by both getObjectResponse (zero-copy view) and getObjectContent (owned string).
+Result<S3Response, BackendError> fetchObjectSync(
+    NativeS3Client& client, const std::string& bucket, const std::string& key, int64_t max_bytes) {
+    std::map<std::string, std::string> headers;
+    if (max_bytes > 0)
+        headers["range"] = "bytes=0-" + std::to_string(max_bytes - 1);
+
+    auto resp = client.performRequest(drogon::Get, bucket, key, {}, headers);
+    if (!resp.isSuccess()) {
+        // Range GET on a 0-byte object returns 416 Range Not Satisfiable; verify via HEAD.
+        if (max_bytes > 0 && !resp.network_error && resp.status == 416) {
+            auto head = client.performRequest(drogon::Head, bucket, key, {}, {}, "", NativeS3Client::kDefaultMetaTimeoutSeconds);
+            if (head.isSuccess() && head.header("content-length") == "0")
+                return head;
+        }
+        return makeS3Error(resp, "[S3Client] GetObject failed: ");
+    }
+
+    size_t reported_len = 0;
+    if (auto cl = resp.header("content-length"); !cl.empty()) {
+        try {
+            reported_len = static_cast<size_t>(std::stoull(cl));
+        } catch (...) {
+        }
+    }
+
+    if (max_bytes > 0 && resp.body.size() > static_cast<size_t>(max_bytes))
+        resp.body = resp.body.substr(0, static_cast<size_t>(max_bytes));
+
+    if (max_bytes <= 0 && reported_len > 0 && resp.body.size() != reported_len) {
+        std::string error = fmt::format("[S3Client] GetObject truncated read: expected {} bytes, got {}", reported_len, resp.body.size());
+        ERROR_LOG("{}", error);
+        return BackendError{BackendErrorKind::Garage, "Storage", error};
+    }
+    return resp;
+}
+
+} // namespace
 
 void S3Client::initAndStart(const Json::Value& t_config) {
     region_ = t_config.get("region", "us-east-1").asString();
     endpoint_ = t_config.get("endpoint", "").asString();
     public_endpoint_ = t_config.get("public_endpoint", endpoint_).asString();
 
-    Aws::InitAPI(sdk_options_); // now synchronous
-
     const std::string access_key = t_config.get("access_key", "").asString();
     const std::string secret_key = t_config.get("secret_key", "").asString();
-    Aws::Auth::AWSCredentials credentials(access_key, secret_key);
 
-    Aws::S3::S3ClientConfiguration cfg;
-    cfg.region = region_;
-    cfg.useVirtualAddressing = false;
-    if (!endpoint_.empty())
-        cfg.endpointOverride = endpoint_;
+    if (endpoint_.empty() || access_key.empty() || secret_key.empty()) {
+        ERROR_LOG("[S3Client] Missing required S3 configuration (endpoint/access_key/secret_key); client remains uninitialized");
+        return;
+    }
 
-    client_ = std::make_shared<Aws::S3::S3Client>(credentials, nullptr, cfg);
+    const int worker_threads = std::clamp(t_config.get("worker_threads", 4).asInt(), 1, 64);
+    const int io_threads = std::clamp(t_config.get("io_threads", worker_threads).asInt(), 1, 32);
+    const bool unsigned_payload = t_config.get("unsigned_payload", false).asBool();
+
+    s3_pool_ = std::make_shared<sgrn::utils::ManagedThreadPool>("s3-io-pool", worker_threads);
+    client_ = std::make_shared<NativeS3Client>(
+        endpoint_, region_, access_key, secret_key, /*sign_only=*/false, static_cast<size_t>(io_threads), unsigned_payload);
 
     if (!public_endpoint_.empty() && public_endpoint_ != endpoint_) {
-        Aws::S3::S3ClientConfiguration pub_cfg;
-        pub_cfg.region = region_;
-        pub_cfg.useVirtualAddressing = false;
-        pub_cfg.endpointOverride = public_endpoint_;
-        public_client_ = std::make_shared<Aws::S3::S3Client>(credentials, nullptr, pub_cfg);
+        public_client_ = std::make_shared<NativeS3Client>(public_endpoint_, region_, access_key, secret_key, /*sign_only=*/true);
     }
+    INFO_LOG("[S3Client] Initialized (worker_threads={}, io_threads={}, unsigned_payload={}, endpoint='{}')", worker_threads, io_threads,
+        unsigned_payload, endpoint_);
 }
+
 void S3Client::shutdown() {
-    {
-        std::lock_guard lock(client_mutex_);
-        client_.reset();
-        public_client_.reset();
-    }
-    Aws::ShutdownAPI(sdk_options_);
+    std::lock_guard lock(client_mutex_);
+    client_.reset();
+    public_client_.reset();
+    s3_pool_.reset();
 }
 
 Task<Result<void, BackendError>> S3Client::uploadFile(std::string t_bucket, std::string t_key, std::string t_file_path) {
     co_return co_await execute<void>([t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_file_path = std::move(t_file_path)](
-                                         Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
-        Aws::S3::Model::PutObjectRequest req;
-        req.SetBucket(t_bucket.c_str());
-        req.SetKey(t_key.c_str());
-
-        auto input_stream = Aws::MakeShared<Aws::FStream>("UploadStream", t_file_path.c_str(), std::ios::in | std::ios::binary);
-
-        if (!*input_stream) {
+                                         NativeS3Client& t_client) -> Result<void, BackendError> {
+        std::string body;
+        if (!sgrn::utils::filesystem::readBinaryFile(t_file_path, body)) {
             std::string error = "Cannot open file: " + t_file_path;
-            ERROR_LOG(error);
+            ERROR_LOG("{}", error);
             return BackendError(BackendErrorKind::Filesystem, std::move(error));
         }
 
-        req.SetBody(input_stream);
-
-        auto outcome = t_client.PutObject(req);
-
-        if (!outcome.IsSuccess()) {
-            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-            std::string error = "Upload failed: " + outcome.GetError().GetMessage();
-            ERROR_LOG(error);
-            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-        }
+        auto resp = t_client.performRequest(drogon::Put, t_bucket, t_key, {}, {}, std::move(body));
+        if (!resp.isSuccess())
+            return makeS3Error(resp, "Upload failed: ");
         return {};
     });
 }
@@ -122,167 +190,58 @@ Task<Result<void, BackendError>> S3Client::uploadFromMemory(
     std::string t_bucket, std::string t_key, std::string t_data, std::string t_content_type) {
     co_return co_await execute<void>(
         [t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_data = std::move(t_data), t_content_type = std::move(t_content_type)](
-            Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
-            Aws::S3::Model::PutObjectRequest req;
-            req.SetBucket(t_bucket.c_str());
-            req.SetKey(t_key.c_str());
+            NativeS3Client& t_client) -> Result<void, BackendError> {
+            std::map<std::string, std::string> headers;
+            if (!t_content_type.empty())
+                headers["content-type"] = t_content_type;
 
-            auto stream = Aws::MakeShared<Aws::StringStream>("UploadStream", std::move(t_data));
-            req.SetBody(stream);
-
-            if (!t_content_type.empty()) {
-                req.SetContentType(t_content_type.c_str());
-            }
-            auto outcome = t_client.PutObject(req);
-
-            if (!outcome.IsSuccess()) {
-                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-                std::string error = "Upload from memory failed: " + outcome.GetError().GetMessage();
-                ERROR_LOG(error);
-                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-            }
+            auto resp = t_client.performRequest(drogon::Put, t_bucket, t_key, {}, headers, std::move(t_data));
+            if (!resp.isSuccess())
+                return makeS3Error(resp, "Upload from memory failed: ");
             return {};
         });
 }
 
 Task<Result<void, BackendError>> S3Client::uploadWithMetadata(
-    std::string t_bucket, std::string t_key, std::string t_file_path, Json::Value t_metadata) {
+    std::string t_bucket, std::string t_key, std::string t_file_path, S3Metadata t_metadata) {
     co_return co_await execute<void>([t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_file_path = std::move(t_file_path),
-                                         t_metadata = std::move(t_metadata)](Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
-        Aws::S3::Model::PutObjectRequest req;
-        req.SetBucket(t_bucket.c_str());
-        req.SetKey(t_key.c_str());
-
-        auto input_stream = Aws::MakeShared<Aws::FStream>("UploadStream", t_file_path.c_str(), std::ios::in | std::ios::binary);
-
-        if (!*input_stream) {
+                                         t_metadata = std::move(t_metadata)](NativeS3Client& t_client) -> Result<void, BackendError> {
+        std::string body;
+        if (!sgrn::utils::filesystem::readBinaryFile(t_file_path, body)) {
             std::string error = "Cannot open file: " + t_file_path;
-            ERROR_LOG(error);
+            ERROR_LOG("{}", error);
             return BackendError(BackendErrorKind::Filesystem, std::move(error));
         }
 
-        req.SetBody(input_stream);
-
-        for (const auto& key_name : t_metadata.getMemberNames()) {
-            req.AddMetadata(key_name.c_str(), t_metadata[key_name].asString().c_str());
+        std::map<std::string, std::string> headers;
+        for (const auto& [key_name, val] : t_metadata) {
+            std::string lower_key = sgrn::utils::strings::toLower(key_name);
+            if (!isValidHeaderToken(lower_key))
+                return BackendError(BackendErrorKind::Runtime, "Invalid S3 metadata key: " + key_name);
+            headers["x-amz-meta-" + lower_key] = sgrn::utils::strings::collapseWhitespace(val);
         }
 
-        auto outcome = t_client.PutObject(req);
-
-        if (!outcome.IsSuccess()) {
-            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-            std::string error = "[S3Client] Upload with metadata failed: " + outcome.GetError().GetMessage();
-            ERROR_LOG(error);
-            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-        }
-
+        auto resp = t_client.performRequest(drogon::Put, t_bucket, t_key, {}, headers, std::move(body));
+        if (!resp.isSuccess())
+            return makeS3Error(resp, "[S3Client] Upload with metadata failed: ");
         return {};
     });
 }
 
-Task<Result<void, BackendError>> S3Client::downloadFile(std::string t_bucket, std::string t_key, std::string t_download_path) {
-    co_return co_await execute<void>(
-        [t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_download_path = std::move(t_download_path)](
-            Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
-            Aws::S3::Model::GetObjectRequest req;
-            req.SetBucket(t_bucket.c_str());
-            req.SetKey(t_key.c_str());
-
-            auto outcome = t_client.GetObject(req);
-
-            if (!outcome.IsSuccess()) {
-                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-                std::string error = "Download failed: " + outcome.GetError().GetMessage();
-                ERROR_LOG(error);
-                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-            }
-
-            std::ofstream out(t_download_path, std::ios::binary);
-            if (!out) {
-                return BackendError(BackendErrorKind::Filesystem, "Failed to open local file for writing: " + t_download_path);
-            }
-            out << outcome.GetResult().GetBody().rdbuf();
-            return {};
-        });
-}
-
-Task<Result<void, BackendError>> S3Client::downloadFileRange(
-    std::string t_bucket, std::string t_key, std::string t_download_path, int64_t t_start, int64_t t_end) {
-    co_return co_await execute<void>(
-        [t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_download_path = std::move(t_download_path), t_start = t_start,
-            t_end = t_end](Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
-            Aws::S3::Model::GetObjectRequest req;
-            req.SetBucket(t_bucket.c_str());
-            req.SetKey(t_key.c_str());
-
-            std::stringstream range;
-            range << "bytes=" << t_start << "-" << t_end;
-            req.SetRange(range.str().c_str());
-
-            auto outcome = t_client.GetObject(req);
-
-            if (!outcome.IsSuccess()) {
-                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-                std::string error = "[S3Client] Download range failed: " + outcome.GetError().GetMessage();
-                ERROR_LOG(error);
-                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-            }
-
-            std::ofstream out(t_download_path, std::ios::binary);
-            if (!out) {
-                return BackendError(BackendErrorKind::Filesystem, "Failed to open local file for writing: " + t_download_path);
-            }
-            out << outcome.GetResult().GetBody().rdbuf();
-            return {};
-        });
+Task<Result<S3Response, BackendError>> S3Client::getObjectResponse(std::string t_bucket, std::string t_key, int64_t t_max_bytes) {
+    co_return co_await execute<S3Response>([t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_max_bytes](
+                                               NativeS3Client& t_client) -> Result<S3Response, BackendError> {
+        return fetchObjectSync(t_client, t_bucket, t_key, t_max_bytes);
+    });
 }
 
 Task<Result<std::string, BackendError>> S3Client::getObjectContent(std::string t_bucket, std::string t_key, int64_t t_max_bytes) {
     co_return co_await execute<std::string>([t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_max_bytes](
-                                                Aws::S3::S3Client& t_client) -> Result<std::string, BackendError> {
-        Aws::S3::Model::GetObjectRequest req;
-        req.SetBucket(t_bucket.c_str());
-        req.SetKey(t_key.c_str());
-
-        if (t_max_bytes > 0) {
-            std::string range_hdr = "bytes=0-" + std::to_string(t_max_bytes - 1);
-            req.SetRange(range_hdr.c_str());
-        }
-
-        auto outcome = t_client.GetObject(req);
-
-        if (!outcome.IsSuccess()) {
-            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-            std::string error = "[S3Client] GetObject failed: " + outcome.GetError().GetMessage();
-            ERROR_LOG(error);
-            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-        }
-
-        auto& result = outcome.GetResult();
-        size_t reported_len = static_cast<size_t>(result.GetContentLength());
-        INFO_LOG("[S3Client] getObjectContent: bucket='{}' key='{}' reported_content_length={}", t_bucket, t_key, reported_len);
-
-        Aws::IOStream& body_stream = result.GetBody();
-        std::string content;
-        if (t_max_bytes > 0) {
-            content.reserve(std::min<size_t>(reported_len, static_cast<size_t>(t_max_bytes)));
-        } else if (reported_len > 0) {
-            content.reserve(reported_len);
-        }
-        content.assign((std::istreambuf_iterator<char>(body_stream)), std::istreambuf_iterator<char>());
-        if (t_max_bytes > 0 && content.size() > static_cast<size_t>(t_max_bytes)) {
-            content.resize(static_cast<size_t>(t_max_bytes));
-        }
-        INFO_LOG("[S3Client] getObjectContent: read {} bytes from stream", content.size());
-        // Guard against a mid-stream Garage failure: the SDK happily
-        // yields a shorter stream without an error outcome. Serving such
-        // a body would corrupt the download while silently returning
-        // 200, so fail loudly instead.
-        if (t_max_bytes <= 0 && reported_len > 0 && content.size() != reported_len) {
-            std::string error = fmt::format("[S3Client] GetObject truncated read: expected {} bytes, got {}", reported_len, content.size());
-            ERROR_LOG(error);
-            return BackendError{BackendErrorKind::Garage, "Storage", error};
-        }
+                                                NativeS3Client& t_client) -> Result<std::string, BackendError> {
+        auto res = fetchObjectSync(t_client, t_bucket, t_key, t_max_bytes);
+        if (res.hasError())
+            return res.error();
+        std::string content(res->body);
         DEBUG_LOG("[S3Client] Content read - size: {}, ptr: {}", content.size(), (void*)content.data());
         return content;
     });
@@ -290,61 +249,59 @@ Task<Result<std::string, BackendError>> S3Client::getObjectContent(std::string t
 
 Task<Result<void, BackendError>> S3Client::deleteFile(std::string t_bucket, std::string t_key) {
     co_return co_await execute<void>(
-        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
-            Aws::S3::Model::DeleteObjectRequest req;
-            req.SetBucket(t_bucket.c_str());
-            req.SetKey(t_key.c_str());
-
-            auto outcome = t_client.DeleteObject(req);
-
-            if (!outcome.IsSuccess()) {
-                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-                std::string error = "[S3Client] Delete failed: " + outcome.GetError().GetMessage();
-                ERROR_LOG(error);
-                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-            }
-
+        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](NativeS3Client& t_client) -> Result<void, BackendError> {
+            auto resp = t_client.performRequest(drogon::Delete, t_bucket, t_key, {}, {}, "", NativeS3Client::kDefaultMetaTimeoutSeconds);
+            if (!resp.isSuccess())
+                return makeS3Error(resp, "[S3Client] Delete failed: ");
             return {};
         });
 }
 
-Task<Result<Json::Value, BackendError>> S3Client::deleteFiles(std::string t_bucket, std::vector<std::string> t_keys) {
-    co_return co_await execute<Json::Value>(
-        [t_bucket = std::move(t_bucket), t_keys = std::move(t_keys)](Aws::S3::S3Client& t_client) -> Result<Json::Value, BackendError> {
-            Json::Value result;
-            result["deleted"] = Json::Value(Json::arrayValue);
-            result["errors"] = Json::Value(Json::arrayValue);
+Task<Result<S3DeleteResult, BackendError>> S3Client::deleteFiles(std::string t_bucket, std::vector<std::string> t_keys) {
+    co_return co_await execute<S3DeleteResult>(
+        [t_bucket = std::move(t_bucket), t_keys = std::move(t_keys)](NativeS3Client& t_client) -> Result<S3DeleteResult, BackendError> {
+            S3DeleteResult result;
+            if (t_keys.empty())
+                return result;
+            result.deleted.reserve(t_keys.size());
 
-            Aws::S3::Model::DeleteObjectsRequest req;
-            req.SetBucket(t_bucket.c_str());
+            for (size_t offset = 0; offset < t_keys.size(); offset += kMaxDeleteBatchSize) {
+                const size_t end = std::min(offset + kMaxDeleteBatchSize, t_keys.size());
 
-            Aws::S3::Model::Delete deleteContainer;
-            for (const auto& t_key : t_keys) {
-                Aws::S3::Model::ObjectIdentifier obj;
-                obj.SetKey(t_key.c_str());
-                deleteContainer.AddObjects(obj);
-            }
-            req.SetDelete(deleteContainer);
+                std::string xml;
+                xml.reserve(64 + (end - offset) * 96);
+                xml += "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Delete>";
+                for (size_t i = offset; i < end; ++i) {
+                    xml += "<Object><Key>";
+                    xml += sgrn::utils::xml::xmlEscape(t_keys[i]);
+                    xml += "</Key></Object>";
+                }
+                xml += "</Delete>";
 
-            auto outcome = t_client.DeleteObjects(req);
+                std::map<std::string, std::string> headers;
+                headers["content-type"] = "application/xml";
+                headers["content-md5"] = md5Base64OrThrow(xml);
 
-            if (!outcome.IsSuccess()) {
-                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-                std::string error = "Bulk delete failed: " + outcome.GetError().GetMessage();
-                ERROR_LOG(error);
-                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-            }
+                auto resp = t_client.performRequest(
+                    drogon::Post, t_bucket, "", {{"delete", ""}}, headers, std::move(xml), NativeS3Client::kDefaultMetaTimeoutSeconds);
+                if (!resp.isSuccess()) {
+                    if (offset == 0)
+                        return makeS3Error(resp, "Bulk delete failed: ");
+                    for (size_t i = offset; i < t_keys.size(); ++i) {
+                        result.errors.push_back(S3DeleteError{t_keys[i], "BatchFailed", resp.error_message});
+                    }
+                    break;
+                }
 
-            for (const auto& deleted : outcome.GetResult().GetDeleted()) {
-                result["deleted"].append(deleted.GetKey().c_str());
-            }
-
-            for (const auto& error_obj : outcome.GetResult().GetErrors()) {
-                Json::Value err;
-                err["key"] = error_obj.GetKey().c_str();
-                err["code"] = error_obj.GetCode().c_str();
-                err["message"] = error_obj.GetMessage().c_str();
-                result["errors"].append(err);
+                sgrn::utils::xml::forEachXmlBlock(resp.body, "Deleted",
+                    [&](std::string_view blk) { result.deleted.push_back(sgrn::utils::xml::extractXmlTag(blk, "Key")); });
+                sgrn::utils::xml::forEachXmlBlock(resp.body, "Error", [&](std::string_view blk) {
+                    result.errors.push_back(S3DeleteError{
+                        sgrn::utils::xml::extractXmlTag(blk, "Key"),
+                        sgrn::utils::xml::extractXmlTag(blk, "Code"),
+                        sgrn::utils::xml::extractXmlTag(blk, "Message"),
+                    });
+                });
             }
             return result;
         });
@@ -352,289 +309,215 @@ Task<Result<Json::Value, BackendError>> S3Client::deleteFiles(std::string t_buck
 
 Task<Result<void, BackendError>> S3Client::copyFile(
     std::string t_src_bucket, std::string t_src_key, std::string t_dest_bucket, std::string t_dest_key) {
-    co_return co_await execute<void>(
-        [t_src_bucket = std::move(t_src_bucket), t_src_key = std::move(t_src_key), t_dest_bucket = std::move(t_dest_bucket),
-            t_dest_key = std::move(t_dest_key)](Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
-            Aws::S3::Model::CopyObjectRequest req;
+    co_return co_await execute<void>([t_src_bucket = std::move(t_src_bucket), t_src_key = std::move(t_src_key),
+                                         t_dest_bucket = std::move(t_dest_bucket),
+                                         t_dest_key = std::move(t_dest_key)](NativeS3Client& t_client) -> Result<void, BackendError> {
+        std::map<std::string, std::string> headers;
+        std::string copy_src =
+            "/" + sgrn::utils::encoding::uriEncode(t_src_bucket, true) + "/" + sgrn::utils::encoding::uriEncode(t_src_key, false);
+        headers["x-amz-copy-source"] = copy_src;
 
-            std::string copySource = t_src_bucket + "/" + t_src_key;
-            req.SetCopySource(copySource.c_str());
-            req.SetBucket(t_dest_bucket.c_str());
-            req.SetKey(t_dest_key.c_str());
-
-            auto outcome = t_client.CopyObject(req);
-
-            if (!outcome.IsSuccess()) {
-                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-                std::string error = "Copy failed: " + outcome.GetError().GetMessage();
-                ERROR_LOG(error);
-                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-            }
-
-            return {};
-        });
+        auto resp =
+            t_client.performRequest(drogon::Put, t_dest_bucket, t_dest_key, {}, headers, "", NativeS3Client::kDefaultMetaTimeoutSeconds);
+        if (!resp.isSuccess())
+            return makeS3Error(resp, "Copy failed: ");
+        return {};
+    });
 }
 
 Task<Result<bool, BackendError>> S3Client::exists(std::string t_bucket, std::string t_key) {
     co_return co_await execute<bool>(
-        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](Aws::S3::S3Client& t_client) -> Result<bool, BackendError> {
-            Aws::S3::Model::HeadObjectRequest req;
-            req.SetBucket(t_bucket.c_str());
-            req.SetKey(t_key.c_str());
-
-            auto outcome = t_client.HeadObject(req);
-
-            if (outcome.IsSuccess()) {
+        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](NativeS3Client& t_client) -> Result<bool, BackendError> {
+            auto resp = t_client.performRequest(drogon::Head, t_bucket, t_key, {}, {}, "", NativeS3Client::kDefaultMetaTimeoutSeconds);
+            if (resp.isSuccess())
                 return true;
-            }
-
-            auto error = outcome.GetError();
-            if (error.GetErrorType() == Aws::S3::S3Errors::NO_SUCH_KEY || error.GetErrorType() == Aws::S3::S3Errors::RESOURCE_NOT_FOUND) {
+            if (!resp.network_error && resp.status == 404)
                 return false;
-            }
-
-            std::string error_msg = "HeadObject failed: " + error.GetMessage();
-            ERROR_LOG(error_msg);
-            return ::sgrn::datastore::plugins::aws::toBackendError(::sgrn::datastore::plugins::aws::fromAwsError(error), error_msg);
+            return makeS3Error(resp, "HeadObject failed: ");
         });
 }
 
-Task<Result<Json::Value, BackendError>> S3Client::statObject(std::string t_bucket, std::string t_key) {
-    co_return co_await execute<Json::Value>(
-        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](Aws::S3::S3Client& t_client) -> Result<Json::Value, BackendError> {
-            Aws::S3::Model::HeadObjectRequest req;
-            req.SetBucket(t_bucket.c_str());
-            req.SetKey(t_key.c_str());
+Task<Result<S3ObjectStat, BackendError>> S3Client::statObject(std::string t_bucket, std::string t_key) {
+    co_return co_await execute<S3ObjectStat>(
+        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](NativeS3Client& t_client) -> Result<S3ObjectStat, BackendError> {
+            auto resp = t_client.performRequest(drogon::Head, t_bucket, t_key, {}, {}, "", NativeS3Client::kDefaultMetaTimeoutSeconds);
+            if (!resp.isSuccess())
+                return makeS3Error(resp, "[S3Client] Head failed: ");
 
-            auto outcome = t_client.HeadObject(req);
-
-            if (!outcome.IsSuccess()) {
-                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-                std::string error = "[S3Client] Head failed: " + outcome.GetError().GetMessage();
-                ERROR_LOG(error);
-                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
+            S3ObjectStat stat;
+            if (auto cl = resp.header("content-length"); !cl.empty()) {
+                try {
+                    stat.content_length = std::stoll(cl);
+                } catch (...) {
+                }
             }
+            stat.content_type = resp.header("content-type");
+            stat.etag = resp.header("etag");
+            stat.last_modified = resp.header("last-modified");
 
-            auto& result = outcome.GetResult();
-            Json::Value meta;
-            meta["content_length"] = static_cast<Json::Int64>(result.GetContentLength());
-            meta["content_type"] = result.GetContentType().c_str();
-            meta["etag"] = result.GetETag().c_str();
-            meta["last_modified"] = result.GetLastModified().ToGmtString(Aws::Utils::DateFormat::ISO_8601).c_str();
-
-            Json::Value user_meta;
-            for (const auto& kv : result.GetMetadata()) {
-                user_meta[kv.first.c_str()] = kv.second.c_str();
+            static constexpr std::string_view kMetaPrefix = "x-amz-meta-";
+            for (const auto& [k, v] : resp.headers) {
+                if (k.size() > kMetaPrefix.size() && k.rfind(kMetaPrefix, 0) == 0) {
+                    stat.metadata[k.substr(kMetaPrefix.size())] = v;
+                }
             }
-            meta["metadata"] = user_meta;
-
-            return meta;
+            return stat;
         });
 }
 
-Task<Result<Json::Value, BackendError>> S3Client::listObjects(
+Task<Result<S3ListObjectsResult, BackendError>> S3Client::listObjects(
     std::string t_bucket, std::string t_prefix, std::string t_continuation_token, uint32_t t_max_keys) {
-    co_return co_await execute<Json::Value>([t_bucket = std::move(t_bucket), t_prefix = std::move(t_prefix),
-                                                t_continuation_token = std::move(t_continuation_token),
-                                                t_max_keys = t_max_keys](Aws::S3::S3Client& t_client) -> Result<Json::Value, BackendError> {
-        Aws::S3::Model::ListObjectsV2Request req;
-        req.SetBucket(t_bucket.c_str());
+    co_return co_await execute<S3ListObjectsResult>(
+        [t_bucket = std::move(t_bucket), t_prefix = std::move(t_prefix), t_continuation_token = std::move(t_continuation_token),
+            t_max_keys = t_max_keys](NativeS3Client& t_client) -> Result<S3ListObjectsResult, BackendError> {
+            std::vector<std::pair<std::string, std::string>> params = {{"list-type", "2"}};
+            if (!t_prefix.empty())
+                params.emplace_back("prefix", t_prefix);
+            if (t_max_keys > 0)
+                params.emplace_back("max-keys", std::to_string(t_max_keys));
+            if (!t_continuation_token.empty())
+                params.emplace_back("continuation-token", t_continuation_token);
 
-        if (!t_prefix.empty()) {
-            req.SetPrefix(t_prefix.c_str());
-        }
+            auto resp = t_client.performRequest(drogon::Get, t_bucket, "", params, {}, "", NativeS3Client::kDefaultMetaTimeoutSeconds);
+            if (!resp.isSuccess())
+                return makeS3Error(resp, "[S3Client] List objects failed: ");
 
-        if (t_max_keys > 0) {
-            req.SetMaxKeys(t_max_keys);
-        }
-
-        if (!t_continuation_token.empty()) {
-            req.SetContinuationToken(t_continuation_token.c_str());
-        }
-
-        auto outcome = t_client.ListObjectsV2(req);
-
-        if (!outcome.IsSuccess()) {
-            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-            std::string error = "[S3Client] List objects failed: " + outcome.GetError().GetMessage();
-            ERROR_LOG(error);
-            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-        }
-
-        auto& list_result = outcome.GetResult();
-        Json::Value result;
-        result["objects"] = Json::Value(Json::arrayValue);
-
-        for (const auto& object : list_result.GetContents()) {
-            Json::Value obj;
-            obj["key"] = object.GetKey().c_str();
-            obj["size"] = static_cast<Json::Int64>(object.GetSize());
-            obj["etag"] = object.GetETag().c_str();
-            obj["last_modified"] = object.GetLastModified().ToGmtString(Aws::Utils::DateFormat::ISO_8601).c_str();
-            obj["storage_class"] = Aws::S3::Model::ObjectStorageClassMapper::GetNameForObjectStorageClass(object.GetStorageClass()).c_str();
-            result["objects"].append(obj);
-        }
-
-        result["is_truncated"] = list_result.GetIsTruncated();
-        if (list_result.GetIsTruncated()) {
-            result["next_continuation_token"] = list_result.GetNextContinuationToken().c_str();
-        }
-        return result;
-    });
-}
-
-Task<Result<void, BackendError>> S3Client::createBucket(std::string t_bucket) {
-    co_return co_await execute<void>([t_bucket = std::move(t_bucket)](Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
-        Aws::S3::Model::CreateBucketRequest req;
-        req.SetBucket(t_bucket.c_str());
-
-        auto outcome = t_client.CreateBucket(req);
-
-        if (!outcome.IsSuccess()) {
-            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-            std::string error = "Create bucket failed: " + outcome.GetError().GetMessage();
-            ERROR_LOG(error);
-            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-        }
-
-        return {};
-    });
-}
-
-Task<Result<void, BackendError>> S3Client::deleteBucket(std::string t_bucket) {
-    co_return co_await execute<void>([t_bucket = std::move(t_bucket)](Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
-        Aws::S3::Model::DeleteBucketRequest req;
-        req.SetBucket(t_bucket.c_str());
-
-        auto outcome = t_client.DeleteBucket(req);
-
-        if (!outcome.IsSuccess()) {
-            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-            std::string error = "Delete bucket failed: " + outcome.GetError().GetMessage();
-            ERROR_LOG(error);
-            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-        }
-
-        return {};
-    });
-}
-
-Task<Result<bool, BackendError>> S3Client::bucketExists(std::string t_bucket) {
-    co_return co_await execute<bool>([t_bucket = std::move(t_bucket)](Aws::S3::S3Client& t_client) -> Result<bool, BackendError> {
-        Aws::S3::Model::HeadBucketRequest req;
-        req.SetBucket(t_bucket.c_str());
-
-        auto outcome = t_client.HeadBucket(req);
-
-        if (outcome.IsSuccess()) {
-            return true;
-        }
-
-        auto error = outcome.GetError();
-        if (error.GetErrorType() == Aws::S3::S3Errors::NO_SUCH_BUCKET || error.GetErrorType() == Aws::S3::S3Errors::RESOURCE_NOT_FOUND) {
-            return false;
-        }
-
-        std::string error_msg = "HeadBucket failed: " + error.GetMessage();
-        ERROR_LOG(error_msg);
-        return ::sgrn::datastore::plugins::aws::toBackendError(::sgrn::datastore::plugins::aws::fromAwsError(error), error_msg);
-    });
-}
-
-Task<Result<Json::Value, BackendError>> S3Client::listBuckets() {
-    co_return co_await execute<Json::Value>([](Aws::S3::S3Client& t_client) -> Result<Json::Value, BackendError> {
-        auto outcome = t_client.ListBuckets();
-
-        if (!outcome.IsSuccess()) {
-            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-            std::string error = "List buckets failed: " + outcome.GetError().GetMessage();
-            ERROR_LOG(error);
-            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-        }
-
-        Json::Value result;
-        result["buckets"] = Json::Value(Json::arrayValue);
-
-        for (const auto& t_bucket : outcome.GetResult().GetBuckets()) {
-            Json::Value b;
-            b["name"] = t_bucket.GetName().c_str();
-            b["creation_date"] = t_bucket.GetCreationDate().ToGmtString(Aws::Utils::DateFormat::ISO_8601).c_str();
-            result["buckets"].append(b);
-        }
-        return result;
-    });
-}
-
-Task<Result<Json::Value, BackendError>> S3Client::getObjectTags(std::string t_bucket, std::string t_key) {
-    co_return co_await execute<Json::Value>(
-        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](Aws::S3::S3Client& t_client) -> Result<Json::Value, BackendError> {
-            Json::Value result(Json::objectValue);
-
-            Aws::S3::Model::GetObjectTaggingRequest req;
-            req.SetBucket(t_bucket.c_str());
-            req.SetKey(t_key.c_str());
-
-            auto outcome = t_client.GetObjectTagging(req);
-
-            if (!outcome.IsSuccess()) {
-                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-                std::string error = "[S3Client] Get tags failed: " + outcome.GetError().GetMessage();
-                ERROR_LOG(error);
-                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
+            S3ListObjectsResult result;
+            if (auto kc = sgrn::utils::xml::extractXmlTag(resp.body, "KeyCount"); !kc.empty()) {
+                try {
+                    result.key_count = std::stoll(kc);
+                    if (result.key_count > 0)
+                        result.objects.reserve(static_cast<size_t>(result.key_count));
+                } catch (...) {
+                }
             }
+            sgrn::utils::xml::forEachXmlBlock(resp.body, "Contents", [&](std::string_view blk) {
+                S3ObjectSummary obj;
+                obj.key = sgrn::utils::xml::extractXmlTag(blk, "Key");
+                if (auto s = sgrn::utils::xml::extractXmlTag(blk, "Size"); !s.empty()) {
+                    try {
+                        obj.size = std::stoll(s);
+                    } catch (...) {
+                    }
+                }
+                obj.etag = sgrn::utils::xml::extractXmlTag(blk, "ETag");
+                obj.last_modified = sgrn::utils::xml::extractXmlTag(blk, "LastModified");
+                result.objects.push_back(std::move(obj));
+            });
 
-            for (const auto& tag : outcome.GetResult().GetTagSet()) {
-                result[tag.GetKey().c_str()] = tag.GetValue().c_str();
+            sgrn::utils::xml::forEachXmlBlock(resp.body, "CommonPrefixes", [&](std::string_view blk) {
+                auto p = sgrn::utils::xml::extractXmlTag(blk, "Prefix");
+                if (!p.empty())
+                    result.common_prefixes.push_back(std::move(p));
+            });
+
+            result.is_truncated = (sgrn::utils::xml::extractXmlTag(resp.body, "IsTruncated") == "true");
+            if (result.is_truncated)
+                result.next_continuation_token = sgrn::utils::xml::extractXmlTag(resp.body, "NextContinuationToken");
+
+            if (result.key_count == 0 && !result.objects.empty()) {
+                result.key_count = static_cast<int64_t>(result.objects.size());
             }
             return result;
         });
 }
 
-Task<Result<void, BackendError>> S3Client::putObjectTags(std::string t_bucket, std::string t_key, Json::Value t_tags) {
+Task<Result<void, BackendError>> S3Client::createBucket(std::string t_bucket) {
+    co_return co_await execute<void>([t_bucket = std::move(t_bucket)](NativeS3Client& t_client) -> Result<void, BackendError> {
+        auto resp = t_client.performRequest(drogon::Put, t_bucket, "", {}, {}, "", NativeS3Client::kDefaultMetaTimeoutSeconds);
+        if (!resp.isSuccess())
+            return makeS3Error(resp, "Create bucket failed: ");
+        return {};
+    });
+}
+
+Task<Result<void, BackendError>> S3Client::deleteBucket(std::string t_bucket) {
+    co_return co_await execute<void>([t_bucket = std::move(t_bucket)](NativeS3Client& t_client) -> Result<void, BackendError> {
+        auto resp = t_client.performRequest(drogon::Delete, t_bucket, "", {}, {}, "", NativeS3Client::kDefaultMetaTimeoutSeconds);
+        if (!resp.isSuccess())
+            return makeS3Error(resp, "Delete bucket failed: ");
+        return {};
+    });
+}
+
+Task<Result<bool, BackendError>> S3Client::bucketExists(std::string t_bucket) {
+    co_return co_await execute<bool>([t_bucket = std::move(t_bucket)](NativeS3Client& t_client) -> Result<bool, BackendError> {
+        auto resp = t_client.performRequest(drogon::Head, t_bucket, "", {}, {}, "", NativeS3Client::kDefaultMetaTimeoutSeconds);
+        if (resp.isSuccess())
+            return true;
+        if (!resp.network_error && resp.status == 404)
+            return false;
+        return makeS3Error(resp, "HeadBucket failed: ");
+    });
+}
+
+Task<Result<S3ListBucketsResult, BackendError>> S3Client::listBuckets() {
+    co_return co_await execute<S3ListBucketsResult>([](NativeS3Client& t_client) -> Result<S3ListBucketsResult, BackendError> {
+        auto resp = t_client.performRequest(drogon::Get, "", "", {}, {}, "", NativeS3Client::kDefaultMetaTimeoutSeconds);
+        if (!resp.isSuccess())
+            return makeS3Error(resp, "List buckets failed: ");
+
+        S3ListBucketsResult result;
+        sgrn::utils::xml::forEachXmlBlock(resp.body, "Bucket", [&](std::string_view blk) {
+            result.buckets.push_back(S3BucketInfo{
+                sgrn::utils::xml::extractXmlTag(blk, "Name"),
+                sgrn::utils::xml::extractXmlTag(blk, "CreationDate"),
+            });
+        });
+        return result;
+    });
+}
+
+Task<Result<S3Tags, BackendError>> S3Client::getObjectTags(std::string t_bucket, std::string t_key) {
+    co_return co_await execute<S3Tags>(
+        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](NativeS3Client& t_client) -> Result<S3Tags, BackendError> {
+            auto resp = t_client.performRequest(
+                drogon::Get, t_bucket, t_key, {{"tagging", ""}}, {}, "", NativeS3Client::kDefaultMetaTimeoutSeconds);
+            if (!resp.isSuccess())
+                return makeS3Error(resp, "[S3Client] Get tags failed: ");
+
+            S3Tags result;
+            sgrn::utils::xml::forEachXmlBlock(resp.body, "Tag", [&](std::string_view blk) {
+                result[sgrn::utils::xml::extractXmlTag(blk, "Key")] = sgrn::utils::xml::extractXmlTag(blk, "Value");
+            });
+            return result;
+        });
+}
+
+Task<Result<void, BackendError>> S3Client::putObjectTags(std::string t_bucket, std::string t_key, S3Tags t_tags) {
     co_return co_await execute<void>([t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_tags = std::move(t_tags)](
-                                         Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
-        Aws::S3::Model::PutObjectTaggingRequest req;
-        req.SetBucket(t_bucket.c_str());
-        req.SetKey(t_key.c_str());
-
-        Aws::S3::Model::Tagging tagging;
-        for (const auto& key_name : t_tags.getMemberNames()) {
-            Aws::S3::Model::Tag tag;
-            tag.SetKey(key_name.c_str());
-            tag.SetValue(t_tags[key_name].asString().c_str());
-            tagging.AddTagSet(tag);
+                                         NativeS3Client& t_client) -> Result<void, BackendError> {
+        std::string xml;
+        xml.reserve(64 + t_tags.size() * 64);
+        xml += "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Tagging><TagSet>";
+        for (const auto& [key_name, val] : t_tags) {
+            xml += "<Tag><Key>";
+            xml += sgrn::utils::xml::xmlEscape(key_name);
+            xml += "</Key><Value>";
+            xml += sgrn::utils::xml::xmlEscape(val);
+            xml += "</Value></Tag>";
         }
-        req.SetTagging(tagging);
+        xml += "</TagSet></Tagging>";
 
-        auto outcome = t_client.PutObjectTagging(req);
+        std::map<std::string, std::string> headers;
+        headers["content-type"] = "application/xml";
+        headers["content-md5"] = md5Base64OrThrow(xml);
 
-        if (!outcome.IsSuccess()) {
-            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-            std::string error = "Put tags failed: " + outcome.GetError().GetMessage();
-            ERROR_LOG(error);
-            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-        }
-
+        auto resp = t_client.performRequest(
+            drogon::Put, t_bucket, t_key, {{"tagging", ""}}, headers, std::move(xml), NativeS3Client::kDefaultMetaTimeoutSeconds);
+        if (!resp.isSuccess())
+            return makeS3Error(resp, "Put tags failed: ");
         return {};
     });
 }
 
 Task<Result<void, BackendError>> S3Client::deleteObjectTags(std::string t_bucket, std::string t_key) {
     co_return co_await execute<void>(
-        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
-            Aws::S3::Model::DeleteObjectTaggingRequest req;
-            req.SetBucket(t_bucket.c_str());
-            req.SetKey(t_key.c_str());
-
-            auto outcome = t_client.DeleteObjectTagging(req);
-
-            if (!outcome.IsSuccess()) {
-                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-                std::string error = "Delete tags failed: " + outcome.GetError().GetMessage();
-                ERROR_LOG(error);
-                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-            }
-
+        [t_bucket = std::move(t_bucket), t_key = std::move(t_key)](NativeS3Client& t_client) -> Result<void, BackendError> {
+            auto resp = t_client.performRequest(
+                drogon::Delete, t_bucket, t_key, {{"tagging", ""}}, {}, "", NativeS3Client::kDefaultMetaTimeoutSeconds);
+            if (!resp.isSuccess())
+                return makeS3Error(resp, "Delete tags failed: ");
             return {};
         });
 }
@@ -643,25 +526,16 @@ Task<Result<std::string, BackendError>> S3Client::createMultipartUpload(
     std::string t_bucket, std::string t_key, std::string t_content_type) {
     co_return co_await execute<std::string>(
         [t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_content_type = std::move(t_content_type)](
-            Aws::S3::S3Client& t_client) -> Result<std::string, BackendError> {
-            Aws::S3::Model::CreateMultipartUploadRequest req;
-            req.SetBucket(t_bucket.c_str());
-            req.SetKey(t_key.c_str());
+            NativeS3Client& t_client) -> Result<std::string, BackendError> {
+            std::map<std::string, std::string> headers;
+            if (!t_content_type.empty())
+                headers["content-type"] = t_content_type;
 
-            if (!t_content_type.empty()) {
-                req.SetContentType(t_content_type.c_str());
-            }
-
-            auto outcome = t_client.CreateMultipartUpload(req);
-
-            if (!outcome.IsSuccess()) {
-                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-                std::string error = "Create multipart upload failed: " + outcome.GetError().GetMessage();
-                ERROR_LOG(error);
-                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-            }
-
-            return outcome.GetResult().GetUploadId();
+            auto resp = t_client.performRequest(
+                drogon::Post, t_bucket, t_key, {{"uploads", ""}}, headers, "", NativeS3Client::kDefaultMetaTimeoutSeconds);
+            if (!resp.isSuccess())
+                return makeS3Error(resp, "Create multipart upload failed: ");
+            return sgrn::utils::xml::extractXmlTag(resp.body, "UploadId");
         });
 }
 
@@ -669,181 +543,231 @@ Task<Result<std::string, BackendError>> S3Client::uploadPart(
     std::string t_bucket, std::string t_key, std::string t_upload_id, int t_part_number, std::string t_body) {
     co_return co_await execute<std::string>(
         [t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_upload_id = std::move(t_upload_id), t_part_number = t_part_number,
-            t_data = std::move(t_body)](Aws::S3::S3Client& t_client) -> Result<std::string, BackendError> {
-            Aws::S3::Model::UploadPartRequest req;
-            req.SetBucket(t_bucket.c_str());
-            req.SetKey(t_key.c_str());
-            req.SetUploadId(t_upload_id.c_str());
-            req.SetPartNumber(t_part_number);
-
-            auto stream = Aws::MakeShared<Aws::StringStream>("UploadPartStream");
-            *stream << t_data;
-            req.SetBody(stream);
-
-            auto outcome = t_client.UploadPart(req);
-
-            if (!outcome.IsSuccess()) {
-                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-                std::string error = "Upload part failed: " + outcome.GetError().GetMessage();
-                ERROR_LOG(error);
-                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-            }
-
-            return outcome.GetResult().GetETag();
+            t_data = std::move(t_body)](NativeS3Client& t_client) -> Result<std::string, BackendError> {
+            std::vector<std::pair<std::string, std::string>> params = {
+                {"partNumber", std::to_string(t_part_number)},
+                {"uploadId", t_upload_id},
+            };
+            auto resp = t_client.performRequest(drogon::Put, t_bucket, t_key, params, {}, std::move(t_data));
+            if (!resp.isSuccess())
+                return makeS3Error(resp, "Upload part failed: ");
+            return resp.header("etag");
         });
 }
 
 Task<Result<void, BackendError>> S3Client::completeMultipartUpload(
-    std::string t_bucket, std::string t_key, std::string t_upload_id, Json::Value t_parts) {
+    std::string t_bucket, std::string t_key, std::string t_upload_id, std::vector<S3CompletedPart> t_parts) {
     co_return co_await execute<void>([t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_upload_id = std::move(t_upload_id),
-                                         t_parts = std::move(t_parts)](Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
-        Aws::S3::Model::CompleteMultipartUploadRequest req;
-        req.SetBucket(t_bucket.c_str());
-        req.SetKey(t_key.c_str());
-        req.SetUploadId(t_upload_id.c_str());
-
-        Aws::S3::Model::CompletedMultipartUpload completed;
-        for (const auto& part : t_parts) {
-            Aws::S3::Model::CompletedPart p;
-            p.SetPartNumber(part["part_number"].asInt());
-            p.SetETag(part["etag"].asString().c_str());
-            completed.AddParts(p);
-        }
-        req.SetMultipartUpload(completed);
-
-        auto outcome = t_client.CompleteMultipartUpload(req);
-
-        if (!outcome.IsSuccess()) {
-            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-            std::string error = "Complete multipart upload failed: " + outcome.GetError().GetMessage();
-            ERROR_LOG(error);
-            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-        }
-
-        return {};
+                                         t_parts = std::move(t_parts)](NativeS3Client& t_client) -> Result<void, BackendError> {
+        return completeMultipartSync(t_client, t_bucket, t_key, t_upload_id, t_parts);
     });
 }
 
 Task<Result<void, BackendError>> S3Client::abortMultipartUpload(std::string t_bucket, std::string t_key, std::string t_upload_id) {
     co_return co_await execute<void>([t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_upload_id = std::move(t_upload_id)](
-                                         Aws::S3::S3Client& t_client) -> Result<void, BackendError> {
-        Aws::S3::Model::AbortMultipartUploadRequest req;
-        req.SetBucket(t_bucket.c_str());
-        req.SetKey(t_key.c_str());
-        req.SetUploadId(t_upload_id.c_str());
-
-        auto outcome = t_client.AbortMultipartUpload(req);
-
-        if (!outcome.IsSuccess()) {
-            auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-            std::string error = "Abort multipart upload failed: " + outcome.GetError().GetMessage();
-            ERROR_LOG(error);
-            return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-        }
-
+                                         NativeS3Client& t_client) -> Result<void, BackendError> {
+        auto resp = t_client.performRequest(
+            drogon::Delete, t_bucket, t_key, {{"uploadId", t_upload_id}}, {}, "", NativeS3Client::kDefaultMetaTimeoutSeconds);
+        if (!resp.isSuccess())
+            return makeS3Error(resp, "Abort multipart upload failed: ");
         return {};
     });
 }
 
 Task<Result<int, BackendError>> S3Client::uploadFileMultipart(
     std::string t_bucket, std::string t_key, std::string t_content_type, std::filesystem::path t_file_path, size_t t_part_size_bytes) {
+    co_return co_await execute<int>(
+        [t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_content_type = std::move(t_content_type),
+            t_file_path = std::move(t_file_path), t_part_size_bytes](NativeS3Client& t_client) -> Result<int, BackendError> {
+            if (t_part_size_bytes == 0) {
+                return BackendError(BackendErrorKind::Runtime, "Multipart part size must be greater than zero");
+            }
 
-    // 1. Start the upload.
-    auto upload_id_res = co_await createMultipartUpload(t_bucket, t_key, t_content_type);
-    CO_RETURN_ERROR_IF(upload_id_res.hasError(), std::move(upload_id_res).error());
-    std::string upload_id = std::move(*upload_id_res);
+            std::error_code ec;
+            const auto file_size = std::filesystem::file_size(t_file_path, ec);
+            if (ec) {
+                return BackendError(BackendErrorKind::Filesystem, "Failed to stat file for multipart upload: " + ec.message());
+            }
+            if (file_size == 0) {
+                return BackendError(BackendErrorKind::Filesystem, "Multipart upload produced zero parts (empty file)");
+            }
 
-    // 2. Stream the (already-compressed) temp file through a bounded buffer,
-    //    uploading one part at a time. Memory use stays flat at ~part_size_bytes
-    //    regardless of total file size — never holds more than one part in RAM.
-    std::ifstream in(t_file_path, std::ios::binary);
-    if (!in) {
-        co_await abortMultipartUpload(t_bucket, t_key, upload_id);
-        co_return BackendError(BackendErrorKind::Filesystem, "Failed to open file for multipart upload");
-    }
+            const uintmax_t expected_parts = (file_size + t_part_size_bytes - 1) / t_part_size_bytes;
+            if (expected_parts > kMaxMultipartParts) {
+                return BackendError(BackendErrorKind::Runtime,
+                    fmt::format("Multipart upload requires {} parts, exceeding S3 limit of {}", expected_parts, kMaxMultipartParts));
+            }
 
-    Json::Value parts = Json::arrayValue;
-    int part_number = 1;
-    std::string buffer;
-    buffer.resize(t_part_size_bytes);
+            std::ifstream in(t_file_path, std::ios::binary);
+            if (!in) {
+                return BackendError(BackendErrorKind::Filesystem, "Failed to open file for multipart upload");
+            }
 
-    while (in) {
-        in.read(buffer.data(), static_cast<std::streamsize>(t_part_size_bytes));
-        std::streamsize bytes_read = in.gcount();
-        if (bytes_read <= 0) {
-            break;
-        }
-        std::string part_body = buffer.substr(0, static_cast<size_t>(bytes_read));
+            std::map<std::string, std::string> init_headers;
+            if (!t_content_type.empty())
+                init_headers["content-type"] = t_content_type;
 
-        auto etag_res = co_await uploadPart(t_bucket, t_key, upload_id, part_number, std::move(part_body));
-        if (etag_res.hasError()) {
-            // 3. Any part failure aborts the whole upload — never leave a
-            //    half-uploaded multipart session dangling in storage.
-            co_await abortMultipartUpload(t_bucket, t_key, upload_id);
-            co_return std::move(etag_res).error();
-        }
+            auto create_resp = t_client.performRequest(
+                drogon::Post, t_bucket, t_key, {{"uploads", ""}}, init_headers, "", NativeS3Client::kDefaultMetaTimeoutSeconds);
+            if (!create_resp.isSuccess()) {
+                return makeS3Error(create_resp, "Create multipart upload failed: ");
+            }
 
-        Json::Value part;
-        part["part_number"] = part_number;
-        part["etag"] = *etag_res;
-        parts.append(std::move(part));
-        ++part_number;
-    }
+            const std::string upload_id = sgrn::utils::xml::extractXmlTag(create_resp.body, "UploadId");
+            if (upload_id.empty()) {
+                return BackendError(BackendErrorKind::Garage, "Create multipart upload returned empty UploadId");
+            }
 
-    if (parts.empty()) {
-        co_await abortMultipartUpload(t_bucket, t_key, upload_id);
-        co_return BackendError(BackendErrorKind::Filesystem, "Multipart upload produced zero parts (empty file?)");
-    }
+            const size_t total_parts = static_cast<size_t>(expected_parts);
+            const size_t concurrency = std::clamp<size_t>(std::min(t_client.ioThreadCount(), total_parts), 1, 4);
 
-    // 4. Finalize — S3 assembles the parts into one ordinary object here.
-    // (Capture the count first: parts is moved into the request below.)
-    const int part_count = static_cast<int>(parts.size());
-    auto fin_res = co_await completeMultipartUpload(t_bucket, t_key, upload_id, std::move(parts));
-    CO_RETURN_ERROR_IF(fin_res.hasError(), std::move(fin_res).error());
-    co_return part_count;
+            std::vector<S3CompletedPart> parts(total_parts);
+            std::atomic<bool> failed{false};
+            std::mutex read_mutex;
+            std::mutex err_mutex;
+            std::optional<BackendError> first_error;
+            int next_part_number = 1;
+            std::atomic<size_t> uploaded_count{0};
+
+            auto recordError = [&](BackendError err) {
+                failed.store(true, std::memory_order_release);
+                std::lock_guard lock(err_mutex);
+                if (!first_error.has_value())
+                    first_error = std::move(err);
+            };
+
+            auto uploadWorker = [&]() {
+                try {
+                    std::string buffer;
+                    buffer.resize(t_part_size_bytes);
+                    std::vector<std::pair<std::string, std::string>> params = {
+                        {"partNumber", ""},
+                        {"uploadId", upload_id},
+                    };
+
+                    while (!failed.load(std::memory_order_acquire)) {
+                        int my_part = 0;
+                        std::streamsize bytes_read = 0;
+                        {
+                            std::lock_guard lock(read_mutex);
+                            if (failed.load(std::memory_order_relaxed) || !in)
+                                break;
+                            in.read(buffer.data(), static_cast<std::streamsize>(t_part_size_bytes));
+                            bytes_read = in.gcount();
+                            if (bytes_read <= 0)
+                                break;
+                            if (in.bad()) {
+                                recordError(BackendError(BackendErrorKind::Filesystem, "I/O error reading file during multipart upload"));
+                                break;
+                            }
+                            my_part = next_part_number++;
+                        }
+
+                        // Shrink buffer only on the final short part so performRequest sends exact length without extra copy.
+                        buffer.resize(static_cast<size_t>(bytes_read));
+                        params[0].second = std::to_string(my_part);
+                        auto part_resp = t_client.performRequest(drogon::Put, t_bucket, t_key, params, {}, buffer);
+                        buffer.resize(t_part_size_bytes);
+
+                        if (!part_resp.isSuccess()) {
+                            recordError(makeS3Error(part_resp, "Upload part failed: "));
+                            break;
+                        }
+
+                        parts[static_cast<size_t>(my_part - 1)] = S3CompletedPart{my_part, part_resp.header("etag")};
+                        uploaded_count.fetch_add(1, std::memory_order_relaxed);
+                    }
+                } catch (const std::exception& ex) {
+                    recordError(BackendError(BackendErrorKind::Runtime, std::string("Exception in multipart upload worker: ") + ex.what()));
+                } catch (...) {
+                    recordError(BackendError(BackendErrorKind::Runtime, "Unknown exception in multipart upload worker"));
+                }
+            };
+
+            try {
+                if (concurrency <= 1) {
+                    uploadWorker();
+                } else {
+                    std::vector<std::thread> workers;
+                    workers.reserve(concurrency - 1);
+                    for (size_t i = 0; i + 1 < concurrency; ++i) {
+                        workers.emplace_back(uploadWorker);
+                    }
+                    uploadWorker();
+                    for (auto& w : workers) {
+                        if (w.joinable())
+                            w.join();
+                    }
+                }
+
+                if (first_error.has_value()) {
+                    abortMultipartQuietly(t_client, t_bucket, t_key, upload_id);
+                    return std::move(*first_error);
+                }
+
+                const size_t actual_parts = uploaded_count.load(std::memory_order_relaxed);
+                if (actual_parts == 0) {
+                    abortMultipartQuietly(t_client, t_bucket, t_key, upload_id);
+                    return BackendError(BackendErrorKind::Filesystem, "Multipart upload produced zero parts (empty file?)");
+                }
+                parts.resize(actual_parts);
+
+                auto fin_res = completeMultipartSync(t_client, t_bucket, t_key, upload_id, parts);
+                if (fin_res.hasError()) {
+                    abortMultipartQuietly(t_client, t_bucket, t_key, upload_id);
+                    return fin_res.error();
+                }
+            } catch (...) {
+                abortMultipartQuietly(t_client, t_bucket, t_key, upload_id);
+                throw;
+            }
+
+            return static_cast<int>(parts.size());
+        });
 }
 
-Task<Result<Json::Value, BackendError>> S3Client::listParts(
+Task<Result<S3ListPartsResult, BackendError>> S3Client::listParts(
     std::string t_bucket, std::string t_key, std::string t_upload_id, uint32_t t_max_parts) {
-    co_return co_await execute<Json::Value>(
+    co_return co_await execute<S3ListPartsResult>(
         [t_bucket = std::move(t_bucket), t_key = std::move(t_key), t_upload_id = std::move(t_upload_id), t_max_parts = t_max_parts](
-            Aws::S3::S3Client& t_client) -> Result<Json::Value, BackendError> {
-            Json::Value result;
-            result["parts"] = Json::Value(Json::arrayValue);
+            NativeS3Client& t_client) -> Result<S3ListPartsResult, BackendError> {
+            std::vector<std::pair<std::string, std::string>> params = {{"uploadId", t_upload_id}};
+            if (t_max_parts > 0)
+                params.emplace_back("max-parts", std::to_string(t_max_parts));
 
-            Aws::S3::Model::ListPartsRequest req;
-            req.SetBucket(t_bucket.c_str());
-            req.SetKey(t_key.c_str());
-            req.SetUploadId(t_upload_id.c_str());
+            auto resp = t_client.performRequest(drogon::Get, t_bucket, t_key, params, {}, "", NativeS3Client::kDefaultMetaTimeoutSeconds);
+            if (!resp.isSuccess())
+                return makeS3Error(resp, "List parts failed: ");
 
-            if (t_max_parts > 0) {
-                req.SetMaxParts(t_max_parts);
-            }
-
-            auto outcome = t_client.ListParts(req);
-
-            if (!outcome.IsSuccess()) {
-                auto s3e = ::sgrn::datastore::plugins::aws::fromAwsError(outcome.GetError());
-                std::string error = "List parts failed: " + outcome.GetError().GetMessage();
-                ERROR_LOG(error);
-                return ::sgrn::datastore::plugins::aws::toBackendError(s3e, error);
-            }
-
-            for (const auto& part : outcome.GetResult().GetParts()) {
-                Json::Value p;
-                p["part_number"] = part.GetPartNumber();
-                p["etag"] = part.GetETag().c_str();
-                p["size"] = static_cast<Json::Int64>(part.GetSize());
-                p["last_modified"] = part.GetLastModified().ToGmtString(Aws::Utils::DateFormat::ISO_8601).c_str();
-                result["parts"].append(p);
+            S3ListPartsResult result;
+            sgrn::utils::xml::forEachXmlBlock(resp.body, "Part", [&](std::string_view blk) {
+                S3PartInfo p;
+                try {
+                    p.part_number = std::stoi(sgrn::utils::xml::extractXmlTag(blk, "PartNumber"));
+                } catch (...) {
+                }
+                try {
+                    p.size = std::stoll(sgrn::utils::xml::extractXmlTag(blk, "Size"));
+                } catch (...) {
+                }
+                p.etag = sgrn::utils::xml::extractXmlTag(blk, "ETag");
+                p.last_modified = sgrn::utils::xml::extractXmlTag(blk, "LastModified");
+                result.parts.push_back(std::move(p));
+            });
+            result.is_truncated = (sgrn::utils::xml::extractXmlTag(resp.body, "IsTruncated") == "true");
+            if (auto marker = sgrn::utils::xml::extractXmlTag(resp.body, "NextPartNumberMarker"); !marker.empty()) {
+                try {
+                    result.next_part_number_marker = std::stoi(marker);
+                } catch (...) {
+                }
             }
             return result;
         });
 }
 
 Task<Result<std::string, BackendError>> S3Client::generatePresignedUrl(
-    std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds, Aws::Http::HttpMethod t_method) {
-    std::shared_ptr<Aws::S3::S3Client> sp_pub_client;
+    std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds, drogon::HttpMethod t_method) {
+    std::shared_ptr<NativeS3Client> sp_pub_client;
     {
         std::lock_guard lock(client_mutex_);
         sp_pub_client = public_client_;
@@ -851,31 +775,28 @@ Task<Result<std::string, BackendError>> S3Client::generatePresignedUrl(
 
     co_return co_await execute<std::string>(
         [sp_pub_client = std::move(sp_pub_client), t_bucket = std::move(t_bucket), t_key = std::move(t_key),
-            t_expiry_seconds = t_expiry_seconds, t_method = t_method](Aws::S3::S3Client& t_client) -> Result<std::string, BackendError> {
+            t_expiry_seconds = t_expiry_seconds, t_method = t_method](NativeS3Client& t_client) -> Result<std::string, BackendError> {
             try {
-                Aws::S3::S3Client* client_to_use = sp_pub_client ? sp_pub_client.get() : &t_client;
-
-                std::string url = client_to_use->GeneratePresignedUrl(t_bucket.c_str(), t_key.c_str(), t_method, t_expiry_seconds);
-
-                return url;
+                NativeS3Client* client_to_use = sp_pub_client ? sp_pub_client.get() : &t_client;
+                return client_to_use->generatePresignedUrl(t_method, t_bucket, t_key, t_expiry_seconds);
             } catch (const std::exception& ex) {
                 std::string error = "Generate presigned URL failed: " + std::string(ex.what());
-                ERROR_LOG(error);
-                return ::sgrn::datastore::plugins::aws::toBackendError(::sgrn::datastore::plugins::aws::S3Error::RequestFailed, error);
+                ERROR_LOG("{}", error);
+                return toBackendError(S3Error::RequestFailed, error);
             }
         });
 }
 
 Task<Result<std::string, BackendError>> S3Client::presignedGetUrl(std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds) {
-    co_return co_await generatePresignedUrl(std::move(t_bucket), std::move(t_key), t_expiry_seconds, Aws::Http::HttpMethod::HTTP_GET);
+    co_return co_await generatePresignedUrl(std::move(t_bucket), std::move(t_key), t_expiry_seconds, drogon::Get);
 }
 
 Task<Result<std::string, BackendError>> S3Client::presignedPutUrl(std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds) {
-    co_return co_await generatePresignedUrl(std::move(t_bucket), std::move(t_key), t_expiry_seconds, Aws::Http::HttpMethod::HTTP_PUT);
+    co_return co_await generatePresignedUrl(std::move(t_bucket), std::move(t_key), t_expiry_seconds, drogon::Put);
 }
 
 Task<Result<std::string, BackendError>> S3Client::presignedDeleteUrl(std::string t_bucket, std::string t_key, uint32_t t_expiry_seconds) {
-    co_return co_await generatePresignedUrl(std::move(t_bucket), std::move(t_key), t_expiry_seconds, Aws::Http::HttpMethod::HTTP_DELETE);
+    co_return co_await generatePresignedUrl(std::move(t_bucket), std::move(t_key), t_expiry_seconds, drogon::Delete);
 }
 
 } // namespace sgrn::datastore::plugins::aws

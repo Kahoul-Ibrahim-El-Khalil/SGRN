@@ -357,6 +357,98 @@ struct QueryMapping {
     }();
 };
 
+namespace detail
+{
+
+// ── GCC 14 coroutine ICE workaround ─────────────────────────────────────────
+//
+// GCC 14.x has a confirmed ICE (bug #110897) in tsubst_lambda_expr at cp/pt.cc
+// when a lambda captures a structured-binding / glz::to_tie tuple inside a
+// coroutine template instantiation.
+// To prevent this bug on GCC (and keep code clean for all compilers), we avoid
+// lambdas entirely when unpacking struct fields: each field access is an
+// explicit function template invoked across std::index_sequence via fold expression.
+
+template <std::size_t I, typename T, typename Mapping, typename Tie>
+void fillFieldByMapping(Tie& tie, const drogon::orm::Row& row, std::size_t row_size) {
+    if constexpr (I < glz::reflect<T>::size) {
+        constexpr std::size_t col_idx = Mapping::col_indices[I];
+        using FieldType = std::remove_cvref_t<decltype(glz::get<I>(tie))>;
+        if constexpr (!is_optional_v<FieldType>) {
+            static_assert(col_idx != Mapping::kNotFound,
+                "Compile-time SQL check failed: Required struct field not found in SELECT query projection!");
+        }
+        if constexpr (col_idx != Mapping::kNotFound) {
+            if (col_idx < row_size) {
+                glz::get<I>(tie) = extractField<FieldType>(row[static_cast<drogon::orm::Row::SizeType>(col_idx)]);
+            }
+        }
+    }
+}
+
+template <typename T, typename Mapping, std::size_t... I>
+void fillRowByMapping(T& obj, const drogon::orm::Row& row, std::index_sequence<I...>) {
+    auto tie = glz::to_tie(obj);
+    const auto row_size = row.size();
+    (fillFieldByMapping<I, T, Mapping>(tie, row, row_size), ...);
+}
+
+template <std::size_t I, typename T, typename Tie>
+void fillFieldByPos(Tie& tie, const drogon::orm::Row& row, std::size_t row_size) {
+    if constexpr (I < glz::reflect<T>::size) {
+        if (I < row_size) {
+            using FieldType = std::remove_cvref_t<decltype(glz::get<I>(tie))>;
+            glz::get<I>(tie) = extractField<FieldType>(row[static_cast<drogon::orm::Row::SizeType>(I)]);
+        }
+    }
+}
+
+template <typename T, std::size_t... I>
+void fillRowByPos(T& obj, const drogon::orm::Row& row, std::index_sequence<I...>) {
+    auto tie = glz::to_tie(obj);
+    const auto row_size = row.size();
+    (fillFieldByPos<I, T>(tie, row, row_size), ...);
+}
+
+template <std::size_t I, typename T, typename Tie>
+void fillFieldByName(Tie& tie, const drogon::orm::Row& row) {
+    if constexpr (I < glz::reflect<T>::size) {
+        constexpr std::string_view key = glz::reflect<T>::keys[I];
+        using FieldType = std::remove_cvref_t<decltype(glz::get<I>(tie))>;
+        try {
+            const auto field = row[std::string(key)];
+            glz::get<I>(tie) = extractField<FieldType>(field);
+        } catch (...) {
+            // Column absent from query result — leave default
+        }
+    }
+}
+
+template <typename T, std::size_t... I>
+void fillRowByName(T& obj, const drogon::orm::Row& row, std::index_sequence<I...>) {
+    auto tie = glz::to_tie(obj);
+    (fillFieldByName<I, T>(tie, row), ...);
+}
+
+template <std::size_t I, typename T, std::size_t N, typename Tie>
+void fillFieldByColIndex(Tie& tie, const drogon::orm::Row& row, const std::array<ssize_t, N>& col_indices) {
+    if constexpr (I < N) {
+        const ssize_t col_idx = col_indices[I];
+        if (col_idx >= 0 && static_cast<std::size_t>(col_idx) < row.size()) {
+            using FieldType = std::remove_cvref_t<decltype(glz::get<I>(tie))>;
+            glz::get<I>(tie) = extractField<FieldType>(row[static_cast<drogon::orm::Row::SizeType>(col_idx)]);
+        }
+    }
+}
+
+template <typename T, std::size_t N, std::size_t... I>
+void fillRowByColIndices(T& obj, const drogon::orm::Row& row, const std::array<ssize_t, N>& col_indices, std::index_sequence<I...>) {
+    auto tie = glz::to_tie(obj);
+    (fillFieldByColIndex<I, T, N>(tie, row, col_indices), ...);
+}
+
+} // namespace detail
+
 // ── Strategy Two: Compile-Time Verified & Permuted Mapping ────────────────────
 
 /// Map a single drogon::orm::Row into struct T using compile-time SQL query routing.
@@ -370,27 +462,7 @@ T fromRow(const drogon::orm::Row& row) {
     T obj{};
     constexpr std::size_t N = glz::reflect<T>::size;
     if constexpr (N > 0) {
-        auto tie = glz::to_tie(obj);
-        const auto row_size = row.size();
-        [&]<std::size_t... I>(std::index_sequence<I...>) {
-            (
-                [&]() {
-                    if constexpr (I < N) {
-                        constexpr std::size_t col_idx = Mapping::col_indices[I];
-                        using FieldType = std::remove_cvref_t<decltype(glz::get<I>(tie))>;
-                        if constexpr (!detail::is_optional_v<FieldType>) {
-                            static_assert(col_idx != Mapping::kNotFound,
-                                "Compile-time SQL check failed: Required struct field not found in SELECT query projection!");
-                        }
-                        if constexpr (col_idx != Mapping::kNotFound) {
-                            if (col_idx < row_size) {
-                                glz::get<I>(tie) = detail::extractField<FieldType>(row[static_cast<drogon::orm::Row::SizeType>(col_idx)]);
-                            }
-                        }
-                    }
-                }(),
-                ...);
-        }(std::make_index_sequence<N>{});
+        detail::fillRowByMapping<T, Mapping>(obj, row, std::make_index_sequence<N>{});
     }
     return obj;
 }
@@ -425,20 +497,7 @@ T fromRow(const drogon::orm::Row& row) {
     T obj{};
     constexpr std::size_t N = glz::reflect<T>::size;
     if constexpr (N > 0) {
-        auto tie = glz::to_tie(obj);
-        const auto row_size = row.size();
-        [&]<std::size_t... I>(std::index_sequence<I...>) {
-            (
-                [&]() {
-                    if constexpr (I < N) {
-                        if (I < row_size) {
-                            using FieldType = std::remove_cvref_t<decltype(glz::get<I>(tie))>;
-                            glz::get<I>(tie) = detail::extractField<FieldType>(row[static_cast<drogon::orm::Row::SizeType>(I)]);
-                        }
-                    }
-                }(),
-                ...);
-        }(std::make_index_sequence<N>{});
+        detail::fillRowByPos<T>(obj, row, std::make_index_sequence<N>{});
     }
     return obj;
 }
@@ -472,24 +531,7 @@ T fromRowByName(const drogon::orm::Row& row) {
     T obj{};
     constexpr std::size_t N = glz::reflect<T>::size;
     if constexpr (N > 0) {
-        auto tie = glz::to_tie(obj);
-        constexpr auto keys = glz::reflect<T>::keys;
-        [&]<std::size_t... I>(std::index_sequence<I...>) {
-            (
-                [&]() {
-                    if constexpr (I < N) {
-                        constexpr std::string_view key = keys[I];
-                        using FieldType = std::remove_cvref_t<decltype(glz::get<I>(tie))>;
-                        try {
-                            const auto field = row[std::string(key)];
-                            glz::get<I>(tie) = detail::extractField<FieldType>(field);
-                        } catch (...) {
-                            // Column absent from query result
-                        }
-                    }
-                }(),
-                ...);
-        }(std::make_index_sequence<N>{});
+        detail::fillRowByName<T>(obj, row, std::make_index_sequence<N>{});
     }
     return obj;
 }
@@ -522,22 +564,8 @@ std::vector<T> fromResultByName(const drogon::orm::Result& result) {
 
     const auto sz = result.size();
     for (drogon::orm::Result::SizeType r = 0; r < sz; ++r) {
-        const auto& row = result[r];
         T obj{};
-        auto tie = glz::to_tie(obj);
-        [&]<std::size_t... I>(std::index_sequence<I...>) {
-            (
-                [&]() {
-                    if constexpr (I < N) {
-                        const ssize_t col_idx = col_indices[I];
-                        if (col_idx >= 0 && static_cast<std::size_t>(col_idx) < row.size()) {
-                            using FieldType = std::remove_cvref_t<decltype(glz::get<I>(tie))>;
-                            glz::get<I>(tie) = detail::extractField<FieldType>(row[static_cast<drogon::orm::Row::SizeType>(col_idx)]);
-                        }
-                    }
-                }(),
-                ...);
-        }(std::make_index_sequence<N>{});
+        detail::fillRowByColIndices<T, N>(obj, result[r], col_indices, std::make_index_sequence<N>{});
         items.push_back(std::move(obj));
     }
     return items;

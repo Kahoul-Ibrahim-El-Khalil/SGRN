@@ -21,7 +21,7 @@ public:
         return worker_pool_;
     }
 
-    void run(size_t t_io_threads = 2, size_t t_worker_threads = 2) {
+    void run(size_t t_io_threads = 2, size_t /*t_worker_threads*/ = 2) {
         // Use work guard to keep io_context running
         work_guard_ = std::make_unique<asio::executor_work_guard<asio::io_context::executor_type>>(asio::make_work_guard(io_ctx_));
         for (size_t i = 0; i < t_io_threads; ++i) {

@@ -341,34 +341,51 @@ int verifyInstall(const std::string& t_base_dir, bool t_allow_insecure) {
         }
     }
 
-    // 7. deployment env prerequisites: nginx binary + mime.types.
+    // 7. system nginx binary + mime.types (system install; no Micromamba env required).
     {
-        std::string deployment_env = sgrn::utils::env::get("SGRN_DEPLOYMENT_ENV", "");
-        if (deployment_env.empty() || deployment_env.find("$ENV{") != std::string::npos) {
-            report.fail(
-                fmt::format("SGRN_DEPLOYMENT_ENV unresolved in .env (got '{}') — set it and re-run --generate-config", deployment_env));
-        } else {
-            std::string nginx_bin;
-            for (const char* kSub : {"bin", "sbin"}) {
-                fs::path candidate = fs::path(deployment_env) / kSub / "nginx";
-                std::error_code ec;
-                auto st = fs::status(candidate, ec);
-                if (!ec && fs::is_regular_file(st)) {
-                    nginx_bin = candidate.string();
-                    break;
+        // Check well-known system nginx locations.
+        static constexpr std::array<const char*, 4> kNginxCandidates = {
+            "/usr/sbin/nginx", "/usr/bin/nginx", "/usr/local/sbin/nginx", "/usr/local/bin/nginx"};
+        std::string nginx_bin;
+        for (const char* p : kNginxCandidates) {
+            std::error_code ec;
+            if (fs::is_regular_file(fs::path(p), ec)) {
+                nginx_bin = p;
+                break;
+            }
+        }
+        // Also honour SGRN_DEPLOYMENT_ENV for non-/usr custom installs.
+        if (nginx_bin.empty()) {
+            std::string deployment_env = sgrn::utils::env::get("SGRN_DEPLOYMENT_ENV", "");
+            if (!deployment_env.empty() && deployment_env.find("$ENV{") == std::string::npos) {
+                for (const char* kSub : {"bin", "sbin"}) {
+                    fs::path candidate = fs::path(deployment_env) / kSub / "nginx";
+                    std::error_code ec;
+                    if (fs::is_regular_file(candidate, ec)) {
+                        nginx_bin = candidate.string();
+                        break;
+                    }
                 }
             }
-            if (nginx_bin.empty()) {
-                report.fail(fmt::format("nginx binary not in {}/bin or {}/sbin", deployment_env, deployment_env));
-            } else {
-                report.pass(fmt::format("nginx binary at {}", nginx_bin));
-            }
+        }
+        if (nginx_bin.empty()) {
+            report.fail("nginx binary not found in /usr/sbin, /usr/bin, or /usr/local/sbin");
+        } else {
+            report.pass(fmt::format("nginx binary at {}", nginx_bin));
+        }
 
-            if (fs::exists(fs::path(deployment_env) / "etc" / "nginx" / "mime.types")) {
-                report.pass("mime.types available in deployment env");
-            } else {
-                report.fail(fmt::format("mime.types missing in {}/etc/nginx — staged conf includes it", deployment_env));
+        // mime.types: check system path first, then deployment env.
+        static constexpr std::array<const char*, 2> kMimeCandidates = {"/etc/nginx/mime.types", "/usr/share/nginx/mime.types"};
+        bool mime_found = false;
+        for (const char* mp : kMimeCandidates) {
+            if (fs::exists(fs::path(mp))) {
+                report.pass("mime.types available (system nginx)");
+                mime_found = true;
+                break;
             }
+        }
+        if (!mime_found) {
+            report.fail("mime.types missing — expected at /etc/nginx/mime.types");
         }
     }
 

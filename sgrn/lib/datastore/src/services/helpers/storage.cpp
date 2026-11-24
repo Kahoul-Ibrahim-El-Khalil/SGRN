@@ -84,11 +84,7 @@ Result<FileHash, BackendError> computeHashInMemory(std::string_view t_data) {
     auto hash = utils::computeSha512Data(t_data, utils::HashEncoding::base64url);
     RETURN_ERROR_IF(!hash.has_value(), BackendError(BackendErrorKind::Hashing, std::move(hash.error())));
     result.key = std::move(hash.value());
-
-    auto sha512 = utils::computeSha512Data(t_data, utils::HashEncoding::base64url);
-    RETURN_ERROR_IF(!sha512.has_value(), BackendError(BackendErrorKind::Hashing, std::move(sha512.error())));
-    result.sha512_hex = std::move(sha512.value());
-
+    result.sha512_hex = result.key;
     result.original_size = t_data.size();
     return result;
 }
@@ -104,11 +100,7 @@ Result<FileHash, BackendError> computeHashFromFile(const fs::path& t_file_path) 
     auto hash = utils::computeSha512File(t_file_path, utils::HashEncoding::base64url);
     RETURN_ERROR_IF(!hash.has_value(), BackendError(BackendErrorKind::Hashing, std::move(hash.error())));
     result.key = std::move(hash.value());
-
-    auto sha512 = utils::computeSha512File(t_file_path, utils::HashEncoding::base64url);
-    RETURN_ERROR_IF(!sha512.has_value(), BackendError(BackendErrorKind::Hashing, std::move(sha512.error())));
-    result.sha512_hex = std::move(sha512.value());
-
+    result.sha512_hex = result.key;
     result.original_size = fs::file_size(t_file_path);
     return result;
 }
@@ -155,9 +147,9 @@ Task<Result<std::string, BackendError>> compressInMemory(std::string&& t_data, u
     plugins::Threadpool* p_tp = tp_res.value();
     co_return co_await utils::runInPool(
         p_tp->getPool(), [buffer = std::move(t_data), level = t_compression_level]() -> Result<std::string, BackendError> {
-            auto tp_res = utils::compressStringZstd(buffer, level);
-            RETURN_ERROR_IF(!tp_res, BackendError(BackendErrorKind::Compression, std::move(tp_res.error())));
-            return std::move(tp_res.value());
+            auto comp_res = utils::compressStringZstd(buffer, level);
+            RETURN_ERROR_IF(!comp_res, BackendError(BackendErrorKind::Compression, std::move(comp_res.error())));
+            return std::move(comp_res.value());
         });
 }
 
@@ -178,8 +170,8 @@ Task<Result<fs::path, BackendError>> compressFileAsync(fs::path t_input_path, fs
     plugins::Threadpool* p_tp = tp_res.value();
     co_return co_await p_tp->run(
         [in = std::move(t_input_path), out = std::move(t_output_path), level = t_compression_level]() -> Result<fs::path, BackendError> {
-            auto tp_res = utils::compression::compressFileStreamingZstd(in, out, level);
-            RETURN_ERROR_IF(tp_res.hasError(), BackendError(BackendErrorKind::Runtime, std::move(tp_res.error())));
+            auto comp_res = utils::compression::compressFileStreamingZstd(in, out, level);
+            RETURN_ERROR_IF(comp_res.hasError(), BackendError(BackendErrorKind::Runtime, std::move(comp_res.error())));
             return out;
         });
 }

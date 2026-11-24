@@ -9,9 +9,8 @@ Type=simple
 
 EnvironmentFile=${SGRN_DATA_DIR}/.env
 # `garage` must be on PATH. Convention: drop the binary (or a symlink to it)
-# in /home/<user>/bin or the datastore's bin dir (${SGRN_BIN_DIR}); the conda
-# env's bin/ is NOT safe — env updates do not preserve stray binaries.
-Environment="PATH=${SGRN_BIN_DIR}:/home/${SGRN_USER}/bin:${SGRN_DEPLOYMENT_ENV}/bin:/usr/local/bin:/usr/bin:/bin"
+# in /home/<user>/bin or the datastore's bin dir (${SGRN_BIN_DIR}).
+Environment="PATH=${SGRN_BIN_DIR}:/home/${SGRN_USER}/bin:/usr/local/bin:/usr/bin:/bin"
 
 ExecStartPre=/usr/bin/mkdir -p ${SGRN_DATA_DIR}/garage/meta ${SGRN_DATA_DIR}/garage/data
 ExecStart=/usr/bin/env garage -c ${SGRN_DATA_DIR}/garage/garage.toml server

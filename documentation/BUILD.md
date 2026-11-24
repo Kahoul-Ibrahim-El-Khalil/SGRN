@@ -1,451 +1,186 @@
-# SGRN Build System Guide
+# SGRN Build, Dependency & Deployment Guide
 
-This document explains the development environment, build workflow, dependency management, and how to extend the system with new third-party libraries.
+This document explains SGRN's **xmake** build system, dependency management, cross-compilation targets, and how to deploy and bootstrap `sgrn_datastore` on a target Linux host.
+
+> **Note:** SGRN has migrated from CMake + Micromamba to **xmake**. No Micromamba/Conda environment or `aws-sdk-cpp` installation is required.
 
 ---
 
 ## Directory Layout
 
-| Directory       | Purpose                                                                  |
-| :-------------- | :----------------------------------------------------------------------- |
-| `cmake/`        | All CMake logic: global config, dep wiring, platform resolvers           |
-| `cmake/deps/`   | Third-party dep declarations (CPM), per-dep cmake files, staging         |
-| `deps/`         | Deps-only sub-project CMakeLists.txt (Phase 1 entry point)               |
-| `sgrn/`         | SGRN component source trees                                              |
-| `.build/`       | CMake build directories — one per preset (gitignored)                    |
-| `.prefix/`      | Staged sysroot: compiled deps + headers (gitignored, populated Phase 1)  |
-| `.dist/`        | Final distribution bundles (gitignored, populated by `--target install`) |
-| `~/.cache/CPM/` | Machine-level CPM source cache — survives build dir wipes                |
-
-> **Note:** There are no git submodules. All third-party source code is downloaded
-> on first configure via [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) and
-> cached persistently in `~/.cache/CPM/`.
-
----
-
-## Two-Phase Build Overview
-
-SGRN uses a **two-phase CMake build**:
-
-```
-Phase 1 — deps build      cmake --preset linux-deps-static
-                          cmake --build --preset linux-deps-static --target install
-                               │  (downloads sources, compiles, stages)
-                               ▼
-                          .prefix/
-                            include/               ← all headers (platform-neutral)
-                            linux-static/lib/      ← compiled .a archives
-                            linux-static/lib/cmake/extern/extern-config.cmake
-
-Phase 2 — main build      cmake --preset linux-static
-                          cmake --build --preset linux-static
-                               │  find_package(extern) → extern-config.cmake
-                               ▼
-                          .dist/linux-static/      ← executables + runtime deps
-```
-
-Phase 1 only needs to run **once per platform**. After that, Phase 2 builds are
-fully incremental.
+| Path                  | Purpose                                                                               |
+| :-------------------- | :------------------------------------------------------------------------------------ |
+| `xmake.lua`           | Root build definition (toolchains, C++23 standard, rules, targets)                    |
+| `deps-versions.lua`   | Centralized dependency version pins (`SGRN_DEPS`)                                     |
+| `xmake/options.lua`   | Build options (`xmake f --name=value`)                                                |
+| `xmake/packages.lua`  | Third-party dependency declarations (`xmake-repo` + custom recipes)                   |
+| `xmake/packages/`     | Custom xmake package recipes (`drogon`, `open62541`, `snap7`, `libpq`, etc.)          |
+| `xmake/rules.lua`     | Compiler policy, hardening flags, sanitizers, and PCH                                 |
+| `xmake/tasks.lua`     | Custom tasks (`stage`, `generate-views`, `crud-generate`)                             |
+| `xmake/modules/sgrn/` | Lua modules for VFS asset compression, web bundling, and ORM/CRUD codegen             |
+| `sgrn/`               | SGRN libraries, apps, CRUD manifests, and web dashboards                              |
+| `.build/`             | xmake build artifacts, compiled binaries (`.build/<plat>/<arch>/<mode>/`), and generated headers |
+| `.prefix/`            | Staged public headers (`.prefix/include/sgrn`) and cached LibTorch                    |
 
 ---
 
-## 1. Environment Setup
+## 1. Prerequisites
 
-SGRN uses a **hybrid toolchain** — compilers from the host conda env, libraries
-from target-specific environments.
+### Build Prerequisites (Development / CI Host)
 
-### Host Environment (required for all targets)
+- **xmake** `>= 2.8.5` (on Ubuntu: `sudo add-apt-repository -y ppa:xmake-io/xmake && sudo apt install -y xmake`; on Debian Trixie+: `sudo apt install -y xmake`)
+- **C++23 compiler**: `gcc` / `g++` (recommended on Linux; locked by `xmake.lua`) or `clang`
+- **Python 3** (for ORM/CRUD codegen and asset generation)
+- **[Bun](https://bun.sh/)** (builds the React/Svelte web dashboards; pass `--web=n` to reuse existing `dist`/`build` outputs)
+- **System dev packages (native Linux — used as prebuilt C libraries by `xmake/packages.lua`)**:
+  ```bash
+  # Debian / Ubuntu
+  sudo apt install build-essential cmake ninja-build pkg-config \
+    libssl-dev zlib1g-dev libzstd-dev libsqlite3-dev libc-ares-dev uuid-dev \
+    libreadline-dev zstd python3
+  ```
+- **Cross-compilation toolchains (optional)**:
+  - Windows x64: `x86_64-w64-mingw32-gcc` / `x86_64-w64-mingw32-g++` (`mingw-w64`)
+  - Linux ARM64: `aarch64-linux-gnu-gcc` / `aarch64-linux-gnu-g++` (`g++-aarch64-linux-gnu`)
+
+### Runtime Prerequisites (Target Linux Deployment Host)
+
+On a target machine running `sgrn_datastore`:
+
+- **PostgreSQL** (`sudo apt install postgresql` / `dnf install postgresql-server`) — managed by system `postgresql.service`
+- **NGINX** (`sudo apt install nginx` / `dnf install nginx`) — started by `SGRN-nginx.service` with SGRN's own `nginx.conf`
+- **Garage v2.x** — single binary placed on `PATH` (e.g., `/usr/local/bin/garage` or alongside `sgrn_datastore` in `SGRN_BIN_DIR`)
+
+---
+
+## 2. Building SGRN
+
+All third-party dependencies are resolved and cached automatically by `xmake` on first configure (`xmake/packages.lua`).
+
+### Native Linux (Static Release — Default)
 
 ```bash
-micromamba create -f SGRN.yml
-micromamba activate SGRN
+xmake f -p linux -m release -y
+xmake
 ```
 
-### Target Sysroot Environments (cross-compilation only)
+Outputs:
 
-> **DO NOT activate these.** They are used only as library prefix directories.
+- Binaries (apps & tests): `.build/linux/x86_64/release/` (`sgrn_datastore`, `gateway`, `s7shell`, `mbproxy`, `sgrn_replay`, `sgrn_dataset`, `sclc`, `sgrn_wal_dump`, `datastore_shell`, etc.)
+- Generated assets & ORM headers: `.build/gen/`
+
+### Native Linux (Debug with Shared Libraries)
 
 ```bash
-micromamba create -f micromamba/SGRN-WIN64.yml  --platform win-64
-micromamba create -f micromamba/SGRN-ARM64.yml  --platform linux-aarch64
+xmake f -p linux -m debug -k shared -y
+xmake
 ```
 
----
+### Cross-Compilation
 
-## 2. First-Time Setup: Source Cache
-
-CPM downloads all third-party sources to `~/.cache/CPM/` on first configure.
-This is machine-level — switching presets or wiping `.build/` does **not**
-trigger re-downloads.
+> `datastore` and `torch` are automatically disabled on `mingw`, `windows`, and `cross` targets (`xmake/options.lua`).
 
 ```bash
-# Optional: override the cache location (already set in CMakePresets.json)
-export CPM_SOURCE_CACHE=~/.cache/CPM
+# Windows x86_64 (MinGW, static runtime) -> .build/mingw/x86_64/release/
+xmake f -p mingw -a x86_64 -m release -y
+xmake -j"$(nproc)"
 
-# First configure downloads CPM.cmake itself (~40 KB) then all deps
-cmake --preset linux-deps-static
+# Linux ARM64 -> .build/cross/arm64/release/
+xmake f -p cross -a arm64 --cross=aarch64-linux-gnu- -m release -y
+xmake -j"$(nproc)"
 ```
 
-After the first configure completes:
+### Running Tests
 
-- All dep sources are in `~/.cache/CPM/`
-- Running `cmake --preset linux-arm64-deps-static` or `cmake --preset win64-deps-static`
-  reuses those sources — **zero re-downloads**
-
----
-
-## 3. Build Workflow
-
-### Phase 1: Build & Stage Dependencies
+Tests are enabled and compiled by default (`--tests=y`):
 
 ```bash
-# Linux x64 (static)
-cmake --preset linux-deps-static
-cmake --build --preset linux-deps-static --target install
-
-# Linux ARM64 (cross-compile)
-cmake --preset linux-arm64-deps-static
-cmake --build --preset linux-arm64-deps-static --target install
-
-# Windows x64 (cross-compile)
-cmake --preset win64-deps-static
-cmake --build --preset win64-deps-static --target install
+xmake -j"$(nproc)"
+xmake test -v -j"$(nproc)"
 ```
 
-Or use the workflow shorthand (configure + build + install in one):
+---
+
+## 3. Build Options & Custom Tasks
+
+Configure options with `xmake f --<option>=<value>`:
+
+| Option         | Default            | Description                                                                                              |
+| :------------- | :----------------- | :------------------------------------------------------------------------------------------------------- |
+| `datastore`    | `y` (native Linux) | Build the datastore backend (Drogon / PostgreSQL)                                                        |
+| `torch`        | `y` (non-Windows)  | Build LibTorch ML targets (`--torch=n` to disable)                                                       |
+| `torch_dir`    | `""`               | Custom LibTorch root (else `$LIBTORCH`, `$TORCH_DIR`, conda, or auto-downloaded to `.prefix/libtorch-*`) |
+| `opc`          | `y`                | Enable OPC UA support in `s7shell`                                                                       |
+| `tests`        | `y`                | Build test executables (compiled by default; run via `xmake test`)                                      |
+| `pch`          | `n`                | Enable precompiled headers (`xmake/pch/`)                                                                |
+| `native`       | `y` (native)       | Pass `-march=native` in release builds                                                                   |
+| `web`          | `y`                | Rebuild web dashboards with Bun (`n` = reuse existing build output)                                      |
+| `sanitize`     | `""`               | Sanitizers: `asan`, `ubsan`, `tsan`, or `asan,ubsan`                                                     |
+| `auto_codegen` | `y`                | Auto-regenerate ORM/CRUD views when SQL or manifests change (`xmake/modules/sgrn/codegen.lua`)           |
+
+Custom tasks:
 
 ```bash
-cmake --workflow --preset linux-deps-static
+xmake stage            # Copy public headers into .prefix/include/sgrn
+xmake generate-views   # Regenerate Drogon ORM models and CRUD views
+xmake crud-generate    # Regenerate CRUD handlers from YAML manifests
 ```
 
-### Phase 2: Build SGRN
+---
+
+## 4. Dependency Management
+
+Dependencies are pinned in `deps-versions.lua` and declared in `xmake/packages.lua`:
+
+- C++ and version-pinned packages (`fmt`, `jsoncpp`, `cxxopts`, `unordered_dense`, `glaze`, `crow`, `asio`, `cpp-httplib`, `ixwebsocket`) come from `xmake-repo` with `{shared = false}`.
+- Standard C system libraries (`openssl`, `zlib`, `zstd`, `sqlite3`, `c-ares`, `libuuid`) use prebuilt system `-dev` packages on native Linux (falling back to `xmake-repo` if absent), and automatically switch to target-arch static source builds (`system = false`) when cross-compiling.
+- Custom/niche packages (`snap7`, `angelscript`, `opener`, `sqlite_modern_cpp`, `open62541`, `drogon`, `libmodbus`, `xml_h`, `reproc`, `libpq`, `readline`, `sgrn_torch`) live in `xmake/packages/*.lua`.
+- S3 operations use the built-in `NativeS3Client` (Drogon `HttpClient` + OpenSSL SigV4) — `aws-sdk-cpp` is no longer used.
+
+---
+
+## 5. Deploying & Bootstrapping `sgrn_datastore`
+
+`sgrn_datastore` is self-contained: it embeds the React dashboard, flattened PostgreSQL schema, NGINX configs, and systemd unit templates. You can copy the single `sgrn_datastore` binary to any Linux machine with `postgresql`, `nginx`, and `garage` installed.
+
+### Quick Start on a Target Machine
 
 ```bash
-# Linux x64
-cmake --preset linux-static && cmake --build --preset linux-static
+# 1. Install system runtime dependencies
+sudo apt install postgresql nginx    # or dnf install postgresql-server nginx
+# Ensure `garage` (v2.x) is in /usr/local/bin/ (or the same directory as sgrn_datastore)
 
-# Linux ARM64
-cmake --preset linux-arm64-static && cmake --build --preset linux-arm64-static
+# 2. Copy the binary
+sudo cp .dist/linux-static/bin/sgrn_datastore /usr/local/bin/
 
-# Windows x64
-cmake --preset win64-static && cmake --build --preset win64-static
+# 3. Initialize secrets, configs, self-signed TLS certs, and PostgreSQL schema
+#    (Add --non-interactive to auto-generate all secrets without prompts)
+sudo sgrn_datastore --init
+
+# 4. Deploy and start systemd units
+sudo sgrn_datastore --config-systemd
+
+# 5. Verify installation & listening ports
+sgrn_datastore --verify-install --allow-insecure
 ```
 
-Phase 2 auto-detects the staged prefix by checking for:
-`.prefix/<platform>/lib/cmake/extern/extern-config.cmake`
+### How Bootstrapping Works
 
-### Install Targets (split for fast iteration)
+- **Operation directory**: Stored at `~/.local/share/sgrn` of the invoking user (`SUDO_USER` is respected when invoked via `sudo`, and files are `chown`ed back to that user).
+- **PostgreSQL**: Uses the system `postgresql.service` on `127.0.0.1:5432`. When `--init` or `--init-db` runs via `sudo` without `POSTGRES_SUPERUSER_PASSWORD`, it automatically bootstraps via Unix socket `peer` auth as the system `postgres` user (`su -s /bin/sh postgres`), requiring no manual `createuser` or `pg_hba.conf` edits.
+- **NGINX**: `SGRN-nginx.service` runs `/usr/bin/env nginx` using SGRN's staged `${SGRN_DATA_DIR}/nginx/nginx.conf`, with temp buffers (`client_body_temp_path`, `proxy_temp_path`, etc.) directed inside `${SGRN_DATA_DIR}/var/tmp/nginx/` so non-root NGINX works under systemd `ProtectSystem=strict`.
+- **Systemd units deployed**:
+  - `SGRN-datastore.service` (`:5000`, requires `postgresql.service`, `SGRN-garage.service`, `SGRN-nginx.service`)
+  - `SGRN-garage.service` (`:3900` S3, `:3903` admin)
+  - `SGRN-nginx.service` (`:80` redirect, `:443` TLS reverse proxy)
+  - `sgrn.service` (umbrella unit)
 
-The install step is split into three custom targets so headers are not
-re-copied on every build, and third-party system libraries (which change
-rarely) are separated from our own binaries. CMake's install mechanism
-checks file timestamps — only files newer than the destination are copied;
-the rest are skipped as "Up-to-date".
-
-| Target                  | What gets installed                                                       | Use case                               |
-| :---------------------- | :------------------------------------------------------------------------ | :------------------------------------- |
-| `install-prefix`        | Headers + `sgrn-config.cmake` → `.prefix/`                                | First-time setup, after header changes |
-| `install-binaries`      | **Our** libs + executables → `.prefix/<platform>/`                        | Every `.cpp` edit (fast)               |
-| `install-deps-binaries` | Third-party system libs (OpenSSL, zstd, etc.) → `.prefix/<platform>/lib/` | Rarely; first build or dep updates     |
-| `install`               | Everything (built-in CMake target)                                        | CI, final builds                       |
-
-**Typical dev loop** (after initial `install-prefix` and `install-deps-binaries`):
+### Useful Maintenance Flags
 
 ```bash
-cmake --build .build/linux-static-release -j12 --target install-binaries
+sgrn_datastore --generate-config        # Re-render staged configs & systemd templates without touching .env secrets
+sudo sgrn_datastore --init-db --force   # Drop & recreate database from embedded schema
+sgrn_datastore --rotate POSTGRES_PASSWORD --rotate JWT_SECRET
+sgrn_datastore --backup-db              # pg_dump backup into ~/.local/share/sgrn/backup/
+sgrn_datastore --backup-garage          # S3 object backup with SHA-512 verification
 ```
-
-This only copies the libraries and executables that changed since the last
-install — headers and system libs are untouched.
-
----
-
-## 4. Sysroot Layout (`.prefix/`)
-
-After Phase 1, `.prefix/` looks like:
-
-```
-.prefix/
-├── include/                       ← ALL headers (shared, one copy per dep)
-│   ├── fmt/
-│   ├── json/                      ← jsoncpp
-│   ├── open62541/
-│   ├── snap7cpp/
-│   ├── angelscript/
-│   ├── ixwebsocket/
-│   ├── drogon/  trantor/
-│   ├── modbus/
-│   ├── opener/
-│   ├── httplib/
-│   ├── s7codec/
-│   └── sqlite_modern_cpp.h
-│
-└── linux-static/                  ← platform-specific
-    └── lib/
-        ├── libfmt.a
-        ├── libjsoncpp.a
-        ├── libopen62541.a
-        ├── libsnap7cpp.a
-        ├── libangelscript.a
-        ├── libangelscript_addons.a
-        ├── libixwebsocket.a
-        ├── libdrogon.a
-        ├── libtrantor.a
-        ├── libmodbus.a
-        ├── libopener.a
-        └── cmake/extern/
-            └── extern-config.cmake
-```
-
----
-
-## 5. Dependency Management
-
-All third-party dependencies are managed by **CPM.cmake** via
-`cmake/deps/FetchDeps.cmake`. There are **no git submodules**.
-
-### How sources are fetched
-
-| Strategy      | Used for                          | Speed   |
-| :------------ | :-------------------------------- | :------ |
-| URL tarball   | Deps with GitHub release archives | Fastest |
-| Shallow clone | Deps with no release archives     | Fast    |
-
-CPM caches sources in `~/.cache/CPM/` (set by `CPM_SOURCE_CACHE` in
-`CMakePresets.json`). This cache is:
-
-- **Machine-level**: shared across all presets and projects
-- **Persistent**: survives `rm -rf .build/`
-- **Deduplicated**: the same version of a dep is never downloaded twice
-
-### Current dependencies
-
-| Library           | Version    | Fetch method  |
-| :---------------- | :--------- | :------------ |
-| fmt               | 12.1.0     | URL tarball   |
-| jsoncpp           | 1.9.8      | URL tarball   |
-| open62541         | v1.4.15    | URL tarball   |
-| ixwebsocket       | v12.0.1    | URL tarball   |
-| libmodbus         | v3.1.12    | URL tarball   |
-| cpp-httplib       | v0.53.0    | URL tarball   |
-| sqlite_modern_cpp | v3.2       | URL tarball   |
-| snap7             | main       | Shallow clone |
-| angelscript       | SHA pinned | Shallow clone |
-| opener            | master     | Shallow clone |
-| drogon            | v1.9.13    | Shallow clone |
-| glaze             | 9.1.0      | Shallow clone |
-| xml_h             | SHA pinned | Shallow clone |
-
----
-
-## 6. Adding a New Third-Party Dependency
-
-### Step 1 — Register in `cmake/deps/FetchDeps.cmake`
-
-Add the download metadata. Prefer URL tarballs for deps with GitHub releases:
-
-```cmake
-# Option A: URL tarball (preferred — fastest)
-set(SGRN_DEP_mylib_URL "https://github.com/org/mylib/archive/refs/tags/v1.2.3.tar.gz")
-
-# Option B: Shallow git clone (for deps without release archives)
-set(SGRN_DEP_mylib_REPO "https://github.com/org/mylib.git")
-set(SGRN_DEP_mylib_TAG  "v1.2.3")
-```
-
-### Step 2 — Create `cmake/deps/mylib.cmake`
-
-This file is responsible for building the library:
-
-```cmake
-# cmake/deps/mylib.cmake
-# Exposes: extern::mylib
-
-if(TARGET extern::mylib)
-    return()
-endif()
-
-sgrn_fetch_source(mylib)   # ← downloads + sets mylib_SOURCE_DIR
-
-# Set any CMake options BEFORE add_subdirectory
-set(MYLIB_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-
-add_subdirectory("${mylib_SOURCE_DIR}"
-    "${CMAKE_CURRENT_BINARY_DIR}/mylib"
-    EXCLUDE_FROM_ALL
-)
-
-if(TARGET mylib)
-    add_library(extern::mylib ALIAS mylib)
-    sgrn_add_to_install(mylib)
-endif()
-```
-
-For **header-only** deps, skip `add_subdirectory` and just create an INTERFACE target:
-
-```cmake
-sgrn_fetch_source(mylib)
-if(NOT TARGET extern::mylib)
-    add_library(mylib INTERFACE)
-    target_include_directories(mylib SYSTEM INTERFACE "${mylib_SOURCE_DIR}/include")
-    add_library(extern::mylib ALIAS mylib)
-endif()
-```
-
-### Step 3 — Include in `deps/CMakeLists.txt`
-
-Add the include alongside the other deps:
-
-```cmake
-include(${CMAKE_CURRENT_LIST_DIR}/../cmake/deps/mylib.cmake)
-```
-
-### Step 4 — Add to `cmake/deps/staging.cmake`
-
-So the library and its headers are installed into `.prefix/`:
-
-```cmake
-# Section 1 — library install (if compiled, not header-only)
-# The sgrn_add_to_install() call in step 2 handles this automatically.
-
-# Section 2 — header install
-install(DIRECTORY "${mylib_SOURCE_DIR}/include/mylib"
-    DESTINATION "${_INC}"
-    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
-)
-
-# Section 3 — add an imported target to extern-config.cmake
-# Append to EXTERN_CONFIG_CONTENT near the other target blocks:
-string(APPEND EXTERN_CONFIG_CONTENT "
-add_library(extern::mylib STATIC IMPORTED GLOBAL)
-set_target_properties(extern::mylib PROPERTIES
-    IMPORTED_LOCATION \"\${_lib}/libmylib.a\"
-    INTERFACE_INCLUDE_DIRECTORIES \"\${_inc}\"
-)
-")
-```
-
-### Step 5 — Wire into the root `CMakeLists.txt`
-
-```cmake
-# Declare the sgrn:: alias
-sgrn_alias(sgrn::mylib)
-
-# Link the source-build target to the alias
-sgrn_link_dependency(sgrn::mylib mylib extern::mylib)
-```
-
-### Step 6 — Add fallback for non-installed-deps mode
-
-If the library is consumed in normal (non-deps-only) builds, add it to
-`cmake/deps/header_only.cmake` (for header-only) or create a small
-`cmake/deps/mylib_consume.cmake` that uses `find_package` as fallback.
-
----
-
-## 7. Key CMake Variables
-
-| Variable                  | Set in               | Meaning                                         |
-| :------------------------ | :------------------- | :---------------------------------------------- |
-| `SGRN_SHARED_PREFIX`      | `cmake/global.cmake` | `.prefix/` — architecture-neutral header root   |
-| `SGRN_LOCAL_PREFIX`       | `cmake/global.cmake` | `.prefix/<platform>` — platform-specific libs   |
-| `SGRN_CONDA_PREFIX`       | `cmake/global.cmake` | Active conda env root                           |
-| `SGRN_USE_INSTALLED_DEPS` | `CMakeLists.txt`     | Auto-ON when `extern-config.cmake` exists       |
-| `SGRN_DEPS_ONLY`          | preset (`base-deps`) | ON in `*-deps*` presets — skips SGRN components |
-| `SGRN_BUILD_STATIC`       | preset               | ON for static builds                            |
-| `CPM_SOURCE_CACHE`        | `CMakePresets.json`  | `~/.cache/CPM` — persistent dep source cache    |
-| `FETCHCONTENT_BASE_DIR`   | `CMakePresets.json`  | `.build/_deps` — build-local fallback cache     |
-
----
-
-## 8. File Map
-
-### `cmake/deps/` — Dependency layer
-
-| File                    | Role                                                                    |
-| :---------------------- | :---------------------------------------------------------------------- |
-| `FetchDeps.cmake`       | CPM bootstrap + all dep download metadata + `sgrn_fetch_source()`       |
-| `<dep>.cmake`           | Per-dep: populate source, set options, add_subdirectory, alias          |
-| `jsoncpp_consume.cmake` | Consumer-side jsoncpp resolver (installed/source/system fallback)       |
-| `staging.cmake`         | Phase 1 install pipeline → `.prefix/` + generates `extern-config.cmake` |
-| `hardening.cmake`       | Compiler hardening flags for the deps build                             |
-| `linux.cmake`           | Linux-native dep resolver (Phase 2)                                     |
-| `arm64.cmake`           | ARM64 cross-compile dep resolver (Phase 2)                              |
-| `win64.cmake`           | Win64 cross-compile dep resolver (Phase 2)                              |
-| `fmt.cmake`             | `sgrn::fmt` resolver (deps-only produce + normal consume)               |
-| `header_only.cmake`     | INTERFACE targets: glaze, httplib, xml_h, sqlite_modern_cpp             |
-| `s7codec.cmake`         | s7codec header-only target                                              |
-
-### `cmake/` — Main build logic
-
-| File                 | Role                                                                     |
-| :------------------- | :----------------------------------------------------------------------- |
-| `global.cmake`       | Source of truth — prefix paths, `sgrn_alias()`, `sgrn_link_dependency()` |
-| `macros.cmake`       | Low-level CMake utilities                                                |
-| `targets.cmake`      | Component library/executable helpers                                     |
-| `deps.cmake`         | Orchestrator — includes platform resolver + header_only                  |
-| `pch.cmake`          | Tiered PCH system                                                        |
-| `packaging.cmake`    | Runtime `.so` harvester for distribution bundles                         |
-| `staging_sgrn.cmake` | SGRN's own install pipeline + `sgrn-config.cmake` generation             |
-
----
-
-## 9. Troubleshooting
-
-| Symptom                                                          | Fix                                                                                                                                                          |
-| :--------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CPM.cmake` download fails                                       | Place `CPM_0.42.0.cmake` manually in `~/.cache/CPM/cpm/`                                                                                                     |
-| Dep source not found                                             | Delete `~/.cache/CPM/<dep>/` and re-configure to force re-download                                                                                           |
-| `find_package(extern)` fails                                     | Run the appropriate `*-deps*` preset first to populate `.prefix/`                                                                                            |
-| Wrong headers after dep update                                   | `rm -rf .prefix/ .build/` and rebuild from Phase 1                                                                                                           |
-| ARM64: missing `string_view`                                     | Ensure `SGRN-ARM64` conda env is up-to-date (`micromamba update`)                                                                                            |
-| Windows: missing DLLs in `.dist/`                                | Verify dep is in `SGRN-WIN64` conda env and `SGRN_WIN64_PREFIX` is set                                                                                       |
-| clangd / LSP shows no symbols or "no compilation database found" | The root `compile_commands.json` symlink is missing. Run `./scripts/link_ccab.sh` (see [Editor / Language Server](#10-editor--language-server-clangd) below) |
-
----
-
-## 10. Editor / Language Server (clangd)
-
-### How clangd finds the compilation database
-
-clangd reads `compile_commands.json` from the project root. That root file is
-**not** committed to git — it is a symlink (managed by `.gitignore`) that points
-into the build tree:
-
-```
-compile_commands.json → .build/<preset>/compile_commands.json
-```
-
-CMake generates the real file inside each build directory because the
-`base-common` preset sets `CMAKE_EXPORT_COMPILE_COMMANDS=ON`.
-
-### Linking the database
-
-After any successful `cmake --preset` configure, run:
-
-```bash
-./scripts/link_ccab.sh              # defaults to linux-static-release
-./scripts/link_ccab.sh linux        # switch to the Debug linux preset
-```
-
-The script validates that the target build's `compile_commands.json` exists
-before creating the symlink, and will error out with a hint to run `cmake --preset`
-first if it doesn't.
-
-After re-linking, restart the language server to pick up the new database:
-
-```vim
-" Neovim (nvim-lspconfig)
-:LspRestart
-```
-
-### If clangd still shows no symbols
-
-1. **Verify the symlink resolves:** `readlink -f compile_commands.json`
-2. **Verify it's valid JSON:** `python3 -c "import json; print(len(json.load(open('compile_commands.json'))))"`
-3. **Check the build directory actually ran CMake configure** — if
-   `.build/linux-static-release/compile_commands.json` is missing, re-run
-   `cmake --preset linux-static-release` and then `./scripts/link_ccab.sh` again.
-4. **Check clangd logs** (`:checkhealth` in nvim or `clangd --log=verbose` from
-   the terminal) for "no compilation database found" messages pointing to a
-   stale or broken symlink.

@@ -1,5 +1,5 @@
 [Unit]
-Description=NGINX (Micromamba SGRN)
+Description=NGINX (System)
 After=network.target
 
 [Service]
@@ -8,8 +8,7 @@ Group=${SGRN_USER}
 Type=simple
 
 EnvironmentFile=${SGRN_DATA_DIR}/.env
-Environment="PATH=${SGRN_DEPLOYMENT_ENV}/bin:${SGRN_DEPLOYMENT_ENV}/sbin:/usr/local/bin:/usr/bin:/bin"
-Environment="LD_LIBRARY_PATH=${SGRN_DEPLOYMENT_ENV}/lib"
+Environment="PATH=/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin:/sbin:/bin"
 
 ExecStart=/usr/bin/env nginx \
     -p ${SGRN_DATA_DIR} \

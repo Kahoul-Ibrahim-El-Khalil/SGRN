@@ -396,7 +396,7 @@ Result<PlcSchemaStore, SclError> SclCompiler::compileFiles(const std::vector<std
 
 // ── Phase 2: Emit outputs ───────────────────────────────────────────────────
 
-Result<void, SclError> SclCompiler::emitJson(const PlcSchemaStore& t_store, const std::string& t_output_path, bool t_pretty) {
+Result<void, SclError> SclCompiler::emitJson(const PlcSchemaStore& t_store, const std::string& t_output_path, bool /*t_pretty*/) {
     return t_store.saveToJsonFile(t_output_path);
 }
 

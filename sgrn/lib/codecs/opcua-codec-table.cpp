@@ -26,8 +26,8 @@
 #include <sgrn/scl/types/DataType.hpp>
 #include <cstring>
 #include <iterator>
+#include <open62541/types.h>
 #include <open62541/types_generated.h>
-#include <open62541/types_generated_handling.h>
 #include <s7codec/codec.hpp>
 
 using s7codec::DecodedValue;

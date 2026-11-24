@@ -34,30 +34,10 @@ class ExperimentRun:
 
 
 def binary(name: str) -> Path:
-    exts = [".exe", ""] if sys.platform == "win32" else ["", ".exe"]
-    names = [f"{name}{ext}" for ext in exts]
-
-    candidate_dirs = (
-        ROOT / ".dist/win64-native-static",
-        ROOT / ".dist/win64-static",
-        ROOT / ".dist/linux-static-release",
-        ROOT / ".dist/linux-static",
-        ROOT / ".prefix/win64-static/bin",
-        ROOT / ".prefix/bin",
-        ROOT / ".build/win64-native-static/sgrn/apps/gateway",
-        ROOT / ".build/win64-native-static/sgrn/apps/s7shell",
-        ROOT / ".build/linux-static-release",
-    )
-    for directory in candidate_dirs:
-        for n in names:
-            candidate = directory / n
-            if candidate.is_file() and (sys.platform == "win32" or os.access(candidate, os.X_OK)):
-                return candidate
-    for n in names:
-        found = shutil.which(n)
-        if found:
-            return Path(found)
-    raise FileNotFoundError(f"Cannot find {name}; build/install the binaries first.")
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from scripts.find_bin import require_binary
+    return require_binary(name, root=ROOT)
 
 
 def discoverExperiments() -> list[Path]:

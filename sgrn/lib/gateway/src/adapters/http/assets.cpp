@@ -142,7 +142,7 @@ void HttpAdapter::registerWebAssets(GatewayApp& t_app) {
                 http::applyCors(crow_res, t_crow_req);
                 return crow_res;
             }
-            const auto& asset = web::ASSETS[i];
+            const auto& entry_asset = web::ASSETS[i];
             http::HttpRequest t_req = http::fromCrowRequest(t_crow_req);
             http::HttpResponse t_res;
 
@@ -157,14 +157,14 @@ void HttpAdapter::registerWebAssets(GatewayApp& t_app) {
 
             if (serve_precompressed) {
                 t_res.set_header("Content-Encoding", "zstd");
-                t_res.set_content(
-                    reinterpret_cast<const char*>(asset.compressed_data), asset.compressed_size, std::string(asset.content_type.data()));
+                t_res.set_content(reinterpret_cast<const char*>(entry_asset.compressed_data), entry_asset.compressed_size,
+                    std::string(entry_asset.content_type.data()));
             } else {
                 std::call_once(*flag, [&]() {
-                    auto decompressed = sgrn::utils::compression::decompressStringZstd(asset.compressedView());
+                    auto decompressed = sgrn::utils::compression::decompressStringZstd(entry_asset.compressedView());
 
                     if (decompressed.hasError()) {
-                        SGRN_ERROR("Gateway", "Decompress failed for {}: {}", asset.virtual_path, decompressed.error());
+                        SGRN_ERROR("Gateway", "Decompress failed for {}: {}", entry_asset.virtual_path, decompressed.error());
                         *has_error = true;
                         return;
                     }
@@ -172,11 +172,11 @@ void HttpAdapter::registerWebAssets(GatewayApp& t_app) {
                     *cached = std::move(decompressed.value());
                 });
 
-                if (*has_error || (cached->empty() && asset.original_size > 0)) {
+                if (*has_error || (cached->empty() && entry_asset.original_size > 0)) {
                     t_res.status = 500;
                     t_res.set_content("Failed to decompress asset", "text/plain");
                 } else if (!is_entry) {
-                    t_res.set_content(cached->data(), cached->size(), std::string(asset.content_type.data()));
+                    t_res.set_content(cached->data(), cached->size(), std::string(entry_asset.content_type.data()));
                 } else {
                     const std::string prefix = forwardedPrefix(t_req);
                     std::lock_guard<std::mutex> lock(*variants_mutex);
@@ -186,7 +186,7 @@ void HttpAdapter::registerWebAssets(GatewayApp& t_app) {
                         replaceAll(patched, "<!-- SGRN_RUNTIME_HEAD -->", runtimeHead(prefix));
                         it = variants->emplace(prefix, std::move(patched)).first;
                     }
-                    t_res.set_content(it->second.data(), it->second.size(), std::string(asset.content_type.data()));
+                    t_res.set_content(it->second.data(), it->second.size(), std::string(entry_asset.content_type.data()));
                 }
             }
 

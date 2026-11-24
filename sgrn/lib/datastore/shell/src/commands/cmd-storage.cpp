@@ -19,35 +19,6 @@ Result<void> DatastoreShell::cmdInfo() {
     return {};
 }
 
-namespace
-{
-
-// --flag VALUE option parser shared by the storage-admin commands.
-std::string shellFlag(const std::vector<std::string>& t_args, const std::string& t_flag, const std::string& t_dflt = "") {
-    for (size_t i = 0; i + 1 < t_args.size(); ++i) {
-        if (t_args[i] == t_flag)
-            return t_args[i + 1];
-    }
-    return t_dflt;
-}
-
-bool shellHasFlag(const std::vector<std::string>& t_args, const std::string& t_flag) {
-    return std::find(t_args.begin(), t_args.end(), t_flag) != t_args.end();
-}
-
-uint32_t shellUint(const std::vector<std::string>& t_args, const std::string& t_flag, uint32_t t_dflt) {
-    const std::string raw = shellFlag(t_args, t_flag);
-    if (raw.empty())
-        return t_dflt;
-    try {
-        return static_cast<uint32_t>(std::stoul(raw));
-    } catch (const std::exception&) {
-        return t_dflt;
-    }
-}
-
-} // namespace
-
 Result<void> DatastoreShell::cmdStorageOverview(const std::vector<std::string>& t_args) {
     RETURN_ERROR_IF(!client_, "not connected");
     auto r = client_->tryStorageAdminOverview(shellUint(t_args, "--max-pages", 10));

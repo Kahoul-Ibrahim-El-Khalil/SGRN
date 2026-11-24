@@ -3,8 +3,8 @@
 #include <fmt/core.h>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/encoding.hpp>
+#include <sgrn/utils/hashing.hpp>
 #include <openssl/evp.h>
-#include <openssl/hmac.h>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -52,13 +52,8 @@ static std::string base64UrlDecode(std::string_view t_input) {
 
 // Compute HMAC-SHA256 and return base64url encoded result
 static std::string computeSignature(std::string_view t_payload, std::string_view t_secret) {
-    unsigned char hash[EVP_MAX_MD_SIZE];
-    unsigned int hash_len = 0;
-
-    HMAC(EVP_sha256(), t_secret.data(), t_secret.length(), reinterpret_cast<const unsigned char*>(t_payload.data()), t_payload.length(),
-        hash, &hash_len);
-
-    return ::sgrn::utils::encoding::toBase64Url(hash, hash_len);
+    auto sig = ::sgrn::utils::computeHmacSha256(t_secret, t_payload, ::sgrn::utils::HashEncoding::base64url);
+    return sig.hasValue() ? *sig : std::string{};
 }
 
 Result<std::string> generateToken(const Json::Value& t_claims, const std::string& t_secret) {

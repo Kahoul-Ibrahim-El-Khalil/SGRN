@@ -63,9 +63,36 @@ inline std::string toUpper(std::string t_str) {
 /**
  * @brief Convert a string to lowercase.
  */
-inline std::string toLower(std::string t_str) {
-    std::transform(t_str.begin(), t_str.end(), t_str.begin(), [](unsigned char t_ch) { return static_cast<char>(std::tolower(t_ch)); });
-    return t_str;
+inline std::string toLower(std::string_view t_str) {
+    std::string out;
+    out.reserve(t_str.size());
+    for (unsigned char c : t_str)
+        out.push_back(static_cast<char>(std::tolower(c)));
+    return out;
+}
+
+/**
+ * @brief Trim leading/trailing whitespace and collapse internal runs of whitespace to a single space.
+ */
+inline std::string collapseWhitespace(std::string_view t_str) {
+    std::string result;
+    result.reserve(t_str.size());
+    bool in_space = true; // trims leading whitespace
+    for (unsigned char c : t_str) {
+        if (std::isspace(c)) {
+            if (!in_space) {
+                result.push_back(' ');
+                in_space = true;
+            }
+        } else {
+            result.push_back(static_cast<char>(c));
+            in_space = false;
+        }
+    }
+    if (!result.empty() && result.back() == ' ') {
+        result.pop_back();
+    }
+    return result;
 }
 
 /**
@@ -73,24 +100,7 @@ inline std::string toLower(std::string t_str) {
  *        Example: "  kahoul   ibrahim el-khalil  " -> "KAHOUL IBRAHIM EL-KHALIL"
  */
 inline std::string normalizeName(std::string t_str) {
-    std::string result;
-    bool in_space = true; // start with true to trim leading
-    for (unsigned char c : t_str) {
-        if (std::isspace(c)) {
-            if (!in_space) {
-                result += ' ';
-                in_space = true;
-            }
-        } else {
-            result += static_cast<char>(std::toupper(c));
-            in_space = false;
-        }
-    }
-    // Remove trailing space if any
-    if (!result.empty() && result.back() == ' ') {
-        result.pop_back();
-    }
-    return result;
+    return toUpper(collapseWhitespace(t_str));
 }
 
 /**

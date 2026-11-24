@@ -28,7 +28,7 @@
  *   --fresh                    wipe dev DB + Garage data, then re-init
  *
  * Env var overrides:
- *   SGRN_BUILD_DIR             path to CMake build dir        (default: <root>/.build/linux-static-release)
+ *   SGRN_BUILD_DIR             path to build output dir       (default: <root>/.build/linux/x86_64/{release,debug})
  *   SGRN_DEV_CONFIG            path to Drogon dev JSON        (default: sgrn/lib/datastore/configs/sgrn.dev.json)
  *   SGRN_DEV_PORT              backend listen port            (default: 5001)
  *   SGRN_DEV_DB                dev PostgreSQL database name   (default: sgrn_dev)
@@ -52,10 +52,31 @@ import { randomBytes } from "crypto";
 
 // ── Paths ─────────────────────────────────────────────────────────────────────
 const ROOT = path.resolve(import.meta.dir, "../../..");
-const BUILD_DIR = process.env.SGRN_BUILD_DIR ?? path.join(ROOT, ".build/linux-static-release");
 const DEV_CONFIG = process.env.SGRN_DEV_CONFIG ?? path.join(ROOT, "sgrn/lib/datastore/configs/sgrn.dev.json");
 const DEV_PORT = process.env.SGRN_DEV_PORT ?? "5001";
-const BINARY = path.join(BUILD_DIR, "sgrn/apps/datastore/sgrn_datastore");
+
+async function resolveDatastoreBinary(): Promise<string> {
+    const exe = process.platform === "win32" ? "sgrn_datastore.exe" : "sgrn_datastore";
+    const candidates: string[] = [];
+    if (process.env.SGRN_BUILD_DIR) {
+        candidates.push(
+            path.join(process.env.SGRN_BUILD_DIR, exe),
+            path.join(process.env.SGRN_BUILD_DIR, "sgrn/apps/datastore", exe),
+        );
+    }
+    const arch = process.arch === "arm64" ? "arm64" : "x86_64";
+    const plat = process.platform === "darwin" ? "macosx" : process.platform === "win32" ? "windows" : "linux";
+    candidates.push(
+        path.join(ROOT, `.build/${plat}/${arch}/release/${exe}`),
+        path.join(ROOT, `.build/${plat}/${arch}/debug/${exe}`),
+        path.join(ROOT, `.build/linux-static-release/sgrn/apps/datastore/${exe}`),
+    );
+    for (const c of candidates) {
+        if (await Bun.file(c).exists()) return c;
+    }
+    return candidates[0];
+}
+const BINARY = await resolveDatastoreBinary();
 
 // ── Database config ───────────────────────────────────────────────────────────
 // Superuser: scripts/db.py runs initdb WITHOUT -U, so the cluster superuser is
@@ -82,7 +103,7 @@ const DEV_SEED = path.join(ROOT, "sgrn/web/datastore/dev/seed.sql");
 // ── Validate binary ───────────────────────────────────────────────────────────
 if (!(await Bun.file(BINARY).exists())) {
     console.error(`\nerror: Binary not found: ${BINARY}`);
-    console.error(`    Build it first:  cmake --build ${BUILD_DIR} --target sgrn_datastore\n`);
+    console.error(`    Build it first:  xmake build sgrn_datastore\n`);
     process.exit(1);
 }
 

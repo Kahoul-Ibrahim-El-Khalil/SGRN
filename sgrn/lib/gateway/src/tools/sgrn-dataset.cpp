@@ -873,7 +873,7 @@ void DatasetProcessor::processBinaryArchive(const std::filesystem::path& t_path,
     }
 }
 
-void DatasetProcessor::processJsonlArchive(const std::filesystem::path& t_path, const std::string& t_content) {
+void DatasetProcessor::processJsonlArchive(const std::filesystem::path& /*t_path*/, const std::string& t_content) {
     std::istringstream stream(t_content);
     std::string line;
     std::vector<std::string> path_by_id; // reset per file: dictionary line is file-local

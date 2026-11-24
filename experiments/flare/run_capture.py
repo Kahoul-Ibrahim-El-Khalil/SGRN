@@ -44,18 +44,10 @@ from config_loader import loadConfig, getConfigPath
 
 
 def findBinary(name: str) -> Path:
-    app_name = {"sgrn_replay": "replay"}.get(name, name)
-    paths = (
-        ROOT / ".dist/linux-static-release" / name,
-        ROOT / ".dist/linux-static" / name,
-        ROOT / ".prefix/bin" / name,
-        ROOT / ".build/linux-static-release" / name,
-        ROOT / ".build/linux-static-release/sgrn/apps" / app_name / name,
-    )
-    for path in paths:
-        if path.is_file() and os.access(path, os.X_OK):
-            return path
-    raise FileNotFoundError(f"Cannot find binary {name}; check .dist/linux-static-release/")
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from scripts.find_bin import require_binary
+    return require_binary(name, root=ROOT, check_path=False)
 
 
 def waitHttp(url: str, proc: subprocess.Popen, timeout: float = 30.0) -> None:
@@ -383,7 +375,7 @@ def runCaptureLocal(args, cfg: dict, run_dir: Path, out_dir: Path, ticks_per_day
     # decodes with complete element columns (towers[0..2], valves, detectors)
     # and stays the single human-inspectable transfer artifact.
     final_archive = out_dir / "flare_history.jsonl.zst"
-    merge_bin = ROOT / ".dist/linux-static-release/sgrn_dataset"
+    merge_bin = findBinary("sgrn_dataset")
     res = subprocess.run(
         [str(merge_bin), "--merge", str(final_archive), "-f", "jsonl", str(capture_dir)],
         capture_output=True, text=True,

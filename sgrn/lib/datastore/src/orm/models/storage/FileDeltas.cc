@@ -1,4 +1,3 @@
-
 /**
  *
  *  FileDeltas.cc
@@ -7,9 +6,7 @@
  */
 
 #include "FileDeltas.h"
-
 #include <drogon/utils/Utilities.h>
-
 #include <string>
 
 using namespace drogon;
@@ -17,88 +14,57 @@ using namespace drogon::orm;
 using namespace drogon_model::sgrn::storage;
 
 const std::string FileDeltas::Cols::_id = "\"id\"";
-
 const std::string FileDeltas::Cols::_file_id = "\"file_id\"";
-
 const std::string FileDeltas::Cols::_version_id1 = "\"version_id1\"";
-
 const std::string FileDeltas::Cols::_version_id2 = "\"version_id2\"";
-
 const std::string FileDeltas::Cols::_object_id = "\"object_id\"";
-
 const std::string FileDeltas::Cols::_hash = "\"hash\"";
-
 const std::string FileDeltas::Cols::_algorithm = "\"algorithm\"";
-
 const std::string FileDeltas::Cols::_delta_size = "\"delta_size\"";
-
 const std::string FileDeltas::Cols::_created_at = "\"created_at\"";
-
 const std::string FileDeltas::primaryKeyName = "id";
-
 const bool FileDeltas::hasPrimaryKey = true;
-
 const std::string FileDeltas::tableName = "storage.\"file_deltas\"";
 
-const std::vector<typename FileDeltas::MetaData> FileDeltas::metaData_ = {
-    {"id", "int64_t", "bigint", 8, 1, 1, 1}, {"file_id", "int64_t", "bigint", 8, 0, 0, 1}, {"version_id1", "int64_t", "bigint", 8, 0, 0, 1},
+const std::vector<typename FileDeltas::MetaData> FileDeltas::metaData_ = {{"id", "int64_t", "bigint", 8, 1, 1, 1},
+    {"file_id", "int64_t", "bigint", 8, 0, 0, 1}, {"version_id1", "int64_t", "bigint", 8, 0, 0, 1},
     {"version_id2", "int64_t", "bigint", 8, 0, 0, 1}, {"object_id", "int64_t", "bigint", 8, 0, 0, 1},
     {"hash", "std::string", "character varying", 88, 0, 0, 1}, {"algorithm", "std::string", "text", 0, 0, 0, 1},
-    {"delta_size", "int64_t", "bigint", 8, 0, 0, 1}, {"created_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1}
-
-};
+    {"delta_size", "int64_t", "bigint", 8, 0, 0, 1}, {"created_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1}};
 const std::string& FileDeltas::getColumnName(size_t index) noexcept(false) {
     assert(index < metaData_.size());
     return metaData_[index].colName_;
 }
 FileDeltas::FileDeltas(const Row& r, const ssize_t indexOffset) noexcept {
     if (indexOffset < 0) {
-
         if (!r["id"].isNull()) {
-
             id_ = std::make_shared<int64_t>(r["id"].as<int64_t>());
         }
-
         if (!r["file_id"].isNull()) {
-
             fileId_ = std::make_shared<int64_t>(r["file_id"].as<int64_t>());
         }
-
         if (!r["version_id1"].isNull()) {
-
             versionId1_ = std::make_shared<int64_t>(r["version_id1"].as<int64_t>());
         }
-
         if (!r["version_id2"].isNull()) {
-
             versionId2_ = std::make_shared<int64_t>(r["version_id2"].as<int64_t>());
         }
-
         if (!r["object_id"].isNull()) {
-
             objectId_ = std::make_shared<int64_t>(r["object_id"].as<int64_t>());
         }
-
         if (!r["hash"].isNull()) {
-
             hash_ = std::make_shared<std::string>(r["hash"].as<std::string>());
         }
-
         if (!r["algorithm"].isNull()) {
-
             algorithm_ = std::make_shared<std::string>(r["algorithm"].as<std::string>());
         }
-
         if (!r["delta_size"].isNull()) {
-
             deltaSize_ = std::make_shared<int64_t>(r["delta_size"].as<int64_t>());
         }
-
         if (!r["created_at"].isNull()) {
             auto timeStr = r["created_at"].as<std::string>();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -113,7 +79,6 @@ FileDeltas::FileDeltas(const Row& r, const ssize_t indexOffset) noexcept {
                 createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
-
     } else {
         size_t offset = (size_t)indexOffset;
         if (offset + 9 > r.size()) {
@@ -121,61 +86,43 @@ FileDeltas::FileDeltas(const Row& r, const ssize_t indexOffset) noexcept {
             return;
         }
         size_t index;
-
         index = offset + 0;
         if (!r[index].isNull()) {
-
             id_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
-
         index = offset + 1;
         if (!r[index].isNull()) {
-
             fileId_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
-
         index = offset + 2;
         if (!r[index].isNull()) {
-
             versionId1_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
-
         index = offset + 3;
         if (!r[index].isNull()) {
-
             versionId2_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
-
         index = offset + 4;
         if (!r[index].isNull()) {
-
             objectId_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
-
         index = offset + 5;
         if (!r[index].isNull()) {
-
             hash_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
-
         index = offset + 6;
         if (!r[index].isNull()) {
-
             algorithm_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
-
         index = offset + 7;
         if (!r[index].isNull()) {
-
             deltaSize_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
-
         index = offset + 8;
         if (!r[index].isNull()) {
             auto timeStr = r[index].as<std::string>();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -198,70 +145,60 @@ FileDeltas::FileDeltas(const Json::Value& pJson, const std::vector<std::string>&
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
-
     if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         dirtyFlag_[0] = true;
         if (!pJson[pMasqueradingVector[0]].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
         if (!pJson[pMasqueradingVector[1]].isNull()) {
             fileId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[1]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
         if (!pJson[pMasqueradingVector[2]].isNull()) {
             versionId1_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[2]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
         if (!pJson[pMasqueradingVector[3]].isNull()) {
             versionId2_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[3]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
         dirtyFlag_[4] = true;
         if (!pJson[pMasqueradingVector[4]].isNull()) {
             objectId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[4]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
         dirtyFlag_[5] = true;
         if (!pJson[pMasqueradingVector[5]].isNull()) {
             hash_ = std::make_shared<std::string>(pJson[pMasqueradingVector[5]].asString());
         }
     }
-
     if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
         dirtyFlag_[6] = true;
         if (!pJson[pMasqueradingVector[6]].isNull()) {
             algorithm_ = std::make_shared<std::string>(pJson[pMasqueradingVector[6]].asString());
         }
     }
-
     if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
         dirtyFlag_[7] = true;
         if (!pJson[pMasqueradingVector[7]].isNull()) {
             deltaSize_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[7]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8])) {
         dirtyFlag_[8] = true;
         if (!pJson[pMasqueradingVector[8]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[8]].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -280,70 +217,60 @@ FileDeltas::FileDeltas(const Json::Value& pJson, const std::vector<std::string>&
 }
 
 FileDeltas::FileDeltas(const Json::Value& pJson) noexcept(false) {
-
     if (pJson.isMember("id")) {
         dirtyFlag_[0] = true;
         if (!pJson["id"].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson["id"].asInt64());
         }
     }
-
     if (pJson.isMember("file_id")) {
         dirtyFlag_[1] = true;
         if (!pJson["file_id"].isNull()) {
             fileId_ = std::make_shared<int64_t>((int64_t)pJson["file_id"].asInt64());
         }
     }
-
     if (pJson.isMember("version_id1")) {
         dirtyFlag_[2] = true;
         if (!pJson["version_id1"].isNull()) {
             versionId1_ = std::make_shared<int64_t>((int64_t)pJson["version_id1"].asInt64());
         }
     }
-
     if (pJson.isMember("version_id2")) {
         dirtyFlag_[3] = true;
         if (!pJson["version_id2"].isNull()) {
             versionId2_ = std::make_shared<int64_t>((int64_t)pJson["version_id2"].asInt64());
         }
     }
-
     if (pJson.isMember("object_id")) {
         dirtyFlag_[4] = true;
         if (!pJson["object_id"].isNull()) {
             objectId_ = std::make_shared<int64_t>((int64_t)pJson["object_id"].asInt64());
         }
     }
-
     if (pJson.isMember("hash")) {
         dirtyFlag_[5] = true;
         if (!pJson["hash"].isNull()) {
             hash_ = std::make_shared<std::string>(pJson["hash"].asString());
         }
     }
-
     if (pJson.isMember("algorithm")) {
         dirtyFlag_[6] = true;
         if (!pJson["algorithm"].isNull()) {
             algorithm_ = std::make_shared<std::string>(pJson["algorithm"].asString());
         }
     }
-
     if (pJson.isMember("delta_size")) {
         dirtyFlag_[7] = true;
         if (!pJson["delta_size"].isNull()) {
             deltaSize_ = std::make_shared<int64_t>((int64_t)pJson["delta_size"].asInt64());
         }
     }
-
     if (pJson.isMember("created_at")) {
         dirtyFlag_[8] = true;
         if (!pJson["created_at"].isNull()) {
             auto timeStr = pJson["created_at"].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -366,69 +293,59 @@ void FileDeltas::updateByMasqueradedJson(const Json::Value& pJson, const std::ve
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
-
     if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         if (!pJson[pMasqueradingVector[0]].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
         if (!pJson[pMasqueradingVector[1]].isNull()) {
             fileId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[1]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
         if (!pJson[pMasqueradingVector[2]].isNull()) {
             versionId1_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[2]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
         if (!pJson[pMasqueradingVector[3]].isNull()) {
             versionId2_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[3]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
         dirtyFlag_[4] = true;
         if (!pJson[pMasqueradingVector[4]].isNull()) {
             objectId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[4]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
         dirtyFlag_[5] = true;
         if (!pJson[pMasqueradingVector[5]].isNull()) {
             hash_ = std::make_shared<std::string>(pJson[pMasqueradingVector[5]].asString());
         }
     }
-
     if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
         dirtyFlag_[6] = true;
         if (!pJson[pMasqueradingVector[6]].isNull()) {
             algorithm_ = std::make_shared<std::string>(pJson[pMasqueradingVector[6]].asString());
         }
     }
-
     if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
         dirtyFlag_[7] = true;
         if (!pJson[pMasqueradingVector[7]].isNull()) {
             deltaSize_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[7]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8])) {
         dirtyFlag_[8] = true;
         if (!pJson[pMasqueradingVector[8]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[8]].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -447,69 +364,59 @@ void FileDeltas::updateByMasqueradedJson(const Json::Value& pJson, const std::ve
 }
 
 void FileDeltas::updateByJson(const Json::Value& pJson) noexcept(false) {
-
     if (pJson.isMember("id")) {
         if (!pJson["id"].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson["id"].asInt64());
         }
     }
-
     if (pJson.isMember("file_id")) {
         dirtyFlag_[1] = true;
         if (!pJson["file_id"].isNull()) {
             fileId_ = std::make_shared<int64_t>((int64_t)pJson["file_id"].asInt64());
         }
     }
-
     if (pJson.isMember("version_id1")) {
         dirtyFlag_[2] = true;
         if (!pJson["version_id1"].isNull()) {
             versionId1_ = std::make_shared<int64_t>((int64_t)pJson["version_id1"].asInt64());
         }
     }
-
     if (pJson.isMember("version_id2")) {
         dirtyFlag_[3] = true;
         if (!pJson["version_id2"].isNull()) {
             versionId2_ = std::make_shared<int64_t>((int64_t)pJson["version_id2"].asInt64());
         }
     }
-
     if (pJson.isMember("object_id")) {
         dirtyFlag_[4] = true;
         if (!pJson["object_id"].isNull()) {
             objectId_ = std::make_shared<int64_t>((int64_t)pJson["object_id"].asInt64());
         }
     }
-
     if (pJson.isMember("hash")) {
         dirtyFlag_[5] = true;
         if (!pJson["hash"].isNull()) {
             hash_ = std::make_shared<std::string>(pJson["hash"].asString());
         }
     }
-
     if (pJson.isMember("algorithm")) {
         dirtyFlag_[6] = true;
         if (!pJson["algorithm"].isNull()) {
             algorithm_ = std::make_shared<std::string>(pJson["algorithm"].asString());
         }
     }
-
     if (pJson.isMember("delta_size")) {
         dirtyFlag_[7] = true;
         if (!pJson["delta_size"].isNull()) {
             deltaSize_ = std::make_shared<int64_t>((int64_t)pJson["delta_size"].asInt64());
         }
     }
-
     if (pJson.isMember("created_at")) {
         dirtyFlag_[8] = true;
         if (!pJson["created_at"].isNull()) {
             auto timeStr = pJson["created_at"].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -670,14 +577,11 @@ void FileDeltas::updateId(const uint64_t id) {
 
 const std::vector<std::string>& FileDeltas::insertColumns() noexcept {
     static const std::vector<std::string> inCols = {
-        "file_id", "version_id1", "version_id2", "object_id", "hash", "algorithm", "delta_size", "created_at"
-
-    };
+        "file_id", "version_id1", "version_id2", "object_id", "hash", "algorithm", "delta_size", "created_at"};
     return inCols;
 }
 
 void FileDeltas::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
-
     if (dirtyFlag_[1]) {
         if (getFileId()) {
             binder << getValueOfFileId();
@@ -685,7 +589,6 @@ void FileDeltas::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[2]) {
         if (getVersionId1()) {
             binder << getValueOfVersionId1();
@@ -693,7 +596,6 @@ void FileDeltas::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[3]) {
         if (getVersionId2()) {
             binder << getValueOfVersionId2();
@@ -701,7 +603,6 @@ void FileDeltas::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[4]) {
         if (getObjectId()) {
             binder << getValueOfObjectId();
@@ -709,7 +610,6 @@ void FileDeltas::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[5]) {
         if (getHash()) {
             binder << getValueOfHash();
@@ -717,7 +617,6 @@ void FileDeltas::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[6]) {
         if (getAlgorithm()) {
             binder << getValueOfAlgorithm();
@@ -725,7 +624,6 @@ void FileDeltas::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[7]) {
         if (getDeltaSize()) {
             binder << getValueOfDeltaSize();
@@ -733,7 +631,6 @@ void FileDeltas::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[8]) {
         if (getCreatedAt()) {
             binder << getValueOfCreatedAt();
@@ -745,44 +642,34 @@ void FileDeltas::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
 
 const std::vector<std::string> FileDeltas::updateColumns() const {
     std::vector<std::string> ret;
-
     if (dirtyFlag_[1]) {
         ret.push_back(getColumnName(1));
     }
-
     if (dirtyFlag_[2]) {
         ret.push_back(getColumnName(2));
     }
-
     if (dirtyFlag_[3]) {
         ret.push_back(getColumnName(3));
     }
-
     if (dirtyFlag_[4]) {
         ret.push_back(getColumnName(4));
     }
-
     if (dirtyFlag_[5]) {
         ret.push_back(getColumnName(5));
     }
-
     if (dirtyFlag_[6]) {
         ret.push_back(getColumnName(6));
     }
-
     if (dirtyFlag_[7]) {
         ret.push_back(getColumnName(7));
     }
-
     if (dirtyFlag_[8]) {
         ret.push_back(getColumnName(8));
     }
-
     return ret;
 }
 
 void FileDeltas::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
-
     if (dirtyFlag_[1]) {
         if (getFileId()) {
             binder << getValueOfFileId();
@@ -790,7 +677,6 @@ void FileDeltas::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[2]) {
         if (getVersionId1()) {
             binder << getValueOfVersionId1();
@@ -798,7 +684,6 @@ void FileDeltas::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[3]) {
         if (getVersionId2()) {
             binder << getValueOfVersionId2();
@@ -806,7 +691,6 @@ void FileDeltas::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[4]) {
         if (getObjectId()) {
             binder << getValueOfObjectId();
@@ -814,7 +698,6 @@ void FileDeltas::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[5]) {
         if (getHash()) {
             binder << getValueOfHash();
@@ -822,7 +705,6 @@ void FileDeltas::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[6]) {
         if (getAlgorithm()) {
             binder << getValueOfAlgorithm();
@@ -830,7 +712,6 @@ void FileDeltas::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[7]) {
         if (getDeltaSize()) {
             binder << getValueOfDeltaSize();
@@ -838,7 +719,6 @@ void FileDeltas::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[8]) {
         if (getCreatedAt()) {
             binder << getValueOfCreatedAt();
@@ -849,79 +729,51 @@ void FileDeltas::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
 }
 Json::Value FileDeltas::toJson() const {
     Json::Value ret;
-
     if (getId()) {
-
         ret["id"] = (Json::Int64)getValueOfId();
-
     } else {
         ret["id"] = Json::Value();
     }
-
     if (getFileId()) {
-
         ret["file_id"] = (Json::Int64)getValueOfFileId();
-
     } else {
         ret["file_id"] = Json::Value();
     }
-
     if (getVersionId1()) {
-
         ret["version_id1"] = (Json::Int64)getValueOfVersionId1();
-
     } else {
         ret["version_id1"] = Json::Value();
     }
-
     if (getVersionId2()) {
-
         ret["version_id2"] = (Json::Int64)getValueOfVersionId2();
-
     } else {
         ret["version_id2"] = Json::Value();
     }
-
     if (getObjectId()) {
-
         ret["object_id"] = (Json::Int64)getValueOfObjectId();
-
     } else {
         ret["object_id"] = Json::Value();
     }
-
     if (getHash()) {
-
         ret["hash"] = getValueOfHash();
-
     } else {
         ret["hash"] = Json::Value();
     }
-
     if (getAlgorithm()) {
-
         ret["algorithm"] = getValueOfAlgorithm();
-
     } else {
         ret["algorithm"] = Json::Value();
     }
-
     if (getDeltaSize()) {
-
         ret["delta_size"] = (Json::Int64)getValueOfDeltaSize();
-
     } else {
         ret["delta_size"] = Json::Value();
     }
-
     if (getCreatedAt()) {
-
         ret["created_at"] = getCreatedAt()->toDbStringLocal();
-
     } else {
         ret["created_at"] = Json::Value();
     }
-
     return ret;
 }
 
@@ -932,253 +784,175 @@ std::string FileDeltas::toString() const {
 Json::Value FileDeltas::toMasqueradedJson(const std::vector<std::string>& pMasqueradingVector) const {
     Json::Value ret;
     if (pMasqueradingVector.size() == 9) {
-
         if (!pMasqueradingVector[0].empty()) {
             if (getId()) {
-
                 ret[pMasqueradingVector[0]] = (Json::Int64)getValueOfId();
-
             } else {
                 ret[pMasqueradingVector[0]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[1].empty()) {
             if (getFileId()) {
-
                 ret[pMasqueradingVector[1]] = (Json::Int64)getValueOfFileId();
-
             } else {
                 ret[pMasqueradingVector[1]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[2].empty()) {
             if (getVersionId1()) {
-
                 ret[pMasqueradingVector[2]] = (Json::Int64)getValueOfVersionId1();
-
             } else {
                 ret[pMasqueradingVector[2]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[3].empty()) {
             if (getVersionId2()) {
-
                 ret[pMasqueradingVector[3]] = (Json::Int64)getValueOfVersionId2();
-
             } else {
                 ret[pMasqueradingVector[3]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[4].empty()) {
             if (getObjectId()) {
-
                 ret[pMasqueradingVector[4]] = (Json::Int64)getValueOfObjectId();
-
             } else {
                 ret[pMasqueradingVector[4]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[5].empty()) {
             if (getHash()) {
-
                 ret[pMasqueradingVector[5]] = getValueOfHash();
-
             } else {
                 ret[pMasqueradingVector[5]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[6].empty()) {
             if (getAlgorithm()) {
-
                 ret[pMasqueradingVector[6]] = getValueOfAlgorithm();
-
             } else {
                 ret[pMasqueradingVector[6]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[7].empty()) {
             if (getDeltaSize()) {
-
                 ret[pMasqueradingVector[7]] = (Json::Int64)getValueOfDeltaSize();
-
             } else {
                 ret[pMasqueradingVector[7]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[8].empty()) {
             if (getCreatedAt()) {
-
                 ret[pMasqueradingVector[8]] = getCreatedAt()->toDbStringLocal();
-
             } else {
                 ret[pMasqueradingVector[8]] = Json::Value();
             }
         }
-
         return ret;
     }
     LOG_ERROR << "Masquerade failed";
-
     if (getId()) {
-
         ret["id"] = (Json::Int64)getValueOfId();
-
     } else {
         ret["id"] = Json::Value();
     }
-
     if (getFileId()) {
-
         ret["file_id"] = (Json::Int64)getValueOfFileId();
-
     } else {
         ret["file_id"] = Json::Value();
     }
-
     if (getVersionId1()) {
-
         ret["version_id1"] = (Json::Int64)getValueOfVersionId1();
-
     } else {
         ret["version_id1"] = Json::Value();
     }
-
     if (getVersionId2()) {
-
         ret["version_id2"] = (Json::Int64)getValueOfVersionId2();
-
     } else {
         ret["version_id2"] = Json::Value();
     }
-
     if (getObjectId()) {
-
         ret["object_id"] = (Json::Int64)getValueOfObjectId();
-
     } else {
         ret["object_id"] = Json::Value();
     }
-
     if (getHash()) {
-
         ret["hash"] = getValueOfHash();
-
     } else {
         ret["hash"] = Json::Value();
     }
-
     if (getAlgorithm()) {
-
         ret["algorithm"] = getValueOfAlgorithm();
-
     } else {
         ret["algorithm"] = Json::Value();
     }
-
     if (getDeltaSize()) {
-
         ret["delta_size"] = (Json::Int64)getValueOfDeltaSize();
-
     } else {
         ret["delta_size"] = Json::Value();
     }
-
     if (getCreatedAt()) {
-
         ret["created_at"] = getCreatedAt()->toDbStringLocal();
-
     } else {
         ret["created_at"] = Json::Value();
     }
-
     return ret;
 }
 
 bool FileDeltas::validateJsonForCreation(const Json::Value& pJson, std::string& err) {
-
     if (pJson.isMember("id")) {
         if (!validJsonOfField(0, "id", pJson["id"], err, true))
             return false;
     }
-
     if (pJson.isMember("file_id")) {
         if (!validJsonOfField(1, "file_id", pJson["file_id"], err, true))
             return false;
-    }
-
-    else {
+    } else {
         err = "The file_id column cannot be null";
         return false;
     }
-
     if (pJson.isMember("version_id1")) {
         if (!validJsonOfField(2, "version_id1", pJson["version_id1"], err, true))
             return false;
-    }
-
-    else {
+    } else {
         err = "The version_id1 column cannot be null";
         return false;
     }
-
     if (pJson.isMember("version_id2")) {
         if (!validJsonOfField(3, "version_id2", pJson["version_id2"], err, true))
             return false;
-    }
-
-    else {
+    } else {
         err = "The version_id2 column cannot be null";
         return false;
     }
-
     if (pJson.isMember("object_id")) {
         if (!validJsonOfField(4, "object_id", pJson["object_id"], err, true))
             return false;
-    }
-
-    else {
+    } else {
         err = "The object_id column cannot be null";
         return false;
     }
-
     if (pJson.isMember("hash")) {
         if (!validJsonOfField(5, "hash", pJson["hash"], err, true))
             return false;
-    }
-
-    else {
+    } else {
         err = "The hash column cannot be null";
         return false;
     }
-
     if (pJson.isMember("algorithm")) {
         if (!validJsonOfField(6, "algorithm", pJson["algorithm"], err, true))
             return false;
     }
-
     if (pJson.isMember("delta_size")) {
         if (!validJsonOfField(7, "delta_size", pJson["delta_size"], err, true))
             return false;
-    }
-
-    else {
+    } else {
         err = "The delta_size column cannot be null";
         return false;
     }
-
     if (pJson.isMember("created_at")) {
         if (!validJsonOfField(8, "created_at", pJson["created_at"], err, true))
             return false;
     }
-
     return true;
 }
 bool FileDeltas::validateMasqueradedJsonForCreation(
@@ -1188,100 +962,78 @@ bool FileDeltas::validateMasqueradedJsonForCreation(
         return false;
     }
     try {
-
         if (!pMasqueradingVector[0].empty()) {
             if (pJson.isMember(pMasqueradingVector[0])) {
                 if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, true))
                     return false;
             }
         }
-
         if (!pMasqueradingVector[1].empty()) {
             if (pJson.isMember(pMasqueradingVector[1])) {
                 if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, true))
                     return false;
-            }
-
-            else {
+            } else {
                 err = "The " + pMasqueradingVector[1] + " column cannot be null";
                 return false;
             }
         }
-
         if (!pMasqueradingVector[2].empty()) {
             if (pJson.isMember(pMasqueradingVector[2])) {
                 if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, true))
                     return false;
-            }
-
-            else {
+            } else {
                 err = "The " + pMasqueradingVector[2] + " column cannot be null";
                 return false;
             }
         }
-
         if (!pMasqueradingVector[3].empty()) {
             if (pJson.isMember(pMasqueradingVector[3])) {
                 if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, true))
                     return false;
-            }
-
-            else {
+            } else {
                 err = "The " + pMasqueradingVector[3] + " column cannot be null";
                 return false;
             }
         }
-
         if (!pMasqueradingVector[4].empty()) {
             if (pJson.isMember(pMasqueradingVector[4])) {
                 if (!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, true))
                     return false;
-            }
-
-            else {
+            } else {
                 err = "The " + pMasqueradingVector[4] + " column cannot be null";
                 return false;
             }
         }
-
         if (!pMasqueradingVector[5].empty()) {
             if (pJson.isMember(pMasqueradingVector[5])) {
                 if (!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, true))
                     return false;
-            }
-
-            else {
+            } else {
                 err = "The " + pMasqueradingVector[5] + " column cannot be null";
                 return false;
             }
         }
-
         if (!pMasqueradingVector[6].empty()) {
             if (pJson.isMember(pMasqueradingVector[6])) {
                 if (!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, true))
                     return false;
             }
         }
-
         if (!pMasqueradingVector[7].empty()) {
             if (pJson.isMember(pMasqueradingVector[7])) {
                 if (!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, true))
                     return false;
-            }
-
-            else {
+            } else {
                 err = "The " + pMasqueradingVector[7] + " column cannot be null";
                 return false;
             }
         }
-
         if (!pMasqueradingVector[8].empty()) {
             if (pJson.isMember(pMasqueradingVector[8])) {
                 if (!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, true))
                     return false;
             }
         }
-
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -1289,57 +1041,45 @@ bool FileDeltas::validateMasqueradedJsonForCreation(
     return true;
 }
 bool FileDeltas::validateJsonForUpdate(const Json::Value& pJson, std::string& err) {
-
     if (pJson.isMember("id")) {
         if (!validJsonOfField(0, "id", pJson["id"], err, false))
             return false;
-    }
-
-    else {
+    } else {
         err = "The value of primary key must be set in the json object for update";
         return false;
     }
-
     if (pJson.isMember("file_id")) {
         if (!validJsonOfField(1, "file_id", pJson["file_id"], err, false))
             return false;
     }
-
     if (pJson.isMember("version_id1")) {
         if (!validJsonOfField(2, "version_id1", pJson["version_id1"], err, false))
             return false;
     }
-
     if (pJson.isMember("version_id2")) {
         if (!validJsonOfField(3, "version_id2", pJson["version_id2"], err, false))
             return false;
     }
-
     if (pJson.isMember("object_id")) {
         if (!validJsonOfField(4, "object_id", pJson["object_id"], err, false))
             return false;
     }
-
     if (pJson.isMember("hash")) {
         if (!validJsonOfField(5, "hash", pJson["hash"], err, false))
             return false;
     }
-
     if (pJson.isMember("algorithm")) {
         if (!validJsonOfField(6, "algorithm", pJson["algorithm"], err, false))
             return false;
     }
-
     if (pJson.isMember("delta_size")) {
         if (!validJsonOfField(7, "delta_size", pJson["delta_size"], err, false))
             return false;
     }
-
     if (pJson.isMember("created_at")) {
         if (!validJsonOfField(8, "created_at", pJson["created_at"], err, false))
             return false;
     }
-
     return true;
 }
 bool FileDeltas::validateMasqueradedJsonForUpdate(
@@ -1349,57 +1089,45 @@ bool FileDeltas::validateMasqueradedJsonForUpdate(
         return false;
     }
     try {
-
         if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
             if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, false))
                 return false;
-        }
-
-        else {
+        } else {
             err = "The value of primary key must be set in the json object for update";
             return false;
         }
-
         if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
             if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
             if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
             if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
             if (!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
             if (!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
             if (!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
             if (!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8])) {
             if (!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, false))
                 return false;
         }
-
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -1409,143 +1137,105 @@ bool FileDeltas::validateMasqueradedJsonForUpdate(
 bool FileDeltas::validJsonOfField(
     size_t index, const std::string& fieldName, const Json::Value& pJson, std::string& err, bool isForCreation) {
     switch (index) {
-
         case 0:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (isForCreation) {
                 err = "The automatic primary key cannot be set";
                 return false;
             }
-
             if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 1:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 2:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 3:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 4:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 5:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
-            if (pJson.isString() && drogon::utils::utf8Length(pJson.asCString()) > 88) {
+            if (pJson.isString() &&
+                std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>, wchar_t>{}.from_bytes(pJson.asCString()).size() > 88) {
                 err = "String length exceeds limit for the " + fieldName + " field (the maximum value is 88)";
                 return false;
             }
-
             break;
-
         case 6:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 7:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 8:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         default:
             err = "Internal error in the server";
             return false;

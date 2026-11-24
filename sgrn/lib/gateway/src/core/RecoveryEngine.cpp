@@ -264,7 +264,7 @@ struct ReplayOutcome {
 // Pass 1: stream the archive once, checking the schema line and learning the
 // footer's last_anchor_line. Returns the outcome; never applies data.
 ReplayOutcome scanArchive(
-    const fs::path& t_path, sgrn::utils::compression::ZstdLineReader& t_reader, const PlcSchemaStore& t_schema_store) {
+    const fs::path& /*t_path*/, sgrn::utils::compression::ZstdLineReader& t_reader, const PlcSchemaStore& t_schema_store) {
     ReplayOutcome out;
     std::string line;
     size_t line_no = 0;

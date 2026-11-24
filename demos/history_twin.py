@@ -47,18 +47,10 @@ FAULT_IDS = {
 
 
 def findBinary(name: str) -> Path:
-    app_name = {"sgrn_replay": "replay"}.get(name, name)
-    paths = (
-        ROOT / ".dist/linux-static-release" / name,
-        ROOT / ".dist/linux-static" / name,
-        ROOT / ".prefix/bin" / name,
-        ROOT / ".build/linux-static-release" / name,
-        ROOT / ".build/linux-static-release/sgrn/apps" / app_name / name,
-    )
-    for path in paths:
-        if path.is_file() and os.access(path, os.X_OK):
-            return path
-    raise FileNotFoundError(f"Cannot find {name}; build the Linux gateway tools first.")
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from scripts.find_bin import require_binary
+    return require_binary(name, root=ROOT, check_path=False)
 
 
 def waitHttp(url: str, proc: subprocess.Popen, timeout: float = 30.0) -> None:

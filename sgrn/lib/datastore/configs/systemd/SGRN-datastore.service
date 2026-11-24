@@ -1,7 +1,7 @@
 [Unit]
-Description=SGRN Core Monolith (Micromamba)
-After=network.target SGRN-postgres.service SGRN-garage.service SGRN-nginx.service
-Requires=SGRN-postgres.service SGRN-garage.service SGRN-nginx.service
+Description=SGRN Core Monolith
+After=network.target postgresql.service SGRN-garage.service SGRN-nginx.service
+Requires=postgresql.service SGRN-garage.service SGRN-nginx.service
 
 [Service]
 User=${SGRN_USER}
@@ -10,7 +10,7 @@ Type=simple
 WorkingDirectory=${SGRN_DATA_DIR}
 
 EnvironmentFile=${SGRN_DATA_DIR}/.env
-Environment="PATH=${SGRN_DEPLOYMENT_ENV}/bin:/usr/bin:/bin"
+Environment="PATH=${SGRN_BIN_DIR}:/usr/bin:/bin"
 Environment="SGRN_CONFIG_PATH=${SGRN_DATA_DIR}/sgrn.json"
 # Readiness gate: After= only orders startup, it never waits for Garage to
 # accept traffic — without this the bucket check at boot races Garage's own

@@ -117,7 +117,7 @@ export class ResumableUploader {
             }
 
             const body = await readBody<ApiErrorBody>(resp, {});
-            throw new Error(body.message || `Chunk ${chunkIdx + 1}/${totalChunks} failed (HTTP ${resp.status})`);
+            throw new Error(errorMessage(body, `Chunk ${chunkIdx + 1}/${totalChunks} failed (HTTP ${resp.status})`));
         }
         throw new Error(`Chunk ${chunkIdx + 1}/${totalChunks} failed after retries`);
     }
@@ -127,6 +127,7 @@ export class ResumableUploader {
         this.isAborted = false;
 
         const totalChunks = Math.ceil(this.file.size / this.chunkSize);
+        let completedChunks = 0;
 
         try {
             // 1. Initialize upload session
@@ -176,7 +177,8 @@ export class ResumableUploader {
 
                 await this.uploadChunkWithRetry(authenticatedFetch, chunkUrl, chunkBlob, chunkIdx, totalChunks);
 
-                this.emitProgress(chunkIdx + 1, totalChunks);
+                completedChunks = chunkIdx + 1;
+                this.emitProgress(completedChunks, totalChunks);
             }
 
             // 3. Complete upload — server assembles chunks, hashes, and pushes to S3
@@ -205,7 +207,7 @@ export class ResumableUploader {
             return true;
         } catch (err: unknown) {
             this.status = "error";
-            this.emitProgress(0, totalChunks, errorMessage(err, "Upload error"));
+            this.emitProgress(completedChunks, totalChunks, errorMessage(err, "Upload error"));
             return false;
         }
     }

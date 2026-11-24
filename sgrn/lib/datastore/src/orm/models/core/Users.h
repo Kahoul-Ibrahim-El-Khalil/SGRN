@@ -1,4 +1,3 @@
-
 /**
  *
  *  Users.h
@@ -39,7 +38,6 @@ namespace drogon_model
 {
 namespace sgrn
 {
-
 namespace core
 {
 
@@ -77,9 +75,7 @@ public:
     static const int primaryKeyNumber;
     static const std::string tableName;
     static const bool hasPrimaryKey;
-
     static const std::string primaryKeyName;
-
     using PrimaryKeyType = int32_t;
     const PrimaryKeyType& getPrimaryKey() const;
 
@@ -353,7 +349,6 @@ public:
     std::string toString() const;
     Json::Value toMasqueradedJson(const std::vector<std::string>& pMasqueradingVector) const;
     /// Relationship interfaces
-
 private:
     friend drogon::orm::Mapper<Users>;
     friend drogon::orm::BaseBuilder<Users, true, true>;
@@ -395,7 +390,6 @@ private:
     std::shared_ptr<int32_t> preferredChunkSizeMb_;
     std::shared_ptr<int32_t> rateLimitUploadRpm_;
     std::shared_ptr<::trantor::Date> createdAt_;
-
     struct MetaData {
         const std::string colName_;
         const std::string colType_;
@@ -410,16 +404,12 @@ private:
 
 public:
     static const std::string& sqlForFindingByPrimaryKey() {
-
         static const std::string sql = "select * from " + tableName + " where id = $1";
-
         return sql;
     }
 
     static const std::string& sqlForDeletingByPrimaryKey() {
-
         static const std::string sql = "delete from " + tableName + " where id = $1";
-
         return sql;
     }
     std::string sqlForInserting(bool& needSelection) const {
@@ -428,145 +418,119 @@ public:
         needSelection = false;
         sql += "id,";
         ++parametersCount;
-
         if (dirtyFlag_[1]) {
             sql += "organisation,";
             ++parametersCount;
         }
-
         if (dirtyFlag_[2]) {
             sql += "first_name,";
             ++parametersCount;
         }
-
         if (dirtyFlag_[3]) {
             sql += "family_name,";
             ++parametersCount;
         }
-
         if (dirtyFlag_[4]) {
             sql += "email,";
             ++parametersCount;
         }
-
         if (dirtyFlag_[5]) {
             sql += "password,";
             ++parametersCount;
         }
-
         if (dirtyFlag_[6]) {
             sql += "phone_number,";
             ++parametersCount;
         }
         sql += "is_platform_admin,";
         ++parametersCount;
-
         if (!dirtyFlag_[7]) {
             needSelection = true;
         }
         sql += "role,";
         ++parametersCount;
-
         if (!dirtyFlag_[8]) {
             needSelection = true;
         }
-
         if (dirtyFlag_[9]) {
             sql += "domain,";
             ++parametersCount;
         }
-
         if (dirtyFlag_[10]) {
             sql += "deleted_at,";
             ++parametersCount;
         }
         sql += "status,";
         ++parametersCount;
-
         if (!dirtyFlag_[11]) {
             needSelection = true;
         }
         sql += "is_active,";
         ++parametersCount;
-
         if (!dirtyFlag_[12]) {
             needSelection = true;
         }
         sql += "can_read_personal,";
         ++parametersCount;
-
         if (!dirtyFlag_[13]) {
             needSelection = true;
         }
         sql += "can_write_personal,";
         ++parametersCount;
-
         if (!dirtyFlag_[14]) {
             needSelection = true;
         }
         sql += "can_delete_personal,";
         ++parametersCount;
-
         if (!dirtyFlag_[15]) {
             needSelection = true;
         }
         sql += "total_virtual_size,";
         ++parametersCount;
-
         if (!dirtyFlag_[16]) {
             needSelection = true;
         }
         sql += "total_real_size,";
         ++parametersCount;
-
         if (!dirtyFlag_[17]) {
             needSelection = true;
         }
-
         if (dirtyFlag_[18]) {
             sql += "storage_limit,";
             ++parametersCount;
         }
         sql += "total_entry_count,";
         ++parametersCount;
-
         if (!dirtyFlag_[19]) {
             needSelection = true;
         }
         sql += "entry_count_limit,";
         ++parametersCount;
-
         if (!dirtyFlag_[20]) {
             needSelection = true;
         }
-
         if (dirtyFlag_[21]) {
             sql += "rate_limit_rpm,";
             ++parametersCount;
         }
-
         if (dirtyFlag_[22]) {
             sql += "max_file_size_mb,";
             ++parametersCount;
         }
-
         if (dirtyFlag_[23]) {
             sql += "preferred_chunk_size_mb,";
             ++parametersCount;
         }
-
         if (dirtyFlag_[24]) {
             sql += "rate_limit_upload_rpm,";
             ++parametersCount;
         }
         sql += "created_at,";
         ++parametersCount;
-
         if (!dirtyFlag_[25]) {
             needSelection = true;
         }
         needSelection = true;
-
         if (parametersCount > 0) {
             sql[sql.length() - 1] = ')';
             sql += " values (";
@@ -576,234 +540,143 @@ public:
         int placeholder = 1;
         char placeholderStr[64];
         size_t n = 0;
-
         sql += "default,";
-
         if (dirtyFlag_[1]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
-
         if (dirtyFlag_[2]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
-
         if (dirtyFlag_[3]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
-
         if (dirtyFlag_[4]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
-
         if (dirtyFlag_[5]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
-
         if (dirtyFlag_[6]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
-
         if (dirtyFlag_[7]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-
-        }
-
-        else {
+        } else {
             sql += "default,";
         }
-
         if (dirtyFlag_[8]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-
-        }
-
-        else {
+        } else {
             sql += "default,";
         }
-
         if (dirtyFlag_[9]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
-
         if (dirtyFlag_[10]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
-
         if (dirtyFlag_[11]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-
-        }
-
-        else {
+        } else {
             sql += "default,";
         }
-
         if (dirtyFlag_[12]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-
-        }
-
-        else {
+        } else {
             sql += "default,";
         }
-
         if (dirtyFlag_[13]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-
-        }
-
-        else {
+        } else {
             sql += "default,";
         }
-
         if (dirtyFlag_[14]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-
-        }
-
-        else {
+        } else {
             sql += "default,";
         }
-
         if (dirtyFlag_[15]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-
-        }
-
-        else {
+        } else {
             sql += "default,";
         }
-
         if (dirtyFlag_[16]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-
-        }
-
-        else {
+        } else {
             sql += "default,";
         }
-
         if (dirtyFlag_[17]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-
-        }
-
-        else {
+        } else {
             sql += "default,";
         }
-
         if (dirtyFlag_[18]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
-
         if (dirtyFlag_[19]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-
-        }
-
-        else {
+        } else {
             sql += "default,";
         }
-
         if (dirtyFlag_[20]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-
-        }
-
-        else {
+        } else {
             sql += "default,";
         }
-
         if (dirtyFlag_[21]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
-
         if (dirtyFlag_[22]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
-
         if (dirtyFlag_[23]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
-
         if (dirtyFlag_[24]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
-
         if (dirtyFlag_[25]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-
-        }
-
-        else {
+        } else {
             sql += "default,";
         }
-
         if (parametersCount > 0) {
             sql.resize(sql.length() - 1);
         }
-
         if (needSelection) {
             sql.append(") returning *");
         } else {
             sql.append(1, ')');
         }
-
         LOG_TRACE << sql;
         return sql;
     }
 };
 } // namespace core
 } // namespace sgrn
-
 } // namespace drogon_model

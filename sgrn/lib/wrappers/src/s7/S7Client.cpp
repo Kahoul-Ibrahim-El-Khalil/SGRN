@@ -108,14 +108,14 @@ Result<void, S7Error> S7Client::requireClient() const {
     return S7Error::NotConnected;
 }
 
-Result<void, S7Error> S7Client::validateRange(int t_start, int t_size_or_amount, const char* tp_label) const {
+Result<void, S7Error> S7Client::validateRange(int t_start, int t_size_or_amount, const char* /*tp_label*/) const {
     if (t_start < 0 || t_size_or_amount < 0) {
         return S7Error::InvalidParam;
     }
     return {};
 }
 
-Result<void, S7Error> S7Client::validateBuffer(const void* tp_buffer, int t_size_or_amount, const char* tp_label) const {
+Result<void, S7Error> S7Client::validateBuffer(const void* tp_buffer, int t_size_or_amount, const char* /*tp_label*/) const {
     RETURN_ERROR_IF(t_size_or_amount > 0 && tp_buffer == nullptr, S7Error::InvalidParam);
     return {};
 }

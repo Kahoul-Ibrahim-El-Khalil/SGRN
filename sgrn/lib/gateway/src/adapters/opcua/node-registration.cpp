@@ -14,8 +14,8 @@
 #include <open62541/common.h>
 #include <open62541/nodeids.h>
 #include <open62541/server.h>
+#include <open62541/types.h>
 #include <open62541/types_generated.h>
-#include <open62541/types_generated_handling.h>
 #include <s7codec/codec.hpp>
 #include <stdexcept>
 #include <string>
@@ -78,7 +78,7 @@ static void setReadWriteDataSource(UA_Server* tp_server, const UA_NodeId& t_var_
 }
 
 static std::unique_ptr<NodeContext> makeFieldContext(twin::PlcMemory* tp_plc_memory, uint16_t t_db_number, const std::string& t_full_path,
-    ::sgrn::gateway::SecurityManager* tp_security, const DbField& t_field, bool t_is_array, bool t_is_custom_udt, int t_ua_type_idx,
+    ::sgrn::gateway::SecurityManager* tp_security, const DbField& t_field, bool t_is_array, bool /*t_is_custom_udt*/, int t_ua_type_idx,
     uint32_t t_field_size, wrappers::opcua::TypeRegistry& t_type_registry, bool t_trigger_events)
 
 {

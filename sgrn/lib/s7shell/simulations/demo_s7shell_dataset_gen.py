@@ -41,25 +41,13 @@ def log_error(msg: str):
     print(f"{RED}[ERROR]{RESET} {msg}")
 
 def find_binary(name: str) -> str:
-    """Find binary in project dist/build dirs or PATH."""
+    """Find binary in project xmake/dist/build dirs or PATH."""
     repo_root = Path(__file__).resolve().parent.parent.parent.parent
-    candidates = [
-        repo_root / ".dist/linux-static-release" / "bin" / name,
-        repo_root / ".dist/linux-static-release" / name,
-        repo_root / ".build/linux-static-release/sgrn/s7shell" / name,
-        repo_root / ".build/linux-static-release/sgrn/gateway" / name,
-        repo_root / "build" / name,
-    ]
-    for c in candidates:
-        if c.is_file() and os.access(c, os.X_OK):
-            return str(c)
-    
-    # Check PATH
-    import shutil
-    p = shutil.which(name)
-    if p:
-        return p
-    return ""
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from scripts.find_bin import find_binary as _find_binary
+    found = _find_binary(name, root=repo_root)
+    return str(found) if found else ""
 
 def main():
     repo_root = Path(__file__).resolve().parent.parent.parent.parent

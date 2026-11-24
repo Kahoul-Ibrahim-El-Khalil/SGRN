@@ -29,6 +29,11 @@ std::string toHex(const unsigned char* tp_data, std::size_t t_len);
 std::optional<std::vector<uint8_t>> fromHex(std::string_view t_hex);
 
 /**
+ * @brief Percent-encodes a string per RFC 3986 (optionally encoding '/').
+ */
+std::string uriEncode(std::string_view t_value, bool t_encode_slash = true);
+
+/**
  * @brief Converts a BCD (Binary Coded Decimal) byte to an integer.
  */
 int bcdToDec(uint8_t t_bcd);

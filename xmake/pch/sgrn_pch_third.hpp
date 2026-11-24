@@ -1,0 +1,23 @@
+// Tier 2: third-party headers (former sgrn_pch_third)
+#pragma once
+#include "sgrn_pch_std.hpp"
+#include <fmt/core.h>
+#include <fmt/format.h>
+#include <fmt/chrono.h>
+#include <fmt/color.h>
+#include <fmt/ostream.h>
+#include <fmt/ranges.h>
+#include <json/json.h>
+#include <json/value.h>
+#include <openssl/ssl.h>
+#include <openssl/crypto.h>
+#include <zstd.h>
+#include <cxxopts.hpp>
+#include <sqlite_modern_cpp.h>
+#include <glaze/glaze.hpp>
+#include <httplib.h>
+#include <crow.h>
+#include <angelscript.h>
+#include <ixwebsocket/IXWebSocketServer.h>
+#include <ixwebsocket/IXWebSocket.h>
+#include <s7codec/s7.hpp>

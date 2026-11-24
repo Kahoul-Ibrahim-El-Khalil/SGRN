@@ -1,19 +1,17 @@
 [Unit]
 Description=SGRN Platform (All Services)
-After=network.target
-Wants=SGRN-postgres.service SGRN-garage.service SGRN-datastore.service
+After=network.target postgresql.service
+Wants=SGRN-garage.service SGRN-datastore.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 
-ExecStart=/bin/systemctl start SGRN-postgres.service
 ExecStart=/bin/systemctl start SGRN-garage.service
 ExecStart=/bin/systemctl start SGRN-datastore.service
 
 ExecStop=/bin/systemctl stop SGRN-datastore.service
 ExecStop=/bin/systemctl stop SGRN-garage.service
-ExecStop=/bin/systemctl stop SGRN-postgres.service
 
 [Install]
 WantedBy=default.target

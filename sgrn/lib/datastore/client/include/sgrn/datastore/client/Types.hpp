@@ -40,6 +40,11 @@ using StorageOrphanKey = ::sgrn::datastore::storage::StorageOrphanKey;
 using StorageOrphansReport = ::sgrn::datastore::storage::StorageOrphansReport;
 using ObjectInfo = ::sgrn::datastore::storage::ObjectInfo;
 
+using FileVersionInfo = ::sgrn::datastore::storage::FileVersionInfo;
+using FileVersionRestoreRequest = ::sgrn::datastore::storage::FileVersionRestoreRequest;
+using FileVersionRestoreReceipt = ::sgrn::datastore::storage::FileVersionRestoreReceipt;
+using FileVersionTrimReceipt = ::sgrn::datastore::storage::FileVersionTrimReceipt;
+
 using AdminUserEntry = ::sgrn::datastore::admin::AdminUserEntry;
 using ServiceEntry = ::sgrn::datastore::admin::ServiceEntry;
 using NewUser = ::sgrn::datastore::admin::NewUser;

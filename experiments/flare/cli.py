@@ -50,17 +50,10 @@ def _runScript(script: str, extra: Sequence[str], *, cwd: Optional[Path] = None)
 
 
 def _findBinary(name: str) -> Optional[Path]:
-    app_name = {"sgrn_replay": "replay"}.get(name, name)
-    candidates = (
-        REPO_ROOT / ".dist/linux-static-release" / name,
-        REPO_ROOT / ".dist/linux-static" / name,
-        REPO_ROOT / ".prefix/bin" / name,
-        REPO_ROOT / ".prefix/bin" / app_name,
-    )
-    for path in candidates:
-        if path.is_file() and os.access(path, os.X_OK):
-            return path
-    return None
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from scripts.find_bin import find_binary
+    return find_binary(name, root=REPO_ROOT, check_path=False)
 
 
 def _activeConfigPath() -> Path:

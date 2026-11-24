@@ -213,14 +213,22 @@ export async function downloadDriveFile(
 /**
  * Fetch a file content as ArrayBuffer for preview.
  */
-export async function fetchDriveFileContent(t_file_path: string, t_scope: StorageScope = "personal"): Promise<SgrnResult<ArrayBuffer>> {
+export async function fetchDriveFileContent(
+    t_file_path: string,
+    t_scope: StorageScope = "personal",
+    t_max_bytes?: number,
+): Promise<SgrnResult<ArrayBuffer>> {
     try {
         const encoded_path = t_file_path.startsWith("/") ? t_file_path.slice(1) : t_file_path;
         const params = new URLSearchParams({ path: encoded_path, scope: t_scope });
+        const headers: Record<string, string> = {};
+        if (typeof t_max_bytes === "number" && t_max_bytes > 0) {
+            headers["Range"] = `bytes=0-${t_max_bytes - 1}`;
+        }
 
-        const res = await authenticatedFetch(`${StorageBackendApiEndpoints.PATH_BASE}?${params.toString()}`);
+        const res = await authenticatedFetch(`${StorageBackendApiEndpoints.PATH_BASE}?${params.toString()}`, { headers });
 
-        if (!res.ok) {
+        if (!res.ok && res.status !== 206) {
             const err_data = await readBody<unknown>(res, null);
             return readApiFailure(err_data, `Fetch failed: ${res.status}`, ErrorScope.Network);
         }
@@ -229,10 +237,9 @@ export async function fetchDriveFileContent(t_file_path: string, t_scope: Storag
 
         // Transfer-integrity check: the server stamps the *stored* entity size
         // (post-decryption bytes, compressed or not) in X-Original-Size. A
-        // short body means the response was truncated in transit — fail
-        // loudly instead of handing the preview a silently corrupted payload.
+        // short body on a full (200) response means truncation in transit.
         const original_size = res.headers.get("X-Original-Size");
-        if (original_size) {
+        if (res.status !== 206 && original_size) {
             const expected = Number(original_size);
             if (Number.isFinite(expected) && expected > 0 && buffer.byteLength !== expected) {
                 return {
@@ -350,6 +357,8 @@ export async function uploadDriveFile(
             };
 
             xhr.onerror = () => resolve({ error: "Network error", scope: ErrorScope.Network });
+            xhr.onabort = () => resolve({ error: "Upload aborted", scope: ErrorScope.Network });
+            xhr.ontimeout = () => resolve({ error: "Upload timed out", scope: ErrorScope.Network });
             xhr.send(form_data);
         });
     } catch (e) {
@@ -479,20 +488,16 @@ export async function uploadDriveFilesBatch(
                     resolve();
                 };
 
-                xhr.onerror = () => {
+                const failChunk = (message: string) => {
                     completed_files += chunk.length;
                     fail_count += chunk.length;
-                    resultsByChunk[chunkIndex] = chunk.map(() => ({ success: false, error: "Network error" }));
+                    resultsByChunk[chunkIndex] = chunk.map(() => ({ success: false, error: message }));
                     if (t_on_progress) t_on_progress(Math.floor((completed_files / total_files) * 100));
                     resolve();
                 };
-                xhr.onabort = () => {
-                    completed_files += chunk.length;
-                    fail_count += chunk.length;
-                    resultsByChunk[chunkIndex] = chunk.map(() => ({ success: false, error: "Upload aborted" }));
-                    if (t_on_progress) t_on_progress(Math.floor((completed_files / total_files) * 100));
-                    resolve();
-                };
+                xhr.onerror = () => failChunk("Network error");
+                xhr.onabort = () => failChunk("Upload aborted");
+                xhr.ontimeout = () => failChunk("Batch upload timed out");
 
                 xhr.send(form_data);
             });
@@ -594,11 +599,17 @@ export async function deleteDriveItem(
 }
 
 /**
- * Renames a file or folder.
+ * Renames a file or folder. The scope must match the listing the item came
+ * from, otherwise the datastore resolves the id inside the wrong namespace.
  */
-export async function renameItem(id: number | string, type: "file" | "folder", newName: string): Promise<SgrnResult<MoveItemResponse>> {
+export async function renameItem(
+    id: number | string,
+    type: "file" | "folder",
+    newName: string,
+    t_scope: StorageScope = "personal",
+): Promise<SgrnResult<MoveItemResponse>> {
     try {
-        const params = new URLSearchParams({ id: id.toString(), type: type });
+        const params = new URLSearchParams({ id: id.toString(), type: type, scope: t_scope });
         const res = await authenticatedFetch(`${StorageBackendApiEndpoints.DRIVE_MOVE}?${params.toString()}`, {
             method: "PATCH",
             ...jsonBody<MoveItemRequest>({ new_name: newName }),
@@ -643,9 +654,11 @@ export async function bulkAction(
     action: "move" | "delete",
     items: { id: number | string; type: "file" | "folder" }[],
     targetParentId?: number | null,
+    t_scope: StorageScope = "personal",
 ): Promise<SgrnResult<DriveBulkActionReceipt>> {
     try {
-        const res = await authenticatedFetch(`${StorageBackendApiEndpoints.DRIVE_BULK}`, {
+        const params = new URLSearchParams({ scope: t_scope });
+        const res = await authenticatedFetch(`${StorageBackendApiEndpoints.DRIVE_BULK}?${params.toString()}`, {
             method: "POST",
             ...jsonBody<BulkActionRequest>({
                 action,

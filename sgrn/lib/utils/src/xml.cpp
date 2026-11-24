@@ -104,4 +104,82 @@ std::optional<Document> Document::parseFile(const std::string& t_path) {
     return std::nullopt;
 }
 
+std::string xmlEscape(std::string_view t_str) {
+    std::string out;
+    out.reserve(t_str.size());
+    for (char c : t_str) {
+        switch (c) {
+            case '&':
+                out += "&amp;";
+                break;
+            case '<':
+                out += "&lt;";
+                break;
+            case '>':
+                out += "&gt;";
+                break;
+            case '"':
+                out += "&quot;";
+                break;
+            case '\'':
+                out += "&apos;";
+                break;
+            default:
+                out.push_back(c);
+                break;
+        }
+    }
+    return out;
+}
+
+std::string xmlUnescape(std::string_view t_str) {
+    std::string out;
+    out.reserve(t_str.size());
+    for (size_t i = 0; i < t_str.size(); ++i) {
+        if (t_str[i] == '&') {
+            auto rest = t_str.substr(i);
+            if (rest.starts_with("&amp;")) {
+                out.push_back('&');
+                i += 4;
+            } else if (rest.starts_with("&lt;")) {
+                out.push_back('<');
+                i += 3;
+            } else if (rest.starts_with("&gt;")) {
+                out.push_back('>');
+                i += 3;
+            } else if (rest.starts_with("&quot;")) {
+                out.push_back('"');
+                i += 5;
+            } else if (rest.starts_with("&apos;")) {
+                out.push_back('\'');
+                i += 5;
+            } else {
+                out.push_back('&');
+            }
+        } else {
+            out.push_back(t_str[i]);
+        }
+    }
+    return out;
+}
+
+std::string extractXmlTag(std::string_view t_xml, std::string_view t_tag) {
+    std::string open_tag = "<" + std::string(t_tag) + ">";
+    std::string close_tag = "</" + std::string(t_tag) + ">";
+    size_t start = t_xml.find(open_tag);
+    if (start == std::string_view::npos)
+        return {};
+    start += open_tag.size();
+    size_t end = t_xml.find(close_tag, start);
+    if (end == std::string_view::npos)
+        return {};
+    return xmlUnescape(t_xml.substr(start, end - start));
+}
+
+std::vector<std::string> extractXmlBlocks(std::string_view t_xml, std::string_view t_tag) {
+    std::vector<std::string> blocks;
+    forEachXmlBlock(t_xml, t_tag, [&](std::string_view blk) { blocks.emplace_back(blk); });
+    return blocks;
+}
+
 } // namespace sgrn::utils::xml

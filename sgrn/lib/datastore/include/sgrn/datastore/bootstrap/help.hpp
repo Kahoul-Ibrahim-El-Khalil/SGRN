@@ -44,8 +44,8 @@ constexpr const char help_message[] =
                         obsolete units, ensure nginx runtime dirs,
                         daemon-reload, enable and restart changed services.
                         Nginx serves its site configs from the operation
-                        directory directly (not copied into the micromamba
-                        env — env updates must not take the site down).
+                        directory directly (not copied into the system nginx
+                        dirs — system updates must not take the site down).
     --verify-install    No root: report drift between staged templates and
                         the deployed system (units, nginx, binaries, certs,
                         temp dirs, running services, ports). Nonzero exit
@@ -68,12 +68,10 @@ constexpr const char help_message[] =
   ──────────────────────────────────────────
 
   Prerequisites — the following must be on $PATH (or in SGRN conda env):
-    • postgres / pg_ctl          (PostgreSQL 15+)
+    • postgres / pg_ctl          (PostgreSQL 17, system install: apt install postgresql)
     • garage                     (Garage v2.x, single-node layout)
-    • nginx                      (Nginx 1.24+)
+    • nginx                      (Nginx 1.24+, system install: apt install nginx)
 
-  These are all available in the SGRN Micromamba environment:
-    micromamba activate SGRN
 
   ── Step 1: First install, fully guided (recommended) ─────────────────
 
@@ -109,8 +107,8 @@ constexpr const char help_message[] =
 
     → Copies service files to /etc/systemd/system/
     → Nginx site configs stay in ~/.local/share/sgrn/nginx/ (Serviced
-      in place — never copied into the micromamba env, where env
-      updates would wipe them)
+      in place — never copied into the system nginx dirs, where system
+      updates would wipe them; they are managed by the datastore)
     → Ensures nginx buffer/log/pid dirs exist under the data prefix
     → Removes units of retired services (e.g. PostgREST)
     → Reloads systemd daemon; enables and restarts changed services

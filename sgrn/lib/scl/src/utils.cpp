@@ -632,7 +632,7 @@ sgrn::Result<void, ::sgrn::scl::SclError> encodeScalarValue(
 }
 
 sgrn::Result<std::string, ::sgrn::scl::SclError> decodeFieldAt(
-    const DbField& t_field, const uint8_t* tp_ptr, size_t t_buffer_size, int t_depth, s7codec::Endian t_e) {
+    const DbField& t_field, const uint8_t* tp_ptr, size_t t_buffer_size, int t_depth, s7codec::Endian /*t_e*/) {
     sgrn::json::dom::StringBuffer sb;
     sgrn::json::dom::Writer<sgrn::json::dom::StringBuffer> t_writer(sb);
     serializeFieldToWriter(t_writer, t_field, tp_ptr, t_buffer_size, t_depth);

@@ -63,26 +63,12 @@ def log_error(msg):
 
 
 def find_binary(name):
-    """Locate s7shell / sgrn_dataset in dist/build trees or PATH.
-
-    Fresh build trees come first so source iterations (e.g. new script
-    bindings) are picked up without requiring a reinstall into .dist.
-    """
-    candidates = [
-        REPO_ROOT / ".build/linux-static-release/sgrn/s7shell" / name,
-        REPO_ROOT / ".build/linux-static-release/sgrn/gateway" / name,
-        REPO_ROOT / ".build/linux-static/sgrn/s7shell" / name,
-        REPO_ROOT / ".build/linux-static/sgrn/gateway" / name,
-        REPO_ROOT / ".dist/linux-static-release" / "bin" / name,
-        REPO_ROOT / ".dist/linux-static-release" / name,
-        REPO_ROOT / ".prefix/bin" / name,
-        REPO_ROOT / "build" / name,
-    ]
-    for c in candidates:
-        if c.is_file() and os.access(c, os.X_OK):
-            return str(c)
-    p = shutil.which(name)
-    return p or ""
+    """Locate s7shell / sgrn_dataset in xmake/build/dist trees or PATH."""
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from scripts.find_bin import find_binary as _find_binary
+    found = _find_binary(name, root=REPO_ROOT)
+    return str(found) if found else ""
 
 
 # ── Step 1: generate ─────────────────────────────────────────────────────────

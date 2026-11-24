@@ -20,6 +20,10 @@ namespace sgrn::datastore::core
  * @brief Safely retrieve the default database client.
  */
 inline Result<drogon::orm::DbClientPtr, BackendError> getDbClient() {
+    if (!drogon::app().hasDbClient("default")) {
+        DB_ERROR_LOG("Database client is not initialized or unavailable");
+        RETURN_ERROR(BackendError(BackendErrorKind::Database, "Database client is not initialized or unavailable"));
+    }
     auto db = drogon::app().getDbClient();
     if (!db) {
         DB_ERROR_LOG("Database client is not initialized or unavailable");

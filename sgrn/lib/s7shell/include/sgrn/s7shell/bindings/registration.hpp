@@ -40,7 +40,7 @@ namespace detail
 }
 
 [[nodiscard]] inline ::sgrn::Result<void, std::string> checkAsResult(
-    int t_r, std::string_view t_ctx, int t_behavior, std::string_view t_decl) {
+    int t_r, std::string_view t_ctx, int /*t_behavior*/, std::string_view t_decl) {
     if (t_r < 0) {
         fmt::print(stderr, fg(fmt::color::red), "AngelScript registration failed [{}]: code {}, decl{} \n", t_ctx, t_r, t_decl);
         return std::string(t_ctx);

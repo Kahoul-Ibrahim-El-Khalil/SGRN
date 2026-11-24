@@ -585,7 +585,7 @@ static void encodeScriptFieldValue(const ::sgrn::scl::DbField& t_field, asIScrip
     uint8_t* tp_buf, size_t t_buf_size, const std::string& t_ctx, uint16_t t_db_num);
 
 static s7codec::DecodedValue decodedFromScriptScalar(const ::sgrn::scl::DbField& t_field, asIScriptEngine* tp_engine, const void* tp_val,
-    int t_type_id, const std::string& t_ctx, uint16_t t_db_num) {
+    int t_type_id, const std::string& t_ctx, uint16_t /*t_db_num*/) {
     using s7codec::DecodedValue;
     if (t_type_id == asTYPEID_BOOL)
         return DecodedValue::makeBool(*static_cast<const bool*>(tp_val));

@@ -19,6 +19,11 @@ const INITIAL_STATE: FileVersionHistoryState = {
     keepInput: 10,
 };
 
+/** Clamp a retention input to a whole number of versions, never below 1. */
+export function normalizeKeepCount(value: number): number {
+    return Math.max(1, Math.floor(Number.isFinite(value) ? value : 1));
+}
+
 interface UseFileVersionHistoryOptions {
     file: DriveFile;
     scope: StorageScope;
@@ -116,7 +121,7 @@ export function useFileVersionHistory({ file, scope, onChanged }: UseFileVersion
 
     const prune = useCallback(async (): Promise<void> => {
         const identity = fileIdentity;
-        const keep = Math.max(1, Math.floor(Number.isFinite(state.keepInput) ? state.keepInput : 1));
+        const keep = normalizeKeepCount(state.keepInput);
         patch({ busyVersionNo: -1, error: null });
         try {
             const result = await pruneFileVersions(file.path, keep, scope);

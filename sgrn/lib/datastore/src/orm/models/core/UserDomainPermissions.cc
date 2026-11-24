@@ -1,4 +1,3 @@
-
 /**
  *
  *  UserDomainPermissions.cc
@@ -7,9 +6,7 @@
  */
 
 #include "UserDomainPermissions.h"
-
 #include <drogon/utils/Utilities.h>
-
 #include <string>
 
 using namespace drogon;
@@ -17,29 +14,17 @@ using namespace drogon::orm;
 using namespace drogon_model::sgrn::core;
 
 const std::string UserDomainPermissions::Cols::_id = "\"id\"";
-
 const std::string UserDomainPermissions::Cols::_user_id = "\"user_id\"";
-
 const std::string UserDomainPermissions::Cols::_organisation = "\"organisation\"";
-
 const std::string UserDomainPermissions::Cols::_domain = "\"domain\"";
-
 const std::string UserDomainPermissions::Cols::_allowed_subpath = "\"allowed_subpath\"";
-
 const std::string UserDomainPermissions::Cols::_can_read = "\"can_read\"";
-
 const std::string UserDomainPermissions::Cols::_can_write = "\"can_write\"";
-
 const std::string UserDomainPermissions::Cols::_can_delete = "\"can_delete\"";
-
 const std::string UserDomainPermissions::Cols::_created_at = "\"created_at\"";
-
 const std::string UserDomainPermissions::Cols::_updated_at = "\"updated_at\"";
-
 const std::string UserDomainPermissions::primaryKeyName = "id";
-
 const bool UserDomainPermissions::hasPrimaryKey = true;
-
 const std::string UserDomainPermissions::tableName = "core.\"user_domain_permissions\"";
 
 const std::vector<typename UserDomainPermissions::MetaData> UserDomainPermissions::metaData_ = {{"id", "int64_t", "bigint", 8, 1, 1, 1},
@@ -47,61 +32,41 @@ const std::vector<typename UserDomainPermissions::MetaData> UserDomainPermission
     {"domain", "std::string", "text", 0, 0, 0, 1}, {"allowed_subpath", "std::string", "character varying", 1024, 0, 0, 1},
     {"can_read", "bool", "boolean", 1, 0, 0, 1}, {"can_write", "bool", "boolean", 1, 0, 0, 1},
     {"can_delete", "bool", "boolean", 1, 0, 0, 1}, {"created_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1},
-    {"updated_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1}
-
-};
+    {"updated_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1}};
 const std::string& UserDomainPermissions::getColumnName(size_t index) noexcept(false) {
     assert(index < metaData_.size());
     return metaData_[index].colName_;
 }
 UserDomainPermissions::UserDomainPermissions(const Row& r, const ssize_t indexOffset) noexcept {
     if (indexOffset < 0) {
-
         if (!r["id"].isNull()) {
-
             id_ = std::make_shared<int64_t>(r["id"].as<int64_t>());
         }
-
         if (!r["user_id"].isNull()) {
-
             userId_ = std::make_shared<int32_t>(r["user_id"].as<int32_t>());
         }
-
         if (!r["organisation"].isNull()) {
-
             organisation_ = std::make_shared<std::string>(r["organisation"].as<std::string>());
         }
-
         if (!r["domain"].isNull()) {
-
             domain_ = std::make_shared<std::string>(r["domain"].as<std::string>());
         }
-
         if (!r["allowed_subpath"].isNull()) {
-
             allowedSubpath_ = std::make_shared<std::string>(r["allowed_subpath"].as<std::string>());
         }
-
         if (!r["can_read"].isNull()) {
-
             canRead_ = std::make_shared<bool>(r["can_read"].as<bool>());
         }
-
         if (!r["can_write"].isNull()) {
-
             canWrite_ = std::make_shared<bool>(r["can_write"].as<bool>());
         }
-
         if (!r["can_delete"].isNull()) {
-
             canDelete_ = std::make_shared<bool>(r["can_delete"].as<bool>());
         }
-
         if (!r["created_at"].isNull()) {
             auto timeStr = r["created_at"].as<std::string>();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -116,12 +81,10 @@ UserDomainPermissions::UserDomainPermissions(const Row& r, const ssize_t indexOf
                 createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
-
         if (!r["updated_at"].isNull()) {
             auto timeStr = r["updated_at"].as<std::string>();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -136,7 +99,6 @@ UserDomainPermissions::UserDomainPermissions(const Row& r, const ssize_t indexOf
                 updatedAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
-
     } else {
         size_t offset = (size_t)indexOffset;
         if (offset + 10 > r.size()) {
@@ -144,61 +106,43 @@ UserDomainPermissions::UserDomainPermissions(const Row& r, const ssize_t indexOf
             return;
         }
         size_t index;
-
         index = offset + 0;
         if (!r[index].isNull()) {
-
             id_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
-
         index = offset + 1;
         if (!r[index].isNull()) {
-
             userId_ = std::make_shared<int32_t>(r[index].as<int32_t>());
         }
-
         index = offset + 2;
         if (!r[index].isNull()) {
-
             organisation_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
-
         index = offset + 3;
         if (!r[index].isNull()) {
-
             domain_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
-
         index = offset + 4;
         if (!r[index].isNull()) {
-
             allowedSubpath_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
-
         index = offset + 5;
         if (!r[index].isNull()) {
-
             canRead_ = std::make_shared<bool>(r[index].as<bool>());
         }
-
         index = offset + 6;
         if (!r[index].isNull()) {
-
             canWrite_ = std::make_shared<bool>(r[index].as<bool>());
         }
-
         index = offset + 7;
         if (!r[index].isNull()) {
-
             canDelete_ = std::make_shared<bool>(r[index].as<bool>());
         }
-
         index = offset + 8;
         if (!r[index].isNull()) {
             auto timeStr = r[index].as<std::string>();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -213,13 +157,11 @@ UserDomainPermissions::UserDomainPermissions(const Row& r, const ssize_t indexOf
                 createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
-
         index = offset + 9;
         if (!r[index].isNull()) {
             auto timeStr = r[index].as<std::string>();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -243,70 +185,60 @@ UserDomainPermissions::UserDomainPermissions(const Json::Value& pJson, const std
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
-
     if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         dirtyFlag_[0] = true;
         if (!pJson[pMasqueradingVector[0]].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
         if (!pJson[pMasqueradingVector[1]].isNull()) {
             userId_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[1]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
         if (!pJson[pMasqueradingVector[2]].isNull()) {
             organisation_ = std::make_shared<std::string>(pJson[pMasqueradingVector[2]].asString());
         }
     }
-
     if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
         if (!pJson[pMasqueradingVector[3]].isNull()) {
             domain_ = std::make_shared<std::string>(pJson[pMasqueradingVector[3]].asString());
         }
     }
-
     if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
         dirtyFlag_[4] = true;
         if (!pJson[pMasqueradingVector[4]].isNull()) {
             allowedSubpath_ = std::make_shared<std::string>(pJson[pMasqueradingVector[4]].asString());
         }
     }
-
     if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
         dirtyFlag_[5] = true;
         if (!pJson[pMasqueradingVector[5]].isNull()) {
             canRead_ = std::make_shared<bool>(pJson[pMasqueradingVector[5]].asBool());
         }
     }
-
     if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
         dirtyFlag_[6] = true;
         if (!pJson[pMasqueradingVector[6]].isNull()) {
             canWrite_ = std::make_shared<bool>(pJson[pMasqueradingVector[6]].asBool());
         }
     }
-
     if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
         dirtyFlag_[7] = true;
         if (!pJson[pMasqueradingVector[7]].isNull()) {
             canDelete_ = std::make_shared<bool>(pJson[pMasqueradingVector[7]].asBool());
         }
     }
-
     if (!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8])) {
         dirtyFlag_[8] = true;
         if (!pJson[pMasqueradingVector[8]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[8]].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -322,14 +254,12 @@ UserDomainPermissions::UserDomainPermissions(const Json::Value& pJson, const std
             }
         }
     }
-
     if (!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9])) {
         dirtyFlag_[9] = true;
         if (!pJson[pMasqueradingVector[9]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[9]].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -348,70 +278,60 @@ UserDomainPermissions::UserDomainPermissions(const Json::Value& pJson, const std
 }
 
 UserDomainPermissions::UserDomainPermissions(const Json::Value& pJson) noexcept(false) {
-
     if (pJson.isMember("id")) {
         dirtyFlag_[0] = true;
         if (!pJson["id"].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson["id"].asInt64());
         }
     }
-
     if (pJson.isMember("user_id")) {
         dirtyFlag_[1] = true;
         if (!pJson["user_id"].isNull()) {
             userId_ = std::make_shared<int32_t>((int32_t)pJson["user_id"].asInt64());
         }
     }
-
     if (pJson.isMember("organisation")) {
         dirtyFlag_[2] = true;
         if (!pJson["organisation"].isNull()) {
             organisation_ = std::make_shared<std::string>(pJson["organisation"].asString());
         }
     }
-
     if (pJson.isMember("domain")) {
         dirtyFlag_[3] = true;
         if (!pJson["domain"].isNull()) {
             domain_ = std::make_shared<std::string>(pJson["domain"].asString());
         }
     }
-
     if (pJson.isMember("allowed_subpath")) {
         dirtyFlag_[4] = true;
         if (!pJson["allowed_subpath"].isNull()) {
             allowedSubpath_ = std::make_shared<std::string>(pJson["allowed_subpath"].asString());
         }
     }
-
     if (pJson.isMember("can_read")) {
         dirtyFlag_[5] = true;
         if (!pJson["can_read"].isNull()) {
             canRead_ = std::make_shared<bool>(pJson["can_read"].asBool());
         }
     }
-
     if (pJson.isMember("can_write")) {
         dirtyFlag_[6] = true;
         if (!pJson["can_write"].isNull()) {
             canWrite_ = std::make_shared<bool>(pJson["can_write"].asBool());
         }
     }
-
     if (pJson.isMember("can_delete")) {
         dirtyFlag_[7] = true;
         if (!pJson["can_delete"].isNull()) {
             canDelete_ = std::make_shared<bool>(pJson["can_delete"].asBool());
         }
     }
-
     if (pJson.isMember("created_at")) {
         dirtyFlag_[8] = true;
         if (!pJson["created_at"].isNull()) {
             auto timeStr = pJson["created_at"].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -427,14 +347,12 @@ UserDomainPermissions::UserDomainPermissions(const Json::Value& pJson) noexcept(
             }
         }
     }
-
     if (pJson.isMember("updated_at")) {
         dirtyFlag_[9] = true;
         if (!pJson["updated_at"].isNull()) {
             auto timeStr = pJson["updated_at"].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -458,69 +376,59 @@ void UserDomainPermissions::updateByMasqueradedJson(const Json::Value& pJson, co
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
-
     if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         if (!pJson[pMasqueradingVector[0]].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
         if (!pJson[pMasqueradingVector[1]].isNull()) {
             userId_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[1]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
         if (!pJson[pMasqueradingVector[2]].isNull()) {
             organisation_ = std::make_shared<std::string>(pJson[pMasqueradingVector[2]].asString());
         }
     }
-
     if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
         if (!pJson[pMasqueradingVector[3]].isNull()) {
             domain_ = std::make_shared<std::string>(pJson[pMasqueradingVector[3]].asString());
         }
     }
-
     if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
         dirtyFlag_[4] = true;
         if (!pJson[pMasqueradingVector[4]].isNull()) {
             allowedSubpath_ = std::make_shared<std::string>(pJson[pMasqueradingVector[4]].asString());
         }
     }
-
     if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
         dirtyFlag_[5] = true;
         if (!pJson[pMasqueradingVector[5]].isNull()) {
             canRead_ = std::make_shared<bool>(pJson[pMasqueradingVector[5]].asBool());
         }
     }
-
     if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
         dirtyFlag_[6] = true;
         if (!pJson[pMasqueradingVector[6]].isNull()) {
             canWrite_ = std::make_shared<bool>(pJson[pMasqueradingVector[6]].asBool());
         }
     }
-
     if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
         dirtyFlag_[7] = true;
         if (!pJson[pMasqueradingVector[7]].isNull()) {
             canDelete_ = std::make_shared<bool>(pJson[pMasqueradingVector[7]].asBool());
         }
     }
-
     if (!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8])) {
         dirtyFlag_[8] = true;
         if (!pJson[pMasqueradingVector[8]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[8]].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -536,14 +444,12 @@ void UserDomainPermissions::updateByMasqueradedJson(const Json::Value& pJson, co
             }
         }
     }
-
     if (!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9])) {
         dirtyFlag_[9] = true;
         if (!pJson[pMasqueradingVector[9]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[9]].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -562,69 +468,59 @@ void UserDomainPermissions::updateByMasqueradedJson(const Json::Value& pJson, co
 }
 
 void UserDomainPermissions::updateByJson(const Json::Value& pJson) noexcept(false) {
-
     if (pJson.isMember("id")) {
         if (!pJson["id"].isNull()) {
             id_ = std::make_shared<int64_t>((int64_t)pJson["id"].asInt64());
         }
     }
-
     if (pJson.isMember("user_id")) {
         dirtyFlag_[1] = true;
         if (!pJson["user_id"].isNull()) {
             userId_ = std::make_shared<int32_t>((int32_t)pJson["user_id"].asInt64());
         }
     }
-
     if (pJson.isMember("organisation")) {
         dirtyFlag_[2] = true;
         if (!pJson["organisation"].isNull()) {
             organisation_ = std::make_shared<std::string>(pJson["organisation"].asString());
         }
     }
-
     if (pJson.isMember("domain")) {
         dirtyFlag_[3] = true;
         if (!pJson["domain"].isNull()) {
             domain_ = std::make_shared<std::string>(pJson["domain"].asString());
         }
     }
-
     if (pJson.isMember("allowed_subpath")) {
         dirtyFlag_[4] = true;
         if (!pJson["allowed_subpath"].isNull()) {
             allowedSubpath_ = std::make_shared<std::string>(pJson["allowed_subpath"].asString());
         }
     }
-
     if (pJson.isMember("can_read")) {
         dirtyFlag_[5] = true;
         if (!pJson["can_read"].isNull()) {
             canRead_ = std::make_shared<bool>(pJson["can_read"].asBool());
         }
     }
-
     if (pJson.isMember("can_write")) {
         dirtyFlag_[6] = true;
         if (!pJson["can_write"].isNull()) {
             canWrite_ = std::make_shared<bool>(pJson["can_write"].asBool());
         }
     }
-
     if (pJson.isMember("can_delete")) {
         dirtyFlag_[7] = true;
         if (!pJson["can_delete"].isNull()) {
             canDelete_ = std::make_shared<bool>(pJson["can_delete"].asBool());
         }
     }
-
     if (pJson.isMember("created_at")) {
         dirtyFlag_[8] = true;
         if (!pJson["created_at"].isNull()) {
             auto timeStr = pJson["created_at"].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -640,14 +536,12 @@ void UserDomainPermissions::updateByJson(const Json::Value& pJson) noexcept(fals
             }
         }
     }
-
     if (pJson.isMember("updated_at")) {
         dirtyFlag_[9] = true;
         if (!pJson["updated_at"].isNull()) {
             auto timeStr = pJson["updated_at"].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -826,14 +720,11 @@ void UserDomainPermissions::updateId(const uint64_t id) {
 
 const std::vector<std::string>& UserDomainPermissions::insertColumns() noexcept {
     static const std::vector<std::string> inCols = {
-        "user_id", "organisation", "domain", "allowed_subpath", "can_read", "can_write", "can_delete", "created_at", "updated_at"
-
-    };
+        "user_id", "organisation", "domain", "allowed_subpath", "can_read", "can_write", "can_delete", "created_at", "updated_at"};
     return inCols;
 }
 
 void UserDomainPermissions::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
-
     if (dirtyFlag_[1]) {
         if (getUserId()) {
             binder << getValueOfUserId();
@@ -841,7 +732,6 @@ void UserDomainPermissions::outputArgs(drogon::orm::internal::SqlBinder& binder)
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[2]) {
         if (getOrganisation()) {
             binder << getValueOfOrganisation();
@@ -849,7 +739,6 @@ void UserDomainPermissions::outputArgs(drogon::orm::internal::SqlBinder& binder)
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[3]) {
         if (getDomain()) {
             binder << getValueOfDomain();
@@ -857,7 +746,6 @@ void UserDomainPermissions::outputArgs(drogon::orm::internal::SqlBinder& binder)
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[4]) {
         if (getAllowedSubpath()) {
             binder << getValueOfAllowedSubpath();
@@ -865,7 +753,6 @@ void UserDomainPermissions::outputArgs(drogon::orm::internal::SqlBinder& binder)
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[5]) {
         if (getCanRead()) {
             binder << getValueOfCanRead();
@@ -873,7 +760,6 @@ void UserDomainPermissions::outputArgs(drogon::orm::internal::SqlBinder& binder)
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[6]) {
         if (getCanWrite()) {
             binder << getValueOfCanWrite();
@@ -881,7 +767,6 @@ void UserDomainPermissions::outputArgs(drogon::orm::internal::SqlBinder& binder)
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[7]) {
         if (getCanDelete()) {
             binder << getValueOfCanDelete();
@@ -889,7 +774,6 @@ void UserDomainPermissions::outputArgs(drogon::orm::internal::SqlBinder& binder)
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[8]) {
         if (getCreatedAt()) {
             binder << getValueOfCreatedAt();
@@ -897,7 +781,6 @@ void UserDomainPermissions::outputArgs(drogon::orm::internal::SqlBinder& binder)
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[9]) {
         if (getUpdatedAt()) {
             binder << getValueOfUpdatedAt();
@@ -909,48 +792,37 @@ void UserDomainPermissions::outputArgs(drogon::orm::internal::SqlBinder& binder)
 
 const std::vector<std::string> UserDomainPermissions::updateColumns() const {
     std::vector<std::string> ret;
-
     if (dirtyFlag_[1]) {
         ret.push_back(getColumnName(1));
     }
-
     if (dirtyFlag_[2]) {
         ret.push_back(getColumnName(2));
     }
-
     if (dirtyFlag_[3]) {
         ret.push_back(getColumnName(3));
     }
-
     if (dirtyFlag_[4]) {
         ret.push_back(getColumnName(4));
     }
-
     if (dirtyFlag_[5]) {
         ret.push_back(getColumnName(5));
     }
-
     if (dirtyFlag_[6]) {
         ret.push_back(getColumnName(6));
     }
-
     if (dirtyFlag_[7]) {
         ret.push_back(getColumnName(7));
     }
-
     if (dirtyFlag_[8]) {
         ret.push_back(getColumnName(8));
     }
-
     if (dirtyFlag_[9]) {
         ret.push_back(getColumnName(9));
     }
-
     return ret;
 }
 
 void UserDomainPermissions::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
-
     if (dirtyFlag_[1]) {
         if (getUserId()) {
             binder << getValueOfUserId();
@@ -958,7 +830,6 @@ void UserDomainPermissions::updateArgs(drogon::orm::internal::SqlBinder& binder)
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[2]) {
         if (getOrganisation()) {
             binder << getValueOfOrganisation();
@@ -966,7 +837,6 @@ void UserDomainPermissions::updateArgs(drogon::orm::internal::SqlBinder& binder)
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[3]) {
         if (getDomain()) {
             binder << getValueOfDomain();
@@ -974,7 +844,6 @@ void UserDomainPermissions::updateArgs(drogon::orm::internal::SqlBinder& binder)
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[4]) {
         if (getAllowedSubpath()) {
             binder << getValueOfAllowedSubpath();
@@ -982,7 +851,6 @@ void UserDomainPermissions::updateArgs(drogon::orm::internal::SqlBinder& binder)
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[5]) {
         if (getCanRead()) {
             binder << getValueOfCanRead();
@@ -990,7 +858,6 @@ void UserDomainPermissions::updateArgs(drogon::orm::internal::SqlBinder& binder)
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[6]) {
         if (getCanWrite()) {
             binder << getValueOfCanWrite();
@@ -998,7 +865,6 @@ void UserDomainPermissions::updateArgs(drogon::orm::internal::SqlBinder& binder)
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[7]) {
         if (getCanDelete()) {
             binder << getValueOfCanDelete();
@@ -1006,7 +872,6 @@ void UserDomainPermissions::updateArgs(drogon::orm::internal::SqlBinder& binder)
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[8]) {
         if (getCreatedAt()) {
             binder << getValueOfCreatedAt();
@@ -1014,7 +879,6 @@ void UserDomainPermissions::updateArgs(drogon::orm::internal::SqlBinder& binder)
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[9]) {
         if (getUpdatedAt()) {
             binder << getValueOfUpdatedAt();
@@ -1025,87 +889,56 @@ void UserDomainPermissions::updateArgs(drogon::orm::internal::SqlBinder& binder)
 }
 Json::Value UserDomainPermissions::toJson() const {
     Json::Value ret;
-
     if (getId()) {
-
         ret["id"] = (Json::Int64)getValueOfId();
-
     } else {
         ret["id"] = Json::Value();
     }
-
     if (getUserId()) {
-
         ret["user_id"] = getValueOfUserId();
-
     } else {
         ret["user_id"] = Json::Value();
     }
-
     if (getOrganisation()) {
-
         ret["organisation"] = getValueOfOrganisation();
-
     } else {
         ret["organisation"] = Json::Value();
     }
-
     if (getDomain()) {
-
         ret["domain"] = getValueOfDomain();
-
     } else {
         ret["domain"] = Json::Value();
     }
-
     if (getAllowedSubpath()) {
-
         ret["allowed_subpath"] = getValueOfAllowedSubpath();
-
     } else {
         ret["allowed_subpath"] = Json::Value();
     }
-
     if (getCanRead()) {
-
         ret["can_read"] = getValueOfCanRead();
-
     } else {
         ret["can_read"] = Json::Value();
     }
-
     if (getCanWrite()) {
-
         ret["can_write"] = getValueOfCanWrite();
-
     } else {
         ret["can_write"] = Json::Value();
     }
-
     if (getCanDelete()) {
-
         ret["can_delete"] = getValueOfCanDelete();
-
     } else {
         ret["can_delete"] = Json::Value();
     }
-
     if (getCreatedAt()) {
-
         ret["created_at"] = getCreatedAt()->toDbStringLocal();
-
     } else {
         ret["created_at"] = Json::Value();
     }
-
     if (getUpdatedAt()) {
-
         ret["updated_at"] = getUpdatedAt()->toDbStringLocal();
-
     } else {
         ret["updated_at"] = Json::Value();
     }
-
     return ret;
 }
 
@@ -1116,261 +949,182 @@ std::string UserDomainPermissions::toString() const {
 Json::Value UserDomainPermissions::toMasqueradedJson(const std::vector<std::string>& pMasqueradingVector) const {
     Json::Value ret;
     if (pMasqueradingVector.size() == 10) {
-
         if (!pMasqueradingVector[0].empty()) {
             if (getId()) {
-
                 ret[pMasqueradingVector[0]] = (Json::Int64)getValueOfId();
-
             } else {
                 ret[pMasqueradingVector[0]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[1].empty()) {
             if (getUserId()) {
-
                 ret[pMasqueradingVector[1]] = getValueOfUserId();
-
             } else {
                 ret[pMasqueradingVector[1]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[2].empty()) {
             if (getOrganisation()) {
-
                 ret[pMasqueradingVector[2]] = getValueOfOrganisation();
-
             } else {
                 ret[pMasqueradingVector[2]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[3].empty()) {
             if (getDomain()) {
-
                 ret[pMasqueradingVector[3]] = getValueOfDomain();
-
             } else {
                 ret[pMasqueradingVector[3]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[4].empty()) {
             if (getAllowedSubpath()) {
-
                 ret[pMasqueradingVector[4]] = getValueOfAllowedSubpath();
-
             } else {
                 ret[pMasqueradingVector[4]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[5].empty()) {
             if (getCanRead()) {
-
                 ret[pMasqueradingVector[5]] = getValueOfCanRead();
-
             } else {
                 ret[pMasqueradingVector[5]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[6].empty()) {
             if (getCanWrite()) {
-
                 ret[pMasqueradingVector[6]] = getValueOfCanWrite();
-
             } else {
                 ret[pMasqueradingVector[6]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[7].empty()) {
             if (getCanDelete()) {
-
                 ret[pMasqueradingVector[7]] = getValueOfCanDelete();
-
             } else {
                 ret[pMasqueradingVector[7]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[8].empty()) {
             if (getCreatedAt()) {
-
                 ret[pMasqueradingVector[8]] = getCreatedAt()->toDbStringLocal();
-
             } else {
                 ret[pMasqueradingVector[8]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[9].empty()) {
             if (getUpdatedAt()) {
-
                 ret[pMasqueradingVector[9]] = getUpdatedAt()->toDbStringLocal();
-
             } else {
                 ret[pMasqueradingVector[9]] = Json::Value();
             }
         }
-
         return ret;
     }
     LOG_ERROR << "Masquerade failed";
-
     if (getId()) {
-
         ret["id"] = (Json::Int64)getValueOfId();
-
     } else {
         ret["id"] = Json::Value();
     }
-
     if (getUserId()) {
-
         ret["user_id"] = getValueOfUserId();
-
     } else {
         ret["user_id"] = Json::Value();
     }
-
     if (getOrganisation()) {
-
         ret["organisation"] = getValueOfOrganisation();
-
     } else {
         ret["organisation"] = Json::Value();
     }
-
     if (getDomain()) {
-
         ret["domain"] = getValueOfDomain();
-
     } else {
         ret["domain"] = Json::Value();
     }
-
     if (getAllowedSubpath()) {
-
         ret["allowed_subpath"] = getValueOfAllowedSubpath();
-
     } else {
         ret["allowed_subpath"] = Json::Value();
     }
-
     if (getCanRead()) {
-
         ret["can_read"] = getValueOfCanRead();
-
     } else {
         ret["can_read"] = Json::Value();
     }
-
     if (getCanWrite()) {
-
         ret["can_write"] = getValueOfCanWrite();
-
     } else {
         ret["can_write"] = Json::Value();
     }
-
     if (getCanDelete()) {
-
         ret["can_delete"] = getValueOfCanDelete();
-
     } else {
         ret["can_delete"] = Json::Value();
     }
-
     if (getCreatedAt()) {
-
         ret["created_at"] = getCreatedAt()->toDbStringLocal();
-
     } else {
         ret["created_at"] = Json::Value();
     }
-
     if (getUpdatedAt()) {
-
         ret["updated_at"] = getUpdatedAt()->toDbStringLocal();
-
     } else {
         ret["updated_at"] = Json::Value();
     }
-
     return ret;
 }
 
 bool UserDomainPermissions::validateJsonForCreation(const Json::Value& pJson, std::string& err) {
-
     if (pJson.isMember("id")) {
         if (!validJsonOfField(0, "id", pJson["id"], err, true))
             return false;
     }
-
     if (pJson.isMember("user_id")) {
         if (!validJsonOfField(1, "user_id", pJson["user_id"], err, true))
             return false;
-    }
-
-    else {
+    } else {
         err = "The user_id column cannot be null";
         return false;
     }
-
     if (pJson.isMember("organisation")) {
         if (!validJsonOfField(2, "organisation", pJson["organisation"], err, true))
             return false;
-    }
-
-    else {
+    } else {
         err = "The organisation column cannot be null";
         return false;
     }
-
     if (pJson.isMember("domain")) {
         if (!validJsonOfField(3, "domain", pJson["domain"], err, true))
             return false;
-    }
-
-    else {
+    } else {
         err = "The domain column cannot be null";
         return false;
     }
-
     if (pJson.isMember("allowed_subpath")) {
         if (!validJsonOfField(4, "allowed_subpath", pJson["allowed_subpath"], err, true))
             return false;
     }
-
     if (pJson.isMember("can_read")) {
         if (!validJsonOfField(5, "can_read", pJson["can_read"], err, true))
             return false;
     }
-
     if (pJson.isMember("can_write")) {
         if (!validJsonOfField(6, "can_write", pJson["can_write"], err, true))
             return false;
     }
-
     if (pJson.isMember("can_delete")) {
         if (!validJsonOfField(7, "can_delete", pJson["can_delete"], err, true))
             return false;
     }
-
     if (pJson.isMember("created_at")) {
         if (!validJsonOfField(8, "created_at", pJson["created_at"], err, true))
             return false;
     }
-
     if (pJson.isMember("updated_at")) {
         if (!validJsonOfField(9, "updated_at", pJson["updated_at"], err, true))
             return false;
     }
-
     return true;
 }
 bool UserDomainPermissions::validateMasqueradedJsonForCreation(
@@ -1380,92 +1134,75 @@ bool UserDomainPermissions::validateMasqueradedJsonForCreation(
         return false;
     }
     try {
-
         if (!pMasqueradingVector[0].empty()) {
             if (pJson.isMember(pMasqueradingVector[0])) {
                 if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, true))
                     return false;
             }
         }
-
         if (!pMasqueradingVector[1].empty()) {
             if (pJson.isMember(pMasqueradingVector[1])) {
                 if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, true))
                     return false;
-            }
-
-            else {
+            } else {
                 err = "The " + pMasqueradingVector[1] + " column cannot be null";
                 return false;
             }
         }
-
         if (!pMasqueradingVector[2].empty()) {
             if (pJson.isMember(pMasqueradingVector[2])) {
                 if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, true))
                     return false;
-            }
-
-            else {
+            } else {
                 err = "The " + pMasqueradingVector[2] + " column cannot be null";
                 return false;
             }
         }
-
         if (!pMasqueradingVector[3].empty()) {
             if (pJson.isMember(pMasqueradingVector[3])) {
                 if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, true))
                     return false;
-            }
-
-            else {
+            } else {
                 err = "The " + pMasqueradingVector[3] + " column cannot be null";
                 return false;
             }
         }
-
         if (!pMasqueradingVector[4].empty()) {
             if (pJson.isMember(pMasqueradingVector[4])) {
                 if (!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, true))
                     return false;
             }
         }
-
         if (!pMasqueradingVector[5].empty()) {
             if (pJson.isMember(pMasqueradingVector[5])) {
                 if (!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, true))
                     return false;
             }
         }
-
         if (!pMasqueradingVector[6].empty()) {
             if (pJson.isMember(pMasqueradingVector[6])) {
                 if (!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, true))
                     return false;
             }
         }
-
         if (!pMasqueradingVector[7].empty()) {
             if (pJson.isMember(pMasqueradingVector[7])) {
                 if (!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, true))
                     return false;
             }
         }
-
         if (!pMasqueradingVector[8].empty()) {
             if (pJson.isMember(pMasqueradingVector[8])) {
                 if (!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, true))
                     return false;
             }
         }
-
         if (!pMasqueradingVector[9].empty()) {
             if (pJson.isMember(pMasqueradingVector[9])) {
                 if (!validJsonOfField(9, pMasqueradingVector[9], pJson[pMasqueradingVector[9]], err, true))
                     return false;
             }
         }
-
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -1473,62 +1210,49 @@ bool UserDomainPermissions::validateMasqueradedJsonForCreation(
     return true;
 }
 bool UserDomainPermissions::validateJsonForUpdate(const Json::Value& pJson, std::string& err) {
-
     if (pJson.isMember("id")) {
         if (!validJsonOfField(0, "id", pJson["id"], err, false))
             return false;
-    }
-
-    else {
+    } else {
         err = "The value of primary key must be set in the json object for update";
         return false;
     }
-
     if (pJson.isMember("user_id")) {
         if (!validJsonOfField(1, "user_id", pJson["user_id"], err, false))
             return false;
     }
-
     if (pJson.isMember("organisation")) {
         if (!validJsonOfField(2, "organisation", pJson["organisation"], err, false))
             return false;
     }
-
     if (pJson.isMember("domain")) {
         if (!validJsonOfField(3, "domain", pJson["domain"], err, false))
             return false;
     }
-
     if (pJson.isMember("allowed_subpath")) {
         if (!validJsonOfField(4, "allowed_subpath", pJson["allowed_subpath"], err, false))
             return false;
     }
-
     if (pJson.isMember("can_read")) {
         if (!validJsonOfField(5, "can_read", pJson["can_read"], err, false))
             return false;
     }
-
     if (pJson.isMember("can_write")) {
         if (!validJsonOfField(6, "can_write", pJson["can_write"], err, false))
             return false;
     }
-
     if (pJson.isMember("can_delete")) {
         if (!validJsonOfField(7, "can_delete", pJson["can_delete"], err, false))
             return false;
     }
-
     if (pJson.isMember("created_at")) {
         if (!validJsonOfField(8, "created_at", pJson["created_at"], err, false))
             return false;
     }
-
     if (pJson.isMember("updated_at")) {
         if (!validJsonOfField(9, "updated_at", pJson["updated_at"], err, false))
             return false;
     }
-
     return true;
 }
 bool UserDomainPermissions::validateMasqueradedJsonForUpdate(
@@ -1538,62 +1262,49 @@ bool UserDomainPermissions::validateMasqueradedJsonForUpdate(
         return false;
     }
     try {
-
         if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
             if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, false))
                 return false;
-        }
-
-        else {
+        } else {
             err = "The value of primary key must be set in the json object for update";
             return false;
         }
-
         if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
             if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
             if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
             if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
             if (!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
             if (!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
             if (!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
             if (!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[8].empty() && pJson.isMember(pMasqueradingVector[8])) {
             if (!validJsonOfField(8, pMasqueradingVector[8], pJson[pMasqueradingVector[8]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[9].empty() && pJson.isMember(pMasqueradingVector[9])) {
             if (!validJsonOfField(9, pMasqueradingVector[9], pJson[pMasqueradingVector[9]], err, false))
                 return false;
         }
-
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -1603,157 +1314,115 @@ bool UserDomainPermissions::validateMasqueradedJsonForUpdate(
 bool UserDomainPermissions::validJsonOfField(
     size_t index, const std::string& fieldName, const Json::Value& pJson, std::string& err, bool isForCreation) {
     switch (index) {
-
         case 0:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (isForCreation) {
                 err = "The automatic primary key cannot be set";
                 return false;
             }
-
             if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 1:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isInt()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 2:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 3:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 4:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
-            if (pJson.isString() && drogon::utils::utf8Length(pJson.asCString()) > 1024) {
+            if (pJson.isString() &&
+                std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>, wchar_t>{}.from_bytes(pJson.asCString()).size() > 1024) {
                 err = "String length exceeds limit for the " + fieldName + " field (the maximum value is 1024)";
                 return false;
             }
-
             break;
-
         case 5:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isBool()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 6:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isBool()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 7:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isBool()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 8:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 9:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         default:
             err = "Internal error in the server";
             return false;

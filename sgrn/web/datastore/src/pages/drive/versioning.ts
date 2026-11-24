@@ -15,6 +15,8 @@ export interface StorageConstraintsResponse {
     max_file_size_mb: number;
     max_file_size_bytes: number;
     encryption_supported: boolean;
+    /** Whether the datastore keeps file versions. Absent on older datastore builds. */
+    versioning_enabled?: boolean;
 }
 
 /** Stable DTO returned by GET /api/v1/storage/files/versions. */
@@ -274,7 +276,7 @@ export async function uploadDriveFileVersion(
 
         // Match ordinary Drive transport policy. Version creation itself is
         // governed by the datastore's versioning configuration and upload path;
-        // the current /storage/info DTO intentionally exposes only size/encryption.
+        // /storage/info exposes size, encryption support and whether versioning is enabled.
         // The server remains authoritative for scope and policy enforcement.
         const useResumable = replacement.size >= 5 * 1024 * 1024 || encryptReplacement || t_scope === "domains";
         if (useResumable) {

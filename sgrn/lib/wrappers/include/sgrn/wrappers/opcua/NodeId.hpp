@@ -1,7 +1,6 @@
 #pragma once
 
 #include <open62541/types.h>
-#include <open62541/types_generated_handling.h>
 #include <string_view>
 
 namespace sgrn::wrappers::opcua

@@ -141,6 +141,11 @@ private:
     sgrn::Result<void> cmdScope(const std::vector<std::string>& t_args);
     sgrn::Result<void> cmdSwitch(const std::vector<std::string>& t_args);
     sgrn::Result<void> cmdZip(const std::vector<std::string>& t_args);
+    // File version history
+    sgrn::Result<void> cmdVersions(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdVersionGet(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdVersionRestore(const std::vector<std::string>& t_args);
+    sgrn::Result<void> cmdVersionPrune(const std::vector<std::string>& t_args);
     // Resumable upload
     sgrn::Result<void> cmdRput(const std::vector<std::string>& t_args);
     sgrn::Result<void> cmdUploadStatus(const std::vector<std::string>& t_args);

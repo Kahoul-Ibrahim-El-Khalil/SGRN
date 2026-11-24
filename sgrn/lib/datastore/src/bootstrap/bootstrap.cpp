@@ -10,6 +10,7 @@
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/env.hpp>
 #include <sgrn/utils/filesystem.hpp>
+#include <sgrn/utils/process.hpp>
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
@@ -22,6 +23,48 @@
 
 namespace sgrn::datastore::bootstrap
 {
+
+namespace
+{
+
+void chownDirToSudoUser(const std::string& t_dir) {
+    if (::geteuid() != 0)
+        return;
+    std::string sudo_user = sgrn::utils::process::resolveSudoUser();
+    if (sudo_user.empty() || sudo_user == "root")
+        return;
+    if (struct passwd* p_pw = ::getpwnam(sudo_user.c_str())) {
+        [[maybe_unused]] int rc = std::system(fmt::format("chown -R '{}:{}' '{}' 2>/dev/null", p_pw->pw_uid, p_pw->pw_gid, t_dir).c_str());
+    }
+}
+
+bool isLocalPgHost(const std::string& t_host) {
+    return t_host.empty() || t_host == "127.0.0.1" || t_host == "localhost" || t_host == "::1" || t_host.starts_with("/");
+}
+
+int runPsqlAsPostgres(const std::string& t_db, const std::string& t_sql_cmd, const std::string& t_stdin_file = {}) {
+    std::string cmd = t_stdin_file.empty()
+                          ? fmt::format("su -s /bin/sh postgres -c \"psql -d {} -v ON_ERROR_STOP=1 -tAc \\\"{}\\\"\"", t_db, t_sql_cmd)
+                          : fmt::format("su -s /bin/sh postgres -c \"psql -d {} -q -v ON_ERROR_STOP=1\" < '{}'", t_db, t_stdin_file);
+    return sgrn::utils::process::execute(cmd);
+}
+
+std::string capturePsqlAsPostgres(const std::string& t_db, const std::string& t_sql_cmd) {
+    std::string cmd = fmt::format("su -s /bin/sh postgres -c \"psql -d {} -tAc \\\"{}\\\"\" 2>/dev/null", t_db, t_sql_cmd);
+    FILE* pipe = ::popen(cmd.c_str(), "r");
+    if (!pipe)
+        return {};
+    char buf[256];
+    std::string out;
+    while (::fgets(buf, sizeof(buf), pipe) != nullptr)
+        out += buf;
+    ::pclose(pipe);
+    while (!out.empty() && (out.back() == '\n' || out.back() == '\r' || out.back() == ' '))
+        out.pop_back();
+    return out;
+}
+
+} // namespace
 
 // ---------------------------------------------------------------------------
 // Template rendering
@@ -88,7 +131,9 @@ bool generateConfigOnly(const std::string& t_base_dir) {
 
     fs::path env_path = fs::path(t_base_dir) / ".env";
     bool env_exists = fs::exists(env_path);
-    std::string sgrn_user = envOrDefault("USER", "admin");
+    std::string sgrn_user = sgrn::utils::process::resolveSudoUser();
+    if (sgrn_user.empty())
+        sgrn_user = envOrDefault("USER", "admin");
 
     if (!env_exists)
         generateDefaultEnvFile(env_path, sgrn_user, t_base_dir);
@@ -122,6 +167,7 @@ bool generateConfigOnly(const std::string& t_base_dir) {
     generateSelfSignedCert(fs::path(t_base_dir) / "certs");
     extractConfigAssets(t_base_dir, tmpl);
     generateSystemdServices(t_base_dir, tmpl);
+    chownDirToSudoUser(t_base_dir);
 
     return env_exists;
 }
@@ -161,29 +207,62 @@ void initDatabaseOnly(const std::string& t_base_dir, bool t_allow_insecure, bool
     auto tmpl = buildTemplateResolver(t_base_dir);
     std::string sql = decompressSqlAssets(tmpl);
 
+    const char* p_su_pass = std::getenv("POSTGRES_SUPERUSER_PASSWORD");
+    const bool use_root_peer = (::geteuid() == 0) && (p_su_pass == nullptr || *p_su_pass == '\0') && isLocalPgHost(pg_host);
+
     std::string bootstrap_conn = fmt::format("host={} port={} dbname=postgres user={}", pg_host, pg_port, pg_superuser);
-    if (const char* p_su_pass = std::getenv("POSTGRES_SUPERUSER_PASSWORD"))
+    if (p_su_pass != nullptr && *p_su_pass != '\0')
         bootstrap_conn += fmt::format(" password={}", p_su_pass);
 
     trantor::EventLoopThread loop_thread;
-    loop_thread.run();
-
-    SGRN_INFO("DatastoreInit", "Bootstrapping via connection: {}", bootstrap_conn);
-    auto client = drogon::orm::DbClient::newPgClient(bootstrap_conn, 1, loop_thread.getLoop());
+    std::shared_ptr<drogon::orm::DbClient> client;
+    if (use_root_peer) {
+        SGRN_INFO("DatastoreInit", "Bootstrapping via system postgres user (Unix socket peer auth)");
+    } else {
+        loop_thread.run();
+        SGRN_INFO("DatastoreInit", "Bootstrapping via connection: host={} port={} dbname=postgres user={}", pg_host, pg_port, pg_superuser);
+        client = drogon::orm::DbClient::newPgClient(bootstrap_conn, 1, loop_thread.getLoop());
+    }
 
     SGRN_INFO("DatastoreInit", "Init target: {}:{}/{} (drop + recreate)", pg_host, pg_port, pg_db);
 
     bool db_exists = false;
-    try {
-        auto exists = client->execSqlSync(fmt::format("SELECT 1 AS e FROM pg_database WHERE datname = '{}'", sqlEscape(pg_db)));
-        db_exists = !exists.empty();
-    } catch (const std::exception& e) {
-        SGRN_WARN("DatastoreInit", "Could not list databases ({}): treating target as absent.", e.what());
+    if (use_root_peer) {
+        db_exists =
+            capturePsqlAsPostgres("postgres", fmt::format("SELECT 1 FROM pg_database WHERE datname = '{}'", sqlEscape(pg_db))) == "1";
+    } else {
+        try {
+            auto exists = client->execSqlSync(fmt::format("SELECT 1 AS e FROM pg_database WHERE datname = '{}'", sqlEscape(pg_db)));
+            db_exists = !exists.empty();
+        } catch (const std::exception& e) {
+            SGRN_WARN("DatastoreInit", "Could not list databases ({}): treating target as absent.", e.what());
+        }
     }
 
     if (db_exists) {
-        const std::string target_conn = fmt::format("host={} port={} dbname={} user={}", pg_host, pg_port, pg_db, pg_superuser);
-        const long long rows = estimateLiveRows(target_conn);
+        long long rows = -1;
+        if (use_root_peer) {
+            std::string stats_s = capturePsqlAsPostgres(pg_db, "SELECT COALESCE(SUM(n_live_tup), 0)::bigint FROM pg_stat_all_tables "
+                                                               "WHERE schemaname NOT IN ('pg_catalog', 'information_schema')");
+            if (!stats_s.empty()) {
+                try {
+                    rows = std::stoll(stats_s);
+                } catch (...) {
+                    rows = -1;
+                }
+            }
+            std::string core_s =
+                capturePsqlAsPostgres(pg_db, "SELECT (SELECT count(*) FROM core.users) + (SELECT count(*) FROM core.organisations)");
+            if (!core_s.empty()) {
+                try {
+                    rows = std::max(rows, std::stoll(core_s));
+                } catch (...) {
+                }
+            }
+        } else {
+            const std::string target_conn = fmt::format("host={} port={} dbname={} user={}", pg_host, pg_port, pg_db, pg_superuser);
+            rows = estimateLiveRows(target_conn);
+        }
         if (rows == 0) {
             SGRN_INFO("DatastoreInit", "Target is empty (no user rows) — safe to rebuild.");
         } else if (rows > 0) {
@@ -207,7 +286,20 @@ void initDatabaseOnly(const std::string& t_base_dir, bool t_allow_insecure, bool
         }
     }
 
-    recreateDatabase(client.get(), pg_db);
+    if (use_root_peer) {
+        SGRN_INFO("DatastoreInit", "Dropping existing '{}' database if present...", pg_db);
+        if (runPsqlAsPostgres("postgres", fmt::format("DROP DATABASE IF EXISTS {} WITH (FORCE);", pg_db)) != 0) {
+            SGRN_ERROR("DatastoreInit", "Failed to drop existing '{}' database via postgres user.", pg_db);
+            std::exit(EXIT_FAILURE);
+        }
+        SGRN_INFO("DatastoreInit", "Creating fresh '{}' database...", pg_db);
+        if (runPsqlAsPostgres("postgres", fmt::format("CREATE DATABASE {} ENCODING 'UTF8';", pg_db)) != 0) {
+            SGRN_ERROR("DatastoreInit", "Failed to create '{}' database via postgres user.", pg_db);
+            std::exit(EXIT_FAILURE);
+        }
+    } else {
+        recreateDatabase(client.get(), pg_db);
+    }
 
     fs::path schema_path = fs::path(t_base_dir) / "schema.sql";
     std::string admin_fragment;
@@ -223,7 +315,16 @@ void initDatabaseOnly(const std::string& t_base_dir, bool t_allow_insecure, bool
             sql_out << "\n-- -- admin account bootstrap (staged by --init wizard) --\n" << admin_fragment << "\n";
     }
 
-    executeSchemaViaPsql(pg_host, pg_port, pg_superuser, schema_path, sgrn_deployment_env);
+    if (use_root_peer) {
+        SGRN_INFO("DatastoreInit", "Executing flattened schema via psql (postgres peer auth)...");
+        if (runPsqlAsPostgres("postgres", {}, schema_path.string()) != 0) {
+            SGRN_ERROR("DatastoreInit", "Failed to execute schema via postgres user.");
+            std::exit(EXIT_FAILURE);
+        }
+        SGRN_INFO("DatastoreInit", "Database schema applied.");
+    } else {
+        executeSchemaViaPsql(pg_host, pg_port, pg_superuser, schema_path, sgrn_deployment_env);
+    }
 
     if (!admin_fragment.empty()) {
         std::error_code rm_ec;
@@ -235,6 +336,7 @@ void initDatabaseOnly(const std::string& t_base_dir, bool t_allow_insecure, bool
         SGRN_WARN("DatastoreInit", "The seeded admin account keeps its default password (postgres/seeding.sql). "
                                    "Change it immediately from the dashboard, or re-run --init to let the wizard master one.");
     }
+    chownDirToSudoUser(t_base_dir);
 }
 
 void configureSystemd() {
@@ -346,7 +448,9 @@ void configureSystemd() {
                 any_created = true;
         }
         if (any_created) {
-            std::system(fmt::format("chown -R '{}:{}' '{}/var' 2>/dev/null", user_uid, user_gid, sgrn_data).c_str());
+            if (std::system(fmt::format("chown -R '{}:{}' '{}/var' 2>/dev/null", user_uid, user_gid, sgrn_data).c_str()) != 0) {
+                SGRN_WARN("DatastoreInit", "Failed to chown {}/var to {}:{}", sgrn_data, user_uid, user_gid);
+            }
             SGRN_WARN("DatastoreInit", "Created missing nginx runtime dirs under {}/var (root-owned entries chowned).", sgrn_data);
         }
     }
@@ -359,17 +463,33 @@ void configureSystemd() {
     changed_services = orderServicesForRestart(std::move(changed_services));
     enableServices(changed_services);
 
-    if (std::find(changed_services.begin(), changed_services.end(), "SGRN-postgres.service") != changed_services.end()) {
-        waitForPostgres(envOrDefault("POSTGRES_HOST", "127.0.0.1"), envOrDefault("POSTGRES_PORT", "5432"),
-            (fs::path(sgrn_deployment_env) / "bin" / "pg_isready").string());
-    }
-
     if (!restartChangedServices(changed_services))
         std::exit(EXIT_FAILURE);
+
+    // Verify PostgreSQL is accepting connections when SGRN-datastore.service was
+    // restarted (system postgresql.service is expected to be running).
+    // Use system pg_isready directly; fall back to SGRN_DEPLOYMENT_ENV/bin for
+    // custom installs where SGRN_DEPLOYMENT_ENV != /usr.
+    if (std::find(changed_services.begin(), changed_services.end(), "SGRN-datastore.service") != changed_services.end()) {
+        auto pg_isready_path = [&]() -> std::string {
+            for (const char* p : {"/usr/bin/pg_isready", "/usr/lib/postgresql/17/bin/pg_isready"}) {
+                if (std::filesystem::exists(p))
+                    return p;
+            }
+            std::string candidate = (fs::path(sgrn_deployment_env) / "bin" / "pg_isready").string();
+            if (std::filesystem::exists(candidate))
+                return candidate;
+            return {};
+        }();
+        waitForPostgres(envOrDefault("POSTGRES_HOST", "127.0.0.1"), envOrDefault("POSTGRES_PORT", "5432"), pg_isready_path);
+    }
 }
 
 void bootstrapDatabase(bool t_non_interactive, bool t_allow_insecure, bool t_force) {
-    std::string base_dir = sgrn::utils::filesystem::expandUserPath(std::string(kDefaultOperationDir));
+    // Path resolved by cli.cpp's base_dir() lambda (SUDO_USER-aware) and
+    // forwarded here via bootstrapDatabase(base_dir, ...). This zero-arg overload
+    // is kept for other internal call-sites that don't go through the CLI.
+    const std::string base_dir = sgrn::utils::filesystem::expandUserPath(std::string(kDefaultOperationDir));
 
     wizard::runSecretWizard(base_dir, t_non_interactive);
 
@@ -378,6 +498,24 @@ void bootstrapDatabase(bool t_non_interactive, bool t_allow_insecure, bool t_for
         return; // stop and let user configure secrets
 
     initDatabaseOnly(base_dir, t_allow_insecure, t_force, t_non_interactive);
+
+    SGRN_INFO("DatastoreInit", "");
+    SGRN_INFO("DatastoreInit", "╔══════════════════════════════════════════════╗");
+    SGRN_INFO("DatastoreInit", "║     SGRN Platform Ready!                     ║");
+    SGRN_INFO("DatastoreInit", "╚══════════════════════════════════════════════╝");
+    SGRN_INFO("DatastoreInit", "To install and activate system-wide systemd services:");
+    SGRN_INFO("DatastoreInit", "  sudo <bin> --config-systemd");
+    SGRN_INFO("DatastoreInit", "");
+}
+
+void bootstrapDatabase(const std::string& t_base_dir, bool t_non_interactive, bool t_allow_insecure, bool t_force) {
+    wizard::runSecretWizard(t_base_dir, t_non_interactive);
+
+    bool env_exists = generateConfigOnly(t_base_dir);
+    if (!env_exists)
+        return; // stop and let user configure secrets
+
+    initDatabaseOnly(t_base_dir, t_allow_insecure, t_force, t_non_interactive);
 
     SGRN_INFO("DatastoreInit", "");
     SGRN_INFO("DatastoreInit", "╔══════════════════════════════════════════════╗");

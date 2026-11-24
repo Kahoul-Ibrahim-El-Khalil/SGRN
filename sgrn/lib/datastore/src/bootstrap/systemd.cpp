@@ -57,9 +57,9 @@ void stopLegacyServices(const std::string& t_sudo_user, uid_t t_user_uid) {
 void removeObsoleteUnits(const std::filesystem::path& t_data_dir) {
     namespace fs = std::filesystem;
     static constexpr std::string_view kObsoleteUnits[] = {
-        "SGRN-postgrest.service", "SGRN-minio.service", "SGRN-redis.service", "SGRN-api.service"};
+        "SGRN-postgrest.service", "SGRN-minio.service", "SGRN-redis.service", "SGRN-api.service", "SGRN-postgres.service"};
     static constexpr std::string_view kObsoleteDataFiles[] = {"systemd/SGRN-postgrest.service", "systemd/SGRN-minio.service",
-        "systemd/SGRN-redis.service", "systemd/SGRN-api.service", "postgrest.conf"};
+        "systemd/SGRN-redis.service", "systemd/SGRN-api.service", "systemd/SGRN-postgres.service", "postgrest.conf"};
 
     for (auto unit : kObsoleteUnits) {
         SGRN_INFO("DatastoreInit", "Removing obsolete unit {} (if present)...", unit);
@@ -196,12 +196,14 @@ bool enableServices(const std::vector<std::string>& t_services) {
 
 void waitForPostgres(const std::string& t_host, const std::string& t_port, const std::string& t_pg_isready) {
     if (t_pg_isready.empty() || !std::filesystem::exists(t_pg_isready)) {
-        SGRN_WARN("DatastoreInit", "pg_isready not found; skipping postgres readiness wait.");
+        SGRN_WARN("DatastoreInit", "pg_isready not found at '{}'; skipping postgres readiness wait.", t_pg_isready);
         return;
     }
     SGRN_INFO("DatastoreInit", "Waiting for PostgreSQL at {}:{} to accept connections...", t_host, t_port);
     for (int i = 0; i < 30; ++i) {
-        if (execute(fmt::format("{} -h {} -p {} -t 2 2>/dev/null", t_pg_isready, t_host, t_port)) == 0) {
+        // Redirect both stdout and stderr: pg_isready prints "host:port - no response"
+        // to stdout on every failed probe, which would spam the operator's terminal.
+        if (execute(fmt::format("{} -h {} -p {} -t 2 >/dev/null 2>&1", t_pg_isready, t_host, t_port)) == 0) {
             SGRN_INFO("DatastoreInit", "PostgreSQL is accepting connections.");
             return;
         }

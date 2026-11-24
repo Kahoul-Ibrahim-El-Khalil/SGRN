@@ -21,8 +21,8 @@ int main(int t_argc, char** tp_argv) {
     // Server mode: configure Drogon then start the event loop.
     return sgrn::utils::app::runMain(
         t_argc, tp_argv,
-        [](int t_argc, char** tp_argv) {
-            Result<void> cfg = configDrogonApp(t_argc, tp_argv);
+        [](int argc, char** argv) {
+            Result<void> cfg = configDrogonApp(argc, argv);
             if (cfg.hasError()) {
                 fmt::print("{}\n", cfg.error());
                 return EXIT_FAILURE;

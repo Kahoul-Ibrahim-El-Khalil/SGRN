@@ -40,7 +40,14 @@
 namespace s7codec
 {
 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
+#endif
 enum class ValueKind : size_t { None = 0, Bool, SignedInt, UnsignedInt, Float, Double, String };
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 class DecodedValue : public std::variant<std::monostate, bool, int64_t, uint64_t, float, double, std::string> {
 public:

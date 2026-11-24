@@ -237,7 +237,13 @@ def entry_description(name, info):
 
 
 def gateway_binary(build_dir, app):
-    return os.path.join(build_dir, "sgrn", "apps", app, app) if build_dir else None
+    if REPO_ROOT not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from pathlib import Path
+    from scripts.find_bin import find_binary
+    extra = [Path(build_dir) / "sgrn" / "apps" / app] if build_dir else ()
+    found = find_binary(app, root=Path(REPO_ROOT), extra_dirs=extra, check_path=False)
+    return str(found) if found else None
 
 
 def check_prereqs(name, info, build_dir):
@@ -245,9 +251,8 @@ def check_prereqs(name, info, build_dir):
         if shutil.which("bun") is None:
             return False, "bun not on PATH"
         for app in ("gateway", "s7shell"):
-            binary = os.path.join(REPO_ROOT, ".build", "linux-static-release", "sgrn", "apps", app, app)
-            if not os.path.isfile(binary):
-                return False, f"missing {app} binary {binary} (build the linux-static-release preset first)"
+            if gateway_binary(build_dir, app) is None:
+                return False, f"missing {app} binary (build first with `xmake -j10`)"
         return True, ""
     if info["kind"] == "cpp":
         if build_dir is None:
@@ -259,9 +264,8 @@ def check_prereqs(name, info, build_dir):
         return True, ""
     # python
     if info.get("needs_sclc"):
-        sclc = os.path.join(REPO_ROOT, ".prefix", "linux-static", "bin", "sclc")
-        if not os.path.isfile(sclc):
-            return False, f"missing sclc binary {sclc} (build first)"
+        if gateway_binary(build_dir, "sclc") is None:
+            return False, "missing sclc binary (build first with `xmake -j10`)"
         return True, ""
     if info["mode"] == "integration":
         gw = gateway_binary(build_dir, "gateway")

@@ -106,7 +106,7 @@ struct KeySearchResponse {
     std::string key;
     std::optional<StorageObjectInfo> db;
     std::optional<std::vector<StorageFileReference>> files;
-    sgrn::json::RawJson garage{"null"};
+    std::optional<::sgrn::datastore::plugins::aws::S3ObjectStat> garage;
     std::optional<std::string> garage_error;
 };
 
@@ -149,7 +149,7 @@ struct PurgeResponse {
     std::string bucket;
     bool dry_run{false};
     std::vector<std::string> deleted;
-    sgrn::json::RawJson errors{"[]"};
+    std::vector<::sgrn::datastore::plugins::aws::S3DeleteError> errors;
     std::vector<PurgeSkipped> skipped;
 };
 
@@ -588,31 +588,25 @@ struct FormatConflictResponse {
     std::string hint;
 };
 
-std::string jsonText(const Json::Value& t_value) {
-    Json::StreamWriterBuilder writer;
-    writer["indentation"] = "";
-    return Json::writeString(writer, t_value);
-}
-
 // Page through ListObjectsV2 (server-side prefix filter) up to max_pages.
 Task<GarageScan> scanBucketKeys(
     ::sgrn::datastore::plugins::aws::S3Client* s3, const std::string& t_bucket, const std::string& t_prefix, uint32_t t_max_pages) {
     GarageScan scan;
     std::string token;
     for (uint32_t page = 0; page < t_max_pages; ++page) {
-        const Json::Value res = co_await s3unwrap(s3->listObjects(t_bucket, t_prefix, token, 1000));
-        for (const auto& obj : res["objects"]) {
+        const auto res = co_await s3unwrap(s3->listObjects(t_bucket, t_prefix, token, 1000));
+        for (const auto& obj : res.objects) {
             GarageKey k;
-            k.key = obj["key"].asString();
-            k.size = obj["size"].asInt64();
-            k.etag = obj["etag"].asString();
+            k.key = obj.key;
+            k.size = obj.size;
+            k.etag = obj.etag;
             scan.keys.push_back(std::move(k));
         }
         ++scan.pages;
-        if (!res["is_truncated"].asBool()) {
+        if (!res.is_truncated) {
             co_return scan;
         }
-        token = res["next_continuation_token"].asString();
+        token = res.next_continuation_token;
         if (token.empty()) {
             break;
         }
@@ -642,11 +636,11 @@ Task<HttpResponsePtr> StorageAdminHandler::handleOverview(HttpRequestPtr tsp_req
         }
         auto db = db_res.value();
 
-        const Json::Value buckets_res = co_await s3unwrap(s3->listBuckets());
+        const auto buckets_res = co_await s3unwrap(s3->listBuckets());
         std::vector<OverviewBucket> buckets;
-        buckets.reserve(buckets_res["buckets"].size());
-        for (const auto& b : buckets_res["buckets"]) {
-            const std::string name = b["name"].asString();
+        buckets.reserve(buckets_res.buckets.size());
+        for (const auto& b : buckets_res.buckets) {
+            const std::string& name = b.name;
             OverviewBucket entry;
             entry.name = name;
 
@@ -870,21 +864,11 @@ Task<HttpResponsePtr> StorageAdminHandler::handlePurgeOrphans(HttpRequestPtr tsp
         }
 
         std::vector<std::string> deleted;
-        sgrn::json::RawJson errors{"[]"};
+        std::vector<::sgrn::datastore::plugins::aws::S3DeleteError> errors;
         if (!doomed.empty()) {
-            const Json::Value res = co_await s3unwrap(s3->deleteFiles(bucket, doomed));
-            if (res.isMember("deleted") && res["deleted"].isArray()) {
-                for (const auto& key : res["deleted"]) {
-                    if (key.isString()) {
-                        deleted.push_back(key.asString());
-                    }
-                }
-            } else {
-                deleted = doomed;
-            }
-            if (res.isMember("errors")) {
-                errors = sgrn::json::RawJson{jsonText(res["errors"])};
-            }
+            auto res = co_await s3unwrap(s3->deleteFiles(bucket, doomed));
+            deleted = std::move(res.deleted);
+            errors = std::move(res.errors);
         }
         co_return sgrn::createTypedResponse(tsp_req,
             PurgeResponse{
@@ -944,7 +928,7 @@ Task<HttpResponsePtr> StorageAdminHandler::handleSearch(HttpRequestPtr tsp_req) 
                                 : sgrn::orm::fromResult<StorageFileReference, detail::kOrganisationStorageFileReferencesQuery>(files);
             }
             try {
-                out.garage = sgrn::json::RawJson{jsonText(co_await s3unwrap(s3->statObject(bucket, key)))};
+                out.garage = co_await s3unwrap(s3->statObject(bucket, key));
             } catch (const S3UpstreamError& e) {
                 out.garage_error = e.what();
             }
@@ -952,7 +936,7 @@ Task<HttpResponsePtr> StorageAdminHandler::handleSearch(HttpRequestPtr tsp_req) 
         }
 
         if (!prefix.empty()) {
-            const Json::Value res = co_await s3unwrap(s3->listObjects(bucket, prefix, "", static_cast<uint32_t>(limit)));
+            const auto res = co_await s3unwrap(s3->listObjects(bucket, prefix, "", static_cast<uint32_t>(limit)));
             auto match_rows = co_await sgrn::datastore::core::execSqlCoroVec(db,
                 fmt::format("SELECT key FROM storage.objects WHERE bucket = $1 AND key LIKE $2 || '%' ESCAPE '\\' LIMIT {}", limit),
                 {bucket, escapeLike(prefix)});
@@ -962,13 +946,12 @@ Task<HttpResponsePtr> StorageAdminHandler::handleSearch(HttpRequestPtr tsp_req) 
                 db_keys.insert(row.key);
             }
             std::vector<PrefixMatch> matches;
-            matches.reserve(res["objects"].size());
-            for (const auto& obj : res["objects"]) {
-                const std::string object_key = obj["key"].asString();
-                matches.push_back({object_key, obj["size"].asInt64(), obj["etag"].asString(), db_keys.find(object_key) != db_keys.end()});
+            matches.reserve(res.objects.size());
+            for (const auto& obj : res.objects) {
+                matches.push_back({obj.key, obj.size, obj.etag, db_keys.find(obj.key) != db_keys.end()});
             }
             co_return sgrn::createTypedResponse(
-                tsp_req, PrefixSearchResponse{bucket, prefix, std::move(matches), res["is_truncated"].asBool()}, k200OK);
+                tsp_req, PrefixSearchResponse{bucket, prefix, std::move(matches), res.is_truncated}, k200OK);
         }
 
         co_return sgrn::createTypedResponse(
@@ -1413,23 +1396,29 @@ Task<HttpResponsePtr> StorageAdminHandler::handleUpsertFormat(HttpRequestPtr tsp
             co_await sgrn::datastore::core::execSqlCoroVec(db, "SELECT extension FROM storage.formats WHERE extension = $1", {ext});
         FormatRecord row;
         bool created = false;
+        // NB: the bind lists are hoisted into named variables. Building a
+        // std::vector<std::string> from an initializer list directly inside a
+        // co_await expression crashes GCC 14 (ICE in gimple_add_tmp_var).
+        const std::vector<std::string> format_binds{
+            ext, mime, is_compressed ? "true" : "false", is_allowed ? "true" : "false", description};
         if (existing.empty()) {
             auto inserted = co_await sgrn::datastore::core::execSqlCoroVec(db,
                 "INSERT INTO storage.formats (extension, mime_type, is_compressed, is_allowed, description) "
                 "VALUES ($1, $2, ($3 = 'true'), ($4 = 'true'), NULLIF($5, '')) "
                 "RETURNING extension, mime_type, is_compressed, is_allowed, description, created_at",
-                {ext, mime, is_compressed ? "true" : "false", is_allowed ? "true" : "false", description});
+                format_binds);
             row = sgrn::orm::fromRow<FormatRecord>(inserted[0]);
             created = true;
         } else {
             // Only touch description when the caller sent one.
+            const std::vector<std::string> update_binds{ext, mime, is_compressed ? "true" : "false", is_allowed ? "true" : "false",
+                description, has_description ? "true" : "false"};
             auto updated = co_await sgrn::datastore::core::execSqlCoroVec(db,
                 "UPDATE storage.formats SET mime_type = $2, is_compressed = ($3 = 'true'), is_allowed = ($4 = 'true'), "
                 "description = CASE WHEN $6 = 'true' THEN NULLIF($5, '') ELSE description END "
                 "WHERE extension = $1 "
                 "RETURNING extension, mime_type, is_compressed, is_allowed, description, created_at",
-                {ext, mime, is_compressed ? "true" : "false", is_allowed ? "true" : "false", description,
-                    has_description ? "true" : "false"});
+                update_binds);
             row = sgrn::orm::fromRow<FormatRecord>(updated[0]);
         }
         co_return sgrn::createTypedResponse(tsp_req,

@@ -145,7 +145,8 @@ int main(int argc, char** argv) {
                 has_dictionary = true;
                 archive_dict_json = line; // Stash the whole dictionary line JSON
                 if (doc.hasMember("leaves") && doc["leaves"].is_array()) {
-                    for (const auto& item : doc["leaves"].elements()) {
+                    auto leaves = doc["leaves"];
+                    for (const auto& item : leaves.elements()) {
                         if (item.is_object() && item.hasMember("id") && item["id"].isUint() && item.hasMember("path") &&
                             item["path"].is_string()) {
                             auto id = item["id"].getUint();

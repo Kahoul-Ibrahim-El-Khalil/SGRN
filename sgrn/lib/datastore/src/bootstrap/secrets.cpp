@@ -158,10 +158,12 @@ void resolveEnvPlaceholderKey(const std::filesystem::path& t_env_path, const std
         return;
     }
     const std::string inner = value.substr(pos + kNeedle.size(), close - pos - kNeedle.size());
-    const std::string var_name = inner.empty() ? "CONDA_PREFIX" : inner;
+    // inner is the variable name inside $ENV{...}; default to the key itself
+    // so $ENV{} without an inner name expands from the same environment variable.
+    const std::string var_name = inner.empty() ? t_key : inner;
     const std::string var_value = sgrn::utils::env::get(var_name.c_str(), "");
     if (var_value.size() < 2) {
-        return; // nothing usable to substitute (no active micromamba env)
+        return; // nothing usable to substitute — variable is unset or empty
     }
     const std::string resolved = value.substr(0, pos) + var_value + value.substr(close + 1);
     if (resolved == value) {

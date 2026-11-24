@@ -1,0 +1,6 @@
+target("sgrn_crud")
+    set_kind("static")
+    add_files("src/*.cpp", "generated/RegisteredViews.cpp")
+    add_includedirs("include", "generated", {public = true})
+    add_deps("sgrn_core")
+    add_packages("drogon", "jsoncpp", {public = true})

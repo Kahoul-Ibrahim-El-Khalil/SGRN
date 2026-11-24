@@ -73,7 +73,8 @@ sgrn::scl::DbSchema fromJson(const sgrn::json::dom::Value& t_node) {
         t_db.dataset_step_ns = t_node["dataset_step_ns"].getUint64();
 
     if (t_node.hasMember("fields") && t_node["fields"].is_array()) {
-        for (const auto& field_node : t_node["fields"].elements()) {
+        const auto fields = t_node["fields"];
+        for (const auto& field_node : fields.elements()) {
             t_db.fields.push_back(sgrn::scl::field::fromJson(field_node));
         }
     }

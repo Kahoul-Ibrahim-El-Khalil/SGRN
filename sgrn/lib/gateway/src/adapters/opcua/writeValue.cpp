@@ -29,8 +29,8 @@
 #include <opcua-codec-table.hpp>
 #include <open62541/nodeids.h>
 #include <open62541/server.h>
+#include <open62541/types.h>
 #include <open62541/types_generated.h>
-#include <open62541/types_generated_handling.h>
 #include <optional>
 #include <s7codec/codec.hpp>
 #include <stdexcept>
@@ -295,7 +295,6 @@ UA_StatusCode writeValue(UA_Server* tp_ua_server, const UA_NodeId* tp_session_id
     // would render it as an opaque number instead of a member label).
     // Non-int payloads fall through to the normal type-mismatch path.
     if (!p_ctx->enum_map.empty() && tp_data_value && tp_data_value->hasValue) {
-        const UA_Variant& t_v = tp_data_value->value;
         if (t_v.data != nullptr && t_v.type != nullptr) {
             const UA_DataType* t_payload = t_v.type;
             const auto enumBacked = [&] {

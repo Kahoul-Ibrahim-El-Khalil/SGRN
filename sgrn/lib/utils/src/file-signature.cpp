@@ -125,13 +125,13 @@ const std::vector<FileSignature>& getSignatures() {
     return vec;
 }
 
-static bool matchPattern(const std::string& data, const uint8_t* pattern, size_t pattern_len, size_t offset) {
+static bool matchPattern(std::string_view data, const uint8_t* pattern, size_t pattern_len, size_t offset) {
     if (data.size() < offset + pattern_len)
         return false;
     return std::equal(pattern, pattern + pattern_len, reinterpret_cast<const uint8_t*>(data.data()) + offset);
 }
 
-std::optional<std::string> sniffExtension(const std::string& t_data) {
+std::optional<std::string> sniffExtension(std::string_view t_data) {
     for (const auto& sig : getSignatures()) {
         if (matchPattern(t_data, sig.pattern, sig.pattern_len, sig.offset)) {
             return std::string(sig.extension);

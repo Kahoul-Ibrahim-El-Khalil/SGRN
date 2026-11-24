@@ -9,6 +9,7 @@
 #include <sgrn/datastore/bootstrap/secrets.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/env.hpp>
+#include <sgrn/utils/process.hpp>
 #include <cstdlib>
 #include <fstream>
 #include <map>
@@ -80,8 +81,8 @@ void writeEnvFileWithValues(const fs::path& t_env_path, const std::string& t_use
     env_out << "POSTGRES_HOST=" << or_default("POSTGRES_HOST", "127.0.0.1") << "\n";
     env_out << "POSTGRES_PORT=" << or_default("POSTGRES_PORT", "5432") << "\n";
     env_out << "POSTGRES_DB=" << or_default("POSTGRES_DB", "sgrn") << "\n";
-    env_out << "# Superuser for bootstrapping (peer auth — must match your Linux username)\n";
-    env_out << "POSTGRES_SUPERUSER=" << t_user << "\n";
+    env_out << "# Superuser for bootstrapping (system postgres role)\n";
+    env_out << "POSTGRES_SUPERUSER=" << or_default("POSTGRES_SUPERUSER", "postgres") << "\n";
     env_out << "POSTGRES_PASSWORD=" << secret_for("POSTGRES_PASSWORD") << "\n\n";
 
     env_out << "# -- JWT (>= 32 chars for HS256) ------------------------------------------------------\n";
@@ -197,11 +198,13 @@ void runSecretWizard(const std::string& t_base_dir, bool t_non_interactive) {
         if (std::string exe_dir = wizardExeDir(); !exe_dir.empty()) {
             values["SGRN_BIN_DIR"] = exe_dir;
         }
-        if (const char* conda_prefix = ::getenv("CONDA_PREFIX"); conda_prefix != nullptr) {
-            values["SGRN_DEPLOYMENT_ENV"] = conda_prefix;
-        }
+        // Use system prefix as default — no Micromamba/Conda environment required.
+        values["SGRN_DEPLOYMENT_ENV"] = sgrn::utils::env::get("SGRN_DEPLOYMENT_ENV", "/usr");
 
-        writeEnvFileWithValues(env_path, sgrn::utils::env::get("USER", "admin"), t_base_dir, values);
+        std::string real_user = sgrn::utils::process::resolveSudoUser();
+        if (real_user.empty())
+            real_user = sgrn::utils::env::get("USER", "admin");
+        writeEnvFileWithValues(env_path, real_user, t_base_dir, values);
         if (!ensureOwnerOnlyPerms(env_path)) {
             SGRN_WARN("DatastoreInit", "Could not tighten .env permissions to 0600.");
         }
@@ -221,11 +224,9 @@ void runSecretWizard(const std::string& t_base_dir, bool t_non_interactive) {
         std::exit(EXIT_FAILURE);
     }
 
-    // The --generate-config template writes SGRN_DEPLOYMENT_ENV=$ENV{CONDA_PREFIX}
-    // unresolved (loadEnvFile does NOT expand $ENV{} — only buildTemplateResolver
-    // does, for the staged config files). Every later shell invocation
-    // (executeSchemaViaPsql, --rotate's psql) sources its psql path from this
-    // value, so resolve it once and persist the concrete path.
+    // SGRN_DEPLOYMENT_ENV is now written as a concrete path (/usr by default).
+    // resolveEnvPlaceholderKey is a no-op when no $ENV{} placeholder is present,
+    // but keep the call for upgrades from old installs that may still have it.
     resolveEnvPlaceholderKey(env_path, "SGRN_DEPLOYMENT_ENV");
 
     const std::vector<std::string> placeholders = placeholderEnvKeys();

@@ -1,4 +1,3 @@
-
 /**
  *
  *  Roles.cc
@@ -7,9 +6,7 @@
  */
 
 #include "Roles.h"
-
 #include <drogon/utils/Utilities.h>
-
 #include <string>
 
 using namespace drogon;
@@ -17,76 +14,50 @@ using namespace drogon::orm;
 using namespace drogon_model::sgrn::core;
 
 const std::string Roles::Cols::_id = "\"id\"";
-
 const std::string Roles::Cols::_organisation = "\"organisation\"";
-
 const std::string Roles::Cols::_name = "\"name\"";
-
 const std::string Roles::Cols::_description = "\"description\"";
-
 const std::string Roles::Cols::_permissions = "\"permissions\"";
-
 const std::string Roles::Cols::_is_system = "\"is_system\"";
-
 const std::string Roles::Cols::_created_at = "\"created_at\"";
-
 const std::string Roles::Cols::_updated_at = "\"updated_at\"";
-
 const std::string Roles::primaryKeyName = "id";
-
 const bool Roles::hasPrimaryKey = true;
-
 const std::string Roles::tableName = "core.\"roles\"";
 
 const std::vector<typename Roles::MetaData> Roles::metaData_ = {{"id", "int32_t", "integer", 4, 1, 1, 1},
     {"organisation", "std::string", "text", 0, 0, 0, 1}, {"name", "std::string", "character varying", 64, 0, 0, 1},
     {"description", "std::string", "text", 0, 0, 0, 0}, {"permissions", "std::string", "jsonb", 0, 0, 0, 1},
     {"is_system", "bool", "boolean", 1, 0, 0, 1}, {"created_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1},
-    {"updated_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1}
-
-};
+    {"updated_at", "::trantor::Date", "timestamp with time zone", 0, 0, 0, 1}};
 const std::string& Roles::getColumnName(size_t index) noexcept(false) {
     assert(index < metaData_.size());
     return metaData_[index].colName_;
 }
 Roles::Roles(const Row& r, const ssize_t indexOffset) noexcept {
     if (indexOffset < 0) {
-
         if (!r["id"].isNull()) {
-
             id_ = std::make_shared<int32_t>(r["id"].as<int32_t>());
         }
-
         if (!r["organisation"].isNull()) {
-
             organisation_ = std::make_shared<std::string>(r["organisation"].as<std::string>());
         }
-
         if (!r["name"].isNull()) {
-
             name_ = std::make_shared<std::string>(r["name"].as<std::string>());
         }
-
         if (!r["description"].isNull()) {
-
             description_ = std::make_shared<std::string>(r["description"].as<std::string>());
         }
-
         if (!r["permissions"].isNull()) {
-
             permissions_ = std::make_shared<std::string>(r["permissions"].as<std::string>());
         }
-
         if (!r["is_system"].isNull()) {
-
             isSystem_ = std::make_shared<bool>(r["is_system"].as<bool>());
         }
-
         if (!r["created_at"].isNull()) {
             auto timeStr = r["created_at"].as<std::string>();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -101,12 +72,10 @@ Roles::Roles(const Row& r, const ssize_t indexOffset) noexcept {
                 createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
-
         if (!r["updated_at"].isNull()) {
             auto timeStr = r["updated_at"].as<std::string>();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -121,7 +90,6 @@ Roles::Roles(const Row& r, const ssize_t indexOffset) noexcept {
                 updatedAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
-
     } else {
         size_t offset = (size_t)indexOffset;
         if (offset + 8 > r.size()) {
@@ -129,49 +97,35 @@ Roles::Roles(const Row& r, const ssize_t indexOffset) noexcept {
             return;
         }
         size_t index;
-
         index = offset + 0;
         if (!r[index].isNull()) {
-
             id_ = std::make_shared<int32_t>(r[index].as<int32_t>());
         }
-
         index = offset + 1;
         if (!r[index].isNull()) {
-
             organisation_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
-
         index = offset + 2;
         if (!r[index].isNull()) {
-
             name_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
-
         index = offset + 3;
         if (!r[index].isNull()) {
-
             description_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
-
         index = offset + 4;
         if (!r[index].isNull()) {
-
             permissions_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
-
         index = offset + 5;
         if (!r[index].isNull()) {
-
             isSystem_ = std::make_shared<bool>(r[index].as<bool>());
         }
-
         index = offset + 6;
         if (!r[index].isNull()) {
             auto timeStr = r[index].as<std::string>();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -186,13 +140,11 @@ Roles::Roles(const Row& r, const ssize_t indexOffset) noexcept {
                 createdAt_ = std::make_shared<::trantor::Date>(t * 1000000 + decimalNum);
             }
         }
-
         index = offset + 7;
         if (!r[index].isNull()) {
             auto timeStr = r[index].as<std::string>();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -215,56 +167,48 @@ Roles::Roles(const Json::Value& pJson, const std::vector<std::string>& pMasquera
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
-
     if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         dirtyFlag_[0] = true;
         if (!pJson[pMasqueradingVector[0]].isNull()) {
             id_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
         if (!pJson[pMasqueradingVector[1]].isNull()) {
             organisation_ = std::make_shared<std::string>(pJson[pMasqueradingVector[1]].asString());
         }
     }
-
     if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
         if (!pJson[pMasqueradingVector[2]].isNull()) {
             name_ = std::make_shared<std::string>(pJson[pMasqueradingVector[2]].asString());
         }
     }
-
     if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
         if (!pJson[pMasqueradingVector[3]].isNull()) {
             description_ = std::make_shared<std::string>(pJson[pMasqueradingVector[3]].asString());
         }
     }
-
     if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
         dirtyFlag_[4] = true;
         if (!pJson[pMasqueradingVector[4]].isNull()) {
             permissions_ = std::make_shared<std::string>(pJson[pMasqueradingVector[4]].asString());
         }
     }
-
     if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
         dirtyFlag_[5] = true;
         if (!pJson[pMasqueradingVector[5]].isNull()) {
             isSystem_ = std::make_shared<bool>(pJson[pMasqueradingVector[5]].asBool());
         }
     }
-
     if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
         dirtyFlag_[6] = true;
         if (!pJson[pMasqueradingVector[6]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[6]].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -280,14 +224,12 @@ Roles::Roles(const Json::Value& pJson, const std::vector<std::string>& pMasquera
             }
         }
     }
-
     if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
         dirtyFlag_[7] = true;
         if (!pJson[pMasqueradingVector[7]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[7]].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -306,56 +248,48 @@ Roles::Roles(const Json::Value& pJson, const std::vector<std::string>& pMasquera
 }
 
 Roles::Roles(const Json::Value& pJson) noexcept(false) {
-
     if (pJson.isMember("id")) {
         dirtyFlag_[0] = true;
         if (!pJson["id"].isNull()) {
             id_ = std::make_shared<int32_t>((int32_t)pJson["id"].asInt64());
         }
     }
-
     if (pJson.isMember("organisation")) {
         dirtyFlag_[1] = true;
         if (!pJson["organisation"].isNull()) {
             organisation_ = std::make_shared<std::string>(pJson["organisation"].asString());
         }
     }
-
     if (pJson.isMember("name")) {
         dirtyFlag_[2] = true;
         if (!pJson["name"].isNull()) {
             name_ = std::make_shared<std::string>(pJson["name"].asString());
         }
     }
-
     if (pJson.isMember("description")) {
         dirtyFlag_[3] = true;
         if (!pJson["description"].isNull()) {
             description_ = std::make_shared<std::string>(pJson["description"].asString());
         }
     }
-
     if (pJson.isMember("permissions")) {
         dirtyFlag_[4] = true;
         if (!pJson["permissions"].isNull()) {
             permissions_ = std::make_shared<std::string>(pJson["permissions"].asString());
         }
     }
-
     if (pJson.isMember("is_system")) {
         dirtyFlag_[5] = true;
         if (!pJson["is_system"].isNull()) {
             isSystem_ = std::make_shared<bool>(pJson["is_system"].asBool());
         }
     }
-
     if (pJson.isMember("created_at")) {
         dirtyFlag_[6] = true;
         if (!pJson["created_at"].isNull()) {
             auto timeStr = pJson["created_at"].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -371,14 +305,12 @@ Roles::Roles(const Json::Value& pJson) noexcept(false) {
             }
         }
     }
-
     if (pJson.isMember("updated_at")) {
         dirtyFlag_[7] = true;
         if (!pJson["updated_at"].isNull()) {
             auto timeStr = pJson["updated_at"].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -401,55 +333,47 @@ void Roles::updateByMasqueradedJson(const Json::Value& pJson, const std::vector<
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
-
     if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         if (!pJson[pMasqueradingVector[0]].isNull()) {
             id_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
         if (!pJson[pMasqueradingVector[1]].isNull()) {
             organisation_ = std::make_shared<std::string>(pJson[pMasqueradingVector[1]].asString());
         }
     }
-
     if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
         if (!pJson[pMasqueradingVector[2]].isNull()) {
             name_ = std::make_shared<std::string>(pJson[pMasqueradingVector[2]].asString());
         }
     }
-
     if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
         if (!pJson[pMasqueradingVector[3]].isNull()) {
             description_ = std::make_shared<std::string>(pJson[pMasqueradingVector[3]].asString());
         }
     }
-
     if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
         dirtyFlag_[4] = true;
         if (!pJson[pMasqueradingVector[4]].isNull()) {
             permissions_ = std::make_shared<std::string>(pJson[pMasqueradingVector[4]].asString());
         }
     }
-
     if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
         dirtyFlag_[5] = true;
         if (!pJson[pMasqueradingVector[5]].isNull()) {
             isSystem_ = std::make_shared<bool>(pJson[pMasqueradingVector[5]].asBool());
         }
     }
-
     if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
         dirtyFlag_[6] = true;
         if (!pJson[pMasqueradingVector[6]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[6]].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -465,14 +389,12 @@ void Roles::updateByMasqueradedJson(const Json::Value& pJson, const std::vector<
             }
         }
     }
-
     if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
         dirtyFlag_[7] = true;
         if (!pJson[pMasqueradingVector[7]].isNull()) {
             auto timeStr = pJson[pMasqueradingVector[7]].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -491,55 +413,47 @@ void Roles::updateByMasqueradedJson(const Json::Value& pJson, const std::vector<
 }
 
 void Roles::updateByJson(const Json::Value& pJson) noexcept(false) {
-
     if (pJson.isMember("id")) {
         if (!pJson["id"].isNull()) {
             id_ = std::make_shared<int32_t>((int32_t)pJson["id"].asInt64());
         }
     }
-
     if (pJson.isMember("organisation")) {
         dirtyFlag_[1] = true;
         if (!pJson["organisation"].isNull()) {
             organisation_ = std::make_shared<std::string>(pJson["organisation"].asString());
         }
     }
-
     if (pJson.isMember("name")) {
         dirtyFlag_[2] = true;
         if (!pJson["name"].isNull()) {
             name_ = std::make_shared<std::string>(pJson["name"].asString());
         }
     }
-
     if (pJson.isMember("description")) {
         dirtyFlag_[3] = true;
         if (!pJson["description"].isNull()) {
             description_ = std::make_shared<std::string>(pJson["description"].asString());
         }
     }
-
     if (pJson.isMember("permissions")) {
         dirtyFlag_[4] = true;
         if (!pJson["permissions"].isNull()) {
             permissions_ = std::make_shared<std::string>(pJson["permissions"].asString());
         }
     }
-
     if (pJson.isMember("is_system")) {
         dirtyFlag_[5] = true;
         if (!pJson["is_system"].isNull()) {
             isSystem_ = std::make_shared<bool>(pJson["is_system"].asBool());
         }
     }
-
     if (pJson.isMember("created_at")) {
         dirtyFlag_[6] = true;
         if (!pJson["created_at"].isNull()) {
             auto timeStr = pJson["created_at"].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -555,14 +469,12 @@ void Roles::updateByJson(const Json::Value& pJson) noexcept(false) {
             }
         }
     }
-
     if (pJson.isMember("updated_at")) {
         dirtyFlag_[7] = true;
         if (!pJson["updated_at"].isNull()) {
             auto timeStr = pJson["updated_at"].asString();
             struct tm stm;
             memset(&stm, 0, sizeof(stm));
-            stm.tm_isdst = -1;
             auto p = strptime(timeStr.c_str(), "%Y-%m-%d %H:%M:%S", &stm);
             time_t t = mktime(&stm);
             size_t decimalNum = 0;
@@ -721,14 +633,11 @@ void Roles::updateId(const uint64_t id) {
 
 const std::vector<std::string>& Roles::insertColumns() noexcept {
     static const std::vector<std::string> inCols = {
-        "organisation", "name", "description", "permissions", "is_system", "created_at", "updated_at"
-
-    };
+        "organisation", "name", "description", "permissions", "is_system", "created_at", "updated_at"};
     return inCols;
 }
 
 void Roles::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
-
     if (dirtyFlag_[1]) {
         if (getOrganisation()) {
             binder << getValueOfOrganisation();
@@ -736,7 +645,6 @@ void Roles::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[2]) {
         if (getName()) {
             binder << getValueOfName();
@@ -744,7 +652,6 @@ void Roles::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[3]) {
         if (getDescription()) {
             binder << getValueOfDescription();
@@ -752,7 +659,6 @@ void Roles::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[4]) {
         if (getPermissions()) {
             binder << getValueOfPermissions();
@@ -760,7 +666,6 @@ void Roles::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[5]) {
         if (getIsSystem()) {
             binder << getValueOfIsSystem();
@@ -768,7 +673,6 @@ void Roles::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[6]) {
         if (getCreatedAt()) {
             binder << getValueOfCreatedAt();
@@ -776,7 +680,6 @@ void Roles::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[7]) {
         if (getUpdatedAt()) {
             binder << getValueOfUpdatedAt();
@@ -788,40 +691,31 @@ void Roles::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
 
 const std::vector<std::string> Roles::updateColumns() const {
     std::vector<std::string> ret;
-
     if (dirtyFlag_[1]) {
         ret.push_back(getColumnName(1));
     }
-
     if (dirtyFlag_[2]) {
         ret.push_back(getColumnName(2));
     }
-
     if (dirtyFlag_[3]) {
         ret.push_back(getColumnName(3));
     }
-
     if (dirtyFlag_[4]) {
         ret.push_back(getColumnName(4));
     }
-
     if (dirtyFlag_[5]) {
         ret.push_back(getColumnName(5));
     }
-
     if (dirtyFlag_[6]) {
         ret.push_back(getColumnName(6));
     }
-
     if (dirtyFlag_[7]) {
         ret.push_back(getColumnName(7));
     }
-
     return ret;
 }
 
 void Roles::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
-
     if (dirtyFlag_[1]) {
         if (getOrganisation()) {
             binder << getValueOfOrganisation();
@@ -829,7 +723,6 @@ void Roles::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[2]) {
         if (getName()) {
             binder << getValueOfName();
@@ -837,7 +730,6 @@ void Roles::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[3]) {
         if (getDescription()) {
             binder << getValueOfDescription();
@@ -845,7 +737,6 @@ void Roles::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[4]) {
         if (getPermissions()) {
             binder << getValueOfPermissions();
@@ -853,7 +744,6 @@ void Roles::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[5]) {
         if (getIsSystem()) {
             binder << getValueOfIsSystem();
@@ -861,7 +751,6 @@ void Roles::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[6]) {
         if (getCreatedAt()) {
             binder << getValueOfCreatedAt();
@@ -869,7 +758,6 @@ void Roles::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[7]) {
         if (getUpdatedAt()) {
             binder << getValueOfUpdatedAt();
@@ -880,71 +768,46 @@ void Roles::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
 }
 Json::Value Roles::toJson() const {
     Json::Value ret;
-
     if (getId()) {
-
         ret["id"] = getValueOfId();
-
     } else {
         ret["id"] = Json::Value();
     }
-
     if (getOrganisation()) {
-
         ret["organisation"] = getValueOfOrganisation();
-
     } else {
         ret["organisation"] = Json::Value();
     }
-
     if (getName()) {
-
         ret["name"] = getValueOfName();
-
     } else {
         ret["name"] = Json::Value();
     }
-
     if (getDescription()) {
-
         ret["description"] = getValueOfDescription();
-
     } else {
         ret["description"] = Json::Value();
     }
-
     if (getPermissions()) {
-
         ret["permissions"] = getValueOfPermissions();
-
     } else {
         ret["permissions"] = Json::Value();
     }
-
     if (getIsSystem()) {
-
         ret["is_system"] = getValueOfIsSystem();
-
     } else {
         ret["is_system"] = Json::Value();
     }
-
     if (getCreatedAt()) {
-
         ret["created_at"] = getCreatedAt()->toDbStringLocal();
-
     } else {
         ret["created_at"] = Json::Value();
     }
-
     if (getUpdatedAt()) {
-
         ret["updated_at"] = getUpdatedAt()->toDbStringLocal();
-
     } else {
         ret["updated_at"] = Json::Value();
     }
-
     return ret;
 }
 
@@ -955,210 +818,147 @@ std::string Roles::toString() const {
 Json::Value Roles::toMasqueradedJson(const std::vector<std::string>& pMasqueradingVector) const {
     Json::Value ret;
     if (pMasqueradingVector.size() == 8) {
-
         if (!pMasqueradingVector[0].empty()) {
             if (getId()) {
-
                 ret[pMasqueradingVector[0]] = getValueOfId();
-
             } else {
                 ret[pMasqueradingVector[0]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[1].empty()) {
             if (getOrganisation()) {
-
                 ret[pMasqueradingVector[1]] = getValueOfOrganisation();
-
             } else {
                 ret[pMasqueradingVector[1]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[2].empty()) {
             if (getName()) {
-
                 ret[pMasqueradingVector[2]] = getValueOfName();
-
             } else {
                 ret[pMasqueradingVector[2]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[3].empty()) {
             if (getDescription()) {
-
                 ret[pMasqueradingVector[3]] = getValueOfDescription();
-
             } else {
                 ret[pMasqueradingVector[3]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[4].empty()) {
             if (getPermissions()) {
-
                 ret[pMasqueradingVector[4]] = getValueOfPermissions();
-
             } else {
                 ret[pMasqueradingVector[4]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[5].empty()) {
             if (getIsSystem()) {
-
                 ret[pMasqueradingVector[5]] = getValueOfIsSystem();
-
             } else {
                 ret[pMasqueradingVector[5]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[6].empty()) {
             if (getCreatedAt()) {
-
                 ret[pMasqueradingVector[6]] = getCreatedAt()->toDbStringLocal();
-
             } else {
                 ret[pMasqueradingVector[6]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[7].empty()) {
             if (getUpdatedAt()) {
-
                 ret[pMasqueradingVector[7]] = getUpdatedAt()->toDbStringLocal();
-
             } else {
                 ret[pMasqueradingVector[7]] = Json::Value();
             }
         }
-
         return ret;
     }
     LOG_ERROR << "Masquerade failed";
-
     if (getId()) {
-
         ret["id"] = getValueOfId();
-
     } else {
         ret["id"] = Json::Value();
     }
-
     if (getOrganisation()) {
-
         ret["organisation"] = getValueOfOrganisation();
-
     } else {
         ret["organisation"] = Json::Value();
     }
-
     if (getName()) {
-
         ret["name"] = getValueOfName();
-
     } else {
         ret["name"] = Json::Value();
     }
-
     if (getDescription()) {
-
         ret["description"] = getValueOfDescription();
-
     } else {
         ret["description"] = Json::Value();
     }
-
     if (getPermissions()) {
-
         ret["permissions"] = getValueOfPermissions();
-
     } else {
         ret["permissions"] = Json::Value();
     }
-
     if (getIsSystem()) {
-
         ret["is_system"] = getValueOfIsSystem();
-
     } else {
         ret["is_system"] = Json::Value();
     }
-
     if (getCreatedAt()) {
-
         ret["created_at"] = getCreatedAt()->toDbStringLocal();
-
     } else {
         ret["created_at"] = Json::Value();
     }
-
     if (getUpdatedAt()) {
-
         ret["updated_at"] = getUpdatedAt()->toDbStringLocal();
-
     } else {
         ret["updated_at"] = Json::Value();
     }
-
     return ret;
 }
 
 bool Roles::validateJsonForCreation(const Json::Value& pJson, std::string& err) {
-
     if (pJson.isMember("id")) {
         if (!validJsonOfField(0, "id", pJson["id"], err, true))
             return false;
     }
-
     if (pJson.isMember("organisation")) {
         if (!validJsonOfField(1, "organisation", pJson["organisation"], err, true))
             return false;
-    }
-
-    else {
+    } else {
         err = "The organisation column cannot be null";
         return false;
     }
-
     if (pJson.isMember("name")) {
         if (!validJsonOfField(2, "name", pJson["name"], err, true))
             return false;
-    }
-
-    else {
+    } else {
         err = "The name column cannot be null";
         return false;
     }
-
     if (pJson.isMember("description")) {
         if (!validJsonOfField(3, "description", pJson["description"], err, true))
             return false;
     }
-
     if (pJson.isMember("permissions")) {
         if (!validJsonOfField(4, "permissions", pJson["permissions"], err, true))
             return false;
     }
-
     if (pJson.isMember("is_system")) {
         if (!validJsonOfField(5, "is_system", pJson["is_system"], err, true))
             return false;
     }
-
     if (pJson.isMember("created_at")) {
         if (!validJsonOfField(6, "created_at", pJson["created_at"], err, true))
             return false;
     }
-
     if (pJson.isMember("updated_at")) {
         if (!validJsonOfField(7, "updated_at", pJson["updated_at"], err, true))
             return false;
     }
-
     return true;
 }
 bool Roles::validateMasqueradedJsonForCreation(
@@ -1168,73 +968,60 @@ bool Roles::validateMasqueradedJsonForCreation(
         return false;
     }
     try {
-
         if (!pMasqueradingVector[0].empty()) {
             if (pJson.isMember(pMasqueradingVector[0])) {
                 if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, true))
                     return false;
             }
         }
-
         if (!pMasqueradingVector[1].empty()) {
             if (pJson.isMember(pMasqueradingVector[1])) {
                 if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, true))
                     return false;
-            }
-
-            else {
+            } else {
                 err = "The " + pMasqueradingVector[1] + " column cannot be null";
                 return false;
             }
         }
-
         if (!pMasqueradingVector[2].empty()) {
             if (pJson.isMember(pMasqueradingVector[2])) {
                 if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, true))
                     return false;
-            }
-
-            else {
+            } else {
                 err = "The " + pMasqueradingVector[2] + " column cannot be null";
                 return false;
             }
         }
-
         if (!pMasqueradingVector[3].empty()) {
             if (pJson.isMember(pMasqueradingVector[3])) {
                 if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, true))
                     return false;
             }
         }
-
         if (!pMasqueradingVector[4].empty()) {
             if (pJson.isMember(pMasqueradingVector[4])) {
                 if (!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, true))
                     return false;
             }
         }
-
         if (!pMasqueradingVector[5].empty()) {
             if (pJson.isMember(pMasqueradingVector[5])) {
                 if (!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, true))
                     return false;
             }
         }
-
         if (!pMasqueradingVector[6].empty()) {
             if (pJson.isMember(pMasqueradingVector[6])) {
                 if (!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, true))
                     return false;
             }
         }
-
         if (!pMasqueradingVector[7].empty()) {
             if (pJson.isMember(pMasqueradingVector[7])) {
                 if (!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, true))
                     return false;
             }
         }
-
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -1242,52 +1029,41 @@ bool Roles::validateMasqueradedJsonForCreation(
     return true;
 }
 bool Roles::validateJsonForUpdate(const Json::Value& pJson, std::string& err) {
-
     if (pJson.isMember("id")) {
         if (!validJsonOfField(0, "id", pJson["id"], err, false))
             return false;
-    }
-
-    else {
+    } else {
         err = "The value of primary key must be set in the json object for update";
         return false;
     }
-
     if (pJson.isMember("organisation")) {
         if (!validJsonOfField(1, "organisation", pJson["organisation"], err, false))
             return false;
     }
-
     if (pJson.isMember("name")) {
         if (!validJsonOfField(2, "name", pJson["name"], err, false))
             return false;
     }
-
     if (pJson.isMember("description")) {
         if (!validJsonOfField(3, "description", pJson["description"], err, false))
             return false;
     }
-
     if (pJson.isMember("permissions")) {
         if (!validJsonOfField(4, "permissions", pJson["permissions"], err, false))
             return false;
     }
-
     if (pJson.isMember("is_system")) {
         if (!validJsonOfField(5, "is_system", pJson["is_system"], err, false))
             return false;
     }
-
     if (pJson.isMember("created_at")) {
         if (!validJsonOfField(6, "created_at", pJson["created_at"], err, false))
             return false;
     }
-
     if (pJson.isMember("updated_at")) {
         if (!validJsonOfField(7, "updated_at", pJson["updated_at"], err, false))
             return false;
     }
-
     return true;
 }
 bool Roles::validateMasqueradedJsonForUpdate(
@@ -1297,52 +1073,41 @@ bool Roles::validateMasqueradedJsonForUpdate(
         return false;
     }
     try {
-
         if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
             if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, false))
                 return false;
-        }
-
-        else {
+        } else {
             err = "The value of primary key must be set in the json object for update";
             return false;
         }
-
         if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
             if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
             if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
             if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[4].empty() && pJson.isMember(pMasqueradingVector[4])) {
             if (!validJsonOfField(4, pMasqueradingVector[4], pJson[pMasqueradingVector[4]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[5].empty() && pJson.isMember(pMasqueradingVector[5])) {
             if (!validJsonOfField(5, pMasqueradingVector[5], pJson[pMasqueradingVector[5]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[6].empty() && pJson.isMember(pMasqueradingVector[6])) {
             if (!validJsonOfField(6, pMasqueradingVector[6], pJson[pMasqueradingVector[6]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[7].empty() && pJson.isMember(pMasqueradingVector[7])) {
             if (!validJsonOfField(7, pMasqueradingVector[7], pJson[pMasqueradingVector[7]], err, false))
                 return false;
         }
-
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -1351,128 +1116,94 @@ bool Roles::validateMasqueradedJsonForUpdate(
 }
 bool Roles::validJsonOfField(size_t index, const std::string& fieldName, const Json::Value& pJson, std::string& err, bool isForCreation) {
     switch (index) {
-
         case 0:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (isForCreation) {
                 err = "The automatic primary key cannot be set";
                 return false;
             }
-
             if (!pJson.isInt()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 1:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 2:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
-            if (pJson.isString() && drogon::utils::utf8Length(pJson.asCString()) > 64) {
+            if (pJson.isString() &&
+                std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>, wchar_t>{}.from_bytes(pJson.asCString()).size() > 64) {
                 err = "String length exceeds limit for the " + fieldName + " field (the maximum value is 64)";
                 return false;
             }
-
             break;
-
         case 3:
-
             if (pJson.isNull()) {
                 return true;
             }
-
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 4:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 5:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isBool()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 6:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 7:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         default:
             err = "Internal error in the server";
             return false;

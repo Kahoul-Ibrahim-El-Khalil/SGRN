@@ -81,7 +81,7 @@ void ScriptS7Server::configureBeforeStart() {
     server_->SetRWAreaCallback(s7RequestCallback, this);
 }
 
-int S7API ScriptS7Server::s7RequestCallback(void* tp_usr_ptr, int t_sender, int t_operation, PS7Tag t_tag, void* tp_data) {
+int S7API ScriptS7Server::s7RequestCallback(void* tp_usr_ptr, int /*t_sender*/, int t_operation, PS7Tag t_tag, void* tp_data) {
     auto* p_srv = static_cast<ScriptS7Server*>(tp_usr_ptr);
     if (!p_srv || !t_tag) {
         return ::evrErrException;

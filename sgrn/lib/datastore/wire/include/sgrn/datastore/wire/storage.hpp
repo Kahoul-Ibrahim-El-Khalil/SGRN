@@ -65,6 +65,47 @@ struct StorageConstraints {
     bool versioning_enabled{false};
 };
 
+// ─── File versions (handlers/storage-versions.cpp) ──────────────────────────
+
+/// One row of GET /api/v1/storage/files/versions, newest version first.
+struct FileVersionInfo {
+    int64_t version_id{};
+    int64_t file_id{};
+    int32_t version_no{};
+    std::string storage_kind{}; ///< "full" or "delta"
+    bool is_checkpoint{false};
+    std::string content_sha512{};
+    int64_t original_size{};
+    bool is_encrypted{false};
+    std::optional<std::string> comment{};
+    std::optional<int64_t> restored_from_version_id{};
+    std::optional<int32_t> created_by_user_id{};
+    std::optional<int32_t> created_by_service_id{};
+    std::string created_at{};
+    bool is_current{false};
+    int64_t stored_size{}; ///< bytes actually stored: the full copy or the delta blob
+};
+
+/// POST /api/v1/storage/files/versions/restore
+struct FileVersionRestoreRequest {
+    std::string path{};
+    std::string scope{"personal"};
+    int32_t version_no{};
+    std::optional<std::string> comment{};
+};
+
+/// Response of the restore call: the NEW head version created from the old one.
+struct FileVersionRestoreReceipt {
+    int64_t version_id{};
+    int32_t version_no{};
+    bool created{false};
+};
+
+/// Response of DELETE /api/v1/storage/files/versions?keep=N.
+struct FileVersionTrimReceipt {
+    int32_t removed{};
+};
+
 // ─── Storage administration reports (shapes emitted by StorageAdminHandler) ─
 
 struct GarageCensus {

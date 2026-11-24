@@ -61,7 +61,7 @@ drogon::Task<bool> AuditLogger::logSerialized(drogon::orm::DbClientPtr tsp_db_cl
     std::optional<int32_t> t_actor_id, std::string t_actor_name, std::string t_action, std::string t_target_type, std::string t_target_id,
     std::string t_ip, std::string t_details_json, std::string t_status) {
     try {
-        if (!tsp_db_client) {
+        if (!tsp_db_client && drogon::app().hasDbClient("default")) {
             tsp_db_client = drogon::app().getDbClient();
         }
         if (!tsp_db_client) {
@@ -98,7 +98,7 @@ drogon::Task<AuditVerificationResult> AuditLogger::verifyChain(drogon::orm::DbCl
     AuditVerificationResult result;
     result.is_valid = false;
 
-    if (!tsp_db_client) {
+    if (!tsp_db_client && drogon::app().hasDbClient("default")) {
         tsp_db_client = drogon::app().getDbClient();
     }
     if (!tsp_db_client) {
@@ -180,7 +180,7 @@ drogon::Task<AuditCheckpointResult> AuditLogger::createCheckpoint(
     AuditCheckpointResult result;
     result.success = false;
 
-    if (!tsp_db_client) {
+    if (!tsp_db_client && drogon::app().hasDbClient("default")) {
         tsp_db_client = drogon::app().getDbClient();
     }
     if (!tsp_db_client) {
@@ -264,7 +264,7 @@ bool AuditLogger::verifyEd25519(const std::string& message, const std::string& s
 }
 
 int verifyAuditTrail(const std::string& t_organisation) {
-    auto db = drogon::app().getDbClient();
+    auto db = drogon::app().hasDbClient("default") ? drogon::app().getDbClient() : nullptr;
     if (!db) {
         fmt::print(stderr, "error: Database client not initialized\n");
         return 1;

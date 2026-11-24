@@ -51,7 +51,8 @@ void generateDefaultEnvFile(const std::filesystem::path& t_env_path, const std::
     std::string bin_dir = currentExeDir();
     if (bin_dir.empty())
         bin_dir = "/usr/local/bin";
-    std::string conda_prefix = envOrDefault("CONDA_PREFIX", "$ENV{CONDA_PREFIX}");
+    // Use system prefix — no Micromamba/Conda environment is required.
+    std::string deployment_env = envOrDefault("SGRN_DEPLOYMENT_ENV", "/usr");
 
     std::ofstream env_out(t_env_path);
     env_out << "# ==========================================\n";
@@ -63,14 +64,14 @@ void generateDefaultEnvFile(const std::filesystem::path& t_env_path, const std::
     env_out << "SGRN_USER=" << t_user << "\n";
     env_out << "SGRN_DATA_DIR=" << t_base_dir << "\n";
     env_out << "SGRN_BIN_DIR=" << bin_dir << "\n";
-    env_out << "SGRN_DEPLOYMENT_ENV=" << conda_prefix << "\n\n";
+    env_out << "SGRN_DEPLOYMENT_ENV=" << deployment_env << "\n\n";
 
     env_out << "# ── PostgreSQL ─────────────────────────────\n";
     env_out << "POSTGRES_HOST=127.0.0.1\n";
     env_out << "POSTGRES_PORT=5432\n";
     env_out << "POSTGRES_DB=sgrn\n";
-    env_out << "# Superuser for bootstrapping (peer auth — must match your Linux username)\n";
-    env_out << "POSTGRES_SUPERUSER=" << t_user << "\n";
+    env_out << "# Superuser for bootstrapping (system postgres role)\n";
+    env_out << "POSTGRES_SUPERUSER=postgres\n";
     env_out << "# App-level role created by the schema (used by the datastore)\n";
     env_out << "POSTGRES_USER=sgrn_datastore\n";
     env_out << "POSTGRES_PASSWORD=change_me_secure_db_password\n\n";
@@ -145,6 +146,10 @@ void extractConfigAssets(const std::string& t_base_dir, const std::function<std:
         if (vpath.starts_with("/"))
             vpath.remove_prefix(1);
 
+        // SGRN-postgres.service is retired in favour of the system postgresql.service.
+        if (vpath == "systemd/SGRN-postgres.service")
+            continue;
+
         fs::path out_path = fs::path(t_base_dir) / vpath;
         auto dec_result = sgrn::utils::compression::decompressStringZstd(asset.compressedView());
         if (!dec_result.hasError()) {
@@ -195,10 +200,10 @@ void generateSystemdServices(const std::string& t_base_dir, const std::function<
     fs::create_directories(systemd_out_dir);
 
     static constexpr std::string_view kSystemdServices[] = {
-        "SGRN-datastore.service", "SGRN-garage.service", "SGRN-postgres.service", "SGRN-nginx.service", "sgrn.service"};
+        "SGRN-datastore.service", "SGRN-garage.service", "SGRN-nginx.service", "sgrn.service"};
 
     for (auto svc : kSystemdServices) {
-        std::string vp = std::string("/systemd/") + std::string(svc);
+        std::string vp = std::string("systemd/") + std::string(svc);
         bool found = false;
         for (size_t i = 0; i < sgrn::datastore::assets::config::ASSET_COUNT; ++i) {
             if (sgrn::datastore::assets::config::ASSETS[i].virtual_path == vp) {

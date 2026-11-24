@@ -19,8 +19,8 @@
 #include <open62541/common.h>
 #include <open62541/nodeids.h>
 #include <open62541/server.h>
+#include <open62541/types.h>
 #include <open62541/types_generated.h>
-#include <open62541/types_generated_handling.h>
 
 using sgrn::gateway::adapters::DeltaPushHandler;
 using sgrn::gateway::adapters::NodeContext;

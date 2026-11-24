@@ -7,14 +7,19 @@
 //     useDriveSelection    – multi-select state
 //     useDriveUpload       – file & folder upload flows
 //     useDriveActions      – create folder, delete, rename, navigate
+//     useFileDropZone      – drag-over state + drop handling for uploads
 //
 //   Local Components (UI)
-//     DriveBar           – combined breadcrumb + scope/search/view/actions bar
+//     DragOverlay          – full-screen "drop files" overlay
+//     LoadingState         – spinner while a listing is loading
+//
+//   Imported Components (UI)
+//     DriveBar             – combined breadcrumb + scope/search/view/actions bar
 //     NewFolderPrompt      – inline create-folder input
 //     DriveContent         – grid/list + pagination
-//     PaginationControls   – prev/next page row
+//     DetailsModal         – centered details dialog (+ version dropdown)
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { Loader2, Upload } from "lucide-react";
 import { PageLayout } from "@/components/PageLayout";
 import { DriveBar } from "@/pages/drive/components/DriveBar";
@@ -39,9 +44,9 @@ import {
 } from "@/pages/drive/api";
 import { toDisplayDrivePath } from "@/pages/drive/pathDisplay";
 import { RenameModal } from "@/pages/drive/components/RenameModal";
-import { DetailsPanel } from "@/pages/drive/components/DetailsPanel";
+import { DetailsModal } from "@/pages/drive/components/DetailsModal";
 import { SelectionBar } from "@/pages/drive/components/SelectionBar";
-import { FilePreviewModal } from "@/pages/drive/components/FilePreviewModal";
+const FilePreviewModal = lazy(() => import("@/pages/drive/components/FilePreviewModal").then((m) => ({ default: m.FilePreviewModal })));
 import { UploadProgressPanel, type UploadProgressItem } from "@/pages/drive/components/UploadProgressPanel";
 import { useEvent } from "@/contexts/EventContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -64,6 +69,11 @@ function createTransferId(): string {
     return `transfer-${Date.now()}-${transferSequence}`;
 }
 
+function isAdminRole(role: unknown): boolean {
+    if (role === "admin") return true;
+    return typeof role === "object" && role !== null && "name" in role && role.name === "admin";
+}
+
 function createEmptyListing(path: string): DriveListing {
     return {
         path,
@@ -81,11 +91,13 @@ function createEmptyListing(path: string): DriveListing {
 // ─── custom hooks ────────────────────────────────────────────────────────────
 
 /** Manages the active storage scope and current path. */
-function useDriveScope(isAdmin: boolean) {
+function useDriveScope() {
     const [currentScope, setCurrentScope] = useState<StorageScope>("personal");
     const [currentPath, setCurrentPath] = useState("/");
 
-    const isNamespaceRoot = isAdmin && currentScope !== "personal" && currentPath === "/";
+    // The root of every non-personal scope is a namespace listing (domains,
+    // users, services), not a real folder, so nothing can be created there.
+    const isNamespaceRoot = currentScope !== "personal" && currentPath === "/";
 
     const switchScope = useCallback((scope: StorageScope) => {
         setCurrentScope(scope);
@@ -620,7 +632,7 @@ function useDriveActions(
             if (!confirm(`Are you sure you want to delete ${selectedItems.length} items?`)) return;
 
             const items = selectedItems.map(({ id, type }) => ({ id, type }));
-            const result = await bulkAction("delete", items);
+            const result = await bulkAction("delete", items, undefined, currentScope);
 
             if (isError(result)) {
                 showEvent("error", result.error);
@@ -630,7 +642,7 @@ function useDriveActions(
                 onRefresh();
             }
         },
-        [showEvent, onRefresh, onClearSelection, listing],
+        [currentScope, showEvent, onRefresh, onClearSelection, listing],
     );
 
     const handleRenameConfirm = useCallback(
@@ -642,7 +654,7 @@ function useDriveActions(
             }
 
             if (!renamingItem) return false;
-            const result = await renameItem(renamingItem.id, renamingItem.type, newName);
+            const result = await renameItem(renamingItem.id, renamingItem.type, newName, currentScope);
             if (isError(result)) {
                 showEvent("error", result.error);
                 return false;
@@ -651,7 +663,7 @@ function useDriveActions(
             onRefresh();
             return true;
         },
-        [renamingItem, showEvent, onRefresh, listing],
+        [renamingItem, currentScope, showEvent, onRefresh, listing],
     );
 
     const handleFileClick = useCallback(
@@ -829,6 +841,7 @@ function useDriveActions(
                 "move",
                 items.map((i) => ({ id: i.id, type: i.type })),
                 targetId,
+                currentScope,
             );
 
             if (isError(result)) {
@@ -839,7 +852,7 @@ function useDriveActions(
                 onClearSelection();
             }
         },
-        [showEvent, onRefresh, onClearSelection, listing],
+        [currentScope, showEvent, onRefresh, onClearSelection, listing],
     );
 
     const handleUploadNewVersion = useCallback<UploadNewVersionHandler>(
@@ -892,7 +905,78 @@ function useDriveActions(
     };
 }
 
-// ─── local components ────────────────────────────────────────────────────────
+/**
+ * Tracks whether files are being dragged over the page and forwards dropped
+ * files to `onFiles`. Only reacts to OS file drags, not in-app item moves.
+ */
+function useFileDropZone(onFiles: (files: File[]) => void | Promise<void>) {
+    const [isDragging, setIsDragging] = useState(false);
+
+    const handleDragOver = useCallback((e: React.DragEvent) => {
+        if (e.dataTransfer.types.includes("Files")) {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDragging(true);
+        }
+    }, []);
+
+    const handleDragLeave = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+    }, []);
+
+    const handleDrop = useCallback(
+        async (e: React.DragEvent) => {
+            if (e.dataTransfer.types.includes("Files")) {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDragging(false);
+
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    const filesList = Array.from(e.dataTransfer.files);
+                    await onFiles(filesList);
+                }
+            }
+        },
+        [onFiles],
+    );
+
+    return { isDragging, handleDragOver, handleDragLeave, handleDrop };
+}
+
+function DragOverlay({
+    path,
+    onDragOver,
+    onDragLeave,
+    onDrop,
+}: {
+    path: string;
+    onDragOver: (e: React.DragEvent) => void;
+    onDragLeave: (e: React.DragEvent) => void;
+    onDrop: (e: React.DragEvent) => void;
+}) {
+    return (
+        <div className="drive-drag-overlay" onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+            <div className="drive-drag-overlay-card">
+                <Upload size={40} className="drive-drag-overlay-icon" />
+                <h3 className="drive-drag-overlay-title">Drop files to upload</h3>
+                <p className="drive-drag-overlay-subtitle">
+                    Your files will be preserved within <span className="drive-drag-overlay-path">{toDisplayDrivePath(path)}</span>
+                </p>
+            </div>
+        </div>
+    );
+}
+
+function LoadingState() {
+    return (
+        <div className="drive-loading">
+            <Loader2 size={32} className="drive-spin" />
+            <span>Loading...</span>
+        </div>
+    );
+}
 
 // ─── page ────────────────────────────────────────────────────────────────────
 
@@ -902,12 +986,11 @@ export default function DrivePage() {
 
     const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
-    const role = user?.role;
-    const checkAdmin = role === "admin" || (typeof role === "object" && role !== null && "name" in role && role.name === "admin");
+    const isAdmin = isAdminRole(user?.role);
     const [previewFile, setPreviewFile] = useState<DriveFile | null>(null);
 
     // hooks
-    const scope = useDriveScope(checkAdmin);
+    const scope = useDriveScope();
     const listing = useDriveListing(scope.currentPath, scope.currentScope, showEvent);
     const selection = useDriveSelection();
 
@@ -955,37 +1038,7 @@ export default function DrivePage() {
         }
     }, [scope.isNamespaceRoot, actions.showNewFolder]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const [isDragging, setIsDragging] = useState(false);
-
-    const handleDragOver = useCallback((e: React.DragEvent) => {
-        if (e.dataTransfer.types.includes("Files")) {
-            e.preventDefault();
-            e.stopPropagation();
-            setIsDragging(true);
-        }
-    }, []);
-
-    const handleDragLeave = useCallback((e: React.DragEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsDragging(false);
-    }, []);
-
-    const handleDrop = useCallback(
-        async (e: React.DragEvent) => {
-            if (e.dataTransfer.types.includes("Files")) {
-                e.preventDefault();
-                e.stopPropagation();
-                setIsDragging(false);
-
-                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                    const filesList = Array.from(e.dataTransfer.files);
-                    await upload.uploadFilesDirect(filesList);
-                }
-            }
-        },
-        [upload.uploadFilesDirect],
-    );
+    const dropZone = useFileDropZone(upload.uploadFilesDirect);
 
     const handleNavigate = useCallback(
         (path: string) => {
@@ -1000,6 +1053,7 @@ export default function DrivePage() {
     // re-rendering when only transient state (e.g. upload progress) changes.
     const handleFolderClick = useCallback((folder: DriveFolder) => scope.navigate(folder.path), [scope.navigate]);
     const handlePreview = useCallback((file: DriveFile) => setPreviewFile(file), []);
+    const handleCloseDetails = useCallback(() => actions.setInfoItem(null), [actions.setInfoItem]);
 
     const handleRenameOpen = useCallback(
         (item: DriveFolder | DriveFile, type: "file" | "folder") => {
@@ -1014,18 +1068,14 @@ export default function DrivePage() {
 
     return (
         <PageLayout>
-            <div className="drive-page" onDragOver={handleDragOver}>
-                {isDragging && (
-                    <div className="drive-drag-overlay" onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
-                        <div className="drive-drag-overlay-card">
-                            <Upload size={40} className="drive-drag-overlay-icon" />
-                            <h3 className="drive-drag-overlay-title">Drop files to upload</h3>
-                            <p className="drive-drag-overlay-subtitle">
-                                Your files will be preserved within{" "}
-                                <span className="drive-drag-overlay-path">{toDisplayDrivePath(scope.currentPath)}</span>
-                            </p>
-                        </div>
-                    </div>
+            <div className="drive-page" onDragOver={dropZone.handleDragOver}>
+                {dropZone.isDragging && (
+                    <DragOverlay
+                        path={scope.currentPath}
+                        onDragOver={dropZone.handleDragOver}
+                        onDragLeave={dropZone.handleDragLeave}
+                        onDrop={dropZone.handleDrop}
+                    />
                 )}
 
                 <DriveBar
@@ -1033,7 +1083,7 @@ export default function DrivePage() {
                     trail={listing.listing?.trail}
                     onNavigate={handleNavigate}
                     currentScope={scope.currentScope}
-                    checkAdmin={checkAdmin}
+                    isAdmin={isAdmin}
                     onSwitchScope={scope.switchScope}
                     viewMode={viewMode}
                     uploading={upload.uploading}
@@ -1069,10 +1119,7 @@ export default function DrivePage() {
                 <div className="drive-content-area">
                     <div className="drive-main-scroll">
                         {listing.loading ? (
-                            <div className="drive-loading">
-                                <Loader2 size={32} className="drive-spin" />
-                                <span>Loading...</span>
-                            </div>
+                            <LoadingState />
                         ) : listing.listing ? (
                             <DriveContent
                                 listing={listing.listing}
@@ -1098,17 +1145,6 @@ export default function DrivePage() {
                             />
                         ) : null}
                     </div>
-
-                    {actions.infoItem && (
-                        <DetailsPanel
-                            item={actions.infoItem}
-                            scope={scope.currentScope}
-                            canWrite={listing.listing?.capabilities?.can_write !== false}
-                            canDelete={listing.listing?.capabilities?.can_delete !== false}
-                            onClose={() => actions.setInfoItem(null)}
-                            onChanged={() => listing.fetchListing()}
-                        />
-                    )}
                 </div>
 
                 <SelectionBar
@@ -1125,17 +1161,30 @@ export default function DrivePage() {
                     onConfirm={actions.handleRenameConfirm}
                 />
 
+                <DetailsModal
+                    item={actions.infoItem}
+                    scope={scope.currentScope}
+                    canWrite={listing.listing?.capabilities?.can_write !== false}
+                    canDelete={listing.listing?.capabilities?.can_delete !== false}
+                    onClose={handleCloseDetails}
+                    onChanged={() => listing.fetchListing()}
+                />
+
                 <UploadProgressPanel items={upload.uploadItems} onClearCompleted={upload.clearCompletedUploads} />
 
-                <FilePreviewModal
-                    isOpen={!!previewFile}
-                    file={previewFile}
-                    currentScope={scope.currentScope}
-                    onClose={() => setPreviewFile(null)}
-                    onDownload={(file) => {
-                        actions.handleFileClick(file);
-                    }}
-                />
+                {previewFile ? (
+                    <Suspense fallback={null}>
+                        <FilePreviewModal
+                            isOpen={!!previewFile}
+                            file={previewFile}
+                            currentScope={scope.currentScope}
+                            onClose={() => setPreviewFile(null)}
+                            onDownload={(file) => {
+                                actions.handleFileClick(file);
+                            }}
+                        />
+                    </Suspense>
+                ) : null}
             </div>
         </PageLayout>
     );

@@ -42,7 +42,7 @@ namespace sgrn::s7shell::shell
 // silently fails (g_suppress_errors guards the output).
 // ─────────────────────────────────────────────────────────────────────────────
 void injectDbRefs(
-    asIScriptEngine* tp_engine, asIScriptModule* tp_mod, const sgrn::scl::PlcSchemaStore& t_store, const std::string& t_client_var) {
+    asIScriptEngine* /*tp_engine*/, asIScriptModule* tp_mod, const sgrn::scl::PlcSchemaStore& t_store, const std::string& t_client_var) {
     const auto& dbs = t_store.dbs();
     if (dbs.empty())
         return;

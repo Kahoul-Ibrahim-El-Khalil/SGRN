@@ -858,10 +858,9 @@ Task<HttpResponsePtr> StorageApiHandler::handleCompleteUploadSession(HttpRequest
                 auto* s3_sniff = s3_res2.value();
                 std::string first_key = existing_segs.empty() ? "" : "pending/" + upload_id + "/0";
                 if (!first_key.empty()) {
-                    auto content_res = co_await s3_sniff->getObjectContent(bucket, first_key, 4096);
+                    auto content_res = co_await s3_sniff->getObjectResponse(bucket, first_key, 4096);
                     if (content_res.has_value()) {
-                        std::string_view data(*content_res);
-                        std::string preview(data.substr(0, std::min<size_t>(data.size(), 4096)));
+                        std::string_view preview = content_res->body.substr(0, std::min<size_t>(content_res->body.size(), 4096));
                         auto sniff_res = sgrn::utils::file_signature::sniffExtension(preview);
                         if (sniff_res.has_value()) {
                             sniffed_ext = *sniff_res;

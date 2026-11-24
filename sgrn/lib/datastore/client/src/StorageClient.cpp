@@ -102,4 +102,33 @@ TransferOutcome StorageClient::downloadZip(const std::string& t_path, const std:
     return {true, res.http_status, t_local_path};
 }
 
+sgrn::Result<std::vector<FileVersionInfo>, std::string> StorageClient::listVersions(const std::string& t_path, StorageScope t_scope) {
+    return client_.tryListFileVersions(t_path, t_scope);
+}
+
+TransferOutcome StorageClient::downloadVersion(
+    const std::string& t_remote_path, int32_t t_version_no, const std::string& t_local_path, StorageScope t_scope) {
+    auto res = client_.doDownloadFileVersion(t_remote_path, t_version_no, t_scope);
+    if (!res.ok)
+        return {false, res.http_status, res.message.empty() ? fmt::format("HTTP {}", res.http_status) : res.message};
+
+    std::ofstream ofs(t_local_path, std::ios::binary);
+    if (!ofs)
+        return {false, 0, localWriteError(t_local_path)};
+    ofs.write(res.bytes.data(), static_cast<std::streamsize>(res.bytes.size()));
+    if (!ofs)
+        return {false, 0, fmt::format("cannot write '{}': {}", t_local_path, std::strerror(errno))};
+    return {true, res.http_status, t_local_path};
+}
+
+sgrn::Result<FileVersionRestoreReceipt, std::string> StorageClient::restoreVersion(
+    const std::string& t_path, int32_t t_version_no, StorageScope t_scope, const std::string& t_comment) {
+    return client_.tryRestoreFileVersion(t_path, t_version_no, t_scope, t_comment);
+}
+
+sgrn::Result<FileVersionTrimReceipt, std::string> StorageClient::trimVersions(
+    const std::string& t_path, int32_t t_keep, StorageScope t_scope) {
+    return client_.tryTrimFileVersions(t_path, t_keep, t_scope);
+}
+
 } // namespace sgrn::datastore::client

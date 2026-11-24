@@ -59,7 +59,7 @@ drogon::Task<AdminLevel> AdminLevelCache::resolveAdminLevel(
     bool db_queried = false;
 
     try {
-        auto db = drogon::app().getDbClient();
+        auto db = drogon::app().hasDbClient("default") ? drogon::app().getDbClient() : nullptr;
         if (db) {
             std::optional<drogon::orm::Result> res_opt;
             if (t_domain_id.has_value()) {

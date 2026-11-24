@@ -67,4 +67,8 @@ void configureSystemd();
 
 void bootstrapDatabase(bool t_non_interactive = false, bool t_allow_insecure = false, bool t_force = false);
 
+/// Overload for callers (cli.cpp) that have already resolved the base_dir
+/// with SUDO_USER awareness.
+void bootstrapDatabase(const std::string& t_base_dir, bool t_non_interactive = false, bool t_allow_insecure = false, bool t_force = false);
+
 } // namespace sgrn::datastore::bootstrap

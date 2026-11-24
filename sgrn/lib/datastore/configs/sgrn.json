@@ -22,11 +22,15 @@
   "plugins": [
     {
       "name": "sgrn::datastore::plugins::aws::S3Client",
+      "dependencies": ["sgrn::datastore::plugins::Threadpool"],
       "config": {
         "region": "us-east-1",
         "endpoint": "http://127.0.0.1:3900",
         "access_key": "${GARAGE_ACCESS_KEY}",
-        "secret_key": "${GARAGE_SECRET_KEY}"
+        "secret_key": "${GARAGE_SECRET_KEY}",
+        "worker_threads": 4,
+        "io_threads": 4,
+        "unsigned_payload": true
       }
     },
     {

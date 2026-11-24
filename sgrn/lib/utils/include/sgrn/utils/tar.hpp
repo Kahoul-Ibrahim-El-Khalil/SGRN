@@ -99,7 +99,9 @@ private:
         if (t_field == 0) {
             return;
         }
-        std::snprintf(t_dst, t_field, "%0*llo", static_cast<int>(t_field - 1), static_cast<long long unsigned>(t_value));
+        char tmp[32];
+        std::snprintf(tmp, sizeof(tmp), "%0*llo", static_cast<int>(t_field - 1), static_cast<long long unsigned>(t_value));
+        std::memcpy(t_dst, tmp, t_field - 1);
         t_dst[t_field - 1] = 0;
     }
 

@@ -3,8 +3,8 @@
 #include <sgrn/wrappers/opcua/Server.hpp>
 
 #include <open62541/server.h>
+#include <open62541/types.h>
 #include <open62541/types_generated.h>
-#include <open62541/types_generated_handling.h>
 
 #include <fmt/core.h>
 #include <stdexcept>

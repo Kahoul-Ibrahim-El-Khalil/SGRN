@@ -31,18 +31,10 @@ def printHeader(title: str):
     print(f"\n{'='*60}\n {title}\n{'='*60}")
 
 def findBinary(name: str) -> Path | None:
-    candidates = [
-        BASE_DIR / ".prefix" / "bin" / name,
-        BASE_DIR / ".dist" / "linux-static-release" / name,
-        BASE_DIR / ".build" / "linux-static-release" / name,
-        BASE_DIR / ".build" / "linux-static-release" / "bin" / name,
-        BASE_DIR / ".build" / "linux-static-release" / "sgrn" / "gateway" / name,
-        BASE_DIR / ".build" / "linux-static-release" / "sgrn" / "s7shell" / name,
-    ]
-    for p in candidates:
-        if p.exists():
-            return p
-    return None
+    if str(BASE_DIR) not in sys.path:
+        sys.path.insert(0, str(BASE_DIR))
+    from scripts.find_bin import find_binary
+    return find_binary(name, root=BASE_DIR, check_path=False)
 
 def checkBinaries():
     global GATEWAY_BIN, S7SHELL_BIN, SGRN_DATASET_BIN

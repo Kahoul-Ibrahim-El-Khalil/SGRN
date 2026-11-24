@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 
 import type { User } from "@/pages/signin/types"; // Assumes you have the User type defined in types/index.ts
 import { appPath } from "@/lib/appPath";
@@ -58,9 +58,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         window.location.href = appPath("/signin");
     }, []);
 
-    return (
-        <AuthContext.Provider value={{ user, token, isAuthenticated: !!user, isLoading, login, logout }}>{children}</AuthContext.Provider>
+    const value = useMemo(
+        () => ({ user, token, isAuthenticated: !!user, isLoading, login, logout }),
+        [user, token, isLoading, login, logout],
     );
+
+    return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

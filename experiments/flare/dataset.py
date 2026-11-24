@@ -54,15 +54,10 @@ from sgrn.ml import Scaler, createSlidingWindows
 
 
 def findSgrnDatasetBin() -> Path:
-    paths = (
-        ROOT / ".dist/linux-static-release/sgrn_dataset",
-        ROOT / ".dist/linux-static/sgrn_dataset",
-        ROOT / ".prefix/bin/sgrn_dataset",
-    )
-    for p in paths:
-        if p.is_file():
-            return p
-    raise FileNotFoundError("sgrn_dataset binary not found")
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from scripts.find_bin import require_binary
+    return require_binary("sgrn_dataset", root=ROOT, check_path=False)
 
 
 def ensureWindowCache(archive_path: Path, cachePrefix: Path, exportCsv: Path | None = None) -> Path:

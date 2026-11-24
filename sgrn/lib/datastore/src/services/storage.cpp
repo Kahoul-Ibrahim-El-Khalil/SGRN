@@ -141,7 +141,7 @@ Result<sgrn::datastore::plugins::aws::S3Client*, BackendError> StorageService::S
 }
 
 Result<drogon::orm::DbClientPtr, BackendError> StorageService::getDbClient() const {
-    return drogon::app().getDbClient();
+    return sgrn::datastore::core::getDbClient();
 }
 
 StorageScope StorageService::parseScope(const std::string& t_scope_str) {
@@ -199,15 +199,20 @@ Task<HttpResponsePtr> StorageService::handleDownloadFileRequest(
         co_return createTypedResponse(BackendErrorResponse{"File storage object not found", drogon::k404NotFound});
     }
 
+    auto s3_res = S3Client();
+    if (s3_res.hasError()) {
+        co_return sgrn::createTypedResponse(BackendErrorResponse{s3_res.error()});
+    }
+    auto* s3 = s3_res.value();
+
     std::string file_data;
     const std::string bucket = currentStorageConfig().default_bucket;
     for (const auto& prow : sgrn::orm::fromResult<ObjectKeyRow, kPartObjectKeysQuery>(part_rows)) {
-        std::string key = prow.key;
-        auto chunk_res = co_await downloadFile(bucket, key);
+        auto chunk_res = co_await s3->getObjectResponse(bucket, prow.key);
         if (chunk_res.hasError()) {
             co_return sgrn::createTypedResponse(BackendErrorResponse{chunk_res.error()});
         }
-        file_data.append(chunk_res.value());
+        file_data.append(chunk_res->body);
     }
 
     std::string download_name = record_res->name;

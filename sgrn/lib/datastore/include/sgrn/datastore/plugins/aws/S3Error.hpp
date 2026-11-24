@@ -7,20 +7,16 @@
 //   - enum class : uint16_t
 //   - constexpr toString()  (no default: branch, -Wswitch catches missed cases)
 //   - fmt::formatter specialisation
-//   - fromAwsError() bridge from the SDK's own typed error code
+//   - fromHttpStatus() bridge from HTTP status / S3 XML error code
 //   - toBackendError() bridge lives here (not in BackendError.hpp) so that
-//     BackendError.hpp does not need to depend on AWS SDK headers.
+//     BackendError.hpp does not need to depend on S3 headers.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include <cstdint>
+#include <string>
 #include <string_view>
 
 #include <fmt/format.h>
-#include <aws/core/client/AWSError.h>
-#include <aws/s3/S3Errors.h>
-#include <stdexcept>
-#include <string>
-
 #include <sgrn/datastore/BackendError.hpp>
 
 namespace sgrn::datastore::plugins::aws
@@ -28,12 +24,12 @@ namespace sgrn::datastore::plugins::aws
 
 enum class S3Error : uint16_t {
     NotInitialized,  ///< S3 client_ or threadpool is null at call time
-    RequestFailed,   ///< The AWS SDK call returned a non-success outcome
-    NotFound,        ///< NO_SUCH_KEY or NO_SUCH_BUCKET
-    AccessDenied,    ///< ACCESS_DENIED from the SDK
-    Timeout,         ///< Network timeout
+    RequestFailed,   ///< The S3 HTTP call returned a non-success status
+    NotFound,        ///< 404 / NoSuchKey / NoSuchBucket
+    AccessDenied,    ///< 403 / AccessDenied
+    Timeout,         ///< 408 / 504 / SlowDown / network timeout
     FilesystemError, ///< Local filesystem I/O error (open, read, write)
-    Unknown,         ///< Catch-all for unrecognised SDK errors
+    Unknown,         ///< Catch-all for unrecognised errors
 };
 
 constexpr std::string_view toString(S3Error e) noexcept {
@@ -56,30 +52,21 @@ constexpr std::string_view toString(S3Error e) noexcept {
     return "unknown S3 error";
 }
 
-/// Map the SDK's own typed error code to our enum.
-/// This replaces the pattern of catching std::exception and discarding the
-/// SDK-level S3Errors value; every !outcome.IsSuccess() path should call this.
-inline S3Error fromAwsError(const Aws::Client::AWSError<Aws::S3::S3Errors>& e) noexcept {
-    switch (e.GetErrorType()) {
-        case Aws::S3::S3Errors::NO_SUCH_KEY:
-        case Aws::S3::S3Errors::NO_SUCH_BUCKET:
-        case Aws::S3::S3Errors::RESOURCE_NOT_FOUND:
-            return S3Error::NotFound;
-        case Aws::S3::S3Errors::ACCESS_DENIED:
-            return S3Error::AccessDenied;
-        case Aws::S3::S3Errors::REQUEST_TIMEOUT:
-        case Aws::S3::S3Errors::SLOW_DOWN: // also a transient / throttle case
-            return S3Error::Timeout;
-        case Aws::S3::S3Errors::UNKNOWN:
-            return S3Error::Unknown;
-        default:
-            return S3Error::RequestFailed;
-    }
+/// Map an HTTP status code (and optional S3 XML <Code>) to our typed S3Error.
+inline S3Error fromHttpStatus(int status, std::string_view xml_code = "", bool is_timeout = false) noexcept {
+    if (is_timeout || status == 408 || status == 504 || xml_code == "RequestTimeout" || xml_code == "SlowDown")
+        return S3Error::Timeout;
+    if (status == 404 || xml_code == "NoSuchKey" || xml_code == "NoSuchBucket" || xml_code == "NotFound")
+        return S3Error::NotFound;
+    if (status == 403 || xml_code == "AccessDenied" || xml_code == "SignatureDoesNotMatch")
+        return S3Error::AccessDenied;
+    if (status == 0)
+        return S3Error::Unknown;
+    return S3Error::RequestFailed;
 }
 
 /// Convert an S3Error (plus optional human-readable detail) into a BackendError
-/// ready for service-layer propagation.  Lives here — not in BackendError.hpp —
-/// so that BackendError.hpp remains free of AWS SDK headers.
+/// ready for service-layer propagation.
 inline BackendError toBackendError(S3Error e, std::string_view detail = "") {
     std::string msg = detail.empty() ? std::string(toString(e)) : std::string(detail);
     return BackendError(BackendErrorKind::Garage, "Garage", std::move(msg));

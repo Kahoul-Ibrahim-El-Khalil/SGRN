@@ -286,7 +286,7 @@ void DatastoreBridge::moveToSynced(const std::string& t_file_path) {
     }
 }
 
-void DatastoreBridge::markSynced(int t_id, const std::string& t_file_path) {
+void DatastoreBridge::markSynced(int t_id, const std::string& /*t_file_path*/) {
     if (node_db_) {
         (void)node_db_->markBatchSynced(t_id);
     }

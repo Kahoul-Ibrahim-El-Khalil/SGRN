@@ -8,12 +8,6 @@
 #include <sgrn/utils/hashing.hpp>
 #include <sgrn/utils/jsoncpp.hpp>
 
-#include <openssl/evp.h>
-#include <openssl/hmac.h>
-
-#include <iomanip>
-#include <sstream>
-
 namespace sgrn::datastore::services
 {
 using drogon::Task;
@@ -51,17 +45,8 @@ WebhookService& WebhookService::instance() {
 }
 
 std::string WebhookService::calculateHmacSha256(const std::string& secret, const std::string& payload) {
-    unsigned char hash[EVP_MAX_MD_SIZE];
-    unsigned int len = 0;
-
-    HMAC(EVP_sha256(), secret.data(), static_cast<int>(secret.size()), reinterpret_cast<const unsigned char*>(payload.data()),
-        payload.size(), hash, &len);
-
-    std::stringstream ss;
-    for (unsigned int i = 0; i < len; ++i) {
-        ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hash[i]);
-    }
-    return ss.str();
+    auto res = sgrn::utils::computeHmacSha256(secret, payload, sgrn::utils::HashEncoding::hex);
+    return res.hasValue() ? *res : std::string{};
 }
 
 void WebhookService::sendHttpRequest(

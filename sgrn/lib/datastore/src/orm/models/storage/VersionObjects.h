@@ -1,4 +1,3 @@
-
 /**
  *
  *  VersionObjects.h
@@ -39,7 +38,6 @@ namespace drogon_model
 {
 namespace sgrn
 {
-
 namespace storage
 {
 
@@ -55,10 +53,8 @@ public:
     static const int primaryKeyNumber;
     static const std::string tableName;
     static const bool hasPrimaryKey;
-
     static const std::vector<std::string> primaryKeyName;
     using PrimaryKeyType = std::tuple<int64_t, int32_t>; // version_id,part_index
-
     PrimaryKeyType getPrimaryKey() const;
 
     /**
@@ -138,7 +134,6 @@ public:
     std::string toString() const;
     Json::Value toMasqueradedJson(const std::vector<std::string>& pMasqueradingVector) const;
     /// Relationship interfaces
-
 private:
     friend drogon::orm::Mapper<VersionObjects>;
     friend drogon::orm::BaseBuilder<VersionObjects, true, true>;
@@ -158,7 +153,6 @@ private:
     std::shared_ptr<int64_t> objectId_;
     std::shared_ptr<int32_t> partIndex_;
     std::shared_ptr<std::string> role_;
-
     struct MetaData {
         const std::string colName_;
         const std::string colType_;
@@ -173,45 +167,36 @@ private:
 
 public:
     static const std::string& sqlForFindingByPrimaryKey() {
-
         static const std::string sql = "select * from " + tableName + " where version_id = $1 and part_index = $2";
-
         return sql;
     }
 
     static const std::string& sqlForDeletingByPrimaryKey() {
-
         static const std::string sql = "delete from " + tableName + " where version_id = $1 and part_index = $2";
-
         return sql;
     }
     std::string sqlForInserting(bool& needSelection) const {
         std::string sql = "insert into " + tableName + " (";
         size_t parametersCount = 0;
         needSelection = false;
-
         if (dirtyFlag_[0]) {
             sql += "version_id,";
             ++parametersCount;
         }
-
         if (dirtyFlag_[1]) {
             sql += "object_id,";
             ++parametersCount;
         }
         sql += "part_index,";
         ++parametersCount;
-
         if (!dirtyFlag_[2]) {
             needSelection = true;
         }
         sql += "role,";
         ++parametersCount;
-
         if (!dirtyFlag_[3]) {
             needSelection = true;
         }
-
         if (parametersCount > 0) {
             sql[sql.length() - 1] = ')';
             sql += " values (";
@@ -221,56 +206,38 @@ public:
         int placeholder = 1;
         char placeholderStr[64];
         size_t n = 0;
-
         if (dirtyFlag_[0]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
-
         if (dirtyFlag_[1]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
         }
-
         if (dirtyFlag_[2]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-
-        }
-
-        else {
+        } else {
             sql += "default,";
         }
-
         if (dirtyFlag_[3]) {
-
             n = snprintf(placeholderStr, sizeof(placeholderStr), "$%d,", placeholder++);
             sql.append(placeholderStr, n);
-
-        }
-
-        else {
+        } else {
             sql += "default,";
         }
-
         if (parametersCount > 0) {
             sql.resize(sql.length() - 1);
         }
-
         if (needSelection) {
             sql.append(") returning *");
         } else {
             sql.append(1, ')');
         }
-
         LOG_TRACE << sql;
         return sql;
     }
 };
 } // namespace storage
 } // namespace sgrn
-
 } // namespace drogon_model

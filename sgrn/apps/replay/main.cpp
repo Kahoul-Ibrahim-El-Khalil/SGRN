@@ -10,7 +10,7 @@
 
 static std::atomic<bool> g_shutdown_requested{false};
 
-void signal_handler(int signal) {
+void signal_handler(int /*signal*/) {
     g_shutdown_requested.store(true);
 }
 
@@ -160,18 +160,24 @@ OPTIONS
             const std::string url = fmt::format("http://127.0.0.1:{}/", http_port);
             fmt::print(fg(fmt::color::cyan), "[sgrn_replay] Opening dashboard at {}\n", url);
 #if defined(_WIN32)
-            ::system(fmt::format("start msedge --app=\"{}\" || start chrome --app=\"{}\" || start \"\" \"{}\"", url, url, url).c_str());
+            const int rc =
+                ::system(fmt::format("start msedge --app=\"{}\" || start chrome --app=\"{}\" || start \"\" \"{}\"", url, url, url).c_str());
 #elif defined(__APPLE__)
-            ::system(fmt::format("open -n -a \"Google Chrome\" --args --app=\"{}\" 2>/dev/null || open \"{}\"", url, url).c_str());
+            const int rc =
+                ::system(fmt::format("open -n -a \"Google Chrome\" --args --app=\"{}\" 2>/dev/null || open \"{}\"", url, url).c_str());
 #else
             const char* display = ::getenv("DISPLAY");
             const std::string env = display ? fmt::format("DISPLAY=\"{}\" ", display) : "";
-            ::system(fmt::format("(which chromium > /dev/null 2>&1 && {0}chromium --app=\"{1}\" > /dev/null 2>&1 &) || "
-                                 "(which google-chrome > /dev/null 2>&1 && {0}google-chrome --app=\"{1}\" > /dev/null 2>&1 &) || "
-                                 "{0}xdg-open \"{1}\" > /dev/null 2>&1 &",
-                env, url)
-                    .c_str());
+            const int rc =
+                ::system(fmt::format("(which chromium > /dev/null 2>&1 && {0}chromium --app=\"{1}\" > /dev/null 2>&1 &) || "
+                                     "(which google-chrome > /dev/null 2>&1 && {0}google-chrome --app=\"{1}\" > /dev/null 2>&1 &) || "
+                                     "{0}xdg-open \"{1}\" > /dev/null 2>&1 &",
+                    env, url)
+                        .c_str());
 #endif
+            if (rc != 0) {
+                fmt::print(fg(fmt::color::yellow), "[sgrn_replay] Browser launch command exited with status {}\n", rc);
+            }
         }
     }
 

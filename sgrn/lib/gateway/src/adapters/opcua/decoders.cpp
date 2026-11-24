@@ -7,8 +7,8 @@
 #include <sgrn/gateway/twin/PlcState.hpp>
 #include <sgrn/utils/strings.hpp>
 #include <opcua-codec-table.hpp>
+#include <open62541/types.h>
 #include <open62541/types_generated.h>
-#include <open62541/types_generated_handling.h>
 #include <s7codec/codec.hpp>
 
 using ::sgrn::scl::DataType;

@@ -1021,4 +1021,120 @@ sgrn::Result<std::string, std::string> DatastoreClient::deleteWebhookJson(int32_
     return std::string("Webhook deleted");
 }
 
+// ── File version history ─────────────────────────────────────────────────────
+
+namespace
+{
+
+constexpr std::string_view kFileVersionsPath = "/api/v1/storage/files/versions";
+
+/// Auto resolves the same way as the drive/transfer calls above.
+StorageScope effectiveVersionScope(const DatastoreClientConfig& t_config, StorageScope t_scope) {
+    if (t_scope != StorageScope::Auto)
+        return t_scope;
+    return t_config.auth_mode == AuthMode::UserPassword ? StorageScope::Users : StorageScope::AutomatedServices;
+}
+
+std::string fileVersionsQuery(const std::string& t_path, const std::string& t_scope) {
+    return "?path=" + urlEncodeQueryValue(t_path) + "&scope=" + t_scope;
+}
+
+} // namespace
+
+sgrn::Result<std::vector<FileVersionInfo>, std::string> DatastoreClient::tryListFileVersions(
+    const std::string& t_path, StorageScope t_scope) {
+    const std::string scope = sgrn::datastore::client::detail::storageScopeToString(effectiveVersionScope(config_, t_scope));
+    return makeTypedRequest<std::vector<FileVersionInfo>>("GET", std::string(kFileVersionsPath) + fileVersionsQuery(t_path, scope));
+}
+
+DatastoreClient::DownloadResult DatastoreClient::doDownloadFileVersion(
+    const std::string& t_remote_path, int32_t t_version_no, StorageScope t_scope) {
+    DownloadResult res;
+    if (t_version_no < 1) {
+        res.message = "version number must be a positive integer";
+        return res;
+    }
+    if (!hasSessionToken())
+        signIn();
+
+    // Versions are served by the user storage route (GET files?version=N), never
+    // by the automated-service route that resolveStoragePath() may select.
+    const std::string scope = sgrn::datastore::client::detail::storageScopeToString(effectiveVersionScope(config_, t_scope));
+    const std::string endpoint =
+        "/api/v1/storage/files" + fileVersionsQuery(t_remote_path, scope) + "&version=" + std::to_string(t_version_no);
+
+    httplib::Headers headers;
+    headers.emplace("Authorization", "Bearer " + getSessionToken());
+
+    auto res_http = http_client_->Get(endpoint, headers);
+
+    if (res_http && res_http->status == 401 && config_.retry_on_unauthorized) {
+        clearSessionToken();
+        if (signIn() && hasSessionToken()) {
+            headers.erase("Authorization");
+            headers.emplace("Authorization", "Bearer " + getSessionToken());
+            res_http = http_client_->Get(endpoint, headers);
+        }
+    }
+
+    if (!res_http) {
+        res.message = "no response from server";
+        return res;
+    }
+
+    res.http_status = res_http->status;
+    if (res_http->status != 200) {
+        res.message = httpErrorText(res_http->status, res_http->body);
+        return res;
+    }
+
+    // The server already returns logical bytes (decrypted and decompressed), so
+    // unlike doDownload() there is no transparent zstd handling here: a version
+    // whose content genuinely is a .zst stream must stay untouched.
+    res.bytes = std::move(res_http->body);
+    if (res_http->has_header("Content-Type"))
+        res.content_type = res_http->get_header_value("Content-Type");
+
+    // Transfer-integrity check (same contract as the web client): X-Original-Size
+    // is the logical size of the version.
+    if (res_http->has_header("X-Original-Size")) {
+        try {
+            const auto expected = static_cast<size_t>(std::stoull(res_http->get_header_value("X-Original-Size")));
+            if (expected > 0 && res.bytes.size() != expected) {
+                res.message = fmt::format("version data truncated in transit: received {} of {} bytes", res.bytes.size(), expected);
+                res.bytes.clear();
+                return res;
+            }
+        } catch (const std::exception&) {
+            // Malformed header: ignore it rather than fail an otherwise valid download.
+        }
+    }
+    res.ok = true;
+    return res;
+}
+
+sgrn::Result<FileVersionRestoreReceipt, std::string> DatastoreClient::tryRestoreFileVersion(
+    const std::string& t_path, int32_t t_version_no, StorageScope t_scope, const std::string& t_comment) {
+    RETURN_ERROR_IF(t_version_no < 1, "version number must be a positive integer");
+
+    storage::FileVersionRestoreRequest body;
+    body.path = t_path;
+    body.scope = sgrn::datastore::client::detail::storageScopeToString(effectiveVersionScope(config_, t_scope));
+    body.version_no = t_version_no;
+    if (!t_comment.empty())
+        body.comment = t_comment;
+
+    return makeTypedRequest<FileVersionRestoreReceipt>(
+        "POST", std::string(kFileVersionsPath) + "/restore", sgrn::json::writeOmitNull(body).value_or(std::string{}));
+}
+
+sgrn::Result<FileVersionTrimReceipt, std::string> DatastoreClient::tryTrimFileVersions(
+    const std::string& t_path, int32_t t_keep, StorageScope t_scope) {
+    RETURN_ERROR_IF(t_keep < 1, "the number of retained versions must be at least 1");
+
+    const std::string scope = sgrn::datastore::client::detail::storageScopeToString(effectiveVersionScope(config_, t_scope));
+    return makeTypedRequest<FileVersionTrimReceipt>(
+        "DELETE", std::string(kFileVersionsPath) + fileVersionsQuery(t_path, scope) + "&keep=" + std::to_string(t_keep));
+}
+
 } // namespace sgrn::datastore::client

@@ -90,11 +90,11 @@ std::vector<std::string> DatastoreShell::generateCompletions(const std::string& 
     auto words = splitWords(before);
 
     if (words.empty()) {
-        static constexpr std::array<std::string_view, 46> builtins = {"connect", "login", "logout", "orgs", "domains", "statuses", "users",
+        static constexpr std::array<std::string_view, 48> builtins = {"connect", "login", "logout", "orgs", "domains", "statuses", "users",
             "useradd", "services", "service-add", "service-token-rotate", "passwd", "whoami", "stats", "info", "constraints", "ls", "cd",
             "cat", "get", "put", "rput", "upload-status", "upload-abort", "mkdir", "mv", "rm", "tree", "du", "session", "sessions", "scope",
-            "switch", "zip", "storage-overview", "storage-orphans", "storage-purge", "storage-search", "webhooks", "webhook-add",
-            "webhook-del", "help", "quit", "exit"};
+            "switch", "zip", "versions", "version-get", "version-restore", "version-prune", "storage-overview", "storage-orphans",
+            "storage-purge", "storage-search", "webhooks", "webhook-add", "webhook-del", "help", "quit", "exit"};
         for (const auto& cmd : builtins) {
             if (cmd.rfind(t_text, 0) == 0)
                 matches.insert(std::string(cmd));
@@ -139,7 +139,8 @@ std::vector<std::string> DatastoreShell::generateCompletions(const std::string& 
         return {matches.begin(), matches.end()};
     }
 
-    static constexpr std::array<std::string_view, 8> path_cmds = {"cd", "ls", "cat", "mkdir", "rm", "tree", "du", "zip"};
+    static constexpr std::array<std::string_view, 12> path_cmds = {
+        "cd", "ls", "cat", "mkdir", "rm", "tree", "du", "zip", "versions", "version-get", "version-restore", "version-prune"};
     const bool is_path_cmd = std::find(path_cmds.begin(), path_cmds.end(), cmd) != path_cmds.end() || (cmd == "get" && words.size() == 1) ||
                              (cmd == "put" && words.size() > 1);
 

@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -40,17 +41,7 @@ inline Bytes toBytes(const std::vector<unsigned char>& t_src) {
 }
 
 inline std::string getDigestHex(const Bytes& t_buffer) {
-    static const char hex_lookup[] = "0123456789abcdef";
-
-    std::string hex;
-    hex.reserve(t_buffer.size() * 2);
-
-    for (char c : t_buffer) {
-        unsigned char uc = static_cast<unsigned char>(c);
-        hex.push_back(hex_lookup[uc >> 4]);
-        hex.push_back(hex_lookup[uc & 0x0F]);
-    }
-    return hex;
+    return encoding::toHex(reinterpret_cast<const unsigned char*>(t_buffer.data()), t_buffer.size());
 }
 
 inline std::string generateSalt(size_t t_length = 16) {
@@ -118,149 +109,106 @@ private:
 };
 
 // =======================================================
-// 5️⃣ SHA512 Convenience Wrappers (Base64 - Primary)
+//  Digest & HMAC Wrappers
 // =======================================================
-enum class HashEncoding { hex, base64, base64url };
+enum class HashEncoding { hex, base64, base64url, raw };
 
-inline ::sgrn::Result<std::string> computeSha512Data(std::string_view t_data, HashEncoding t_enc) {
-    DigestContext ctx_;
-    if (EVP_DigestInit_ex(ctx_.get(), EVP_sha512(), nullptr) != 1 || EVP_DigestUpdate(ctx_.get(), t_data.data(), t_data.size()) != 1) {
-        ERROR_LOG("Digest init/update failed");
-        return Error("Digest init/update failed");
-    }
+namespace detail
+{
 
-    std::array<unsigned char, EVP_MAX_MD_SIZE> hash{};
-    unsigned int len = 0;
-
-    if (EVP_DigestFinal_ex(ctx_.get(), hash.data(), &len) != 1) {
-        return Error("Digest final failed");
-    }
-
+inline ::sgrn::Result<std::string> encodeHash(const unsigned char* tp_data, unsigned int t_len, HashEncoding t_enc) {
     switch (t_enc) {
-        case sgrn::utils::HashEncoding::base64:
-            return ::sgrn::utils::encoding::toBase64(hash.data(), len);
-        case sgrn::utils::HashEncoding::base64url:
-            return ::sgrn::utils::encoding::toBase64Url(hash.data(), len);
-        case sgrn::utils::HashEncoding::hex:
-            return sgrn::utils::encoding::toHex(hash.data(), len);
+        case HashEncoding::base64:
+            return ::sgrn::utils::encoding::toBase64(tp_data, t_len);
+        case HashEncoding::base64url:
+            return ::sgrn::utils::encoding::toBase64Url(tp_data, t_len);
+        case HashEncoding::hex:
+            return ::sgrn::utils::encoding::toHex(tp_data, t_len);
+        case HashEncoding::raw:
+            return std::string(reinterpret_cast<const char*>(tp_data), t_len);
     }
     return Error("Unknown hash encoding");
 }
 
-inline ::sgrn::Result<std::string> computeSha512File(const std::filesystem::path& t_path, HashEncoding t_enc) {
+inline ::sgrn::Result<std::string> computeDigestData(const EVP_MD* tp_md, std::string_view t_data, HashEncoding t_enc) {
+    std::array<unsigned char, EVP_MAX_MD_SIZE> hash{};
+    unsigned int len = 0;
+    if (EVP_Digest(t_data.data(), t_data.size(), hash.data(), &len, tp_md, nullptr) != 1) {
+        ERROR_LOG("EVP_Digest failed");
+        return Error("Digest computation failed");
+    }
+    return encodeHash(hash.data(), len, t_enc);
+}
+
+inline ::sgrn::Result<std::string> computeDigestFile(const EVP_MD* tp_md, const std::filesystem::path& t_path, HashEncoding t_enc) {
     std::ifstream file(t_path, std::ios::binary);
     if (!file) {
         return Error("Cannot open file: " + t_path.string());
     }
-    DigestContext ctx_;
+    DigestContext ctx;
 
-    if (EVP_DigestInit_ex(ctx_.get(), EVP_sha512(), nullptr) != 1) {
+    if (EVP_DigestInit_ex(ctx.get(), tp_md, nullptr) != 1) {
         ERROR_LOG("Digest init failed for file: {}", t_path.string());
-        return ::sgrn::Error("Digest init failed");
-    }
-
-    constexpr std::size_t buffer_size = 16 * 1024;
-    std::array<char, buffer_size> t_buffer{};
-
-    while (file.good()) {
-        file.read(t_buffer.data(), t_buffer.size());
-        std::streamsize read = file.gcount();
-
-        if (read > 0) {
-            RETURN_ERROR_IF(EVP_DigestUpdate(ctx_.get(), t_buffer.data(), static_cast<std::size_t>(read)) != 1, "Digest update failed");
-        }
-    }
-
-    std::array<unsigned char, EVP_MAX_MD_SIZE> hash{};
-    unsigned int len = 0;
-
-    if (EVP_DigestFinal_ex(ctx_.get(), hash.data(), &len) != 1) {
-        return Error("Digest final failed");
-    }
-    switch (t_enc) {
-        case sgrn::utils::HashEncoding::base64:
-            return ::sgrn::utils::encoding::toBase64(hash.data(), len);
-        case sgrn::utils::HashEncoding::base64url:
-            return ::sgrn::utils::encoding::toBase64Url(hash.data(), len);
-        case sgrn::utils::HashEncoding::hex:
-            return sgrn::utils::encoding::toHex(hash.data(), len);
-    }
-    return Error("Unknown hash encoding");
-}
-
-// =======================================================
-//  SHA256 Convenience Wrappers (legacy / protocol-mandated only)
-// =======================================================
-// SGRN content hashes use SHA-512 (see computeSha512* above). SHA-256 is kept
-// only for protocols that define it (JWT HS256, webhook HMAC, AWS SigV4) and
-// for verifying the tamper-evident audit chain, which cannot be rehashed.
-
-inline ::sgrn::Result<std::string> computeSha256Data(std::string_view t_data, HashEncoding t_enc) {
-    DigestContext ctx_;
-    if (EVP_DigestInit_ex(ctx_.get(), EVP_sha256(), nullptr) != 1 || EVP_DigestUpdate(ctx_.get(), t_data.data(), t_data.size()) != 1) {
-        ERROR_LOG("SHA256 digest init/update failed");
-        return Error("Digest init/update failed");
-    }
-
-    std::array<unsigned char, EVP_MAX_MD_SIZE> hash{};
-    unsigned int len = 0;
-
-    if (EVP_DigestFinal_ex(ctx_.get(), hash.data(), &len) != 1) {
-        return Error("Digest final failed");
-    }
-
-    switch (t_enc) {
-        case sgrn::utils::HashEncoding::base64:
-            return ::sgrn::utils::encoding::toBase64(hash.data(), len);
-        case sgrn::utils::HashEncoding::base64url:
-            return ::sgrn::utils::encoding::toBase64Url(hash.data(), len);
-        case sgrn::utils::HashEncoding::hex:
-            return sgrn::utils::encoding::toHex(hash.data(), len);
-    }
-    return Error("Unknown hash encoding");
-}
-
-inline ::sgrn::Result<std::string> computeSha256File(const std::filesystem::path& t_path, HashEncoding t_enc) {
-    std::ifstream file(t_path, std::ios::binary);
-    if (!file) {
-        return Error("Cannot open file: " + t_path.string());
-    }
-    DigestContext ctx_;
-
-    if (EVP_DigestInit_ex(ctx_.get(), EVP_sha256(), nullptr) != 1) {
-        ERROR_LOG("SHA256 digest init failed for file: {}", t_path.string());
         return Error("Digest init failed");
     }
 
-    constexpr std::size_t buffer_size = 16 * 1024;
-    std::array<char, buffer_size> t_buffer{};
+    constexpr std::size_t kBufferSize = 16 * 1024;
+    std::array<char, kBufferSize> buffer{};
 
     while (file.good()) {
-        file.read(t_buffer.data(), t_buffer.size());
+        file.read(buffer.data(), buffer.size());
         std::streamsize read = file.gcount();
-
         if (read > 0) {
-            if (EVP_DigestUpdate(ctx_.get(), t_buffer.data(), static_cast<std::size_t>(read)) != 1) {
-                return Error("Digest update failed");
-            }
+            RETURN_ERROR_IF(EVP_DigestUpdate(ctx.get(), buffer.data(), static_cast<std::size_t>(read)) != 1, "Digest update failed");
         }
     }
 
     std::array<unsigned char, EVP_MAX_MD_SIZE> hash{};
     unsigned int len = 0;
-
-    if (EVP_DigestFinal_ex(ctx_.get(), hash.data(), &len) != 1) {
+    if (EVP_DigestFinal_ex(ctx.get(), hash.data(), &len) != 1) {
         return Error("Digest final failed");
     }
-    switch (t_enc) {
-        case sgrn::utils::HashEncoding::hex:
-            return sgrn::utils::encoding::toHex(hash.data(), len);
-        case sgrn::utils::HashEncoding::base64:
-            return ::sgrn::utils::encoding::toBase64(hash.data(), len);
-        case sgrn::utils::HashEncoding::base64url:
-            return ::sgrn::utils::encoding::toBase64Url(hash.data(), len);
+    return encodeHash(hash.data(), len, t_enc);
+}
+
+} // namespace detail
+
+inline ::sgrn::Result<std::string> computeSha512Data(std::string_view t_data, HashEncoding t_enc) {
+    return detail::computeDigestData(EVP_sha512(), t_data, t_enc);
+}
+
+inline ::sgrn::Result<std::string> computeSha512File(const std::filesystem::path& t_path, HashEncoding t_enc) {
+    return detail::computeDigestFile(EVP_sha512(), t_path, t_enc);
+}
+
+// =======================================================
+//  SHA-256, MD5 & HMAC-SHA256 (protocol-mandated only)
+// =======================================================
+// SGRN content hashes use SHA-512 (see computeSha512* above). SHA-256 and MD5
+// are kept only for protocols that define them (JWT HS256, webhook HMAC,
+// AWS SigV4, S3 Content-MD5) and for verifying the tamper-evident audit chain.
+
+inline ::sgrn::Result<std::string> computeSha256Data(std::string_view t_data, HashEncoding t_enc) {
+    return detail::computeDigestData(EVP_sha256(), t_data, t_enc);
+}
+
+inline ::sgrn::Result<std::string> computeSha256File(const std::filesystem::path& t_path, HashEncoding t_enc) {
+    return detail::computeDigestFile(EVP_sha256(), t_path, t_enc);
+}
+
+inline ::sgrn::Result<std::string> computeMd5Data(std::string_view t_data, HashEncoding t_enc) {
+    return detail::computeDigestData(EVP_md5(), t_data, t_enc);
+}
+
+inline ::sgrn::Result<std::string> computeHmacSha256(std::string_view t_key, std::string_view t_data, HashEncoding t_enc) {
+    std::array<unsigned char, EVP_MAX_MD_SIZE> out{};
+    unsigned int len = 0;
+    if (HMAC(EVP_sha256(), t_key.data(), static_cast<int>(t_key.size()), reinterpret_cast<const unsigned char*>(t_data.data()),
+            t_data.size(), out.data(), &len) == nullptr) {
+        ERROR_LOG("OpenSSL HMAC(SHA-256) failed");
+        return Error("HMAC(SHA-256) failed");
     }
-    return Error("Unknown hash encoding");
+    return detail::encodeHash(out.data(), len, t_enc);
 }
 
 // =======================================================
@@ -299,14 +247,7 @@ public:
         unsigned char md[EVP_MAX_MD_SIZE] = {};
         unsigned int len = 0;
         EVP_DigestFinal_ex(ctx_, md, &len);
-        static constexpr char kHex[] = "0123456789abcdef";
-        std::string out;
-        out.reserve(len * 2);
-        for (unsigned int i = 0; i < len; ++i) {
-            out.push_back(kHex[md[i] >> 4]);
-            out.push_back(kHex[md[i] & 0xF]);
-        }
-        return out;
+        return sgrn::utils::encoding::toHex(md, len);
     }
 
 private:

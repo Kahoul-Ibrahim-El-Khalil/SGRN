@@ -43,7 +43,8 @@ sgrn::scl::UdtDefinition fromJson(const sgrn::json::dom::Value& t_node) {
         udt_def.size_bytes = t_node["size_bytes"].getInt();
 
     if (t_node.hasMember("fields") && t_node["fields"].is_array()) {
-        for (const auto& field_node : t_node["fields"].elements()) {
+        const auto fields = t_node["fields"];
+        for (const auto& field_node : fields.elements()) {
             udt_def.fields.push_back(sgrn::scl::field::fromJson(field_node));
         }
     }

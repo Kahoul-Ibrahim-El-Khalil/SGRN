@@ -111,65 +111,53 @@ Both `gateway` and `datastore` embed compiled web dashboards (Svelte/React, comp
 
 ## Building SGRN
 
-SGRN uses **CMake Presets** and a unified build environment managed with **Micromamba**.
+SGRN uses **[xmake](https://xmake.io/)** with automatic dependency resolution (`xmake/packages.lua` and `deps-versions.lua`). No Micromamba or Conda environment is required.
 
-### Prerequisites
+### Build Prerequisites
 
-- Linux x86_64 (Ubuntu 22.04+ or a modern Linux distribution)
-- [Micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html) or Conda
+- **Linux x86_64** (Debian 12+/13, Ubuntu 22.04+, Fedora, Arch, etc.)
+- **xmake** (`>= 2.8.5`) and a **C++23** compiler (`gcc >= 13` or `clang`)
+- **Python 3**, **`zstd`** CLI (for VFS asset compression), and **[Bun](https://bun.sh/)** (for web dashboards; skip with `--web=n`)
+- **System libraries for native Linux datastore**: `libpq-dev`, `libssl-dev`, `zlib1g-dev`, `libsqlite3-dev`, `uuid-dev`, `libzstd-dev`
 
-### 1. Clone the repository
+### Build
 
 ```bash
 git clone <repository-url>
 cd SGRN
+
+# Native static release build (outputs to .dist/linux-static/bin/)
+xmake f -p linux -m release -y
+xmake
 ```
 
 > [!NOTE]
-> SGRN has **no Git submodules** — ignore any old instructions to run `git submodule update`. All third-party source dependencies are fetched automatically by [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) into `.cpm-cache/` during the CMake configure step below.
+> For debug/shared builds, cross-compilation (**Windows x64** via MinGW, **Linux ARM64**), build options, and adding new dependencies, see [**`documentation/BUILD.md`**](./documentation/BUILD.md) and [**`xmake/README.md`**](./xmake/README.md).
 
-### 2. Initialize the build environment
+---
 
-The environment files in `micromamba/` provide compilers (GCC/Clang), Ninja, CMake, and the packaged C++ libraries in an isolated prefix:
+## Deploying & Bootstrapping `sgrn_datastore`
 
-```bash
-# Create and activate the primary Linux development environment:
-micromamba create -f micromamba/SGRN.yml
-micromamba activate SGRN
-```
+`sgrn_datastore` embeds the React dashboard, SQL schema, and systemd/NGINX templates directly in the binary (no `aws-sdk-cpp` or Micromamba runtime required). On any target Linux machine:
 
-### 3. Build and install via CMake Presets
+1. Install runtime prerequisites:
+   ```bash
+   # Debian / Ubuntu
+   sudo apt install postgresql nginx
+   # Also place the `garage` binary (v2.x) in /usr/local/bin/
+   ```
+2. Copy `.dist/linux-static/bin/sgrn_datastore` to `/usr/local/bin/` (or run it directly from `.dist/linux-static/bin/`).
+3. Bootstrap secrets, configs, database, and systemd units:
+   ```bash
+   # Interactive setup (or pass --non-interactive to auto-generate all secrets)
+   sudo sgrn_datastore --init
 
-Run all builds with the `SGRN` environment activated. Presets are defined in `CMakePresets.json`.
+   # Install/enable systemd services (SGRN-datastore, SGRN-garage, SGRN-nginx, sgrn)
+   sudo sgrn_datastore --config-systemd
 
-First, build and install the dependencies that come as source code:
-
-```bash
-# Downloads and configures all CPM-fetched dependency sources:
-cmake --preset linux-deps-static
-
-# Compiles them and installs libraries into .prefix/linux-static/:
-cmake --build --preset linux-deps-static
-```
-
-Second, build the project itself:
-
-```bash
-# Configure using the Linux static-release preset:
-cmake --preset linux-static-release
-
-# Build all SGRN components:
-cmake --build --preset linux-static-release
-
-# Optional: install binaries and headers into .dist/:
-cmake --build --preset linux-static-release --target install
-```
-
-> [!NOTE]
-> For the full two-phase build workflow, build options, and cross-compilation (Windows / ARM64), see [**`documentation/BUILD.md`**](./documentation/BUILD.md).
-
-> [!NOTE]
-> For cross-compiling to **Windows** (`linux-to-win64`) or **ARM64** (`linux-to-arm64`), see [**`documentation/BUILD.md`**](./documentation/BUILD.md).
+   # Verify deployment (add --allow-insecure when using the auto-generated self-signed TLS cert)
+   sgrn_datastore --verify-install --allow-insecure
+   ```
 
 ---
 

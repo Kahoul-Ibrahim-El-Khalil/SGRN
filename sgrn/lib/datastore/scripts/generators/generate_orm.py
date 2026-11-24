@@ -389,8 +389,17 @@ def main():
     build_db_name = args.build_db
     target_dbname = args.dbname if args.dbname else (build_db_name if build_db_name else DB_CONFIG_TEMPLATE["dbname"])
 
-    # If build-db is requested and host is loopback but port is not open, automatically spin up ephemeral postgres
-    use_ephemeral = build_db_name and args.host in ("127.0.0.1", "localhost") and not isPortOpen(args.host, args.port)
+    # When --build-db targets loopback, prefer an isolated ephemeral Postgres cluster whenever
+    # local initdb/postgres binaries are available (and not running as root, which initdb rejects).
+    # This avoids failing auth against or mutating a developer's local Postgres on port 5432.
+    can_run_ephemeral = (
+        getattr(os, "geteuid", lambda: 1)() != 0
+        and findPgBinary("initdb") is not None
+        and findPgBinary("postgres") is not None
+    )
+    use_ephemeral = build_db_name and args.host in ("127.0.0.1", "localhost") and (
+        can_run_ephemeral or not isPortOpen(args.host, args.port)
+    )
 
     if use_ephemeral:
         with ephemeralPostgres() as (e_host, e_port, e_super, e_super_pass):

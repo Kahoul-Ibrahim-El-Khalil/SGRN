@@ -3,6 +3,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // Forward declaration of the internal C struct
@@ -74,5 +75,48 @@ private:
     explicit Document(XMLNode* tp_root);
     XMLNode* root_{nullptr};
 };
+
+// ── Lightweight XML text/tag helpers ─────────────────────────────────────────
+
+/// Escape XML special characters (&, <, >, ", ').
+std::string xmlEscape(std::string_view t_str);
+
+/// Unescape standard XML entities (&amp;, &lt;, &gt;, &quot;, &apos;).
+std::string xmlUnescape(std::string_view t_str);
+
+/// Extract and unescape the text inside the first <tag>...</tag> element.
+std::string extractXmlTag(std::string_view t_xml, std::string_view t_tag);
+
+/// Extract raw inner contents of all <tag>...</tag> blocks in t_xml.
+std::vector<std::string> extractXmlBlocks(std::string_view t_xml, std::string_view t_tag);
+
+/// Zero-copy iteration over the inner contents of all <tag>...</tag> blocks in t_xml.
+template <typename Fn>
+inline void forEachXmlBlock(std::string_view t_xml, std::string_view t_tag, Fn&& t_fn) {
+    std::string open_tag;
+    open_tag.reserve(t_tag.size() + 2);
+    open_tag.push_back('<');
+    open_tag.append(t_tag);
+    open_tag.push_back('>');
+
+    std::string close_tag;
+    close_tag.reserve(t_tag.size() + 3);
+    close_tag.append("</");
+    close_tag.append(t_tag);
+    close_tag.push_back('>');
+
+    size_t pos = 0;
+    while (pos < t_xml.size()) {
+        const size_t start = t_xml.find(open_tag, pos);
+        if (start == std::string_view::npos)
+            break;
+        const size_t content_start = start + open_tag.size();
+        const size_t end = t_xml.find(close_tag, content_start);
+        if (end == std::string_view::npos)
+            break;
+        t_fn(t_xml.substr(content_start, end - content_start));
+        pos = end + close_tag.size();
+    }
+}
 
 } // namespace sgrn::utils::xml

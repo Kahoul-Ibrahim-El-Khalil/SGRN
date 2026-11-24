@@ -194,6 +194,24 @@ std::optional<std::vector<uint8_t>> fromHex(std::string_view t_hex) {
     return bytes;
 }
 
+std::string uriEncode(std::string_view t_value, bool t_encode_slash) {
+    static constexpr char kUpperHex[] = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(t_value.size());
+    for (unsigned char c : t_value) {
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '~' || c == '.') {
+            out.push_back(static_cast<char>(c));
+        } else if (c == '/' && !t_encode_slash) {
+            out.push_back('/');
+        } else {
+            out.push_back('%');
+            out.push_back(kUpperHex[(c >> 4) & 0xF]);
+            out.push_back(kUpperHex[c & 0xF]);
+        }
+    }
+    return out;
+}
+
 int bcdToDec(uint8_t t_bcd) {
     return ((t_bcd >> 4) * 10) + (t_bcd & 0x0F);
 }

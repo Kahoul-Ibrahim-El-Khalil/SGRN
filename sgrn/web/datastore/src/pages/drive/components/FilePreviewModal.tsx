@@ -252,7 +252,10 @@ export function FilePreviewModal({ isOpen, file, currentScope, onClose, onDownlo
         setLoading(true);
 
         (async () => {
-            const result = await fetchDriveFileContent(file.path, currentScope);
+            // For plain (non-zstd) text files larger than 1 MB, fetch only the preview window
+            // so opening a large log/JSON file does not download and decode the entire file.
+            const maxBytes = !kind && !file.name.endsWith(".zst") && file.size > MAX_PREVIEW_CHARS * 2 ? MAX_PREVIEW_CHARS * 2 : undefined;
+            const result = await fetchDriveFileContent(file.path, currentScope, maxBytes);
             if (cancelled) return;
             if (isError(result)) {
                 setError(result.error);
@@ -288,7 +291,7 @@ export function FilePreviewModal({ isOpen, file, currentScope, onClose, onDownlo
 
             let text = new TextDecoder("utf-8").decode(bytes);
             let json: unknown = null;
-            if (file.name.endsWith(".json") || file.name.endsWith(".json.zst")) {
+            if (!maxBytes && text.length <= MAX_PREVIEW_CHARS && (file.name.endsWith(".json") || file.name.endsWith(".json.zst"))) {
                 try {
                     json = JSON.parse(text);
                     text = JSON.stringify(json, null, 2);

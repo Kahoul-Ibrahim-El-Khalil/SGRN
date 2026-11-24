@@ -41,7 +41,12 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-import zstandard as zstd
+import subprocess
+try:
+    import zstandard as zstd
+    HAS_PY_ZSTD = True
+except ImportError:
+    HAS_PY_ZSTD = False
 
 # ---------------------------------------------------------------------------
 # Extension → MIME type table (used for web assets only)
@@ -147,7 +152,17 @@ def compress_file(path: Path, level: int, kind: str) -> tuple[bytes, int]:
         raw = stripConfigComments(raw_text).encode("utf-8")
     else:
         raw = path.read_bytes()
-    compressed = zstd.ZstdCompressor(level=level).compress(raw)
+    if HAS_PY_ZSTD:
+        compressed = zstd.ZstdCompressor(level=level).compress(raw)
+    else:
+        proc = subprocess.run(
+            ["zstd", f"-{level}", "-q", "-c"],
+            input=raw,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        compressed = proc.stdout
     print(f"  Compressing {path.name}: {len(raw):,} -> {len(compressed):,} bytes")
     return compressed, len(raw)
 

@@ -151,7 +151,7 @@ private:
 using ::sgrn::scl::SclError;
 using S7Error = ::sgrn::wrappers::s7::S7Error;
 
-inline ::sgrn::scl::SclError proto_bridge(const S7Error& t_e) noexcept {
+inline ::sgrn::scl::SclError proto_bridge(const S7Error& /*t_e*/) noexcept {
     return ::sgrn::scl::SclError::Generic;
 }
 
@@ -264,10 +264,10 @@ inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::put(S7Client& t_cli
 template <typename Provider>
 inline sgrn::Result<void, SclError> S7BatchEngine<Provider>::commitLocal() {
     RETURN_ERROR_IF(last_error_.has_value(), *last_error_);
-    if (pending_paths_.empty())
-        return {};
-    auto res = provider_.commitLocalPut(pending_paths_, pending_values_);
-    RETURN_IF(res.hasError(), proto_bridge(res.error()));
+    if (!pending_paths_.empty()) {
+        auto res = provider_.commitLocalPut(pending_paths_, pending_values_);
+        RETURN_IF(res.hasError(), proto_bridge(res.error()));
+    }
     return {};
 }
 template <typename Provider>

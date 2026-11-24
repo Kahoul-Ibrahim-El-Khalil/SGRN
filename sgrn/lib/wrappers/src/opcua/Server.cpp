@@ -3,8 +3,8 @@
 #include <sgrn/wrappers/opcua/TypeRegistry.hpp>
 
 #include <open62541/server_config_default.h>
+#include <open62541/types.h>
 #include <open62541/types_generated.h>
-#include <open62541/types_generated_handling.h>
 
 #include <utility>
 

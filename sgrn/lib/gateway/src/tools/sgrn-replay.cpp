@@ -508,7 +508,8 @@ bool GatewayReplayer::processBinaryArchive(const std::string& path) {
 
             if (doc.hasMember("type") && doc["type"].is_string() && std::string_view(doc["type"].getString()) == "dictionary") {
                 if (doc.hasMember("leaves") && doc["leaves"].is_array()) {
-                    for (const auto& item : doc["leaves"].elements()) {
+                    const auto leaves = doc["leaves"];
+                    for (const auto& item : leaves.elements()) {
                         if (item.is_object() && item.hasMember("id") && item["id"].isUint() && item.hasMember("path") &&
                             item["path"].is_string()) {
                             const auto id = item["id"].getUint();

@@ -269,6 +269,21 @@ public:
         std::optional<int64_t> t_target_parent_id = std::nullopt, StorageScope t_scope = StorageScope::Auto);
     bool deleteDriveItem(int64_t t_id, DriveItemType t_type, StorageScope t_scope = StorageScope::Auto);
 
+    /// File version history. These endpoints (/api/v1/storage/files/versions)
+    /// sit behind the user-session filter, so they need a user login; service
+    /// credentials are rejected by the server. Paths and scopes follow the
+    /// same rules as doDownload()/listDrive().
+    sgrn::Result<std::vector<FileVersionInfo>, std::string> tryListFileVersions(
+        const std::string& t_path, StorageScope t_scope = StorageScope::Auto);
+    /// Logical (already decrypted + decompressed) bytes of one version.
+    DownloadResult doDownloadFileVersion(const std::string& t_remote_path, int32_t t_version_no, StorageScope t_scope = StorageScope::Auto);
+    /// Creates a NEW head version whose content equals `t_version_no`; history is never rewritten.
+    sgrn::Result<FileVersionRestoreReceipt, std::string> tryRestoreFileVersion(
+        const std::string& t_path, int32_t t_version_no, StorageScope t_scope = StorageScope::Auto, const std::string& t_comment = "");
+    /// Permanently drops everything older than the newest `t_keep` versions.
+    sgrn::Result<FileVersionTrimReceipt, std::string> tryTrimFileVersions(
+        const std::string& t_path, int32_t t_keep, StorageScope t_scope = StorageScope::Auto);
+
 private:
     bool signInAutomatedService();
     bool signInUser();

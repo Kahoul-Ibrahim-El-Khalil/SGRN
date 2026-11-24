@@ -156,7 +156,7 @@ void testTarWriterAndHygiene() {
     CHECK(tar_size % 512 == 0);
 
     // Verify streamed digest against independent file hash
-    auto file_digest = sgrn::utils::computeSha512File(tar_tmp, sgrn::utils::HashEncoding::base64url);
+    auto file_digest = sgrn::utils::computeSha512File(tar_tmp, sgrn::utils::HashEncoding::hex);
     CHECK(file_digest.hasValue());
     CHECK(file_digest.value() == computed_hash);
 

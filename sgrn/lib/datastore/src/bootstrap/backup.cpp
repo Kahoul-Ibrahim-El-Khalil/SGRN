@@ -13,15 +13,12 @@
 #include <sgrn/datastore/bootstrap/secrets.hpp> // resolveEnvPlaceholderKey
 #include <sgrn/datastore/core/orm-glaze.hpp>
 #include <sgrn/datastore/crypto/sqlite-key-provider.hpp>
+#include <sgrn/datastore/plugins/aws/NativeS3Client.hpp>
 #include <sgrn/debug.hpp>
 #include <sgrn/utils/env.hpp>
 #include <sgrn/utils/hashing.hpp> // computeSha512File
 #include <algorithm>
 #include <array>
-#include <aws/core/Aws.h>
-#include <aws/core/auth/AWSCredentials.h>
-#include <aws/s3/S3Client.h>
-#include <aws/s3/model/GetObjectRequest.h>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -58,9 +55,16 @@ struct BackupFileRow {
     bool is_encrypted{false};
 };
 
-/// psql/pg_dump live next to each other: prefer SGRN_DEPLOYMENT_ENV/bin
-/// (same precedence as executeSchemaViaPsql), otherwise fall back to PATH.
+/// psql/pg_dump live next to each other: check /usr/bin first (distro- and
+/// PG-version-agnostic via pg_wrapper on Debian/Ubuntu or direct binary on
+/// Fedora/Arch), then fall back to SGRN_DEPLOYMENT_ENV/bin or PATH.
 std::string deploymentBinPrefix() {
+    {
+        std::error_code ec;
+        if (fs::exists("/usr/bin/pg_dump", ec))
+            return "/usr/bin/";
+    }
+    // Legacy / custom prefix: honour SGRN_DEPLOYMENT_ENV if set to a non-system prefix.
     const std::string deployment_env = sgrn::utils::env::get("SGRN_DEPLOYMENT_ENV", "");
     if (!deployment_env.empty() && deployment_env.find("$ENV{") == std::string::npos) {
         const fs::path bin = fs::path(deployment_env) / "bin";
@@ -154,11 +158,6 @@ struct S3FetchResult {
 class S3Session {
 public:
     S3Session() {
-        Aws::SDKOptions options;
-        options.loggingOptions.logLevel = Aws::Utils::Logging::LogLevel::Off;
-        Aws::InitAPI(options);
-        options_ = options;
-
         const std::string endpoint = sgrn::utils::env::get("GARAGE_S3_ENDPOINT", "");
         const std::string region = sgrn::utils::env::get("GARAGE_REGION", "us-east-1");
         const std::string access = sgrn::utils::env::get("GARAGE_ACCESS_KEY", "");
@@ -169,20 +168,11 @@ public:
             return;
         }
 
-        Aws::S3::S3ClientConfiguration cfg;
-        cfg.region = region;
-        cfg.scheme = Aws::Http::Scheme::HTTP;
-        if (endpoint.rfind("https://", 0) == 0) {
-            cfg.scheme = Aws::Http::Scheme::HTTPS;
-        }
-        cfg.endpointOverride = Aws::String(endpoint.substr(endpoint.find("://") + 3));
-        cfg.useVirtualAddressing = false; // garage is path-style
-        client_ = std::make_shared<Aws::S3::S3Client>(Aws::Auth::AWSCredentials(access, secret), nullptr, cfg);
+        client_ = std::make_shared<sgrn::datastore::plugins::aws::NativeS3Client>(endpoint, region, access, secret);
         ready_ = true;
     }
     ~S3Session() {
         client_.reset();
-        Aws::ShutdownAPI(options_);
     }
     S3Session(const S3Session&) = delete;
     S3Session& operator=(const S3Session&) = delete;
@@ -201,41 +191,33 @@ public:
             res.error = error_;
             return res;
         }
-        Aws::S3::Model::GetObjectRequest req;
-        req.SetBucket(t_bucket);
-        req.SetKey(t_key);
-        auto outcome = client_->GetObject(req);
-        if (!outcome.IsSuccess()) {
-            res.http_status = static_cast<int>(outcome.GetError().GetResponseCode());
-            res.error = outcome.GetError().GetMessage();
+        auto resp = client_->performRequest(drogon::Get, t_bucket, t_key);
+        if (!resp.isSuccess()) {
+            res.http_status = resp.status;
+            res.error = resp.error_message;
             return res;
         }
         res.http_status = 200;
-        auto& body = outcome.GetResult().GetBody();
-        Sha512Stream hasher;
-        std::array<char, 256 * 1024> buf{};
-        while (body.good()) {
-            body.read(buf.data(), static_cast<std::streamsize>(buf.size()));
-            const std::streamsize got = body.gcount();
-            if (got <= 0) {
-                break;
-            }
-            t_out.write(buf.data(), got);
-            hasher.update(buf.data(), static_cast<size_t>(got));
-            res.bytes += static_cast<std::uint64_t>(got);
-            if (!t_out) {
-                res.error = "backup tar write failed (disk full?)";
-                return res;
-            }
+        if (!resp.body.empty()) {
+            t_out.write(resp.body.data(), static_cast<std::streamsize>(resp.body.size()));
+            Sha512Stream hasher;
+            hasher.update(resp.body.data(), resp.body.size());
+            res.bytes = resp.body.size();
+            res.sha512_hex = hasher.hex();
+        } else {
+            Sha512Stream hasher;
+            res.sha512_hex = hasher.hex();
         }
-        res.sha512_hex = hasher.hex();
+        if (!t_out) {
+            res.error = "backup tar write failed (disk full?)";
+            return res;
+        }
         res.ok = true;
         return res;
     }
 
 private:
-    Aws::SDKOptions options_{};
-    std::shared_ptr<Aws::S3::S3Client> client_;
+    std::shared_ptr<sgrn::datastore::plugins::aws::NativeS3Client> client_;
     bool ready_ = false;
     std::string error_;
 };

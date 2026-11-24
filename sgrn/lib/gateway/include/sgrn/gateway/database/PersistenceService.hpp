@@ -60,7 +60,8 @@ template <class JsonDocument>
 inline void parseDictionaryLine(const JsonDocument& t_doc, std::vector<std::string>& t_paths) {
     if (!t_doc.hasMember("leaves") || !t_doc["leaves"].is_array())
         return;
-    for (const auto& item : t_doc["leaves"].elements()) {
+    const auto leaves = t_doc["leaves"];
+    for (const auto& item : leaves.elements()) {
         if (item.is_object() && item.hasMember("id") && item["id"].isUint() && item.hasMember("path") && item["path"].is_string()) {
             const auto id = item["id"].getUint();
             if (id >= t_paths.size())

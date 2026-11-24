@@ -48,7 +48,7 @@ int DatastoreShell::dispatch(const std::vector<std::string>& t_words) {
     if (t_words.empty())
         return 0;
 
-    static const std::array<CommandDispatchEntry, 48> kCommandTable = {{
+    static const std::array<CommandDispatchEntry, 52> kCommandTable = {{
         // Help and shell control
         DATASTORE_SHELL_HELP("help"),
         DATASTORE_SHELL_HELP("-h"),
@@ -105,6 +105,12 @@ int DatastoreShell::dispatch(const std::vector<std::string>& t_words) {
 
         // Archive and upload operations
         DATASTORE_SHELL_COMMAND("zip", true, cmdZip),
+
+        // File version history
+        DATASTORE_SHELL_COMMAND("versions", true, cmdVersions),
+        DATASTORE_SHELL_COMMAND("version-get", true, cmdVersionGet),
+        DATASTORE_SHELL_COMMAND("version-restore", true, cmdVersionRestore),
+        DATASTORE_SHELL_COMMAND("version-prune", true, cmdVersionPrune),
         DATASTORE_SHELL_COMMAND("rput", true, cmdRput),
         DATASTORE_SHELL_COMMAND("upload-status", true, cmdUploadStatus),
         DATASTORE_SHELL_COMMAND("upload-abort", true, cmdUploadAbort),

@@ -141,15 +141,10 @@ def printBanner(output_dir: Path, device: torch.device, hw_info: dict, config_pa
 
 
 def findSgrnDatasetBin() -> Path:
-    paths = (
-        ROOT / ".dist/linux-static-release/sgrn_dataset",
-        ROOT / ".dist/linux-static/sgrn_dataset",
-        ROOT / ".prefix/bin/sgrn_dataset",
-    )
-    for p in paths:
-        if p.is_file() and os.access(p, os.X_OK):
-            return p
-    raise FileNotFoundError("sgrn_dataset binary not found; please build SGRN tools.")
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from scripts.find_bin import require_binary
+    return require_binary("sgrn_dataset", root=ROOT, check_path=False)
 
 
 def stage1Ingestion(output_dir: Path, run_capture: bool, config_path: Path, local_capture: bool = False) -> Tuple[Path, Path]:

@@ -140,10 +140,11 @@ Task<Result<UploadResponse, BackendError>> StorageService::uploadFile(UploadCont
             CO_RETURN_ERROR_IF(hash.hasError(), hash.error());
             t_original_hash = std::move(hash.value());
         } else {
-            auto temp_result = helpers::saveToTempFile(t_file);
-            CO_RETURN_ERROR_IF(temp_result.hasError(), temp_result.error());
-            sgrn::utils::filesystem::TempFileGuard temp_guard = std::move(*temp_result);
-            auto r = co_await helpers::computeHashFromFileAsync(temp_guard.path);
+            // Hash directly from Drogon's in-memory upload buffer on the CPU pool,
+            // avoiding an extra temp-file write + delete before executeStreamingUpload.
+            std::string_view raw_view(t_file.fileData(), t_file.fileLength());
+            auto r = co_await sgrn::utils::runInPool(
+                &plugins::aws::S3Client::getWorkerPool(), [raw_view]() { return helpers::computeHashInMemory(raw_view); });
             CO_RETURN_ERROR_IF(r.hasError(), r.error());
             t_original_hash = std::move(r.value());
         }
@@ -423,10 +424,9 @@ Task<Result<void, BackendError>> StorageService::finalizeUpload(drogon::orm::DbC
         auto s3_res = S3Client();
         if (s3_res.has_value()) {
             auto* s3 = s3_res.value();
-            auto content_res = co_await s3->getObjectContent(t_context.bucket, t_context.identity.hash.key, 4096);
+            auto content_res = co_await s3->getObjectResponse(t_context.bucket, t_context.identity.hash.key, 4096);
             if (content_res.has_value()) {
-                std::string_view data(*content_res);
-                std::string preview(data.substr(0, std::min<size_t>(data.size(), 4096)));
+                std::string_view preview = content_res->body.substr(0, std::min<size_t>(content_res->body.size(), 4096));
                 auto sniff_res = sgrn::utils::file_signature::sniffExtension(preview);
                 if (sniff_res.has_value()) {
                     std::string sniffed_ext = *sniff_res;

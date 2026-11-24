@@ -549,7 +549,7 @@ static sgrn::Result<DbSchema, SclError> dbFromJson(const DbJson& t_w) {
         else if (area == "discrete")
             db.modbus_area = ModbusArea::Discrete;
     }
-    for (const auto& fw : t_w.fields.value_or({})) {
+    for (const auto& fw : t_w.fields.value_or(std::vector<FieldJson>{})) {
         auto f = fieldFromJson(fw);
         if (f.hasError())
             return Error(f.error());
@@ -590,7 +590,7 @@ static sgrn::Result<PlcTag, SclError> tagFromJson(const TagJson& t_w) {
 
 static sgrn::Result<RegistryContent, SclError> contentFromJson(const RootJson& t_w, bool t_lenient_tags) {
     RegistryContent out;
-    for (const auto& uw : t_w.udts.value_or({})) {
+    for (const auto& uw : t_w.udts.value_or(std::vector<UdtJson>{})) {
         auto udt = udtFromJson(uw);
         if (udt.hasError())
             return Error(udt.error());
@@ -606,7 +606,7 @@ static sgrn::Result<RegistryContent, SclError> contentFromJson(const RootJson& t
             return SclError::Generic;
         out.dbs.push_back(std::move(db.value()));
     }
-    for (const auto& tw : t_w.tags.value_or({})) {
+    for (const auto& tw : t_w.tags.value_or(std::vector<TagJson>{})) {
         auto tag = tagFromJson(tw);
         if (tag.hasError()) {
             if (t_lenient_tags)

@@ -21,15 +21,10 @@ except ModuleNotFoundError:
 ROOT = Path(__file__).resolve().parents[1]
 SIMULATIONS = ROOT / "sgrn/lib/gateway/simulations"
 
-BINARY_LOCATION = ""
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-if os.sys.platform == "win32":
-    # Prefer the build output first on Windows: a crashed .dist binary may
-    # still be locked by a zombie process, but the .build output is never
-    # mapped by the demo runner so it is always replaceable.
-    BINARY_LOCATION = ROOT / ".build/win64-native-static/sgrn/apps/gateway"
-else:
-    BINARY_LOCATION = ROOT / ".dist/linux-static-release"
+from scripts.find_bin import candidate_bin_dirs, require_binary
 
 
 @dataclass
@@ -43,31 +38,7 @@ class DemoRun:
 
 
 def binary(name: str) -> Path:
-    exts = [".exe", ""] if sys.platform == "win32" else ["", ".exe"]
-    names = [f"{name}{ext}" for ext in exts]
-
-    candidate_dirs = (
-        BINARY_LOCATION,
-        ROOT / ".build/win64-native-static/sgrn/apps/gateway",
-        ROOT / ".build/win64-native-static/sgrn/apps/s7shell",
-        ROOT / ".dist/win64-native-static",
-        ROOT / ".dist/win64-static",
-        ROOT / ".dist/linux-static-release",
-        ROOT / ".dist/linux-static",
-        ROOT / ".prefix/win64-static/bin",
-        ROOT / ".prefix/bin",
-        ROOT / ".build/linux-static-release",
-    )
-    for directory in candidate_dirs:
-        for n in names:
-            candidate = directory / n
-            if candidate.is_file() and (sys.platform == "win32" or os.access(candidate, os.X_OK)):
-                return candidate
-    for n in names:
-        found = shutil.which(n)
-        if found:
-            return Path(found)
-    raise FileNotFoundError(f"Cannot find {name}; build/install the binaries first.")
+    return require_binary(name, root=ROOT)
 
 
 def discoverSimulations() -> list[Path]:
@@ -109,12 +80,7 @@ def _kill_stale_gateway(gateway_exe: Path) -> None:
     # Build set of candidate exe paths to match against (both .dist and .build).
     target_name = "gateway.exe" if sys.platform == "win32" else "gateway"
     candidate_paths: set[str] = set()
-    for d in (
-        ROOT / ".dist/win64-native-static",
-        ROOT / ".build/win64-native-static/sgrn/apps/gateway",
-        ROOT / ".dist/linux-static-release",
-        ROOT / ".build/linux-static-release/sgrn/apps/gateway",
-    ):
+    for d in candidate_bin_dirs("gateway", root=ROOT):
         candidate = d / target_name
         if candidate.exists():
             candidate_paths.add(str(candidate.resolve()).lower())

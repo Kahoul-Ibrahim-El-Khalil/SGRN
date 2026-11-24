@@ -653,7 +653,9 @@ void GatewayApplication::run() {
         std::string profile_dir = fmt::format("/tmp/sgrn_gui_{}_{}", config_.http->port, is_root && sudo_user ? sudo_user : "user");
 
         if (is_root && sudo_user) {
-            ::system(fmt::format("chown -R {}:{} {} 2>/dev/null || true", sudo_user, sudo_user, profile_dir).c_str());
+            if (::system(fmt::format("chown -R {}:{} {} 2>/dev/null || true", sudo_user, sudo_user, profile_dir).c_str()) != 0) {
+                // best-effort
+            }
             if (::system("which chromium > /dev/null 2>&1") == 0) {
                 gui_cmd = fmt::format("sudo -u {} {}chromium --app=\"{}\" --user-data-dir=\"{}\" --disable-infobars "
                                       "--no-default-browser-check --test-type > /dev/null 2>&1 &",
@@ -674,7 +676,9 @@ void GatewayApplication::run() {
                 gui_cmd = fmt::format("{}xdg-open \"{}\" > /dev/null 2>&1 &", env_prefix, http_url);
             }
         }
-        ::system(gui_cmd.c_str());
+        if (::system(gui_cmd.c_str()) != 0) {
+            // best-effort
+        }
 #endif
     }
 

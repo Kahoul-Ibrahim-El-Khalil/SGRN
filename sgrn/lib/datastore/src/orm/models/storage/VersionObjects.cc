@@ -1,4 +1,3 @@
-
 /**
  *
  *  VersionObjects.cc
@@ -7,9 +6,7 @@
  */
 
 #include "VersionObjects.h"
-
 #include <drogon/utils/Utilities.h>
-
 #include <string>
 
 using namespace drogon;
@@ -17,51 +14,34 @@ using namespace drogon::orm;
 using namespace drogon_model::sgrn::storage;
 
 const std::string VersionObjects::Cols::_version_id = "\"version_id\"";
-
 const std::string VersionObjects::Cols::_object_id = "\"object_id\"";
-
 const std::string VersionObjects::Cols::_part_index = "\"part_index\"";
-
 const std::string VersionObjects::Cols::_role = "\"role\"";
-
 const std::vector<std::string> VersionObjects::primaryKeyName = {"version_id", "part_index"};
-
 const bool VersionObjects::hasPrimaryKey = true;
-
 const std::string VersionObjects::tableName = "storage.\"version_objects\"";
 
-const std::vector<typename VersionObjects::MetaData> VersionObjects::metaData_ = {
-    {"version_id", "int64_t", "bigint", 8, 0, 1, 1}, {"object_id", "int64_t", "bigint", 8, 0, 0, 1},
-    {"part_index", "int32_t", "integer", 4, 0, 1, 1}, {"role", "std::string", "text", 0, 0, 0, 1}
-
-};
+const std::vector<typename VersionObjects::MetaData> VersionObjects::metaData_ = {{"version_id", "int64_t", "bigint", 8, 0, 1, 1},
+    {"object_id", "int64_t", "bigint", 8, 0, 0, 1}, {"part_index", "int32_t", "integer", 4, 0, 1, 1},
+    {"role", "std::string", "text", 0, 0, 0, 1}};
 const std::string& VersionObjects::getColumnName(size_t index) noexcept(false) {
     assert(index < metaData_.size());
     return metaData_[index].colName_;
 }
 VersionObjects::VersionObjects(const Row& r, const ssize_t indexOffset) noexcept {
     if (indexOffset < 0) {
-
         if (!r["version_id"].isNull()) {
-
             versionId_ = std::make_shared<int64_t>(r["version_id"].as<int64_t>());
         }
-
         if (!r["object_id"].isNull()) {
-
             objectId_ = std::make_shared<int64_t>(r["object_id"].as<int64_t>());
         }
-
         if (!r["part_index"].isNull()) {
-
             partIndex_ = std::make_shared<int32_t>(r["part_index"].as<int32_t>());
         }
-
         if (!r["role"].isNull()) {
-
             role_ = std::make_shared<std::string>(r["role"].as<std::string>());
         }
-
     } else {
         size_t offset = (size_t)indexOffset;
         if (offset + 4 > r.size()) {
@@ -69,28 +49,20 @@ VersionObjects::VersionObjects(const Row& r, const ssize_t indexOffset) noexcept
             return;
         }
         size_t index;
-
         index = offset + 0;
         if (!r[index].isNull()) {
-
             versionId_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
-
         index = offset + 1;
         if (!r[index].isNull()) {
-
             objectId_ = std::make_shared<int64_t>(r[index].as<int64_t>());
         }
-
         index = offset + 2;
         if (!r[index].isNull()) {
-
             partIndex_ = std::make_shared<int32_t>(r[index].as<int32_t>());
         }
-
         index = offset + 3;
         if (!r[index].isNull()) {
-
             role_ = std::make_shared<std::string>(r[index].as<std::string>());
         }
     }
@@ -101,28 +73,24 @@ VersionObjects::VersionObjects(const Json::Value& pJson, const std::vector<std::
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
-
     if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         dirtyFlag_[0] = true;
         if (!pJson[pMasqueradingVector[0]].isNull()) {
             versionId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
         if (!pJson[pMasqueradingVector[1]].isNull()) {
             objectId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[1]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         dirtyFlag_[2] = true;
         if (!pJson[pMasqueradingVector[2]].isNull()) {
             partIndex_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[2]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
         if (!pJson[pMasqueradingVector[3]].isNull()) {
@@ -132,28 +100,24 @@ VersionObjects::VersionObjects(const Json::Value& pJson, const std::vector<std::
 }
 
 VersionObjects::VersionObjects(const Json::Value& pJson) noexcept(false) {
-
     if (pJson.isMember("version_id")) {
         dirtyFlag_[0] = true;
         if (!pJson["version_id"].isNull()) {
             versionId_ = std::make_shared<int64_t>((int64_t)pJson["version_id"].asInt64());
         }
     }
-
     if (pJson.isMember("object_id")) {
         dirtyFlag_[1] = true;
         if (!pJson["object_id"].isNull()) {
             objectId_ = std::make_shared<int64_t>((int64_t)pJson["object_id"].asInt64());
         }
     }
-
     if (pJson.isMember("part_index")) {
         dirtyFlag_[2] = true;
         if (!pJson["part_index"].isNull()) {
             partIndex_ = std::make_shared<int32_t>((int32_t)pJson["part_index"].asInt64());
         }
     }
-
     if (pJson.isMember("role")) {
         dirtyFlag_[3] = true;
         if (!pJson["role"].isNull()) {
@@ -168,26 +132,22 @@ void VersionObjects::updateByMasqueradedJson(const Json::Value& pJson, const std
         LOG_ERROR << "Bad masquerading vector";
         return;
     }
-
     if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
         if (!pJson[pMasqueradingVector[0]].isNull()) {
             versionId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[0]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
         dirtyFlag_[1] = true;
         if (!pJson[pMasqueradingVector[1]].isNull()) {
             objectId_ = std::make_shared<int64_t>((int64_t)pJson[pMasqueradingVector[1]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
         if (!pJson[pMasqueradingVector[2]].isNull()) {
             partIndex_ = std::make_shared<int32_t>((int32_t)pJson[pMasqueradingVector[2]].asInt64());
         }
     }
-
     if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
         dirtyFlag_[3] = true;
         if (!pJson[pMasqueradingVector[3]].isNull()) {
@@ -197,26 +157,22 @@ void VersionObjects::updateByMasqueradedJson(const Json::Value& pJson, const std
 }
 
 void VersionObjects::updateByJson(const Json::Value& pJson) noexcept(false) {
-
     if (pJson.isMember("version_id")) {
         if (!pJson["version_id"].isNull()) {
             versionId_ = std::make_shared<int64_t>((int64_t)pJson["version_id"].asInt64());
         }
     }
-
     if (pJson.isMember("object_id")) {
         dirtyFlag_[1] = true;
         if (!pJson["object_id"].isNull()) {
             objectId_ = std::make_shared<int64_t>((int64_t)pJson["object_id"].asInt64());
         }
     }
-
     if (pJson.isMember("part_index")) {
         if (!pJson["part_index"].isNull()) {
             partIndex_ = std::make_shared<int32_t>((int32_t)pJson["part_index"].asInt64());
         }
     }
-
     if (pJson.isMember("role")) {
         dirtyFlag_[3] = true;
         if (!pJson["role"].isNull()) {
@@ -292,14 +248,11 @@ typename VersionObjects::PrimaryKeyType VersionObjects::getPrimaryKey() const {
 }
 
 const std::vector<std::string>& VersionObjects::insertColumns() noexcept {
-    static const std::vector<std::string> inCols = {"version_id", "object_id", "part_index", "role"
-
-    };
+    static const std::vector<std::string> inCols = {"version_id", "object_id", "part_index", "role"};
     return inCols;
 }
 
 void VersionObjects::outputArgs(drogon::orm::internal::SqlBinder& binder) const {
-
     if (dirtyFlag_[0]) {
         if (getVersionId()) {
             binder << getValueOfVersionId();
@@ -307,7 +260,6 @@ void VersionObjects::outputArgs(drogon::orm::internal::SqlBinder& binder) const 
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[1]) {
         if (getObjectId()) {
             binder << getValueOfObjectId();
@@ -315,7 +267,6 @@ void VersionObjects::outputArgs(drogon::orm::internal::SqlBinder& binder) const 
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[2]) {
         if (getPartIndex()) {
             binder << getValueOfPartIndex();
@@ -323,7 +274,6 @@ void VersionObjects::outputArgs(drogon::orm::internal::SqlBinder& binder) const 
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[3]) {
         if (getRole()) {
             binder << getValueOfRole();
@@ -335,28 +285,22 @@ void VersionObjects::outputArgs(drogon::orm::internal::SqlBinder& binder) const 
 
 const std::vector<std::string> VersionObjects::updateColumns() const {
     std::vector<std::string> ret;
-
     if (dirtyFlag_[0]) {
         ret.push_back(getColumnName(0));
     }
-
     if (dirtyFlag_[1]) {
         ret.push_back(getColumnName(1));
     }
-
     if (dirtyFlag_[2]) {
         ret.push_back(getColumnName(2));
     }
-
     if (dirtyFlag_[3]) {
         ret.push_back(getColumnName(3));
     }
-
     return ret;
 }
 
 void VersionObjects::updateArgs(drogon::orm::internal::SqlBinder& binder) const {
-
     if (dirtyFlag_[0]) {
         if (getVersionId()) {
             binder << getValueOfVersionId();
@@ -364,7 +308,6 @@ void VersionObjects::updateArgs(drogon::orm::internal::SqlBinder& binder) const 
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[1]) {
         if (getObjectId()) {
             binder << getValueOfObjectId();
@@ -372,7 +315,6 @@ void VersionObjects::updateArgs(drogon::orm::internal::SqlBinder& binder) const 
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[2]) {
         if (getPartIndex()) {
             binder << getValueOfPartIndex();
@@ -380,7 +322,6 @@ void VersionObjects::updateArgs(drogon::orm::internal::SqlBinder& binder) const 
             binder << nullptr;
         }
     }
-
     if (dirtyFlag_[3]) {
         if (getRole()) {
             binder << getValueOfRole();
@@ -391,39 +332,26 @@ void VersionObjects::updateArgs(drogon::orm::internal::SqlBinder& binder) const 
 }
 Json::Value VersionObjects::toJson() const {
     Json::Value ret;
-
     if (getVersionId()) {
-
         ret["version_id"] = (Json::Int64)getValueOfVersionId();
-
     } else {
         ret["version_id"] = Json::Value();
     }
-
     if (getObjectId()) {
-
         ret["object_id"] = (Json::Int64)getValueOfObjectId();
-
     } else {
         ret["object_id"] = Json::Value();
     }
-
     if (getPartIndex()) {
-
         ret["part_index"] = getValueOfPartIndex();
-
     } else {
         ret["part_index"] = Json::Value();
     }
-
     if (getRole()) {
-
         ret["role"] = getValueOfRole();
-
     } else {
         ret["role"] = Json::Value();
     }
-
     return ret;
 }
 
@@ -434,118 +362,83 @@ std::string VersionObjects::toString() const {
 Json::Value VersionObjects::toMasqueradedJson(const std::vector<std::string>& pMasqueradingVector) const {
     Json::Value ret;
     if (pMasqueradingVector.size() == 4) {
-
         if (!pMasqueradingVector[0].empty()) {
             if (getVersionId()) {
-
                 ret[pMasqueradingVector[0]] = (Json::Int64)getValueOfVersionId();
-
             } else {
                 ret[pMasqueradingVector[0]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[1].empty()) {
             if (getObjectId()) {
-
                 ret[pMasqueradingVector[1]] = (Json::Int64)getValueOfObjectId();
-
             } else {
                 ret[pMasqueradingVector[1]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[2].empty()) {
             if (getPartIndex()) {
-
                 ret[pMasqueradingVector[2]] = getValueOfPartIndex();
-
             } else {
                 ret[pMasqueradingVector[2]] = Json::Value();
             }
         }
-
         if (!pMasqueradingVector[3].empty()) {
             if (getRole()) {
-
                 ret[pMasqueradingVector[3]] = getValueOfRole();
-
             } else {
                 ret[pMasqueradingVector[3]] = Json::Value();
             }
         }
-
         return ret;
     }
     LOG_ERROR << "Masquerade failed";
-
     if (getVersionId()) {
-
         ret["version_id"] = (Json::Int64)getValueOfVersionId();
-
     } else {
         ret["version_id"] = Json::Value();
     }
-
     if (getObjectId()) {
-
         ret["object_id"] = (Json::Int64)getValueOfObjectId();
-
     } else {
         ret["object_id"] = Json::Value();
     }
-
     if (getPartIndex()) {
-
         ret["part_index"] = getValueOfPartIndex();
-
     } else {
         ret["part_index"] = Json::Value();
     }
-
     if (getRole()) {
-
         ret["role"] = getValueOfRole();
-
     } else {
         ret["role"] = Json::Value();
     }
-
     return ret;
 }
 
 bool VersionObjects::validateJsonForCreation(const Json::Value& pJson, std::string& err) {
-
     if (pJson.isMember("version_id")) {
         if (!validJsonOfField(0, "version_id", pJson["version_id"], err, true))
             return false;
-    }
-
-    else {
+    } else {
         err = "The version_id column cannot be null";
         return false;
     }
-
     if (pJson.isMember("object_id")) {
         if (!validJsonOfField(1, "object_id", pJson["object_id"], err, true))
             return false;
-    }
-
-    else {
+    } else {
         err = "The object_id column cannot be null";
         return false;
     }
-
     if (pJson.isMember("part_index")) {
         if (!validJsonOfField(2, "part_index", pJson["part_index"], err, true))
             return false;
     }
-
     if (pJson.isMember("role")) {
         if (!validJsonOfField(3, "role", pJson["role"], err, true))
             return false;
     }
-
     return true;
 }
 bool VersionObjects::validateMasqueradedJsonForCreation(
@@ -555,45 +448,36 @@ bool VersionObjects::validateMasqueradedJsonForCreation(
         return false;
     }
     try {
-
         if (!pMasqueradingVector[0].empty()) {
             if (pJson.isMember(pMasqueradingVector[0])) {
                 if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, true))
                     return false;
-            }
-
-            else {
+            } else {
                 err = "The " + pMasqueradingVector[0] + " column cannot be null";
                 return false;
             }
         }
-
         if (!pMasqueradingVector[1].empty()) {
             if (pJson.isMember(pMasqueradingVector[1])) {
                 if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, true))
                     return false;
-            }
-
-            else {
+            } else {
                 err = "The " + pMasqueradingVector[1] + " column cannot be null";
                 return false;
             }
         }
-
         if (!pMasqueradingVector[2].empty()) {
             if (pJson.isMember(pMasqueradingVector[2])) {
                 if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, true))
                     return false;
             }
         }
-
         if (!pMasqueradingVector[3].empty()) {
             if (pJson.isMember(pMasqueradingVector[3])) {
                 if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, true))
                     return false;
             }
         }
-
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -601,37 +485,28 @@ bool VersionObjects::validateMasqueradedJsonForCreation(
     return true;
 }
 bool VersionObjects::validateJsonForUpdate(const Json::Value& pJson, std::string& err) {
-
     if (pJson.isMember("version_id")) {
         if (!validJsonOfField(0, "version_id", pJson["version_id"], err, false))
             return false;
-    }
-
-    else {
+    } else {
         err = "The value of primary key must be set in the json object for update";
         return false;
     }
-
     if (pJson.isMember("object_id")) {
         if (!validJsonOfField(1, "object_id", pJson["object_id"], err, false))
             return false;
     }
-
     if (pJson.isMember("part_index")) {
         if (!validJsonOfField(2, "part_index", pJson["part_index"], err, false))
             return false;
-    }
-
-    else {
+    } else {
         err = "The value of primary key must be set in the json object for update";
         return false;
     }
-
     if (pJson.isMember("role")) {
         if (!validJsonOfField(3, "role", pJson["role"], err, false))
             return false;
     }
-
     return true;
 }
 bool VersionObjects::validateMasqueradedJsonForUpdate(
@@ -641,37 +516,28 @@ bool VersionObjects::validateMasqueradedJsonForUpdate(
         return false;
     }
     try {
-
         if (!pMasqueradingVector[0].empty() && pJson.isMember(pMasqueradingVector[0])) {
             if (!validJsonOfField(0, pMasqueradingVector[0], pJson[pMasqueradingVector[0]], err, false))
                 return false;
-        }
-
-        else {
+        } else {
             err = "The value of primary key must be set in the json object for update";
             return false;
         }
-
         if (!pMasqueradingVector[1].empty() && pJson.isMember(pMasqueradingVector[1])) {
             if (!validJsonOfField(1, pMasqueradingVector[1], pJson[pMasqueradingVector[1]], err, false))
                 return false;
         }
-
         if (!pMasqueradingVector[2].empty() && pJson.isMember(pMasqueradingVector[2])) {
             if (!validJsonOfField(2, pMasqueradingVector[2], pJson[pMasqueradingVector[2]], err, false))
                 return false;
-        }
-
-        else {
+        } else {
             err = "The value of primary key must be set in the json object for update";
             return false;
         }
-
         if (!pMasqueradingVector[3].empty() && pJson.isMember(pMasqueradingVector[3])) {
             if (!validJsonOfField(3, pMasqueradingVector[3], pJson[pMasqueradingVector[3]], err, false))
                 return false;
         }
-
     } catch (const Json::LogicError& e) {
         err = e.what();
         return false;
@@ -681,63 +547,46 @@ bool VersionObjects::validateMasqueradedJsonForUpdate(
 bool VersionObjects::validJsonOfField(
     size_t index, const std::string& fieldName, const Json::Value& pJson, std::string& err, bool isForCreation) {
     switch (index) {
-
         case 0:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 1:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isInt64()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 2:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isInt()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         case 3:
-
             if (pJson.isNull()) {
                 err = "The " + fieldName + " column cannot be null";
                 return false;
             }
-
             if (!pJson.isString()) {
                 err = "Type error in the " + fieldName + " field";
                 return false;
             }
-
             break;
-
         default:
             err = "Internal error in the server";
             return false;
