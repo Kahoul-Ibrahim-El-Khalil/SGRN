@@ -501,6 +501,78 @@ Task<HttpResponsePtr> StorageApiHandler::handleFileRequest(HttpRequestPtr tsp_re
     }
 }
 
+
+Task<HttpResponsePtr> StorageApiHandler::handleAutomatedServiceFileRequest(HttpRequestPtr tsp_req) {
+    try {
+        auto norm = normalizePath(tsp_req->getOptionalParameter<std::string>("path").value_or(""));
+        if (!norm.has_value()) {
+            co_return createTypedResponse(BackendErrorResponse{"Invalid path", k400BadRequest, "StorageApi"});
+        }
+        std::string path_str = std::move(*norm);
+        const HttpMethod method = tsp_req->getMethod();
+
+        const auto session = tsp_req->getAttributes()->get<::sgrn::datastore::auth::SessionClaims>("session_claims");
+        if (session.user.id <= 0) {
+            co_return createTypedResponse(BackendErrorResponse{"No session found", k401Unauthorized});
+        }
+
+        if (method == Get) {
+            DEBUG_LOG("[StorageApiHandler::handleAutomatedServiceFileRequest] GET - path: {}", path_str);
+            co_return co_await storage_service_.handleDownloadFileRequest(std::move(session), "personal", path_str);
+
+        } else if (method == Post) {
+            drogon::MultiPartParser parser;
+            if (parser.parse(tsp_req) == -1) {
+                const std::string& ct = tsp_req->getHeader("Content-Type");
+                ERROR_LOG("[handleAutomatedServiceFileRequest] Failed to parse multipart: Content-Type='{}'", ct);
+                co_return createTypedResponse(
+                    BackendErrorResponse{"Failed to parse automated service multipart request body", k400BadRequest});
+            }
+            const auto& files = parser.getFiles();
+            if (files.empty()) {
+                co_return createTypedResponse(
+                    BackendErrorResponse{"No file parts found in automated service multipart request", k400BadRequest});
+            }
+
+            DEBUG_LOG("[StorageApiHandler::handleAutomatedServiceFileRequest] POST - path: {}, count: {}", path_str, files.size());
+
+            if (files.size() == 1) {
+                // Single file: the target is either the multipart "path"
+                // field verbatim (SDK full-path contract) or the query
+                // directory joined with the file part name (drive UI).
+                std::string file_rel_path = drogon::utils::urlDecode(files[0].getFileName());
+
+                // SEC: Sanitize the relative path segment before merging with the base path
+                auto safe_rel = sgrn::utils::strings::sanitizeRelativeFilename(file_rel_path);
+                if (!safe_rel.has_value()) {
+                    co_return createTypedResponse(BackendErrorResponse{"Invalid filename: path traversal detected", k400BadRequest});
+                }
+                file_rel_path = std::move(*safe_rel);
+
+                std::string path_error;
+                auto target_opt = resolveSingleUploadTarget(parser.getParameters(), path_str, file_rel_path, path_error);
+                if (!target_opt) {
+                    co_return createTypedResponse(BackendErrorResponse{path_error, k400BadRequest, "StorageApi"});
+                }
+                std::string target_path = std::move(*target_opt);
+                co_return co_await storage_service_.handleUploadFileRequest(std::move(session), "personal", target_path, files[0]);
+            } else {
+                co_return co_await storage_service_.handleUploadFilesBatchRequest(std::move(session), "personal", path_str, files);
+            }
+        }
+
+        co_return createTypedResponse(BackendErrorResponse{"Method not allowed", k405MethodNotAllowed});
+
+    } catch (const drogon::orm::DrogonDbException& e) {
+        ERROR_LOG("AutomatedServiceApiHandler::handleFileRequest DB exception: {}", e.base().what());
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
+    } catch (const std::exception& ex) {
+        ERROR_LOG("AutomatedServiceApiHandler::handleFileRequest exception: {}", ex.what());
+        co_return createTypedResponse(BackendErrorResponse{GenericApiError::InternalServerError});
+    }
+}
+
+
 } // namespace sgrn::datastore::handlers::storage
 
 #undef DEBUG_LOG

@@ -65,8 +65,19 @@ def ensureGarage(root: Path) -> bool:
     """Check the prebuilt `garage` binary is on PATH (https://garagehq.deuxfleurs.fr,
     or `cargo install`). Unlike MinIO there is nothing to compile here."""
     print("[Garage] Checking for garage binary...")
-    if shutil.which("garage"):
+    garage = shutil.which("garage")
+    if garage:
         return True
+    # shutil.which() silently skips non-executable files. A freshly downloaded
+    # release often lands without the executable bit, and then `env garage`
+    # exits with status 126 while systemd only surfaces a SIGTERM loop on the
+    # dependent datastore unit. Find it anyway and fix the mode.
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        candidate = Path(directory) / "garage"
+        if candidate.is_file():
+            print(f"[Garage] WARNING: {candidate} is not executable; setting +x.")
+            candidate.chmod(candidate.stat().st_mode | 0o111)
+            return True
     print("[Garage] ERROR: `garage` not found on PATH. Install the prebuilt")
     print("  binary (~/bin or /usr/local/bin) then provision once per machine:")
     print("  garage -c $SGRN_DATA_DIR/garage/garage.toml layout assign -z dc1 -c 50G <node-id>")

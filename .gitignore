@@ -5,6 +5,13 @@ compile_commands.json
 
 cmake/*.cpp
 
+# CMake scratch directories left in-tree by the pre-xmake build. They hold
+# compiler probes (CMakeDetermineCompilerABI_*.bin, CompilerIdC/a.out) and
+# CTest logs — never source. Both the repo root and sgrn/lib/datastore/ had
+# them committed by mistake; untracked in the "untrack CMake artifacts" commit.
+CMakeFiles/
+Testing/
+
 # ── Node dependencies ─────────────────────────────────────────────────────────
 # Confirmed present: root-level node_modules/, plus nested under
 # sgrn/gateway/web-svelte and the datastore React dashboard.
